@@ -1,48 +1,22 @@
 {
   "spec": "AgentGraph action_ref <-> AIPOU workReceiptId cross-fixture",
-  "version": "v0",
-  "purpose": "Interoperability validation of evidence LINKAGE only. This asserts no reward, no claim, no integration status, and no endorsement by either project. Hashes and public verification material only; no raw prompts or outputs.",
+  "version": "v1",
+  "aligned_with": "0xddneto/AI-Proof-of-Us examples/lifecycle-adapter/agentgraph-cross-fixtures.json (v0.4-canonical)",
+  "purpose": "Interoperability validation of evidence LINKAGE only — no reward, no claim, no integration status, no endorsement. Hashes and public verification material only. v1 swaps the earlier placeholder AIPOU receipt digest for AIPOU's FROZEN real artifact; the fail-closed logic is unchanged.",
   "parties": {
     "agentgraph": {
       "role": "source — pre-execution action authorization",
-      "action_ref_definition": "action_ref = 'sha256:' + hex(SHA-256(JCS({agent_id, action_type, scope, timestamp_ms})))",
-      "canonicalization": "RFC 8785 (JCS)",
-      "reference_impl": "src.trust.action_ref_vectors.compute_action_ref (agentgraph-co/agentgraph)"
+      "action_ref": "sha256:31d477f761ee3f1cf943acba4d78980bd566ab175ee5f92f53c1e1b1aeb26cdd",
+      "canonical_envelope_id": "agentgraph:run-123",
+      "canonical_envelope_digest": "sha256:8547074431a45ce09a0be8b7f618d05c3894e36109af66c1e51dcab436077f08",
+      "note": "our real run-123 canonical-envelope digest (RFC 8785 JCS) — swap this in for the placeholder on the AIPOU side"
     },
     "aipou": {
-      "role": "target — later-recorded work receipt",
-      "link_scheme": "external-evidence-link-v1",
-      "reference_impl": "examples/lifecycle-adapter/external-evidence-link.mjs (0xddneto/AI-Proof-of-Us)"
+      "role": "target — frozen work receipt",
+      "work_receipt_id": "0x34d3be87d9dbe9aeced79bf1ddb299c94be78f5d355f4a9d22afc6dc6e01b08f",
+      "receipt_digest": "sha256:059075bc5de4fef9b7f5f64c9d995f97c03dbd982d77c839f00651d6887bbaab",
+      "source": "0xddneto frozen fixture v0.4-canonical"
     }
-  },
-  "agentgraph_recompute_material": {
-    "valid_read_scope": {
-      "preimage": {
-        "agent_id": "did:web:agent.example",
-        "action_type": "behavioral_eval",
-        "scope": "urn:scope:read",
-        "timestamp_ms": 1748736000000
-      },
-      "canonical_bytes_utf8": "{\"action_type\":\"behavioral_eval\",\"agent_id\":\"did:web:agent.example\",\"scope\":\"urn:scope:read\",\"timestamp_ms\":1748736000000}",
-      "expected_action_ref": "sha256:31d477f761ee3f1cf943acba4d78980bd566ab175ee5f92f53c1e1b1aeb26cdd",
-      "ctef_envelope_digest": "sha256:fc0c430590ed7099a1976eecdb361567942b8dce4bd543081c5883f32cd65a94"
-    },
-    "mismatch_write_scope": {
-      "preimage": {
-        "agent_id": "did:web:agent.example",
-        "action_type": "behavioral_eval",
-        "scope": "urn:scope:write",
-        "timestamp_ms": 1748736000000
-      },
-      "canonical_bytes_utf8": "{\"action_type\":\"behavioral_eval\",\"agent_id\":\"did:web:agent.example\",\"scope\":\"urn:scope:write\",\"timestamp_ms\":1748736000000}",
-      "recomputed_action_ref": "sha256:0d550dd25c53dc55bfdac4960548d7c2a667ca362653792513c6a739e2157ca5"
-    }
-  },
-  "aipou_receipt_material": {
-    "work_receipt_id": "aipou:receipt:0xf1xture0001",
-    "fixture_content_utf8": "aipou-receipt-v1:fixture:work-nonce-0001",
-    "digest": "sha256:b03711f685cb5bc443658cc15d5431e0e51667d05dea7ac5237011ef63aa48d2",
-    "note": "placeholder receipt content — swap for AIPOU's canonical v0.4 receipt digest to finalize"
   },
   "vectors": [
     {
@@ -58,32 +32,29 @@
           "kind": "attestation",
           "scheme": "ctef-action-ref-v0",
           "id": "sha256:31d477f761ee3f1cf943acba4d78980bd566ab175ee5f92f53c1e1b1aeb26cdd",
-          "digest": "sha256:fc0c430590ed7099a1976eecdb361567942b8dce4bd543081c5883f32cd65a94"
+          "digest": "sha256:8547074431a45ce09a0be8b7f618d05c3894e36109af66c1e51dcab436077f08"
         },
         "target": {
           "kind": "receipt",
           "scheme": "aipou-receipt-v1",
-          "id": "aipou:receipt:0xf1xture0001",
-          "digest": "sha256:b03711f685cb5bc443658cc15d5431e0e51667d05dea7ac5237011ef63aa48d2"
+          "id": "0x34d3be87d9dbe9aeced79bf1ddb299c94be78f5d355f4a9d22afc6dc6e01b08f",
+          "digest": "sha256:059075bc5de4fef9b7f5f64c9d995f97c03dbd982d77c839f00651d6887bbaab"
         },
         "privacy": "digest_only",
-        "issuedAt": "2026-07-28T00:00:00.000Z",
-        "linkDigest": "sha256:14050aa52b56be01a9f06e36ffbc4bd73ac55939f3be8f5097532d4efdd70365"
-      },
-      "agentgraph_check": {
-        "recompute_over": "agentgraph_recompute_material.valid_read_scope.preimage",
-        "require": "recomputed action_ref == link.source.id",
-        "expected_action_ref": "sha256:31d477f761ee3f1cf943acba4d78980bd566ab175ee5f92f53c1e1b1aeb26cdd"
+        "issuedAt": "2026-08-03T00:00:00.000Z",
+        "linkDigest": "sha256:30759a953c665718870d16fd3433f495f038b9c473e1e82d6fbf2945d037cb39"
       }
     },
     {
       "name": "action_ref_mismatch__fail_closed",
       "failure_owner": "agentgraph",
-      "description": "Structurally valid link, but recomputing action_ref over the presented (write-scope) preimage yields a value != link.source.id (read-scope). AIPOU's structural check passes; AgentGraph's binding check MUST reject.",
       "expected": {
         "aipou": "accept",
         "agentgraph_recompute": "reject"
       },
+      "note": "recompute action_ref over the write-scope preimage -> != source.id; AgentGraph binding check rejects",
+      "recomputed_action_ref": "sha256:0d550dd25c53dc55bfdac4960548d7c2a667ca362653792513c6a739e2157ca5",
+      "link_source_id": "sha256:31d477f761ee3f1cf943acba4d78980bd566ab175ee5f92f53c1e1b1aeb26cdd",
       "link": {
         "scheme": "external-evidence-link-v1",
         "relation": "input_to",
@@ -91,30 +62,22 @@
           "kind": "attestation",
           "scheme": "ctef-action-ref-v0",
           "id": "sha256:31d477f761ee3f1cf943acba4d78980bd566ab175ee5f92f53c1e1b1aeb26cdd",
-          "digest": "sha256:fc0c430590ed7099a1976eecdb361567942b8dce4bd543081c5883f32cd65a94"
+          "digest": "sha256:8547074431a45ce09a0be8b7f618d05c3894e36109af66c1e51dcab436077f08"
         },
         "target": {
           "kind": "receipt",
           "scheme": "aipou-receipt-v1",
-          "id": "aipou:receipt:0xf1xture0001",
-          "digest": "sha256:b03711f685cb5bc443658cc15d5431e0e51667d05dea7ac5237011ef63aa48d2"
+          "id": "0x34d3be87d9dbe9aeced79bf1ddb299c94be78f5d355f4a9d22afc6dc6e01b08f",
+          "digest": "sha256:059075bc5de4fef9b7f5f64c9d995f97c03dbd982d77c839f00651d6887bbaab"
         },
         "privacy": "digest_only",
-        "issuedAt": "2026-07-28T00:00:00.000Z",
-        "linkDigest": "sha256:14050aa52b56be01a9f06e36ffbc4bd73ac55939f3be8f5097532d4efdd70365"
-      },
-      "agentgraph_check": {
-        "recompute_over": "agentgraph_recompute_material.mismatch_write_scope.preimage",
-        "require": "recomputed action_ref == link.source.id",
-        "recomputed_action_ref": "sha256:0d550dd25c53dc55bfdac4960548d7c2a667ca362653792513c6a739e2157ca5",
-        "link_source_id": "sha256:31d477f761ee3f1cf943acba4d78980bd566ab175ee5f92f53c1e1b1aeb26cdd",
-        "result": "reject: presented preimage not bound by source.id"
+        "issuedAt": "2026-08-03T00:00:00.000Z",
+        "linkDigest": "sha256:30759a953c665718870d16fd3433f495f038b9c473e1e82d6fbf2945d037cb39"
       }
     },
     {
       "name": "digest_mismatch__fail_closed",
       "failure_owner": "aipou",
-      "description": "target.digest tampered without recomputing linkDigest -> linkDigest no longer matches the payload. AIPOU's validator MUST fail closed.",
       "expected": {
         "aipou": "reject",
         "agentgraph_recompute": "n/a"
@@ -126,17 +89,17 @@
           "kind": "attestation",
           "scheme": "ctef-action-ref-v0",
           "id": "sha256:31d477f761ee3f1cf943acba4d78980bd566ab175ee5f92f53c1e1b1aeb26cdd",
-          "digest": "sha256:fc0c430590ed7099a1976eecdb361567942b8dce4bd543081c5883f32cd65a94"
+          "digest": "sha256:8547074431a45ce09a0be8b7f618d05c3894e36109af66c1e51dcab436077f08"
         },
         "target": {
           "kind": "receipt",
           "scheme": "aipou-receipt-v1",
-          "id": "aipou:receipt:0xf1xture0001",
+          "id": "0x34d3be87d9dbe9aeced79bf1ddb299c94be78f5d355f4a9d22afc6dc6e01b08f",
           "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
         },
         "privacy": "digest_only",
-        "issuedAt": "2026-07-28T00:00:00.000Z",
-        "linkDigest": "sha256:14050aa52b56be01a9f06e36ffbc4bd73ac55939f3be8f5097532d4efdd70365"
+        "issuedAt": "2026-08-03T00:00:00.000Z",
+        "linkDigest": "sha256:30759a953c665718870d16fd3433f495f038b9c473e1e82d6fbf2945d037cb39"
       }
     }
   ],
@@ -153,5 +116,6 @@
       "result": "reject",
       "error": "External evidence link digest mismatch"
     }
-  }
+  },
+  "link_scheme": "external-evidence-link-v1"
 }

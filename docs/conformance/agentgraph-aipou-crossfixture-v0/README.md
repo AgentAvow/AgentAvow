@@ -65,13 +65,19 @@ for v in fx["vectors"]:
 # valid_link -> accept ; action_ref_mismatch -> reject
 ```
 
-## Status / alignment note
+## Status / alignment note (v1 — 2026-08-03)
 
-The AIPOU receipt digest in `aipou_receipt_material` is a **deterministic public placeholder** (SHA-256
-of a fixed fixture string) so the fixture is self-contained and recomputable today. When AIPOU's v0.4
-receipt/`action_ref` canonical form is ready, swap in the real `workReceiptId` + receipt digest and
-recompute `linkDigest`; the fail-closed semantics are unchanged. Per @0xddneto's note, the AIPOU-side
-lifecycle checks are ready to align on that finalization.
+**Aligned with AIPOU's frozen artifact.** The earlier placeholder AIPOU receipt digest has been swapped
+for [@0xddneto](https://github.com/0xddneto)'s **frozen v0.4-canonical** work receipt
+(`workReceiptId 0x34d3be87…`, `digest sha256:059075bc…`) from
+[`examples/lifecycle-adapter/agentgraph-cross-fixtures.json`](https://github.com/0xddneto/AI-Proof-of-Us/blob/main/examples/lifecycle-adapter/agentgraph-cross-fixtures.json).
+The fail-closed semantics are unchanged; only the referenced digests are now real. New valid
+`linkDigest = sha256:30759a95…`.
+
+To complete the loop mutually, our real **run-123 canonical-envelope digest**
+(`sha256:8547074431a45ce0…`, RFC 8785 / JCS) is exposed in `parties.agentgraph.canonical_envelope_digest`
+— the AIPOU side can swap that in for its placeholder AgentGraph digest so both fixtures reference each
+other's real artifacts.
 
 `observed_results` in `fixture.json` records the actual output of AIPOU's reference validator on each
 vector at generation time.
