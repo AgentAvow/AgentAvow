@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.rate_limit import rate_limit_history_reads, rate_limit_reads
+from src.config import settings
 from src.database import get_db
 from src.signing import (
     KID,
@@ -912,9 +913,21 @@ async def scan_badge(
             grade = _grade_from_score(score)
             score_type = "Scan"
         else:
-            score = None
-            grade = None
-            score_type = None
+            # Cache miss: regenerate on demand rather than decaying to a grey
+            # "not scanned" pill. A README badge is hit long after the 1h cache
+            # expires; without this it silently breaks in strangers' READMEs
+            # (codecov/shields regenerate on every request). Reuse the tested
+            # scan path, which also repopulates the cache for subsequent hits.
+            try:
+                fresh = await public_scan(owner=owner, repo=repo, force=False, db=db)
+                score = fresh.security_score
+                grade = _grade_from_score(score)
+                score_type = "Scan"
+            except Exception:
+                logger.warning("badge regenerate failed for %s/%s", owner, repo, exc_info=True)
+                score = None
+                grade = None
+                score_type = None
 
     # Build badge
     if score is not None:
@@ -932,7 +945,7 @@ async def scan_badge(
   <rect x="80" width="{label_width}" height="20" fill="{color}" rx="3"/>
   <rect x="80" width="4" height="20" fill="{color}"/>
   <text x="40" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
-        text-anchor="middle">AgentGraph</text>
+        text-anchor="middle">{settings.badge_brand}</text>
   <text x="{80 + label_width // 2}" y="14" fill="#fff" font-family="Verdana,sans-serif"
         font-size="11" text-anchor="middle">{label}</text>
 </svg>'''

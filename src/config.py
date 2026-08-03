@@ -12,6 +12,10 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "AgentGraph"
+    # Brand shown on embeddable trust badges. Kept as "AgentGraph" until the
+    # AgentAvow cutover; flip via env (BADGE_BRAND=AgentAvow) at launch so the
+    # rebrand is a one-line change and the new name isn't leaked publicly early.
+    badge_brand: str = "AgentGraph"
     debug: bool = False
     api_v1_prefix: str = "/api/v1"
     base_url: str = "http://localhost:5173"
