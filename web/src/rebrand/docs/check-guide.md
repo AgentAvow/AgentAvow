@@ -26,13 +26,11 @@ The result is cached for 1 hour. Add `?force=true` to force a fresh scan.
 Every scan returns a single **letter grade (A+ → F)** plus a 0–100 score. The grade is the headline; the
 subscores tell you *why*.
 
-| Grade | Meaning |
-|---|---|
-| **A+ / A** | Trusted — no high or critical findings, clean dependencies |
-| **B** | Good — minor issues, safe for most uses |
-| **C** | Caution — real findings worth reviewing before you connect |
-| **D** | Risky — high-severity issues present |
-| **F** | Blocked — critical issues; do not connect |
+- **A+ / A** — Trusted: no high or critical findings, clean dependencies
+- **B** — Good: minor issues, safe for most uses
+- **C** — Caution: real findings worth reviewing before you connect
+- **D** — Risky: high-severity issues present
+- **F** — Blocked: critical issues; do not connect
 
 ### Subscores
 
@@ -49,14 +47,12 @@ The overall grade is composed from category subscores, each independently graded
 Each grade maps to a **trust tier** with a recommended execution posture, so a gateway or framework can act
 on it automatically:
 
-| Tier | Score | Recommended |
-|---|---|---|
-| `verified` | 96–100 | unlimited execution |
-| `trusted` | 81–95 | 60 req/min, 8K tokens |
-| `standard` | 51–80 | 30 req/min, 4K tokens |
-| `minimal` | 31–50 | 15 req/min, user confirmation |
-| `restricted` | 11–30 | 5 req/min, user confirmation |
-| `blocked` | 0–10 | execution denied |
+- `verified` (96–100) — unlimited execution
+- `trusted` (81–95) — 60 req/min, 8K tokens
+- `standard` (51–80) — 30 req/min, 4K tokens
+- `minimal` (31–50) — 15 req/min, user confirmation
+- `restricted` (11–30) — 5 req/min, user confirmation
+- `blocked` (0–10) — execution denied
 
 ## Findings
 

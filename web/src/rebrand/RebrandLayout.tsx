@@ -59,7 +59,7 @@ export default function RebrandLayout() {
           <nav className="hidden md:flex items-center gap-6 ml-2">
             {link('/rebrand/browse', 'Browse')}
             {link('/rebrand/badge', 'For developers')}
-            <a href="/docs" className="text-[14.5px] text-text-muted hover:text-text transition-colors">Docs</a>
+            {link('/rebrand/docs', 'Docs')}
           </nav>
           <div className="ml-auto flex items-center gap-4">
             <a href="/login" className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</a>
@@ -84,8 +84,8 @@ export default function RebrandLayout() {
           <div className="flex flex-wrap items-center justify-between gap-5">
             <Wordmark />
             <div className="flex flex-wrap gap-5 text-[14px] text-text-muted">
-              <a href="/docs" className="hover:text-text">Docs</a>
-              <a href="/docs" className="hover:text-text">API</a>
+              <Link to="/rebrand/docs" className="hover:text-text">Docs</Link>
+              <a href="/api/v1/redoc" className="hover:text-text">API</a>
               <a href="/.well-known/jwks.json" className="hover:text-text">Verify (JWKS)</a>
               <a href="https://github.com/agentgraph-co" className="hover:text-text">GitHub</a>
               <a href="/legal/terms" className="hover:text-text">Terms</a>

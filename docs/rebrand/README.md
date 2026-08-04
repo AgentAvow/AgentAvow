@@ -6,10 +6,13 @@ adding them here changes nothing on the live site.
 
 Full audit + migration plan: `docs/internal/rebrand-docs-audit.md`.
 
-## P0 docs written
+## P0 docs written — now in `web/src/rebrand/docs/` (previewable at `/rebrand/docs`)
+The 3 P0 docs live in `web/src/rebrand/docs/*.md` so the rebrand docs page can bundle + render them
+(`web/src/rebrand/pages/Docs.tsx`, react-markdown). They are NOT served by the backend `_SLUG_MAP` yet.
 - `check-guide.md` — reading your scan grade (anchors "a trust score you can verify")
 - `trust-badges.md` — add a signed trust badge to your README (the virality mechanism)
 - `verify-attestations.md` — the JWS/EdDSA + JWKS "verify it yourself" walkthrough
+*(No GFM tables — the app's react-markdown has no remark-gfm, so tables are written as lists.)*
 
 ## Cutover wiring (apply at rebrand cutover, per the agreed defaults)
 1. Move/copy these `.md` into `docs/` and add each to `_SLUG_MAP` in `src/api/docs_router.py`.
