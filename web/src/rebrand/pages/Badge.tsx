@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { badgeUrl } from '../../lib/scanApi'
 
 /**
  * Developer landing — the badge growth loop (prototype).
@@ -12,6 +13,7 @@ export default function RebrandBadge() {
   const [copied, setCopied] = useState(false)
   const navigate = useNavigate()
   const slug = repo.trim() || 'you/your-repo'
+  const [owner, name] = slug.includes('/') ? slug.split('/') : ['', '']
   const markdown = `[![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/${slug}/badge)](https://agentavow.com/check/${slug})`
 
   const copy = () => {
@@ -52,11 +54,15 @@ export default function RebrandBadge() {
         </div>
 
         <div className="mt-5 flex items-center gap-3 flex-wrap">
-          <span className="font-mono text-[11.5px] text-text-muted">Preview:</span>
-          <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-            <span className="bg-surface-hover text-text px-2.5 py-1.5">🛡 AgentAvow</span>
-            <span className="px-2.5 py-1.5 font-bold text-white bg-gradient-to-r from-primary to-primary-dark">Trust: A 94</span>
-          </span>
+          <span className="font-mono text-[11.5px] text-text-muted">{owner && name ? 'Live badge:' : 'Preview:'}</span>
+          {owner && name ? (
+            <img src={badgeUrl(owner, name)} alt={`${slug} trust badge`} className="h-[26px] rounded shadow-md" />
+          ) : (
+            <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
+              <span className="bg-surface-hover text-text px-2.5 py-1.5">🛡 AgentAvow</span>
+              <span className="px-2.5 py-1.5 font-bold text-white bg-gradient-to-r from-primary to-primary-dark">Trust: A 94</span>
+            </span>
+          )}
         </div>
 
         <div className="relative mt-4">

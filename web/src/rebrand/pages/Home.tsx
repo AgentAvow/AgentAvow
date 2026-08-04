@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { fetchCatalog, rowIdentity } from '../catalog'
+import { getGradeInfo } from '../../components/trust/gradeSystem'
 
 /**
  * AgentAvow rebrand homepage (prototype).
@@ -23,7 +26,21 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 export default function RebrandHome() {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
-  const go = () => navigate('/rebrand/check')
+  const go = () => {
+    // Parse a github owner/repo out of the input → run the real /check scan.
+    // Non-repo inputs (mcp://, npm:, pypi:) fall through to the Check page's own parser.
+    const m = value.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
+    navigate(m ? `/rebrand/check/${m[1]}/${m[2]}` : '/rebrand/check')
+  }
+
+  // Live catalog: powers the proof-of-scale counts + the browse teaser.
+  const { data: cat } = useQuery({
+    queryKey: ['rebrand-home-catalog'],
+    queryFn: () => fetchCatalog({ surface: 'mcp', sort: 'safest', limit: 6 }),
+    staleTime: 5 * 60_000,
+  })
+  const summary = cat?.summary
+  const teaser = (cat?.rows ?? []).filter((r) => r.trust_score != null).slice(0, 3)
 
   return (
     <div>
@@ -109,12 +126,12 @@ export default function RebrandHome() {
         </div>
       </section>
 
-      {/* ③ PROOF-OF-SCALE STRIP (TODO: pull counts live from public scan API — do not ship hardcoded) */}
+      {/* ③ PROOF-OF-SCALE STRIP — LIVE from the scan catalog (never hardcoded) */}
       <section className="max-w-[1080px] mx-auto px-6 pb-14">
         <div className="glass rounded-2xl p-8 flex flex-wrap gap-x-12 gap-y-4 justify-center text-center">
           {[
-            ['35,689', 'tools scanned'],
-            ['7,029', 'MCP servers'],
+            [summary ? summary.total_scans.toLocaleString() : '—', 'tools scanned'],
+            [summary ? (summary.by_surface?.mcp ?? 0).toLocaleString() : '—', 'MCP servers'],
             ['12', 'detection categories'],
             ['100%', 'signed & verifiable'],
           ].map(([n, l]) => (
@@ -124,7 +141,7 @@ export default function RebrandHome() {
             </div>
           ))}
           <div className="basis-full font-mono text-[11.5px] text-text-muted/70 mt-1">
-            a one-time launch corpus — counts pulled live from the scan catalog, never hardcoded
+            live from the scan catalog · a one-time launch corpus
           </div>
         </div>
       </section>
@@ -191,19 +208,30 @@ export default function RebrandHome() {
           <p className="mt-3 text-text-muted">Sorted safest-first. Open any tool to see why it earned its grade.</p>
         </div>
         <div className="grid md:grid-cols-3 gap-3.5 mt-8">
-          {[
-            ['acme/filesystem-mcp', 'A', 'text-success bg-success/15'],
-            ['acme/mcp-server', 'B', 'text-warning bg-warning/15'],
-            ['unknown/agent-bridge', 'D', 'text-danger bg-danger/15'],
-          ].map(([name, grade, cls]) => (
-            <Link key={name} to="/rebrand/browse" className="glass card-hover rounded-xl p-[18px] block">
-              <div className="flex items-center justify-between gap-2.5">
-                <span className="font-mono text-[13.5px] break-all">{name}</span>
-                <span className={`font-extrabold text-[13px] px-2.5 py-0.5 rounded-lg ${cls}`}>{grade}</span>
-              </div>
-              <div className="mt-3 text-[12.5px] text-primary-light">Why this grade →</div>
-            </Link>
-          ))}
+          {teaser.length > 0
+            ? teaser.map((row) => {
+                const { display, repoPath } = rowIdentity(row)
+                const g = getGradeInfo(row.trust_score as number)
+                return (
+                  <Link
+                    key={display}
+                    to={repoPath ? `/rebrand/check/${repoPath}` : '/rebrand/browse'}
+                    className="glass card-hover rounded-xl p-[18px] block"
+                  >
+                    <div className="flex items-center justify-between gap-2.5">
+                      <span className="font-mono text-[13.5px] break-all">{display}</span>
+                      <span className={`font-extrabold text-[13px] px-2.5 py-0.5 rounded-lg ${g.textClass} ${g.bgClass}`}>{g.grade}</span>
+                    </div>
+                    <div className="mt-3 text-[12.5px] text-primary-light">Why this grade →</div>
+                  </Link>
+                )
+              })
+            : Array.from({ length: 3 }).map((_, i) => (
+                <Link key={i} to="/rebrand/browse" className="glass card-hover rounded-xl p-[18px] block">
+                  <div className="h-4 w-2/3 rounded bg-surface-hover animate-pulse" />
+                  <div className="mt-3 text-[12.5px] text-primary-light">Browse the catalog →</div>
+                </Link>
+              ))}
         </div>
         <div className="mt-6">
           <Link to="/rebrand/browse" className="text-[14px] font-semibold text-primary-light hover:text-primary">Browse the full catalog →</Link>
