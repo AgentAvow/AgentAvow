@@ -84,6 +84,12 @@ const Scans = lazy(() => import('./pages/Scans'))
 const StateOfAgentSecurity2026 = lazy(() => import('./pages/StateOfAgentSecurity2026'))
 const Research = lazy(() => import('./pages/Research'))
 
+// AgentAvow rebrand sandbox — isolated /rebrand/* tree (see docs/internal/rebrand-build-spec-and-loose-ends.md)
+const RebrandLayout = lazy(() => import('./rebrand/RebrandLayout'))
+const RebrandHome = lazy(() => import('./rebrand/pages/Home'))
+const RebrandBrowse = lazy(() => import('./rebrand/pages/Browse'))
+const RebrandBadge = lazy(() => import('./rebrand/pages/Badge'))
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -189,6 +195,16 @@ function AppRoutes() {
           <Route path="/disputes" element={<ProtectedRoute><Disputes /></ProtectedRoute>} />
           <Route path="/webhooks" element={<ProtectedRoute><Webhooks /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
+        </Route>
+
+        {/* AgentAvow rebrand sandbox — isolated tree, own layout, does not touch the live site */}
+        <Route path="/rebrand" element={<RebrandLayout />}>
+          <Route index element={<RebrandHome />} />
+          <Route path="browse" element={<RebrandBrowse />} />
+          <Route path="badge" element={<RebrandBadge />} />
+          <Route path="check" element={<Check />} />
+          <Route path="check/:owner/:repo" element={<Check />} />
+          <Route path="*" element={<RebrandHome />} />
         </Route>
       </Routes>
     </Suspense>
