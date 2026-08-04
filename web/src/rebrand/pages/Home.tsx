@@ -260,28 +260,52 @@ export default function RebrandHome() {
         </div>
       </section>
 
-      {/* ⑧ ACCOUNT CAPTURE — the one earned account ask */}
+      {/* ⑧ TWO EARNED PATHS — change alerts (anyone) + CI gate (developers) */}
       <section className="max-w-[1080px] mx-auto px-6 py-14">
-        <div className="glass rounded-3xl p-10 text-center relative overflow-hidden">
-          <div className="relative">
-            <Eyebrow>Stay safe over time</Eyebrow>
-            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">
-              Depend on a tool? We'll <span className="gradient-text">watch it</span> for you.
-            </h2>
-            <p className="mt-3 mx-auto max-w-[52ch] text-text-muted">
-              Tools change after you vet them. We re-scan the ones you watch and alert you the moment a grade
-              drops or a signed definition changes — the rug-pull you'd otherwise miss.
+        <div className="text-center max-w-[56ch] mx-auto">
+          <Eyebrow>Stay safe over time</Eyebrow>
+          <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">
+            A tool is only safe until it <span className="gradient-text">changes</span>.
+          </h2>
+          <p className="mt-3 text-text-muted">
+            Vetting once isn't enough — tools get updated, and a clean scan can quietly go bad. Two ways to
+            never get caught by it.
+          </p>
+        </div>
+        <div className="grid md:grid-cols-2 gap-4 mt-8">
+          {/* anyone → change alerts */}
+          <div className="glass rounded-2xl p-7 flex flex-col">
+            <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
+            <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
+            <p className="mt-2 text-text-muted text-[14.5px] flex-1">
+              Watch the tools you depend on. We re-scan them and alert you the moment a grade drops or a
+              signed definition changes — the rug-pull you'd otherwise miss.
             </p>
             <a
               href="/register"
-              className="inline-block mt-6 font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
+              className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
             >
-              Watch a tool
+              Get change alerts →
             </a>
-            <div className="mt-3.5 font-mono text-[11.5px] text-text-muted/70">
-              the one thing worth an account · everything else stays free and anonymous
-            </div>
           </div>
+          {/* developers → CI gate */}
+          <div className="glass rounded-2xl p-7 flex flex-col">
+            <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>
+            <h3 className="mt-2 text-xl font-semibold">Add to your CI</h3>
+            <p className="mt-2 text-text-muted text-[14.5px] flex-1">
+              Run the scan on every pull request with the GitHub Action. Gate merges on a minimum grade so a
+              dependency can never silently regress in your pipeline.
+            </p>
+            <Link
+              to="/rebrand/badge"
+              className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors"
+            >
+              Add to your CI →
+            </Link>
+          </div>
+        </div>
+        <div className="mt-5 text-center font-mono text-[11.5px] text-text-muted/70">
+          alerts need a free account · everything else stays free and anonymous
         </div>
       </section>
     </div>
