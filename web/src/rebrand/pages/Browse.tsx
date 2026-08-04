@@ -94,8 +94,9 @@ export default function RebrandBrowse() {
         </div>
       </div>
 
-      {/* sticky controls — tabs + search + sort pinned under the header */}
-      <div className="sticky top-[62px] z-10 glass border-y border-border/50 mt-6">
+      {/* sticky controls — mirrors the agentgraph pinned-bar blend: translucent bg + a
+          soft gradient fade below (no hard bar), so content scrolls under it cleanly. */}
+      <div className="sticky top-[62px] z-10 mt-6 bg-background/80 relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
         <div className="max-w-[1080px] mx-auto px-6 py-3 flex flex-wrap items-center gap-2">
           {SURFACES.map((sf, i) => (
             <button
