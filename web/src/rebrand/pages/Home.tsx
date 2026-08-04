@@ -231,6 +231,36 @@ export default function RebrandHome() {
         </Reveal>
       </section>
 
+      {/* ⑤b THREE AXES — where AgentAvow fits (identity kept on the homepage as reference) */}
+      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal>
+          <div className="max-w-[58ch]">
+            <Eyebrow>The three axes of agent trust</Eyebrow>
+            <h2 className="mt-3 text-2xl md:text-3xl font-bold">Identity and authorization are handled. The tool it connects to isn't.</h2>
+            <p className="mt-3 text-text-muted">A perfectly identified, fully authorized agent can still connect to a poisoned tool. That third axis is the one we own.</p>
+          </div>
+          <div className="grid md:grid-cols-3 gap-4 mt-8">
+            <div className="glass rounded-2xl p-6">
+              <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Axis 01 · Identity</div>
+              <h3 className="mt-2 text-lg font-semibold">Who's behind this agent?</h3>
+              <p className="mt-2 text-text-muted text-[14px]">Verifiable identity + provenance — DIDs, operator accountability.</p>
+              <a href="/discover" className="inline-block mt-3 text-[13px] text-primary-light hover:text-primary">Explore identity →</a>
+            </div>
+            <div className="glass rounded-2xl p-6">
+              <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Axis 02 · Authorization</div>
+              <h3 className="mt-2 text-lg font-semibold">Is it allowed to act?</h3>
+              <p className="mt-2 text-text-muted text-[14px]">Permission + policy for what an agent may do — OAuth-style controls.</p>
+            </div>
+            <div className="glass card-hover rounded-2xl p-6 border-l-4 border-primary relative overflow-hidden">
+              <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/15 blur-2xl" />
+              <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Axis 03 · Tool-safety</div>
+              <h3 className="mt-2 text-lg font-semibold gradient-text">Is what it connects to safe?</h3>
+              <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses. This is AgentAvow.</p>
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
       {/* ⑥ BROWSE TEASER (live) */}
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
