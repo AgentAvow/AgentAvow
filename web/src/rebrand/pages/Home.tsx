@@ -1,23 +1,39 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
 
 /**
  * AgentAvow rebrand homepage (prototype).
- * The /check input IS the hero. Two-audience fork, honest proof, a live signed
- * result (Attestation Trust + Adoption), the Yelp browse teaser, the badge loop,
- * and the one earned account ask. Static content for now — see
- * docs/internal/rebrand-build-spec-and-loose-ends.md for the live-data wiring pass.
+ * The /check input IS the hero. Live catalog for counts + browse teaser.
+ * Section order: hero → fork → proof strip → signed-result example →
+ * how it works → browse teaser → developer → change-alerts/CI.
  */
 
-const CHIPS = [
-  'github.com/acme/mcp-server',
-  'mcp://github-tools',
-  'npm: agent-toolkit',
-  'pypi: langchain-tools',
+// Real, scannable example repos — clicking a chip runs a real scan (works on prod;
+// on-demand scans 502 locally without a GitHub token — see the /check note).
+const EXAMPLES = [
+  'modelcontextprotocol/servers',
+  'agenttrust/mcp-server',
+  'block/goose',
+  'langchain-ai/langchain',
 ]
+
+function Reveal({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <motion.div
+      className={className}
+      initial={{ opacity: 0, y: 16 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-80px' }}
+      transition={{ duration: 0.55, ease: 'easeOut' }}
+    >
+      {children}
+    </motion.div>
+  )
+}
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
@@ -26,20 +42,17 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 export default function RebrandHome() {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
-  const go = () => {
-    // Parse a github owner/repo out of the input → run the real /check scan.
-    // Non-repo inputs (mcp://, npm:, pypi:) fall through to the Check page's own parser.
-    const m = value.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
+  const runCheck = (input: string) => {
+    const m = input.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
     navigate(m ? `/rebrand/check/${m[1]}/${m[2]}` : '/rebrand/check')
   }
 
-  // Live catalog: powers the proof-of-scale counts + the browse teaser.
   const { data: cat } = useQuery({
     queryKey: ['rebrand-home-catalog'],
     queryFn: () => fetchCatalog({ surface: 'mcp', sort: 'score-desc', limit: 6 }),
     staleTime: 5 * 60_000,
   })
-  const summary = cat?.summary
+  const s = cat?.summary
   const teaser = (cat?.rows ?? []).filter((r) => r.trust_score != null).slice(0, 3)
 
   return (
@@ -47,17 +60,16 @@ export default function RebrandHome() {
       {/* ① HERO = the check itself */}
       <section className="text-center pt-16 pb-8 px-6">
         <div className="max-w-[1080px] mx-auto">
-          <Eyebrow>Tool-counterparty safety</Eyebrow>
-          <h1 className="mt-4 text-4xl sm:text-5xl md:text-6xl font-extrabold leading-[1.06] tracking-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-[1.06] tracking-tight">
             Is this AI tool <span className="gradient-text-bio">safe</span> to connect?
           </h1>
           <p className="mt-5 mx-auto max-w-[50ch] text-lg text-text-muted font-light">
-            Scan any tool, MCP server, or skill your agent connects to. Get a signed, verifiable safety grade
-            in seconds — free, no signup.
+            Scan any tool, MCP server, or skill your agent connects to. Get a signed safety grade in seconds
+            — free, no signup, and verifiable offline.
           </p>
 
           <form
-            onSubmit={(e) => { e.preventDefault(); go() }}
+            onSubmit={(e) => { e.preventDefault(); runCheck(value) }}
             className="glass mt-8 mx-auto max-w-[600px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10"
           >
             <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 self-center text-text-muted shrink-0">
@@ -70,271 +82,235 @@ export default function RebrandHome() {
               placeholder="github.com/owner/repo"
               className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15.5px] text-text placeholder:text-text-muted"
             />
-            <button
-              type="submit"
-              className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap"
-            >
+            <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">
               Check
             </button>
           </form>
 
-          <div className="mt-4 flex flex-wrap gap-2 justify-center">
-            {CHIPS.map((c) => (
+          <div className="mt-4 flex flex-wrap gap-2 justify-center items-center">
+            <span className="font-mono text-[11.5px] text-text-muted/70">try one:</span>
+            {EXAMPLES.map((c) => (
               <button
                 key={c}
-                onClick={() => setValue(c)}
+                onClick={() => { setValue(c); runCheck(c) }}
                 className="font-mono text-[12.5px] text-text-muted bg-surface border border-border rounded-full px-3 py-1.5 hover:border-primary-light hover:text-primary-light transition-colors"
               >
                 {c}
               </button>
             ))}
           </div>
-          <div className="mt-4">
-            <Link to="/rebrand/browse" className="text-[14px] text-text-muted border-b border-border hover:text-primary-light hover:border-primary-light">
-              or browse 35,000+ already-scanned tools →
-            </Link>
-          </div>
-          <div className="mt-3.5 font-mono text-[12px] text-text-muted/70">
-            no account · no install · signed result you can verify offline
-          </div>
         </div>
       </section>
 
-      {/* ② TWO-AUDIENCE FORK */}
+      {/* ② TWO-AUDIENCE FORK — styled to stand out */}
       <section className="max-w-[1080px] mx-auto px-6 py-14">
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="glass card-hover rounded-2xl p-6 flex flex-col gap-2">
-            <h3 className="text-lg font-semibold">Checking a tool</h3>
+        <Reveal className="grid md:grid-cols-2 gap-4">
+          <Link to="/rebrand/browse" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-primary/60 relative overflow-hidden">
+            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/10 blur-2xl group-hover:bg-primary/20 transition-colors" />
+            <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Checking a tool</div>
+            <h3 className="text-xl font-bold">Browse the trust catalog</h3>
             <p className="text-text-muted text-[14.5px] flex-1">
-              Browse tools by grade before you connect one. See the exact reason for every grade — the
-              dangerous permission, the injection surface, the signed evidence — not a star rating.
+              See tools ranked by grade before you connect one — with the exact reason for each score, not a
+              star rating.
             </p>
-            <Link to="/rebrand/browse" className="mt-2 self-start text-[14.5px] font-semibold text-primary-light hover:text-primary">
-              Browse the catalog →
-            </Link>
-          </div>
-          <div className="glass card-hover rounded-2xl p-6 flex flex-col gap-2">
-            <h3 className="text-lg font-semibold">Building a tool</h3>
+            <span className="mt-2 self-start text-[14.5px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform">Browse the catalog →</span>
+          </Link>
+          <Link to="/rebrand/badge" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-accent/60 relative overflow-hidden">
+            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-accent/10 blur-2xl group-hover:bg-accent/20 transition-colors" />
+            <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Building a tool</div>
+            <h3 className="text-xl font-bold">Get a signed badge</h3>
             <p className="text-text-muted text-[14.5px] flex-1">
-              Scan your repo and drop a signed trust badge in your README in one line. Every viewer can verify
-              the grade themselves. Wire it into CI when you're ready.
+              Drop a signed trust badge in your README in one line. Every viewer can verify the grade — and
+              gate your CI on it.
             </p>
-            <Link to="/rebrand/badge" className="mt-2 self-start text-[14.5px] font-semibold text-primary-light hover:text-primary">
-              Get your badge →
-            </Link>
-          </div>
-        </div>
+            <span className="mt-2 self-start text-[14.5px] font-semibold text-accent group-hover:translate-x-1 transition-transform">Get your badge →</span>
+          </Link>
+        </Reveal>
       </section>
 
-      {/* ③ PROOF-OF-SCALE STRIP — LIVE from the scan catalog (never hardcoded) */}
+      {/* ③ PROOF-OF-SCALE STRIP — LIVE, richer surface mix */}
       <section className="max-w-[1080px] mx-auto px-6 pb-14">
-        <div className="glass rounded-2xl p-8 flex flex-wrap gap-x-12 gap-y-4 justify-center text-center">
-          {[
-            [summary ? summary.total_scans.toLocaleString() : '—', 'tools scanned'],
-            [summary ? (summary.by_surface?.mcp ?? 0).toLocaleString() : '—', 'MCP servers'],
-            ['12', 'detection categories'],
-            ['100%', 'signed & verifiable'],
-          ].map(([n, l]) => (
-            <div key={l}>
-              <b className="block text-3xl tracking-tight tabular-nums gradient-text">{n}</b>
-              <span className="text-[13px] text-text-muted">{l}</span>
+        <Reveal>
+          <div className="glass rounded-2xl p-8 flex flex-wrap gap-x-10 gap-y-4 justify-center text-center">
+            {[
+              [s ? s.total_scans.toLocaleString() : '—', 'tools scanned'],
+              [s ? (s.by_surface?.mcp ?? 0).toLocaleString() : '—', 'MCP servers'],
+              [s ? (s.by_surface?.x402 ?? 0).toLocaleString() : '—', 'x402 endpoints'],
+              [s ? (s.repo_scans_total ?? 0).toLocaleString() : '—', 'repos scanned'],
+              ['12', 'detection categories'],
+            ].map(([n, l]) => (
+              <div key={l}>
+                <b className="block text-3xl tracking-tight tabular-nums gradient-text">{n}</b>
+                <span className="text-[13px] text-text-muted">{l}</span>
+              </div>
+            ))}
+            <div className="basis-full font-mono text-[11.5px] text-text-muted/70 mt-1">
+              live from the scan catalog · a one-time launch corpus (not continuously re-scanned)
             </div>
-          ))}
-          <div className="basis-full font-mono text-[11.5px] text-text-muted/70 mt-1">
-            live from the scan catalog · a one-time launch corpus
           </div>
-        </div>
+        </Reveal>
       </section>
 
-      {/* ④ LIVE PROOF — a real signed result (Attestation Trust + Adoption) */}
+      {/* ④ SIGNED RESULT EXAMPLE — the trust score, verifiable */}
       <section id="proof" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <div className="text-center max-w-[56ch] mx-auto">
-          <Eyebrow>Not a score, a signature</Eyebrow>
-          <h2 className="mt-3 text-2xl md:text-3xl font-bold">Two scores, one signed record.</h2>
-          <p className="mt-3 text-text-muted">
-            Attestation Trust is your signed safety grade. Adoption shows how much the ecosystem actually uses
-            a tool — real usage, not opinions.
-          </p>
-        </div>
-
-        <div className="glass rounded-2xl overflow-hidden max-w-[620px] mx-auto mt-8">
-          <div className="flex items-center gap-4 p-5 border-b border-border/60">
-            <div className="w-14 h-14 rounded-2xl grid place-items-center text-2xl font-extrabold text-[#08110f] bg-gradient-to-br from-accent to-primary shadow-lg shadow-accent/30">A</div>
-            <div>
-              <div className="font-mono text-[13px] text-text-muted">github.com/acme/filesystem-mcp</div>
-              <div className="mt-1 text-[13px] font-semibold gradient-text">Verified / Trusted · tier 4</div>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2.5 p-4 border-b border-border/60">
-            <div className="flex-1 min-w-[180px] bg-surface border border-border rounded-xl px-4 py-3">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-text-muted">Attestation Trust</div>
-              <div className="text-lg font-bold text-primary-light mt-0.5">A · 94</div>
-              <div className="text-[11.5px] text-text-muted mt-0.5">signed scanner grade · verifiable now</div>
-            </div>
-            <div className="flex-1 min-w-[180px] bg-surface border border-border rounded-xl px-4 py-3">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-text-muted">Adoption</div>
-              <div className="text-lg font-bold text-warning mt-0.5">12.4k installs · 340 checks</div>
-              <div className="text-[11.5px] text-text-muted mt-0.5">downloads · stars · checks · public data</div>
-            </div>
-          </div>
-          <div className="p-5 flex flex-col gap-2.5">
-            <div className="flex gap-2.5 items-start text-[14px]">
-              <span className="font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/15 text-success shrink-0 mt-0.5">pass</span>
-              <span>Scoped file access, no shell <code className="font-mono text-[12.5px] text-text-muted">exec()</code></span>
-            </div>
-            <div className="flex gap-2.5 items-start text-[14px]">
-              <span className="font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/15 text-success shrink-0 mt-0.5">pass</span>
-              <span>No secrets · no exfiltration sinks · no injection surface · deps clean</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2.5 p-4 border-t border-dashed border-border flex-wrap">
-            <span className="flex items-center gap-2 font-mono text-[12px] text-success">
-              <svg viewBox="0 0 24 24" fill="none" className="w-[18px] h-[18px]">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" />
-                <path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Signed · Ed25519 / JWS
-            </span>
-            <a href="/.well-known/jwks.json" className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">Verify this attestation →</a>
-          </div>
-        </div>
-      </section>
-
-      {/* ⑤ BROWSE STRIP (Yelp teaser) */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <div className="max-w-[56ch]">
-          <Eyebrow>Browse</Eyebrow>
-          <h2 className="mt-3 text-2xl md:text-3xl font-bold">See how the tools you're about to trust actually score.</h2>
-          <p className="mt-3 text-text-muted">Sorted safest-first. Open any tool to see why it earned its grade.</p>
-        </div>
-        <div className="grid md:grid-cols-3 gap-3.5 mt-8">
-          {teaser.length > 0
-            ? teaser.map((row) => {
-                const { display, repoPath } = rowIdentity(row)
-                const g = getGradeInfo(row.trust_score as number)
-                return (
-                  <Link
-                    key={display}
-                    to={repoPath ? `/rebrand/check/${repoPath}` : '/rebrand/browse'}
-                    className="glass card-hover rounded-xl p-[18px] block"
-                  >
-                    <div className="flex items-center justify-between gap-2.5">
-                      <span className="font-mono text-[13.5px] break-all">{display}</span>
-                      <span className={`font-extrabold text-[13px] px-2.5 py-0.5 rounded-lg ${g.textClass} ${g.bgClass}`}>{g.grade}</span>
-                    </div>
-                    <div className="mt-3 text-[12.5px] text-primary-light">Why this grade →</div>
-                  </Link>
-                )
-              })
-            : Array.from({ length: 3 }).map((_, i) => (
-                <Link key={i} to="/rebrand/browse" className="glass card-hover rounded-xl p-[18px] block">
-                  <div className="h-4 w-2/3 rounded bg-surface-hover animate-pulse" />
-                  <div className="mt-3 text-[12.5px] text-primary-light">Browse the catalog →</div>
-                </Link>
-              ))}
-        </div>
-        <div className="mt-6">
-          <Link to="/rebrand/browse" className="text-[14px] font-semibold text-primary-light hover:text-primary">Browse the full catalog →</Link>
-        </div>
-      </section>
-
-      {/* ⑥ DEVELOPER STRIP — the badge loop */}
-      <section id="developers" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <div className="max-w-[56ch]">
-          <Eyebrow>For developers</Eyebrow>
-          <h2 className="mt-3 text-2xl md:text-3xl font-bold">One line. A signed trust badge in your README.</h2>
-          <p className="mt-3 text-text-muted">Check your repo, copy the badge. Every reader can verify the grade — and clicking it re-checks your tool.</p>
-        </div>
-        <div className="grid md:grid-cols-2 gap-6 items-center mt-6">
-          <div>
-            <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-              <span className="bg-surface-hover text-text px-2.5 py-1.5">🛡 AgentAvow</span>
-              <span className="px-2.5 py-1.5 font-bold text-white bg-gradient-to-r from-primary to-primary-dark">Trust: A 94</span>
-            </span>
-            <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text overflow-x-auto">
-              [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)
-            </div>
-          </div>
-          <div>
-            <p className="text-text-muted text-[14.5px]">
-              The badge regenerates on every view, so it never goes stale. It's signed and links back to a
-              full, verifiable report — no account required to mint one.
+        <Reveal>
+          <div className="text-center max-w-[56ch] mx-auto">
+            <Eyebrow>A trust score you can verify</Eyebrow>
+            <h2 className="mt-3 text-2xl md:text-3xl font-bold">Two scores, one signed record.</h2>
+            <p className="mt-3 text-text-muted">
+              Attestation Trust is your signed safety grade. Adoption shows how much the ecosystem actually
+              uses a tool — real usage, not opinions.
             </p>
-            <Link to="/rebrand/badge" className="inline-block mt-4 font-mono text-[13px] text-primary-light hover:text-primary">
-              Wire it into CI with the GitHub Action · SDK · CLI →
-            </Link>
           </div>
-        </div>
+
+          <div className="glass rounded-2xl overflow-hidden max-w-[620px] mx-auto mt-8">
+            <div className="flex items-center gap-4 p-5 border-b border-border/60">
+              <div className="w-14 h-14 rounded-2xl grid place-items-center text-2xl font-extrabold text-[#08110f] bg-gradient-to-br from-accent to-primary shadow-lg shadow-accent/30">A</div>
+              <div>
+                <div className="font-mono text-[13px] text-text-muted">github.com/acme/filesystem-mcp</div>
+                <div className="mt-1 text-[13px] font-semibold gradient-text">Verified / Trusted · tier 4</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2.5 p-4 border-b border-border/60">
+              <div className="flex-1 min-w-[180px] bg-surface border border-border rounded-xl px-4 py-3">
+                <div className="font-mono text-[11.5px] uppercase tracking-wide text-text-muted">Attestation Trust</div>
+                <div className="text-lg font-bold text-primary-light mt-0.5">A · 94</div>
+                <div className="text-[11.5px] text-text-muted mt-0.5">signed scanner grade · verifiable now</div>
+              </div>
+              <div className="flex-1 min-w-[180px] bg-surface border border-border rounded-xl px-4 py-3">
+                <div className="font-mono text-[11.5px] uppercase tracking-wide text-text-muted">Adoption</div>
+                <div className="text-lg font-bold text-warning mt-0.5">12.4k installs · 340 checks</div>
+                <div className="text-[11.5px] text-text-muted mt-0.5">downloads · stars · checks · public data</div>
+              </div>
+            </div>
+            <div className="p-5 flex flex-col gap-2.5">
+              <div className="flex gap-2.5 items-start text-[14px]">
+                <span className="font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/15 text-success shrink-0 mt-0.5">pass</span>
+                <span>Scoped file access, no shell <code className="font-mono text-[12.5px] text-text-muted">exec()</code></span>
+              </div>
+              <div className="flex gap-2.5 items-start text-[14px]">
+                <span className="font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/15 text-success shrink-0 mt-0.5">pass</span>
+                <span>No secrets · no exfiltration · no injection surface · deps clean</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5 p-4 border-t border-dashed border-border flex-wrap">
+              <span className="flex items-center gap-2 font-mono text-[12px] text-success">
+                <svg viewBox="0 0 24 24" fill="none" className="w-[18px] h-[18px]">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" />
+                  <path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Signed · Ed25519 / JWS
+              </span>
+              <span className="text-[12px] text-text-muted">· we alert you if this grade ever drops</span>
+              <a href="/.well-known/jwks.json" className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">Verify →</a>
+            </div>
+          </div>
+        </Reveal>
       </section>
 
-      {/* ⑦ HOW IT WORKS */}
+      {/* ⑤ HOW IT WORKS — moved above browse */}
       <section id="how" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <div className="max-w-[56ch]">
-          <Eyebrow>How it works</Eyebrow>
-          <h2 className="mt-3 text-2xl md:text-3xl font-bold">Paste, scan, verify.</h2>
-        </div>
-        <div className="grid md:grid-cols-3 rounded-2xl overflow-hidden border border-border/60 mt-8 glass">
-          {[
-            ['01', 'Paste a URL', 'A repo, MCP server, npm/PyPI package, or skill. No signup.'],
-            ['02', 'We scan it', 'Across 12 categories — secrets, exec sinks, exfiltration, prompt injection, obfuscation, deps.'],
-            ['03', 'Get a signed grade', 'A letter grade plus a signed attestation anyone can verify offline against our public key.'],
-          ].map(([n, h, p], i) => (
-            <div key={n} className={`p-6 ${i < 2 ? 'md:border-r border-border/60' : ''}`}>
-              <div className="font-mono text-[12px] text-primary-light tracking-wide">{n}</div>
-              <h3 className="mt-2.5 text-[17px] font-semibold">{h}</h3>
-              <p className="mt-2 text-text-muted text-[14px]">{p}</p>
-            </div>
-          ))}
-        </div>
+        <Reveal>
+          <div className="max-w-[56ch]">
+            <Eyebrow>How it works</Eyebrow>
+            <h2 className="mt-3 text-2xl md:text-3xl font-bold">Paste, scan, verify.</h2>
+          </div>
+          <div className="grid md:grid-cols-3 rounded-2xl overflow-hidden border border-border/60 mt-8 glass">
+            {[
+              ['01', 'Paste a URL', 'A repo, MCP server, npm/PyPI package, or skill. No signup.'],
+              ['02', 'We scan it', 'Across 12 categories — secrets, exec sinks, exfiltration, prompt injection, obfuscation, deps.'],
+              ['03', 'Get a signed grade', 'A letter grade plus a signed attestation anyone can verify offline against our public key.'],
+            ].map(([n, h, p], i) => (
+              <div key={n} className={`p-6 ${i < 2 ? 'md:border-r border-border/60' : ''}`}>
+                <div className="font-mono text-[12px] text-primary-light tracking-wide">{n}</div>
+                <h3 className="mt-2.5 text-[17px] font-semibold">{h}</h3>
+                <p className="mt-2 text-text-muted text-[14px]">{p}</p>
+              </div>
+            ))}
+          </div>
+        </Reveal>
       </section>
 
-      {/* ⑧ TWO EARNED PATHS — change alerts (anyone) + CI gate (developers) */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14">
-        <div className="text-center max-w-[56ch] mx-auto">
-          <Eyebrow>Stay safe over time</Eyebrow>
-          <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">
-            A tool is only safe until it <span className="gradient-text">changes</span>.
-          </h2>
-          <p className="mt-3 text-text-muted">
-            Vetting once isn't enough — tools get updated, and a clean scan can quietly go bad. Two ways to
-            never get caught by it.
-          </p>
-        </div>
-        <div className="grid md:grid-cols-2 gap-4 mt-8">
-          {/* anyone → change alerts */}
-          <div className="glass rounded-2xl p-7 flex flex-col">
-            <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
-            <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
-            <p className="mt-2 text-text-muted text-[14.5px] flex-1">
-              Watch the tools you depend on. We re-scan them and alert you the moment a grade drops or a
-              signed definition changes — the rug-pull you'd otherwise miss.
-            </p>
-            <a
-              href="/register"
-              className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
-            >
-              Get change alerts →
-            </a>
+      {/* ⑥ BROWSE TEASER (live) */}
+      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal>
+          <div className="max-w-[56ch]">
+            <Eyebrow>Browse</Eyebrow>
+            <h2 className="mt-3 text-2xl md:text-3xl font-bold">See how the tools you're about to trust actually score.</h2>
+            <p className="mt-3 text-text-muted">Safest-first. Open any tool for the evidence behind its grade.</p>
           </div>
-          {/* developers → CI gate */}
-          <div className="glass rounded-2xl p-7 flex flex-col">
-            <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>
-            <h3 className="mt-2 text-xl font-semibold">Add to your CI</h3>
-            <p className="mt-2 text-text-muted text-[14.5px] flex-1">
-              Run the scan on every pull request with the GitHub Action. Gate merges on a minimum grade so a
-              dependency can never silently regress in your pipeline.
-            </p>
-            <Link
-              to="/rebrand/badge"
-              className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors"
-            >
-              Add to your CI →
-            </Link>
+          <div className="grid md:grid-cols-3 gap-3.5 mt-8">
+            {teaser.length > 0
+              ? teaser.map((row) => {
+                  const { display, repoPath } = rowIdentity(row)
+                  const g = getGradeInfo(row.trust_score as number)
+                  return (
+                    <Link key={display} to={repoPath ? `/rebrand/check/${repoPath}` : '/rebrand/browse'} className="glass card-hover rounded-xl p-[18px] block">
+                      <div className="flex items-center justify-between gap-2.5">
+                        <span className="font-mono text-[13.5px] break-all">{display}</span>
+                        <span className={`font-extrabold text-[13px] px-2.5 py-0.5 rounded-lg ${g.textClass} ${g.bgClass}`}>{g.grade}</span>
+                      </div>
+                      <div className="mt-3 text-[12.5px] text-primary-light">Why this grade →</div>
+                    </Link>
+                  )
+                })
+              : Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[86px]" />
+                ))}
           </div>
-        </div>
-        <div className="mt-5 text-center font-mono text-[11.5px] text-text-muted/70">
-          alerts need a free account · everything else stays free and anonymous
-        </div>
+          <div className="mt-6"><Link to="/rebrand/browse" className="text-[14px] font-semibold text-primary-light hover:text-primary">Browse the full catalog →</Link></div>
+        </Reveal>
+      </section>
+
+      {/* ⑦ DEVELOPER STRIP — the badge loop */}
+      <section id="developers" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal>
+          <div className="max-w-[56ch]">
+            <Eyebrow>For developers</Eyebrow>
+            <h2 className="mt-3 text-2xl md:text-3xl font-bold">One line. A signed trust badge in your README.</h2>
+            <p className="mt-3 text-text-muted">Check your repo, copy the badge. Every reader can verify the grade — and clicking it re-checks your tool.</p>
+          </div>
+          <div className="grid md:grid-cols-2 gap-6 items-center mt-6">
+            <div>
+              <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
+                <span className="bg-surface-hover text-text px-2.5 py-1.5">🛡 AgentAvow</span>
+                <span className="px-2.5 py-1.5 font-bold text-white bg-gradient-to-r from-primary to-primary-dark">Trust: A 94</span>
+              </span>
+              <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text overflow-x-auto">
+                [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)
+              </div>
+            </div>
+            <div>
+              <p className="text-text-muted text-[14.5px]">The badge regenerates on every view, so it never goes stale. It's signed and links back to a full, verifiable report — no account required to mint one.</p>
+              <Link to="/rebrand/badge" className="inline-block mt-4 font-mono text-[13px] text-primary-light hover:text-primary">Wire it into CI with the GitHub Action · SDK · CLI →</Link>
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
+      {/* ⑧ TWO EARNED PATHS — change alerts + CI gate */}
+      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal>
+          <div className="text-center max-w-[56ch] mx-auto">
+            <Eyebrow>Stay safe over time</Eyebrow>
+            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">A tool is only safe until it <span className="gradient-text">changes</span>.</h2>
+            <p className="mt-3 text-text-muted">Vetting once isn't enough — tools get updated, and a clean scan can quietly go bad. Two ways to never get caught by it.</p>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4 mt-8">
+            <div className="glass rounded-2xl p-7 flex flex-col">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
+              <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a grade drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
+              <a href="/register" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</a>
+            </div>
+            <div className="glass rounded-2xl p-7 flex flex-col">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>
+              <h3 className="mt-2 text-xl font-semibold">Add to your CI</h3>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Run the scan on every pull request with the GitHub Action. Gate merges on a minimum grade so a dependency can never silently regress in your pipeline.</p>
+              <Link to="/rebrand/badge" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to your CI →</Link>
+            </div>
+          </div>
+        </Reveal>
       </section>
     </div>
   )

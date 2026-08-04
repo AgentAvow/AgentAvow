@@ -87,14 +87,14 @@ export default function RebrandLayout() {
               <a href="/docs" className="hover:text-text">Docs</a>
               <a href="/docs" className="hover:text-text">API</a>
               <a href="/.well-known/jwks.json" className="hover:text-text">Verify (JWKS)</a>
-              <Link to="/rebrand/browse" className="hover:text-text">Catalog</Link>
               <a href="https://github.com/agentgraph-co" className="hover:text-text">GitHub</a>
               <a href="/legal/terms" className="hover:text-text">Terms</a>
               <a href="/legal/privacy" className="hover:text-text">Privacy</a>
+              <a href="/" className="hover:text-text">Community ↗</a>
             </div>
           </div>
           <div className="mt-5 font-mono text-[12px] text-text-muted/70">
-            Not a score, a signature. · Verify everything. · © {new Date().getFullYear()} AgentAvow
+            A trust score you can verify. · © {new Date().getFullYear()} AgentAvow
           </div>
         </div>
       </footer>
