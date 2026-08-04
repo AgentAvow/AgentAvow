@@ -62,7 +62,7 @@ export default function RebrandLayout() {
             {link('/rebrand/docs', 'Docs')}
           </nav>
           <div className="ml-auto flex items-center gap-4">
-            <a href="/login" className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</a>
+            <Link to="/rebrand/login" className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
             <Link
               to="/rebrand/check"
               className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
@@ -88,8 +88,8 @@ export default function RebrandLayout() {
               <a href="/api/v1/redoc" className="hover:text-text">API</a>
               <a href="/.well-known/jwks.json" className="hover:text-text">Verify (JWKS)</a>
               <a href="https://github.com/agentgraph-co" className="hover:text-text">GitHub</a>
-              <a href="/legal/terms" className="hover:text-text">Terms</a>
-              <a href="/legal/privacy" className="hover:text-text">Privacy</a>
+              <Link to="/rebrand/legal/terms" className="hover:text-text">Terms</Link>
+              <Link to="/rebrand/legal/privacy" className="hover:text-text">Privacy</Link>
               <a href="/" className="hover:text-text">Community ↗</a>
             </div>
           </div>

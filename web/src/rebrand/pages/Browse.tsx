@@ -24,6 +24,13 @@ const SORTS = [
   { key: 'name', label: 'Name (A–Z)' },
 ]
 
+const SEVERITIES = [
+  { key: '', label: 'All findings' },
+  { key: 'critical', label: 'Has critical' },
+  { key: 'high', label: 'Has high+' },
+  { key: 'clean', label: 'Clean only' },
+]
+
 function whyLines(row: CatalogRow): string[] {
   const out: string[] = []
   if (row.critical) out.push(`${row.critical} critical finding${row.critical > 1 ? 's' : ''}`)
@@ -67,13 +74,14 @@ function ToolCard({ row }: { row: CatalogRow }) {
 export default function RebrandBrowse() {
   const [tab, setTab] = useState(0)
   const [sort, setSort] = useState('score-desc')
+  const [severity, setSeverity] = useState('')
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const surface = SURFACES[tab].key
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['rebrand-catalog', surface, sort, q],
-    queryFn: () => fetchCatalog({ surface, sort, q, limit: 30 }),
+    queryKey: ['rebrand-catalog', surface, sort, severity, q],
+    queryFn: () => fetchCatalog({ surface, sort, severity, q, limit: 30 }),
     placeholderData: keepPreviousData,
   })
 
@@ -126,6 +134,13 @@ export default function RebrandBrowse() {
             />
             <button type="submit" className="text-[12px] font-semibold px-3 py-1 rounded-full text-white bg-primary/80 hover:bg-primary">Go</button>
           </form>
+          <select
+            value={severity}
+            onChange={(e) => setSeverity(e.target.value)}
+            className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light"
+          >
+            {SEVERITIES.map((sv) => <option key={sv.key} value={sv.key}>{sv.label}</option>)}
+          </select>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value)}
