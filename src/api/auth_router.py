@@ -235,10 +235,17 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
             detail="User not found or inactive",
         )
 
+    # Snapshot the scalars we need while the entity is freshly loaded in this
+    # async context. Reading ORM attributes AFTER the later awaits (cache,
+    # blacklist) can raise MissingGreenlet if the greenlet/session context shifts
+    # under Starlette's BaseHTTPMiddleware TaskGroup — the /auth/refresh Sentry issue.
+    entity_id = entity.id
+    entity_type_value = entity.type.value
+
     # Check password-change invalidation
     from src import cache
 
-    inv_ts = await cache.get(f"token:inv:{entity.id}")
+    inv_ts = await cache.get(f"token:inv:{entity_id}")
     if inv_ts is not None and payload.get("iat", 0) <= inv_ts:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -250,10 +257,10 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
         from datetime import datetime, timezone
 
         exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-        await blacklist_token(db, old_jti, entity.id, exp)
+        await blacklist_token(db, old_jti, entity_id, exp)
 
-    access_token = create_access_token(entity.id, entity.type.value)
-    refresh_token = create_refresh_token(entity.id)
+    access_token = create_access_token(entity_id, entity_type_value)
+    refresh_token = create_refresh_token(entity_id)
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
