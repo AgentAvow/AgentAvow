@@ -80,6 +80,7 @@ const exactRoutes: Record<string, Intensity> = {
 }
 
 const prefixRoutes: Array<[string, Intensity]> = [
+  ['/rebrand', 'medium'],
   ['/profile/', 'medium'],
   ['/post/', 'medium'],
   ['/m/', 'medium'],

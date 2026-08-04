@@ -67,7 +67,7 @@ export default function RebrandBrowse() {
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rebrand-catalog', surface],
-    queryFn: () => fetchCatalog({ surface, sort: 'safest', limit: 24 }),
+    queryFn: () => fetchCatalog({ surface, sort: 'score-desc', limit: 24 }),
     placeholderData: keepPreviousData,
   })
 

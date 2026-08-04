@@ -36,7 +36,7 @@ export default function RebrandHome() {
   // Live catalog: powers the proof-of-scale counts + the browse teaser.
   const { data: cat } = useQuery({
     queryKey: ['rebrand-home-catalog'],
-    queryFn: () => fetchCatalog({ surface: 'mcp', sort: 'safest', limit: 6 }),
+    queryFn: () => fetchCatalog({ surface: 'mcp', sort: 'score-desc', limit: 6 }),
     staleTime: 5 * 60_000,
   })
   const summary = cat?.summary

@@ -1,4 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
+import { AtmosphericBackground } from '../components/AtmosphericBackground'
 
 /**
  * Isolated shell for the AgentAvow rebrand sandbox (/rebrand/*).
@@ -73,7 +74,9 @@ export default function RebrandLayout() {
       </header>
 
       <main>
-        <Outlet />
+        <AtmosphericBackground>
+          <Outlet />
+        </AtmosphericBackground>
       </main>
 
       <footer className="border-t border-border/60 mt-8">
