@@ -1,6 +1,17 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { badgeUrl } from '../../lib/scanApi'
+import { useRotatingPlaceholder } from '../lib/hooks'
+
+const REPO_HINTS = ['owner/repo', 'your-org/mcp-server', 'your-agent-toolkit', 'your-python-package']
+
+const DEV_RESOURCES: [string, string, string][] = [
+  ['Docs', 'Guides: reading a grade, badges, verifying attestations.', '/rebrand/docs'],
+  ['API reference', 'The REST API — every endpoint, offline-verifiable verdicts.', '/api/v1/redoc'],
+  ['Verify keys (JWKS)', 'Public signing keys to verify any attestation offline.', 'https://agentgraph.co/.well-known/jwks.json'],
+  ['How it works', 'The score, the evidence format, and the open standards.', '/rebrand/how-it-works'],
+  ['GitHub', 'Source, specs, conformance fixtures, and issues.', 'https://github.com/agentgraph-co/agentgraph'],
+]
 
 /**
  * Developer landing — the badge growth loop (prototype).
@@ -26,6 +37,7 @@ export default function RebrandBadge() {
   }
 
   const scan = () => navigate(owner && name ? `/rebrand/check/${owner}/${name}` : '/rebrand/check')
+  const hint = useRotatingPlaceholder(REPO_HINTS)
 
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-14">
@@ -47,7 +59,7 @@ export default function RebrandBadge() {
           <input
             value={repo}
             onChange={(e) => setRepo(e.target.value)}
-            placeholder="owner/repo"
+            placeholder={repo ? '' : hint}
             className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[14px] text-text placeholder:text-text-muted"
           />
           <button
@@ -81,22 +93,37 @@ export default function RebrandBadge() {
         </p>
       </div>
 
-      {/* CI + SDK */}
-      <div className="grid md:grid-cols-3 gap-3.5 mt-6">
-        {[
-          ['GitHub Action', 'Gate PRs on a minimum grade. Posts the report as a check comment.', 'fail-below: B'],
-          ['Python SDK', 'Programmatic scans + attestation verification in your pipeline.', 'agentavow scan owner/repo'],
-          ['REST API', 'The same signed verdicts, offline-verifiable against our JWKS.', 'GET /public/scan/{owner}/{repo}'],
-        ].map(([h, p, code]) => (
-          <div key={h} className="glass rounded-xl p-5">
-            <div className="text-[15px] font-semibold">{h}</div>
+      {/* CI + SDK — each links to its home */}
+      <h2 className="mt-12 text-xl font-bold">Wire it into your workflow</h2>
+      <div className="grid md:grid-cols-3 gap-3.5 mt-4">
+        {([
+          ['GitHub Action', 'Gate PRs on a minimum grade. Posts the report as a check comment.', 'fail-below: B', 'https://github.com/agentgraph-co/agentgraph'],
+          ['Python SDK / CLI', 'Programmatic scans + attestation verification in your pipeline.', 'agentavow scan owner/repo', '/rebrand/docs'],
+          ['REST API', 'The same signed verdicts, offline-verifiable against our JWKS.', 'GET /public/scan/{owner}/{repo}', '/api/v1/redoc'],
+        ] as [string, string, string, string][]).map(([h, p, code, href]) => (
+          <a key={h} href={href} target={href.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" className="glass card-hover rounded-xl p-5 block">
+            <div className="flex items-center justify-between gap-2"><div className="text-[15px] font-semibold">{h}</div><span className="text-primary-light text-[13px]">→</span></div>
             <p className="mt-2 text-text-muted text-[13.5px]">{p}</p>
             <code className="inline-block mt-3 font-mono text-[11.5px] text-primary-light bg-surface px-2 py-1 rounded break-all">{code}</code>
-          </div>
+          </a>
         ))}
       </div>
-      <div className="mt-8 text-center font-mono text-[12px] text-text-muted/70">
-        prototype — badge preview + SDK/CLI to be wired to the live badge endpoint
+
+      {/* everything a developer needs, in one place */}
+      <h2 className="mt-12 text-xl font-bold">Developer resources</h2>
+      <div className="grid sm:grid-cols-2 gap-2.5 mt-4">
+        {DEV_RESOURCES.map(([h, p, href]) => {
+          const external = href.startsWith('http') || href.startsWith('/api')
+          const inner = (
+            <>
+              <div className="flex items-center justify-between gap-2"><div className="text-[14.5px] font-semibold">{h}</div><span className="text-primary-light text-[13px] shrink-0">{external ? '↗' : '→'}</span></div>
+              <div className="text-[13px] text-text-muted mt-0.5">{p}</div>
+            </>
+          )
+          return external
+            ? <a key={h} href={href} target="_blank" rel="noopener noreferrer" className="glass card-hover rounded-xl px-4 py-3 block">{inner}</a>
+            : <Link key={h} to={href} className="glass card-hover rounded-xl px-4 py-3 block">{inner}</Link>
+        })}
       </div>
     </div>
   )

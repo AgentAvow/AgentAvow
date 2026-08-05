@@ -147,9 +147,11 @@ export default function RebrandBrowse() {
   const [page, setPage] = useState(0)
   const surface = SURFACES[tab].key
 
+  // A search should find things anywhere — when q is set we drop the surface
+  // filter so search spans the whole catalog, not just the active tab.
   const { data, isLoading, isError, isFetching } = useQuery({
     queryKey: ['rebrand-catalog', surface, sort, severity, q, page],
-    queryFn: () => fetchCatalog({ surface, sort, severity, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    queryFn: () => fetchCatalog({ surface: q ? '' : surface, sort, severity, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     placeholderData: keepPreviousData,
   })
 
@@ -231,6 +233,7 @@ export default function RebrandBrowse() {
         {!isError && matching != null && (
           <div className="text-[13px] text-text-muted mb-4">
             {matching.toLocaleString()} matching {matching === 1 ? 'scan' : 'scans'}
+            {q && <span> for “{q}” · <span className="text-primary-light">all surfaces</span></span>}
             {isFetching && <span className="text-primary-light"> · refreshing…</span>}
           </div>
         )}

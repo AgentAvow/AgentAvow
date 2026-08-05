@@ -94,6 +94,7 @@ const RebrandCheck = lazy(() => import('./rebrand/pages/Check'))
 const RebrandLogin = lazy(() => import('./rebrand/pages/Login'))
 const RebrandLegal = lazy(() => import('./rebrand/pages/Legal'))
 const RebrandAccount = lazy(() => import('./rebrand/pages/Account'))
+const RebrandHowItWorks = lazy(() => import('./rebrand/pages/HowItWorks'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -212,6 +213,7 @@ function AppRoutes() {
           <Route path="check/:owner/:repo" element={<RebrandCheck />} />
           <Route path="login" element={<RebrandLogin />} />
           <Route path="account" element={<RebrandAccount />} />
+          <Route path="how-it-works" element={<RebrandHowItWorks />} />
           <Route path="legal" element={<RebrandLegal />} />
           <Route path="legal/:section" element={<RebrandLegal />} />
           <Route path="*" element={<RebrandHome />} />

@@ -85,11 +85,16 @@ export default function RebrandAccount() {
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
       <Reveal>
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div>
-            <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Your account</span>
-            <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Welcome back, {user.display_name}.</h1>
-            <p className="mt-2 text-text-muted">The tools you watch, their current grade, and every change we've alerted you to.</p>
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-4">
+            {user.avatar_url
+              ? <img src={user.avatar_url} alt="" className="w-14 h-14 rounded-full object-cover shrink-0 ring-2 ring-primary/30" />
+              : <span className="w-14 h-14 rounded-full grid place-items-center text-xl font-bold text-white bg-gradient-to-br from-primary to-accent shrink-0">{user.display_name?.charAt(0).toUpperCase() || '?'}</span>}
+            <div>
+              <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Your account</span>
+              <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Welcome back, {user.display_name}.</h1>
+              <a href="/settings" className="text-[12.5px] text-text-muted hover:text-primary-light">Edit profile & avatar in Settings →</a>
+            </div>
           </div>
           <Link to="/rebrand/check" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Check a tool</Link>
         </div>

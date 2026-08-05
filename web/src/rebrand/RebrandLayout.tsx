@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { AtmosphericBackground } from '../components/AtmosphericBackground'
 import { useAuth } from '../hooks/useAuth'
@@ -17,9 +17,15 @@ function AccountMenu() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
+  // Count only watch-alert unread — the global unread-count includes the user's
+  // old social-era notifications (that's the "large number" bug), which the
+  // tool-safety rebrand shouldn't surface.
   const { data: unread } = useQuery({
-    queryKey: ['rebrand-unread'],
-    queryFn: async () => (await api.get<{ unread_count: number }>('/notifications/unread-count')).data,
+    queryKey: ['rebrand-unread-watch'],
+    queryFn: async () => {
+      const r = await api.get<{ notifications: unknown[] }>('/notifications', { params: { kind: 'watch_alert', unread_only: true, limit: 50 } })
+      return r.data.notifications.length
+    },
     enabled: !!user,
     refetchInterval: 60_000,
   })
@@ -35,7 +41,7 @@ function AccountMenu() {
     return <Link to="/rebrand/login" className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
   }
 
-  const count = unread?.unread_count ?? 0
+  const count = unread ?? 0
   const initial = user.display_name?.charAt(0).toUpperCase() || '?'
 
   return (
@@ -115,6 +121,65 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
   )
 }
 
+const NAV = [
+  ['/rebrand/browse', 'Browse'],
+  ['/rebrand/badge', 'For developers'],
+  ['/rebrand/how-it-works', 'How it works'],
+  ['/rebrand/docs', 'Docs'],
+]
+
+/** Animated hamburger → morphs to an X; opens a full mobile nav drawer. */
+function MobileNav({ pathname }: { pathname: string }) {
+  const [open, setOpen] = useState(false)
+  const reduce = useReducedMotion()
+  const top = open ? { rotate: 45, y: 6 } : { rotate: 0, y: 0 }
+  const bot = open ? { rotate: -45, y: -6 } : { rotate: 0, y: 0 }
+  return (
+    <div className="md:hidden">
+      <button onClick={() => setOpen(!open)} aria-label={open ? 'Close menu' : 'Open menu'} className="p-2 -mr-2 text-text">
+        <svg viewBox="0 0 24 24" className="w-6 h-6">
+          <motion.line x1="4" y1="8" x2="20" y2="8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ transformBox: 'fill-box', transformOrigin: 'center' }} animate={reduce ? {} : top} />
+          <motion.line x1="4" y1="16" x2="20" y2="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ transformBox: 'fill-box', transformOrigin: 'center' }} animate={reduce ? {} : bot} />
+        </svg>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <>
+            <motion.div className="fixed inset-0 top-[calc(62px+25px)] bg-background/60 backdrop-blur-sm z-30"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setOpen(false)} />
+            <motion.nav className="fixed left-0 right-0 top-[calc(62px+25px)] z-40 glass border-b border-border/60 px-6 py-4 flex flex-col"
+              initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.22 }}>
+              {NAV.map(([to, label], i) => (
+                <motion.div key={to} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.04 * i }}>
+                  <Link to={to} onClick={() => setOpen(false)} className={`block py-2.5 text-[15px] ${pathname === to ? 'text-primary-light font-semibold' : 'text-text-muted'}`}>{label}</Link>
+                </motion.div>
+              ))}
+              <Link to="/rebrand/check" onClick={() => setOpen(false)} className="mt-3 text-center font-semibold px-4 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check a tool</Link>
+            </motion.nav>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+/** Subtle breathing color orbs in the gutters — the "rails pop" from the mock. */
+function Orbs() {
+  const reduce = useReducedMotion()
+  const orb = (cls: string, delay: number) => (
+    <motion.div className={`absolute rounded-full blur-[90px] ${cls}`}
+      animate={reduce ? {} : { scale: [1, 1.08, 1], opacity: [0.4, 0.55, 0.4] }}
+      transition={{ duration: 9, ease: 'easeInOut', repeat: Infinity, delay }} />
+  )
+  return (
+    <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden" aria-hidden="true">
+      {orb('w-[520px] h-[520px] -top-40 -left-32 bg-[radial-gradient(circle,var(--color-primary)_0%,transparent_70%)] opacity-40', 0)}
+      {orb('w-[460px] h-[460px] top-20 -right-36 bg-[radial-gradient(circle,var(--color-accent)_0%,transparent_70%)] opacity-25', 2)}
+      {orb('w-[400px] h-[400px] top-[520px] left-[40%] bg-[radial-gradient(circle,#A78BFA_0%,transparent_70%)] opacity-20', 4)}
+    </div>
+  )
+}
+
 export default function RebrandLayout() {
   const { pathname } = useLocation()
 
@@ -144,6 +209,7 @@ export default function RebrandLayout() {
 
   return (
     <div className="min-h-screen bg-background text-text">
+      <Orbs />
       {/* prototype ribbon so reviewers know this is the sandbox */}
       <div className="w-full text-center text-[11px] tracking-wide py-1 bg-primary/10 text-primary-light font-mono">
         AgentAvow rebrand preview · sandbox at /rebrand · not the live site
@@ -155,18 +221,17 @@ export default function RebrandLayout() {
             <Wordmark />
           </Link>
           <nav className="hidden md:flex items-center gap-6 ml-2">
-            {link('/rebrand/browse', 'Browse')}
-            {link('/rebrand/badge', 'For developers')}
-            {link('/rebrand/docs', 'Docs')}
+            {NAV.map(([to, label]) => link(to, label))}
           </nav>
           <div className="ml-auto flex items-center gap-4">
             <AccountMenu />
             <Link
               to="/rebrand/check"
-              className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
+              className="hidden md:inline-block text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
             >
               Check a tool
             </Link>
+            <MobileNav pathname={pathname} />
           </div>
         </div>
       </header>
@@ -196,7 +261,7 @@ export default function RebrandLayout() {
               <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="hover:text-text">Verify keys</a>
               <Link to="/rebrand/legal/terms" className="hover:text-text">Terms</Link>
               <Link to="/rebrand/legal/privacy" className="hover:text-text">Privacy</Link>
-              <a href="/" className="hover:text-text">Community ↗</a>
+              <a href="https://github.com/agentgraph-co/agentgraph/issues/new" target="_blank" rel="noopener noreferrer" className="hover:text-text">Feedback ↗</a>
             </div>
           </div>
           <div className="mt-6 flex items-center justify-between gap-4 flex-wrap">

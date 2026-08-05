@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
@@ -7,11 +7,15 @@ import { getGradeInfo } from '../../components/trust/gradeSystem'
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
+import { useRotatingPlaceholder } from '../lib/hooks'
+import { DualScore } from '../components/DualScore'
+import { summarize } from '../lib/summarize'
 
 /**
- * Rebrand-native check / trust-score page. Reuses the real scan API + getGradeInfo,
- * rendered in the AgentAvow style: animated grade ring, count-up score, prominent
- * badge promotion, and sharing. Repo scans; wallet/search/history parity is a follow-up.
+ * Rebrand-native check / trust-score page — built for ANY user, not just devs.
+ * Plain-English verdict up top, then the signed evidence. Animated scanning
+ * loader (scans are slow, so we make the wait fun). Developer bits (badge, SVG,
+ * API) live lower down where the people who need them will look.
  */
 
 const CAT_LABELS: Record<string, string> = {
@@ -30,105 +34,75 @@ const SEV_CLASS: Record<string, string> = {
   info: 'text-text-muted bg-surface-hover',
 }
 
-/** "Watch this tool" — POSTs to /watches (the alerting backend) when signed in. */
+const VERDICT_STYLE = {
+  safe: { ring: 'text-success', chip: 'bg-success/15 text-success', label: 'SAFE' },
+  caution: { ring: 'text-warning', chip: 'bg-warning/15 text-warning', label: 'CAUTION' },
+  risky: { ring: 'text-danger', chip: 'bg-danger/15 text-danger', label: 'RISKY' },
+}
+
+const CHECK_HINTS = ['github.com/owner/repo', 'an MCP server', 'an npm package', 'a Python package', 'an agent skill']
+
+/** "Watch this tool" — POSTs to /watches when signed in. */
 function WatchButton({ owner, repo }: { owner: string; repo: string }) {
   const { user } = useAuth()
   const [watching, setWatching] = useState(false)
-  const mutation = useMutation({
-    mutationFn: () => api.post('/watches', { owner, repo }),
-    onSuccess: () => setWatching(true),
-  })
+  const mutation = useMutation({ mutationFn: () => api.post('/watches', { owner, repo }), onSuccess: () => setWatching(true) })
   if (!user) {
-    return (
-      <Link
-        to="/rebrand/login"
-        className="text-[13px] font-semibold px-3.5 py-1.5 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors"
-      >
-        + Watch this tool
-      </Link>
-    )
+    return <Link to="/rebrand/login" className="text-[13px] font-semibold px-3.5 py-1.5 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">+ Watch this tool</Link>
   }
   return (
-    <button
-      onClick={() => !watching && mutation.mutate()}
-      disabled={watching || mutation.isPending}
-      className={`text-[13px] font-semibold px-3.5 py-1.5 rounded-lg transition-colors disabled:opacity-70 ${
-        watching
-          ? 'bg-success/15 text-success border border-success/40'
-          : 'border border-border text-text hover:border-primary-light hover:text-primary-light'
-      }`}
-    >
+    <button onClick={() => !watching && mutation.mutate()} disabled={watching || mutation.isPending}
+      className={`text-[13px] font-semibold px-3.5 py-1.5 rounded-lg transition-colors disabled:opacity-70 ${watching ? 'bg-success/15 text-success border border-success/40' : 'border border-border text-text hover:border-primary-light hover:text-primary-light'}`}>
       {watching ? '✓ Watching — we\'ll alert you' : mutation.isPending ? 'Adding…' : '+ Watch this tool'}
     </button>
   )
 }
 
-/** Animated circular grade ring — draws to the score and counts the number up. */
-function GradeRing({ score, grade, colorClass }: { score: number; grade: string; colorClass: string }) {
+/** Animated grade ring — draws to the score, counts up, tinted by verdict. */
+function GradeRing({ score, grade, verdictClass }: { score: number; grade: string; verdictClass: string }) {
   const reduce = useReducedMotion()
-  const r = 52
   return (
-    <div className={`relative w-[132px] h-[132px] shrink-0 ${colorClass}`}>
+    <div className={`relative w-[150px] h-[150px] shrink-0 ${verdictClass}`}>
       <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-        <circle cx="60" cy="60" r={r} fill="none" stroke="currentColor" strokeWidth="8" opacity="0.12" />
-        <motion.circle
-          cx="60" cy="60" r={r} fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round"
-          pathLength={1}
-          initial={reduce ? false : { pathLength: 0 }}
-          animate={{ pathLength: Math.max(score, 0) / 100 }}
-          transition={{ duration: 1.1, ease: 'easeOut', delay: 0.15 }}
-        />
+        <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" opacity="0.12" />
+        <motion.circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" strokeLinecap="round"
+          pathLength={1} initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: Math.max(score, 0) / 100 }}
+          transition={{ duration: 1.2, ease: 'easeOut', delay: 0.15 }} />
       </svg>
       <div className="absolute inset-0 grid place-items-center">
         <div className="text-center leading-none">
-          <div className="text-4xl font-extrabold">{grade}</div>
-          <CountUp value={score} className="text-[13px] font-mono text-text-muted" suffix="/100" duration={1100} />
+          <div className="text-5xl font-extrabold">{grade}</div>
+          <CountUp value={score} className="text-[13px] font-mono text-text-muted" suffix="/100" />
         </div>
       </div>
     </div>
   )
 }
 
-/** Share row — copy the link, or post to X. */
+/** Share row — copy link, X, Bluesky. */
 function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; score: number; grade: string }) {
   const [copied, setCopied] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href : ''
   const text = `${owner}/${repo} scored ${grade} (${score}/100) on AgentAvow — a signed, verifiable trust grade.`
-  const copy = () => {
-    if (navigator.clipboard) navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1400)
-  }
+  const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) }
+  const btn = 'text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors'
   return (
-    <div className="flex items-center gap-2">
-      <button onClick={copy} className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors">
-        {copied ? 'Link copied ✓' : '🔗 Copy link'}
-      </button>
-      <a
-        href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`}
-        target="_blank" rel="noopener noreferrer"
-        className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
-      >
-        Share on X
-      </a>
+    <div className="flex items-center gap-2 flex-wrap">
+      <button onClick={copy} className={btn}>{copied ? 'Link copied ✓' : '🔗 Copy link'}</button>
+      <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer" className={btn}>Share on X</a>
+      <a href={`https://bsky.app/intent/compose?text=${encodeURIComponent(text + ' ' + url)}`} target="_blank" rel="noopener noreferrer" className={btn}>Share on Bluesky</a>
     </div>
   )
 }
 
-/** Prominent badge promotion — the growth loop, not buried at the bottom. */
+/** Prominent badge promotion — dynamic origin so copied embeds always resolve. */
 function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
   const [copied, setCopied] = useState(false)
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  // Dynamic origin so the copied badge actually resolves now (agentgraph.co) and
-  // after cutover (agentavow.com) — never a dead agentavow.com link pre-DNS.
   const md = `[![AgentAvow Trust](${origin}/api/v1/public/scan/${owner}/${repo}/badge)](${origin}/check/${owner}/${repo})`
-  const copy = () => {
-    if (navigator.clipboard) navigator.clipboard.writeText(md)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1400)
-  }
+  const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1400) }
   return (
-    <div className="glass rounded-2xl p-6 mt-6 border-l-4 border-accent/60 relative overflow-hidden">
+    <div className="glass rounded-2xl p-6 border-l-4 border-accent/60 relative overflow-hidden">
       <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-accent/10 blur-3xl" />
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
@@ -136,13 +110,14 @@ function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
           <h3 className="mt-1 text-lg font-bold">Put a signed trust badge in your README.</h3>
           <p className="mt-1 text-text-muted text-[13.5px] max-w-[46ch]">Regenerates on every view, links back to this verifiable report. One line, no account.</p>
         </div>
-        <img src={badgeUrl(owner, repo)} alt="trust badge" className="h-[28px] rounded shadow-md shrink-0" />
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <img src={badgeUrl(owner, repo)} alt="trust badge" className="h-[28px] rounded shadow-md" />
+          <a href={badgeUrl(owner, repo)} download={`agentavow-${owner}-${repo}.svg`} className="font-mono text-[11px] text-primary-light hover:text-primary">↓ Download SVG</a>
+        </div>
       </div>
       <div className="relative mt-4">
         <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text overflow-x-auto whitespace-pre-wrap break-all">{md}</pre>
-        <button onClick={copy} className="absolute top-2 right-2 font-mono text-[11px] px-2.5 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">
-          {copied ? 'copied ✓' : 'copy'}
-        </button>
+        <button onClick={copy} className="absolute top-2 right-2 font-mono text-[11px] px-2.5 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied ? 'copied ✓' : 'copy'}</button>
       </div>
     </div>
   )
@@ -151,41 +126,65 @@ function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
 function Hero() {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
+  const hint = useRotatingPlaceholder(CHECK_HINTS)
   const go = () => {
     const m = value.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
     if (m) navigate(`/rebrand/check/${m[1]}/${m[2]}`)
   }
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
-      <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">
-        Check a <span className="gradient-text-bio">tool</span>.
-      </h1>
-      <p className="mt-4 text-text-muted">Paste a GitHub repo to get a signed safety grade.</p>
-      <form onSubmit={(e) => { e.preventDefault(); go() }} className="glass mt-7 mx-auto max-w-[560px] flex gap-2.5 rounded-2xl p-2 pl-4">
-        <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="github.com/owner/repo"
+      <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this tool <span className="gradient-text-bio">safe</span>?</h1>
+      <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed grade.</p>
+      <form onSubmit={(e) => { e.preventDefault(); go() }} className="glass mt-7 mx-auto max-w-[560px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10">
+        <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={value ? '' : hint}
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px] text-text placeholder:text-text-muted" />
         <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check</button>
       </form>
+      <div className="mt-3 font-mono text-[11.5px] text-text-muted/70">no account · signed result you can verify offline</div>
     </div>
   )
 }
 
-/** Ghosted skeleton while the scan runs. */
-function ResultSkeleton({ owner, repo }: { owner: string; repo: string }) {
+/** Fun scanning-metaphor loader — scans are slow, so we lean into it. */
+function ScanningLoader({ owner, repo }: { owner: string; repo: string }) {
+  const reduce = useReducedMotion()
+  const phases = [
+    'Cloning the repository…',
+    'Sweeping for exposed secrets & API keys…',
+    'Checking for unsafe code execution…',
+    'Inspecting how it handles your data…',
+    'Mapping file & network access…',
+    'Auditing dependencies…',
+    'Signing the attestation…',
+  ]
+  const [phase, setPhase] = useState(0)
+  useEffect(() => {
+    if (reduce) return
+    const id = setInterval(() => setPhase((p) => (p + 1) % phases.length), 1400)
+    return () => clearInterval(id)
+  }, [reduce, phases.length])
   return (
-    <div className="max-w-[860px] mx-auto px-6 py-14">
-      <div className="glass rounded-2xl p-6 flex items-center gap-6 flex-wrap">
-        <div className="w-[132px] h-[132px] rounded-full bg-surface-hover animate-pulse shrink-0" />
-        <div className="flex-1 min-w-[200px] space-y-3">
-          <div className="h-4 w-2/3 bg-surface-hover rounded animate-pulse" />
-          <div className="h-3 w-1/3 bg-surface-hover rounded animate-pulse" />
-          <div className="h-3 w-1/2 bg-surface-hover rounded animate-pulse" />
-        </div>
+    <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
+      {/* radar */}
+      <div className="relative w-[140px] h-[140px] mx-auto">
+        <div className="absolute inset-0 rounded-full border border-primary/20" />
+        <div className="absolute inset-[18px] rounded-full border border-primary/15" />
+        <div className="absolute inset-[36px] rounded-full border border-primary/10" />
+        <motion.div className="absolute inset-0" style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+          animate={reduce ? {} : { rotate: 360 }} transition={{ duration: 2.2, ease: 'linear', repeat: Infinity }}>
+          <div className="absolute left-1/2 top-1/2 h-1/2 w-[2px] -translate-x-1/2 -translate-y-full bg-gradient-to-t from-primary-light to-transparent origin-bottom" />
+        </motion.div>
+        <motion.div className="absolute left-1/2 top-1/2 w-2 h-2 rounded-full bg-primary-light -translate-x-1/2 -translate-y-1/2"
+          animate={reduce ? {} : { scale: [1, 1.6, 1], opacity: [1, 0.4, 1] }} transition={{ duration: 1.4, repeat: Infinity }} />
       </div>
-      <div className="grid grid-cols-3 gap-3 mt-4">
-        {[0, 1, 2].map((i) => <div key={i} className="glass rounded-xl h-[76px] animate-pulse" />)}
+      <div className="mt-6 font-mono text-[13px] text-text break-all">scanning {owner}/{repo}</div>
+      <motion.div key={phase} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="mt-2 text-[14px] text-primary-light">
+        {phases[phase]}
+      </motion.div>
+      <div className="mt-6 flex gap-1.5 justify-center">
+        {phases.map((_, i) => <div key={i} className={`h-1 w-6 rounded-full transition-colors ${i <= phase ? 'bg-primary-light' : 'bg-surface-hover'}`} />)}
       </div>
-      <div className="mt-6 text-center font-mono text-[12.5px] text-text-muted">scanning {owner}/{repo}…</div>
+      <p className="mt-6 text-[12.5px] text-text-muted/70">First scan of a tool takes a moment — we're reading the actual code, not guessing.</p>
     </div>
   )
 }
@@ -203,14 +202,14 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
     retry: 0,
   })
 
-  if (isLoading) return <ResultSkeleton owner={owner} repo={repo} />
+  if (isLoading) return <ScanningLoader owner={owner} repo={repo} />
 
   if (isError || !scan) {
     return (
       <div className="max-w-[620px] mx-auto px-6 py-24 text-center">
         <div className="glass rounded-2xl p-8">
           <h2 className="text-xl font-semibold">Couldn't scan {owner}/{repo}</h2>
-          <p className="mt-2 text-text-muted text-[14px]">The scanner didn't return a result. On-demand scans need the backend scan service (they don't run in local preview). Try a repo already in the catalog, or check back on the live site.</p>
+          <p className="mt-2 text-text-muted text-[14px]">The scanner didn't return a result. It may be a private repo, or the scan service is busy. Try a repo already in the catalog, or check back shortly.</p>
           <Link to="/rebrand/browse" className="inline-block mt-5 text-[13.5px] font-semibold text-primary-light hover:text-primary">Browse scored tools →</Link>
         </div>
       </div>
@@ -220,36 +219,60 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
   const g = getGradeInfo(scan.trust_score)
   const f = scan.findings
   const cats = scan.category_scores || {}
+  const sum = summarize(scan, scan.repo)
+  const v = VERDICT_STYLE[sum.verdict]
 
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
-      {/* grade hero */}
-      <motion.div
-        className="glass rounded-2xl p-6 flex items-center gap-6 flex-wrap"
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: 'easeOut' }}
-      >
-        <GradeRing score={scan.trust_score} grade={g.grade} colorClass={g.textClass} />
-        <div className="min-w-0 flex-1">
-          <div className="font-mono text-[14px] text-text break-all">{scan.repo}</div>
-          <div className="mt-1 text-[15px] font-semibold gradient-text">{scan.trust_tier}</div>
-          {scan.metadata && <div className="mt-1 font-mono text-[11.5px] text-text-muted">{scan.metadata.primary_language || 'code'} · {scan.metadata.files_scanned} files · scanned {new Date(scan.scanned_at).toLocaleDateString()}</div>}
-          <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <span className="flex items-center gap-1.5 font-mono text-[12px] text-success">
-              <svg viewBox="0 0 24 24" fill="none" className="w-[15px] h-[15px]"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" /><path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              Signed · Ed25519
-            </span>
-            <a href="https://agentgraph.co/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="text-[12px] text-primary-light hover:text-primary">Verify →</a>
-          </div>
-          <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <WatchButton owner={owner} repo={repo} />
-            <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />
+      {/* FLASHY HERO */}
+      <motion.div className="glass rounded-2xl overflow-hidden relative"
+        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: 'easeOut' }}>
+        <div className={`absolute -right-16 -top-16 w-56 h-56 rounded-full blur-3xl opacity-20 ${v.ring}`} style={{ background: 'currentColor' }} />
+        <div className="relative p-7 flex items-center gap-7 flex-wrap">
+          <GradeRing score={scan.trust_score} grade={g.grade} verdictClass={v.ring} />
+          <div className="min-w-0 flex-1">
+            <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
+            <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
+            <div className="mt-1 font-mono text-[13.5px] text-text-muted break-all">{scan.repo}</div>
+            <div className="mt-0.5 text-[13px] font-semibold gradient-text">{scan.trust_tier}</div>
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <WatchButton owner={owner} repo={repo} />
+            </div>
+            <div className="mt-2"><ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} /></div>
           </div>
         </div>
       </motion.div>
 
-      {/* findings summary — staggered */}
+      {/* PLAIN-ENGLISH VERDICT — for any user */}
+      <Reveal>
+        <div className="mt-4 glass rounded-2xl p-6">
+          <p className="text-[15.5px] leading-relaxed">{sum.paragraph}</p>
+          <div className="grid sm:grid-cols-2 gap-4 mt-5">
+            {sum.goodPractices.length > 0 && (
+              <div>
+                <div className="font-mono text-[11px] uppercase tracking-wide text-success mb-2">What's good</div>
+                <ul className="space-y-1.5">{sum.goodPractices.map((p) => <li key={p} className="text-[13.5px] text-text-muted flex gap-2"><span className="text-success">✓</span>{p}</li>)}</ul>
+              </div>
+            )}
+            {sum.risks.length > 0 && (
+              <div>
+                <div className="font-mono text-[11px] uppercase tracking-wide text-warning mb-2">Worth knowing</div>
+                <ul className="space-y-1.5">{sum.risks.map((p) => <li key={p} className="text-[13.5px] text-text-muted flex gap-2"><span className="text-warning">!</span>{p}</li>)}</ul>
+              </div>
+            )}
+          </div>
+        </div>
+      </Reveal>
+
+      {/* DUAL SCORE */}
+      <Reveal>
+        <div className="mt-4">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-2">The two-axis score</h3>
+          <DualScore score={scan.trust_score} />
+        </div>
+      </Reveal>
+
+      {/* findings summary */}
       <RevealStagger className="grid grid-cols-3 gap-3 mt-4" stagger={0.06}>
         {[['critical', f?.critical ?? 0, 'text-danger'], ['high', f?.high ?? 0, 'text-warning'], ['total', f?.total ?? 0, 'text-text']].map(([lab, n, cls]) => (
           <div key={lab as string} className="glass rounded-xl p-4 text-center">
@@ -259,44 +282,65 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
         ))}
       </RevealStagger>
 
-      {/* badge promotion — moved up, prominent */}
-      <Reveal><BadgePromo owner={owner} repo={repo} /></Reveal>
-
       {/* category subscores */}
-      <Reveal>
-        <h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">Category scores</h3>
-      </Reveal>
+      <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">Category scores</h3></Reveal>
       <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-3" stagger={0.04}>
-        {Object.entries(CAT_LABELS)
-          .filter(([key]) => (cats as Record<string, number>)[key] != null)
-          .map(([key, label]) => {
-            const sc = (cats as Record<string, number>)[key]
-            const cg = getGradeInfo(sc)
-            return (
-              <div key={key} className="glass rounded-xl px-4 py-3 flex items-center justify-between">
-                <span className="text-[14px]">{label}</span>
-                <span className={`font-bold text-[13px] px-2 py-0.5 rounded ${cg.textClass} ${cg.bgClass}`}>{cg.grade} · {sc}</span>
-              </div>
-            )
-          })}
+        {Object.entries(CAT_LABELS).filter(([key]) => (cats as Record<string, number>)[key] != null).map(([key, label]) => {
+          const sc = (cats as Record<string, number>)[key]
+          const cg = getGradeInfo(sc)
+          return (
+            <div key={key} className="glass rounded-xl px-4 py-3 flex items-center justify-between">
+              <span className="text-[14px]">{label}</span>
+              <span className={`font-bold text-[13px] px-2 py-0.5 rounded ${cg.textClass} ${cg.bgClass}`}>{cg.grade} · {sc}</span>
+            </div>
+          )
+        })}
       </RevealStagger>
 
-      {/* positive signals */}
-      {scan.positive_signals && scan.positive_signals.length > 0 && (
-        <Reveal>
-          <div className="mt-6 glass rounded-xl p-5">
-            <h3 className="text-[13px] font-mono uppercase tracking-wide text-success mb-2">Clean signals</h3>
-            <ul className="list-disc pl-5 text-[13.5px] text-text-muted space-y-1">
-              {scan.positive_signals.slice(0, 6).map((p) => <li key={p}>{p}</li>)}
-            </ul>
+      {/* scan facts */}
+      <Reveal>
+        <div className="mt-6 glass rounded-xl p-5">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-2">Scan facts</h3>
+          <div className="flex flex-wrap gap-2">
+            {sum.facts.map((fct) => <span key={fct} className="text-[12.5px] text-text-muted bg-surface border border-border rounded-full px-3 py-1">{fct}</span>)}
           </div>
-        </Reveal>
-      )}
+        </div>
+      </Reveal>
 
-      {/* findings list */}
+      {/* SIGNED & VERIFIABLE — the powerful part, explained */}
+      <Reveal>
+        <div className="mt-6 glass rounded-2xl p-6 border-l-4 border-primary/60">
+          <div className="flex items-center gap-2 text-success font-mono text-[12.5px]">
+            <svg viewBox="0 0 24 24" fill="none" className="w-[18px] h-[18px]"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" /><path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            Signed · Ed25519 / JWS
+          </div>
+          <h3 className="mt-2 text-lg font-bold">This grade is signed — you don't have to trust us.</h3>
+          <p className="mt-1 text-text-muted text-[14px] max-w-[62ch]">Every result carries a cryptographic signature you can verify offline against our public keys. If anyone tampers with the grade, verification fails. That's the difference between a badge and a signature.</p>
+          <div className="mt-3 flex gap-4 flex-wrap">
+            <a href="https://agentgraph.co/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-primary-light hover:text-primary">Public keys (JWKS) →</a>
+            <Link to="/rebrand/how-it-works" className="text-[13px] font-semibold text-primary-light hover:text-primary">How verification works →</Link>
+          </div>
+        </div>
+      </Reveal>
+
+      {/* badge promotion */}
+      <Reveal><div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div></Reveal>
+
+      {/* claim CTA */}
+      <Reveal>
+        <div className="mt-6 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h3 className="text-[15px] font-bold">Own this tool?</h3>
+            <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get a fix-it report, respond to findings, and control how it appears on AgentAvow.</p>
+          </div>
+          <Link to="/rebrand/login" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
+        </div>
+      </Reveal>
+
+      {/* findings detail */}
       {f?.items && f.items.length > 0 && (
         <>
-          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">Findings</h3></Reveal>
+          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">The details ({f.items.length})</h3></Reveal>
           <RevealStagger className="flex flex-col gap-2 mt-3" stagger={0.03}>
             {f.items.slice(0, 12).map((it, i) => (
               <div key={i} className="glass rounded-xl px-4 py-3 flex gap-3 items-start">

@@ -5,6 +5,10 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
 import { Reveal, CountUp } from '../components/motion'
+import { useRotatingPlaceholder } from '../lib/hooks'
+import { DualScore } from '../components/DualScore'
+
+const CHECK_HINTS = ['github.com/owner/repo', 'an MCP server', 'an npm package', 'a Python package', 'an agent skill']
 
 /**
  * AgentAvow rebrand homepage.
@@ -63,6 +67,7 @@ function HeroSeal() {
 export default function RebrandHome() {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
+  const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
     const m = input.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
     navigate(m ? `/rebrand/check/${m[1]}/${m[2]}` : '/rebrand/check')
@@ -75,6 +80,13 @@ export default function RebrandHome() {
   })
   const s = cat?.summary
   const teaser = (cat?.rows ?? []).filter((r) => r.trust_score != null).slice(0, 3)
+  // A real scored tool for the signed-result example (no mock/fabricated data).
+  const example = (() => {
+    const row = teaser[0]
+    if (!row) return null
+    const { display, repoPath } = rowIdentity(row)
+    return { row, display, repoPath, g: getGradeInfo(row.trust_score as number) }
+  })()
 
   return (
     <div>
@@ -106,7 +118,7 @@ export default function RebrandHome() {
               value={value}
               onChange={(e) => setValue(e.target.value)}
               aria-label="Check a tool"
-              placeholder="github.com/owner/repo"
+              placeholder={value ? '' : hint}
               className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15.5px] text-text placeholder:text-text-muted"
             />
             <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow whitespace-nowrap">
@@ -192,48 +204,35 @@ export default function RebrandHome() {
             </p>
           </div>
 
-          <div className="glass rounded-2xl overflow-hidden max-w-[620px] mx-auto mt-8">
-            <div className="flex items-center gap-4 p-5 border-b border-border/60">
-              <div className="w-14 h-14 rounded-2xl grid place-items-center text-2xl font-extrabold text-[#08110f] bg-gradient-to-br from-accent to-primary shadow-lg shadow-accent/30">A</div>
-              <div>
-                <div className="font-mono text-[13px] text-text-muted">github.com/acme/filesystem-mcp</div>
-                <div className="mt-1 text-[13px] font-semibold gradient-text">Verified / Trusted · tier 4</div>
+          {example ? (
+            <div className="glass rounded-2xl overflow-hidden max-w-[620px] mx-auto mt-8">
+              <div className="flex items-center gap-4 p-5 border-b border-border/60">
+                <div className={`w-14 h-14 rounded-2xl grid place-items-center text-2xl font-extrabold ${example.g.textClass} ${example.g.bgClass}`}>{example.g.grade}</div>
+                <div className="min-w-0">
+                  <div className="font-mono text-[13px] text-text-muted break-all">{example.display}</div>
+                  <div className="mt-1 text-[12px] font-semibold gradient-text">a real scan · {example.row.trust_score}/100</div>
+                </div>
+              </div>
+              <div className="p-4 border-b border-border/60"><DualScore score={example.row.trust_score as number} /></div>
+              <div className="p-5 flex flex-wrap gap-5 text-[13px] text-text-muted">
+                <span><b className="text-danger tabular-nums">{example.row.critical ?? 0}</b> critical</span>
+                <span><b className="text-warning tabular-nums">{example.row.high ?? 0}</b> high</span>
+                <span><b className="text-text tabular-nums">{example.row.findings_count ?? 0}</b> total findings</span>
+              </div>
+              <div className="flex items-center gap-2.5 p-4 border-t border-dashed border-border flex-wrap">
+                <span className="flex items-center gap-2 font-mono text-[12px] text-success">
+                  <svg viewBox="0 0 24 24" fill="none" className="w-[18px] h-[18px]">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" />
+                    <path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Signed · Ed25519 / JWS
+                </span>
+                {example.repoPath && <Link to={`/rebrand/check/${example.repoPath}`} className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">See the full report →</Link>}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2.5 p-4 border-b border-border/60">
-              <div className="flex-1 min-w-[180px] bg-surface border border-border rounded-xl px-4 py-3">
-                <div className="font-mono text-[11.5px] uppercase tracking-wide text-text-muted">Attestation Trust</div>
-                <div className="text-lg font-bold text-primary-light mt-0.5">A · 94</div>
-                <div className="text-[11.5px] text-text-muted mt-0.5">signed scanner grade · verifiable now</div>
-              </div>
-              <div className="flex-1 min-w-[180px] bg-surface border border-border rounded-xl px-4 py-3">
-                <div className="font-mono text-[11.5px] uppercase tracking-wide text-text-muted">Adoption</div>
-                <div className="text-lg font-bold text-warning mt-0.5">12.4k installs · 340 checks</div>
-                <div className="text-[11.5px] text-text-muted mt-0.5">downloads · stars · checks · public data</div>
-              </div>
-            </div>
-            <div className="p-5 flex flex-col gap-2.5">
-              <div className="flex gap-2.5 items-start text-[14px]">
-                <span className="font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/15 text-success shrink-0 mt-0.5">pass</span>
-                <span>Scoped file access, no shell <code className="font-mono text-[12.5px] text-text-muted">exec()</code></span>
-              </div>
-              <div className="flex gap-2.5 items-start text-[14px]">
-                <span className="font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/15 text-success shrink-0 mt-0.5">pass</span>
-                <span>No secrets · no exfiltration · no injection surface · deps clean</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2.5 p-4 border-t border-dashed border-border flex-wrap">
-              <span className="flex items-center gap-2 font-mono text-[12px] text-success">
-                <svg viewBox="0 0 24 24" fill="none" className="w-[18px] h-[18px]">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" />
-                  <path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Signed · Ed25519 / JWS
-              </span>
-              <span className="text-[12px] text-text-muted">· we alert you if this grade ever drops</span>
-              <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">Verify →</a>
-            </div>
-          </div>
+          ) : (
+            <div className="glass rounded-2xl max-w-[620px] mx-auto mt-8 h-[260px] animate-pulse" />
+          )}
         </Reveal>
       </section>
 
