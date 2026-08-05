@@ -45,7 +45,14 @@ export interface CatalogResponse {
 export async function fetchCatalog(
   params: Record<string, string | number> = {},
 ): Promise<CatalogResponse> {
-  const { data } = await publicApi.get<CatalogResponse>('/public/scan-catalog', { params })
+  // Prune empty/undefined values — the API 422s on an empty `severity=` (not a
+  // valid enum) and treats empty `q=` as a no-match filter. Only send real ones.
+  const clean: Record<string, string | number> = {}
+  for (const [k, v] of Object.entries(params)) {
+    if (v === '' || v == null) continue
+    clean[k] = v
+  }
+  const { data } = await publicApi.get<CatalogResponse>('/public/scan-catalog', { params: clean })
   return data
 }
 
