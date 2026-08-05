@@ -91,9 +91,9 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
         {/* outer gradient ring — rotates on hover */}
         <motion.circle
           cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7"
-          style={{ originX: '12px', originY: '12px' }}
-          variants={reduce ? {} : { rest: { rotate: 0 }, hover: { rotate: 360 } }}
-          transition={{ duration: 0.9, ease: 'easeInOut' }}
+          style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+          variants={reduce ? {} : { rest: { scale: 1 }, hover: { scale: [1, 1.09, 1] } }}
+          transition={{ duration: 0.5, ease: 'easeInOut' }}
         />
         <circle cx="12" cy="12" r="5.2" stroke="var(--color-primary-light)" strokeWidth="1.2" opacity="0.5" />
         {/* checkmark — redraws on hover via dash offset */}

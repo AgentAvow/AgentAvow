@@ -43,9 +43,9 @@ function HeroSeal() {
       </defs>
       <motion.circle
         cx="48" cy="48" r="40" fill="none" stroke="url(#seal-g)" strokeWidth="3"
-        style={{ originX: '48px', originY: '48px' }}
+        style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
         animate={reduce ? {} : { rotate: 360 }}
-        transition={{ duration: 32, ease: 'linear', repeat: Infinity }}
+        transition={{ duration: 16, ease: 'linear', repeat: Infinity }}
         strokeDasharray="4 10" strokeLinecap="round"
       />
       <circle cx="48" cy="48" r="30" fill="none" stroke="var(--color-primary-light)" strokeWidth="1.5" opacity="0.35" />
