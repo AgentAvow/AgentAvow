@@ -1,7 +1,69 @@
-import { useEffect } from 'react'
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
+import { useQuery } from '@tanstack/react-query'
 import { AtmosphericBackground } from '../components/AtmosphericBackground'
+import { useAuth } from '../hooks/useAuth'
+import api from '../lib/api'
+
+/**
+ * Signed-in account controls: a notifications bell (unread count from the real
+ * /notifications API) + an avatar dropdown (My watches, Settings, Admin, Sign out).
+ * Signed-out: a plain "Sign in" link. Settings/Admin reuse the existing app.
+ */
+function AccountMenu() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const { data: unread } = useQuery({
+    queryKey: ['rebrand-unread'],
+    queryFn: async () => (await api.get<{ unread_count: number }>('/notifications/unread-count')).data,
+    enabled: !!user,
+    refetchInterval: 60_000,
+  })
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  if (!user) {
+    return <Link to="/rebrand/login" className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
+  }
+
+  const count = unread?.unread_count ?? 0
+  const initial = user.display_name?.charAt(0).toUpperCase() || '?'
+
+  return (
+    <div className="flex items-center gap-3" ref={ref}>
+      <Link to="/rebrand/account" className="relative p-1 text-text-muted hover:text-text transition-colors" aria-label={`Notifications${count ? `, ${count} unread` : ''}`}>
+        <svg viewBox="0 0 24 24" fill="none" className="w-[19px] h-[19px]"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><path d="M13.7 21a2 2 0 0 1-3.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+        {count > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-accent text-white text-[10px] font-bold tabular-nums">{count > 9 ? '9+' : count}</span>}
+      </Link>
+      <div className="relative">
+        <button onClick={() => setOpen(!open)} className="flex items-center gap-2 group" aria-label="Account menu">
+          <span className="w-8 h-8 rounded-full grid place-items-center text-[13px] font-bold text-white bg-gradient-to-br from-primary to-accent">{initial}</span>
+        </button>
+        {open && (
+          <div className="absolute right-0 mt-2 w-52 glass rounded-xl border border-border/60 shadow-xl py-1.5 z-30">
+            <div className="px-3.5 py-2 border-b border-border/60">
+              <div className="text-[13.5px] font-semibold truncate">{user.display_name}</div>
+              <div className="text-[11.5px] text-text-muted truncate">{user.email}</div>
+            </div>
+            <Link to="/rebrand/account" onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My watches</Link>
+            <a href="/settings" className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</a>
+            {user.is_admin && <a href="/admin" className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</a>}
+            <button onClick={() => { setOpen(false); logout(); navigate('/rebrand') }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /**
  * Isolated shell for the AgentAvow rebrand sandbox (/rebrand/*).
@@ -98,7 +160,7 @@ export default function RebrandLayout() {
             {link('/rebrand/docs', 'Docs')}
           </nav>
           <div className="ml-auto flex items-center gap-4">
-            <Link to="/rebrand/login" className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
+            <AccountMenu />
             <Link
               to="/rebrand/check"
               className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
