@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { fetchCatalog, rowIdentity, type CatalogRow } from '../catalog'
+import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
 
 /**
  * The "Yelp" browse catalog — LIVE from /public/scan-catalog.
- * Sticky category tabs, search, sort. Grades from the shared getGradeInfo.
+ * Sticky category tabs, search, sort, severity. Grades from the shared getGradeInfo.
  * The expander is "Why this grade" (signed evidence), not star reviews.
+ * Mines the old /scans page for parity: summary strip, per-card findings/status,
+ * result count, and pagination.
  */
 
 const SURFACES = [
@@ -29,7 +31,10 @@ const SEVERITIES = [
   { key: 'critical', label: 'Has critical' },
   { key: 'high', label: 'Has high+' },
   { key: 'clean', label: 'Clean only' },
+  { key: 'skipped', label: 'Skipped / errored' },
 ]
+
+const PAGE_SIZE = 30
 
 function whyLines(row: CatalogRow): string[] {
   const out: string[] = []
@@ -40,10 +45,35 @@ function whyLines(row: CatalogRow): string[] {
   return out
 }
 
+/** At-a-glance status chip on the card face — mirrors the old Scans status column. */
+function statusChip(row: CatalogRow): { label: string; cls: string } {
+  if (row.skipped) return { label: 'skipped', cls: 'text-text-muted bg-surface-hover' }
+  if (row.scan_error) return { label: 'fetch error', cls: 'text-warning bg-warning/15' }
+  if (row.surface === 'x402') {
+    return row.has_x402_header
+      ? { label: `x402 ✓${row.http_status ? ` · ${row.http_status}` : ''}`, cls: 'text-success bg-success/15' }
+      : { label: `${row.http_status ?? '—'}`, cls: 'text-text-muted bg-surface-hover' }
+  }
+  if (row.critical) return { label: 'critical', cls: 'text-danger bg-danger/15' }
+  if (row.high) return { label: 'high', cls: 'text-warning bg-warning/15' }
+  if (row.trust_score != null) return { label: 'clean', cls: 'text-success bg-success/15' }
+  return { label: 'unscored', cls: 'text-text-muted bg-surface-hover' }
+}
+
+function findingsLine(row: CatalogRow): string | null {
+  const parts: string[] = []
+  if (row.critical) parts.push(`${row.critical}C`)
+  if (row.high) parts.push(`${row.high}H`)
+  if (!parts.length && row.findings_count) parts.push(`${row.findings_count} findings`)
+  return parts.length ? parts.join(' · ') : null
+}
+
 function ToolCard({ row }: { row: CatalogRow }) {
   const [open, setOpen] = useState(false)
   const { display, repoPath } = rowIdentity(row)
   const g = row.trust_score != null ? getGradeInfo(row.trust_score) : null
+  const chip = statusChip(row)
+  const fnd = findingsLine(row)
   return (
     <div className="glass card-hover rounded-xl p-[18px]">
       <div className="flex items-center justify-between gap-2.5">
@@ -53,6 +83,13 @@ function ToolCard({ row }: { row: CatalogRow }) {
         ) : (
           <span className="font-mono text-[11px] px-2 py-0.5 rounded-lg shrink-0 text-text-muted bg-surface-hover">unscored</span>
         )}
+      </div>
+      {/* status + findings + language — the at-a-glance row Scans had */}
+      <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+        <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded ${chip.cls}`}>{chip.label}</span>
+        {fnd && <span className="font-mono text-[11px] text-text-muted tabular-nums">{fnd}</span>}
+        {row.primary_language && <span className="font-mono text-[11px] text-text-muted">· {row.primary_language}</span>}
+        {row.trust_score != null && <span className="font-mono text-[11px] text-text-muted tabular-nums ml-auto">{row.trust_score}/100</span>}
       </div>
       <button onClick={() => setOpen(!open)} className="mt-3 text-[12.5px] text-primary-light hover:text-primary">
         {open ? 'Hide' : 'Why this grade'} {open ? '▴' : '▾'}
@@ -71,22 +108,57 @@ function ToolCard({ row }: { row: CatalogRow }) {
   )
 }
 
+function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="glass rounded-xl p-4">
+      <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1">{label}</div>
+      <div className="text-2xl font-bold tabular-nums gradient-text">{value}</div>
+      <div className="text-[11.5px] text-text-muted mt-1">{hint}</div>
+    </div>
+  )
+}
+
+function SummaryStrip({ s }: { s: CatalogSummary }) {
+  const bs = s.by_surface || {}
+  const bc = s.by_surface_critical || {}
+  const bh = s.by_surface_high || {}
+  const npmPypi = (bs.npm ?? 0) + (bs.pypi ?? 0)
+  const npmPypiCrit = (bc.npm ?? 0) + (bc.pypi ?? 0)
+  const npmPypiHigh = (bh.npm ?? 0) + (bh.pypi ?? 0)
+  const x402Total = s.x402_endpoints_total ?? bs.x402 ?? 0
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-6">
+      <StatCard label="Total scans" value={s.total_scans.toLocaleString()} hint="across 5 surfaces" />
+      <StatCard label="x402 endpoints" value={x402Total.toLocaleString()} hint={s.x402_compliant != null ? `${s.x402_compliant} compliant` : 'payment-gated APIs'} />
+      <StatCard label="MCP servers" value={(bs.mcp ?? 0).toLocaleString()} hint={`${bc.mcp ?? 0} critical · ${bh.mcp ?? 0} high`} />
+      <StatCard label="Agent skills" value={(bs.openclaw ?? 0).toLocaleString()} hint={`${bc.openclaw ?? 0} critical · ${bh.openclaw ?? 0} high`} />
+      <StatCard label="npm + PyPI" value={npmPypi.toLocaleString()} hint={`${npmPypiCrit} critical · ${npmPypiHigh} high`} />
+    </div>
+  )
+}
+
 export default function RebrandBrowse() {
   const [tab, setTab] = useState(0)
   const [sort, setSort] = useState('score-desc')
   const [severity, setSeverity] = useState('')
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
+  const [page, setPage] = useState(0)
   const surface = SURFACES[tab].key
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['rebrand-catalog', surface, sort, severity, q],
-    queryFn: () => fetchCatalog({ surface, sort, severity, q, limit: 30 }),
+  const { data, isLoading, isError, isFetching } = useQuery({
+    queryKey: ['rebrand-catalog', surface, sort, severity, q, page],
+    queryFn: () => fetchCatalog({ surface, sort, severity, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     placeholderData: keepPreviousData,
   })
 
   const rows = data?.rows ?? []
-  const total = data?.summary?.total_scans
+  const summary = data?.summary
+  const total = summary?.total_scans
+  const matching = data?.total
+  const totalPages = matching != null ? Math.ceil(matching / PAGE_SIZE) : 0
+
+  const reset = (fn: () => void) => { fn(); setPage(0) }
 
   return (
     <div>
@@ -100,6 +172,7 @@ export default function RebrandBrowse() {
             evidence anyone can recompute.{total != null && <> {total.toLocaleString()} scanned so far.</>}
           </p>
         </div>
+        {summary && <SummaryStrip s={summary} />}
       </div>
 
       {/* sticky controls — mirrors the agentgraph pinned-bar blend: translucent bg + a
@@ -109,7 +182,7 @@ export default function RebrandBrowse() {
           {SURFACES.map((sf, i) => (
             <button
               key={sf.key}
-              onClick={() => setTab(i)}
+              onClick={() => reset(() => setTab(i))}
               className={`text-[13.5px] px-4 py-1.5 rounded-full border transition-colors ${
                 tab === i
                   ? 'text-white border-transparent bg-gradient-to-r from-primary to-primary-dark'
@@ -120,7 +193,7 @@ export default function RebrandBrowse() {
             </button>
           ))}
           <form
-            onSubmit={(e) => { e.preventDefault(); setQ(qInput.trim()) }}
+            onSubmit={(e) => { e.preventDefault(); reset(() => setQ(qInput.trim())) }}
             className="ml-auto flex items-center gap-2 rounded-full border border-border bg-surface pl-3 pr-1 py-1"
           >
             <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-text-muted shrink-0">
@@ -136,14 +209,14 @@ export default function RebrandBrowse() {
           </form>
           <select
             value={severity}
-            onChange={(e) => setSeverity(e.target.value)}
+            onChange={(e) => reset(() => setSeverity(e.target.value))}
             className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light"
           >
             {SEVERITIES.map((sv) => <option key={sv.key} value={sv.key}>{sv.label}</option>)}
           </select>
           <select
             value={sort}
-            onChange={(e) => setSort(e.target.value)}
+            onChange={(e) => reset(() => setSort(e.target.value))}
             className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light"
           >
             {SORTS.map((so) => <option key={so.key} value={so.key}>{so.label}</option>)}
@@ -153,17 +226,45 @@ export default function RebrandBrowse() {
 
       {/* results */}
       <div className="max-w-[1080px] mx-auto px-6 py-8">
+        {/* result count + refreshing indicator (from Scans) */}
+        {!isError && matching != null && (
+          <div className="text-[13px] text-text-muted mb-4">
+            {matching.toLocaleString()} matching {matching === 1 ? 'scan' : 'scans'}
+            {isFetching && <span className="text-primary-light"> · refreshing…</span>}
+          </div>
+        )}
         {isError ? (
           <div className="glass rounded-xl p-8 text-center text-text-muted text-[14px]">Couldn't load the catalog right now. Try again in a moment.</div>
         ) : (
           <div className="grid md:grid-cols-3 gap-3.5">
             {isLoading && rows.length === 0
-              ? Array.from({ length: 9 }).map((_, i) => <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[92px]" />)
+              ? Array.from({ length: 9 }).map((_, i) => <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[128px]" />)
               : rows.map((row) => <ToolCard key={row.full_name || row.name} row={row} />)}
           </div>
         )}
         {!isLoading && !isError && rows.length === 0 && (
           <div className="mt-2 text-center text-text-muted text-[14px]">No matches on this surface. Try another category or search.</div>
+        )}
+
+        {/* pagination (from Scans) */}
+        {!isError && totalPages > 1 && (
+          <div className="flex items-center justify-between mt-8">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="text-[13px] font-semibold rounded-full border border-border bg-surface px-4 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed hover:border-primary-light"
+            >
+              ← Prev
+            </button>
+            <div className="text-[13px] text-text-muted tabular-nums">Page {page + 1} of {totalPages.toLocaleString()}</div>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={page + 1 >= totalPages}
+              className="text-[13px] font-semibold rounded-full border border-border bg-surface px-4 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed hover:border-primary-light"
+            >
+              Next →
+            </button>
+          </div>
         )}
       </div>
     </div>

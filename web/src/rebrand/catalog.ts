@@ -12,6 +12,8 @@ export interface CatalogSummary {
   by_surface_critical?: Record<string, number>
   by_surface_high?: Record<string, number>
   repo_scans_total?: number
+  x402_endpoints_total?: number
+  x402_compliant?: number
 }
 
 export interface CatalogRow {
@@ -25,11 +27,19 @@ export interface CatalogRow {
   high: number | null
   findings_count: number | null
   is_mcp_server?: boolean | null
+  primary_language?: string | null
+  scan_error?: string | null
+  skipped?: string | null
+  has_x402_header?: boolean | null
+  http_status?: number | null
 }
 
 export interface CatalogResponse {
   summary: CatalogSummary
   rows: CatalogRow[]
+  total?: number
+  offset?: number
+  limit?: number
 }
 
 export async function fetchCatalog(
