@@ -20,7 +20,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.rate_limit import rate_limit_history_reads, rate_limit_reads
+from src.api.rate_limit import (
+    rate_limit_history_reads,
+    rate_limit_reads,
+    rate_limit_scans,
+)
 from src.config import settings
 from src.database import get_db
 from src.signing import (
@@ -547,7 +551,7 @@ async def scan_by_wallet(
 @router.get(
     "/{owner}/{repo}",
     response_model=PublicScanResponse,
-    dependencies=[Depends(rate_limit_reads)],
+    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
 )
 async def public_scan(
     owner: str,

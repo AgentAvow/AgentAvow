@@ -185,7 +185,7 @@ def _get_catalog() -> dict[str, Any]:
 
 @router.get("", response_model=CatalogResponse, dependencies=[Depends(rate_limit_reads)])
 async def scan_catalog(
-    surface: str | None = Query(None, pattern="^(x402|mcp|npm|pypi)$"),
+    surface: str | None = Query(None, pattern="^(x402|mcp|npm|pypi|openclaw)$"),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
     sort: str = Query("default", pattern="^(default|score-asc|score-desc|name)$"),

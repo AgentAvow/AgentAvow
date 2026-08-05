@@ -263,6 +263,34 @@ async def rate_limit_writes(request: Request) -> None:
             )
 
 
+async def rate_limit_scans(request: Request) -> None:
+    """Tighter per-IP limit for on-demand /public/scan/{owner}/{repo}.
+
+    A cache miss clones + scans a repo, so this is the abuse-prone path. Capped at
+    settings.rate_limit_scans_per_minute per IP (default 20/min); authenticated
+    callers get 3x. Cache hits count too, but the cap is generous for real users.
+    """
+    ip = _get_client_ip(request)
+    limit = settings.rate_limit_scans_per_minute
+    key = f"scan:{ip}"
+    if not await _limiter.check(key, limit):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Scan rate limit exceeded — sign in for a higher limit, or retry shortly.",
+            headers=_rate_limit_response(0, limit),
+        )
+    entity_id = _get_entity_id(request)
+    effective_limit = limit * 3 if entity_id else limit
+    await _set_rate_limit_headers(request, key, effective_limit)
+    if entity_id:
+        if not await _limiter.check(f"scan:entity:{entity_id}", effective_limit):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Scan rate limit exceeded — try again in a minute.",
+                headers=_rate_limit_response(0, effective_limit),
+            )
+
+
 async def rate_limit_export(request: Request) -> None:
     """Very strict limit for heavy export endpoints (5/hour)."""
     ip = _get_client_ip(request)

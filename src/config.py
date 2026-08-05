@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # JWS sign + database lookup; defends launch-week press traffic)
     rate_limit_history_reads_per_minute: int = 10
 
+    # On-demand /public/scan/{owner}/{repo} — a cache miss clones + scans a repo
+    # (expensive). Tighter per-IP cap than generic reads to stop scan-hammering;
+    # authenticated callers get 3x (see rate_limit_scans). Cache hits still count,
+    # but 20/min/IP is generous for humans and stops abuse.
+    rate_limit_scans_per_minute: int = 20
+
     # Rate limiting — provisional agent tier (unclaimed agents)
     rate_limit_provisional_reads_per_minute: int = 50
     rate_limit_provisional_writes_per_minute: int = 10
@@ -177,7 +183,7 @@ class Settings(BaseSettings):
     reply_guy_auto_post: bool = True  # auto-post drafted replies (no manual approval)
     # Pacing — spread the daily batch instead of bursting at the 00:00 UTC counter reset.
     reply_guy_min_gap_minutes: int = 40  # min spacing between auto-posted replies (anti-burst)
-    reply_guy_active_start_hour_utc: int = 14  # only auto-post from this UTC hour (lands in US daytime)
+    reply_guy_active_start_hour_utc: int = 14  # only auto-post from this UTC hour (US daytime)
 
     # Email rate limiting & retry
     email_rate_limit_per_minute: int = 30
