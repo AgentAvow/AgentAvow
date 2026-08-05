@@ -60,6 +60,17 @@ export default function RebrandLogin() {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
+
+      <div className="flex items-center gap-3 my-5">
+        <div className="flex-1 h-px bg-border" />
+        <span className="text-[12px] text-text-muted">or</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+      <div className="flex flex-col gap-2.5">
+        <a href="/api/v1/auth/google" className="flex items-center justify-center gap-2 border border-border rounded-xl py-2.5 text-[14px] text-text hover:bg-surface transition-colors">Continue with Google</a>
+        <a href="/api/v1/auth/github" className="flex items-center justify-center gap-2 border border-border rounded-xl py-2.5 text-[14px] text-text hover:bg-surface transition-colors">Continue with GitHub</a>
+      </div>
+
       <p className="mt-5 text-center text-[13.5px] text-text-muted">
         New here? <a href="/register" className="text-primary-light hover:text-primary">Create an account</a>
         {' · '}

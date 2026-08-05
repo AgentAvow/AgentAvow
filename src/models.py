@@ -2360,5 +2360,30 @@ class AggregateEnvelope(Base):
     )
 
 
+class ToolWatch(Base):
+    """A user watching a tool/repo for grade or signed-definition changes (rug-pull alerts)."""
+
+    __tablename__ = "tool_watches"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    watcher_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    owner = Column(String(255), nullable=False)
+    repo = Column(String(255), nullable=False)
+    last_score = Column(Integer, nullable=True)
+    last_manifest_digest = Column(String(128), nullable=True)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("watcher_id", "owner", "repo", name="uq_tool_watch_target"),
+    )
+
+
 # Import marketing models so Alembic can discover them
 from src.marketing.models import MarketingCampaign, MarketingPost  # noqa: E402, F401

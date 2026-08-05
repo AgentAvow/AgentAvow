@@ -755,6 +755,78 @@ async def _lock_refresh_loop() -> None:
         raise
 
 
+# Watch re-scan: daily, re-scan watched tools and alert on grade/definition changes.
+WATCH_RESCAN_INTERVAL = 24 * 60 * 60
+
+
+async def _run_watch_rescan(limit: int = 200) -> None:
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from src.api.notification_router import create_notification
+    from src.api.public_scan_router import public_scan
+    from src.database import async_session
+    from src.models import Entity, ToolWatch
+
+    async with async_session() as db:
+        watches = (
+            await db.execute(select(ToolWatch).where(ToolWatch.active.is_(True)).limit(limit))
+        ).scalars().all()
+
+    for w in watches:
+        async with async_session() as db:
+            try:
+                res = await public_scan(owner=w.owner, repo=w.repo, force=False, db=db)
+            except Exception:
+                continue
+            new_score = res.trust_score
+            new_digest = res.tool_manifest_digest
+            dropped = (
+                w.last_score is not None and new_score is not None and new_score < w.last_score - 5
+            )
+            drift = bool(w.last_manifest_digest and new_digest and new_digest != w.last_manifest_digest)
+            if dropped or drift:
+                reason = "grade dropped" if dropped else "signed definition changed"
+                title = f"{w.owner}/{w.repo} — {reason}"
+                body = (
+                    f"A tool you're watching changed: {reason}"
+                    + (f" ({w.last_score} -> {new_score})" if dropped else "")
+                    + ". Review it before your agents keep using it."
+                )
+                try:
+                    await create_notification(
+                        db, w.watcher_id, "watch_alert", title, body,
+                        reference_id=f"{w.owner}/{w.repo}",
+                    )
+                except Exception:
+                    logger.exception("watch notification failed for %s/%s", w.owner, w.repo)
+                try:
+                    watcher = await db.get(Entity, w.watcher_id)
+                    if watcher is not None and watcher.email:
+                        from src.email import send_email
+
+                        await send_email(watcher.email, f"AgentGraph alert: {title}", f"<p>{body}</p>")
+                except Exception:
+                    pass
+            fresh = await db.get(ToolWatch, w.id)
+            if fresh is not None:
+                fresh.last_score = new_score
+                fresh.last_manifest_digest = new_digest
+                fresh.last_checked_at = datetime.now(timezone.utc)
+                await db.commit()
+
+
+async def _watch_rescan_loop(interval: int = WATCH_RESCAN_INTERVAL) -> None:
+    logger.info("Watch re-scan loop started (interval=%ds)", interval)
+    while True:
+        try:
+            await _run_watch_rescan()
+        except Exception:
+            logger.exception("Watch re-scan loop iteration failed")
+        await asyncio.sleep(interval)
+
+
 async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     """Start the background scheduler task.
 
@@ -887,6 +959,11 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     asyncio.create_task(
         _marketing_sync_loop(),
         name="marketing-sync",
+    )
+
+    asyncio.create_task(
+        _watch_rescan_loop(),
+        name="watch-rescan",
     )
 
     return _scheduler_task

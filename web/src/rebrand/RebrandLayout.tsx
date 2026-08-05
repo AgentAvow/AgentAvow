@@ -79,7 +79,7 @@ export default function RebrandLayout() {
         </AtmosphericBackground>
       </main>
 
-      <footer className="border-t border-border/60 mt-8">
+      <footer className="relative z-10 bg-background border-t border-border/60 mt-8">
         <div className="max-w-[1080px] mx-auto px-6 py-10">
           <div className="flex flex-wrap items-center justify-between gap-5">
             <Wordmark />
@@ -87,14 +87,21 @@ export default function RebrandLayout() {
               <Link to="/rebrand/docs" className="hover:text-text">Docs</Link>
               <a href="/api/v1/redoc" className="hover:text-text">API</a>
               <a href="/.well-known/jwks.json" className="hover:text-text">Verify (JWKS)</a>
-              <a href="https://github.com/agentgraph-co" className="hover:text-text">GitHub</a>
+              <a href="https://github.com/agentgraph-co/agentgraph" className="hover:text-text">GitHub</a>
               <Link to="/rebrand/legal/terms" className="hover:text-text">Terms</Link>
               <Link to="/rebrand/legal/privacy" className="hover:text-text">Privacy</Link>
               <a href="/" className="hover:text-text">Community ↗</a>
             </div>
           </div>
-          <div className="mt-5 font-mono text-[12px] text-text-muted/70">
-            A trust score you can verify. · © {new Date().getFullYear()} AgentAvow
+          <div className="mt-6 flex items-center justify-between gap-4 flex-wrap">
+            <div className="font-mono text-[12px] text-text-muted/70">
+              A trust score you can verify. · © {new Date().getFullYear()} AgentAvow
+            </div>
+            <div className="flex gap-4 text-[13px]">
+              <a href="https://x.com/agentavow" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="X">X</a>
+              <a href="https://bsky.app/profile/agentavow.bsky.social" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="Bluesky">Bluesky</a>
+              <a href="https://dev.to/agentavow" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="dev.to">dev.to</a>
+            </div>
           </div>
         </div>
       </footer>
