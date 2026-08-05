@@ -98,9 +98,13 @@ export default function RebrandLayout() {
               A trust score you can verify. · © {new Date().getFullYear()} AgentAvow
             </div>
             <div className="flex gap-4 text-[13px]">
-              <a href="https://x.com/agentavow" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="X">X</a>
+              <a href="https://github.com/agentgraph-co/agentgraph" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="GitHub">GitHub</a>
               <a href="https://bsky.app/profile/agentavow.bsky.social" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="Bluesky">Bluesky</a>
+              <a href="https://x.com/agentavow" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="X">X</a>
+              <a href="https://huggingface.co/agentavow" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="Hugging Face">HuggingFace</a>
               <a href="https://dev.to/agentavow" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="dev.to">dev.to</a>
+              {/* TODO(cutover): update LinkedIn URL once the AgentAvow company page exists — Kenne to supply post-cutover */}
+              <a href="https://www.linkedin.com/company/agentavow" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text" aria-label="LinkedIn">LinkedIn</a>
             </div>
           </div>
         </div>
