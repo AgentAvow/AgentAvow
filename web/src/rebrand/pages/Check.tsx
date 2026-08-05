@@ -1,8 +1,43 @@
 import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchPublicScan, badgeUrl } from '../../lib/scanApi'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
+import { useAuth } from '../../hooks/useAuth'
+import api from '../../lib/api'
+
+/** "Watch this tool" — POSTs to /watches (the alerting backend) when signed in. */
+function WatchButton({ owner, repo }: { owner: string; repo: string }) {
+  const { user } = useAuth()
+  const [watching, setWatching] = useState(false)
+  const mutation = useMutation({
+    mutationFn: () => api.post('/watches', { owner, repo }),
+    onSuccess: () => setWatching(true),
+  })
+  if (!user) {
+    return (
+      <Link
+        to="/rebrand/login"
+        className="text-[13px] font-semibold px-3.5 py-1.5 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors"
+      >
+        + Watch this tool
+      </Link>
+    )
+  }
+  return (
+    <button
+      onClick={() => !watching && mutation.mutate()}
+      disabled={watching || mutation.isPending}
+      className={`text-[13px] font-semibold px-3.5 py-1.5 rounded-lg transition-colors disabled:opacity-70 ${
+        watching
+          ? 'bg-success/15 text-success border border-success/40'
+          : 'border border-border text-text hover:border-primary-light hover:text-primary-light'
+      }`}
+    >
+      {watching ? '✓ Watching — we\'ll alert you' : mutation.isPending ? 'Adding…' : '+ Watch this tool'}
+    </button>
+  )
+}
 
 /**
  * Rebrand-native check result — reuses the real scan API + getGradeInfo, rendered in
@@ -100,6 +135,7 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
             Signed · Ed25519
           </span>
           <a href="https://agentgraph.co/.well-known/jwks.json" className="text-[12px] text-primary-light hover:text-primary">Verify this attestation →</a>
+          <div className="mt-2"><WatchButton owner={owner} repo={repo} /></div>
         </div>
       </div>
 
