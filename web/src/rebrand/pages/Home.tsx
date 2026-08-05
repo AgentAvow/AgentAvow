@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
+import { Reveal, CountUp } from '../components/motion'
 
 /**
- * AgentAvow rebrand homepage (prototype).
+ * AgentAvow rebrand homepage.
  * The /check input IS the hero. Live catalog for counts + browse teaser.
- * Section order: hero → fork → proof strip → signed-result example →
- * how it works → browse teaser → developer → change-alerts/CI.
+ * Section order: hero → proof strip → two-audience fork → signed-result example →
+ * how it works → three axes → browse teaser → developer → change-alerts/CI.
  */
 
 // Real, scannable example repos — clicking a chip runs a real scan (works on prod;
@@ -21,22 +22,42 @@ const EXAMPLES = [
   'langchain-ai/langchain',
 ]
 
-function Reveal({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <motion.div
-      className={className}
-      initial={{ opacity: 0, y: 16 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-80px' }}
-      transition={{ duration: 0.55, ease: 'easeOut' }}
-    >
-      {children}
-    </motion.div>
-  )
-}
-
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
+}
+
+/** Large animated trust-seal for the hero — echoes the logo, draws itself in on load. */
+function HeroSeal() {
+  const reduce = useReducedMotion()
+  return (
+    <motion.svg
+      viewBox="0 0 96 96" className="w-[72px] h-[72px] mx-auto mb-6" aria-hidden="true"
+      initial={reduce ? false : { opacity: 0, scale: 0.85 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.6, ease: 'easeOut' }}
+    >
+      <defs>
+        <linearGradient id="seal-g" x1="0" y1="0" x2="96" y2="96">
+          <stop stopColor="#2DD4BF" /><stop offset="1" stopColor="#E879F9" />
+        </linearGradient>
+      </defs>
+      <motion.circle
+        cx="48" cy="48" r="40" fill="none" stroke="url(#seal-g)" strokeWidth="3"
+        style={{ originX: '48px', originY: '48px' }}
+        animate={reduce ? {} : { rotate: 360 }}
+        transition={{ duration: 32, ease: 'linear', repeat: Infinity }}
+        strokeDasharray="4 10" strokeLinecap="round"
+      />
+      <circle cx="48" cy="48" r="30" fill="none" stroke="var(--color-primary-light)" strokeWidth="1.5" opacity="0.35" />
+      <motion.path
+        d="M34 49l9 9 19-20" fill="none" stroke="var(--color-primary-light)" strokeWidth="5"
+        strokeLinecap="round" strokeLinejoin="round" pathLength={1}
+        initial={reduce ? false : { pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 0.7, ease: 'easeOut', delay: 0.35 }}
+      />
+    </motion.svg>
+  )
 }
 
 export default function RebrandHome() {
@@ -59,7 +80,13 @@ export default function RebrandHome() {
     <div>
       {/* ① HERO = the check itself */}
       <section className="text-center pt-16 pb-8 px-6">
-        <div className="max-w-[1080px] mx-auto">
+        <motion.div
+          className="max-w-[1080px] mx-auto"
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
+        >
+          <HeroSeal />
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-[1.06] tracking-tight">
             Is this AI tool <span className="gradient-text-bio">safe</span> to connect?
           </h1>
@@ -99,10 +126,35 @@ export default function RebrandHome() {
               </button>
             ))}
           </div>
-        </div>
+        </motion.div>
       </section>
 
-      {/* ② TWO-AUDIENCE FORK — styled to stand out */}
+      {/* ② PROOF-OF-SCALE STRIP — LIVE, numbers count up. Moved up: scale credibility first. */}
+      <section className="max-w-[1080px] mx-auto px-6 pt-4 pb-10">
+        <Reveal>
+          <div className="glass rounded-2xl p-8 flex flex-wrap gap-x-10 gap-y-4 justify-center text-center">
+            {[
+              [s?.total_scans ?? 0, 'tools scanned'],
+              [s?.by_surface?.mcp ?? 0, 'MCP servers'],
+              [s?.by_surface?.x402 ?? 0, 'x402 endpoints'],
+              [s?.repo_scans_total ?? 0, 'repos scanned'],
+              [12, 'detection categories'],
+            ].map(([n, l]) => (
+              <div key={l as string}>
+                {s || n === 12
+                  ? <CountUp value={n as number} className="block text-3xl tracking-tight tabular-nums gradient-text font-bold" />
+                  : <b className="block text-3xl tracking-tight tabular-nums gradient-text">—</b>}
+                <span className="text-[13px] text-text-muted">{l}</span>
+              </div>
+            ))}
+            <div className="basis-full font-mono text-[11.5px] text-text-muted/70 mt-1">
+              live from the scan catalog · a one-time launch corpus (not continuously re-scanned)
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
+      {/* ③ TWO-AUDIENCE FORK — styled to stand out */}
       <section className="max-w-[1080px] mx-auto px-6 py-14">
         <Reveal className="grid md:grid-cols-2 gap-4">
           <Link to="/rebrand/browse" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-primary/60 relative overflow-hidden">
@@ -125,29 +177,6 @@ export default function RebrandHome() {
             </p>
             <span className="mt-2 self-start text-[14.5px] font-semibold text-accent group-hover:translate-x-1 transition-transform">Get your badge →</span>
           </Link>
-        </Reveal>
-      </section>
-
-      {/* ③ PROOF-OF-SCALE STRIP — LIVE, richer surface mix */}
-      <section className="max-w-[1080px] mx-auto px-6 pb-14">
-        <Reveal>
-          <div className="glass rounded-2xl p-8 flex flex-wrap gap-x-10 gap-y-4 justify-center text-center">
-            {[
-              [s ? s.total_scans.toLocaleString() : '—', 'tools scanned'],
-              [s ? (s.by_surface?.mcp ?? 0).toLocaleString() : '—', 'MCP servers'],
-              [s ? (s.by_surface?.x402 ?? 0).toLocaleString() : '—', 'x402 endpoints'],
-              [s ? (s.repo_scans_total ?? 0).toLocaleString() : '—', 'repos scanned'],
-              ['12', 'detection categories'],
-            ].map(([n, l]) => (
-              <div key={l}>
-                <b className="block text-3xl tracking-tight tabular-nums gradient-text">{n}</b>
-                <span className="text-[13px] text-text-muted">{l}</span>
-              </div>
-            ))}
-            <div className="basis-full font-mono text-[11.5px] text-text-muted/70 mt-1">
-              live from the scan catalog · a one-time launch corpus (not continuously re-scanned)
-            </div>
-          </div>
         </Reveal>
       </section>
 
@@ -202,7 +231,7 @@ export default function RebrandHome() {
                 Signed · Ed25519 / JWS
               </span>
               <span className="text-[12px] text-text-muted">· we alert you if this grade ever drops</span>
-              <a href="/.well-known/jwks.json" className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">Verify →</a>
+              <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">Verify →</a>
             </div>
           </div>
         </Reveal>
@@ -244,7 +273,6 @@ export default function RebrandHome() {
               <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Axis 01 · Identity</div>
               <h3 className="mt-2 text-lg font-semibold">Who's behind this agent?</h3>
               <p className="mt-2 text-text-muted text-[14px]">Verifiable identity + provenance — DIDs, operator accountability.</p>
-              <a href="/discover" className="inline-block mt-3 text-[13px] text-primary-light hover:text-primary">Explore identity →</a>
             </div>
             <div className="glass rounded-2xl p-6">
               <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Axis 02 · Authorization</div>
@@ -331,7 +359,7 @@ export default function RebrandHome() {
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
               <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a grade drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
-              <a href="/register" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</a>
+              <Link to="/rebrand/login" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
             </div>
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>

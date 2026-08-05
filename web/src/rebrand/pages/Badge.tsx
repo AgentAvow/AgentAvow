@@ -14,7 +14,10 @@ export default function RebrandBadge() {
   const navigate = useNavigate()
   const slug = repo.trim() || 'you/your-repo'
   const [owner, name] = slug.includes('/') ? slug.split('/') : ['', '']
-  const markdown = `[![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/${slug}/badge)](https://agentavow.com/check/${slug})`
+  // Dynamic origin so the copied badge resolves NOW (agentgraph.co) and after
+  // cutover (agentavow.com) — never a dead hardcoded agentavow.com link pre-DNS.
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
+  const markdown = `[![AgentAvow Trust](${origin}/api/v1/public/scan/${slug}/badge)](${origin}/check/${slug})`
 
   const copy = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(markdown)

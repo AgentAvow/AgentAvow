@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
+import { motion, useReducedMotion } from 'framer-motion'
 import { AtmosphericBackground } from '../components/AtmosphericBackground'
 
 /**
@@ -7,32 +9,66 @@ import { AtmosphericBackground } from '../components/AtmosphericBackground'
  * Deliberately does NOT import the old Layout — this keeps the live site's
  * header/footer/nav untouched. Uses the existing design system (index.css
  * utility classes + Tailwind color tokens), so it looks native without
- * depending on the social-era components. Static prototype content; live data
- * gets wired in a later pass.
+ * depending on the social-era components.
  */
 
-function Wordmark() {
+/**
+ * Animated wordmark — on hover the outer ring sweeps and the checkmark redraws.
+ * `id` keeps the gradient/def ids unique between the header and footer instances.
+ */
+function Wordmark({ id = 'hdr' }: { id?: string }) {
+  const reduce = useReducedMotion()
   return (
-    <span className="flex items-center gap-2 font-bold text-[17px] tracking-tight">
+    <motion.span
+      className="group flex items-center gap-2 font-bold text-[17px] tracking-tight cursor-pointer"
+      initial="rest"
+      whileHover="hover"
+      animate="rest"
+    >
       <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
-        <circle cx="12" cy="12" r="9.3" stroke="url(#av-g)" strokeWidth="1.7" />
+        {/* outer gradient ring — rotates on hover */}
+        <motion.circle
+          cx="12" cy="12" r="9.3" stroke={`url(#av-g-${id})`} strokeWidth="1.7"
+          style={{ originX: '12px', originY: '12px' }}
+          variants={reduce ? {} : { rest: { rotate: 0 }, hover: { rotate: 360 } }}
+          transition={{ duration: 0.9, ease: 'easeInOut' }}
+        />
         <circle cx="12" cy="12" r="5.2" stroke="var(--color-primary-light)" strokeWidth="1.2" opacity="0.5" />
-        <path d="M8.6 12.2l2.3 2.3 4.6-4.9" stroke="var(--color-primary-light)" strokeWidth="2"
-          strokeLinecap="round" strokeLinejoin="round" />
+        {/* checkmark — redraws on hover via dash offset */}
+        <motion.path
+          d="M8.6 12.2l2.3 2.3 4.6-4.9" stroke="var(--color-primary-light)" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" pathLength={1}
+          variants={reduce ? {} : { rest: { pathLength: 1, opacity: 1 }, hover: { pathLength: [0, 1], opacity: 1 } }}
+          transition={{ duration: 0.5, ease: 'easeOut', delay: 0.15 }}
+        />
         <defs>
-          <linearGradient id="av-g" x1="0" y1="0" x2="24" y2="24">
+          <linearGradient id={`av-g-${id}`} x1="0" y1="0" x2="24" y2="24">
             <stop stopColor="#2DD4BF" />
             <stop offset="1" stopColor="#E879F9" />
           </linearGradient>
         </defs>
       </svg>
       AgentAvow<span className="text-text-muted font-medium">™</span>
-    </span>
+    </motion.span>
   )
 }
 
 export default function RebrandLayout() {
   const { pathname } = useLocation()
+
+  // Rebrand-only favicon + title swap — restored on unmount so the live site
+  // (which shares index.html) keeps its own identity until the real cutover.
+  useEffect(() => {
+    const iconEl = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+    const prevIcon = iconEl?.getAttribute('href') ?? null
+    const prevTitle = document.title
+    if (iconEl) iconEl.setAttribute('href', '/favicon-avow.svg')
+    document.title = 'AgentAvow — Trust for the tools your agents connect to'
+    return () => {
+      if (iconEl && prevIcon) iconEl.setAttribute('href', prevIcon)
+      document.title = prevTitle
+    }
+  }, [])
   const link = (to: string, label: string) => (
     <Link
       to={to}
@@ -75,19 +111,27 @@ export default function RebrandLayout() {
 
       <main>
         <AtmosphericBackground>
-          <Outlet />
+          {/* per-route entrance — a gentle fade+rise on every navigation.
+              Keyed on pathname; no exit anim (plays nice with lazy/Suspense). */}
+          <motion.div
+            key={pathname}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.32, ease: 'easeOut' }}
+          >
+            <Outlet />
+          </motion.div>
         </AtmosphericBackground>
       </main>
 
       <footer className="relative z-10 bg-background border-t border-border/60 mt-8">
         <div className="max-w-[1080px] mx-auto px-6 py-10">
           <div className="flex flex-wrap items-center justify-between gap-5">
-            <Wordmark />
+            <Wordmark id="ftr" />
             <div className="flex flex-wrap gap-5 text-[14px] text-text-muted">
               <Link to="/rebrand/docs" className="hover:text-text">Docs</Link>
-              <a href="/api/v1/redoc" className="hover:text-text">API</a>
-              <a href="/.well-known/jwks.json" className="hover:text-text">Verify (JWKS)</a>
-              <a href="https://github.com/agentgraph-co/agentgraph" className="hover:text-text">GitHub</a>
+              <a href="/api/v1/redoc" target="_blank" rel="noopener noreferrer" className="hover:text-text">API</a>
+              <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="hover:text-text">Verify keys</a>
               <Link to="/rebrand/legal/terms" className="hover:text-text">Terms</Link>
               <Link to="/rebrand/legal/privacy" className="hover:text-text">Privacy</Link>
               <a href="/" className="hover:text-text">Community ↗</a>

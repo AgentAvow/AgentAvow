@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
+import { Reveal, RevealStagger, CountUp } from '../components/motion'
 
 /**
  * The "Yelp" browse catalog — LIVE from /public/scan-catalog.
@@ -108,11 +109,11 @@ function ToolCard({ row }: { row: CatalogRow }) {
   )
 }
 
-function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
+function StatCard({ label, value, hint }: { label: string; value: number; hint: string }) {
   return (
     <div className="glass rounded-xl p-4">
       <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1">{label}</div>
-      <div className="text-2xl font-bold tabular-nums gradient-text">{value}</div>
+      <CountUp value={value} className="block text-2xl font-bold tabular-nums gradient-text" />
       <div className="text-[11.5px] text-text-muted mt-1">{hint}</div>
     </div>
   )
@@ -127,13 +128,13 @@ function SummaryStrip({ s }: { s: CatalogSummary }) {
   const npmPypiHigh = (bh.npm ?? 0) + (bh.pypi ?? 0)
   const x402Total = s.x402_endpoints_total ?? bs.x402 ?? 0
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-6">
-      <StatCard label="Total scans" value={s.total_scans.toLocaleString()} hint="across 5 surfaces" />
-      <StatCard label="x402 endpoints" value={x402Total.toLocaleString()} hint={s.x402_compliant != null ? `${s.x402_compliant} compliant` : 'payment-gated APIs'} />
-      <StatCard label="MCP servers" value={(bs.mcp ?? 0).toLocaleString()} hint={`${bc.mcp ?? 0} critical · ${bh.mcp ?? 0} high`} />
-      <StatCard label="Agent skills" value={(bs.openclaw ?? 0).toLocaleString()} hint={`${bc.openclaw ?? 0} critical · ${bh.openclaw ?? 0} high`} />
-      <StatCard label="npm + PyPI" value={npmPypi.toLocaleString()} hint={`${npmPypiCrit} critical · ${npmPypiHigh} high`} />
-    </div>
+    <Reveal className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-6">
+      <StatCard label="Total scans" value={s.total_scans} hint="across 5 surfaces" />
+      <StatCard label="x402 endpoints" value={x402Total} hint={s.x402_compliant != null ? `${s.x402_compliant} compliant` : 'payment-gated APIs'} />
+      <StatCard label="MCP servers" value={bs.mcp ?? 0} hint={`${bc.mcp ?? 0} critical · ${bh.mcp ?? 0} high`} />
+      <StatCard label="Agent skills" value={bs.openclaw ?? 0} hint={`${bc.openclaw ?? 0} critical · ${bh.openclaw ?? 0} high`} />
+      <StatCard label="npm + PyPI" value={npmPypi} hint={`${npmPypiCrit} critical · ${npmPypiHigh} high`} />
+    </Reveal>
   )
 }
 
@@ -235,12 +236,14 @@ export default function RebrandBrowse() {
         )}
         {isError ? (
           <div className="glass rounded-xl p-8 text-center text-text-muted text-[14px]">Couldn't load the catalog right now. Try again in a moment.</div>
-        ) : (
+        ) : isLoading && rows.length === 0 ? (
           <div className="grid md:grid-cols-3 gap-3.5">
-            {isLoading && rows.length === 0
-              ? Array.from({ length: 9 }).map((_, i) => <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[128px]" />)
-              : rows.map((row) => <ToolCard key={row.full_name || row.name} row={row} />)}
+            {Array.from({ length: 9 }).map((_, i) => <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[128px]" />)}
           </div>
+        ) : (
+          <RevealStagger key={`${surface}-${page}`} className="grid md:grid-cols-3 gap-3.5" stagger={0.035}>
+            {rows.map((row) => <ToolCard key={row.full_name || row.name} row={row} />)}
+          </RevealStagger>
         )}
         {!isLoading && !isError && rows.length === 0 && (
           <div className="mt-2 text-center text-text-muted text-[14px]">No matches on this surface. Try another category or search.</div>
