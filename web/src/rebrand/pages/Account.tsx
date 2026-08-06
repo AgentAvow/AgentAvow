@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
@@ -29,6 +29,60 @@ interface Notif {
   reference_id: string | null
   is_read: boolean
   created_at: string
+}
+
+interface ApiKey { id: string; label: string; created_at: string | null }
+
+/** Developer API keys — create (shown once), list, revoke. */
+function ApiKeys() {
+  const qc = useQueryClient()
+  const [label, setLabel] = useState('')
+  const [fresh, setFresh] = useState<string | null>(null)
+  const { data } = useQuery({
+    queryKey: ['rebrand-apikeys'],
+    queryFn: async () => (await api.get<{ keys: ApiKey[] }>('/account/api-keys')).data,
+  })
+  const create = useMutation({
+    mutationFn: async () => (await api.post<{ key: string }>('/account/api-keys', { label: label.trim() || 'default' })).data,
+    onSuccess: (d) => { setFresh(d.key); setLabel(''); qc.invalidateQueries({ queryKey: ['rebrand-apikeys'] }) },
+  })
+  const revoke = useMutation({
+    mutationFn: (id: string) => api.delete(`/account/api-keys/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rebrand-apikeys'] }),
+  })
+  const keys = data?.keys ?? []
+  return (
+    <div className="mt-10">
+      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">API keys</h2>
+      <p className="text-text-muted text-[13px] mb-3">Call the scan API programmatically. Keys carry your higher rate limit. <a href="/api/v1/redoc" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">API reference ↗</a></p>
+      {fresh && (
+        <div className="glass rounded-xl p-4 mb-3 border-l-4 border-success/60">
+          <div className="text-[12.5px] text-success font-semibold mb-1">Copy this key now — it won't be shown again.</div>
+          <code className="font-mono text-[12px] break-all bg-surface px-2 py-1 rounded">{fresh}</code>
+        </div>
+      )}
+      <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="flex gap-2 mb-3">
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="key label (e.g. ci-pipeline)"
+          className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
+        <button type="submit" disabled={create.isPending} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">Create key</button>
+      </form>
+      {keys.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          {keys.map((k) => (
+            <div key={k.id} className="glass rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[14px] font-semibold">{k.label}</div>
+                <div className="font-mono text-[11.5px] text-text-muted">created {k.created_at ? new Date(k.created_at).toLocaleDateString() : '—'}</div>
+              </div>
+              <button onClick={() => revoke.mutate(k.id)} disabled={revoke.isPending} className="text-[12px] text-text-muted hover:text-danger transition-colors shrink-0">Revoke</button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-text-muted text-[13px]">No keys yet.</div>
+      )}
+    </div>
+  )
 }
 
 function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; removing: boolean }) {
@@ -136,6 +190,9 @@ export default function RebrandAccount() {
           </RevealStagger>
         )}
       </div>
+
+      {/* developer API keys */}
+      <ApiKeys />
     </div>
   )
 }

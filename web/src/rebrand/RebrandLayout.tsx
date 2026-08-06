@@ -254,6 +254,7 @@ export default function RebrandLayout() {
             <Wordmark id="ftr" />
             <div className="flex flex-wrap gap-5 text-[14px] text-text-muted">
               <Link to="/rebrand/docs" className="hover:text-text">Docs</Link>
+              <Link to="/rebrand/research" className="hover:text-text">Research</Link>
               <a href="/api/v1/redoc" target="_blank" rel="noopener noreferrer" className="hover:text-text">API</a>
               <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="hover:text-text">Verify keys</a>
               <Link to="/rebrand/legal/terms" className="hover:text-text">Terms</Link>

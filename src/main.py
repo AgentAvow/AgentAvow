@@ -65,6 +65,7 @@ from src.api.onboarding_router import router as onboarding_router
 from src.api.org_router import router as org_router
 from src.api.profile_router import router as profile_router
 from src.api.public_scan_router import router as public_scan_router
+from src.api.account_keys_router import router as account_keys_router
 from src.api.watch_router import router as watch_router
 from src.api.ratelimit_router import router as ratelimit_router
 from src.api.recruitment_router import router as recruitment_router
@@ -702,6 +703,7 @@ app.include_router(jwks_router)
 # Public scan API — trust-tiered security scanning (no auth required)
 app.include_router(public_scan_router, prefix=settings.api_v1_prefix)
 app.include_router(watch_router, prefix=settings.api_v1_prefix)
+app.include_router(account_keys_router, prefix=settings.api_v1_prefix)
 
 # Public scan catalog — browseable index of every launch scan (no auth required)
 app.include_router(scan_catalog_router, prefix=settings.api_v1_prefix)
