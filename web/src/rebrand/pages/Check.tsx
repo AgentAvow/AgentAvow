@@ -80,44 +80,43 @@ function GradeRing({ score, grade, hex }: { score: number; grade: string; hex: s
   )
 }
 
-/** Score-history timeline — a labeled sparkline (score over time). */
+/** Score-over-time line chart. Only shown once there's real multi-scan history —
+ * a single point is meaningless, so we hide it until the tool has been re-scanned. */
 function ScoreHistory({ history, current }: { history: { score: number; at?: number }[]; current: number }) {
   const merged = [...history]
+  // Append the current scan as "now" if it isn't already the last recorded point.
   if (!merged.length || merged[merged.length - 1].score !== current) merged.push({ score: current })
   const pts = merged.slice(-30)
-  const sparse = pts.length < 2
+  if (pts.length < 2) return null // nothing meaningful to plot yet
+
   const W = 320, H = 90, PAD = 8
-  const x = (i: number) => pts.length < 2 ? W / 2 : PAD + (i / (pts.length - 1)) * (W - 2 * PAD)
-  const y = (s: number) => H - PAD - (s / 100) * (H - 2 * PAD) // 0-100 scale, fixed axis
+  const x = (i: number) => PAD + (i / (pts.length - 1)) * (W - 2 * PAD)
+  const y = (s: number) => H - PAD - (s / 100) * (H - 2 * PAD) // fixed 0–100 axis
   const line = pts.map((p, i) => `${x(i)},${y(p.score)}`).join(' ')
-  const last = pts[pts.length - 1]
-  const lastG = getGradeInfo(last.score)
+  const lastG = getGradeInfo(pts[pts.length - 1].score)
+  const fmt = (at?: number) => at ? new Date(at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'now'
+  const firstDate = fmt(pts[0].at)
+  const lastDate = fmt(pts[pts.length - 1].at)
+
   return (
     <Reveal>
       <div className="mt-6 glass rounded-2xl p-6">
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Score over time</h3>
-          <span className="font-mono text-[11.5px] text-text-muted">latest <b style={{ color: lastG.color }}>{last.score}/100</b></span>
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Trust score over time</h3>
+          <span className="font-mono text-[11.5px] text-text-muted">{pts.length} scans · now <b style={{ color: lastG.color }}>{current}/100</b></span>
         </div>
-        <p className="text-text-muted text-[13px] mt-1 mb-3">
-          {sparse
-            ? 'First data point recorded. Every re-scan adds to this line — watch the tool to track changes over time.'
-            : 'A living record — every re-scan, not a one-shot. Watch this tool to be alerted the moment the line drops.'}
-        </p>
+        <p className="text-text-muted text-[13px] mt-1 mb-3">A living record — every re-scan, not a one-shot snapshot. Watch this tool to be alerted the moment the line drops.</p>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[90px]" preserveAspectRatio="none" aria-hidden="true">
-          {/* fixed 0/50/100 gridlines so the scale is clear */}
-          {[0, 50, 100].map((g) => (
-            <g key={g}>
-              <line x1={PAD} y1={y(g)} x2={W - PAD} y2={y(g)} stroke="currentColor" className="text-border" strokeWidth="0.5" opacity="0.5" />
-            </g>
-          ))}
-          {!sparse && <polyline points={line} fill="none" stroke={lastG.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
-          {pts.map((p, i) => {
-            const g = getGradeInfo(p.score)
-            return <circle key={i} cx={x(i)} cy={y(p.score)} r={i === pts.length - 1 ? 4 : 2.5} fill={g.color} />
-          })}
+          {[0, 50, 100].map((g) => <line key={g} x1={PAD} y1={y(g)} x2={W - PAD} y2={y(g)} stroke="currentColor" className="text-border" strokeWidth="0.5" opacity="0.5" />)}
+          <polyline points={line} fill="none" stroke={lastG.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          {pts.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.score)} r={i === pts.length - 1 ? 4 : 2.5} fill={getGradeInfo(p.score).color} />)}
         </svg>
-        <div className="font-mono text-[10.5px] text-text-muted/60 mt-1">← older · newer → · scale 0–100</div>
+        {/* time axis labels */}
+        <div className="flex justify-between font-mono text-[10.5px] text-text-muted/70 mt-1">
+          <span>{firstDate}</span>
+          <span className="text-text-muted/50">score 0–100 (higher = safer)</span>
+          <span>{lastDate}</span>
+        </div>
       </div>
     </Reveal>
   )
@@ -415,7 +414,7 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
         <div className="mt-6 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h3 className="text-[15px] font-bold">Own this tool?</h3>
-            <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get a fix-it report, respond to findings, scan it privately, and control how it appears on AgentAvow.</p>
+            <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get a fix-it report, respond to findings, scan it privately, and take ownership of how it appears on AgentAvow.</p>
           </div>
           <Link to={`/rebrand/claim?owner=${owner}&repo=${repo}`} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
         </div>

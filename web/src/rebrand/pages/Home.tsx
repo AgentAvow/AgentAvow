@@ -368,7 +368,7 @@ export default function RebrandHome() {
             <p className="mt-3 text-text-muted">Check your repo, copy the badge. Every reader can verify the grade — and clicking it re-checks your tool.</p>
           </div>
           <div className="grid md:grid-cols-2 gap-6 items-center mt-6">
-            <div>
+            <div className="min-w-0">
               <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
                 <span className="bg-surface-hover text-text px-2.5 py-1.5">🛡 AgentAvow</span>
                 <span className="px-2.5 py-1.5 font-bold text-white bg-gradient-to-r from-primary to-primary-dark">Trust: A 94</span>
@@ -377,7 +377,7 @@ export default function RebrandHome() {
                 [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-text-muted text-[14.5px]">The badge regenerates on every view, so it never goes stale. It's signed and links back to a full, verifiable report — no account required to mint one.</p>
               <Link to="/rebrand/badge" className="inline-block mt-4 font-mono text-[13px] text-primary-light hover:text-primary">Wire it into CI with the GitHub Action · SDK · CLI →</Link>
             </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
@@ -165,6 +165,22 @@ function MobileNav({ pathname }: { pathname: string }) {
   )
 }
 
+/** Ghosted skeleton shown while a rebrand page chunk loads (replaces the spinner). */
+function PageSkeleton() {
+  return (
+    <div className="max-w-[1080px] mx-auto px-6 py-16 animate-pulse" aria-hidden="true">
+      <div className="h-3 w-24 bg-surface-hover rounded mb-4" />
+      <div className="h-9 w-2/3 bg-surface-hover rounded mb-3" />
+      <div className="h-4 w-5/6 bg-surface-hover rounded mb-2" />
+      <div className="h-4 w-1/2 bg-surface-hover rounded" />
+      <div className="grid md:grid-cols-3 gap-3.5 mt-10">
+        {[0, 1, 2].map((i) => <div key={i} className="glass rounded-2xl h-[120px]" />)}
+      </div>
+      <div className="glass rounded-2xl h-[180px] mt-4" />
+    </div>
+  )
+}
+
 /** Subtle breathing color orbs in the gutters — the "rails pop" from the mock. */
 function Orbs() {
   const reduce = useReducedMotion()
@@ -243,7 +259,9 @@ export default function RebrandLayout() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.32, ease: 'easeOut' }}
           >
-            <Outlet />
+            <Suspense fallback={<PageSkeleton />}>
+              <Outlet />
+            </Suspense>
           </motion.div>
         </AtmosphericBackground>
       </main>
