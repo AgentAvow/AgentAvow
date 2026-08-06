@@ -785,7 +785,9 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             dropped = (
                 w.last_score is not None and new_score is not None and new_score < w.last_score - 5
             )
-            drift = bool(w.last_manifest_digest and new_digest and new_digest != w.last_manifest_digest)
+            drift = bool(
+                w.last_manifest_digest and new_digest and new_digest != w.last_manifest_digest
+            )
             if dropped or drift:
                 reason = "grade dropped" if dropped else "signed definition changed"
                 title = f"{w.owner}/{w.repo} — {reason}"
@@ -806,9 +808,39 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                     if watcher is not None and watcher.email:
                         from src.email import send_email
 
-                        await send_email(watcher.email, f"AgentGraph alert: {title}", f"<p>{body}</p>")
+                        await send_email(
+                            watcher.email, f"AgentAvow alert: {title}", f"<p>{body}</p>"
+                        )
                 except Exception:
                     pass
+                # Webhook alert-delivery — POST to the watcher's configured URL.
+                try:
+                    from sqlalchemy import select as _select
+
+                    from src.models import AlertWebhook
+
+                    hook = (await db.execute(
+                        _select(AlertWebhook).where(
+                            AlertWebhook.entity_id == w.watcher_id,
+                            AlertWebhook.active.is_(True),
+                        )
+                    )).scalar_one_or_none()
+                    if hook is not None:
+                        import httpx
+
+                        async with httpx.AsyncClient(timeout=6) as client:
+                            resp = await client.post(hook.url, json={
+                                "type": "agentavow.alert.grade_change",
+                                "owner": w.owner,
+                                "repo": w.repo,
+                                "old_score": w.last_score,
+                                "new_score": new_score,
+                                "reason": reason,
+                            })
+                        hook.last_status = resp.status_code
+                        hook.last_delivery_at = datetime.now(timezone.utc)
+                except Exception:
+                    logger.debug("webhook alert delivery failed for %s/%s", w.owner, w.repo)
             fresh = await db.get(ToolWatch, w.id)
             if fresh is not None:
                 fresh.last_score = new_score

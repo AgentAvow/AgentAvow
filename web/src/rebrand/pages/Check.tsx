@@ -80,31 +80,44 @@ function GradeRing({ score, grade, hex }: { score: number; grade: string; hex: s
   )
 }
 
-/** Score-history timeline (living record) — reinforces the watchlist. */
+/** Score-history timeline — a labeled sparkline (score over time). */
 function ScoreHistory({ history, current }: { history: { score: number; at?: number }[]; current: number }) {
-  // Merge stored history with the current score; dedupe a trailing duplicate.
   const merged = [...history]
   if (!merged.length || merged[merged.length - 1].score !== current) merged.push({ score: current })
-  const scores = merged.map((p) => p.score)
-  const max = Math.max(...scores, 100), min = Math.min(...scores, 0)
-  const range = max - min || 1
-  const sparse = merged.length < 2
+  const pts = merged.slice(-30)
+  const sparse = pts.length < 2
+  const W = 320, H = 90, PAD = 8
+  const x = (i: number) => pts.length < 2 ? W / 2 : PAD + (i / (pts.length - 1)) * (W - 2 * PAD)
+  const y = (s: number) => H - PAD - (s / 100) * (H - 2 * PAD) // 0-100 scale, fixed axis
+  const line = pts.map((p, i) => `${x(i)},${y(p.score)}`).join(' ')
+  const last = pts[pts.length - 1]
+  const lastG = getGradeInfo(last.score)
   return (
     <Reveal>
       <div className="mt-6 glass rounded-2xl p-6">
-        <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Score history</h3>
-        <p className="text-text-muted text-[13px] mb-3">
-          {sparse
-            ? 'First data point recorded. This becomes a living timeline as the tool is re-scanned — watch it to track every change.'
-            : 'A living record — every re-scan, not a one-shot snapshot. Watch this tool to get alerted when the line drops.'}
-        </p>
-        <div className="flex items-end gap-1.5 h-24">
-          {merged.slice(-24).map((p, i) => {
-            const h = 12 + ((p.score - min) / range) * 76
-            const g = getGradeInfo(p.score)
-            return <div key={i} className="flex-1 rounded-t min-w-[6px]" style={{ height: `${h}%`, background: g.color, opacity: 0.4 + 0.6 * (i / Math.max(merged.length - 1, 1)) }} title={`${p.score}`} />
-          })}
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Score over time</h3>
+          <span className="font-mono text-[11.5px] text-text-muted">latest <b style={{ color: lastG.color }}>{last.score}/100</b></span>
         </div>
+        <p className="text-text-muted text-[13px] mt-1 mb-3">
+          {sparse
+            ? 'First data point recorded. Every re-scan adds to this line — watch the tool to track changes over time.'
+            : 'A living record — every re-scan, not a one-shot. Watch this tool to be alerted the moment the line drops.'}
+        </p>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[90px]" preserveAspectRatio="none" aria-hidden="true">
+          {/* fixed 0/50/100 gridlines so the scale is clear */}
+          {[0, 50, 100].map((g) => (
+            <g key={g}>
+              <line x1={PAD} y1={y(g)} x2={W - PAD} y2={y(g)} stroke="currentColor" className="text-border" strokeWidth="0.5" opacity="0.5" />
+            </g>
+          ))}
+          {!sparse && <polyline points={line} fill="none" stroke={lastG.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
+          {pts.map((p, i) => {
+            const g = getGradeInfo(p.score)
+            return <circle key={i} cx={x(i)} cy={y(p.score)} r={i === pts.length - 1 ? 4 : 2.5} fill={g.color} />
+          })}
+        </svg>
+        <div className="font-mono text-[10.5px] text-text-muted/60 mt-1">← older · newer → · scale 0–100</div>
       </div>
     </Reveal>
   )

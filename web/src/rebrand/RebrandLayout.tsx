@@ -265,7 +265,7 @@ export default function RebrandLayout() {
           </div>
           <div className="mt-6 flex items-center justify-between gap-4 flex-wrap">
             <div className="font-mono text-[12px] text-text-muted/70">
-              A trust score you can verify. · © {new Date().getFullYear()} AgentAvow
+              A trust score you can verify · © {new Date().getFullYear()} AgentAvow
             </div>
             <div className="flex items-center gap-5">
               <a href="https://github.com/agentgraph-co/agentgraph" target="_blank" rel="noopener noreferrer" className="text-text-muted hover:text-text transition-colors" aria-label="GitHub">

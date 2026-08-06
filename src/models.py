@@ -2385,6 +2385,27 @@ class ToolWatch(Base):
     )
 
 
+class AlertWebhook(Base):
+    """Per-account webhook that receives grade-change alerts for the user's watched
+    tools. The daily re-scan loop POSTs here when a watched tool's grade drops or its
+    signed definition changes — webhook alert-delivery alongside email/in-app."""
+
+    __tablename__ = "alert_webhooks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    url = Column(String(512), nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_delivery_at = Column(DateTime(timezone=True), nullable=True)
+    last_status = Column(Integer, nullable=True)
+
+
 class CommunityScan(Base):
     """A tool someone scanned on-demand — persisted so the catalog grows beyond the
     static launch corpus. Upserted on every fresh scan; surfaced as the 'community'

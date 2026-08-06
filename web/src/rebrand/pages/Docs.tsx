@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import Markdown from 'react-markdown'
 import checkGuide from '../docs/check-guide.md?raw'
 import trustBadges from '../docs/trust-badges.md?raw'
@@ -16,7 +17,15 @@ const DOCS = [
   { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations },
 ]
 
-const SOON = ['Scan catalog', 'SDK & CLI', 'Integrations', 'Standards (CTEF)', 'Platform (social)']
+// Real destinations that already exist (were "coming at launch" placeholders).
+const MORE: [string, string][] = [
+  ['Scan catalog', '/rebrand/browse'],
+  ['How it works', '/rebrand/how-it-works'],
+  ['Standards & research', '/rebrand/research'],
+  ['API reference', '/api/v1/redoc'],
+]
+// Genuinely not shipped yet.
+const SOON = ['SDK & CLI', 'GitHub Action']
 
 const PROSE = [
   '[&_h1]:text-3xl [&_h1]:font-extrabold [&_h1]:tracking-tight [&_h1]:mb-2',
@@ -54,11 +63,18 @@ export default function RebrandDocs() {
             </button>
           ))}
         </nav>
-        <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mt-6 mb-2">Coming at launch</div>
+        <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mt-6 mb-2">More</div>
+        <nav className="flex flex-col gap-1">
+          {MORE.map(([label, href]) => (
+            href.startsWith('/api')
+              ? <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label} ↗</a>
+              : <Link key={label} to={href} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</Link>
+          ))}
+        </nav>
+        <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mt-5 mb-2">Coming soon</div>
         <div className="flex flex-col gap-1 opacity-50">
           {SOON.map((s) => <span key={s} className="text-[13.5px] px-3 py-1.5 text-text-muted">{s}</span>)}
         </div>
-        <a href="/api/v1/redoc" className="inline-block mt-6 text-[13px] text-primary-light hover:text-primary px-3">API reference ↗</a>
       </aside>
 
       <article className={`min-w-0 ${PROSE}`}>

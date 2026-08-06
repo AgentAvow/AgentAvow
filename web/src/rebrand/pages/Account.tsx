@@ -31,6 +31,57 @@ interface Notif {
   created_at: string
 }
 
+interface WebhookState { url: string | null; active: boolean; last_status: number | null }
+
+/** Alert webhook — POST grade-change alerts to a URL (Slack/CI/your app). */
+function AlertWebhook() {
+  const qc = useQueryClient()
+  const [url, setUrl] = useState('')
+  const [testResult, setTestResult] = useState<string | null>(null)
+  const { data } = useQuery({
+    queryKey: ['rebrand-webhook'],
+    queryFn: async () => (await api.get<WebhookState>('/account/alert-webhook')).data,
+  })
+  const save = useMutation({
+    mutationFn: async () => (await api.put('/account/alert-webhook', { url: url.trim() })).data,
+    onSuccess: () => { setUrl(''); qc.invalidateQueries({ queryKey: ['rebrand-webhook'] }) },
+  })
+  const remove = useMutation({
+    mutationFn: () => api.delete('/account/alert-webhook'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rebrand-webhook'] }),
+  })
+  const test = useMutation({
+    mutationFn: async () => (await api.post<{ delivered: boolean; status: number }>('/account/alert-webhook/test')).data,
+    onSuccess: (d) => setTestResult(d.delivered ? `Delivered ✓ (HTTP ${d.status})` : `Failed (HTTP ${d.status})`),
+  })
+  const current = data?.url
+  return (
+    <div className="mt-10">
+      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Alert webhook</h2>
+      <p className="text-text-muted text-[13px] mb-3">Get grade-change alerts POSTed to a URL — Slack, your CI, your app — in addition to email.</p>
+      {current ? (
+        <div className="glass rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="font-mono text-[13px] break-all">{current}</div>
+            {data?.last_status != null && <div className="text-[11.5px] text-text-muted">last delivery: HTTP {data.last_status}</div>}
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={() => { setTestResult(null); test.mutate() }} disabled={test.isPending} className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light">{test.isPending ? 'Testing…' : 'Send test'}</button>
+            <button onClick={() => remove.mutate()} className="text-[12px] text-text-muted hover:text-danger">Remove</button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={(e) => { e.preventDefault(); save.mutate() }} className="flex gap-2">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-app.com/webhook" type="url"
+            className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
+          <button type="submit" disabled={save.isPending} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">Save</button>
+        </form>
+      )}
+      {testResult && <div className="mt-2 text-[12.5px] text-text-muted">{testResult}</div>}
+    </div>
+  )
+}
+
 interface ApiKey { id: string; label: string; created_at: string | null }
 
 /** Developer API keys — create (shown once), list, revoke. */
@@ -190,6 +241,9 @@ export default function RebrandAccount() {
           </RevealStagger>
         )}
       </div>
+
+      {/* alert delivery */}
+      <AlertWebhook />
 
       {/* developer API keys */}
       <ApiKeys />

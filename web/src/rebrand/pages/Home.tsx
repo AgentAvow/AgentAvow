@@ -180,33 +180,7 @@ export default function RebrandHome() {
         </Reveal>
       </section>
 
-      {/* ③ TWO-AUDIENCE FORK — styled to stand out */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14">
-        <Reveal className="grid md:grid-cols-2 gap-4">
-          <Link to="/rebrand/browse" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-primary/60 relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/10 blur-2xl group-hover:bg-primary/20 transition-colors" />
-            <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Checking a tool</div>
-            <h3 className="text-xl font-bold">Browse the trust catalog</h3>
-            <p className="text-text-muted text-[14.5px] flex-1">
-              See tools ranked by grade before you connect one — with the exact reason for each score, not a
-              star rating.
-            </p>
-            <span className="mt-2 self-start text-[14.5px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform">Browse the catalog →</span>
-          </Link>
-          <Link to="/rebrand/badge" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-accent/60 relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-accent/10 blur-2xl group-hover:bg-accent/20 transition-colors" />
-            <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Building a tool</div>
-            <h3 className="text-xl font-bold">Get a signed badge</h3>
-            <p className="text-text-muted text-[14.5px] flex-1">
-              Drop a signed trust badge in your README in one line. Every viewer can verify the grade — and
-              gate your CI on it.
-            </p>
-            <span className="mt-2 self-start text-[14.5px] font-semibold text-accent group-hover:translate-x-1 transition-transform">Get your badge →</span>
-          </Link>
-        </Reveal>
-      </section>
-
-      {/* ④ SIGNED RESULT EXAMPLE — the trust score, verifiable */}
+      {/* ④→② SIGNED RESULT EXAMPLE — moved up, right below the scan count */}
       <section id="proof" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
           <div className="text-center max-w-[56ch] mx-auto">
@@ -250,6 +224,57 @@ export default function RebrandHome() {
         </Reveal>
       </section>
 
+      {/* ③ TWO-AUDIENCE FORK — checking a tool / building a tool */}
+      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal className="grid md:grid-cols-2 gap-4">
+          <Link to="/rebrand/browse" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-primary/60 relative overflow-hidden">
+            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/10 blur-2xl group-hover:bg-primary/20 transition-colors" />
+            <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Checking a tool</div>
+            <h3 className="text-xl font-bold">Browse the trust catalog</h3>
+            <p className="text-text-muted text-[14.5px] flex-1">
+              See tools ranked by grade before you connect one — with the exact reason for each score, not a
+              star rating.
+            </p>
+            <span className="mt-2 self-start text-[14.5px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform">Browse the catalog →</span>
+          </Link>
+          <Link to="/rebrand/badge" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-accent/60 relative overflow-hidden">
+            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-accent/10 blur-2xl group-hover:bg-accent/20 transition-colors" />
+            <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Building a tool</div>
+            <h3 className="text-xl font-bold">Get a signed badge</h3>
+            <p className="text-text-muted text-[14.5px] flex-1">
+              Drop a signed trust badge in your README in one line. Every viewer can verify the grade — and
+              gate your CI on it.
+            </p>
+            <span className="mt-2 self-start text-[14.5px] font-semibold text-accent group-hover:translate-x-1 transition-transform">Get your badge →</span>
+          </Link>
+        </Reveal>
+      </section>
+
+      {/* ⑧→ STAY SAFE OVER TIME — moved right below the two audience cards */}
+      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal>
+          <div className="text-center max-w-[56ch] mx-auto">
+            <Eyebrow>Stay safe over time</Eyebrow>
+            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">A tool is only safe until it <span className="gradient-text">changes</span>.</h2>
+            <p className="mt-3 text-text-muted">Vetting once isn't enough — tools get updated, and a clean scan can quietly go bad. Two ways to never get caught by it.</p>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4 mt-8">
+            <div className="glass rounded-2xl p-7 flex flex-col">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
+              <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a grade drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
+              <Link to="/rebrand/login" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
+            </div>
+            <div className="glass rounded-2xl p-7 flex flex-col">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>
+              <h3 className="mt-2 text-xl font-semibold">Add to your CI</h3>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Run the scan on every pull request with the GitHub Action. Gate merges on a minimum grade so a dependency can never silently regress in your pipeline.</p>
+              <Link to="/rebrand/badge" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to your CI →</Link>
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
       {/* ⑤ HOW IT WORKS — moved above browse */}
       <section id="how" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
@@ -276,29 +301,30 @@ export default function RebrandHome() {
       {/* ⑤b THREE AXES — where AgentAvow fits (identity kept on the homepage as reference) */}
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
-          <div className="max-w-[58ch]">
-            <Eyebrow>The three axes of agent trust</Eyebrow>
-            <h2 className="mt-3 text-2xl md:text-3xl font-bold">Identity and authorization are handled. The tool it connects to isn't.</h2>
-            <p className="mt-3 text-text-muted">A perfectly identified, fully authorized agent can still connect to a poisoned tool. That third axis is the one we own.</p>
+          <div className="max-w-[60ch]">
+            <Eyebrow>Where AgentAvow fits</Eyebrow>
+            <h2 className="mt-3 text-2xl md:text-3xl font-bold">Identity and authorization are being solved. The tool it connects to isn't.</h2>
+            <p className="mt-3 text-text-muted">A perfectly identified, fully authorized agent can still connect to a poisoned tool. We build <em>on</em> the identity and authorization work — interoperating with those standards rather than reinventing them — and own the third axis: is the thing it connects to actually safe, and can you prove it?</p>
           </div>
           <div className="grid md:grid-cols-3 gap-4 mt-8">
             <div className="glass rounded-2xl p-6">
               <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Axis 01 · Identity</div>
               <h3 className="mt-2 text-lg font-semibold">Who's behind this agent?</h3>
-              <p className="mt-2 text-text-muted text-[14px]">Verifiable identity + provenance — DIDs, operator accountability.</p>
+              <p className="mt-2 text-text-muted text-[14px]">Verifiable identity + provenance — DIDs, operator accountability. Solved by the identity standards we plug into, not compete with.</p>
             </div>
             <div className="glass rounded-2xl p-6">
               <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Axis 02 · Authorization</div>
               <h3 className="mt-2 text-lg font-semibold">Is it allowed to act?</h3>
-              <p className="mt-2 text-text-muted text-[14px]">Permission + policy for what an agent may do — OAuth-style controls.</p>
+              <p className="mt-2 text-text-muted text-[14px]">Permission + policy for what an agent may do — OAuth-style controls, handled by the authorization layer.</p>
             </div>
             <div className="glass card-hover rounded-2xl p-6 border-l-4 border-primary relative overflow-hidden">
               <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/15 blur-2xl" />
               <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Axis 03 · Tool-safety</div>
               <h3 className="mt-2 text-lg font-semibold gradient-text">Is what it connects to safe?</h3>
-              <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses. This is AgentAvow.</p>
+              <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses — graded and <strong>signed so you can verify it</strong>. This is AgentAvow.</p>
             </div>
           </div>
+          <p className="mt-5 text-[14px] text-text-muted">Our evidence format and conformance vectors are public and built in the open with the agent-trust standards community. <Link to="/rebrand/how-it-works" className="text-primary-light hover:text-primary font-semibold">See how it works & who we build with →</Link></p>
         </Reveal>
       </section>
 
@@ -359,30 +385,6 @@ export default function RebrandHome() {
         </Reveal>
       </section>
 
-      {/* ⑧ TWO EARNED PATHS — change alerts + CI gate */}
-      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal>
-          <div className="text-center max-w-[56ch] mx-auto">
-            <Eyebrow>Stay safe over time</Eyebrow>
-            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">A tool is only safe until it <span className="gradient-text">changes</span>.</h2>
-            <p className="mt-3 text-text-muted">Vetting once isn't enough — tools get updated, and a clean scan can quietly go bad. Two ways to never get caught by it.</p>
-          </div>
-          <div className="grid md:grid-cols-2 gap-4 mt-8">
-            <div className="glass rounded-2xl p-7 flex flex-col">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
-              <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a grade drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
-              <Link to="/rebrand/login" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
-            </div>
-            <div className="glass rounded-2xl p-7 flex flex-col">
-              <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>
-              <h3 className="mt-2 text-xl font-semibold">Add to your CI</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Run the scan on every pull request with the GitHub Action. Gate merges on a minimum grade so a dependency can never silently regress in your pipeline.</p>
-              <Link to="/rebrand/badge" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to your CI →</Link>
-            </div>
-          </div>
-        </Reveal>
-      </section>
     </div>
   )
 }
