@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { rp } from '../basePath'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
@@ -71,7 +72,7 @@ export default function RebrandHome() {
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
     const m = input.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
-    navigate(m ? `/rebrand/check/${m[1]}/${m[2]}` : '/rebrand/check')
+    navigate(rp(m ? `/rebrand/check/${m[1]}/${m[2]}` : '/rebrand/check'))
   }
 
   const { data: cat } = useQuery({
@@ -215,7 +216,7 @@ export default function RebrandHome() {
                   </svg>
                   Signed · Ed25519 / JWS
                 </span>
-                {example.repoPath && <Link to={`/rebrand/check/${example.repoPath}`} className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">See the full report →</Link>}
+                {example.repoPath && <Link to={rp(`/rebrand/check/${example.repoPath}`)} className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">See the full report →</Link>}
               </div>
             </div>
           ) : (
@@ -227,7 +228,7 @@ export default function RebrandHome() {
       {/* ③ TWO-AUDIENCE FORK — checking a tool / building a tool */}
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal className="grid md:grid-cols-2 gap-4">
-          <Link to="/rebrand/browse" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-primary/60 relative overflow-hidden">
+          <Link to={rp("/rebrand/browse")} className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-primary/60 relative overflow-hidden">
             <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/10 blur-2xl group-hover:bg-primary/20 transition-colors" />
             <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Checking a tool</div>
             <h3 className="text-xl font-bold">Browse the trust catalog</h3>
@@ -237,7 +238,7 @@ export default function RebrandHome() {
             </p>
             <span className="mt-2 self-start text-[14.5px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform">Browse the catalog →</span>
           </Link>
-          <Link to="/rebrand/badge" className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-accent/60 relative overflow-hidden">
+          <Link to={rp("/rebrand/badge")} className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-accent/60 relative overflow-hidden">
             <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-accent/10 blur-2xl group-hover:bg-accent/20 transition-colors" />
             <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Building a tool</div>
             <h3 className="text-xl font-bold">Get a signed badge</h3>
@@ -263,13 +264,13 @@ export default function RebrandHome() {
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
               <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a grade drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
-              <Link to="/rebrand/login" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
+              <Link to={rp("/rebrand/login")} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
             </div>
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>
               <h3 className="mt-2 text-xl font-semibold">Add to your CI</h3>
               <p className="mt-2 text-text-muted text-[14.5px] flex-1">Run the scan on every pull request with the GitHub Action. Gate merges on a minimum grade so a dependency can never silently regress in your pipeline.</p>
-              <Link to="/rebrand/badge" className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to your CI →</Link>
+              <Link to={rp("/rebrand/badge")} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to your CI →</Link>
             </div>
           </div>
         </Reveal>
@@ -324,7 +325,7 @@ export default function RebrandHome() {
               <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses — graded and <strong>signed so you can verify it</strong>. This is AgentAvow.</p>
             </div>
           </div>
-          <p className="mt-5 text-[14px] text-text-muted">Our evidence format and conformance vectors are public and built in the open with the agent-trust standards community. <Link to="/rebrand/how-it-works" className="text-primary-light hover:text-primary font-semibold">See how it works & who we build with →</Link></p>
+          <p className="mt-5 text-[14px] text-text-muted">Our evidence format and conformance vectors are public and built in the open with the agent-trust standards community. <Link to={rp("/rebrand/how-it-works")} className="text-primary-light hover:text-primary font-semibold">See how it works & who we build with →</Link></p>
         </Reveal>
       </section>
 
@@ -342,7 +343,7 @@ export default function RebrandHome() {
                   const { display, repoPath } = rowIdentity(row)
                   const g = getGradeInfo(row.trust_score as number)
                   return (
-                    <Link key={display} to={repoPath ? `/rebrand/check/${repoPath}` : '/rebrand/browse'} className="glass card-hover rounded-xl p-[18px] block">
+                    <Link key={display} to={rp(repoPath ? `/rebrand/check/${repoPath}` : '/rebrand/browse')} className="glass card-hover rounded-xl p-[18px] block">
                       <div className="flex items-center justify-between gap-2.5">
                         <span className="font-mono text-[13.5px] break-all">{display}</span>
                         <span className={`font-extrabold text-[13px] px-2.5 py-0.5 rounded-lg ${g.textClass} ${g.bgClass}`}>{g.grade}</span>
@@ -355,7 +356,7 @@ export default function RebrandHome() {
                   <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[86px]" />
                 ))}
           </div>
-          <div className="mt-6"><Link to="/rebrand/browse" className="text-[14px] font-semibold text-primary-light hover:text-primary">Browse the full catalog →</Link></div>
+          <div className="mt-6"><Link to={rp("/rebrand/browse")} className="text-[14px] font-semibold text-primary-light hover:text-primary">Browse the full catalog →</Link></div>
         </Reveal>
       </section>
 
@@ -379,7 +380,7 @@ export default function RebrandHome() {
             </div>
             <div className="min-w-0">
               <p className="text-text-muted text-[14.5px]">The badge regenerates on every view, so it never goes stale. It's signed and links back to a full, verifiable report — no account required to mint one.</p>
-              <Link to="/rebrand/badge" className="inline-block mt-4 font-mono text-[13px] text-primary-light hover:text-primary">Wire it into CI with the GitHub Action · SDK · CLI →</Link>
+              <Link to={rp("/rebrand/badge")} className="inline-block mt-4 font-mono text-[13px] text-primary-light hover:text-primary">Wire it into CI with the GitHub Action · SDK · CLI →</Link>
             </div>
           </div>
         </Reveal>

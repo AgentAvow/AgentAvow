@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { rp } from '../basePath'
 import { useAuth } from '../../hooks/useAuth'
 
 /**
@@ -28,7 +29,7 @@ export default function RebrandLogin() {
       } else {
         await login(email, password)
       }
-      navigate('/rebrand')
+      navigate(rp('/rebrand'))
     } catch {
       setError(mode === 'signup'
         ? 'Could not create your account — that email may already be registered.'

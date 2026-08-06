@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { rp } from '../basePath'
 import { badgeUrl } from '../../lib/scanApi'
 import { useRotatingPlaceholder } from '../lib/hooks'
 
@@ -36,7 +37,7 @@ export default function RebrandBadge() {
     setTimeout(() => setCopied(false), 1400)
   }
 
-  const scan = () => navigate(owner && name ? `/rebrand/check/${owner}/${name}` : '/rebrand/check')
+  const scan = () => navigate(owner && name ? rp(`/rebrand/check/${owner}/${name}`) : rp('/rebrand/check'))
   const hint = useRotatingPlaceholder(REPO_HINTS)
 
   return (

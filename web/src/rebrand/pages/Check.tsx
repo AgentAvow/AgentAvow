@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
+import { rp } from '../basePath'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, badgeUrl, publicApi } from '../../lib/scanApi'
@@ -49,7 +50,7 @@ function WatchButton({ owner, repo }: { owner: string; repo: string }) {
   const [watching, setWatching] = useState(false)
   const mutation = useMutation({ mutationFn: () => api.post('/watches', { owner, repo }), onSuccess: () => setWatching(true) })
   if (!user) {
-    return <Link to="/rebrand/login" className="text-[13px] font-semibold px-3.5 py-1.5 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">+ Watch this tool</Link>
+    return <Link to={rp("/rebrand/login")} className="text-[13px] font-semibold px-3.5 py-1.5 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">+ Watch this tool</Link>
   }
   return (
     <button onClick={() => !watching && mutation.mutate()} disabled={watching || mutation.isPending}
@@ -173,7 +174,7 @@ function Hero() {
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const go = () => {
     const m = value.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
-    if (m) navigate(`/rebrand/check/${m[1]}/${m[2]}`)
+    if (m) navigate(rp(`/rebrand/check/${m[1]}/${m[2]}`))
   }
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
@@ -273,7 +274,7 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
         <div className="glass rounded-2xl p-8">
           <h2 className="text-xl font-semibold">Couldn't scan {owner}/{repo}</h2>
           <p className="mt-2 text-text-muted text-[14px]">The scanner didn't return a result. It may be a private repo, or the scan service is busy. Try a repo already in the catalog, or check back shortly.</p>
-          <Link to="/rebrand/browse" className="inline-block mt-5 text-[13.5px] font-semibold text-primary-light hover:text-primary">Browse scored tools →</Link>
+          <Link to={rp("/rebrand/browse")} className="inline-block mt-5 text-[13.5px] font-semibold text-primary-light hover:text-primary">Browse scored tools →</Link>
         </div>
       </div>
     )
@@ -401,7 +402,7 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
           <p className="mt-1 text-text-muted text-[14px] max-w-[62ch]">Every result carries a cryptographic signature you can verify offline against our public keys. If anyone tampers with the grade, verification fails. That's the difference between a badge and a signature.</p>
           <div className="mt-3 flex gap-4 flex-wrap">
             <a href="https://agentgraph.co/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-primary-light hover:text-primary">Public keys (JWKS) →</a>
-            <Link to="/rebrand/how-it-works" className="text-[13px] font-semibold text-primary-light hover:text-primary">How verification works →</Link>
+            <Link to={rp("/rebrand/how-it-works")} className="text-[13px] font-semibold text-primary-light hover:text-primary">How verification works →</Link>
           </div>
         </div>
       </Reveal>
@@ -416,7 +417,7 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
             <h3 className="text-[15px] font-bold">Own this tool?</h3>
             <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get a fix-it report, respond to findings, scan it privately, and take ownership of how it appears on AgentAvow.</p>
           </div>
-          <Link to={`/rebrand/claim?owner=${owner}&repo=${repo}`} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
+          <Link to={rp(`/rebrand/claim?owner=${owner}&repo=${repo}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
         </div>
       </Reveal>
 

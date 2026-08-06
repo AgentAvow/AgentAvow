@@ -1,4 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
+import { rp } from '../basePath'
 
 /**
  * Rebrand Legal — real clauses ported from the existing agentgraph.co legal pages,
@@ -69,7 +70,7 @@ export default function RebrandLegal() {
         {SECTIONS.map((sec) => (
           <Link
             key={sec.path}
-            to={`/rebrand/legal/${sec.path}`}
+            to={rp(`/rebrand/legal/${sec.path}`)}
             className={`text-[14px] px-3 py-2 rounded-lg transition-colors ${
               key === sec.path ? 'bg-primary/10 text-primary-light font-medium' : 'text-text-muted hover:text-text hover:bg-surface'
             }`}

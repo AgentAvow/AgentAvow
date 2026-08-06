@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { rp } from '../basePath'
 import { Reveal, RevealStagger } from '../components/motion'
 import { DualScore } from '../components/DualScore'
 import { VerifyDemo } from '../components/VerifyDemo'
@@ -128,7 +129,7 @@ export default function RebrandHowItWorks() {
 
       <Reveal>
         <div className="mt-12 text-center">
-          <Link to="/rebrand/check" className="inline-block font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Check a tool now →</Link>
+          <Link to={rp("/rebrand/check")} className="inline-block font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Check a tool now →</Link>
         </div>
       </Reveal>
     </div>

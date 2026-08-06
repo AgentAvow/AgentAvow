@@ -4,6 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { HelmetProvider } from 'react-helmet-async'
 import * as Sentry from '@sentry/react'
 import { AuthProvider, useAuth } from './hooks/useAuth'
+import { REBRAND_BASE } from './rebrand/basePath'
+
+// At cutover (VITE_CUTOVER=true) the rebrand becomes the root site and the old
+// pages it replaces step aside. Off (default) → everything is exactly as today.
+const CUTOVER = REBRAND_BASE === ''
 import Layout from './components/Layout'
 import { ToastProvider } from './components/Toasts'
 import { LiveUpdates } from './components/LiveUpdates'
@@ -150,8 +155,10 @@ function AppRoutes() {
       <ScrollToTop />
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
+          {!CUTOVER && <Route path="/" element={<Home />} />}
+          {/* keep the old homepage reachable post-cutover (Kenne wants to revive it) */}
+          {CUTOVER && <Route path="/legacy-home" element={<Home />} />}
+          {!CUTOVER && <Route path="/login" element={<Login />} />}
           <Route path="/register" element={<Register />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
@@ -172,20 +179,20 @@ function AppRoutes() {
           <Route path="/evolution/:entityId" element={<Evolution />} />
           <Route path="/discover" element={<Discover />} />
           <Route path="/agent/:entityId" element={<AgentRedirect />} />
-          <Route path="/legal/:section" element={<Legal />} />
+          {!CUTOVER && <Route path="/legal/:section" element={<Legal />} />}
           <Route path="/badges" element={<Badges />} />
           <Route path="/bot-onboarding" element={<BotOnboarding />} />
           <Route path="/developers" element={<Developers />} />
-          <Route path="/docs" element={<DocsHub />} />
-          <Route path="/docs/:section" element={<DocsHub />} />
+          {!CUTOVER && <Route path="/docs" element={<DocsHub />} />}
+          {!CUTOVER && <Route path="/docs/:section" element={<DocsHub />} />}
           <Route path="/faq" element={<FAQ />} />
           <Route path="/sandbox" element={<Sandbox />} />
-          <Route path="/check" element={<Check />} />
-          <Route path="/check/:owner/:repo" element={<Check />} />
+          {!CUTOVER && <Route path="/check" element={<Check />} />}
+          {!CUTOVER && <Route path="/check/:owner/:repo" element={<Check />} />}
           <Route path="/scans" element={<Scans />} />
           <Route path="/x402" element={<X402Explorer />} />
           <Route path="/state-of-agent-security-2026" element={<StateOfAgentSecurity2026 />} />
-          <Route path="/research" element={<Research />} />
+          {!CUTOVER && <Route path="/research" element={<Research />} />}
           {/* Protected routes — require authentication */}
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/marketplace/create" element={<ProtectedRoute><CreateListing /></ProtectedRoute>} />
@@ -202,11 +209,11 @@ function AppRoutes() {
           <Route path="/avatar" element={<ProtectedRoute><AvatarPicker /></ProtectedRoute>} />
           <Route path="/disputes" element={<ProtectedRoute><Disputes /></ProtectedRoute>} />
           <Route path="/webhooks" element={<ProtectedRoute><Webhooks /></ProtectedRoute>} />
-          <Route path="*" element={<NotFound />} />
+          {!CUTOVER && <Route path="*" element={<NotFound />} />}
         </Route>
 
-        {/* AgentAvow rebrand sandbox — isolated tree, own layout, does not touch the live site */}
-        <Route path="/rebrand" element={<RebrandLayout />}>
+        {/* AgentAvow rebrand — /rebrand pre-cutover, the root site at cutover (VITE_CUTOVER=true) */}
+        <Route path={REBRAND_BASE || '/'} element={<RebrandLayout />}>
           <Route index element={<RebrandHome />} />
           <Route path="browse" element={<RebrandBrowse />} />
           <Route path="badge" element={<RebrandBadge />} />

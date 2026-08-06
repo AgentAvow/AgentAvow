@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
@@ -103,7 +104,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
       )}
       {repoPath && (
         <div className="mt-3">
-          <Link to={`/rebrand/check/${repoPath}`} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">Full report →</Link>
+          <Link to={rp(`/rebrand/check/${repoPath}`)} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">Full report →</Link>
         </div>
       )}
     </div>

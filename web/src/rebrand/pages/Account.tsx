@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
+import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import api from '../../lib/api'
@@ -146,7 +147,7 @@ function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; r
         <div className="w-11 h-11 rounded-xl grid place-items-center font-mono text-[10px] text-text-muted bg-surface-hover shrink-0">n/a</div>
       )}
       <div className="min-w-0 flex-1">
-        <Link to={`/rebrand/check/${w.owner}/${w.repo}`} className="font-mono text-[14px] break-all hover:text-primary-light">{w.owner}/{w.repo}</Link>
+        <Link to={rp(`/rebrand/check/${w.owner}/${w.repo}`)} className="font-mono text-[14px] break-all hover:text-primary-light">{w.owner}/{w.repo}</Link>
         <div className="font-mono text-[11.5px] text-text-muted mt-0.5">{w.last_score != null ? `${w.last_score}/100 at last check` : 'awaiting first check'}</div>
       </div>
       <button onClick={onRemove} disabled={removing} className="text-[12px] text-text-muted hover:text-danger transition-colors disabled:opacity-50 shrink-0">
@@ -162,7 +163,7 @@ export default function RebrandAccount() {
   const qc = useQueryClient()
 
   useEffect(() => {
-    if (!authLoading && !user) navigate('/rebrand/login')
+    if (!authLoading && !user) navigate(rp('/rebrand/login'))
   }, [authLoading, user, navigate])
 
   const { data: watches, isLoading: wLoading } = useQuery({
@@ -202,8 +203,8 @@ export default function RebrandAccount() {
             </div>
           </div>
           <div className="flex gap-2 shrink-0">
-            <Link to="/rebrand/claim" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claim a repo</Link>
-            <Link to="/rebrand/check" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check a tool</Link>
+            <Link to={rp("/rebrand/claim")} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claim a repo</Link>
+            <Link to={rp("/rebrand/check")} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check a tool</Link>
           </div>
         </div>
       </Reveal>
@@ -218,7 +219,7 @@ export default function RebrandAccount() {
                 <div key={n.id} className={`glass rounded-xl px-4 py-3 border-l-4 ${n.is_read ? 'border-border' : 'border-warning'}`}>
                   <div className="text-[14px] font-semibold">{n.title}</div>
                   <div className="text-[13px] text-text-muted mt-0.5">{n.body}</div>
-                  {n.reference_id && <Link to={`/rebrand/check/${n.reference_id}`} className="inline-block mt-1.5 text-[12.5px] text-primary-light hover:text-primary">Re-check →</Link>}
+                  {n.reference_id && <Link to={rp(`/rebrand/check/${n.reference_id}`)} className="inline-block mt-1.5 text-[12.5px] text-primary-light hover:text-primary">Re-check →</Link>}
                 </div>
               ))}
             </div>
@@ -234,7 +235,7 @@ export default function RebrandAccount() {
         ) : rows.length === 0 ? (
           <div className="glass rounded-2xl p-8 text-center">
             <p className="text-text-muted text-[14px]">You're not watching any tools yet. Watch a tool and we'll re-scan it and alert you if its grade drops or its signed definition changes.</p>
-            <Link to="/rebrand/browse" className="inline-block mt-4 text-[13.5px] font-semibold text-primary-light hover:text-primary">Browse scored tools →</Link>
+            <Link to={rp("/rebrand/browse")} className="inline-block mt-4 text-[13.5px] font-semibold text-primary-light hover:text-primary">Browse scored tools →</Link>
           </div>
         ) : (
           <RevealStagger className="flex flex-col gap-2" stagger={0.04}>

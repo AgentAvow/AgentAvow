@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
+import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
@@ -85,7 +86,7 @@ export default function RebrandClaim() {
   const [owner, setOwner] = useState(params.get('owner') || '')
   const [repo, setRepo] = useState(params.get('repo') || '')
 
-  useEffect(() => { if (!isLoading && !user) navigate('/rebrand/login') }, [isLoading, user, navigate])
+  useEffect(() => { if (!isLoading && !user) navigate(rp('/rebrand/login')) }, [isLoading, user, navigate])
 
   const { data } = useQuery({
     queryKey: ['rebrand-claims'],
@@ -121,7 +122,7 @@ export default function RebrandClaim() {
         {claims.length > 0 ? (
           <div className="flex flex-col gap-2.5">{claims.map((c) => <ClaimRow key={c.id} c={c} onRefetch={refetch} />)}</div>
         ) : (
-          <div className="text-text-muted text-[13px]">No claims yet. <Link to="/rebrand/browse" className="text-primary-light hover:text-primary">Find your tool →</Link></div>
+          <div className="text-text-muted text-[13px]">No claims yet. <Link to={rp("/rebrand/browse")} className="text-primary-light hover:text-primary">Find your tool →</Link></div>
         )}
       </div>
 

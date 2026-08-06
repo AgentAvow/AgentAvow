@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { rp } from './basePath'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { AtmosphericBackground } from '../components/AtmosphericBackground'
@@ -38,7 +39,7 @@ function AccountMenu() {
   }, [open])
 
   if (!user) {
-    return <Link to="/rebrand/login" className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
+    return <Link to={rp("/rebrand/login")} className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
   }
 
   const count = unread ?? 0
@@ -46,7 +47,7 @@ function AccountMenu() {
 
   return (
     <div className="flex items-center gap-3" ref={ref}>
-      <Link to="/rebrand/account" className="relative p-1 text-text-muted hover:text-text transition-colors" aria-label={`Notifications${count ? `, ${count} unread` : ''}`}>
+      <Link to={rp("/rebrand/account")} className="relative p-1 text-text-muted hover:text-text transition-colors" aria-label={`Notifications${count ? `, ${count} unread` : ''}`}>
         <svg viewBox="0 0 24 24" fill="none" className="w-[19px] h-[19px]"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><path d="M13.7 21a2 2 0 0 1-3.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
         {count > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-accent text-white text-[10px] font-bold tabular-nums">{count > 9 ? '9+' : count}</span>}
       </Link>
@@ -60,10 +61,10 @@ function AccountMenu() {
               <div className="text-[13.5px] font-semibold truncate">{user.display_name}</div>
               <div className="text-[11.5px] text-text-muted truncate">{user.email}</div>
             </div>
-            <Link to="/rebrand/account" onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My watches</Link>
+            <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My watches</Link>
             <a href="/settings" className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</a>
             {user.is_admin && <a href="/admin" className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</a>}
-            <button onClick={() => { setOpen(false); logout(); navigate('/rebrand') }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
+            <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
           </div>
         )}
       </div>
@@ -156,7 +157,7 @@ function MobileNav({ pathname }: { pathname: string }) {
                   <Link to={to} onClick={() => setOpen(false)} className={`block py-2.5 text-[15px] ${pathname === to ? 'text-primary-light font-semibold' : 'text-text-muted'}`}>{label}</Link>
                 </motion.div>
               ))}
-              <Link to="/rebrand/check" onClick={() => setOpen(false)} className="mt-3 text-center font-semibold px-4 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check a tool</Link>
+              <Link to={rp("/rebrand/check")} onClick={() => setOpen(false)} className="mt-3 text-center font-semibold px-4 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check a tool</Link>
             </motion.nav>
           </>
         )}
@@ -230,7 +231,7 @@ export default function RebrandLayout() {
       <Orbs />
       <header className="sticky top-0 z-20 glass border-b border-border/60">
         <div className="max-w-[1080px] mx-auto px-6 h-[62px] flex items-center gap-7">
-          <Link to="/rebrand" aria-label="AgentAvow home">
+          <Link to={rp("/rebrand")} aria-label="AgentAvow home">
             <Wordmark />
           </Link>
           <nav className="hidden md:flex items-center gap-6 ml-2">
@@ -239,7 +240,7 @@ export default function RebrandLayout() {
           <div className="ml-auto flex items-center gap-4">
             <AccountMenu />
             <Link
-              to="/rebrand/check"
+              to={rp("/rebrand/check")}
               className="hidden md:inline-block text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow"
             >
               Check a tool
@@ -271,12 +272,12 @@ export default function RebrandLayout() {
           <div className="flex flex-wrap items-center justify-between gap-5">
             <Wordmark id="ftr" />
             <div className="flex flex-wrap gap-5 text-[14px] text-text-muted">
-              <Link to="/rebrand/docs" className="hover:text-text">Docs</Link>
-              <Link to="/rebrand/research" className="hover:text-text">Research</Link>
+              <Link to={rp("/rebrand/docs")} className="hover:text-text">Docs</Link>
+              <Link to={rp("/rebrand/research")} className="hover:text-text">Research</Link>
               <a href="/api/v1/redoc" target="_blank" rel="noopener noreferrer" className="hover:text-text">API</a>
               <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="hover:text-text">Verify keys</a>
-              <Link to="/rebrand/legal/terms" className="hover:text-text">Terms</Link>
-              <Link to="/rebrand/legal/privacy" className="hover:text-text">Privacy</Link>
+              <Link to={rp("/rebrand/legal/terms")} className="hover:text-text">Terms</Link>
+              <Link to={rp("/rebrand/legal/privacy")} className="hover:text-text">Privacy</Link>
               <a href="/" className="hover:text-text">Community ↗</a>
               <a href="https://github.com/agentgraph-co/agentgraph/issues/new" target="_blank" rel="noopener noreferrer" className="hover:text-text">Feedback ↗</a>
             </div>
