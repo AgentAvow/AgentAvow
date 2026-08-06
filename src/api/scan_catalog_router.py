@@ -20,8 +20,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.rate_limit import rate_limit_reads
+from src.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -183,19 +186,60 @@ def _get_catalog() -> dict[str, Any]:
     return _CATALOG_CACHE
 
 
+async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
+    """On-demand scans users have run, persisted so the catalog grows over time.
+    Best-effort — a DB hiccup must never break the static catalog."""
+    from src.models import CommunityScan
+
+    try:
+        result = await db.execute(
+            select(CommunityScan).order_by(CommunityScan.last_scanned_at.desc()).limit(2000)
+        )
+        out: list[CatalogRow] = []
+        for c in result.scalars().all():
+            out.append(
+                CatalogRow(
+                    surface="community",
+                    name=c.full_name,
+                    full_name=c.full_name,
+                    repository_url=f"https://github.com/{c.full_name}",
+                    trust_score=c.trust_score,
+                    critical=c.critical,
+                    high=c.high,
+                    findings_count=c.findings_count,
+                    primary_language=c.primary_language,
+                )
+            )
+        return out
+    except Exception:
+        logger.warning("community_scans fetch failed", exc_info=True)
+        return []
+
+
 @router.get("", response_model=CatalogResponse, dependencies=[Depends(rate_limit_reads)])
 async def scan_catalog(
-    surface: str | None = Query(None, pattern="^(x402|mcp|npm|pypi|openclaw)$"),
+    surface: str | None = Query(None, pattern="^(x402|mcp|npm|pypi|openclaw|community)$"),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
     sort: str = Query("default", pattern="^(default|score-asc|score-desc|name)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
 ) -> CatalogResponse:
-    """Return a paginated, filterable catalog of every launch scan we've run."""
+    """Return a paginated, filterable catalog of every scan — the static launch
+    corpus plus community (on-demand) scans that grow the dataset over time."""
     catalog = _get_catalog()
     rows: list[CatalogRow] = catalog["rows"]
     summary: CatalogSummary = catalog["summary"]
+
+    # Merge in community scans (on-demand scans users ran). Search + the
+    # 'community' tab see them; other single-surface tabs stay the launch corpus.
+    community = await _community_rows(db)
+    summary = summary.model_copy(deep=True)
+    summary.by_surface = {**summary.by_surface, "community": len(community)}
+    summary.total_scans += len(community)
+    if community and (surface in (None, "community") or q):
+        rows = rows + community
 
     filtered = rows
     if surface:

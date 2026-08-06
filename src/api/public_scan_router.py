@@ -256,6 +256,48 @@ async def _set_cached(owner: str, repo: str, data: dict) -> None:
     await cache.set(f"{_CACHE_PREFIX}{owner}/{repo}", data, ttl=_CACHE_TTL)
 
 
+async def _capture_community_scan(
+    owner: str, repo: str, data: dict, db: AsyncSession
+) -> None:
+    """Persist an on-demand scan so the browsable catalog grows beyond the static
+    launch corpus. Upsert one row per owner/repo (latest scan wins, scan_count++)."""
+    from sqlalchemy import func as safunc
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from src.models import CommunityScan
+
+    findings = data.get("findings") or {}
+    meta = data.get("metadata") or {}
+    lang = (meta.get("primary_language") or None)
+    if lang:
+        lang = lang[:120]
+    values = dict(
+        owner=owner,
+        repo=repo,
+        full_name=f"{owner}/{repo}",
+        trust_score=data.get("trust_score"),
+        critical=findings.get("critical"),
+        high=findings.get("high"),
+        findings_count=findings.get("total"),
+        primary_language=lang,
+        scan_count=1,
+    )
+    stmt = pg_insert(CommunityScan).values(**values).on_conflict_do_update(
+        constraint="uq_community_scan_target",
+        set_=dict(
+            trust_score=values["trust_score"],
+            critical=values["critical"],
+            high=values["high"],
+            findings_count=values["findings_count"],
+            primary_language=lang,
+            last_scanned_at=safunc.now(),
+            scan_count=CommunityScan.scan_count + 1,
+        ),
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
 _SCAN_FRESHNESS_TTL = 604800  # 7 days — scan evidence freshness (design §3)
 
 
@@ -645,6 +687,13 @@ async def public_scan(
     data = _scan_result_to_dict(result)
     await _set_cached(owner, repo, data)
 
+    # Persist to the community catalog so on-demand scans grow the browsable
+    # dataset (best-effort — never let this break a scan response).
+    try:
+        await _capture_community_scan(owner, repo, data, db)
+    except Exception:
+        logger.debug("community scan capture failed for %s", full_name, exc_info=True)
+
     # Notify outbound webhooks if score changed (fire-and-forget)
     new_score = data["trust_score"]
     if new_score != old_score:
@@ -962,6 +1011,32 @@ async def scan_badge(
             "Access-Control-Allow-Origin": "*",
         },
     )
+
+
+@router.get("/{owner}/{repo}/checks", dependencies=[Depends(rate_limit_reads)])
+async def scan_checks(owner: str, repo: str, db: AsyncSession = Depends(get_db)) -> dict:
+    """Real adoption signals: how many times this tool has been checked on AgentAvow
+    and how many users are watching it. Increments the check counter on each call."""
+    from sqlalchemy import func as safunc
+    from sqlalchemy import select
+
+    from src.models import ToolWatch
+
+    checks = 0
+    try:
+        from src.redis_client import get_redis
+
+        checks = int(await get_redis().incr(f"checks:{owner}/{repo}"))
+    except Exception:
+        checks = 0
+    watchers = await db.scalar(
+        select(safunc.count()).select_from(ToolWatch).where(
+            ToolWatch.owner == owner,
+            ToolWatch.repo == repo,
+            ToolWatch.active.is_(True),
+        )
+    ) or 0
+    return {"checks": checks, "watchers": int(watchers)}
 
 
 def _verdict_text(grade: str) -> str:

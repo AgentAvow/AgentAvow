@@ -2385,5 +2385,30 @@ class ToolWatch(Base):
     )
 
 
+class CommunityScan(Base):
+    """A tool someone scanned on-demand — persisted so the catalog grows beyond the
+    static launch corpus. Upserted on every fresh scan; surfaced as the 'community'
+    surface in the browse catalog. One row per owner/repo (latest scan wins)."""
+
+    __tablename__ = "community_scans"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner = Column(String(255), nullable=False)
+    repo = Column(String(255), nullable=False)
+    full_name = Column(String(512), nullable=False, index=True)
+    trust_score = Column(Integer, nullable=True)
+    critical = Column(Integer, nullable=True)
+    high = Column(Integer, nullable=True)
+    findings_count = Column(Integer, nullable=True)
+    primary_language = Column(String(120), nullable=True)
+    scan_count = Column(Integer, default=1, nullable=False)
+    first_scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("owner", "repo", name="uq_community_scan_target"),
+    )
+
+
 # Import marketing models so Alembic can discover them
 from src.marketing.models import MarketingCampaign, MarketingPost  # noqa: E402, F401
