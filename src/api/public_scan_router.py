@@ -297,6 +297,23 @@ async def _capture_community_scan(
     await db.execute(stmt)
     await db.commit()
 
+    # Append a score-history point (Redis list, capped) so the timeline grows
+    # over time — each fresh scan / daily re-scan adds a datapoint.
+    if values["trust_score"] is not None:
+        try:
+            import json as _json
+            import time as _time
+
+            from src.redis_client import get_redis
+
+            r = get_redis()
+            key = f"scorehist:{owner}/{repo}"
+            point = _json.dumps({"score": values["trust_score"], "at": int(_time.time())})
+            await r.rpush(key, point)
+            await r.ltrim(key, -60, -1)
+        except Exception:
+            pass
+
 
 _SCAN_FRESHNESS_TTL = 604800  # 7 days — scan evidence freshness (design §3)
 
@@ -1013,20 +1030,63 @@ async def scan_badge(
     )
 
 
+async def _github_stars(owner: str, repo: str) -> int | None:
+    """Public star count for a repo (no claim needed). Cached 24h in Redis."""
+    from src.redis_client import get_redis
+
+    key = f"stars:{owner}/{repo}"
+    try:
+        r = get_redis()
+        cached = await r.get(key)
+        if cached is not None:
+            return int(cached)
+    except Exception:
+        r = None
+    try:
+        import httpx
+
+        from src.github_auth import get_github_token
+
+        headers = {"Accept": "application/vnd.github+json"}
+        token = await get_github_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        async with httpx.AsyncClient(timeout=6) as client:
+            resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
+        if resp.status_code != 200:
+            return None
+        stars = int(resp.json().get("stargazers_count", 0))
+        if r is not None:
+            await r.set(key, stars, ex=86400)
+        return stars
+    except Exception:
+        return None
+
+
 @router.get("/{owner}/{repo}/checks", dependencies=[Depends(rate_limit_reads)])
 async def scan_checks(owner: str, repo: str, db: AsyncSession = Depends(get_db)) -> dict:
-    """Real adoption signals: how many times this tool has been checked on AgentAvow
-    and how many users are watching it. Increments the check counter on each call."""
+    """Real adoption signals — AgentAvow check count, active watchers, GitHub stars
+    (public, no claim needed), and the score-history timeline. Increments checks."""
+    import json as _json
+
     from sqlalchemy import func as safunc
     from sqlalchemy import select
 
     from src.models import ToolWatch
 
     checks = 0
+    history: list[dict] = []
     try:
         from src.redis_client import get_redis
 
-        checks = int(await get_redis().incr(f"checks:{owner}/{repo}"))
+        r = get_redis()
+        checks = int(await r.incr(f"checks:{owner}/{repo}"))
+        raw = await r.lrange(f"scorehist:{owner}/{repo}", 0, -1)
+        for item in raw:
+            try:
+                history.append(_json.loads(item))
+            except Exception:
+                pass
     except Exception:
         checks = 0
     watchers = await db.scalar(
@@ -1036,7 +1096,13 @@ async def scan_checks(owner: str, repo: str, db: AsyncSession = Depends(get_db))
             ToolWatch.active.is_(True),
         )
     ) or 0
-    return {"checks": checks, "watchers": int(watchers)}
+    stars = await _github_stars(owner, repo)
+    return {
+        "checks": checks,
+        "watchers": int(watchers),
+        "stars": stars,
+        "history": history,
+    }
 
 
 def _verdict_text(grade: str) -> str:
