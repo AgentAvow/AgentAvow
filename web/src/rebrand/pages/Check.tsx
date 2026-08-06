@@ -415,9 +415,9 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
         <div className="mt-6 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h3 className="text-[15px] font-bold">Own this tool?</h3>
-            <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get a fix-it report, respond to findings, and control how it appears on AgentAvow.</p>
+            <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get a fix-it report, respond to findings, scan it privately, and control how it appears on AgentAvow.</p>
           </div>
-          <Link to="/rebrand/login" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
+          <Link to={`/rebrand/claim?owner=${owner}&repo=${repo}`} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
         </div>
       </Reveal>
 

@@ -2385,6 +2385,33 @@ class ToolWatch(Base):
     )
 
 
+class RepoClaim(Base):
+    """A user's claim of ownership of a repo, verified via a GitHub repo topic. A
+    verified claim unlocks the fix-it report, responding to findings, and private
+    scans. Public-repo ownership proof — no token stored."""
+
+    __tablename__ = "repo_claims"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    owner = Column(String(255), nullable=False)
+    repo = Column(String(255), nullable=False)
+    full_name = Column(String(512), nullable=False)
+    status = Column(String(20), default="pending", nullable=False)  # pending | verified
+    verify_code = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("entity_id", "owner", "repo", name="uq_repo_claim_target"),
+    )
+
+
 class AlertWebhook(Base):
     """Per-account webhook that receives grade-change alerts for the user's watched
     tools. The daily re-scan loop POSTs here when a watched tool's grade drops or its

@@ -22,10 +22,10 @@ const MORE: [string, string][] = [
   ['Scan catalog', '/rebrand/browse'],
   ['How it works', '/rebrand/how-it-works'],
   ['Standards & research', '/rebrand/research'],
+  ['SDK & CLI', 'https://github.com/agentgraph-co/agentgraph/tree/main/sdk'],
+  ['GitHub Action', 'https://github.com/agentgraph-co/agentgraph/tree/main/sdk/github-action'],
   ['API reference', '/api/v1/redoc'],
 ]
-// Genuinely not shipped yet.
-const SOON = ['SDK & CLI', 'GitHub Action']
 
 const PROSE = [
   '[&_h1]:text-3xl [&_h1]:font-extrabold [&_h1]:tracking-tight [&_h1]:mb-2',
@@ -66,15 +66,11 @@ export default function RebrandDocs() {
         <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mt-6 mb-2">More</div>
         <nav className="flex flex-col gap-1">
           {MORE.map(([label, href]) => (
-            href.startsWith('/api')
+            href.startsWith('/api') || href.startsWith('http')
               ? <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label} ↗</a>
               : <Link key={label} to={href} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</Link>
           ))}
         </nav>
-        <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mt-5 mb-2">Coming soon</div>
-        <div className="flex flex-col gap-1 opacity-50">
-          {SOON.map((s) => <span key={s} className="text-[13.5px] px-3 py-1.5 text-text-muted">{s}</span>)}
-        </div>
       </aside>
 
       <article className={`min-w-0 ${PROSE}`}>

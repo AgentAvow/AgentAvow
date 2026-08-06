@@ -201,7 +201,10 @@ export default function RebrandAccount() {
               <a href="/settings" className="text-[12.5px] text-text-muted hover:text-primary-light">Edit profile & avatar in Settings →</a>
             </div>
           </div>
-          <Link to="/rebrand/check" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Check a tool</Link>
+          <div className="flex gap-2 shrink-0">
+            <Link to="/rebrand/claim" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claim a repo</Link>
+            <Link to="/rebrand/check" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check a tool</Link>
+          </div>
         </div>
       </Reveal>
 
