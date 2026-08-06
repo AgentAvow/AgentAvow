@@ -9,7 +9,7 @@ import { publicApi } from '../../lib/scanApi'
  * verification fail — that's the whole point: you can check the math yourself.
  */
 
-const SAMPLE = 'agenttrust/mcp-server'
+const DEFAULT = 'agenttrust/mcp-server'
 
 function b64urlToBytes(s: string): Uint8Array {
   s = s.replace(/-/g, '+').replace(/_/g, '/')
@@ -24,12 +24,19 @@ type State = { status: 'idle' | 'working' | 'ok' | 'fail' | 'unsupported'; detai
 
 export function VerifyDemo() {
   const [state, setState] = useState<State>({ status: 'idle' })
+  const [input, setInput] = useState('')
+  const [target, setTarget] = useState(DEFAULT)
 
-  const { data: scan } = useQuery({
-    queryKey: ['verify-sample', SAMPLE],
-    queryFn: async () => (await publicApi.get<{ jws: string; key_id: string; jwks_url: string }>(`/public/scan/${SAMPLE}`)).data,
+  const { data: scan, isFetching } = useQuery({
+    queryKey: ['verify-sample', target],
+    queryFn: async () => (await publicApi.get<{ jws: string; key_id: string; jwks_url: string }>(`/public/scan/${target}`)).data,
     retry: 0,
   })
+
+  const loadTarget = () => {
+    const m = input.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
+    if (m) { setTarget(`${m[1]}/${m[2]}`); setState({ status: 'idle' }) }
+  }
 
   const run = async (tamper: boolean) => {
     if (!scan?.jws) return
@@ -63,9 +70,18 @@ export function VerifyDemo() {
         <div>
           <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Live verification</div>
           <h3 className="mt-1 text-lg font-bold">Verify a real attestation, right here.</h3>
-          <p className="text-text-muted text-[13.5px] mt-1 max-w-[54ch]">This runs entirely in your browser against our public keys — no server round-trip for the check. Sample: <span className="font-mono">{SAMPLE}</span>.</p>
+          <p className="text-text-muted text-[13.5px] mt-1 max-w-[54ch]">This runs entirely in your browser against our public keys — no server round-trip for the check. Try any tool:</p>
         </div>
       </div>
+
+      {/* pick a tool to verify */}
+      <form onSubmit={(e) => { e.preventDefault(); loadTarget() }} className="mt-3 flex gap-2 items-center rounded-xl border border-border bg-surface p-1.5 pl-3 max-w-[440px]">
+        <span className="font-mono text-[12.5px] text-text-muted shrink-0">github.com/</span>
+        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={target}
+          className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[13px] text-text placeholder:text-text-muted" />
+        <button type="submit" className="text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-primary/80 hover:bg-primary shrink-0">Load</button>
+      </form>
+      <div className="mt-1.5 font-mono text-[11.5px] text-text-muted">verifying: {target}{isFetching && ' · loading…'}</div>
 
       <div className="mt-4 flex gap-2 flex-wrap">
         <button onClick={() => run(false)} disabled={!scan || state.status === 'working'} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">

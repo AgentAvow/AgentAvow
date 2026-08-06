@@ -81,27 +81,28 @@ function GradeRing({ score, grade, hex }: { score: number; grade: string; hex: s
 }
 
 /** Score-history timeline (living record) — reinforces the watchlist. */
-function ScoreHistory({ owner, repo }: { owner: string; repo: string }) {
-  const { data } = useQuery({
-    queryKey: ['rebrand-history', owner, repo],
-    queryFn: async () => (await publicApi.get<{ timeline?: { score: number; date?: string; scanned_at?: string }[] }>(`/public/scan/${owner}/${repo}/history`)).data,
-    retry: 0,
-  })
-  const points = data?.timeline ?? []
-  if (points.length < 2) return null
-  const scores = points.map((p) => p.score)
+function ScoreHistory({ history, current }: { history: { score: number; at?: number }[]; current: number }) {
+  // Merge stored history with the current score; dedupe a trailing duplicate.
+  const merged = [...history]
+  if (!merged.length || merged[merged.length - 1].score !== current) merged.push({ score: current })
+  const scores = merged.map((p) => p.score)
   const max = Math.max(...scores, 100), min = Math.min(...scores, 0)
   const range = max - min || 1
+  const sparse = merged.length < 2
   return (
     <Reveal>
       <div className="mt-6 glass rounded-2xl p-6">
         <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Score history</h3>
-        <p className="text-text-muted text-[13px] mb-3">A living record — every re-scan, not a one-shot snapshot. Watch this tool to get alerted when the line drops.</p>
+        <p className="text-text-muted text-[13px] mb-3">
+          {sparse
+            ? 'First data point recorded. This becomes a living timeline as the tool is re-scanned — watch it to track every change.'
+            : 'A living record — every re-scan, not a one-shot snapshot. Watch this tool to get alerted when the line drops.'}
+        </p>
         <div className="flex items-end gap-1.5 h-24">
-          {points.slice(-24).map((p, i) => {
+          {merged.slice(-24).map((p, i) => {
             const h = 12 + ((p.score - min) / range) * 76
             const g = getGradeInfo(p.score)
-            return <div key={i} className="flex-1 rounded-t" style={{ height: `${h}%`, background: g.color, opacity: 0.35 + 0.65 * (i / points.length) }} title={`${p.score}`} />
+            return <div key={i} className="flex-1 rounded-t min-w-[6px]" style={{ height: `${h}%`, background: g.color, opacity: 0.4 + 0.6 * (i / Math.max(merged.length - 1, 1)) }} title={`${p.score}`} />
           })}
         </div>
       </div>
@@ -109,18 +110,22 @@ function ScoreHistory({ owner, repo }: { owner: string; repo: string }) {
   )
 }
 
-/** Share row — copy link, X, Bluesky. */
+/** Share row — copy link + branded X / Bluesky icons. */
 function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; score: number; grade: string }) {
   const [copied, setCopied] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href : ''
   const text = `${owner}/${repo} scored ${grade} (${score}/100) on AgentAvow — a signed, verifiable trust grade.`
   const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) }
-  const btn = 'text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors'
+  const icon = 'grid place-items-center w-8 h-8 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors'
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <button onClick={copy} className={btn}>{copied ? 'Link copied ✓' : '🔗 Copy link'}</button>
-      <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer" className={btn}>Share on X</a>
-      <a href={`https://bsky.app/intent/compose?text=${encodeURIComponent(text + ' ' + url)}`} target="_blank" rel="noopener noreferrer" className={btn}>Share on Bluesky</a>
+      <button onClick={copy} className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors">{copied ? 'Link copied ✓' : '🔗 Copy link'}</button>
+      <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer" className={icon} aria-label="Share on X">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-[15px] h-[15px]"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+      </a>
+      <a href={`https://bsky.app/intent/compose?text=${encodeURIComponent(text + ' ' + url)}`} target="_blank" rel="noopener noreferrer" className={icon} aria-label="Share on Bluesky">
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-[15px] h-[15px]"><path d="M12 10.8c-1.087-2.114-4.046-6.053-6.798-7.995C2.566.944 1.561 1.266.902 1.565.139 1.908 0 3.08 0 3.768c0 .69.378 5.65.624 6.479.785 2.627 3.6 3.476 6.18 3.232-4.165.712-8.232 2.625-4.412 8.51C5.777 26.373 11.268 21.248 12 17.04c.732 4.208 6.13 9.282 9.608 4.95 3.82-5.886-.247-7.799-4.412-8.511 2.58.244 5.395-.605 6.18-3.232.246-.828.624-5.79.624-6.479 0-.688-.139-1.86-.902-2.203-.659-.299-1.664-.621-4.3 1.24C16.046 4.748 13.087 8.687 12 10.8z"/></svg>
+      </a>
     </div>
   )
 }
@@ -172,13 +177,13 @@ function Hero() {
   )
 }
 
-// Barcode bars (deterministic widths) for the scan window.
-const BARS = [3, 1, 2, 1, 4, 1, 2, 3, 1, 2, 1, 3, 2, 1, 4, 1, 2, 1, 3, 1, 2, 2, 1, 3, 1]
 // Floating binary bits — fixed positions so it's stable across renders.
 const BITS = [
-  { c: '1', l: '8%', d: 0.0 }, { c: '0', l: '22%', d: 0.6 }, { c: '1', l: '38%', d: 1.2 },
-  { c: '0', l: '54%', d: 0.3 }, { c: '1', l: '70%', d: 0.9 }, { c: '0', l: '86%', d: 1.5 },
-  { c: '1', l: '15%', d: 1.8 }, { c: '0', l: '63%', d: 2.1 }, { c: '1', l: '46%', d: 2.4 },
+  { c: '1', l: '6%', d: 0.0 }, { c: '0', l: '18%', d: 0.6 }, { c: '1', l: '30%', d: 1.2 },
+  { c: '0', l: '42%', d: 0.3 }, { c: '1', l: '54%', d: 0.9 }, { c: '0', l: '66%', d: 1.5 },
+  { c: '1', l: '78%', d: 0.4 }, { c: '0', l: '90%', d: 1.1 }, { c: '1', l: '12%', d: 1.8 },
+  { c: '0', l: '36%', d: 2.1 }, { c: '1', l: '60%', d: 2.4 }, { c: '0', l: '84%', d: 0.75 },
+  { c: '1', l: '24%', d: 2.7 }, { c: '0', l: '48%', d: 1.65 }, { c: '1', l: '72%', d: 2.25 },
 ]
 
 /** Fun scanning loader — a barcode reader sweeping up & down over binary rain. */
@@ -201,22 +206,18 @@ function ScanningLoader({ owner, repo }: { owner: string; repo: string }) {
   }, [reduce, phases.length])
   return (
     <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
-      {/* scan window */}
-      <div className="relative w-[220px] h-[132px] mx-auto rounded-xl border border-primary/25 bg-surface/40 overflow-hidden">
+      {/* scan window — borderless, blends into the background */}
+      <div className="relative w-[220px] h-[132px] mx-auto overflow-hidden">
         {/* floating binary rain */}
         {!reduce && BITS.map((b, i) => (
-          <motion.span key={i} className="absolute font-mono text-[12px] text-primary-light/40 select-none" style={{ left: b.l, top: '-14px' }}
-            animate={{ y: [0, 150], opacity: [0, 0.7, 0] }} transition={{ duration: 3, ease: 'linear', repeat: Infinity, delay: b.d }}>
+          <motion.span key={i} className="absolute font-mono text-[13px] text-primary-light/50 select-none" style={{ left: b.l, top: '-14px' }}
+            animate={{ y: [0, 150], opacity: [0, 0.8, 0] }} transition={{ duration: 3, ease: 'linear', repeat: Infinity, delay: b.d }}>
             {b.c}
           </motion.span>
         ))}
-        {/* barcode bars */}
-        <div className="absolute inset-0 flex items-center justify-center gap-[3px] px-4 opacity-70">
-          {BARS.map((w, i) => <div key={i} className="h-16 bg-text/70" style={{ width: `${w}px` }} />)}
-        </div>
         {/* scan line sweeping up & down */}
         {!reduce && (
-          <motion.div className="absolute left-0 right-0 h-[3px] bg-gradient-to-r from-transparent via-primary-light to-transparent shadow-[0_0_12px_2px_rgba(45,212,191,0.6)]"
+          <motion.div className="absolute left-0 right-0 h-[3px] bg-gradient-to-r from-transparent via-primary-light to-transparent shadow-[0_0_16px_3px_rgba(45,212,191,0.55)]"
             animate={{ top: ['6%', '92%', '6%'] }} transition={{ duration: 2.2, ease: 'easeInOut', repeat: Infinity }} />
         )}
       </div>
@@ -244,10 +245,10 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
     queryFn: () => fetchPublicScan(owner, repo),
     retry: 0,
   })
-  // Real adoption signals — increments the check counter, returns watcher count.
+  // Real adoption signals — checks (Redis), watchers, GitHub stars, score history.
   const { data: adoptionData } = useQuery({
     queryKey: ['rebrand-checks', owner, repo],
-    queryFn: async () => (await publicApi.get<{ checks: number; watchers: number }>(`/public/scan/${owner}/${repo}/checks`)).data,
+    queryFn: async () => (await publicApi.get<{ checks: number; watchers: number; stars: number | null; history: { score: number; at?: number }[] }>(`/public/scan/${owner}/${repo}/checks`)).data,
     retry: 0,
     enabled: !!scan,
   })
@@ -272,7 +273,12 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
   const sum = summarize(scan, scan.repo)
   const v = VERDICT_STYLE[sum.verdict]
   const adoption = adoptionData
-    ? { label: `${adoptionData.checks.toLocaleString()} check${adoptionData.checks === 1 ? '' : 's'}`, sub: `${adoptionData.watchers} watching · on AgentAvow` }
+    ? {
+        label: adoptionData.stars != null && adoptionData.stars > 0
+          ? `★ ${adoptionData.stars.toLocaleString()}`
+          : `${adoptionData.checks.toLocaleString()} check${adoptionData.checks === 1 ? '' : 's'}`,
+        sub: `${adoptionData.stars != null && adoptionData.stars > 0 ? `${adoptionData.checks.toLocaleString()} checks · ` : ''}${adoptionData.watchers} watching · on AgentAvow`,
+      }
     : null
 
   return (
@@ -335,7 +341,7 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
       </Reveal>
 
       {/* score history timeline (living record) */}
-      <ScoreHistory owner={owner} repo={repo} />
+      <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} />
 
       {/* findings summary */}
       <RevealStagger className="grid grid-cols-3 gap-3 mt-4" stagger={0.06}>

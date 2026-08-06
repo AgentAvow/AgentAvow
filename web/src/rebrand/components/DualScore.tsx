@@ -37,8 +37,8 @@ export function DualScore({
           </>
         ) : (
           <>
-            <div className="mt-1 text-lg font-bold text-text-muted/60">Coming soon</div>
-            <div className="text-[11px] text-text-muted mt-0.5">downloads · stars · checks — real usage, not opinions</div>
+            <div className="mt-1 text-lg font-bold text-text-muted/70">Just launched</div>
+            <div className="text-[11px] text-text-muted mt-0.5">stars · checks · watchers — real usage, not opinions</div>
           </>
         )}
       </div>

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
+import { publicApi } from '../../lib/scanApi'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
 import { Reveal, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
@@ -87,6 +88,19 @@ export default function RebrandHome() {
     const { display, repoPath } = rowIdentity(row)
     return { row, display, repoPath, g: getGradeInfo(row.trust_score as number) }
   })()
+  // Real adoption for the example card (stars/checks/watchers) — no "coming soon".
+  const { data: exAdopt } = useQuery({
+    queryKey: ['home-ex-adopt', example?.repoPath],
+    queryFn: async () => (await publicApi.get<{ checks: number; watchers: number; stars: number | null }>(`/public/scan/${example!.repoPath}/checks`)).data,
+    enabled: !!example?.repoPath,
+    staleTime: 5 * 60_000,
+  })
+  const exAdoption = exAdopt
+    ? {
+        label: exAdopt.stars != null && exAdopt.stars > 0 ? `★ ${exAdopt.stars.toLocaleString()}` : `${exAdopt.checks.toLocaleString()} checks`,
+        sub: `${exAdopt.watchers} watching · on AgentAvow`,
+      }
+    : null
 
   return (
     <div>
@@ -213,7 +227,7 @@ export default function RebrandHome() {
                   <div className="mt-1 text-[12px] font-semibold gradient-text">a real scan · {example.row.trust_score}/100</div>
                 </div>
               </div>
-              <div className="p-4 border-b border-border/60"><DualScore score={example.row.trust_score as number} /></div>
+              <div className="p-4 border-b border-border/60"><DualScore score={example.row.trust_score as number} adoption={exAdoption} /></div>
               <div className="p-5 flex flex-wrap gap-5 text-[13px] text-text-muted">
                 <span><b className="text-danger tabular-nums">{example.row.critical ?? 0}</b> critical</span>
                 <span><b className="text-warning tabular-nums">{example.row.high ?? 0}</b> high</span>
