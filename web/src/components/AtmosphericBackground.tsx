@@ -146,6 +146,13 @@ function ParallaxHeroFace({ intensity, reducedMotion }: { intensity: Intensity; 
           background: 'radial-gradient(ellipse at center, transparent 20%, var(--color-background) 70%)',
         }}
       />
+      {/* Bottom fade — kills the hard edge where the face graphic ends */}
+      <div
+        className="absolute inset-x-0 bottom-0 h-1/3"
+        style={{
+          background: 'linear-gradient(to bottom, transparent 0%, var(--color-background) 92%)',
+        }}
+      />
     </motion.div>
   )
 }

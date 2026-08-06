@@ -132,8 +132,10 @@ const NAV = [
 function MobileNav({ pathname }: { pathname: string }) {
   const [open, setOpen] = useState(false)
   const reduce = useReducedMotion()
-  const top = open ? { rotate: 45, y: 6 } : { rotate: 0, y: 0 }
-  const bot = open ? { rotate: -45, y: -6 } : { rotate: 0, y: 0 }
+  // lines sit at y=8 and y=16; to form a clean X they must both meet at y=12
+  // (±4) and rotate ±45 about their own centers.
+  const top = open ? { rotate: 45, y: 4 } : { rotate: 0, y: 0 }
+  const bot = open ? { rotate: -45, y: -4 } : { rotate: 0, y: 0 }
   return (
     <div className="md:hidden">
       <button onClick={() => setOpen(!open)} aria-label={open ? 'Close menu' : 'Open menu'} className="p-2 -mr-2 text-text">
@@ -145,9 +147,9 @@ function MobileNav({ pathname }: { pathname: string }) {
       <AnimatePresence>
         {open && (
           <>
-            <motion.div className="fixed inset-0 top-[calc(62px+25px)] bg-background/60 backdrop-blur-sm z-30"
+            <motion.div className="fixed inset-0 top-[62px] bg-background/60 backdrop-blur-sm z-30"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setOpen(false)} />
-            <motion.nav className="fixed left-0 right-0 top-[calc(62px+25px)] z-40 glass border-b border-border/60 px-6 py-4 flex flex-col"
+            <motion.nav className="fixed left-0 right-0 top-[62px] z-40 glass border-b border-border/60 px-6 py-4 flex flex-col"
               initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.22 }}>
               {NAV.map(([to, label], i) => (
                 <motion.div key={to} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.04 * i }}>
@@ -210,11 +212,6 @@ export default function RebrandLayout() {
   return (
     <div className="min-h-screen bg-background text-text">
       <Orbs />
-      {/* prototype ribbon so reviewers know this is the sandbox */}
-      <div className="w-full text-center text-[11px] tracking-wide py-1 bg-primary/10 text-primary-light font-mono">
-        AgentAvow rebrand preview · sandbox at /rebrand · not the live site
-      </div>
-
       <header className="sticky top-0 z-20 glass border-b border-border/60">
         <div className="max-w-[1080px] mx-auto px-6 h-[62px] flex items-center gap-7">
           <Link to="/rebrand" aria-label="AgentAvow home">
@@ -261,6 +258,7 @@ export default function RebrandLayout() {
               <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="hover:text-text">Verify keys</a>
               <Link to="/rebrand/legal/terms" className="hover:text-text">Terms</Link>
               <Link to="/rebrand/legal/privacy" className="hover:text-text">Privacy</Link>
+              <a href="/" className="hover:text-text">Community ↗</a>
               <a href="https://github.com/agentgraph-co/agentgraph/issues/new" target="_blank" rel="noopener noreferrer" className="hover:text-text">Feedback ↗</a>
             </div>
           </div>

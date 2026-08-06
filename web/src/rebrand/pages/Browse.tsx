@@ -15,10 +15,11 @@ import { Reveal, RevealStagger, CountUp } from '../components/motion'
 
 const SURFACES = [
   { key: 'mcp', label: 'MCP servers' },
-  { key: 'openclaw', label: 'Agent skills' },
+  { key: 'openclaw', label: 'OpenClaw skills' },
   { key: 'npm', label: 'npm packages' },
   { key: 'pypi', label: 'Python packages' },
   { key: 'x402', label: 'x402 endpoints' },
+  { key: 'community', label: 'Community' },
 ]
 
 const SORTS = [
@@ -132,7 +133,7 @@ function SummaryStrip({ s }: { s: CatalogSummary }) {
       <StatCard label="Total scans" value={s.total_scans} hint="across 5 surfaces" />
       <StatCard label="x402 endpoints" value={x402Total} hint={s.x402_compliant != null ? `${s.x402_compliant} compliant` : 'payment-gated APIs'} />
       <StatCard label="MCP servers" value={bs.mcp ?? 0} hint={`${bc.mcp ?? 0} critical · ${bh.mcp ?? 0} high`} />
-      <StatCard label="Agent skills" value={bs.openclaw ?? 0} hint={`${bc.openclaw ?? 0} critical · ${bh.openclaw ?? 0} high`} />
+      <StatCard label="OpenClaw skills" value={bs.openclaw ?? 0} hint={`${bc.openclaw ?? 0} critical · ${bh.openclaw ?? 0} high`} />
       <StatCard label="npm + PyPI" value={npmPypi} hint={`${npmPypiCrit} critical · ${npmPypiHigh} high`} />
     </Reveal>
   )

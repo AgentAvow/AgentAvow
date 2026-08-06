@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Reveal, RevealStagger } from '../components/motion'
 import { DualScore } from '../components/DualScore'
+import { VerifyDemo } from '../components/VerifyDemo'
 
 /**
  * How it works — the transparency page. Explains the aggregate-over-signed-evidence
@@ -41,8 +42,8 @@ export default function RebrandHowItWorks() {
           <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">A trust score you don't have to trust.</h1>
           <p className="mt-3 text-text-muted text-[15.5px] leading-relaxed">
             Most "trust scores" are a black box — you take the number on faith. Ours is different: it's an
-            <strong className="text-text"> aggregate over signed evidence</strong>. The grade is recognizable and portable
-            (like a Rotten Tomatoes score), but underneath sits a cryptographic receipt anyone can recompute and verify.
+            <strong className="text-text"> aggregate over signed evidence</strong>. The grade is one recognizable, portable
+            number, but underneath sits a cryptographic receipt anyone can recompute and verify.
           </p>
         </div>
       </Reveal>
@@ -101,6 +102,9 @@ export default function RebrandHowItWorks() {
           </div>
         </div>
       </Reveal>
+
+      {/* live, real verification */}
+      <Reveal><div className="mt-4"><VerifyDemo /></div></Reveal>
 
       {/* standards & partners */}
       <Reveal>
