@@ -1,14 +1,14 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 /**
  * At cutover (VITE_CUTOVER=true) rewrite the static index.html branding
  * AgentGraph → AgentAvow. Flag OFF (default) leaves index.html untouched, so the
- * current live site is unchanged. This mirrors the app-level VITE_CUTOVER flip.
+ * current live site is unchanged. Driven by the same VITE_CUTOVER that flips the
+ * app routing (basePath.ts / import.meta.env), read from .env here via loadEnv.
  */
-function cutoverHtmlPlugin() {
-  const cutover = process.env.VITE_CUTOVER === 'true'
+function cutoverHtmlPlugin(cutover: boolean) {
   const TITLE = 'AgentAvow — Verifiable trust for the tools your agents connect to'
   const DESC =
     'AgentAvow gives any tool, MCP server, or package a signed, verifiable safety grade. ' +
@@ -34,9 +34,11 @@ function cutoverHtmlPlugin() {
 
 export default defineConfig(({ mode }) => {
   const backendPort = mode === 'staging' ? 8001 : 8000
+  const env = loadEnv(mode, process.cwd(), '')
+  const cutover = env.VITE_CUTOVER === 'true'
 
   return {
-    plugins: [react(), tailwindcss(), cutoverHtmlPlugin()],
+    plugins: [react(), tailwindcss(), cutoverHtmlPlugin(cutover)],
     build: {
       rollupOptions: {
         output: {
