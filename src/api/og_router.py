@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/og", tags=["og-meta"])
 
-BASE_URL = "https://agentgraph.co"
+BASE_URL = "https://agentavow.com"
 
 
 def _html_escape(text: str) -> str:
@@ -60,7 +60,7 @@ def _render_og_html(
   <meta property="og:image" content="{i}" />
   <meta property="og:url" content="{u}" />
   <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="AgentGraph" />
+  <meta property="og:site_name" content="AgentAvow" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="{t}" />
   <meta name="twitter:description" content="{d}" />
@@ -138,9 +138,9 @@ async def og_check(
             grade = _grade_from_score(score)
         else:
             # No scan data available — generic tags
-            title = f"Is {full_name} Safe? | AgentGraph Security Scan"
+            title = f"Is {full_name} Safe? | AgentAvow Security Scan"
             description = (
-                f"Check the security posture of {full_name} on AgentGraph. "
+                f"Check the security posture of {full_name} on AgentAvow. "
                 "Free automated security scanning for any GitHub repository."
             )
             return HTMLResponse(
@@ -203,8 +203,8 @@ async def og_profile(
         eid = uuid.UUID(entity_id)
     except ValueError:
         # Invalid UUID — return generic tags
-        title = "Profile | AgentGraph"
-        description = "View this entity's trust profile on AgentGraph."
+        title = "Profile | AgentAvow"
+        description = "View this entity's trust profile on AgentAvow."
         return HTMLResponse(
             content=_render_og_html(title, description, image_url, canonical_url),
             status_code=200,
@@ -216,8 +216,8 @@ async def og_profile(
     ).scalar_one_or_none()
 
     if not entity:
-        title = "Profile Not Found | AgentGraph"
-        description = "This profile does not exist on AgentGraph."
+        title = "Profile Not Found | AgentAvow"
+        description = "This profile does not exist on AgentAvow."
         return HTMLResponse(
             content=_render_og_html(title, description, image_url, canonical_url),
             status_code=200,
@@ -236,14 +236,14 @@ async def og_profile(
     if ts:
         score100 = round(ts.score * 100)
         grade = _grade_from_score(score100)
-        title = f"{display_name} on AgentGraph — Trust Score: {grade} ({score100}/100)"
+        title = f"{display_name} on AgentAvow — Trust Score: {grade} ({score100}/100)"
         description = (
-            f"{entity_type} with verified identity on AgentGraph. "
+            f"{entity_type} with verified identity on AgentAvow. "
             f"Trust grade: {grade} ({score100}/100)."
         )
     else:
-        title = f"{display_name} on AgentGraph"
-        description = f"{entity_type} profile on AgentGraph — the trust layer for AI agents."
+        title = f"{display_name} on AgentAvow"
+        description = f"{entity_type} profile on AgentAvow — the trust layer for AI agents."
 
     # Use badge as OG image if entity has a source_url with GitHub repo
     if entity.source_url and "github.com/" in (entity.source_url or ""):

@@ -12,6 +12,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -1128,28 +1129,20 @@ def _render_og_svg(
     medium: int,
     verdict: str,
 ) -> str:
-    """Render a 1200x630 SVG Open Graph preview card."""
+    """Render a 1200x630 SVG Open Graph preview card.
+
+    Clean single-ring "attestation trust" card. Adoption/usage counts are not
+    in scope for this function's inputs, so a single centered grade ring is
+    rendered (twin-ring layout is reserved for callers that have adoption data).
+    """
     color = _grade_color(grade)
 
-    # Background gradient stops based on grade color
-    bg_dark = "#0B0F1A"
-    bg_mid = "#111827"
-
-    # Findings summary line
-    findings_parts = []
-    if critical > 0:
-        findings_parts.append(f"{critical} critical")
-    if high > 0:
-        findings_parts.append(f"{high} high")
-    if medium > 0:
-        findings_parts.append(f"{medium} medium")
-    if not findings_parts:
-        findings_line = "No critical or high findings detected."
-    else:
-        findings_line = f"Security scan: {', '.join(findings_parts)} findings."
-
-    # Escape XML entities in repo name
+    # Escape XML entities in repo name (matches existing badge escaping)
     display_name = f"{owner}/{repo}".replace("&", "&amp;").replace("<", "&lt;")
+
+    # Ring geometry
+    circ = 2 * math.pi * 100
+    dash = max(0.0, min(score, 100)) / 100 * circ
 
     svg_open = (
         '<svg xmlns="http://www.w3.org/2000/svg" '
@@ -1157,59 +1150,63 @@ def _render_og_svg(
     )
     return f'''{svg_open}
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="{bg_dark}"/>
-      <stop offset="100%" stop-color="{bg_mid}"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="{color}" stop-opacity="0.3"/>
+    <radialGradient id="glow" cx="0.5" cy="0" r="1">
+      <stop offset="0%" stop-color="{color}" stop-opacity="0.16"/>
       <stop offset="100%" stop-color="{color}" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="gradeGlow" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="{color}" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="{color}" stop-opacity="0.05"/>
+    </radialGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#E879F9"/>
     </linearGradient>
   </defs>
 
   <!-- Background -->
-  <rect width="1200" height="630" fill="url(#bg)"/>
-  <!-- Accent glow at top -->
-  <rect width="1200" height="200" fill="url(#accent)"/>
+  <rect width="1200" height="630" fill="#0B1220"/>
+  <!-- Subtle radial glow at top -->
+  <rect width="1200" height="360" fill="url(#glow)"/>
 
-  <!-- Top bar accent line -->
-  <rect width="1200" height="4" fill="{color}" opacity="0.6"/>
+  <!-- Brand lockup (top-left) -->
+  <g transform="translate(70,66)">
+    <circle cx="20" cy="20" r="18" fill="none" stroke="url(#brand)" stroke-width="3.4"/>
+    <path d="M12 21l6 6 12-13" fill="none" stroke="url(#brand)" stroke-width="4"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="52" y="30" fill="#F8FAFC" font-family="system-ui,-apple-system,sans-serif"
+          font-size="30" font-weight="700" letter-spacing="-0.5">AgentAvow</text>
+  </g>
 
-  <!-- AgentGraph brand (top-left) -->
-  <text x="60" y="62" fill="#9CA3AF" font-family="system-ui,-apple-system,sans-serif"
-        font-size="20" font-weight="600" letter-spacing="0.05em">AGENTGRAPH</text>
-  <text x="232" y="62" fill="#6B7280" font-family="system-ui,-apple-system,sans-serif"
-        font-size="16" font-weight="400">Security Scan</text>
+  <!-- Repo name (top-right) -->
+  <text x="1130" y="88" text-anchor="end" fill="#94A3B8"
+        font-family="monospace" font-size="24">{display_name}</text>
 
-  <!-- Repo name -->
-  <text x="60" y="160" fill="#F9FAFB" font-family="system-ui,-apple-system,sans-serif"
-        font-size="42" font-weight="700">{display_name}</text>
+  <!-- Verdict / tier (centered) -->
+  <text x="600" y="176" text-anchor="middle" fill="#CBD5E1"
+        font-family="system-ui,-apple-system,sans-serif"
+        font-size="34" font-weight="800">{verdict}</text>
 
-  <!-- Grade circle -->
-  <circle cx="600" cy="340" r="120" fill="url(#gradeGlow)" stroke="{color}"
-          stroke-width="4" stroke-opacity="0.5"/>
-  <text x="600" y="365" fill="{color}" font-family="system-ui,-apple-system,sans-serif"
-        font-size="100" font-weight="800" text-anchor="middle">{grade}</text>
+  <!-- Attestation trust ring (centered) -->
+  <g transform="translate(600,360)">
+    <circle cx="0" cy="0" r="100" fill="none" stroke="#1b2b2b" stroke-width="20"/>
+    <circle cx="0" cy="0" r="100" fill="none" stroke="{color}" stroke-width="20"
+            stroke-linecap="round" stroke-dasharray="{dash:.2f} {circ:.2f}"
+            transform="rotate(-90)"/>
+    <text x="0" y="18" text-anchor="middle" fill="{color}"
+          font-family="system-ui,-apple-system,sans-serif"
+          font-size="86" font-weight="800">{grade}</text>
+    <text x="0" y="52" text-anchor="middle" fill="#94A3B8"
+          font-family="monospace" font-size="24">{score}/100</text>
+  </g>
 
-  <!-- Score below grade -->
-  <text x="600" y="500" fill="#D1D5DB" font-family="system-ui,-apple-system,sans-serif"
-        font-size="36" font-weight="600" text-anchor="middle">{score} / 100</text>
+  <!-- Ring label -->
+  <text x="600" y="500" text-anchor="middle" fill="{color}"
+        font-family="monospace" font-size="18">ATTESTATION TRUST</text>
+  <text x="600" y="528" text-anchor="middle" fill="#94A3B8"
+        font-family="system-ui,-apple-system,sans-serif"
+        font-size="18">signed &#183; verifiable now</text>
 
-  <!-- Verdict -->
-  <text x="600" y="545" fill="{color}" font-family="system-ui,-apple-system,sans-serif"
-        font-size="24" font-weight="500" text-anchor="middle">{verdict}</text>
-
-  <!-- Findings summary (bottom-left) -->
-  <text x="60" y="590" fill="#9CA3AF" font-family="system-ui,-apple-system,sans-serif"
-        font-size="18">{findings_line}</text>
-
-  <!-- CTA (bottom-right) -->
-  <text x="1140" y="590" fill="#6B7280" font-family="system-ui,-apple-system,sans-serif"
-        font-size="18" text-anchor="end">agentgraph.co/check</text>
+  <!-- Footer -->
+  <text x="600" y="596" text-anchor="middle" fill="#64748B"
+        font-family="monospace"
+        font-size="18">Signed &#183; Ed25519 &#183; verify offline at agentavow.com</text>
 </svg>'''
 
 

@@ -11,11 +11,11 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Application
-    app_name: str = "AgentGraph"
+    app_name: str = "AgentAvow"
     # Brand shown on embeddable trust badges. Kept as "AgentGraph" until the
     # AgentAvow cutover; flip via env (BADGE_BRAND=AgentAvow) at launch so the
     # rebrand is a one-line change and the new name isn't leaked publicly early.
-    badge_brand: str = "AgentGraph"
+    badge_brand: str = "AgentAvow"
     debug: bool = False
     api_v1_prefix: str = "/api/v1"
     base_url: str = "http://localhost:5173"
