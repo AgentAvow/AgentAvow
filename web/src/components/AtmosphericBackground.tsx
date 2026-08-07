@@ -422,13 +422,6 @@ export function AtmosphericBackground({ children, intensity: intensityProp }: { 
         {intensity === 'subtle' && <SubtleLayer reducedMotion={reducedMotion} />}
         {intensity === 'medium' && <MediumLayer reducedMotion={reducedMotion} />}
         {intensity === 'full' && <FullLayer reducedMotion={reducedMotion} />}
-        {/* Viewport-anchored bottom fade — guarantees the atmosphere (head, network,
-            gradients) dissolves into the page color at the bottom edge regardless of
-            how object-cover crops the head on any given screen size. */}
-        <div
-          className="absolute inset-x-0 bottom-0 h-[45%]"
-          style={{ background: 'linear-gradient(to bottom, transparent, var(--color-background) 88%)' }}
-        />
       </div>
       <div className="relative z-10 flex-1 flex flex-col">
         {children}
