@@ -17,7 +17,8 @@ export default function AuthCallback() {
 
     if (accessToken && refreshToken) {
       loginWithToken(accessToken, refreshToken).then(() => {
-        navigate('/feed', { replace: true })
+        // Post-cutover: land on the AgentAvow homepage, not the old social feed.
+        navigate('/', { replace: true })
       })
     } else {
       navigate('/login?error=oauth_failed', { replace: true })
