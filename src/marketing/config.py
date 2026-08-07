@@ -45,8 +45,7 @@ class MarketingSettings(BaseSettings):
     reddit_client_secret: str | None = None
     reddit_username: str | None = None
     reddit_password: str | None = None
-    # TODO(kenne): confirm the new reddit handle/subreddit
-    reddit_user_agent: str = "AgentAvowBot/1.0 (+https://agentavow.com)"
+    reddit_user_agent: str = "AgentAvowBot/1.0 (by /u/agentavow; +https://agentavow.com)"
 
     # Discord
     discord_bot_token: str | None = None

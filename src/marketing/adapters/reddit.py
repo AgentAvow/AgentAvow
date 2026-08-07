@@ -26,6 +26,7 @@ _TIMEOUT = 15.0
 
 # Target subreddits with subscriber counts for context
 TARGET_SUBREDDITS = [
+    "AgentAvow",           # our own community — primary home base
     "artificial",          # 2.3M — general AI
     "MachineLearning",     # 3.2M — ML research
     "LangChain",           # 45K — LangChain
@@ -97,7 +98,7 @@ class RedditAdapter(AbstractPlatformAdapter):
         if not token:
             return ExternalPostResult(success=False, error="Reddit auth failed")
 
-        subreddit = (metadata or {}).get("subreddit", "artificial")
+        subreddit = (metadata or {}).get("subreddit", "AgentAvow")
         title = (metadata or {}).get("title", content[:200])
 
         body = {
