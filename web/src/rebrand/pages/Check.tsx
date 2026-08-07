@@ -307,6 +307,8 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
   const adUnit = adStars ? 'stars' : 'checks'
   const compact = (n: number) => (n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n))
   const ADOPTION_HEX = '#F59E0B'
+  // Log-scaled traction bar (1 → 100k maps 0 → 100%); a visual, the real count is shown above it.
+  const adoptionPct = adCount ? Math.min(100, Math.round((Math.log10(adCount + 1) / 5) * 100)) : 0
 
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
@@ -331,8 +333,17 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
             <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Attestation Trust</div>
             <div className="mt-0.5 text-[12px] text-text-muted">Signed scanner grade · verifiable now</div>
           </div>
-          <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center">
-            <ScoreRing center={adCount ? compact(adCount) : 'New'} sub={adCount ? adUnit : 'be the first'} hex={adCount ? ADOPTION_HEX : 'var(--color-text-muted)'} dashed={!adCount} />
+          <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center flex flex-col">
+            <div className="min-h-[128px] flex flex-col items-center justify-center gap-4 w-full">
+              <div className="leading-none">
+                <span className="text-[44px] font-extrabold" style={{ color: adCount ? ADOPTION_HEX : 'var(--color-text-muted)' }}>{adCount ? compact(adCount) : 'New'}</span>
+                {adCount ? <span className="ml-1.5 text-[15px] font-mono text-text-muted">{adUnit}</span> : null}
+              </div>
+              <div className="w-full max-w-[190px] h-2.5 rounded-full bg-surface-hover overflow-hidden" role="progressbar" aria-valuenow={adoptionPct} aria-valuemin={0} aria-valuemax={100}>
+                <motion.div className="h-full rounded-full" style={{ background: `linear-gradient(90deg, ${ADOPTION_HEX}, #FBBF24)` }}
+                  initial={{ width: 0 }} animate={{ width: `${adoptionPct}%` }} transition={{ duration: 1.1, ease: 'easeOut', delay: 0.2 }} />
+              </div>
+            </div>
             <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: adCount ? ADOPTION_HEX : 'var(--color-text-muted)' }}>Adoption</div>
             <div className="mt-0.5 text-[12px] text-text-muted">{adoption ? adoption.sub : 'Just launched — no adoption signal yet'}</div>
           </div>

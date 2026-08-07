@@ -139,9 +139,9 @@ function ParallaxHeroFace({ intensity, reducedMotion }: { intensity: Intensity; 
           filter: theme === 'light' ? 'contrast(1.2) brightness(0.9)' : 'none',
           // Fade the bottom of the head graphic to fully transparent so it dissolves
           // into the atmosphere instead of ending on a hard edge — starts below the
-          // face (~55%) so the head itself stays visible.
-          maskImage: 'linear-gradient(to bottom, #000 55%, transparent 90%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, #000 55%, transparent 90%)',
+          // face (~48%) so the head itself stays visible.
+          maskImage: 'linear-gradient(to bottom, #000 48%, transparent 84%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, #000 48%, transparent 84%)',
         }}
       />
       {/* Vignette — fades edges into the background color */}
@@ -151,13 +151,8 @@ function ParallaxHeroFace({ intensity, reducedMotion }: { intensity: Intensity; 
           background: 'radial-gradient(ellipse at center, transparent 20%, var(--color-background) 70%)',
         }}
       />
-      {/* Bottom fade — kills the hard edge where the face graphic ends */}
-      <div
-        className="absolute inset-x-0 bottom-0 h-1/3"
-        style={{
-          background: 'linear-gradient(to bottom, transparent 0%, var(--color-background) 92%)',
-        }}
-      />
+      {/* Bottom fade is now handled by the image mask above (fades to transparent,
+          so the atmosphere shows through instead of an opaque band). */}
     </motion.div>
   )
 }

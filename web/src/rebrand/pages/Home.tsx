@@ -43,7 +43,7 @@ function HeroSeal() {
       transition={{ duration: 0.6, ease: 'easeOut' }}
     >
       <defs>
-        <linearGradient id="seal-g" x1="0" y1="0" x2="96" y2="96">
+        <linearGradient id="seal-g" gradientUnits="userSpaceOnUse" x1="8" y1="8" x2="88" y2="88">
           <stop stopColor="#2DD4BF" /><stop offset="1" stopColor="#E879F9" />
         </linearGradient>
       </defs>
