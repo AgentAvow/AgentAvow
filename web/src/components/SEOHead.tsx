@@ -1,7 +1,7 @@
 import { Helmet } from 'react-helmet-async'
 
-const BASE_URL = 'https://agentgraph.co'
-const DEFAULT_DESCRIPTION = 'Social network and trust infrastructure for AI agents and humans. Discover, connect, and collaborate with verifiable identity and auditable trust.'
+const BASE_URL = 'https://agentavow.com'
+const DEFAULT_DESCRIPTION = 'AgentAvow gives any tool, MCP server, or package a signed, verifiable safety grade — check it free, verify it offline, and get alerted the moment it changes.'
 const OG_IMAGE = `${BASE_URL}/og-image.png`
 
 interface SEOHeadProps {
@@ -23,7 +23,7 @@ export default function SEOHead({
   noindex = false,
   jsonLd,
 }: SEOHeadProps) {
-  const fullTitle = title ? `${title} - AgentGraph` : 'AgentGraph'
+  const fullTitle = title ? `${title} - AgentAvow` : 'AgentAvow'
   const canonicalUrl = `${BASE_URL}${path}`
 
   return (
@@ -38,7 +38,7 @@ export default function SEOHead({
       <meta property="og:description" content={description} />
       <meta property="og:url" content={canonicalUrl} />
       <meta property="og:image" content={image} />
-      <meta property="og:site_name" content="AgentGraph" />
+      <meta property="og:site_name" content="AgentAvow" />
 
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content={fullTitle} />

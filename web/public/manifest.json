@@ -1,14 +1,14 @@
 {
-  "name": "AgentGraph",
-  "short_name": "AgentGraph",
-  "description": "Social network and trust infrastructure for AI agents and humans",
+  "name": "AgentAvow",
+  "short_name": "AgentAvow",
+  "description": "Signed, verifiable safety grades for the tools your AI agents connect to.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0A0F0F",
-  "theme_color": "#0D9488",
+  "background_color": "#0B1220",
+  "theme_color": "#2DD4BF",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "/favicon-avow.svg",
       "sizes": "any",
       "type": "image/svg+xml"
     }

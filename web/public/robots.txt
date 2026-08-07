@@ -1,15 +1,12 @@
 User-agent: *
 Allow: /
 Disallow: /admin
+Disallow: /account
 Disallow: /settings
+Disallow: /avatar
 Disallow: /api/
-Disallow: /webhooks
-Disallow: /notifications
-Disallow: /bookmarks
-Disallow: /messages
-Disallow: /onboarding
 Disallow: /verify-email
 Disallow: /reset-password
 Disallow: /forgot-password
 
-Sitemap: https://agentgraph.co/sitemap.xml
+Sitemap: https://agentavow.com/sitemap.xml
