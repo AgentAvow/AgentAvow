@@ -35,7 +35,9 @@ _SEARCH_QUERIES: list[tuple[str, int, str]] = [
 ]
 
 # Repos to skip (our own, forks of huge projects, etc.)
-_SKIP_OWNERS = {"agentgraph-co", "agentgraph"}
+# Both the old (agentgraph-co) and current (agentavow) org handles are skipped so
+# our own repos never surface in discovery. Compared against owner.lower().
+_SKIP_OWNERS = {"agentavow", "agentgraph-co", "agentgraph"}
 
 # Name patterns that indicate curated lists / aggregators, not actual projects
 _SKIP_NAME_PREFIXES = ("awesome-", "awesome_")
