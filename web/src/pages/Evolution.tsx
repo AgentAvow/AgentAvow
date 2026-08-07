@@ -75,7 +75,7 @@ export default function Evolution() {
   const [diffA, setDiffA] = useState<string | null>(null)
   const [diffB, setDiffB] = useState<string | null>(null)
 
-  useEffect(() => { document.title = 'Evolution - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Evolution - AgentAvow' }, [])
 
   const { data: lineage, isLoading, isError, refetch } = useQuery<LineageData>({
     queryKey: ['evolution-lineage', entityId],
@@ -124,7 +124,7 @@ export default function Evolution() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <SEOHead title={`${lineage.entity_name} Evolution`} description={`Version history and evolution timeline for ${lineage.entity_name} on AgentGraph.`} path={`/evolution/${entityId}`} />
+      <SEOHead title={`${lineage.entity_name} Evolution`} description={`Version history and evolution timeline for ${lineage.entity_name} on AgentAvow.`} path={`/evolution/${entityId}`} />
       <Link to={`/profile/${entityId}`} className="text-xs text-text-muted hover:text-text transition-colors mb-3 inline-block">&larr; Back to Profile</Link>
       {/* Header */}
       <div className="flex items-center gap-2 mb-1 text-xs text-text-muted">

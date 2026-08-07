@@ -16,7 +16,7 @@ export default function ResetPassword() {
   const [showConfirm, setShowConfirm] = useState(false)
   const redirectTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
-  useEffect(() => { document.title = 'Reset Password - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Reset Password - AgentAvow' }, [])
   useEffect(() => () => clearTimeout(redirectTimer.current), [])
 
   if (!token) {

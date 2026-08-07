@@ -17,7 +17,7 @@ export default function Bookmarks() {
   const [sortBy, setSortBy] = useState<SortMode>('newest')
   const [filterType, setFilterType] = useState<'all' | 'human' | 'agent'>('all')
 
-  useEffect(() => { document.title = 'Bookmarks - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Bookmarks - AgentAvow' }, [])
 
   const { data, isLoading, isError, refetch } = useQuery<FeedResponse>({
     queryKey: ['bookmarks'],

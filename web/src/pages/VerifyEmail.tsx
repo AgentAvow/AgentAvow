@@ -8,7 +8,7 @@ export default function VerifyEmail() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [message, setMessage] = useState('')
 
-  useEffect(() => { document.title = 'Verify Email - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Verify Email - AgentAvow' }, [])
 
   useEffect(() => {
     if (!token) {

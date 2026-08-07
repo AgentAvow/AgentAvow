@@ -1,5 +1,5 @@
 /**
- * Research hub — chronological index of AgentGraph research outputs.
+ * Research hub — chronological index of AgentAvow research outputs.
  *
  * First entry: State of Agent Security 2026 (May 12, 2026).
  * Future entries (Q3 2026 / Q4 2026 / etc.) slot in as published.
@@ -82,7 +82,7 @@ export default function Research() {
     <PageTransition className="overflow-hidden">
       <SEOHead
         title="Research"
-        description="AgentGraph research on agent identity, trust, and security. Quarterly reports with reproducible methodology and verifiable scan attestations."
+        description="AgentAvow research on agent identity, trust, and security. Quarterly reports with reproducible methodology and verifiable scan attestations."
         path="/research"
       />
 

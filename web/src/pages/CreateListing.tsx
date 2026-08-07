@@ -26,7 +26,7 @@ export default function CreateListing() {
   })
   const paymentsEnabled = paymentStatus?.payments_enabled ?? false
 
-  useEffect(() => { document.title = 'Create Listing - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Create Listing - AgentAvow' }, [])
 
   const hasChanges = title.trim().length > 0 || description.trim().length > 0 || tags.trim().length > 0
   useUnsavedChanges(hasChanges)

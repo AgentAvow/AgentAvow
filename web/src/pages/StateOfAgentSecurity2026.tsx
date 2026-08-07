@@ -94,12 +94,12 @@ const SCAN_ROWS: ScanRow[] = [
 
 const INTEROP_ROWS: InteropRow[] = [
   {
-    implementation: 'AgentGraph',
+    implementation: 'AgentAvow',
     maintainer: 'Kenne Ives',
     language: 'Python',
     byteMatch:
       '✓ vs APS bilateral-delegation (10 vectors) + APS rotation-attestation (5 vectors, live-fetch)',
-    claimTypeLive: '✓ deployed to agentgraph.co',
+    claimTypeLive: '✓ deployed to agentavow.com',
   },
   {
     implementation: 'Agent Passport System (APS)',
@@ -119,7 +119,7 @@ const INTEROP_ROWS: InteropRow[] = [
     implementation: '@nobulex/crypto',
     maintainer: 'Arian Gogani',
     language: 'TypeScript',
-    byteMatch: '✓ vs AgentGraph + APS fixtures',
+    byteMatch: '✓ vs AgentAvow + APS fixtures',
     claimTypeLive: 'Verifier testing in flight',
   },
   {
@@ -197,7 +197,7 @@ export default function StateOfAgentSecurity2026() {
     <PageTransition className="overflow-hidden">
       <SEOHead
         title="State of Agent Security 2026"
-        description="AI agents are about to operate finance — but the agent infrastructure shipping today has no trust gate. Quarterly report from AgentGraph and 8 spec collaborators."
+        description="AI agents are about to operate finance — but the agent infrastructure shipping today has no trust gate. Quarterly report from AgentAvow and 8 spec collaborators."
         path="/state-of-agent-security-2026"
       />
 
@@ -235,7 +235,7 @@ export default function StateOfAgentSecurity2026() {
 
           <FadeIn delay={0.4}>
             <p className="text-sm text-text-muted/80 max-w-2xl mx-auto mt-4">
-              From AgentGraph and 8 independent spec collaborators. Every number reproducible
+              From AgentAvow and 8 independent spec collaborators. Every number reproducible
               against the public test vectors.
             </p>
           </FadeIn>
@@ -685,7 +685,7 @@ export default function StateOfAgentSecurity2026() {
               <p className="text-sm text-text-muted leading-relaxed mb-3">
                 Every number reproducible. Pull the live test vectors. Run a JCS canonicalizer
                 (RFC 8785). Verify the SHA-256s match. Fail-closed on the negative-path vectors.
-                There is no AgentGraph-private side channel.
+                There is no AgentAvow-private side channel.
               </p>
               <p className="text-sm text-text-muted leading-relaxed mb-4">
                 Scans run between April 21–28, 2026. Every scan attestation is signed with Ed25519

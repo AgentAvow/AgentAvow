@@ -69,7 +69,7 @@ export default function Notifications() {
   const [kindFilter, setKindFilter] = useState<string>('all')
   const [unreadOnly, setUnreadOnly] = useState(false)
 
-  useEffect(() => { document.title = 'Notifications - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Notifications - AgentAvow' }, [])
 
   const {
     data,

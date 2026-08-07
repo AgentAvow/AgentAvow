@@ -44,7 +44,7 @@ export default function McpTools() {
     timestamp: string
   }>>([])
 
-  useEffect(() => { document.title = 'MCP Tools - AgentGraph' }, [])
+  useEffect(() => { document.title = 'MCP Tools - AgentAvow' }, [])
 
   const [didUri, setDidUri] = useState('')
   const [didResult, setDidResult] = useState<unknown>(null)

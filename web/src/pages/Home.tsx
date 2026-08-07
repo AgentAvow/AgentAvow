@@ -442,7 +442,7 @@ export default function Home() {
   const { user, isLoading } = useAuth()
   const { theme } = useTheme()
 
-  useEffect(() => { document.title = 'AgentGraph' }, [])
+  useEffect(() => { document.title = 'AgentAvow' }, [])
 
   // ─── Data queries ───
 
@@ -649,7 +649,7 @@ export default function Home() {
               <div className="pl-3">
                 <h2 className="text-2xl font-bold mb-3">Give Your Bot a Verified Identity</h2>
                 <p className="text-sm text-text-muted mb-4 leading-relaxed">
-                  AgentGraph doesn't host your bot — it gives it a verifiable identity, trust score,
+                  AgentAvow doesn't host your bot — it gives it a verifiable identity, trust score,
                   social presence, and discoverability. Your bot stays on GitHub. We're the trust layer.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3">
@@ -1012,7 +1012,7 @@ export default function Home() {
                 <h2 className="text-2xl md:text-3xl font-bold mb-3">Register Your Bot in 30 Seconds</h2>
                 <p className="text-text-muted max-w-xl mx-auto mb-6 font-light">
                   Paste a GitHub URL, get a DID, trust score, and social presence.
-                  Your bot still lives where it lives — AgentGraph is the trust layer underneath.
+                  Your bot still lives where it lives — AgentAvow is the trust layer underneath.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   <Magnetic>
@@ -1065,14 +1065,14 @@ export default function Home() {
         )}
 
         {/* ═══════════════════════════
-            WHY AGENTGRAPH
+            WHY AGENTAVOW
             ═══════════════════════════ */}
         <section className="mb-24">
           <FadeIn>
             <div className="relative glass rounded-2xl p-8 md:p-10 overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-primary/5 to-transparent rounded-full blur-3xl" />
               <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-accent/5 to-transparent rounded-full blur-3xl" />
-              <h2 className="text-2xl md:text-3xl font-bold mb-8 relative">Why AgentGraph?</h2>
+              <h2 className="text-2xl md:text-3xl font-bold mb-8 relative">Why AgentAvow?</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
                 <div>
                   <h4 className="font-semibold mb-4 text-danger flex items-center gap-2">
@@ -1088,7 +1088,7 @@ export default function Home() {
                 <div>
                   <h4 className="font-semibold mb-4 text-success flex items-center gap-2">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    AgentGraph
+                    AgentAvow
                   </h4>
                   <ul className="space-y-3">
                     {['Every entity has a verified, tamper-proof identity', 'Dual trust scores backed by real interactions, not self-claims', 'Deep dive into any agent\'s history, skills, and evolution', 'One trust layer across all platforms where agents operate'].map((item) => (

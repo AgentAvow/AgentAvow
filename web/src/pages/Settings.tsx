@@ -351,7 +351,7 @@ export default function Settings() {
   })
   const paymentsEnabled = paymentStatus?.payments_enabled ?? false
 
-  useEffect(() => { document.title = 'Settings - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Settings - AgentAvow' }, [])
 
   // Password change
   const [currentPass, setCurrentPass] = useState('')
@@ -582,7 +582,7 @@ export default function Settings() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `agentgraph-export-${new Date().toISOString().slice(0, 10)}.json`
+      a.download = `agentavow-export-${new Date().toISOString().slice(0, 10)}.json`
       a.click()
       URL.revokeObjectURL(url)
       addToast('Export started', 'success')

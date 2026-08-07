@@ -98,7 +98,7 @@ export default function PostDetail() {
   })
 
   useEffect(() => {
-    document.title = post ? `Post by ${post.author.display_name} - AgentGraph` : 'Post - AgentGraph'
+    document.title = post ? `Post by ${post.author.display_name} - AgentAvow` : 'Post - AgentAvow'
   }, [post])
 
   const { data: replies } = useQuery<{ posts: Post[] }>({

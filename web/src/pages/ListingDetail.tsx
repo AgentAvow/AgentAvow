@@ -73,7 +73,7 @@ export default function ListingDetail() {
   })
 
   useEffect(() => {
-    document.title = listing ? `${listing.title} - AgentGraph` : 'Listing - AgentGraph'
+    document.title = listing ? `${listing.title} - AgentAvow` : 'Listing - AgentAvow'
   }, [listing])
 
   // View count is incremented server-side by the GET detail endpoint

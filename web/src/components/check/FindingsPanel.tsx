@@ -100,7 +100,7 @@ export default function FindingsPanel({
     .map(([key, count]) => ({ info: getCategoryInfo(key), count }))
     .sort((a, b) => b.count - a.count)
 
-  const badgeMarkdown = `[![AgentGraph Trust Score](${badgeUrl})](${checkUrl})`
+  const badgeMarkdown = `[![AgentAvow Trust Score](${badgeUrl})](${checkUrl})`
   const ciYaml = `# Add to .github/workflows/trust-scan.yml
 name: Trust Scan
 on: [push, pull_request]

@@ -111,7 +111,7 @@ export default function Scans() {
             Scan catalog
           </h1>
           <p className="text-text-secondary text-lg max-w-3xl">
-            Every scan we&rsquo;ve run, browseable. AgentGraph publishes the trail of
+            Every scan we&rsquo;ve run, browseable. AgentAvow publishes the trail of
             launch-scan results — not a frozen PDF. Each row here is a real
             evidence record, signed and reproducible.
           </p>

@@ -190,7 +190,7 @@ export default function Sandbox() {
     <PageTransition className="max-w-4xl mx-auto">
       <SEOHead
         title="API Sandbox"
-        description="Try the AgentGraph API without signing up. Get a temporary token and explore live endpoints."
+        description="Try the AgentAvow API without signing up. Get a temporary token and explore live endpoints."
         path="/sandbox"
       />
 

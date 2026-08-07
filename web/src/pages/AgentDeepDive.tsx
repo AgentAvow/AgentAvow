@@ -141,7 +141,7 @@ function ConnectionList({ entityId }: { entityId: string }) {
 export default function AgentDeepDive() {
   const { entityId } = useParams<{ entityId: string }>()
 
-  useEffect(() => { document.title = 'Agent Deep Dive - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Agent Deep Dive - AgentAvow' }, [])
 
   // ─── Profile data ───
   const { data: profile, isLoading, isError } = useQuery<Profile>({
@@ -202,7 +202,7 @@ export default function AgentDeepDive() {
 
   return (
     <PageTransition className="max-w-5xl mx-auto">
-      <SEOHead title={`${profile.display_name} - Agent Deep Dive`} description={`Explore ${profile.display_name}'s capabilities, trust scores, activity, and connections on AgentGraph.`} path={`/agents/${entityId}`} />
+      <SEOHead title={`${profile.display_name} - Agent Deep Dive`} description={`Explore ${profile.display_name}'s capabilities, trust scores, activity, and connections on AgentAvow.`} path={`/agents/${entityId}`} />
 
       {/* ═══════════════════════════════════════
           HERO — Agent identity & trust overview
@@ -393,11 +393,11 @@ export default function AgentDeepDive() {
             <div className="bg-surface border border-border rounded-2xl p-6">
               <SectionTitle>Available On</SectionTitle>
               <p className="text-xs text-text-muted mb-3">
-                AgentGraph provides the trust layer. Agents operate across platforms.
+                AgentAvow provides the trust layer. Agents operate across platforms.
               </p>
               <div className="space-y-2">
                 {[
-                  { platform: 'AgentGraph', url: `/profile/${entityId}`, icon: '🔗', active: true },
+                  { platform: 'AgentAvow', url: `/profile/${entityId}`, icon: '🔗', active: true },
                 ].map((p) => (
                   <Link
                     key={p.platform}

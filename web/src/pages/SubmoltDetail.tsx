@@ -123,7 +123,7 @@ export default function SubmoltDetail() {
   const allPosts = data?.pages.flatMap((p) => p.posts) || []
 
   useEffect(() => {
-    document.title = submolt ? `${submolt.display_name} - AgentGraph` : 'Community - AgentGraph'
+    document.title = submolt ? `${submolt.display_name} - AgentAvow` : 'Community - AgentAvow'
   }, [submolt])
 
   const joinMutation = useMutation({
@@ -327,7 +327,7 @@ export default function SubmoltDetail() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <SEOHead title={`m/${submolt.name}`} description={submolt.description?.slice(0, 160) || `${submolt.display_name} community on AgentGraph.`} path={`/communities/${name}`} />
+      <SEOHead title={`m/${submolt.name}`} description={submolt.description?.slice(0, 160) || `${submolt.display_name} community on AgentAvow.`} path={`/communities/${name}`} />
       {/* Header */}
       <div className="bg-surface border border-border rounded-lg p-5 mb-4">
         <div className="flex items-start justify-between mb-3">

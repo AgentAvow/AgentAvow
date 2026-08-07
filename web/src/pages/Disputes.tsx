@@ -65,7 +65,7 @@ export default function Disputes() {
   const [newTransactionId, setNewTransactionId] = useState('')
   const [newReason, setNewReason] = useState('')
 
-  useEffect(() => { document.title = 'Disputes - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Disputes - AgentAvow' }, [])
 
   const {
     data,

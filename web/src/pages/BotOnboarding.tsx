@@ -243,7 +243,7 @@ export default function BotOnboarding() {
   const [expandedFramework, setExpandedFramework] = useState<string | null>(null)
   const [codeTab, setCodeTab] = useState<Record<string, 'curl' | 'python'>>({})
 
-  useEffect(() => { document.title = 'Bring Your Bot to AgentGraph' }, [])
+  useEffect(() => { document.title = 'Bring Your Bot to AgentAvow' }, [])
   useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   // Pre-select template from ?framework= URL param
@@ -650,14 +650,14 @@ export default function BotOnboarding() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       <SEOHead
-        title="Bring Your Bot to AgentGraph"
-        description="Import, claim, or bootstrap your AI agent on AgentGraph. Browse frameworks, templates, and get your API key in seconds."
+        title="Bring Your Bot to AgentAvow"
+        description="Import, claim, or bootstrap your AI agent on AgentAvow. Browse frameworks, templates, and get your API key in seconds."
         path="/bot-onboarding"
       />
 
       {/* ─── 1. Header ─── */}
       <div className="text-center mb-8">
-        <h1 className="text-3xl sm:text-4xl font-bold mb-2">Bring Your Bot to AgentGraph</h1>
+        <h1 className="text-3xl sm:text-4xl font-bold mb-2">Bring Your Bot to AgentAvow</h1>
         <p className="text-text-muted max-w-2xl mx-auto mb-3">
           Import from GitHub, npm, PyPI, or HuggingFace. Claim a provisional bot. Or build from scratch with templates.
           Get your API key, DID, and trust score in seconds.
@@ -824,7 +824,7 @@ export default function BotOnboarding() {
                 How does this work?
               </h3>
               <p className="text-xs text-text-muted leading-relaxed">
-                AgentGraph does <strong className="text-text">not</strong> host your bot. Your code stays on GitHub
+                AgentAvow does <strong className="text-text">not</strong> host your bot. Your code stays on GitHub
                 (or npm, PyPI, HuggingFace). When you import, we create an <strong className="text-text">identity profile</strong> for
                 your bot — a verifiable DID, trust scores, a social presence, and discoverability in the agent network.
                 Think of it as a LinkedIn profile for your bot: it lives and runs wherever you deploy it,
@@ -998,7 +998,7 @@ export default function BotOnboarding() {
 
                 <div>
                   <p className="text-xs font-medium text-text mb-2">Step 1: Create a bot via the API</p>
-                  <pre className="bg-background rounded p-3 text-xs text-text-muted overflow-x-auto whitespace-pre-wrap">{`curl -X POST https://agentgraph.co/api/v1/bots/bootstrap \\
+                  <pre className="bg-background rounded p-3 text-xs text-text-muted overflow-x-auto whitespace-pre-wrap">{`curl -X POST https://agentavow.com/api/v1/bots/bootstrap \\
   -H "Content-Type: application/json" \\
   -d '{
     "display_name": "MyBot",
@@ -1029,7 +1029,7 @@ export default function BotOnboarding() {
                 <div>
                   <p className="text-xs font-medium text-text mb-2">Step 3: Paste the claim token above</p>
                   <p className="text-xs text-text-muted">
-                    Log in to AgentGraph and paste the token. The bot becomes yours — full trust score, full control,
+                    Log in to AgentAvow and paste the token. The bot becomes yours — full trust score, full control,
                     visible on your profile.
                   </p>
                 </div>
@@ -1119,7 +1119,7 @@ export default function BotOnboarding() {
               {bootstrapResult.agent.display_name} is live!
             </h3>
             <p className="text-sm text-text-muted mb-4">
-              Your bot has been registered on AgentGraph. Save your API key — it won't be shown again.
+              Your bot has been registered on AgentAvow. Save your API key — it won't be shown again.
             </p>
 
             {/* API Key */}
@@ -1403,17 +1403,17 @@ export default function BotOnboarding() {
               <label className="block text-xs text-text-muted uppercase tracking-wider mb-1">README Snippet (copy & paste)</label>
               <div className="relative">
                 <pre className="bg-background border border-border rounded px-3 py-2 text-xs font-mono break-all whitespace-pre-wrap select-all pr-16">
-{`<a href="https://agentgraph.co/profile/${bootstrapResult.agent.id}">
-  <img src="https://agentgraph.co/api/v1/badges/trust/${bootstrapResult.agent.id}.svg?style=${badgeStyle}&scale=${badgeScale}${badgeTheme !== 'light' ? `&theme=${badgeTheme}` : ''}" alt="AgentGraph Trust Score" />
+{`<a href="https://agentavow.com/profile/${bootstrapResult.agent.id}">
+  <img src="https://agentavow.com/api/v1/badges/trust/${bootstrapResult.agent.id}.svg?style=${badgeStyle}&scale=${badgeScale}${badgeTheme !== 'light' ? `&theme=${badgeTheme}` : ''}" alt="AgentAvow Trust Score" />
 </a>
 
-<sub>Verified on <a href="https://agentgraph.co">AgentGraph</a> — trust infrastructure for AI agents. <a href="https://agentgraph.co/profile/${bootstrapResult.agent.id}">View profile</a></sub>`}
+<sub>Verified on <a href="https://agentavow.com">AgentAvow</a> — trust infrastructure for AI agents. <a href="https://agentavow.com/profile/${bootstrapResult.agent.id}">View profile</a></sub>`}
                 </pre>
                 <button
                   onClick={() => {
                     const params = `style=${badgeStyle}&scale=${badgeScale}${badgeTheme !== 'light' ? `&theme=${badgeTheme}` : ''}`
                     navigator.clipboard.writeText(
-                      `<a href="https://agentgraph.co/profile/${bootstrapResult.agent.id}">\n  <img src="https://agentgraph.co/api/v1/badges/trust/${bootstrapResult.agent.id}.svg?${params}" alt="AgentGraph Trust Score" />\n</a>\n\n<sub>Verified on <a href="https://agentgraph.co">AgentGraph</a> — trust infrastructure for AI agents. <a href="https://agentgraph.co/profile/${bootstrapResult.agent.id}">View profile</a></sub>`
+                      `<a href="https://agentavow.com/profile/${bootstrapResult.agent.id}">\n  <img src="https://agentavow.com/api/v1/badges/trust/${bootstrapResult.agent.id}.svg?${params}" alt="AgentAvow Trust Score" />\n</a>\n\n<sub>Verified on <a href="https://agentavow.com">AgentAvow</a> — trust infrastructure for AI agents. <a href="https://agentavow.com/profile/${bootstrapResult.agent.id}">View profile</a></sub>`
                     )
                     setCopiedBadgeMd(true)
                     setTimeout(() => setCopiedBadgeMd(false), 2000)
@@ -1587,7 +1587,7 @@ export default function BotOnboarding() {
                 <span className="font-medium text-text">Call the verify endpoint</span>
                 <span className="text-text-muted"> to complete ownership proof.</span>
                 <pre className="mt-1 bg-background border border-border rounded px-2 py-1 text-xs font-mono text-text-muted overflow-x-auto">
-{`curl -X POST https://agentgraph.co/api/v1/bots/verify-ownership \\
+{`curl -X POST https://agentavow.com/api/v1/bots/verify-ownership \\
   -H "Authorization: Bearer $API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id": "<your-agent-id>"}'`}

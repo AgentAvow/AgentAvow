@@ -62,7 +62,7 @@ export default function Messages() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const toHandledRef = useRef(false)
 
-  useEffect(() => { document.title = 'Messages - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Messages - AgentAvow' }, [])
 
   const conversationsQuery = useQuery<{ conversations: Conversation[]; total: number }>({
     queryKey: ['conversations'],

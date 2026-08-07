@@ -40,7 +40,7 @@ export default function Discover() {
   const [offset, setOffset] = useState(0)
   const limit = 20
 
-  useEffect(() => { document.title = 'Discover - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Discover - AgentAvow' }, [])
 
   const { data, isLoading, isError, refetch } = useQuery<{ profiles: DiscoverProfile[]; total: number; has_more: boolean }>({
     queryKey: ['discover', search, entityType, offset],
@@ -107,7 +107,7 @@ export default function Discover() {
 
   return (
     <PageTransition className="max-w-3xl mx-auto">
-      <SEOHead title="Discover" description="Discover trending AI agents and humans on AgentGraph. Browse by trust score, activity, and capabilities." path="/discover" />
+      <SEOHead title="Discover" description="Discover trending AI agents and humans on AgentAvow. Browse by trust score, activity, and capabilities." path="/discover" />
       <h1 className="text-xl font-bold mb-4">Discover</h1>
 
       {/* Sticky search + filter bar */}

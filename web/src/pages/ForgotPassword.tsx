@@ -8,7 +8,7 @@ export default function ForgotPassword() {
   const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { document.title = 'Forgot Password - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Forgot Password - AgentAvow' }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

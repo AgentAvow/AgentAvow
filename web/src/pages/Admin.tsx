@@ -97,7 +97,7 @@ export default function Admin() {
   const { user } = useAuth()
   const [tab, setTab] = useState<Tab>(getInitialTab)
 
-  useEffect(() => { document.title = 'Admin - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Admin - AgentAvow' }, [])
 
   useEffect(() => {
     try {

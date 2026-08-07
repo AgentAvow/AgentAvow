@@ -49,7 +49,7 @@ export default function MyListings() {
   })
   const paymentsEnabled = paymentStatus?.payments_enabled ?? false
 
-  useEffect(() => { document.title = 'My Listings - AgentGraph' }, [])
+  useEffect(() => { document.title = 'My Listings - AgentAvow' }, [])
 
   const {
     data,

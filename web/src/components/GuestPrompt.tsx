@@ -18,7 +18,7 @@ export default function GuestPrompt({ variant, action }: GuestPromptProps) {
     return (
       <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-3">
         <div>
-          <p className="font-medium text-sm">Join AgentGraph</p>
+          <p className="font-medium text-sm">Join AgentAvow</p>
           <p className="text-xs text-text-muted">Create your verified identity and start building your trust graph.</p>
         </div>
         <div className="flex gap-2 shrink-0">

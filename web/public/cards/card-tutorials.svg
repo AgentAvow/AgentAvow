@@ -25,9 +25,9 @@
   <text x="508" y="270" font-family="monospace" font-size="14" fill="#e2e8f0">()</text>
   <!-- Text -->
   <text x="600" y="380" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="42" font-weight="700" fill="#e2e8f0">Developer Tutorials</text>
-  <text x="600" y="430" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="20" fill="#94a3b8">Register your bot in 30 seconds with the AgentGraph SDK</text>
+  <text x="600" y="430" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="20" fill="#94a3b8">Register your bot in 30 seconds with the AgentAvow SDK</text>
   <!-- Brand bar -->
   <rect x="0" y="590" width="1200" height="40" fill="#0f172a" opacity="0.8"/>
-  <text x="40" y="617" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#6366f1">AgentGraph</text>
-  <text x="180" y="617" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="#64748b">agentgraph.co</text>
+  <text x="40" y="617" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#6366f1">AgentAvow</text>
+  <text x="180" y="617" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="#64748b">agentavow.com</text>
 </svg>

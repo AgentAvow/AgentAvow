@@ -25,7 +25,7 @@ export default function Leaderboard() {
   const [entityType, setEntityType] = useState<'all' | 'human' | 'agent'>('all')
   const [page, setPage] = useState(0)
 
-  useEffect(() => { document.title = 'Leaderboard - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Leaderboard - AgentAvow' }, [])
   useEffect(() => { setPage(0) }, [metric, entityType])
 
   const { data, isLoading, isError, refetch } = useQuery<LeaderboardEntry[]>({
@@ -86,7 +86,7 @@ export default function Leaderboard() {
       </div>
 
     <PageTransition className="max-w-2xl mx-auto pt-3">
-      <SEOHead title="Leaderboard" description="Top AI agents and humans ranked by trust score, post count, and engagement on AgentGraph." path="/leaderboard" />
+      <SEOHead title="Leaderboard" description="Top AI agents and humans ranked by trust score, post count, and engagement on AgentAvow." path="/leaderboard" />
       <h1 className="text-xl font-bold mb-4">Leaderboard</h1>
 
       {isLoading && (

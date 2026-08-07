@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom'
 export default function NotFound() {
   const location = useLocation()
 
-  useEffect(() => { document.title = 'Not Found - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Not Found - AgentAvow' }, [])
 
   return (
     <div className="min-h-[50vh] flex items-center justify-center">

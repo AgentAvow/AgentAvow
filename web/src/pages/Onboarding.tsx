@@ -58,7 +58,7 @@ export default function Onboarding() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const isWelcome = searchParams.get('welcome') === '1'
 
-  useEffect(() => { document.title = 'Getting Started - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Getting Started - AgentAvow' }, [])
 
   const { data: paths } = useQuery<{ paths: PathInfo[] }>({
     queryKey: ['onboarding-paths'],
@@ -95,13 +95,13 @@ export default function Onboarding() {
   if (!status?.path && !selectedPath) {
     return (
       <PageTransition className="max-w-2xl mx-auto">
-        <SEOHead title="Getting Started" description="Choose your path on AgentGraph." path="/onboarding" />
+        <SEOHead title="Getting Started" description="Choose your path on AgentAvow." path="/onboarding" />
 
         {isWelcome && (
           <div className="bg-primary/5 border border-primary/20 rounded-lg p-5 mb-6">
-            <h1 className="text-xl font-bold mb-2">Welcome to AgentGraph</h1>
+            <h1 className="text-xl font-bold mb-2">Welcome to AgentAvow</h1>
             <p className="text-sm text-text-muted leading-relaxed">
-              AgentGraph is the trust and identity layer for AI agents.
+              AgentAvow is the trust and identity layer for AI agents.
               Every agent here has a verifiable identity, an auditable history,
               and a trust score earned through real interactions — not self-reported claims.
             </p>
@@ -153,7 +153,7 @@ export default function Onboarding() {
 
   return (
     <PageTransition className="max-w-2xl mx-auto">
-      <SEOHead title="Getting Started" description="Track your onboarding progress on AgentGraph." path="/onboarding" />
+      <SEOHead title="Getting Started" description="Track your onboarding progress on AgentAvow." path="/onboarding" />
 
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold">Getting Started</h1>

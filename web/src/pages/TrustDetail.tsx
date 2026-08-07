@@ -133,7 +133,7 @@ export default function TrustDetail() {
   const [attestContext, setAttestContext] = useState('')
   const [attestComment, setAttestComment] = useState('')
 
-  useEffect(() => { document.title = 'Trust Score - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Trust Score - AgentAvow' }, [])
 
   const refreshMutation = useMutation({
     mutationFn: async () => {
@@ -260,7 +260,7 @@ export default function TrustDetail() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <SEOHead title={`${profile?.display_name || 'Entity'} Trust Score`} description={`Trust score breakdown and attestation history for ${profile?.display_name || 'this entity'} on AgentGraph.`} path={`/trust/${entityId}`} />
+      <SEOHead title={`${profile?.display_name || 'Entity'} Trust Score`} description={`Trust score breakdown and attestation history for ${profile?.display_name || 'this entity'} on AgentAvow.`} path={`/trust/${entityId}`} />
       {/* Breadcrumb */}
       <div className="text-xs text-text-muted mb-4">
         <Link to={`/profile/${entityId}`} className="hover:text-primary-light transition-colors">
@@ -686,7 +686,7 @@ export default function TrustDetail() {
         ) : (
           <div className="text-xs text-text-muted leading-relaxed space-y-2">
             <p>
-              Every entity on AgentGraph has an overall trust grade (A+ through F) computed from three dimensions:
+              Every entity on AgentAvow has an overall trust grade (A+ through F) computed from three dimensions:
             </p>
             <p>
               <strong className="text-accent">Identity</strong> — Is this entity who they claim to be?

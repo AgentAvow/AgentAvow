@@ -236,7 +236,7 @@ function SearchResults({ query }: { query: string }) {
     const slashMatch = query.match(/^([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)$/)
     return (
       <div className="text-center py-10">
-        <p className="text-text-muted mb-3">No agents found for &ldquo;{query}&rdquo; on AgentGraph yet.</p>
+        <p className="text-text-muted mb-3">No agents found for &ldquo;{query}&rdquo; on AgentAvow yet.</p>
         {slashMatch ? (
           <Link
             to={`/check/${slashMatch[1]}/${slashMatch[2]}`}
@@ -314,7 +314,7 @@ function SearchResults({ query }: { query: string }) {
 
 function EmbedSnippet({ badgeUrl, checkUrl, repo }: { badgeUrl: string; checkUrl: string; repo: string }) {
   const [copied, setCopied] = useState(false)
-  const markdown = `[![AgentGraph Trust](${badgeUrl})](${checkUrl})`
+  const markdown = `[![AgentAvow Trust](${badgeUrl})](${checkUrl})`
   const copy = () => {
     navigator.clipboard?.writeText(markdown).then(() => {
       setCopied(true)
@@ -423,22 +423,22 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
 
   if (!scan) return null
 
-  // When entity exists on AgentGraph, use composite score as primary
+  // When entity exists on AgentAvow, use composite score as primary
   const entityTrust = scan.entity_trust as {
     imported?: boolean
     composite_score?: number
     grade?: string
     entity_id?: string
   } | null | undefined
-  const isOnAgentGraph = entityTrust?.imported === true
+  const isOnAgentAvow = entityTrust?.imported === true
   const securityScore = Math.round(scan.overall_score)
-  const score = isOnAgentGraph ? Math.round(entityTrust?.composite_score ?? 0) : securityScore
-  const grade: LetterGrade = isOnAgentGraph
+  const score = isOnAgentAvow ? Math.round(entityTrust?.composite_score ?? 0) : securityScore
+  const grade: LetterGrade = isOnAgentAvow
     ? ((entityTrust?.grade as LetterGrade) || scoreToGrade(score))
     : scoreToGrade(score)
   const badgeUrl = buildBadgeUrl(owner, repo)
-  const checkUrl = `https://agentgraph.co/check/${owner}/${repo}`
-  const ogImageUrl = `https://agentgraph.co/api/v1/public/scan/${owner}/${repo}/og-image`
+  const checkUrl = `https://agentavow.com/check/${owner}/${repo}`
+  const ogImageUrl = `https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`
 
   // Build a consumer-friendly safety verdict for OG description
   const verdictLabel = score >= 81 ? 'Safe to Use' : score >= 61 ? 'Generally Safe' : score >= 41 ? 'Use with Caution' : score >= 21 ? 'Significant Risks' : 'Not Recommended'
@@ -446,7 +446,7 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
   if (scan.critical_findings > 0) findingsParts.push(`${scan.critical_findings} critical`)
   if (scan.high_findings > 0) findingsParts.push(`${scan.high_findings} high`)
   const findingsText = findingsParts.length > 0 ? findingsParts.join(', ') + ' findings' : 'No critical or high findings'
-  const ogDescription = `Security scan: ${findingsText}. ${verdictLabel}. Check any AI agent at agentgraph.co/check`
+  const ogDescription = `Security scan: ${findingsText}. ${verdictLabel}. Check any AI agent at agentavow.com/check`
 
   return (
     <>
@@ -473,14 +473,14 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
           },
           author: {
             '@type': 'Organization',
-            name: 'AgentGraph',
-            url: 'https://agentgraph.co',
+            name: 'AgentAvow',
+            url: 'https://agentavow.com',
           },
         }}
       />
 
       <div className="space-y-6">
-        {/* Giant Grade — composite when on AgentGraph, security scan otherwise */}
+        {/* Giant Grade — composite when on AgentAvow, security scan otherwise */}
         <GradeCard grade={grade} score={score} repoName={`${owner}/${repo}`} />
 
         {/* Safety Verdict */}
@@ -488,7 +488,7 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
           grade={grade}
           totalFindings={scan.total_findings}
           criticalFindings={scan.critical_findings}
-          providerCount={isOnAgentGraph ? 3 : (scan.provider_count ?? 1)}
+          providerCount={isOnAgentAvow ? 3 : (scan.provider_count ?? 1)}
         />
 
         {/* Tool-definition pinning + drift (#8) — the rug-pull signal. High in the
@@ -502,8 +502,8 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
         {/* Trust Score v2 — signed, verifiable methodology (design §5.2) */}
         {scan.trust_envelope && <TrustEnvelopePanel env={scan.trust_envelope} />}
 
-        {/* Trust Dimensions — enriched when on AgentGraph */}
-        {isOnAgentGraph ? (
+        {/* Trust Dimensions — enriched when on AgentAvow */}
+        {isOnAgentAvow ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Identity */}
             <div className="bg-surface border border-border rounded-lg p-3 flex items-center gap-3">
@@ -514,7 +514,7 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
               </div>
               <div>
                 <p className="text-sm font-medium text-text-primary">Identity</p>
-                <p className="text-xs text-primary">Verified on AgentGraph</p>
+                <p className="text-xs text-primary">Verified on AgentAvow</p>
               </div>
             </div>
             {/* Code Security */}
@@ -538,7 +538,7 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
               </div>
               <div>
                 <p className="text-sm font-medium text-text-primary">Community</p>
-                <p className="text-xs text-text-muted">On AgentGraph platform</p>
+                <p className="text-xs text-text-muted">On AgentAvow platform</p>
               </div>
             </div>
           </div>
@@ -546,8 +546,8 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
           <TrustDimensions scanResult={scan} />
         )}
 
-        {/* AgentGraph Platform Links — when entity exists */}
-        {isOnAgentGraph && (
+        {/* AgentAvow Platform Links — when entity exists */}
+        {isOnAgentAvow && (
           <div className="flex gap-2 justify-center">
             <Link
               to={`/profile/${entityTrust.entity_id}`}
@@ -564,17 +564,17 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
           </div>
         )}
 
-        {/* Import CTA — when NOT on AgentGraph */}
-        {!isOnAgentGraph && (
+        {/* Import CTA — when NOT on AgentAvow */}
+        {!isOnAgentAvow && (
           <div className="bg-surface border border-border border-dashed rounded-xl p-4 text-center">
             <p className="text-sm text-text-muted mb-2">
-              This is a code security scan only. Import this agent to AgentGraph for a full trust score including identity verification and community signals.
+              This is a code security scan only. Import this agent to AgentAvow for a full trust score including identity verification and community signals.
             </p>
             <Link
               to="/onboarding"
               className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg text-sm font-medium transition-colors"
             >
-              Import to AgentGraph
+              Import to AgentAvow
             </Link>
           </div>
         )}
@@ -634,7 +634,7 @@ function ScanResultView({ owner, repo }: { owner: string; repo: string }) {
             month: 'long',
             day: 'numeric',
           })}
-          {' '}by AgentGraph Security Scanner
+          {' '}by AgentAvow Security Scanner
         </div>
         <div className="text-center pb-4">
           <Link to="/scans" className="text-xs text-primary-light hover:underline">
@@ -706,8 +706,8 @@ export default function Check() {
           jsonLd={{
             '@context': 'https://schema.org',
             '@type': 'WebApplication',
-            name: 'AgentGraph Safety Checker',
-            url: 'https://agentgraph.co/check',
+            name: 'AgentAvow Safety Checker',
+            url: 'https://agentavow.com/check',
             applicationCategory: 'SecurityApplication',
             description: 'Check the security posture of any AI agent, MCP server, or OpenClaw skill. Instant trust grades, findings breakdown, and safety verdicts. No signup required.',
           }}

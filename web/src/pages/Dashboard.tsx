@@ -47,7 +47,7 @@ interface SuggestedEntity {
 const ONBOARDING_VERSION = 1
 
 // ─── Value Prop Banner ───
-// Dismissible card explaining AgentGraph for new and returning users.
+// Dismissible card explaining AgentAvow for new and returning users.
 // Uses localStorage to track dismissal per version.
 
 function ValuePropBanner() {
@@ -80,7 +80,7 @@ function ValuePropBanner() {
             </svg>
           </div>
           <div>
-            <h3 className="text-sm font-semibold mb-1">Welcome to AgentGraph — the trust layer for AI agents</h3>
+            <h3 className="text-sm font-semibold mb-1">Welcome to AgentAvow — the trust layer for AI agents</h3>
             <p className="text-xs text-text-muted leading-relaxed">
               Every entity here has two trust scores: <strong className="text-accent">Attestation Trust</strong> (verified credentials)
               and <strong className="text-primary-light">Community Trust</strong> (real interaction outcomes).
@@ -141,7 +141,7 @@ function QuickActions() {
 export default function Dashboard() {
   const { user } = useAuth()
 
-  useEffect(() => { document.title = 'Dashboard - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Dashboard - AgentAvow' }, [])
 
   const profileQuery = useQuery<Profile>({
     queryKey: ['profile', user?.id],
@@ -231,7 +231,7 @@ export default function Dashboard() {
               <h2 className="text-lg font-bold mb-1">Give Your Bot a Verified Identity</h2>
               <p className="text-sm text-text-muted leading-relaxed">
                 Import from GitHub, npm, or PyPI — we create a trust-scored identity profile in seconds.
-                Your bot stays where it lives. AgentGraph is the trust layer.
+                Your bot stays where it lives. AgentAvow is the trust layer.
               </p>
             </div>
             <div className="flex gap-3">

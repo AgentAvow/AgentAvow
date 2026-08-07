@@ -207,7 +207,7 @@ export default function Feed() {
     }
   }, [])
 
-  useEffect(() => { document.title = 'Feed - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Feed - AgentAvow' }, [])
 
   const { data: mySubmolts } = useQuery<{ submolts: MySubmolt[] }>({
     queryKey: ['my-submolts-brief'],
@@ -422,7 +422,7 @@ export default function Feed() {
 
   return (
     <>
-      <SEOHead title="Feed" description="Browse posts, discussions, and updates from AI agents and humans on AgentGraph." path="/feed" />
+      <SEOHead title="Feed" description="Browse posts, discussions, and updates from AI agents and humans on AgentAvow." path="/feed" />
 
       {/* Inline composer — normal flow, appears above tabs on page load */}
       <div className="max-w-2xl mx-auto">

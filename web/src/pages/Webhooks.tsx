@@ -49,7 +49,7 @@ export default function Webhooks() {
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
-  useEffect(() => { document.title = 'Webhooks - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Webhooks - AgentAvow' }, [])
   useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const { data: webhooks, isLoading, isError, refetch } = useQuery<{ webhooks: Webhook[]; count: number }>({

@@ -246,7 +246,7 @@ export default function Profile() {
   })
 
   useEffect(() => {
-    document.title = profile ? `${profile.display_name} - AgentGraph` : 'Profile - AgentGraph'
+    document.title = profile ? `${profile.display_name} - AgentAvow` : 'Profile - AgentAvow'
   }, [profile])
 
   // Operator profile for agents
@@ -623,7 +623,7 @@ export default function Profile() {
 
   return (
     <PageTransition className="max-w-2xl mx-auto">
-      <SEOHead title={profile.display_name} description={profile.bio_markdown?.slice(0, 160) || `${profile.display_name} on AgentGraph`} path={`/profile/${entityId}`} type="profile" />
+      <SEOHead title={profile.display_name} description={profile.bio_markdown?.slice(0, 160) || `${profile.display_name} on AgentAvow`} path={`/profile/${entityId}`} type="profile" />
       <div className="bg-surface border border-border rounded-lg p-6">
         <div className="flex flex-col sm:flex-row items-start justify-between gap-3 mb-4">
           <div className="flex items-start gap-4">
@@ -1435,7 +1435,7 @@ export default function Profile() {
               <div className="bg-background border border-border rounded p-3 inline-block">
                 <img
                   src={`/api/v1/badges/trust/${entityId}.svg?style=detailed`}
-                  alt="AgentGraph Trust Score"
+                  alt="AgentAvow Trust Score"
                   className="h-7"
                 />
               </div>
@@ -1443,16 +1443,16 @@ export default function Profile() {
                 <label className="block text-xs text-text-muted uppercase tracking-wider">Markdown + HTML (recommended)</label>
                 <div className="relative">
                   <pre className="bg-background border border-border rounded px-3 py-2 text-xs font-mono break-all whitespace-pre-wrap select-all">
-{`<a href="https://agentgraph.co/profile/${entityId}">
-  <img src="https://agentgraph.co/api/v1/badges/trust/${entityId}.svg?style=detailed&scale=1.5" alt="AgentGraph Trust Score" />
+{`<a href="https://agentavow.com/profile/${entityId}">
+  <img src="https://agentavow.com/api/v1/badges/trust/${entityId}.svg?style=detailed&scale=1.5" alt="AgentAvow Trust Score" />
 </a>
 
-<sub>Verified on <a href="https://agentgraph.co">AgentGraph</a> — trust infrastructure for AI agents. <a href="https://agentgraph.co/profile/${entityId}">View profile</a></sub>`}
+<sub>Verified on <a href="https://agentavow.com">AgentAvow</a> — trust infrastructure for AI agents. <a href="https://agentavow.com/profile/${entityId}">View profile</a></sub>`}
                   </pre>
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(
-                        `<a href="https://agentgraph.co/profile/${entityId}">\n  <img src="https://agentgraph.co/api/v1/badges/trust/${entityId}.svg?style=detailed&scale=1.5" alt="AgentGraph Trust Score" />\n</a>\n\n<sub>Verified on <a href="https://agentgraph.co">AgentGraph</a> — trust infrastructure for AI agents. <a href="https://agentgraph.co/profile/${entityId}">View profile</a></sub>`
+                        `<a href="https://agentavow.com/profile/${entityId}">\n  <img src="https://agentavow.com/api/v1/badges/trust/${entityId}.svg?style=detailed&scale=1.5" alt="AgentAvow Trust Score" />\n</a>\n\n<sub>Verified on <a href="https://agentavow.com">AgentAvow</a> — trust infrastructure for AI agents. <a href="https://agentavow.com/profile/${entityId}">View profile</a></sub>`
                       )
                     }}
                     className="absolute top-2 right-2 px-2 py-1 rounded text-xs font-medium bg-primary text-white hover:bg-primary/90 transition-colors"

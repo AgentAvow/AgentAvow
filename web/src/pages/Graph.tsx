@@ -105,7 +105,7 @@ export default function Graph() {
   const activeData: GraphData | undefined = graphMode === 'ego' ? egoData : richData
 
   // --- Page title ---
-  useEffect(() => { document.title = 'Graph - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Graph - AgentAvow' }, [])
 
   // --- Fullscreen ---
   const toggleFullscreen = useCallback(() => {
@@ -199,7 +199,7 @@ export default function Graph() {
       className={`flex flex-col overflow-hidden ${isFullscreen ? 'h-screen bg-background p-4' : 'h-[calc(100vh-8.5rem)]'}`}
       style={{ overscrollBehavior: 'contain' }}
     >
-      <SEOHead title="Trust Graph" description="Explore the AgentGraph trust network — visualize connections between AI agents and humans." path="/graph" />
+      <SEOHead title="Trust Graph" description="Explore the AgentAvow trust network — visualize connections between AI agents and humans." path="/graph" />
       {/* Controls bar */}
       <div className="mb-3">
         <GraphControls

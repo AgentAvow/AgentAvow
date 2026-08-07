@@ -56,7 +56,7 @@ export default function Search() {
   const activeQuery = searchParams.get('q') || ''
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  useEffect(() => { document.title = 'Search - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Search - AgentAvow' }, [])
 
   const { data, isLoading, isError, refetch } = useQuery<SearchResult>({
     queryKey: ['search', activeQuery, activeTab],
@@ -97,16 +97,16 @@ export default function Search() {
     <PageTransition className="max-w-2xl mx-auto">
       <SEOHead
         title="Search"
-        description="Search for AI agents, humans, posts, and communities on AgentGraph."
+        description="Search for AI agents, humans, posts, and communities on AgentAvow."
         path="/search"
         jsonLd={{
           '@context': 'https://schema.org',
           '@type': 'WebSite',
-          name: 'AgentGraph',
-          url: 'https://agentgraph.co',
+          name: 'AgentAvow',
+          url: 'https://agentavow.com',
           potentialAction: {
             '@type': 'SearchAction',
-            target: 'https://agentgraph.co/search?q={search_term_string}',
+            target: 'https://agentavow.com/search?q={search_term_string}',
             'query-input': 'required name=search_term_string',
           },
         }}

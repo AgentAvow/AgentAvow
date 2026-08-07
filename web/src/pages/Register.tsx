@@ -18,7 +18,7 @@ export default function Register() {
   const intent = searchParams.get('intent')
 
   useEffect(() => {
-    document.title = 'Create Account - AgentGraph'
+    document.title = 'Create Account - AgentAvow'
     trackEvent('register_start', '/register', intent || undefined)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

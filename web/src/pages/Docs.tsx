@@ -53,9 +53,9 @@ const SECTIONS: { title: string; note?: string; items: SectionItem[] }[] = [
       { label: 'Open Agent Trust', desc: 'pip install open-agent-trust — verify agent identity attestations', href: 'https://pypi.org/project/open-agent-trust/', external: true, badge: 'PyPI' },
       { label: 'Microsoft AGT Bridge', desc: 'pip install agentgraph-agt — trust provider for Microsoft Agent Governance Toolkit', href: 'https://pypi.org/project/agentgraph-agt/', external: true, badge: 'PyPI' },
       { label: 'OpenClaw Skill', desc: 'pip install agentgraph-openclaw-skill — autonomous agent self-registration', href: 'https://pypi.org/project/agentgraph-openclaw-skill/', external: true, badge: 'PyPI' },
-      { label: 'LangChain Bridge', desc: 'Register LangChain agents on AgentGraph', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/bridges/agentgraph-bridge-langchain', external: true, badge: 'Preview' },
-      { label: 'CrewAI Bridge', desc: 'Register CrewAI crews on AgentGraph', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/bridges/agentgraph-bridge-crewai', external: true, badge: 'Preview' },
-      { label: 'AutoGen Bridge', desc: 'Register AutoGen agents on AgentGraph', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/bridges/agentgraph-bridge-autogen', external: true, badge: 'Preview' },
+      { label: 'LangChain Bridge', desc: 'Register LangChain agents on AgentAvow', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/bridges/agentgraph-bridge-langchain', external: true, badge: 'Preview' },
+      { label: 'CrewAI Bridge', desc: 'Register CrewAI crews on AgentAvow', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/bridges/agentgraph-bridge-crewai', external: true, badge: 'Preview' },
+      { label: 'AutoGen Bridge', desc: 'Register AutoGen agents on AgentAvow', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/bridges/agentgraph-bridge-autogen', external: true, badge: 'Preview' },
       { label: 'GitHub Action', desc: 'Register agents directly from CI/CD pipelines', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/github-action', external: true, badge: 'Action' },
     ],
   },
@@ -219,7 +219,7 @@ function DocViewer({ slug }: { slug: string }) {
   })
 
   useEffect(() => {
-    if (data?.title) document.title = `${data.title} - AgentGraph Docs`
+    if (data?.title) document.title = `${data.title} - AgentAvow Docs`
   }, [data?.title])
 
   // Handle anchor scrolling after content loads
@@ -266,7 +266,7 @@ function DocViewer({ slug }: { slug: string }) {
 
   return (
     <>
-      <SEOHead title={data.title} description={`${data.title} — AgentGraph documentation`} path={`/docs/${slug}`} />
+      <SEOHead title={data.title} description={`${data.title} — AgentAvow documentation`} path={`/docs/${slug}`} />
       <Link to="/docs" className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-text mb-6 transition-colors">
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         All Docs
@@ -323,7 +323,7 @@ function DocsHub() {
     staleTime: 5 * 60_000,
   })
 
-  useEffect(() => { document.title = 'Developer Docs - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Developer Docs - AgentAvow' }, [])
 
   // 150ms debounce
   const handleSearchChange = useCallback((value: string) => {
@@ -357,7 +357,7 @@ function DocsHub() {
     <>
       <SEOHead
         title="Developer Docs"
-        description="AgentGraph developer documentation — SDKs, API reference, bot onboarding, trust framework, and protocol specifications."
+        description="AgentAvow developer documentation — SDKs, API reference, bot onboarding, trust framework, and protocol specifications."
         path="/docs"
       />
 
@@ -369,7 +369,7 @@ function DocsHub() {
           </span>
         </div>
         <p className="text-sm text-text-muted">
-          Everything you need to build, register, and manage AI agents on AgentGraph.
+          Everything you need to build, register, and manage AI agents on AgentAvow.
         </p>
       </div>
 

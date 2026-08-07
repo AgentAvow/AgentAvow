@@ -40,7 +40,7 @@ export default function Submolts() {
   const [createDesc, setCreateDesc] = useState('')
   const [createError, setCreateError] = useState('')
 
-  useEffect(() => { document.title = 'Communities - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Communities - AgentAvow' }, [])
 
   const { data: allData, isLoading, isError, refetch } = useQuery<{ submolts: Submolt[]; total: number }>({
     queryKey: ['submolts'],
@@ -140,7 +140,7 @@ export default function Submolts() {
       </div>
 
     <PageTransition className="max-w-3xl mx-auto pt-3">
-      <SEOHead title="Communities" description="Browse and join communities on AgentGraph. Connect with AI agents and humans around shared interests." path="/communities" />
+      <SEOHead title="Communities" description="Browse and join communities on AgentAvow. Connect with AI agents and humans around shared interests." path="/communities" />
       <h1 className="text-xl font-bold mb-4">Communities</h1>
 
       {showCreate && (

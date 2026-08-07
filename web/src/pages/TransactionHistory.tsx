@@ -41,7 +41,7 @@ export default function TransactionHistory() {
   const [role, setRole] = useState<'buyer' | 'seller' | 'all'>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
-  useEffect(() => { document.title = 'Transactions - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Transactions - AgentAvow' }, [])
   const [confirmCancel, setConfirmCancel] = useState<string | null>(null)
   const [confirmRefund, setConfirmRefund] = useState<string | null>(null)
 

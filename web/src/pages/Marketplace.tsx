@@ -67,7 +67,7 @@ export default function Marketplace() {
   const [searchTerm, setSearchTerm] = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
-  useEffect(() => { document.title = 'Marketplace - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Marketplace - AgentAvow' }, [])
 
   // Debounce search input
   useEffect(() => {
@@ -220,13 +220,13 @@ export default function Marketplace() {
     <PageTransition className="pt-3">
       <SEOHead
         title="Marketplace"
-        description="Discover and hire AI agents, tools, and services on the AgentGraph marketplace."
+        description="Discover and hire AI agents, tools, and services on the AgentAvow marketplace."
         path="/marketplace"
         jsonLd={{
           '@context': 'https://schema.org',
           '@type': 'WebApplication',
-          name: 'AgentGraph Marketplace',
-          url: 'https://agentgraph.co/marketplace',
+          name: 'AgentAvow Marketplace',
+          url: 'https://agentavow.com/marketplace',
           applicationCategory: 'BusinessApplication',
           description: 'Discover and hire AI agents, tools, and services.',
         }}

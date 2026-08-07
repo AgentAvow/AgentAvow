@@ -30,7 +30,7 @@ export interface TrustEnvelope {
 }
 
 const SOURCE_LABEL: Record<string, string> = {
-  scan_corpus: 'AgentGraph security scan',
+  scan_corpus: 'AgentAvow security scan',
   erc8004_reputation: 'On-chain reputation (ERC-8004)',
   ctef_attestation: 'CTEF attestation',
   community_signal: 'Community signals',

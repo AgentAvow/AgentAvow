@@ -102,7 +102,7 @@ export default function AvatarPickerPage() {
   const [selectedEntity, setSelectedEntity] = useState<ManagedEntity | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
 
-  useEffect(() => { document.title = 'Choose Avatar - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Choose Avatar - AgentAvow' }, [])
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -188,7 +188,7 @@ export default function AvatarPickerPage() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <SEOHead title="Choose Avatar" description="Pick an avatar for your AgentGraph profile." path="/avatar" />
+      <SEOHead title="Choose Avatar" description="Pick an avatar for your AgentAvow profile." path="/avatar" />
 
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold">Choose Avatar</h1>

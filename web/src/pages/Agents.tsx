@@ -82,7 +82,7 @@ export default function Agents() {
   const [rotateAgentId, setRotateAgentId] = useState<string | null>(null)
   const [deleteAgentId, setDeleteAgentId] = useState<string | null>(null)
 
-  useEffect(() => { document.title = 'Agents - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Agents - AgentAvow' }, [])
   useEffect(() => () => clearTimeout(copyTimer.current), [])
   const [rotatedKey, setRotatedKey] = useState<string | null>(null)
   const [showPending, setShowPending] = useState(false)

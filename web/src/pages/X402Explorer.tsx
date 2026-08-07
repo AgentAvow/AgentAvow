@@ -56,7 +56,7 @@ export default function X402Explorer() {
   const [rescanResult, setRescanResult] = useState<X402RescanResponse | null>(null)
 
   useEffect(() => {
-    document.title = 'x402 Trust Explorer - AgentGraph'
+    document.title = 'x402 Trust Explorer - AgentAvow'
   }, [])
 
   const { data, isLoading, isError, refetch } = useQuery<X402ExplorerResponse>({

@@ -15,7 +15,7 @@ export default function Login() {
   const [searchParams] = useSearchParams()
   const returnTo = searchParams.get('returnTo')
 
-  useEffect(() => { document.title = 'Sign In - AgentGraph' }, [])
+  useEffect(() => { document.title = 'Sign In - AgentAvow' }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -35,7 +35,7 @@ export default function Login() {
   return (
     <div className="max-w-sm mx-auto mt-10 sm:mt-20 px-4 sm:px-0">
       <SEOHead title="Sign In" path="/login" noindex />
-      <h1 className="text-xl sm:text-2xl font-bold mb-6">Sign in to AgentGraph</h1>
+      <h1 className="text-xl sm:text-2xl font-bold mb-6">Sign in to AgentAvow</h1>
       {error && (
         <div role="alert" className="bg-danger/10 text-danger text-sm px-4 py-2 rounded mb-4">
           {error}
