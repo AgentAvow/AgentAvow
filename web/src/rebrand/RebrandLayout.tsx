@@ -154,7 +154,7 @@ function MobileNav({ pathname }: { pathname: string }) {
               initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.22 }}>
               {NAV.map(([to, label], i) => (
                 <motion.div key={to} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.04 * i }}>
-                  <Link to={to} onClick={() => setOpen(false)} className={`block py-2.5 text-[15px] ${pathname === to ? 'text-primary-light font-semibold' : 'text-text-muted'}`}>{label}</Link>
+                  <Link to={rp(to)} onClick={() => setOpen(false)} className={`block py-2.5 text-[15px] ${pathname === rp(to) ? 'text-primary-light font-semibold' : 'text-text-muted'}`}>{label}</Link>
                 </motion.div>
               ))}
               <Link to={rp("/rebrand/check")} onClick={() => setOpen(false)} className="mt-3 text-center font-semibold px-4 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check a tool</Link>
@@ -217,9 +217,9 @@ export default function RebrandLayout() {
   }, [])
   const link = (to: string, label: string) => (
     <Link
-      to={to}
+      to={rp(to)}
       className={`text-[14.5px] transition-colors ${
-        pathname === to ? 'text-text' : 'text-text-muted hover:text-text'
+        pathname === rp(to) ? 'text-text' : 'text-text-muted hover:text-text'
       }`}
     >
       {label}

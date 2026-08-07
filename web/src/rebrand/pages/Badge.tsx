@@ -102,7 +102,7 @@ export default function RebrandBadge() {
           ['Python SDK / CLI', 'Programmatic scans + attestation verification in your pipeline.', 'agentavow scan owner/repo', '/rebrand/docs'],
           ['REST API', 'The same signed verdicts, offline-verifiable against our JWKS.', 'GET /public/scan/{owner}/{repo}', '/api/v1/redoc'],
         ] as [string, string, string, string][]).map(([h, p, code, href]) => (
-          <a key={h} href={href} target={href.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" className="glass card-hover rounded-xl p-5 block">
+          <a key={h} href={rp(href)} target={href.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" className="glass card-hover rounded-xl p-5 block">
             <div className="flex items-center justify-between gap-2"><div className="text-[15px] font-semibold">{h}</div><span className="text-primary-light text-[13px]">→</span></div>
             <p className="mt-2 text-text-muted text-[13.5px]">{p}</p>
             <code className="inline-block mt-3 font-mono text-[11.5px] text-primary-light bg-surface px-2 py-1 rounded break-all">{code}</code>
@@ -123,7 +123,7 @@ export default function RebrandBadge() {
           )
           return external
             ? <a key={h} href={href} target="_blank" rel="noopener noreferrer" className="glass card-hover rounded-xl px-4 py-3 block">{inner}</a>
-            : <Link key={h} to={href} className="glass card-hover rounded-xl px-4 py-3 block">{inner}</Link>
+            : <Link key={h} to={rp(href)} className="glass card-hover rounded-xl px-4 py-3 block">{inner}</Link>
         })}
       </div>
     </div>

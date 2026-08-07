@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { rp } from '../basePath'
 import Markdown from 'react-markdown'
 import checkGuide from '../docs/check-guide.md?raw'
 import trustBadges from '../docs/trust-badges.md?raw'
@@ -68,7 +69,7 @@ export default function RebrandDocs() {
           {MORE.map(([label, href]) => (
             href.startsWith('/api') || href.startsWith('http')
               ? <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label} ↗</a>
-              : <Link key={label} to={href} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</Link>
+              : <Link key={label} to={rp(href)} className="text-[13.5px] px-3 py-1.5 text-text-muted hover:text-primary-light">{label}</Link>
           ))}
         </nav>
       </aside>
