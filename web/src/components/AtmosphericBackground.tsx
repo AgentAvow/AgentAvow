@@ -398,11 +398,13 @@ const authRoutes = new Set(['/login', '/register', '/forgot-password', '/reset-p
 
 // ─── Main Component ───
 
-export function AtmosphericBackground({ children }: { children: React.ReactNode }) {
+export function AtmosphericBackground({ children, intensity: intensityProp }: { children: React.ReactNode; intensity?: Intensity }) {
   const location = useLocation()
   const reducedMotion = useReducedMotion()
   const tabVisible = useTabVisible()
-  const intensity = getIntensity(location.pathname)
+  // Explicit override (e.g. the rebrand shell forces 'medium' now that it's at
+  // the root and no longer matches the /rebrand prefix). Falls back to route-based.
+  const intensity = intensityProp ?? getIntensity(location.pathname)
 
   if (intensity === 'none') {
     return <>{children}</>

@@ -251,7 +251,7 @@ export default function RebrandLayout() {
       </header>
 
       <main>
-        <AtmosphericBackground>
+        <AtmosphericBackground intensity="medium">
           {/* per-route entrance — a gentle fade+rise on every navigation.
               Keyed on pathname; no exit anim (plays nice with lazy/Suspense). */}
           <motion.div
