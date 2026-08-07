@@ -253,7 +253,7 @@ export default function RebrandLayout() {
       </header>
 
       <main>
-        <AtmosphericBackground intensity="medium">
+        <AtmosphericBackground intensity="medium" confineFaceToHero>
           {/* per-route entrance — a gentle fade+rise on every navigation.
               Keyed on pathname; no exit anim (plays nice with lazy/Suspense). */}
           <motion.div

@@ -154,6 +154,34 @@ function ParallaxHeroFace({ intensity, reducedMotion }: { intensity: Intensity; 
   )
 }
 
+// ─── Hero-confined face ───
+// Instead of a fixed full-viewport background, the head lives only in the top
+// hero (one viewport tall) and scrolls away with the page, so lower sections and
+// the footer sit on clean dark. Used by the rebrand (confineFaceToHero).
+
+function HeroFace({ reducedMotion }: { reducedMotion: boolean }) {
+  const { theme } = useTheme()
+  return (
+    <div className="absolute top-0 inset-x-0 h-screen z-0 pointer-events-none overflow-hidden">
+      <img
+        src={heroArt}
+        alt=""
+        aria-hidden="true"
+        className={`w-full h-full object-cover ${reducedMotion ? '' : 'animate-hero-breathe'}`}
+        style={{
+          opacity: theme === 'light' ? 0.16 : 0.15,
+          mixBlendMode: theme === 'light' ? 'multiply' : 'screen',
+          filter: theme === 'light' ? 'contrast(1.2) brightness(0.9)' : 'none',
+          // Fade the head out toward the bottom of the hero so it dissolves before
+          // the first section — no hard edge where the hero ends.
+          maskImage: 'linear-gradient(to bottom, #000 30%, transparent 82%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, #000 30%, transparent 82%)',
+        }}
+      />
+    </div>
+  )
+}
+
 // ─── Network Pulse — Canvas-based animated mycelium lines ───
 // Renders 18 flowing connection paths + 11 pulsing junction nodes in a single
 // canvas pass instead of 29 separate CSS-animated SVG elements.
@@ -366,11 +394,11 @@ function SubtleLayer({ reducedMotion }: { reducedMotion: boolean }) {
 // ─── Medium Layer ───
 // GradientBreath + parallax face + canvas network pulse.
 
-function MediumLayer({ reducedMotion }: { reducedMotion: boolean }) {
+function MediumLayer({ reducedMotion, showFace = true }: { reducedMotion: boolean; showFace?: boolean }) {
   return (
     <>
       <GradientBreath className={reducedMotion ? '' : 'opacity-50'} />
-      <ParallaxHeroFace intensity="medium" reducedMotion={reducedMotion} />
+      {showFace && <ParallaxHeroFace intensity="medium" reducedMotion={reducedMotion} />}
       <NetworkPulseCanvas opacity={0.08} reducedMotion={reducedMotion} />
     </>
   )
@@ -379,11 +407,11 @@ function MediumLayer({ reducedMotion }: { reducedMotion: boolean }) {
 // ─── Full Layer (Dashboard) ───
 // Richer gradients + parallax face + canvas network pulse.
 
-function FullLayer({ reducedMotion }: { reducedMotion: boolean }) {
+function FullLayer({ reducedMotion, showFace = true }: { reducedMotion: boolean; showFace?: boolean }) {
   return (
     <>
       <GradientBreath className={reducedMotion ? '' : ''} />
-      <ParallaxHeroFace intensity="full" reducedMotion={reducedMotion} />
+      {showFace && <ParallaxHeroFace intensity="full" reducedMotion={reducedMotion} />}
       <NetworkPulseCanvas opacity={0.14} reducedMotion={reducedMotion} />
     </>
   )
@@ -395,7 +423,7 @@ const authRoutes = new Set(['/login', '/register', '/forgot-password', '/reset-p
 
 // ─── Main Component ───
 
-export function AtmosphericBackground({ children, intensity: intensityProp }: { children: React.ReactNode; intensity?: Intensity }) {
+export function AtmosphericBackground({ children, intensity: intensityProp, confineFaceToHero = false }: { children: React.ReactNode; intensity?: Intensity; confineFaceToHero?: boolean }) {
   const location = useLocation()
   const reducedMotion = useReducedMotion()
   const tabVisible = useTabVisible()
@@ -420,9 +448,12 @@ export function AtmosphericBackground({ children, intensity: intensityProp }: { 
         data-paused={!tabVisible || undefined}
       >
         {intensity === 'subtle' && <SubtleLayer reducedMotion={reducedMotion} />}
-        {intensity === 'medium' && <MediumLayer reducedMotion={reducedMotion} />}
-        {intensity === 'full' && <FullLayer reducedMotion={reducedMotion} />}
+        {intensity === 'medium' && <MediumLayer reducedMotion={reducedMotion} showFace={!confineFaceToHero} />}
+        {intensity === 'full' && <FullLayer reducedMotion={reducedMotion} showFace={!confineFaceToHero} />}
       </div>
+      {/* Hero-confined head: scrolls away with the page, so only the top hero shows
+          it and lower sections + footer stay clean. */}
+      {confineFaceToHero && (intensity === 'medium' || intensity === 'full') && <HeroFace reducedMotion={reducedMotion} />}
       <div className="relative z-10 flex-1 flex flex-col">
         {children}
       </div>
