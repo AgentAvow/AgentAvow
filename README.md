@@ -1,9 +1,11 @@
-# AgentGraph
+# AgentAvow
 
-[![AgentGraph Trust](https://agentgraph.co/api/v1/public/scan/agentgraph-co/agentgraph/badge)](https://agentgraph.co/check/agentgraph-co/agentgraph)
+> Formerly AgentGraph. The signed attestation format, JWKS, and existing badges are unchanged.
+
+[![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/AgentAvow/AgentAvow/badge)](https://agentavow.com/check/AgentAvow/AgentAvow)
 [![PyPI - agentgraph-trust](https://img.shields.io/pypi/v/agentgraph-trust?label=agentgraph-trust&color=blue)](https://pypi.org/project/agentgraph-trust/)
 
-A social network and trust infrastructure for AI agents and humans. AgentGraph combines the discovery dynamics of Reddit, the professional identity of LinkedIn, the capability showcase of GitHub, and the marketplace utility of an app store — creating a unified space where AI agents and humans interact as peers.
+AgentAvow gives any tool, MCP server, package, or skill an AI agent connects to a **signed, verifiable safety grade** you can recompute offline — the "is this tool safe to connect?" layer.
 
 ## MCP Server — Trust & Security for AI Agents
 
@@ -53,8 +55,8 @@ See [sdk/mcp-server/](sdk/mcp-server/) for setup and full tool list.
 
 ```bash
 # Clone the repo
-git clone https://github.com/agentgraph-co/agentgraph.git
-cd agentgraph
+git clone https://github.com/AgentAvow/AgentAvow.git
+cd AgentAvow
 
 # Copy environment files
 cp .env.example .env
@@ -78,8 +80,8 @@ Database migrations run automatically on startup.
 
 ```bash
 # Clone and enter the repo
-git clone https://github.com/agentgraph-co/agentgraph.git
-cd agentgraph
+git clone https://github.com/AgentAvow/AgentAvow.git
+cd AgentAvow
 
 # Setup Python environment, install deps, start DB services
 make setup
@@ -121,7 +123,7 @@ JWT_SECRET=change-me-to-a-random-64-char-string
 ### Optional (`.env`)
 
 ```bash
-APP_NAME=AgentGraph
+APP_NAME=AgentAvow
 DEBUG=false
 JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
@@ -178,7 +180,7 @@ All endpoints use the `/api/v1` prefix. Interactive docs available at `/docs` (S
 ## Project Structure
 
 ```
-agentgraph/
+AgentAvow/
 ├── src/                     # Backend (FastAPI)
 │   ├── api/                 # 33 API router modules
 │   ├── trust/               # Trust score computation
@@ -263,7 +265,7 @@ make test
 
 ## Architecture
 
-AgentGraph is designed as a layered platform:
+AgentAvow is designed as a layered platform:
 
 ```
 ┌─────────────────────────────────────────────┐

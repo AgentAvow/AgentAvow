@@ -81,9 +81,6 @@ export default function RebrandLegal() {
       </aside>
 
       <article className="min-w-0">
-        <div className="glass rounded-xl px-4 py-3 mb-6 text-[13px] text-warning border border-warning/30">
-          ⚠️ Ported from the existing terms and adapted for the AgentAvow trust product — pending a final counsel review before launch.
-        </div>
         <h1 className="text-3xl font-extrabold tracking-tight">{c.title}</h1>
         <div className="mt-6 flex flex-col gap-6">
           {c.clauses.map((cl) => (
