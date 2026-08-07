@@ -161,8 +161,15 @@ function ParallaxHeroFace({ intensity, reducedMotion }: { intensity: Intensity; 
 
 function HeroFace({ reducedMotion }: { reducedMotion: boolean }) {
   const { theme } = useTheme()
+  const { scrollY } = useScroll()
+  // Subtle parallax: the head lags the scroll (~80% speed) for depth. It sits in a
+  // slightly over-tall container so the lag never exposes a gap at the top.
+  const y = useTransform(scrollY, [0, 700], [0, 140])
   return (
-    <div className="absolute top-0 inset-x-0 h-screen z-0 pointer-events-none overflow-hidden">
+    <motion.div
+      className="absolute -top-[8vh] inset-x-0 h-[108vh] z-0 pointer-events-none overflow-hidden"
+      style={reducedMotion ? undefined : { y }}
+    >
       <img
         src={heroArt}
         alt=""
@@ -178,7 +185,7 @@ function HeroFace({ reducedMotion }: { reducedMotion: boolean }) {
           WebkitMaskImage: 'linear-gradient(to bottom, #000 30%, transparent 82%)',
         }}
       />
-    </div>
+    </motion.div>
   )
 }
 
