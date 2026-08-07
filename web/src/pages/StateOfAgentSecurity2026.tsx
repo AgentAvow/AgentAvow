@@ -710,7 +710,7 @@ export default function StateOfAgentSecurity2026() {
           <FadeIn>
             <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm">
               <a
-                href="https://github.com/agentgraph-co/agentgraph"
+                href="https://github.com/AgentAvow/AgentAvow"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-text-muted hover:text-primary-light transition-colors"

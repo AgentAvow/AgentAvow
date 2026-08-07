@@ -49,7 +49,7 @@ fail the build if the grade drops below a threshold:
 
 ```yaml
 # .github/workflows/agentavow.yml
-- uses: agentgraph-co/trust-scan-action@v1
+- uses: AgentAvow/trust-scan-action@v1
   with:
     repo: ${{ github.repository }}
     fail-below: B   # block merges under a B

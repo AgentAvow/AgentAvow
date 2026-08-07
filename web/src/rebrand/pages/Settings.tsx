@@ -102,7 +102,7 @@ export default function RebrandSettings() {
           <div className="min-w-0">
             <div className="text-[17px] font-bold">{user.display_name}</div>
             <div className="text-[13px] text-text-muted break-all">{user.email}</div>
-            <a href="/avatar" className="text-[12.5px] text-primary-light hover:text-primary">Change avatar →</a>
+            <Link to={rp('/rebrand/avatar')} className="text-[12.5px] text-primary-light hover:text-primary">Change avatar →</Link>
           </div>
         </div>
         {!user.email_verified && (

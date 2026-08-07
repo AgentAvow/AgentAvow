@@ -846,7 +846,7 @@ export default function MarketingTab() {
                             item.platform === 'bluesky' ? `https://bsky.app/profile/agentgraph.bsky.social/post/${item.external_id}` :
                             item.platform === 'reddit' ? `https://old.reddit.com${item.external_id}` :
                             item.platform === 'devto' ? `https://dev.to/agentgraph` :
-                            item.platform === 'github_discussions' ? `https://github.com/agentgraph-co/agentgraph/discussions` :
+                            item.platform === 'github_discussions' ? `https://github.com/AgentAvow/AgentAvow/discussions` :
                             item.platform === 'huggingface' ? `https://huggingface.co/agentgraph-official` :
                             '#'
                           }

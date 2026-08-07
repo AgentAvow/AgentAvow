@@ -16,7 +16,7 @@ interface Agent {
 }
 
 const PROD_BASE = 'https://agentgraph.co'
-const GITHUB_REPO = 'https://github.com/agentgraph-co/agentgraph'
+const GITHUB_REPO = 'https://github.com/AgentAvow/AgentAvow'
 
 const STYLE_INFO: Record<BadgeStyle, { label: string; desc: string }> = {
   compact: { label: 'Compact', desc: 'Best for GitHub READMEs' },

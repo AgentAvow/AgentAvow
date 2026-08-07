@@ -384,7 +384,7 @@ export default function SecurityScanCard({
               {showFindings ? 'Hide' : 'Show'} {scan.findings.length} finding{scan.findings.length !== 1 ? 's' : ''}
             </button>
             <a
-              href="https://github.com/agentgraph-co/agentgraph/blob/main/docs/security-scan-false-positives.md"
+              href="https://github.com/AgentAvow/AgentAvow/blob/main/docs/security-scan-false-positives.md"
               target="_blank"
               rel="noopener noreferrer"
               className="text-[10px] text-text-muted hover:text-primary-light transition-colors"
@@ -463,7 +463,7 @@ export default function SecurityScanCard({
           <span>Scanned {new Date(scan.scanned_at).toLocaleDateString()}</span>
           <div className="flex items-center gap-2">
             <a
-              href="https://github.com/agentgraph-co/agentgraph/blob/main/docs/security-scan-false-positives.md"
+              href="https://github.com/AgentAvow/AgentAvow/blob/main/docs/security-scan-false-positives.md"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-primary-light transition-colors"

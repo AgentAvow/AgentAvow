@@ -23,11 +23,11 @@ const CATEGORIES = [
 ]
 
 const STANDARDS = [
-  ['CTEF — Cryptographic Trust Evidence Format', 'The signed, reproducible evidence envelope any implementer can recompute byte-for-byte. Versioned in the open.', 'https://github.com/agentgraph-co/agentgraph/tree/main/docs/standards'],
+  ['CTEF — Cryptographic Trust Evidence Format', 'The signed, reproducible evidence envelope any implementer can recompute byte-for-byte. Versioned in the open.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards'],
   ['Published test vectors', 'Conformance vectors served at /.well-known so anyone can validate their own implementation against ours.', 'https://agentgraph.co/.well-known/cte-test-vectors.json'],
-  ['ERC-8004 bridge', 'Interop with the on-chain agent-trust registry standard.', 'https://github.com/agentgraph-co/agentgraph/tree/main/src/agentgraph_bridge_erc8004'],
-  ['AIPOU cross-fixture', 'A shared conformance fixture proving two independent implementations agree.', 'https://github.com/agentgraph-co/agentgraph/tree/main/docs/conformance'],
-  ['MCP & AIP bridges', 'Adapters so the trust layer plugs into the frameworks agents already use.', 'https://github.com/agentgraph-co/agentgraph/tree/main/docs/protocol'],
+  ['ERC-8004 bridge', 'Interop with the on-chain agent-trust registry standard.', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/agentgraph_bridge_erc8004'],
+  ['AIPOU cross-fixture', 'A shared conformance fixture proving two independent implementations agree.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/conformance'],
+  ['MCP & AIP bridges', 'Adapters so the trust layer plugs into the frameworks agents already use.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/protocol'],
 ]
 
 function Eyebrow({ children }: { children: React.ReactNode }) {

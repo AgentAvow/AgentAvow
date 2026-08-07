@@ -236,7 +236,7 @@ export default function Research() {
               Want to contribute methodology, a fixture set, or a cross-implementation
               comparison?{' '}
               <a
-                href="https://github.com/agentgraph-co/agentgraph"
+                href="https://github.com/AgentAvow/AgentAvow"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-primary-light hover:text-primary transition-colors"

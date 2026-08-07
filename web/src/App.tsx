@@ -104,6 +104,7 @@ const RebrandResearch = lazy(() => import('./rebrand/pages/Research'))
 const RebrandClaim = lazy(() => import('./rebrand/pages/Claim'))
 const RebrandFAQ = lazy(() => import('./rebrand/pages/FAQ'))
 const RebrandSettings = lazy(() => import('./rebrand/pages/Settings'))
+const RebrandAvatar = lazy(() => import('./rebrand/pages/Avatar'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -208,7 +209,7 @@ function AppRoutes() {
           <Route path="/tools" element={<ProtectedRoute><McpTools /></ProtectedRoute>} />
           <Route path="/admin" element={<AdminRoute><ErrorBoundary><Admin /></ErrorBoundary></AdminRoute>} />
           <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="/avatar" element={<ProtectedRoute><AvatarPicker /></ProtectedRoute>} />
+          {!CUTOVER && <Route path="/avatar" element={<ProtectedRoute><AvatarPicker /></ProtectedRoute>} />}
           <Route path="/disputes" element={<ProtectedRoute><Disputes /></ProtectedRoute>} />
           <Route path="/webhooks" element={<ProtectedRoute><Webhooks /></ProtectedRoute>} />
           {!CUTOVER && <Route path="*" element={<NotFound />} />}
@@ -229,6 +230,7 @@ function AppRoutes() {
           <Route path="claim" element={<RebrandClaim />} />
           <Route path="faq" element={<RebrandFAQ />} />
           <Route path="settings" element={<RebrandSettings />} />
+          <Route path="avatar" element={<RebrandAvatar />} />
           <Route path="legal" element={<RebrandLegal />} />
           <Route path="legal/:section" element={<RebrandLegal />} />
           <Route path="*" element={<RebrandHome />} />

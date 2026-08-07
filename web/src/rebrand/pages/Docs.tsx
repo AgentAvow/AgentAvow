@@ -23,8 +23,8 @@ const MORE: [string, string][] = [
   ['Scan catalog', '/rebrand/browse'],
   ['How it works', '/rebrand/how-it-works'],
   ['Standards & research', '/rebrand/research'],
-  ['SDK & CLI', 'https://github.com/agentgraph-co/agentgraph/tree/main/sdk'],
-  ['GitHub Action', 'https://github.com/agentgraph-co/agentgraph/tree/main/sdk/github-action'],
+  ['SDK & CLI', 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk'],
+  ['GitHub Action', 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/github-action'],
   ['API reference', '/api/v1/redoc'],
 ]
 

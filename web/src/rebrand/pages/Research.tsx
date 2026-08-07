@@ -12,7 +12,7 @@ const REPORTS: { title: string; sub: string; date: string; status: 'live' | 'upc
 ]
 
 const PUBLICATIONS: { title: string; sub: string; href: string }[] = [
-  { title: 'CTEF — Cryptographic Trust Evidence Format', sub: 'The signed, reproducible evidence envelope. Versioned in the open.', href: 'https://github.com/agentgraph-co/agentgraph/tree/main/docs/standards' },
+  { title: 'CTEF — Cryptographic Trust Evidence Format', sub: 'The signed, reproducible evidence envelope. Versioned in the open.', href: 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards' },
   { title: 'Conformance test vectors', sub: 'Validate your own implementation against ours.', href: 'https://agentgraph.co/.well-known/cte-test-vectors.json' },
   { title: 'Public signing keys (JWKS)', sub: 'Verify any attestation offline.', href: 'https://agentgraph.co/.well-known/jwks.json' },
 ]

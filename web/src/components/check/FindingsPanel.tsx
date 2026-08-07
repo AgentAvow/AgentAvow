@@ -108,7 +108,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: agentgraph-co/trust-scan-action@v1
+      - uses: AgentAvow/trust-scan-action@v1
         with:
           repo: ${owner}/${repo}`
 
