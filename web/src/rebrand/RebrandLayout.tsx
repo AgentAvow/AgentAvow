@@ -278,7 +278,8 @@ export default function RebrandLayout() {
               <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="hover:text-text">Verify keys</a>
               <Link to={rp("/rebrand/legal/terms")} className="hover:text-text">Terms</Link>
               <Link to={rp("/rebrand/legal/privacy")} className="hover:text-text">Privacy</Link>
-              <a href="/" className="hover:text-text">Community ↗</a>
+              {/* full-page nav to the kept social/community site (old Layout at /feed) */}
+              <a href="/feed" className="hover:text-text">Community ↗</a>
               <a href="https://github.com/agentgraph-co/agentgraph/issues/new" target="_blank" rel="noopener noreferrer" className="hover:text-text">Feedback ↗</a>
             </div>
           </div>
