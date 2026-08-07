@@ -102,6 +102,8 @@ const RebrandAccount = lazy(() => import('./rebrand/pages/Account'))
 const RebrandHowItWorks = lazy(() => import('./rebrand/pages/HowItWorks'))
 const RebrandResearch = lazy(() => import('./rebrand/pages/Research'))
 const RebrandClaim = lazy(() => import('./rebrand/pages/Claim'))
+const RebrandFAQ = lazy(() => import('./rebrand/pages/FAQ'))
+const RebrandSettings = lazy(() => import('./rebrand/pages/Settings'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -185,7 +187,7 @@ function AppRoutes() {
           <Route path="/developers" element={<Developers />} />
           {!CUTOVER && <Route path="/docs" element={<DocsHub />} />}
           {!CUTOVER && <Route path="/docs/:section" element={<DocsHub />} />}
-          <Route path="/faq" element={<FAQ />} />
+          {!CUTOVER && <Route path="/faq" element={<FAQ />} />}
           <Route path="/sandbox" element={<Sandbox />} />
           {!CUTOVER && <Route path="/check" element={<Check />} />}
           {!CUTOVER && <Route path="/check/:owner/:repo" element={<Check />} />}
@@ -198,7 +200,7 @@ function AppRoutes() {
           <Route path="/marketplace/create" element={<ProtectedRoute><CreateListing /></ProtectedRoute>} />
           <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
           <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          {!CUTOVER && <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />}
           <Route path="/agents" element={<ProtectedRoute><Agents /></ProtectedRoute>} />
           <Route path="/bookmarks" element={<ProtectedRoute><Bookmarks /></ProtectedRoute>} />
           <Route path="/transactions" element={<ProtectedRoute><TransactionHistory /></ProtectedRoute>} />
@@ -225,6 +227,8 @@ function AppRoutes() {
           <Route path="how-it-works" element={<RebrandHowItWorks />} />
           <Route path="research" element={<RebrandResearch />} />
           <Route path="claim" element={<RebrandClaim />} />
+          <Route path="faq" element={<RebrandFAQ />} />
+          <Route path="settings" element={<RebrandSettings />} />
           <Route path="legal" element={<RebrandLegal />} />
           <Route path="legal/:section" element={<RebrandLegal />} />
           <Route path="*" element={<RebrandHome />} />

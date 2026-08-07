@@ -316,22 +316,9 @@ export default function Layout() {
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2">
-                <Link
-                  to="/login"
-                  className="text-sm text-text-muted hover:text-text px-3 py-1.5 transition-colors"
-                >
-                  Sign in
-                </Link>
-                <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                  <Link
-                    to="/register"
-                    className="text-sm bg-gradient-to-r from-primary to-primary-dark hover:from-primary-dark hover:to-primary text-white px-4 py-1.5 rounded-lg transition-all duration-300 shadow-md shadow-primary/20"
-                  >
-                    Get Started
-                  </Link>
-                </motion.div>
-              </div>
+              <Link to="/" className="text-sm text-text-muted hover:text-text px-3 py-1.5 transition-colors">
+                Check a tool →
+              </Link>
             )}
           </div>
 
@@ -428,11 +415,8 @@ export default function Layout() {
                   </>
                 ) : (
                   <>
-                    <Link to="/login" className="block px-3 py-2 rounded-lg text-sm text-text-muted hover:text-text hover:bg-surface-hover/50 transition-all">
-                      Sign in
-                    </Link>
-                    <Link to="/register" className="block px-3 py-2.5 rounded-lg text-sm text-center bg-gradient-to-r from-primary to-primary-dark text-white font-medium">
-                      Get Started
+                    <Link to="/" className="block px-3 py-2 rounded-lg text-sm text-text-muted hover:text-text hover:bg-surface-hover/50 transition-all">
+                      Check a tool →
                     </Link>
                     <button
                       onClick={toggleTheme}

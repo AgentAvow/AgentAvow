@@ -53,7 +53,9 @@ function AccountMenu() {
       </Link>
       <div className="relative">
         <button onClick={() => setOpen(!open)} className="flex items-center gap-2 group" aria-label="Account menu">
-          <span className="w-8 h-8 rounded-full grid place-items-center text-[13px] font-bold text-white bg-gradient-to-br from-primary to-accent">{initial}</span>
+          {user.avatar_url
+            ? <img src={user.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover ring-1 ring-primary/30" />
+            : <span className="w-8 h-8 rounded-full grid place-items-center text-[13px] font-bold text-white bg-gradient-to-br from-primary to-accent">{initial}</span>}
         </button>
         {open && (
           <div className="absolute right-0 mt-2 w-52 glass rounded-xl border border-border/60 shadow-xl py-1.5 z-30">
@@ -62,7 +64,7 @@ function AccountMenu() {
               <div className="text-[11.5px] text-text-muted truncate">{user.email}</div>
             </div>
             <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My watches</Link>
-            <a href="/settings" className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</a>
+            <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</Link>
             {user.is_admin && <a href="/admin" className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</a>}
             <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
           </div>
@@ -273,6 +275,7 @@ export default function RebrandLayout() {
             <Wordmark id="ftr" />
             <div className="flex flex-wrap gap-5 text-[14px] text-text-muted">
               <Link to={rp("/rebrand/docs")} className="hover:text-text">Docs</Link>
+              <Link to={rp("/rebrand/faq")} className="hover:text-text">FAQ</Link>
               <Link to={rp("/rebrand/research")} className="hover:text-text">Research</Link>
               <a href="/api/v1/redoc" target="_blank" rel="noopener noreferrer" className="hover:text-text">API</a>
               <a href="/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="hover:text-text">Verify keys</a>
