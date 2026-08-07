@@ -9,7 +9,6 @@ import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
-import { DualScore } from '../components/DualScore'
 import { summarize } from '../lib/summarize'
 import { downloadScoreCard } from '../lib/scoreCard'
 
@@ -44,37 +43,44 @@ const VERDICT_STYLE = {
 
 const CHECK_HINTS = ['github.com/owner/repo', 'an MCP server', 'an npm package', 'a Python package', 'an agent skill']
 
-/** "Watch this tool" — POSTs to /watches when signed in. */
-function WatchButton({ owner, repo }: { owner: string; repo: string }) {
+/** "Watch this tool" — the PRIMARY action. Full-width gradient CTA. */
+function WatchCTA({ owner, repo }: { owner: string; repo: string }) {
   const { user } = useAuth()
   const [watching, setWatching] = useState(false)
   const mutation = useMutation({ mutationFn: () => api.post('/watches', { owner, repo }), onSuccess: () => setWatching(true) })
-  if (!user) {
-    return <Link to={rp("/rebrand/login")} className="text-[13px] font-semibold px-3.5 py-1.5 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">+ Watch this tool</Link>
-  }
+  const base = 'w-full flex items-center justify-center gap-2.5 text-[15px] font-bold px-5 py-3.5 rounded-xl transition-all'
+  const grad = 'text-white bg-gradient-to-r from-primary to-accent shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5'
+  const star = <svg viewBox="0 0 24 24" fill="currentColor" className="w-[17px] h-[17px] shrink-0"><path d="M12 2.5l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 18.6 6.1 21.3l1.2-6.6L2.5 9.5l6.6-.9z"/></svg>
+  if (!user) return <Link to={rp('/rebrand/login')} className={`${base} ${grad}`}>{star} Watch this tool</Link>
+  if (watching) return <div className={`${base} bg-success/15 text-success border border-success/40`}>✓ Watching — we'll alert you if the grade drops</div>
   return (
-    <button onClick={() => !watching && mutation.mutate()} disabled={watching || mutation.isPending}
-      className={`text-[13px] font-semibold px-3.5 py-1.5 rounded-lg transition-colors disabled:opacity-70 ${watching ? 'bg-success/15 text-success border border-success/40' : 'border border-border text-text hover:border-primary-light hover:text-primary-light'}`}>
-      {watching ? '✓ Watching — we\'ll alert you' : mutation.isPending ? 'Adding…' : '+ Watch this tool'}
+    <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className={`${base} ${grad} disabled:opacity-70`}>
+      {star} {mutation.isPending ? 'Adding…' : 'Watch this tool'}
     </button>
   )
 }
 
-/** Animated grade ring — draws to the score, counts up, colored by GRADE (matches the badge). */
-function GradeRing({ score, grade, hex }: { score: number; grade: string; hex: string }) {
+/** Co-equal score ring — used for BOTH Attestation Trust and Adoption so the two
+ * scores read as peers. Draws to `fill` (0–1) when given, a full ring otherwise;
+ * dashed + muted when there's no data (e.g. a just-launched tool with no adoption). */
+function ScoreRing({ center, sub, hex, fill, dashed }: { center: string; sub?: string; hex: string; fill?: number; dashed?: boolean }) {
   const reduce = useReducedMotion()
   return (
-    <div className="relative w-[150px] h-[150px] shrink-0" style={{ color: hex }}>
+    <div className="relative w-[128px] h-[128px] shrink-0 mx-auto" style={{ color: hex }}>
       <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
         <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" opacity="0.14" />
-        <motion.circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" strokeLinecap="round"
-          pathLength={1} initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: Math.max(score, 0) / 100 }}
-          transition={{ duration: 1.2, ease: 'easeOut', delay: 0.15 }} />
+        {dashed ? (
+          <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" strokeLinecap="round" strokeDasharray="2 12" opacity="0.55" />
+        ) : (
+          <motion.circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" strokeLinecap="round"
+            pathLength={1} initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: fill == null ? 1 : Math.max(fill, 0.02) }}
+            transition={{ duration: 1.2, ease: 'easeOut', delay: 0.15 }} />
+        )}
       </svg>
       <div className="absolute inset-0 grid place-items-center">
         <div className="text-center leading-none">
-          <div className="text-5xl font-extrabold" style={{ color: hex }}>{grade}</div>
-          <CountUp value={score} className="text-[13px] font-mono text-text-muted" suffix="/100" />
+          <div className="text-[38px] font-extrabold" style={{ color: hex }}>{center}</div>
+          {sub && <div className="mt-1 text-[12px] font-mono text-text-muted">{sub}</div>}
         </div>
       </div>
     </div>
@@ -294,37 +300,55 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
       }
     : null
 
+  // Adoption ring content — compact number + unit, or "New" when there's no adoption yet.
+  const adStars = adoptionData?.stars && adoptionData.stars > 0 ? adoptionData.stars : 0
+  const adChecks = adoptionData?.checks ?? 0
+  const adCount = adStars || adChecks
+  const adUnit = adStars ? 'stars' : 'checks'
+  const compact = (n: number) => (n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n))
+  const ADOPTION_HEX = '#F59E0B'
+
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
-      {/* BRANDED HERO CELL — grade-colored, checkmark watermark, dual axis delineated */}
+      {/* BRANDED HERO — two co-equal scores + primary Watch CTA */}
       <motion.div className="rounded-2xl overflow-hidden relative border border-border/60"
-        style={{ background: `linear-gradient(135deg, ${g.color}14, transparent 55%), var(--color-surface)` }}
+        style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}
         initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: 'easeOut' }}>
-        {/* quarter checkmark watermark, top-right */}
-        <svg viewBox="0 0 100 100" className="absolute -right-6 -top-6 w-44 h-44 opacity-[0.07] pointer-events-none" aria-hidden="true">
-          <circle cx="50" cy="50" r="42" fill="none" stroke={g.color} strokeWidth="6" />
-          <path d="M32 51l12 12 24-26" fill="none" stroke={g.color} strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: `inset 0 0 60px -20px ${g.color}66` }} />
-        <div className="relative p-7 flex items-center gap-7 flex-wrap">
-          <GradeRing score={scan.trust_score} grade={g.grade} hex={g.color} />
-          <div className="min-w-0 flex-1">
-            <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
-            <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
-            <div className="mt-1 font-mono text-[13.5px] text-text-muted break-all">{scan.repo}</div>
-            <div className="mt-0.5 text-[13px] font-semibold gradient-text">{scan.trust_tier}</div>
+        <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: `inset 0 0 60px -22px ${g.color}55` }} />
+
+        {/* header: verdict + plain-English headline */}
+        <div className="relative px-7 pt-7">
+          <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
+          <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
+          <div className="mt-1 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
+          <div className="mt-0.5 text-[13px] font-semibold gradient-text">{scan.trust_tier}</div>
+        </div>
+
+        {/* two co-equal scores — Attestation Trust + Adoption */}
+        <div className="relative px-7 py-6 grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center">
+            <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
+            <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Attestation Trust</div>
+            <div className="mt-0.5 text-[12px] text-text-muted">Signed scanner grade · verifiable now</div>
+          </div>
+          <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center">
+            <ScoreRing center={adCount ? compact(adCount) : 'New'} sub={adCount ? adUnit : 'be the first'} hex={adCount ? ADOPTION_HEX : 'var(--color-text-muted)'} dashed={!adCount} />
+            <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: adCount ? ADOPTION_HEX : 'var(--color-text-muted)' }}>Adoption</div>
+            <div className="mt-0.5 text-[12px] text-text-muted">{adoption ? adoption.sub : 'Just launched — no adoption signal yet'}</div>
           </div>
         </div>
-        {/* dual axis — delineated inside the hero cell */}
-        <div className="relative px-7 pb-5">
-          <DualScore score={scan.trust_score} adoption={adoption} />
+
+        {/* PRIMARY action — watch */}
+        <div className="relative px-7">
+          <WatchCTA owner={owner} repo={repo} />
+          <p className="mt-2 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this grade drops.</p>
         </div>
-        {/* actions */}
-        <div className="relative px-7 pb-6 flex items-center gap-2 flex-wrap border-t border-border/50 pt-4">
-          <WatchButton owner={owner} repo={repo} />
+
+        {/* secondary actions */}
+        <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
           <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />
           <button
-            onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adoption ? adoption.label : 'new' })}
+            onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '' })}
             className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
           >
             ↓ Download score card

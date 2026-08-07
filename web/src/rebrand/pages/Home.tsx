@@ -56,7 +56,7 @@ function HeroSeal() {
       />
       <circle cx="48" cy="48" r="30" fill="none" stroke="var(--color-primary-light)" strokeWidth="1.5" opacity="0.35" />
       <motion.path
-        d="M34 49l9 9 19-20" fill="none" stroke="var(--color-primary-light)" strokeWidth="5"
+        d="M34 49l9 9 19-20" fill="none" stroke="url(#seal-g)" strokeWidth="5"
         strokeLinecap="round" strokeLinejoin="round" pathLength={1}
         initial={reduce ? false : { pathLength: 0 }}
         animate={{ pathLength: 1 }}
