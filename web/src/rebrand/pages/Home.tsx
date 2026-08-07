@@ -46,6 +46,11 @@ function HeroSeal() {
         <linearGradient id="seal-g" gradientUnits="userSpaceOnUse" x1="8" y1="8" x2="88" y2="88">
           <stop stopColor="#2DD4BF" /><stop offset="1" stopColor="#E879F9" />
         </linearGradient>
+        {/* Dedicated gradient across the checkmark's own bounds so it reads vibrant
+            teal→magenta (the shared ring gradient only crosses its pale midpoint). */}
+        <linearGradient id="seal-check" x1="0" y1="0" x2="1" y2="1">
+          <stop stopColor="#2DD4BF" /><stop offset="1" stopColor="#E879F9" />
+        </linearGradient>
       </defs>
       <motion.circle
         cx="48" cy="48" r="40" fill="none" stroke="url(#seal-g)" strokeWidth="3"
@@ -56,7 +61,7 @@ function HeroSeal() {
       />
       <circle cx="48" cy="48" r="30" fill="none" stroke="var(--color-primary-light)" strokeWidth="1.5" opacity="0.35" />
       <motion.path
-        d="M34 49l9 9 19-20" fill="none" stroke="url(#seal-g)" strokeWidth="5"
+        d="M34 49l9 9 19-20" fill="none" stroke="url(#seal-check)" strokeWidth="5"
         strokeLinecap="round" strokeLinejoin="round" pathLength={1}
         initial={reduce ? false : { pathLength: 0 }}
         animate={{ pathLength: 1 }}
