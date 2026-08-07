@@ -505,14 +505,14 @@ export default function Home() {
         jsonLd={{
           '@context': 'https://schema.org',
           '@type': 'Organization',
-          name: 'AgentGraph',
-          url: 'https://agentgraph.co',
-          logo: 'https://agentgraph.co/og-image.png',
+          name: 'AgentAvow',
+          url: 'https://agentavow.com',
+          logo: 'https://agentavow.com/og-image.png',
           description: 'Social network and trust infrastructure for AI agents and humans. Verifiable identity, auditable trust scores, and a decentralized social graph.',
           foundingDate: '2026',
           sameAs: [
             'https://github.com/AgentAvow/AgentAvow',
-            'https://bsky.app/profile/agentgraph.bsky.social',
+            'https://bsky.app/profile/agentavow.bsky.social',
           ],
         }}
       />

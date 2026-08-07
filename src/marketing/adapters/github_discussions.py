@@ -1,7 +1,7 @@
 """GitHub Discussions adapter — engage in relevant open-source repos.
 
 Searches target AI/agent repos for relevant discussions, monitors for
-keyword mentions, and replies with helpful context about AgentGraph.
+keyword mentions, and replies with helpful context about AgentAvow.
 All posts require human approval before publishing.
 
 Uses the GitHub GraphQL API v4 exclusively.
@@ -27,17 +27,17 @@ _API_URL = "https://api.github.com/graphql"
 _TIMEOUT = 15.0
 
 # Target repos for engagement — popular AI/agent framework repos where
-# AgentGraph's trust + identity layer is most relevant.
+# AgentAvow's trust + identity layer is most relevant.
 TARGET_REPOS: list[dict[str, str]] = [
     {"owner": "langchain-ai", "name": "langchain"},
     {"owner": "microsoft", "name": "autogen"},
     {"owner": "modelcontextprotocol", "name": "servers"},
-    {"owner": "agentgraph-co", "name": "agentgraph"},
+    {"owner": "AgentAvow", "name": "AgentAvow"},
 ]
 
 # Keywords to monitor across discussions
 MONITOR_KEYWORDS: list[str] = [
-    "agentgraph",
+    "agentavow",
     "agent trust",
     "agent identity",
     "agent verification",
@@ -246,7 +246,7 @@ class GitHubDiscussionsAdapter(AbstractPlatformAdapter):
         """Post to GitHub Discussions.
 
         If ``discussion_id`` is in metadata, replies to that discussion.
-        Otherwise creates a new discussion in agentgraph-co/agentgraph.
+        Otherwise creates a new discussion in AgentAvow/AgentAvow.
         All posts go through human approval via HUMAN_APPROVAL_PLATFORMS.
         """
         meta = metadata or {}
@@ -259,11 +259,11 @@ class GitHubDiscussionsAdapter(AbstractPlatformAdapter):
     async def _create_discussion(
         self, content: str, meta: dict,
     ) -> ExternalPostResult:
-        """Create a new discussion on the agentgraph-co/agentgraph repo."""
+        """Create a new discussion on the AgentAvow/AgentAvow repo."""
         if not await self.is_configured():
             return ExternalPostResult(success=False, error="GitHub token not configured")
 
-        owner, name = "agentgraph-co", "agentgraph"
+        owner, name = "AgentAvow", "AgentAvow"
         try:
             # Fetch repo ID and discussion categories
             cat_data = await self._graphql(
@@ -300,7 +300,7 @@ class GitHubDiscussionsAdapter(AbstractPlatformAdapter):
             if not title:
                 lines = content.strip().split("\n", 1)
                 first_line = lines[0].lstrip("#").strip()
-                title = first_line[:128] if first_line else "AgentGraph Update"
+                title = first_line[:128] if first_line else "AgentAvow Update"
                 body = lines[1].strip() if len(lines) > 1 else content
 
             data = await self._graphql(
@@ -415,7 +415,7 @@ class GitHubDiscussionsAdapter(AbstractPlatformAdapter):
     async def fetch_mentions(
         self, since: datetime | None = None,
     ) -> list[Mention]:
-        """Search for AgentGraph-relevant discussions across target repos.
+        """Search for AgentAvow-relevant discussions across target repos.
 
         Combines two strategies:
         1. Global search for keyword mentions in discussions.
@@ -432,7 +432,7 @@ class GitHubDiscussionsAdapter(AbstractPlatformAdapter):
         # Strategy 2: Per-repo recent discussions
         for repo in TARGET_REPOS:
             # Skip our own repo for mention monitoring
-            if repo["owner"] == "agentgraph-co":
+            if repo["owner"] == "AgentAvow":
                 continue
             mentions.extend(await self._fetch_repo_discussions(repo, since))
 
@@ -453,7 +453,7 @@ class GitHubDiscussionsAdapter(AbstractPlatformAdapter):
         mentions: list[Mention] = []
 
         # Build search query — combine key terms with OR
-        search_terms = "agentgraph OR \"agent trust\" OR \"agent identity verification\""
+        search_terms = "agentavow OR \"agent trust\" OR \"agent identity verification\""
         search_query = f"{search_terms} type:discussions"
 
         try:

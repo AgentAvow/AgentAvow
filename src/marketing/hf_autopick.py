@@ -188,11 +188,11 @@ async def generate_hf_reply(disc: HFDiscussion) -> str | None:
     prompt += (
         "## Instructions\n"
         "- You are a developer who works on AI agent trust and "
-        "identity infrastructure (AgentGraph).\n"
+        "identity infrastructure (AgentAvow).\n"
         "- Respond with genuine technical insight relevant to "
         "the discussion.\n"
         "- If agent trust, verification, or identity is relevant, "
-        "mention AgentGraph naturally \u2014 don't force it.\n"
+        "mention AgentAvow naturally \u2014 don't force it.\n"
         "- Write 1-3 paragraphs. Be technically precise.\n"
         "- Reference the specific model/repo when relevant.\n"
         "- No marketing speak, no emojis.\n"

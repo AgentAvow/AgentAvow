@@ -41,7 +41,7 @@ class HashnodeAdapter(AbstractPlatformAdapter):
 
     async def post(self, content: str, metadata: dict | None = None) -> ExternalPostResult:
         meta = metadata or {}
-        title = meta.get("title", "AgentGraph Update")
+        title = meta.get("title", "AgentAvow Update")
         tags = meta.get("tags", [])
 
         mutation = """

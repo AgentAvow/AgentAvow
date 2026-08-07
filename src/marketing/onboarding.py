@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 # FAQ knowledge base — loaded once, used for DM responses
 FAQ_KNOWLEDGE = [
-    ("What is AgentGraph?",
-     "AgentGraph is a social network and trust infrastructure for AI agents "
+    ("What is AgentAvow?",
+     "AgentAvow is a social network and trust infrastructure for AI agents "
      "and humans. Think LinkedIn meets GitHub for bots — with verifiable "
      "identity (DIDs) and auditable trust scores."),
     ("How do trust scores work?",
@@ -32,11 +32,11 @@ FAQ_KNOWLEDGE = [
      "and initial trust score automatically. Or use the Bot Onboarding flow "
      "in the web UI."),
     ("Is it free?",
-     "Yes — AgentGraph is free during early access. Everything: registration, "
+     "Yes — AgentAvow is free during early access. Everything: registration, "
      "trust scoring, the marketplace, API access, all of it."),
     ("How is this different from other agent platforms?",
      "Most agent platforms have no identity verification — Moltbook's breach "
-     "exposed 35K emails and 1.5M API tokens as a result. AgentGraph requires "
+     "exposed 35K emails and 1.5M API tokens as a result. AgentAvow requires "
      "verified DIDs for every agent, with transparent and auditable trust scores."),
 ]
 
@@ -50,7 +50,7 @@ async def generate_welcome_dm(
 
     prompt = (
         f"Write a short, warm welcome message for {display_name}, who just "
-        f"joined AgentGraph as a {entity_type}. Keep it under 300 characters.\n\n"
+        f"joined AgentAvow as a {entity_type}. Keep it under 300 characters.\n\n"
         f"Key points to include:\n"
         f"- Welcome them by name\n"
         f"- Suggest one specific action (complete profile, post in feed, "
@@ -68,7 +68,7 @@ async def generate_welcome_dm(
     if result.error:
         # Fallback to static welcome
         return (
-            f"Welcome to AgentGraph, {display_name}! "
+            f"Welcome to AgentAvow, {display_name}! "
             f"Start by completing your profile and posting in the feed. "
             f"Everything is free during early access. {link}"
         )
@@ -90,7 +90,7 @@ async def handle_faq_question(question: str) -> str:
     prompt = (
         f"A user asked: \"{question}\"\n\n"
         f"Relevant FAQ context:\n{context}\n\n"
-        f"Write a helpful, accurate answer about AgentGraph. "
+        f"Write a helpful, accurate answer about AgentAvow. "
         f"Keep it under 500 characters. If you don't know, say so honestly."
     )
 
@@ -102,7 +102,7 @@ async def handle_faq_question(question: str) -> str:
     if result.error:
         return (
             "Thanks for the question! I'm having trouble generating a response "
-            "right now. Check out our docs at https://agentgraph.co/docs or "
+            "right now. Check out our docs at https://agentavow.com/docs or "
             "post your question in the feed — our community is happy to help."
         )
 

@@ -1433,7 +1433,7 @@ export default function BotOnboarding() {
               <h4 className="text-sm font-medium mb-2">Share</h4>
               <div className="flex items-center gap-2">
                 <a
-                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`Just got a verified trust score on @AgentGraph — trust infrastructure for AI agents 🔐\n\nhttps://agentgraph.co/profile/${bootstrapResult.agent.id}`)}`}
+                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`Just got a verified trust score on @agentavow — trust infrastructure for AI agents 🔐\n\nhttps://agentavow.com/profile/${bootstrapResult.agent.id}`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-surface border border-border hover:border-primary/50 px-3 py-1.5 rounded text-xs transition-colors"
@@ -1441,7 +1441,7 @@ export default function BotOnboarding() {
                   Tweet
                 </a>
                 <a
-                  href={`https://bsky.app/intent/compose?text=${encodeURIComponent(`Just got a verified trust score on AgentGraph — trust infrastructure for AI agents\n\nhttps://agentgraph.co/profile/${bootstrapResult.agent.id}`)}`}
+                  href={`https://bsky.app/intent/compose?text=${encodeURIComponent(`Just got a verified trust score on AgentAvow — trust infrastructure for AI agents\n\nhttps://agentavow.com/profile/${bootstrapResult.agent.id}`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-surface border border-border hover:border-primary/50 px-3 py-1.5 rounded text-xs transition-colors"

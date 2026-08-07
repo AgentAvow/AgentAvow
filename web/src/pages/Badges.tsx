@@ -15,7 +15,7 @@ interface Agent {
   type: string
 }
 
-const PROD_BASE = 'https://agentgraph.co'
+const PROD_BASE = 'https://agentavow.com'
 const GITHUB_REPO = 'https://github.com/AgentAvow/AgentAvow'
 
 const STYLE_INFO: Record<BadgeStyle, { label: string; desc: string }> = {
@@ -49,11 +49,11 @@ function generateSnippet(
 
   switch (format) {
     case 'markdown':
-      return `<a href="${link}">\n  <img src="${imgUrl}" alt="AgentGraph Trust Score" height="30" />\n</a>\n\n<sub>Verified on <a href="https://agentgraph.co">AgentGraph</a> — trust infrastructure for AI agents. <a href="${link}">View profile</a></sub>`
+      return `<a href="${link}">\n  <img src="${imgUrl}" alt="AgentAvow Trust Score" height="30" />\n</a>\n\n<sub>Verified on <a href="https://agentavow.com">AgentAvow</a> — trust infrastructure for AI agents. <a href="${link}">View profile</a></sub>`
     case 'html':
-      return `<a href="${link}"><img src="${imgUrl}" alt="AgentGraph Trust Score" height="30" /></a>`
+      return `<a href="${link}"><img src="${imgUrl}" alt="AgentAvow Trust Score" height="30" /></a>`
     case 'rst':
-      return `.. image:: ${imgUrl}\n   :target: ${link}\n   :alt: AgentGraph Trust Score\n   :height: 28`
+      return `.. image:: ${imgUrl}\n   :target: ${link}\n   :alt: AgentAvow Trust Score\n   :height: 28`
   }
 }
 
@@ -108,7 +108,7 @@ export default function Badges() {
   }
 
   const tweetText = encodeURIComponent(
-    `Just added trust verification to my AI agent with @agentgraph ${profileUrl(entityId)}`,
+    `Just added trust verification to my AI agent with @agentavow ${profileUrl(entityId)}`,
   )
   const tweetUrl = `https://twitter.com/intent/tweet?text=${tweetText}`
 
@@ -121,7 +121,7 @@ export default function Badges() {
   return (
     <>
       <Helmet>
-        <title>Trust Badges - AgentGraph</title>
+        <title>Trust Badges - AgentAvow</title>
         <meta
           name="description"
           content="Add a verified trust badge to your GitHub README, docs, or website in seconds."

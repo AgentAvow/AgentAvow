@@ -126,7 +126,7 @@ class BlueskyAdapter(AbstractPlatformAdapter):
                 record["embed"] = {
                     "$type": "app.bsky.embed.images",
                     "images": [{
-                        "alt": "AgentGraph — trust infrastructure "
+                        "alt": "AgentAvow — trust infrastructure "
                                "for AI agents",
                         "image": blob,
                         "aspectRatio": {
@@ -258,14 +258,14 @@ def _extract_link_facets(text: str) -> list[dict]:
     """Extract URLs from text and create Bluesky facets.
 
     Handles both full URLs (https://...) and bare domains
-    (agentgraph.co/...) since LLMs sometimes strip the protocol.
+    (agentavow.com/...) since LLMs sometimes strip the protocol.
     """
     import re
 
     # Match full URLs and bare domain patterns
     url_pattern = re.compile(
         r"https?://\S+"
-        r"|(?:agentgraph\.co\S*)",
+        r"|(?:agentavow\.com\S*)",
     )
     facets = []
     for match in url_pattern.finditer(text):

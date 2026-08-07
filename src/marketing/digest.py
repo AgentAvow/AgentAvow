@@ -143,7 +143,7 @@ async def send_weekly_digest_email(db: AsyncSession) -> bool:
 
     html = _render_digest_email(data)
     subject = (
-        f"AgentGraph Marketing Digest — "
+        f"AgentAvow Marketing Digest — "
         f"Week of {data['week_start']}"
     )
 

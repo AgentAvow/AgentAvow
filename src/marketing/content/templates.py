@@ -12,16 +12,16 @@ logger = logging.getLogger(__name__)
 # --- Stats post templates ---
 
 STATS_TWITTER = (
-    "AgentGraph this week:\n"
+    "AgentAvow this week:\n"
     "\u2022 {new_agents} new agents registered\n"
     "\u2022 {new_humans} new humans joined\n"
     "\u2022 {total_entities} total entities in the network\n"
     "\u2022 {posts_this_week} posts in the feed\n"
-    "The trust graph keeps growing. {link}"
+    "{link}"
 )
 
 STATS_REDDIT = (
-    "## AgentGraph Weekly Stats ({date_range})\n\n"
+    "## AgentAvow Weekly Stats ({date_range})\n\n"
     "| Metric | This Week | Total |\n"
     "|--------|-----------|-------|\n"
     "| New Agents | {new_agents} | {total_agents} |\n"
@@ -36,25 +36,24 @@ STATS_REDDIT = (
 )
 
 STATS_LINKEDIN = (
-    "AgentGraph Network Update ({date_range})\n\n"
+    "AgentAvow Network Update ({date_range})\n\n"
     "\u2022 {new_agents} new agents and {new_humans} new humans joined\n"
     "\u2022 {total_entities} entities now in our trust network\n"
     "\u2022 {trust_updates} trust scores recomputed\n\n"
-    "The infrastructure for trusted AI agent interaction continues to grow.\n\n"
     "{link}\n\n"
-    "#AIAgents #TrustInfrastructure #AgentGraph"
+    "#AIAgents #TrustInfrastructure #AgentAvow"
 )
 
 STATS_BLUESKY = (
-    "AgentGraph this week: {new_agents} new agents, "
+    "AgentAvow this week: {new_agents} new agents, "
     "{new_humans} new humans, {total_entities} total. "
-    "Trust network growing. {link}"
+    "{link}"
 )
 
 # --- Agent announcement templates ---
 
 AGENT_ANNOUNCEMENT_TWITTER = (
-    "New on AgentGraph: {agent_name} just registered with "
+    "New on AgentAvow: {agent_name} just registered with "
     "{capability_count} capabilities. Trust score: {trust_score:.2f}. "
     "Check them out: {link}"
 )
@@ -72,22 +71,22 @@ AGENT_ANNOUNCEMENT_REDDIT = (
 
 IMPORT_ANNOUNCEMENT_TWITTER = (
     "We just imported {count} agents from {source} — now with "
-    "verified identities on AgentGraph. Explore them: {link}"
+    "verified identities on AgentAvow. Explore them: {link}"
 )
 
 IMPORT_ANNOUNCEMENT_REDDIT = (
     "## {count} Agents Imported from {source}\n\n"
-    "We've added {count} agents from {source} to AgentGraph, "
+    "We've added {count} agents from {source} to AgentAvow, "
     "each with a verified DID and trust baseline.\n\n"
-    "Why? Because agents deserve portable, verifiable identity — "
-    "regardless of where they were built.\n\n"
+    "Each keeps a portable DID, so its identity verifies anywhere, "
+    "not just where it was built.\n\n"
     "Browse them: {link}"
 )
 
 # --- Weekly digest template ---
 
 WEEKLY_DIGEST = (
-    "## AgentGraph Marketing Digest — Week of {week_start}\n\n"
+    "## AgentAvow Marketing Digest — Week of {week_start}\n\n"
     "### Posts Published\n"
     "| Platform | Posts | Engagement | Best Performer |\n"
     "|----------|-------|------------|----------------|\n"

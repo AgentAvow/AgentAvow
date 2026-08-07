@@ -50,7 +50,7 @@ SCOUT_KEYWORDS = [
     "agentic",
 ]
 
-_USER_AGENT = "Mozilla/5.0 (compatible; AgentGraphScout/1.0; +https://agentgraph.co)"
+_USER_AGENT = "Mozilla/5.0 (compatible; AgentAvowScout/1.0; +https://agentavow.com)"
 _REQUEST_TIMEOUT = 15.0
 _DELAY_BETWEEN_REQUESTS = 2.0  # seconds — be polite
 
@@ -135,7 +135,7 @@ async def scan_subreddits(
 
     Live scanning is disabled — the news-digest running on the Windows
     server handles Reddit monitoring separately and pushes data to Redis.
-    AgentGraph should never make outbound HTTP requests to Reddit.
+    AgentAvow should never make outbound HTTP requests to Reddit.
 
     Args:
         subreddits: Ignored (kept for API compatibility).

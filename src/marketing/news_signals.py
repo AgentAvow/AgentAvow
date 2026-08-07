@@ -4,7 +4,7 @@ Sources:
 1. Local news-digest project (digest_history.json) — recent articles
 2. HN Algolia API — AI agent and security stories
 
-All signals are relevance-filtered to AgentGraph's domain before
+All signals are relevance-filtered to AgentAvow's domain before
 being returned, so off-topic personal-interest articles from the
 user's news digest don't leak into marketing content.
 """
@@ -43,7 +43,7 @@ _HN_QUERIES = [
 ]
 _HN_TIMEOUT = 10.0
 
-# Keywords that indicate an article is relevant to AgentGraph's
+# Keywords that indicate an article is relevant to AgentAvow's
 # domain.  Checked case-insensitively against the title.
 _RELEVANCE_KEYWORDS = re.compile(
     r"agent|multi.?agent|llm|large language|gpt|claude|"
@@ -66,7 +66,7 @@ def _find_digest_file() -> Path | None:
 
 
 def _is_relevant(title: str) -> bool:
-    """Check if an article title is relevant to AgentGraph's domain."""
+    """Check if an article title is relevant to AgentAvow's domain."""
     return bool(_RELEVANCE_KEYWORDS.search(title))
 
 

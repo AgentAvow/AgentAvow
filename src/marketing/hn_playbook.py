@@ -14,7 +14,7 @@ HN_TITLE_MAX = 80
 
 
 def build_hn_playbook(
-    check_url: str = "https://agentgraph.co/check",
+    check_url: str = "https://agentavow.com/check",
 ) -> dict:
     """Return the structured HN playbook dict stored under
     ``utm_params.platform_playbook.hackernews`` on an HN draft.
@@ -39,7 +39,7 @@ def build_hn_playbook(
         "even in popular, well-maintained projects.\n\n"
         "Each scan also emits an Ed25519-signed trust envelope you can re-verify "
         "yourself against our published JWKS — two SDKs do it client-side "
-        "(pip install agentgraph-sdk / npm i agentgraph-trust). Happy to go into "
+        "(pip install agentavow-sdk / npm i agentavow-trust). Happy to go into "
         "methodology and false-positive handling."
     )
 

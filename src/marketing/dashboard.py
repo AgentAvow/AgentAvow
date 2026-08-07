@@ -17,8 +17,8 @@ _URL_PATTERNS: dict[str, str] = {
     "twitter": "https://x.com/i/status/{id}",
     "reddit": "https://reddit.com/comments/{id}",
     "linkedin": "https://linkedin.com/feed/update/{id}",
-    "devto": "https://dev.to/agentgraph/{id}",
-    "hashnode": "https://agentgraph.hashnode.dev/{id}",
+    "devto": "https://dev.to/agentavow/{id}",
+    "hashnode": "https://agentavow.hashnode.dev/{id}",
 }
 
 
@@ -37,7 +37,7 @@ def _post_url(
             rkey = parts[-1]
             return (
                 "https://bsky.app/profile/"
-                "agentgraph.bsky.social"
+                "agentavow.bsky.social"
                 f"/post/{rkey}"
             )
         return None

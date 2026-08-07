@@ -46,15 +46,15 @@ TOPICS: list[Topic] = [
                 "curious how others are handling this."
             ),
             "bluesky": (
-                "Every agent on AgentGraph has a cryptographically verifiable "
+                "Every agent on AgentAvow has a cryptographically verifiable "
                 "identity. No more leaked tokens, no more spoofing."
             ),
             "devto": (
-                "How We Built Verifiable Agent Identity with DIDs — "
-                "and why it matters in a world of agent security breaches."
+                "How We Built Verifiable Agent Identity with DIDs: "
+                "the design and the trade-offs that came with it."
             ),
             "hackernews": (
-                "Show HN: AgentGraph — Trust infrastructure for AI agents "
+                "Show HN: AgentAvow — Trust infrastructure for AI agents "
                 "with verifiable identity (DIDs) and auditable interactions"
             ),
         },
@@ -65,29 +65,29 @@ TOPICS: list[Topic] = [
         weight=1.2,
         angles={
             "twitter": (
-                "Register your AI agent on AgentGraph in 30 seconds. "
+                "Register your AI agent on AgentAvow in 30 seconds. "
                 "DID, trust score, and API access — all automatic."
             ),
             "reddit": (
-                "Tutorial: How to register your bot on AgentGraph and "
+                "Tutorial: How to register your bot on AgentAvow and "
                 "start building trust. Includes API examples, MCP bridge "
                 "setup, and trust score mechanics."
             ),
             "linkedin": (
-                "Getting started with AgentGraph: A developer's guide to "
+                "Getting started with AgentAvow: A developer's guide to "
                 "agent identity, trust APIs, and cross-framework interop."
             ),
             "discord": (
                 "Hey! Quick tutorial on getting your agent set up with "
-                "AgentGraph. Happy to help if you hit any snags."
+                "AgentAvow. Happy to help if you hit any snags."
             ),
             "bluesky": (
-                "Built a bot? Give it an identity. AgentGraph lets you "
+                "Built a bot? Give it an identity. AgentAvow lets you "
                 "register agents with verifiable DIDs in seconds."
             ),
             "devto": (
                 "Building Your First Trusted Agent: A Step-by-Step Guide "
-                "to AgentGraph's Identity and Trust APIs"
+                "to AgentAvow's Identity and Trust APIs"
             ),
         },
     ),
@@ -97,8 +97,8 @@ TOPICS: list[Topic] = [
         weight=1.0,
         angles={
             "twitter": (
-                "The agent ecosystem is evolving fast. New frameworks, "
-                "new protocols, new risks. Here's what we're watching."
+                "The agent ecosystem moves fast. Here's what we're "
+                "watching this week."
             ),
             "reddit": (
                 "Weekly ecosystem roundup: What's happening in the agent "
@@ -106,9 +106,8 @@ TOPICS: list[Topic] = [
                 "means for developers building with agents."
             ),
             "linkedin": (
-                "The AI agent ecosystem is at an inflection point. "
-                "As agents become more autonomous, the infrastructure "
-                "underneath them matters more than ever."
+                "AI agents are getting more autonomous. The identity and "
+                "trust layer underneath them hasn't kept up."
             ),
             "discord": (
                 "Interesting developments in the agent ecosystem this week. "
@@ -130,23 +129,23 @@ TOPICS: list[Topic] = [
         weight=1.3,
         angles={
             "twitter": (
-                "New on AgentGraph: {feature}. Building trust "
-                "infrastructure, one feature at a time."
+                "New on AgentAvow: {feature}. What it does and why "
+                "we shipped it."
             ),
             "reddit": (
-                "We just shipped {feature} on AgentGraph. Here's what "
+                "We just shipped {feature} on AgentAvow. Here's what "
                 "it does, why we built it, and how to use it."
             ),
             "linkedin": (
-                "Announcing {feature} on AgentGraph — expanding the "
+                "Announcing {feature} on AgentAvow — expanding the "
                 "trust infrastructure for AI agents and humans."
             ),
             "discord": (
                 "Just shipped: {feature}! Let us know what you think."
             ),
             "bluesky": (
-                "New: {feature} is live on AgentGraph. "
-                "Check it out and let us know what you think."
+                "New: {feature} is live on AgentAvow. "
+                "Tell us what breaks."
             ),
             "devto": (
                 "Building {feature}: Architecture Decisions and "
@@ -160,68 +159,65 @@ TOPICS: list[Topic] = [
         weight=0.8,
         angles={
             "twitter": (
-                "This week on AgentGraph: {stats}. "
-                "The trust network keeps growing."
+                "This week on AgentAvow: {stats}."
             ),
             "reddit": (
                 "Community update: {stats}. Thanks to everyone building "
-                "on AgentGraph. Here's what's trending."
+                "on AgentAvow. Here's what's trending."
             ),
             "linkedin": (
-                "AgentGraph community update: {stats}. "
-                "The network effect in agent trust is real."
+                "AgentAvow community update: {stats}."
             ),
             "discord": (
                 "Community spotlight! {stats}. "
                 "Shoutout to everyone contributing."
             ),
             "bluesky": (
-                "AgentGraph this week: {stats}. "
-                "Trust is a team sport."
+                "AgentAvow this week: {stats}."
             ),
             "devto": (
-                "AgentGraph Community Report: Growth, Trends, and "
+                "AgentAvow Community Report: Growth, Trends, and "
                 "What Developers Are Building"
             ),
         },
     ),
     Topic(
         key="operator_recruitment",
-        name="Operator Recruitment — Join AgentGraph",
+        name="Operator Recruitment — Join AgentAvow",
         weight=1.5,
         angles={
             "twitter": (
                 "Running an AI agent or MCP server? Get a free verified trust "
-                "badge for your GitHub README. AgentGraph gives your bot a "
+                "badge for your GitHub README. AgentAvow gives your bot a "
                 "cryptographic identity, trust score, and public profile. "
-                "Early access → agentgraph.co/bot-onboarding"
+                "Early access → agentavow.com/bot-onboarding"
             ),
             "reddit": (
-                "We built AgentGraph — trust infrastructure for AI agents "
+                "We built AgentAvow — trust infrastructure for AI agents "
                 "(verified identity, trust scores, auditable trails). If you "
                 "maintain an MCP server, AI agent, or tool library, we're "
                 "offering free verified trust badges for your README. Your "
                 "bot gets: a W3C DID, transparent trust score that grows with "
                 "community endorsements, public profile, and an embeddable "
-                "badge. ~2 min setup at agentgraph.co/bot-onboarding."
+                "badge. ~2 min setup at agentavow.com/bot-onboarding."
             ),
             "linkedin": (
                 "Agent operators: your bots deserve verifiable identity. "
-                "AgentGraph offers free trust infrastructure — W3C DIDs, "
+                "AgentAvow offers free trust infrastructure — W3C DIDs, "
                 "trust scores, and public profiles for AI agents. Add a "
                 "verified trust badge to your README and show users your "
                 "agent's trust status. Early access is free."
             ),
             "discord": (
                 "Hey! If you're building AI agents or MCP servers, check out "
-                "AgentGraph — free verified identity and trust scores for "
+                "AgentAvow — free verified identity and trust scores for "
                 "your bots. You get a badge for your README too. "
-                "agentgraph.co/bot-onboarding"
+                "agentavow.com/bot-onboarding"
             ),
             "bluesky": (
                 "Building AI agents? Get a free verified trust badge for "
-                "your README. AgentGraph = cryptographic identity + trust "
-                "scores for bots. Early access → agentgraph.co/bot-onboarding"
+                "your README. AgentAvow = cryptographic identity + trust "
+                "scores for bots. Early access → agentavow.com/bot-onboarding"
             ),
             "devto": (
                 "Why Your AI Agent Needs a Verified Identity — and How to "
@@ -230,15 +226,15 @@ TOPICS: list[Topic] = [
                 "verified trust badge to your GitHub README."
             ),
             "hackernews": (
-                "Show HN: AgentGraph — trust infrastructure for AI agents. "
+                "Show HN: AgentAvow — trust infrastructure for AI agents. "
                 "Free verified identity (W3C DIDs), trust scores, and "
                 "embeddable badges for agent operators. We're building the "
                 "identity layer underneath agent frameworks."
             ),
             "telegram": (
                 "Agent operators: get a free verified trust badge for your "
-                "bot on AgentGraph. Cryptographic identity, trust scores, "
-                "public profile. 2 min setup → agentgraph.co/bot-onboarding"
+                "bot on AgentAvow. Cryptographic identity, trust scores, "
+                "public profile. 2 min setup → agentavow.com/bot-onboarding"
             ),
             "hashnode": (
                 "Why Your AI Agent Needs a Verified Identity — and How to "
@@ -247,15 +243,15 @@ TOPICS: list[Topic] = [
                 "verified trust badge to your GitHub README."
             ),
             "github_discussions": (
-                "If your project builds AI agents or MCP servers, AgentGraph "
+                "If your project builds AI agents or MCP servers, AgentAvow "
                 "offers free trust infrastructure: verified identity, trust "
                 "scores, and embeddable README badges for your bots."
             ),
             "huggingface": (
                 "Running models or agents on HuggingFace? Get a free "
-                "verified trust badge from AgentGraph — cryptographic "
+                "verified trust badge from AgentAvow — cryptographic "
                 "identity and trust scores for your AI agents. "
-                "agentgraph.co/bot-onboarding"
+                "agentavow.com/bot-onboarding"
             ),
         },
     ),
@@ -268,7 +264,7 @@ TOPICS: list[Topic] = [
                 "The agent identity crisis is real: World is building 'proof of "
                 "human' for AI shopping agents, OpenClaw has 512 CVEs with "
                 "elevated system access, and Moltbook went viral for fake posts. "
-                "AgentGraph: verified identity for every agent, by design."
+                "AgentAvow: verified identity for every agent, by design."
             ),
             "reddit": (
                 "Analysis: The AI agent ecosystem has an identity problem. "
@@ -324,23 +320,23 @@ TOPICS: list[Topic] = [
     ),
     Topic(
         key="platform_updates",
-        name="AgentGraph Platform Updates",
+        name="AgentAvow Platform Updates",
         weight=1.0,
         angles={
             "bluesky": (
-                "Share a brief update on what's happening on AgentGraph: "
+                "Share a brief update on what's happening on AgentAvow: "
                 "new agents registered, recent trust score activity, "
                 "interesting profiles, or new features. Include a link to "
-                "https://agentgraph.co. Keep it conversational and genuine — "
+                "https://agentavow.com. Keep it conversational and genuine — "
                 "like a founder sharing what's new on the platform this week. "
                 "Also mention our AI Agent News custom feed: "
-                "https://bsky.app/profile/agentgraph.bsky.social/feed/ai-agent-news"
+                "https://bsky.app/profile/agentavow.bsky.social/feed/ai-agent-news"
             ),
             "twitter": (
-                "Share a brief update on what's happening on AgentGraph: "
+                "Share a brief update on what's happening on AgentAvow: "
                 "new agents registered, recent trust score activity, "
                 "interesting profiles, or new features. Include a link to "
-                "https://agentgraph.co. Keep it conversational and genuine — "
+                "https://agentavow.com. Keep it conversational and genuine — "
                 "like a founder sharing what's new on the platform this week."
             ),
         },
@@ -354,7 +350,7 @@ TOPICS: list[Topic] = [
                 "We open-sourced mcp-security-scan — a CLI that scans MCP "
                 "servers for credential theft, data exfiltration, unsafe "
                 "execution, and code obfuscation. Trust score 0-100. "
-                "MIT licensed: github.com/agentgraph-co/mcp-security-scan"
+                "MIT licensed: github.com/AgentAvow/mcp-security-scan"
             ),
             "devto": (
                 "How to Audit Your MCP Servers for Security Risks — "
@@ -385,7 +381,7 @@ TOPICS: list[Topic] = [
                 "servers used by AI agents. Detects credential theft, data "
                 "exfiltration, and unsafe execution. MIT licensed, works as "
                 "a CLI or GitHub Action. "
-                "github.com/agentgraph-co/mcp-security-scan"
+                "github.com/AgentAvow/mcp-security-scan"
             ),
         },
     ),

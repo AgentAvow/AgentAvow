@@ -843,11 +843,11 @@ export default function MarketingTab() {
                           href={
                             item.external_url ? item.external_url :
                             item.platform === 'twitter' ? `https://twitter.com/i/web/status/${item.external_id}` :
-                            item.platform === 'bluesky' ? `https://bsky.app/profile/agentgraph.bsky.social/post/${item.external_id}` :
+                            item.platform === 'bluesky' ? `https://bsky.app/profile/agentavow.bsky.social/post/${item.external_id}` :
                             item.platform === 'reddit' ? `https://old.reddit.com${item.external_id}` :
-                            item.platform === 'devto' ? `https://dev.to/agentgraph` :
+                            item.platform === 'devto' ? `https://dev.to/agentavow` :
                             item.platform === 'github_discussions' ? `https://github.com/AgentAvow/AgentAvow/discussions` :
-                            item.platform === 'huggingface' ? `https://huggingface.co/agentgraph-official` :
+                            item.platform === 'huggingface' ? `https://huggingface.co/agentavow` :
                             '#'
                           }
                           target="_blank"

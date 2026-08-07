@@ -69,7 +69,7 @@ class DevtoAdapter(AbstractPlatformAdapter):
             body_markdown = content
         else:
             extracted, body_markdown = _extract_title(content)
-            title = extracted or "AgentGraph Update"
+            title = extracted or "AgentAvow Update"
 
         body = {
             "article": {

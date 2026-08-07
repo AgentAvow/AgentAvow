@@ -40,8 +40,8 @@ function CopyLinkButton({ url }: { url: string }) {
 }
 
 export default function ShareCard({ owner, repo, grade, score }: ShareCardProps) {
-  const checkUrl = `https://agentgraph.co/check/${owner}/${repo}`
-  const shareText = `Is ${owner}/${repo} safe? Trust Score: ${grade} (${score}/100) — checked on AgentGraph`
+  const checkUrl = `https://agentavow.com/check/${owner}/${repo}`
+  const shareText = `Is ${owner}/${repo} safe? Trust Score: ${grade} (${score}/100) — checked on AgentAvow`
   const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(checkUrl)}`
   const blueskyUrl = `https://bsky.app/intent/compose?text=${encodeURIComponent(`${shareText} ${checkUrl}`)}`
 

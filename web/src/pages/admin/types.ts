@@ -331,16 +331,16 @@ export const FLAG_STATUS_FILTERS = ['pending', 'dismissed', 'warned', 'removed',
 
 // Where each platform posts
 export const PLATFORM_DESTINATIONS: Record<string, string> = {
-  twitter: '@agentgraph_real on X',
-  bluesky: '@agentgraph.bsky.social',
+  twitter: '@agentavow on X',
+  bluesky: '@agentavow.bsky.social',
   reddit: 'r/artificial, r/MachineLearning, r/LangChain, r/LocalLLaMA',
-  devto: 'dev.to/agentgraph',
-  hashnode: 'hashnode.com/agentgraph',
-  linkedin: 'linkedin.com/company/agentgraph-co',
+  devto: 'dev.to/agentavow',
+  hashnode: 'agentavow.hashnode.dev',
+  linkedin: 'linkedin.com/company/agentavow',
   discord: 'AI/agent community servers',
   huggingface: 'HF model page discussions',
-  github_discussions: 'agentgraph repo discussions',
-  telegram: '@AgentGraphBot channel',
+  github_discussions: 'AgentAvow repo discussions',
+  telegram: 'TODO(kenne): new telegram handle',
   hackernews: 'Hacker News (draft only)',
   producthunt: 'Product Hunt (draft only)',
 }

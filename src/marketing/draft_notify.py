@@ -53,16 +53,16 @@ async def notify_pending_drafts(drafts: list[dict]) -> bool:
         platforms=platforms,
         topics=topics,
         draft_count=str(len(drafts)),
-        dashboard_url="https://agentgraph.co/admin",
+        dashboard_url="https://agentavow.com/admin",
         fallback=(
             f"{len(drafts)} marketing draft(s) need review: {platforms}. "
-            "Visit https://agentgraph.co/admin"
+            "Visit https://agentavow.com/admin"
         ),
     )
 
     sent = await send_email(
         marketing_settings.marketing_notify_email,
-        f"AgentGraph \u2014 {len(drafts)} draft(s) need approval",
+        f"AgentAvow \u2014 {len(drafts)} draft(s) need approval",
         html,
     )
 
@@ -113,16 +113,16 @@ async def notify_post_failure(
         platform=platform.title(),
         content_preview=preview,
         error=error,
-        dashboard_url="https://agentgraph.co/admin",
+        dashboard_url="https://agentavow.com/admin",
         fallback=(
             f"Marketing post failed on {platform.title()}: {error}. "
-            f"Content: {preview}. Visit https://agentgraph.co/admin"
+            f"Content: {preview}. Visit https://agentavow.com/admin"
         ),
     )
 
     sent = await send_email(
         marketing_settings.marketing_notify_email,
-        f"AgentGraph \u2014 Post failed on {platform.title()}",
+        f"AgentAvow \u2014 Post failed on {platform.title()}",
         html,
     )
 

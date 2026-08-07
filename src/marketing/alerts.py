@@ -263,7 +263,7 @@ async def _send_failure_alert(
         "</tr>"
         f"{failure_rows}"
         "</table>"
-        "<p><a href='https://agentgraph.co/admin' "
+        "<p><a href='https://agentavow.com/admin' "
         "style='color:#6366f1;'>View Dashboard</a></p>"
         "</div>"
     )
@@ -337,7 +337,7 @@ async def _notify_admin(
         "background:#0f172a;color:#e2e8f0;'>"
         f"<h2 style='color:#f59e0b;'>{title}</h2>"
         f"<p>{body}</p>"
-        "<p><a href='https://agentgraph.co/admin' "
+        "<p><a href='https://agentavow.com/admin' "
         "style='color:#6366f1;'>View Dashboard</a></p>"
         "</div>"
     )
@@ -684,7 +684,7 @@ async def check_system_credentials(db: AsyncSession) -> None:
         db,
         kind="credential_failure",
         title=(
-            f"AgentGraph: {len(failures)} credential "
+            f"AgentAvow: {len(failures)} credential "
             f"failure{'s' if len(failures) != 1 else ''}"
         ),
         body=(

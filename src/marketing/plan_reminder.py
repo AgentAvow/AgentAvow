@@ -14,7 +14,7 @@ from src.marketing.config import marketing_settings
 
 logger = logging.getLogger(__name__)
 
-_DASHBOARD_URL = "https://agentgraph.co/admin"
+_DASHBOARD_URL = "https://agentavow.com/admin"
 
 
 def _is_sunday() -> bool:
@@ -65,7 +65,7 @@ async def send_plan_reminder(db: AsyncSession) -> bool:
 
     sent = await send_email(
         marketing_settings.marketing_notify_email,
-        "AgentGraph \u2014 Weekly marketing plan",
+        "AgentAvow \u2014 Weekly marketing plan",
         html,
     )
 

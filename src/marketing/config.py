@@ -45,7 +45,8 @@ class MarketingSettings(BaseSettings):
     reddit_client_secret: str | None = None
     reddit_username: str | None = None
     reddit_password: str | None = None
-    reddit_user_agent: str = "AgentGraphBot/1.0 by u/AgentGraphBot"
+    # TODO(kenne): confirm the new reddit handle/subreddit
+    reddit_user_agent: str = "AgentAvowBot/1.0 (+https://agentavow.com)"
 
     # Discord
     discord_bot_token: str | None = None
@@ -102,10 +103,10 @@ class MarketingSettings(BaseSettings):
     pre_launch: bool = False
 
     # --- Notification email ---
-    marketing_notify_email: str = "social@agentgraph.co"
+    marketing_notify_email: str = "social@agentavow.com"
 
     # --- UTM defaults ---
-    utm_source: str = "agentgraph_bot"
+    utm_source: str = "agentavow_bot"
 
     model_config = {
         "env_file": (".env", ".env.secrets"),

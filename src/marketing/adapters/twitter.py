@@ -36,7 +36,7 @@ _MEDIA_UPLOAD_TIMEOUT = 30.0
 
 # Default logo image — resolve relative to project root
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_DEFAULT_LOGO_PATH = _PROJECT_ROOT / "agentgraph-logo-512.png"
+_DEFAULT_LOGO_PATH = _PROJECT_ROOT / "agentavow-logo-512.png"
 # Fallback to marketing assets card if logo not found
 _FALLBACK_CARD_PATH = (
     Path(__file__).resolve().parent.parent / "assets" / "card-features.png"
@@ -287,7 +287,7 @@ class TwitterAdapter(AbstractPlatformAdapter):
         if not marketing_settings.twitter_bearer_token:
             return []
 
-        # Would use search/recent endpoint with query "@AgentGraphBot"
+        # Would use search/recent endpoint with query "@agentavow"
         # Skipping for free tier — implement when upgrading
         return []
 

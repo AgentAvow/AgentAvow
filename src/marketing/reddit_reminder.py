@@ -264,10 +264,10 @@ async def _generate_thread_reply(
         pass
 
     promo_line = (
-        "You MAY work in agentgraph.co/check ONLY if it's literally the punchline "
+        "You MAY work in agentavow.com/check ONLY if it's literally the punchline "
         "— never a pitch."
         if promo_eligible
-        else "Do NOT mention AgentGraph or any product. Pure community value."
+        else "Do NOT mention AgentAvow or any product. Pure community value."
     )
 
     from src.marketing.content.ai_tells import VOICE_PROMPT_FRAGMENT
@@ -385,7 +385,7 @@ async def _send_dry_feed_alert() -> None:
     """Email the admin when the Reddit feed has nothing to draft from.
 
     Throttled to once every 2 days so it nudges without nagging. Fires when the
-    upstream news-digest stops populating ``reddit_thread_details`` — AgentGraph
+    upstream news-digest stops populating ``reddit_thread_details`` — AgentAvow
     is fine, the feed is just dry.
     """
     try:
@@ -403,7 +403,7 @@ async def _send_dry_feed_alert() -> None:
         html = (
             "<p>No Reddit threads were available to draft a reply from "
             "(fresh or re-surfaced).</p>"
-            "<p>AgentGraph is working as intended — the upstream "
+            "<p>AgentAvow is working as intended — the upstream "
             "<b>news-digest</b> isn't populating <code>reddit_thread_details</code>, "
             "so the Reddit feed is dry. Check the news-digest's Reddit capture "
             "(Windows server).</p>"
@@ -439,7 +439,7 @@ async def _email_reddit_draft(
         draft_content=draft_content,
         fallback=(
             f"Reddit {'post' if style == 'long' else 'reply'}: {thread_title}. "
-            f"Review at https://agentgraph.co/admin"
+            f"Review at https://agentavow.com/admin"
         ),
     )
     label = "join-this post" if style == "long" else "reply"

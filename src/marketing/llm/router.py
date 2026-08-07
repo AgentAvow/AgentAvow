@@ -279,7 +279,7 @@ async def _send_budget_nudge(title: str, body: str) -> None:
             f"<div style='font-family:sans-serif;padding:20px;'>"
             f"<h2 style='color:#6366f1;'>{title}</h2>"
             f"<p>{body}</p>"
-            f"<p><a href='https://agentgraph.co/admin'>View Marketing Dashboard</a></p>"
+            f"<p><a href='https://agentavow.com/admin'>View Marketing Dashboard</a></p>"
             f"</div>"
         )
         await send_email(admin.email, title, html)

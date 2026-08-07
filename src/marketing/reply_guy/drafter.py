@@ -15,9 +15,9 @@ from src.models import ReplyOpportunity
 
 logger = logging.getLogger(__name__)
 
-_AGENTGRAPH_CONTEXT = (
-    "AgentGraph is a trust verification platform for AI agents. "
-    "Its free tool at agentgraph.co/check lets anyone check if an AI agent, "
+_AGENTAVOW_CONTEXT = (
+    "AgentAvow is a trust verification platform for AI agents. "
+    "Its free tool at agentavow.com/check lets anyone check if an AI agent, "
     "MCP server, or skill is safe before installing — like checking a restaurant's "
     "health grade before eating there. Results are cryptographically signed and "
     "independent of any platform. We scanned 231 OpenClaw skills and found 14,350 "
@@ -38,7 +38,7 @@ Context about your work: {context}
 
 Guidelines:
 - Add genuine technical insight related to the post's topic
-- Only mention AgentGraph if directly relevant -- most replies should NOT mention it
+- Only mention AgentAvow if directly relevant -- most replies should NOT mention it
 - Match the platform's tone ({platform}: {tone_hint})
 - Keep it 1-3 sentences, natural and conversational
 - Be helpful and insightful, not promotional
@@ -87,7 +87,7 @@ async def _draft_single(opp: ReplyOpportunity) -> None:
         author=target.display_name or target.handle,
         followers=target.follower_count,
         post_content=(opp.post_content or "")[:500],
-        context=_AGENTGRAPH_CONTEXT,
+        context=_AGENTAVOW_CONTEXT,
         platform=opp.platform,
         tone_hint=_TONE_HINTS.get(opp.platform, "conversational"),
     )

@@ -1,5 +1,5 @@
 """Marketing recap generator — posts a summary of recent social media
-activity to the AgentGraph feed twice per week (Monday and Thursday).
+activity to the AgentAvow feed twice per week (Monday and Thursday).
 
 Uses the MarketingBot entity to post, matching the bot posting pattern
 from ``src/bots/engine._post_as_bot``.
@@ -41,15 +41,15 @@ def _build_bluesky_url(external_id: str) -> str:
         parts = external_id.split("/")
         if len(parts) >= 5:
             rkey = parts[-1]
-            return f"https://bsky.app/profile/agentgraph.bsky.social/post/{rkey}"
+            return f"https://bsky.app/profile/agentavow.bsky.social/post/{rkey}"
     # If it's just a bare rkey
-    return f"https://bsky.app/profile/agentgraph.bsky.social/post/{external_id}"
+    return f"https://bsky.app/profile/agentavow.bsky.social/post/{external_id}"
 
 
 def _build_devto_url(external_id: str) -> str:
     """Build a Dev.to article URL."""
     # external_id might be a numeric ID or slug
-    return f"https://dev.to/agentgraph/{external_id}"
+    return f"https://dev.to/agentavow/{external_id}"
 
 
 def _build_reddit_url(external_id: str) -> str:
@@ -64,7 +64,7 @@ def _build_linkedin_url(external_id: str) -> str:
 
 def _build_hashnode_url(external_id: str) -> str:
     """Build a Hashnode article URL."""
-    return f"https://agentgraph.hashnode.dev/{external_id}"
+    return f"https://agentavow.hashnode.dev/{external_id}"
 
 
 def _build_discord_url(external_id: str) -> str:
@@ -134,7 +134,7 @@ def _build_url(platform: str, external_id: str | None) -> str:
 _OPENERS = [
     "We've been busy building trust infrastructure for AI agents.",
     "Another week pushing agent security forward.",
-    "Here's what the AgentGraph bot has been up to.",
+    "Here's what the AgentAvow bot has been up to.",
     "Spreading the word about verifiable agent identity.",
     "Building in public — here's our latest across the web.",
 ]
@@ -183,7 +183,7 @@ def _format_recap(
 
     lines.append(
         f"{total} posts, {len(posts_by_platform)} platforms. "
-        "More at https://agentgraph.co"
+        "More at https://agentavow.com"
     )
 
     return "\n".join(lines)
@@ -207,7 +207,7 @@ async def generate_recap_content(
 
 
 async def post_recap_to_feed(db: AsyncSession, content: str) -> uuid.UUID | None:
-    """Post the recap content to the AgentGraph feed as MarketingBot.
+    """Post the recap content to the AgentAvow feed as MarketingBot.
 
     Returns the post ID or None on failure.
     """

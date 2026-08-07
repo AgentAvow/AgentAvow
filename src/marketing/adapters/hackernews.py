@@ -63,7 +63,7 @@ class HackerNewsAdapter(AbstractPlatformAdapter):
         )
 
     async def fetch_mentions(self, since: datetime | None = None) -> list[Mention]:
-        return await self.search_keywords(["agentgraph"], since)
+        return await self.search_keywords(["agentavow"], since)
 
     async def fetch_metrics(self, post_external_id: str) -> EngagementMetrics:
         try:

@@ -26,13 +26,13 @@ from src.marketing.llm.router import generate as llm_generate
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://agentgraph.co"
+BASE_URL = "https://agentavow.com"
 
 # Global knowledge injected into all LLM prompts so the marketing bot
 # is aware of recent milestones and the competitive landscape.
 _GLOBAL_KNOWLEDGE = (
-    "\n\n## Current AgentGraph context (March 2026)\n"
-    "- AgentGraph is live at agentgraph.co — the trust and identity layer "
+    "\n\n## Current AgentAvow context (March 2026)\n"
+    "- AgentAvow is live at agentavow.com — the trust and identity layer "
     "for AI agents. Early access: free registration, trust scoring, "
     "marketplace, API access.\n"
     "- Competitive landscape: Moltbook (770K agents, zero identity "
@@ -50,14 +50,14 @@ _GLOBAL_KNOWLEDGE = (
     "- NVIDIA GTC: $1T AI chip projection. Compute layer (them) + "
     "trust layer (us).\n"
     "- Our Bluesky custom feed 'AI Agent News' is live — curated AI agent "
-    "developments at bsky.app/profile/agentgraph.bsky.social/feed/ai-agent-news\n"
+    "developments at bsky.app/profile/agentavow.bsky.social/feed/ai-agent-news\n"
     "- New: mcp-security-scan — open-source CLI + GitHub Action for "
-    "scanning MCP servers. Repo: github.com/agentgraph-co/mcp-security-scan "
+    "scanning MCP servers. Repo: github.com/AgentAvow/mcp-security-scan "
     "(MIT license). Scans for credential theft, data exfiltration, unsafe "
     "execution, filesystem access, and code obfuscation. Outputs a trust "
-    "score 0-100 that integrates with AgentGraph trust badges. Available as "
+    "score 0-100 that integrates with AgentAvow trust badges. Available as "
     "a GitHub Action for CI/CD pipelines. This is a pull-based growth tool — "
-    "developers discover AgentGraph through the scanner.\n"
+    "developers discover AgentAvow through the scanner.\n"
     "- Our brand IS trust — always be transparent that this content "
     "is bot-generated.\n"
 )
@@ -285,7 +285,7 @@ async def generate_proactive(
     launch_context = ""
     if marketing_settings.pre_launch:
         launch_context = (
-            "\n\nIMPORTANT: AgentGraph is NOT publicly launched yet. "
+            "\n\nIMPORTANT: AgentAvow is NOT publicly launched yet. "
             "Frame it as 'coming soon' or 'building in public'. "
             "Tease what it will offer, build curiosity. "
             "Do NOT say 'check it out' or 'sign up' — "
@@ -298,24 +298,24 @@ async def generate_proactive(
     if topic.key == "operator_recruitment":
         recruitment_context = (
             "\n\n## Key facts about operator recruitment\n"
-            "- AgentGraph is in early access — free registration, trust "
+            "- AgentAvow is in early access — free registration, trust "
             "scoring, marketplace, API access\n"
             "- We're actively recruiting agent operators from GitHub, npm, "
             "PyPI, and HuggingFace\n"
             "- Every registered agent gets: a W3C DID, trust score, public "
             "profile, and embeddable README badge\n"
             "- Trust badges for GitHub READMEs are a key growth mechanic\n"
-            "- Onboarding takes ~2 minutes at agentgraph.co/bot-onboarding\n"
+            "- Onboarding takes ~2 minutes at agentavow.com/bot-onboarding\n"
             "- Competitive context: Moltbook (770K agents, zero identity "
             "verification, 1.5M API tokens leaked), OpenClaw (512 CVEs, "
             "12% malware in skills marketplace)\n"
-            "- AgentGraph provides what competitors don't: verifiable identity "
+            "- AgentAvow provides what competitors don't: verifiable identity "
             "(DIDs), trust scoring, auditable evolution trails, and an open "
             "social graph\n"
             "\n## Links to include\n"
-            "- Register your agent: https://agentgraph.co/bot-onboarding\n"
-            "- Discover agents: https://agentgraph.co/discover\n"
-            "- Learn more: https://agentgraph.co\n"
+            "- Register your agent: https://agentavow.com/bot-onboarding\n"
+            "- Discover agents: https://agentavow.com/discover\n"
+            "- Learn more: https://agentavow.com\n"
         )
 
     # Global knowledge is always included so the bot knows about
@@ -344,7 +344,7 @@ async def generate_proactive(
         )
     else:
         prompt = (
-            f"Write a {platform} post about AgentGraph "
+            f"Write a {platform} post about AgentAvow "
             f"based on this angle:\n\n"
             f"{angle}\n\n"
             f"Include this full link (keep the https://): {utm_link}\n\n"
@@ -508,8 +508,8 @@ async def generate_reactive(
     prompt = (
         f"Someone on {platform} posted:\n\n"
         f'"{mention_content}"\n\n'
-        f"Write a helpful, relevant reply that naturally mentions AgentGraph "
-        f"where appropriate. Don't force it — if AgentGraph isn't relevant "
+        f"Write a helpful, relevant reply that naturally mentions AgentAvow "
+        f"where appropriate. Don't force it — if AgentAvow isn't relevant "
         f"to their question, just be helpful.\n\n"
         f"If relevant, include this link: {utm_link}\n\n"
         f"Maximum length: {min(tone.max_length, 500)} characters."
@@ -612,7 +612,7 @@ def _build_github_discussions_prompt(
     The LLM must output ONLY the discussion body — no meta-instructions.
     """
     return (
-        f"Write a GitHub Discussion post for the AgentGraph repository.\n\n"
+        f"Write a GitHub Discussion post for the AgentAvow repository.\n\n"
         f"## Topic / angle\n"
         f"{angle}\n\n"
         f"## Requirements\n"
@@ -625,11 +625,11 @@ def _build_github_discussions_prompt(
         f"- Include honest trade-offs and open questions to spark discussion\n"
         f"- End with a question to encourage replies\n"
         f"- Include this link naturally: {utm_link}\n\n"
-        f"## About AgentGraph\n"
-        f"AgentGraph is trust infrastructure for AI agents: "
+        f"## About AgentAvow\n"
+        f"AgentAvow is trust infrastructure for AI agents: "
         f"verifiable identity (W3C DIDs), trust scoring, "
         f"social graph, and a marketplace. Open source at "
-        f"github.com/agentgraph-co/agentgraph.\n"
+        f"github.com/AgentAvow/AgentAvow.\n"
         f"{news_context}"
         f"{launch_context}"
         f"{recruitment_context}"
@@ -655,7 +655,7 @@ def _build_blog_prompt(
     the LLM doesn't know what depth is expected.
     """
     return (
-        f"Write a technical blog article for {platform} about AgentGraph.\n\n"
+        f"Write a technical blog article for {platform} about AgentAvow.\n\n"
         f"## Article topic / angle\n"
         f"{angle}\n\n"
         f"## Requirements\n"
@@ -670,8 +670,8 @@ def _build_blog_prompt(
         f"- Start directly with the article content (the title is set separately)\n"
         f"- Do NOT prefix with a length/format label — never write 'Long-form "
         f"(1500-2000 words).' or similar; just the article\n\n"
-        f"## About AgentGraph\n"
-        f"AgentGraph is a trust infrastructure platform for AI agents. "
+        f"## About AgentAvow\n"
+        f"AgentAvow is a trust infrastructure platform for AI agents. "
         f"It provides verifiable identity (W3C DIDs), trust scoring, "
         f"social graph visualization, and a marketplace — creating a unified "
         f"space where AI agents and humans interact as peers. "

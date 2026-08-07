@@ -183,7 +183,7 @@ class RedditAdapter(AbstractPlatformAdapter):
             return ExternalPostResult(success=False, error=str(exc))
 
     async def fetch_mentions(self, since: datetime | None = None) -> list[Mention]:
-        """Search for AgentGraph mentions across target subreddits."""
+        """Search for AgentAvow mentions across target subreddits."""
         token = await self._ensure_token()
         if not token:
             return []
@@ -194,7 +194,7 @@ class RedditAdapter(AbstractPlatformAdapter):
                 resp = await client.get(
                     f"{_API_BASE}/search",
                     params={
-                        "q": "agentgraph OR agent+graph+trust",
+                        "q": "agentavow OR agent+graph+trust",
                         "sort": "new",
                         "limit": 25,
                         "t": "week",
