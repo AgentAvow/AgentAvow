@@ -43,40 +43,72 @@ async def _sandbox_rate_limit(request: Request) -> None:
         )
 
 
-# ── Sandbox token store (in-memory, ephemeral) ──
+# ── Sandbox token store (Redis-backed → shared across workers; in-memory fallback) ──
+#
+# Prod runs uvicorn --workers 2, so an in-memory dict would let a token minted in
+# one worker fail validation in the other. Tokens live in Redis (auto-expiring);
+# the local dict is only a fallback for single-worker / Redis-down.
 
 _sandbox_tokens: dict[str, dict] = {}
 _SANDBOX_TOKEN_TTL = 900  # 15 minutes
+_MAX_TOKENS_PER_IP = 3
 
 
 def _cleanup_expired() -> None:
-    """Remove expired sandbox tokens."""
+    """Drop expired tokens from the in-memory fallback (Redis expires its own)."""
     now = time.time()
-    expired = [k for k, v in _sandbox_tokens.items() if v["exp"] < now]
-    for k in expired:
+    for k in [k for k, v in _sandbox_tokens.items() if v["exp"] < now]:
         del _sandbox_tokens[k]
 
 
-def _create_sandbox_token(ip: str) -> dict:
-    """Create an ephemeral sandbox token with a fake entity identity."""
+async def _create_sandbox_token(ip: str) -> dict | None:
+    """Create an ephemeral sandbox token, or None if the per-IP concurrent cap is hit."""
+    import json
+
     _cleanup_expired()
-    token_id = uuid.uuid4().hex
-    entity_id = str(uuid.uuid4())
     now = time.time()
-    _sandbox_tokens[token_id] = {
+    token_id = uuid.uuid4().hex
+    data = {
         "token": token_id,
-        "entity_id": entity_id,
+        "entity_id": str(uuid.uuid4()),
         "display_name": f"sandbox-agent-{token_id[:8]}",
         "ip": ip,
         "created_at": now,
         "exp": now + _SANDBOX_TOKEN_TTL,
     }
-    return _sandbox_tokens[token_id]
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        # Per-IP concurrent cap via a counter that expires with inactivity.
+        ipc_key = f"sandbox:ipc:{ip}"
+        count = await r.incr(ipc_key)
+        await r.expire(ipc_key, _SANDBOX_TOKEN_TTL)
+        if count > _MAX_TOKENS_PER_IP:
+            await r.decr(ipc_key)
+            return None
+        await r.set(f"sandbox:tok:{token_id}", json.dumps(data), ex=_SANDBOX_TOKEN_TTL)
+    except Exception:
+        # Redis unavailable → in-memory fallback (per-IP check against local dict)
+        if len([v for v in _sandbox_tokens.values() if v["ip"] == ip]) >= _MAX_TOKENS_PER_IP:
+            return None
+    _sandbox_tokens[token_id] = data  # keep a local copy (fast path + fallback)
+    return data
 
 
-def _validate_sandbox_token(token: str) -> dict | None:
-    """Validate a sandbox token. Returns the token data or None."""
-    _cleanup_expired()
+async def _validate_sandbox_token(token: str) -> dict | None:
+    """Validate a sandbox token against Redis (shared), falling back to memory."""
+    import json
+
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        raw = await r.get(f"sandbox:tok:{token}")
+        if raw is not None:
+            return json.loads(raw)
+    except Exception:
+        pass
     data = _sandbox_tokens.get(token)
     if data is None:
         return None
@@ -150,16 +182,12 @@ async def create_sandbox_token(request: Request) -> SandboxTokenResponse:
     """
     ip = _get_client_ip(request)
 
-    # Limit concurrent sandbox tokens per IP (max 3)
-    _cleanup_expired()
-    ip_tokens = [v for v in _sandbox_tokens.values() if v["ip"] == ip]
-    if len(ip_tokens) >= 3:
+    token_data = await _create_sandbox_token(ip)
+    if token_data is None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many active sandbox sessions. Wait for an existing token to expire.",
         )
-
-    token_data = _create_sandbox_token(ip)
     return SandboxTokenResponse(
         token=token_data["token"],
         entity_id=token_data["entity_id"],
@@ -175,7 +203,7 @@ async def create_sandbox_token(request: Request) -> SandboxTokenResponse:
 )
 async def list_sandbox_endpoints() -> dict:
     """List all available sandbox API endpoints with example curl commands."""
-    base = settings.base_url or "https://agentgraph.co"
+    base = settings.base_url or "https://agentavow.com"
     endpoints = {}
     for key, info in _ALLOWED_ENDPOINTS.items():
         endpoints[key] = {
@@ -211,7 +239,7 @@ async def execute_sandbox_call(
             detail="Missing sandbox token. Call POST /sandbox/token first.",
         )
     token = auth_header[7:]
-    token_data = _validate_sandbox_token(token)
+    token_data = await _validate_sandbox_token(token)
     if token_data is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
