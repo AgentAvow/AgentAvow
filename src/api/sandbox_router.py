@@ -16,7 +16,6 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.rate_limit import RedisRateLimiter, _get_client_ip
@@ -105,52 +104,32 @@ class SandboxCallRequest(BaseModel):
 
 
 # ── Allowed sandbox endpoints (read-only subset) ──
+#
+# Scan-oriented: the sandbox demos the public tool-safety scan API (no auth
+# required for these paths), not the social surfaces. All three are read-only
+# and cache-first on the common path.
 
 _ALLOWED_ENDPOINTS: dict[str, dict] = {
-    "search_agents": {
+    "check_tool": {
         "method": "GET",
-        "path": "/search",
-        "description": "Search for agents and humans by name",
-        "params": {"q": "bot", "limit": "5"},
-        "curl": 'curl -H "Authorization: Bearer {token}" "{base}/api/v1/search?q=bot&limit=5"',
-    },
-    "get_feed": {
-        "method": "GET",
-        "path": "/feed",
-        "description": "Browse the public feed",
-        "params": {"limit": "5"},
-        "curl": 'curl -H "Authorization: Bearer {token}" "{base}/api/v1/feed?limit=5"',
-    },
-    "get_graph_stats": {
-        "method": "GET",
-        "path": "/graph/stats",
-        "description": "Get network graph statistics",
+        "path": "/public/scan/agenttrust/mcp-server",
+        "description": "Check a tool's signed safety grade",
         "params": {},
-        "curl": 'curl -H "Authorization: Bearer {token}" "{base}/api/v1/graph/stats"',
+        "curl": 'curl "{base}/api/v1/public/scan/agenttrust/mcp-server"',
     },
-    "get_leaderboard": {
+    "list_catalog": {
         "method": "GET",
-        "path": "/feed/leaderboard",
-        "description": "View the trust leaderboard",
+        "path": "/public/scan-catalog",
+        "description": "Browse recently scanned tools",
         "params": {"limit": "5"},
-        "curl": 'curl -H "Authorization: Bearer {token}" "{base}/api/v1/feed/leaderboard?limit=5"',
-    },
-    "list_marketplace": {
-        "method": "GET",
-        "path": "/marketplace/listings",
-        "description": "Browse marketplace listings",
-        "params": {"limit": "5"},
-        "curl": (
-            'curl -H "Authorization: Bearer {token}"'
-            ' "{base}/api/v1/marketplace/listings?limit=5"'
-        ),
+        "curl": 'curl "{base}/api/v1/public/scan-catalog?limit=5"',
     },
     "platform_stats": {
         "method": "GET",
-        "path": "/public/stats",
-        "description": "Get platform-wide statistics",
+        "path": "/public/scan-catalog",
+        "description": "Platform-wide scan statistics",
         "params": {},
-        "curl": 'curl "{base}/api/v1/public/stats"',
+        "curl": 'curl "{base}/api/v1/public/scan-catalog?limit=1"',
     },
 }
 
@@ -274,142 +253,84 @@ async def _run_sandbox_query(
     endpoint_info: dict,
     db: AsyncSession,
 ) -> dict | list:
-    """Run a sandboxed query against the real database (read-only)."""
-    from src.models import Entity, Post
+    """Run a sandboxed query against the real public scan API (read-only).
 
-    if endpoint_key == "search_agents":
-        result = await db.execute(
-            select(
-                Entity.id,
-                Entity.display_name,
-                Entity.type,
-                Entity.bio,
-            )
-            .where(Entity.is_active.is_(True))
-            .where(
-                Entity.display_name.ilike("%bot%")
-                | Entity.display_name.ilike("%agent%"),
-            )
-            .limit(5),
-        )
-        rows = result.all()
-        return [
-            {
-                "id": str(r.id),
-                "display_name": r.display_name,
-                "type": r.type.value if hasattr(r.type, "value") else str(r.type),
-                "bio": r.bio,
-            }
-            for r in rows
-        ]
+    Reuses the public scan + catalog endpoint handlers directly so the sandbox
+    returns exactly what an anonymous public caller receives. Every path is
+    cache-first and read-only on the common path (the demo repo is cached after
+    its first scan, so repeated sandbox calls never re-scan).
+    """
+    if endpoint_key == "check_tool":
+        # Demo a real, known repo — the same signed grade a public caller gets
+        # from GET /public/scan/{owner}/{repo}. Cache-first (force=False).
+        from src.api.public_scan_router import _grade_from_score, public_scan
 
-    if endpoint_key == "get_feed":
-        result = await db.execute(
-            select(
-                Post.id,
-                Post.content,
-                Post.author_id,
-                Post.created_at,
-                Post.upvotes,
-                Post.downvotes,
-            )
-            .where(Post.parent_id.is_(None))
-            .where(Post.is_hidden.is_(False))
-            .order_by(Post.created_at.desc())
-            .limit(5),
-        )
-        rows = result.all()
-        return [
-            {
-                "id": str(r.id),
-                "content": r.content[:200] + ("..." if len(r.content) > 200 else ""),
-                "author_id": str(r.author_id),
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "upvotes": r.upvotes,
-                "downvotes": r.downvotes,
-            }
-            for r in rows
-        ]
-
-    if endpoint_key == "get_graph_stats":
-        entity_count = await db.scalar(
-            select(func.count()).select_from(Entity).where(
-                Entity.is_active.is_(True),
-            ),
-        )
-        post_count = await db.scalar(
-            select(func.count()).select_from(Post),
-        )
+        owner, repo = "agenttrust", "mcp-server"
+        resp = await public_scan(owner=owner, repo=repo, force=False, db=db)
         return {
-            "total_entities": entity_count or 0,
-            "total_posts": post_count or 0,
+            "repo": resp.repo,
+            "security_score": resp.security_score,
+            "grade": _grade_from_score(resp.security_score),
+            "trust_tier": resp.trust_tier,
+            "scan_result": resp.scan_result,
+            "findings": {
+                "critical": resp.findings.critical,
+                "high": resp.findings.high,
+                "medium": resp.findings.medium,
+                "total": resp.findings.total,
+            },
+            "positive_signals": resp.positive_signals[:5],
+            "scanned_at": resp.scanned_at,
+            "cached": resp.cached,
+            # Signed EdDSA attestation — verifiable offline against the JWKS below.
+            "jws": resp.jws,
+            "key_id": resp.key_id,
+            "jwks_url": resp.jwks_url,
         }
 
-    if endpoint_key == "get_leaderboard":
-        result = await db.execute(
-            select(
-                Entity.id,
-                Entity.display_name,
-                Entity.type,
-            )
-            .where(Entity.is_active.is_(True))
-            .order_by(Entity.display_name)
-            .limit(5),
-        )
-        rows = result.all()
-        return [
-            {
-                "id": str(r.id),
-                "display_name": r.display_name,
-                "type": r.type.value if hasattr(r.type, "value") else str(r.type),
-            }
-            for r in rows
-        ]
+    if endpoint_key == "list_catalog":
+        # Recently scanned tools from the browsable catalog (launch corpus +
+        # community/on-demand scans). GET /public/scan-catalog?limit=5.
+        from src.api.scan_catalog_router import scan_catalog
 
-    if endpoint_key == "list_marketplace":
-        from src.models import Listing
-
-        result = await db.execute(
-            select(
-                Listing.id,
-                Listing.title,
-                Listing.description,
-                Listing.category,
-                Listing.pricing_model,
-            )
-            .where(Listing.status == "active")
-            .limit(5),
+        catalog = await scan_catalog(
+            surface=None,
+            q=None,
+            severity=None,
+            sort="default",
+            limit=5,
+            offset=0,
+            db=db,
         )
-        rows = result.all()
-        return [
-            {
-                "id": str(r.id),
-                "title": r.title,
-                "description": (r.description or "")[:150],
-                "category": r.category,
-                "pricing_model": r.pricing_model,
-            }
-            for r in rows
-        ]
+        return {
+            "total": catalog.total,
+            "tools": [
+                {
+                    "surface": row.surface,
+                    "name": row.full_name or row.name,
+                    "trust_score": row.trust_score,
+                    "critical": row.critical,
+                    "high": row.high,
+                    "primary_language": row.primary_language,
+                }
+                for row in catalog.rows
+            ],
+        }
 
     if endpoint_key == "platform_stats":
-        humans = await db.scalar(
-            select(func.count())
-            .select_from(Entity)
-            .where(Entity.is_active.is_(True))
-            .where(Entity.type == "human"),
+        # Platform-wide scan statistics — the catalog summary block that the
+        # landing page's proof-of-scale strip reads. GET /public/scan-catalog.
+        from src.api.scan_catalog_router import scan_catalog
+
+        catalog = await scan_catalog(
+            surface=None,
+            q=None,
+            severity=None,
+            sort="default",
+            limit=1,
+            offset=0,
+            db=db,
         )
-        agents = await db.scalar(
-            select(func.count())
-            .select_from(Entity)
-            .where(Entity.is_active.is_(True))
-            .where(Entity.type == "agent"),
-        )
-        posts = await db.scalar(select(func.count()).select_from(Post))
-        return {
-            "total_humans": humans or 0,
-            "total_agents": agents or 0,
-            "total_posts": posts or 0,
-        }
+        return catalog.summary.model_dump()
 
     return {"message": "Endpoint not implemented in sandbox"}

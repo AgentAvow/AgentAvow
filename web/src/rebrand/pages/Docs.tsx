@@ -20,6 +20,7 @@ const DOCS = [
 
 // Real destinations that already exist (were "coming at launch" placeholders).
 const MORE: [string, string][] = [
+  ['API sandbox', '/rebrand/sandbox'],
   ['Scan catalog', '/rebrand/browse'],
   ['How it works', '/rebrand/how-it-works'],
   ['Standards & research', '/rebrand/research'],

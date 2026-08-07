@@ -105,6 +105,7 @@ const RebrandClaim = lazy(() => import('./rebrand/pages/Claim'))
 const RebrandFAQ = lazy(() => import('./rebrand/pages/FAQ'))
 const RebrandSettings = lazy(() => import('./rebrand/pages/Settings'))
 const RebrandAvatar = lazy(() => import('./rebrand/pages/Avatar'))
+const RebrandSandbox = lazy(() => import('./rebrand/pages/Sandbox'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -189,7 +190,7 @@ function AppRoutes() {
           {!CUTOVER && <Route path="/docs" element={<DocsHub />} />}
           {!CUTOVER && <Route path="/docs/:section" element={<DocsHub />} />}
           {!CUTOVER && <Route path="/faq" element={<FAQ />} />}
-          <Route path="/sandbox" element={<Sandbox />} />
+          {!CUTOVER && <Route path="/sandbox" element={<Sandbox />} />}
           {!CUTOVER && <Route path="/check" element={<Check />} />}
           {!CUTOVER && <Route path="/check/:owner/:repo" element={<Check />} />}
           <Route path="/scans" element={<Scans />} />
@@ -231,6 +232,7 @@ function AppRoutes() {
           <Route path="faq" element={<RebrandFAQ />} />
           <Route path="settings" element={<RebrandSettings />} />
           <Route path="avatar" element={<RebrandAvatar />} />
+          <Route path="sandbox" element={<RebrandSandbox />} />
           <Route path="legal" element={<RebrandLegal />} />
           <Route path="legal/:section" element={<RebrandLegal />} />
           <Route path="*" element={<RebrandHome />} />

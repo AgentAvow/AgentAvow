@@ -137,11 +137,8 @@ function ParallaxHeroFace({ intensity, reducedMotion }: { intensity: Intensity; 
           opacity: baseOpacity,
           mixBlendMode: theme === 'light' ? 'multiply' : 'screen',
           filter: theme === 'light' ? 'contrast(1.2) brightness(0.9)' : 'none',
-          // Fade the bottom of the head graphic to fully transparent so it dissolves
-          // into the atmosphere instead of ending on a hard edge — starts below the
-          // face (~48%) so the head itself stays visible.
-          maskImage: 'linear-gradient(to bottom, #000 48%, transparent 84%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, #000 48%, transparent 84%)',
+          // The bottom fade is now baked into hero-art.png's alpha channel (fades
+          // with the image content regardless of object-cover crop), so no CSS mask.
         }}
       />
       {/* Vignette — fades edges into the background color */}

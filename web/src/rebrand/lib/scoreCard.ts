@@ -10,8 +10,9 @@ export interface ScoreCardData {
   tier: string
   gradeHex: string
   attestation: number
-  adoption: string        // compact center value: "1.2k" or "New"
-  adoptionSub?: string    // unit under the adoption number: "stars" / "checks"
+  adoption: string        // compact value: "1.2k" or "New"
+  adoptionSub?: string    // unit next to the adoption number: "stars" / "checks"
+  adoptionPct?: number    // 0–100 log-scaled traction bar fill
 }
 
 function esc(s: string): string {
@@ -26,8 +27,8 @@ export function scoreCardSvg(d: ScoreCardData): string {
   const dash = (Math.max(d.score, 0) / 100) * circ
   const hasAdoption = d.adoption.toLowerCase() !== 'new'
   const aHex = hasAdoption ? ADOPTION_HEX : '#5c6370'
-  // adoption center scales down a touch for longer strings so it never overflows the ring
-  const aSize = d.adoption.length >= 4 ? 58 : 72
+  const barW = 300
+  const barFill = hasAdoption ? Math.max((d.adoptionPct ?? 0) / 100, 0.05) * barW : 0
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="Geist, system-ui, -apple-system, sans-serif">
   <defs>
     <radialGradient id="glow" cx="0.5" cy="0.42" r="0.7">
@@ -63,14 +64,11 @@ export function scoreCardSvg(d: ScoreCardData): string {
   <text x="415" y="500" text-anchor="middle" fill="${d.gradeHex}" font-size="18" font-weight="700" font-family="monospace" letter-spacing="1">ATTESTATION TRUST</text>
   <text x="415" y="528" text-anchor="middle" fill="#94A3B8" font-size="18">signed · verifiable now</text>
 
-  <!-- Adoption -->
-  <g transform="translate(785,360)">
-    <circle r="${R}" fill="none" stroke="#2a2620" stroke-width="20"/>
-    <circle r="${R}" fill="none" stroke="${aHex}" stroke-width="20" stroke-linecap="round"
-      ${hasAdoption ? '' : 'stroke-dasharray="3 22" opacity="0.6"'} transform="rotate(-90)"/>
-    <text x="0" y="${aSize / 3 + 2}" text-anchor="middle" fill="${aHex}" font-size="${aSize}" font-weight="800">${esc(d.adoption)}</text>
-    ${d.adoptionSub ? `<text x="0" y="54" text-anchor="middle" fill="#94A3B8" font-size="24" font-family="monospace">${esc(d.adoptionSub)}</text>` : ''}
-  </g>
+  <!-- Adoption (progress bar — reads distinct from the trust gauge) -->
+  <text x="785" y="342" text-anchor="middle" fill="${aHex}" font-size="76" font-weight="800">${esc(d.adoption)}</text>
+  ${d.adoptionSub ? `<text x="785" y="378" text-anchor="middle" fill="#94A3B8" font-size="24" font-family="monospace">${esc(d.adoptionSub)}</text>` : ''}
+  <rect x="${785 - barW / 2}" y="405" width="${barW}" height="16" rx="8" fill="#2a2620"/>
+  <rect x="${785 - barW / 2}" y="405" width="${barFill.toFixed(1)}" height="16" rx="8" fill="${aHex}"/>
   <text x="785" y="500" text-anchor="middle" fill="${aHex}" font-size="18" font-weight="700" font-family="monospace" letter-spacing="1">ADOPTION</text>
   <text x="785" y="528" text-anchor="middle" fill="#94A3B8" font-size="18">${hasAdoption ? 'ecosystem usage' : 'be the first'}</text>
 
