@@ -80,13 +80,15 @@ async def _create_sandbox_token(ip: str) -> dict | None:
         from src.redis_client import get_redis
 
         r = get_redis()
-        # Per-IP concurrent cap via a counter that expires with inactivity.
-        ipc_key = f"sandbox:ipc:{ip}"
-        count = await r.incr(ipc_key)
-        await r.expire(ipc_key, _SANDBOX_TOKEN_TTL)
-        if count > _MAX_TOKENS_PER_IP:
-            await r.decr(ipc_key)
+        # Accurate per-IP concurrent cap: a sorted set scored by token expiry, so
+        # expired tokens drop out and the count reflects only LIVE tokens (a plain
+        # counter never decrements on expiry and would lock the IP out for the TTL).
+        ipz_key = f"sandbox:ipz:{ip}"
+        await r.zremrangebyscore(ipz_key, 0, now)
+        if await r.zcard(ipz_key) >= _MAX_TOKENS_PER_IP:
             return None
+        await r.zadd(ipz_key, {token_id: now + _SANDBOX_TOKEN_TTL})
+        await r.expire(ipz_key, _SANDBOX_TOKEN_TTL + 60)
         await r.set(f"sandbox:tok:{token_id}", json.dumps(data), ex=_SANDBOX_TOKEN_TTL)
     except Exception:
         # Redis unavailable → in-memory fallback (per-IP check against local dict)
