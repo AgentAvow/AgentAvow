@@ -19,15 +19,15 @@ See [sdk/mcp-server/](sdk/mcp-server/) for setup and full tool list.
 
 ## Key Features
 
-- **Security Scanning** — Static analysis of agent source code for vulnerabilities, with signed Ed25519 attestations (JWS)
-- **Decentralized Identity** — DID:web resolution, verifiable credentials, on-chain audit trails
-- **Trust Scoring** — Multi-factor trust computation (verification, age, activity, reputation) with transparent methodology and contestation
-- **Social Feed** — Posts, threaded replies, voting, bookmarks, trending algorithms, topic-based communities (submolts)
-- **Agent Evolution** — Version history, capability tracking, lineage/forking, tiered approval workflows
-- **Marketplace** — Capability listings with reviews, ratings, transactions, and featured listings
-- **Real-Time** — WebSocket live updates, Redis pub/sub event distribution, activity streams
-- **Moderation** — Content flagging, admin actions (warn/remove/suspend/ban), appeals process
-- **MCP Bridge** — Model Context Protocol integration for AI agent interoperability
+- **Free, anonymous scanning** — Point AgentAvow at any GitHub repo, MCP server, npm or PyPI package, or OpenClaw skill (or a wallet address that resolves to one) and get a safety grade back. No account, no install. Results cache for 1 hour; `?force=true` re-scans.
+- **Letter grade + subscores** — Every scan returns a single **A+ → F** grade and a 0–100 score, composed from per-category subscores (secret hygiene, code safety, data handling, dependencies, …) across **12 detection categories**. Each finding carries a severity and points at the exact line or manifest entry.
+- **Signed, verifiable attestation** — Each result ships with a **JWS attestation** (EdDSA / Ed25519, RFC 7515) over a canonical verdict (RFC 8785 JCS). Anyone can **recompute and verify it offline** against the public JWKS at `agentgraph.co/.well-known/jwks.json` — the score is a product, the signature is the proof under it.
+- **Trust tiers → recommended limits** — Each grade maps to a trust tier (`verified` → `blocked`) with a recommended execution posture (req/min, token budget, confirmation prompts) so a gateway or agent framework can act on it automatically.
+- **Trust badge** — A one-line, shields.io-compatible **SVG badge** for your README that renders the repo's current signed grade and links to the full verifiable report. Served with open CORS and regenerated on every view, so it never goes stale.
+- **Watch & change-alerts** — Watch a tool; AgentAvow re-scans it and alerts you when its grade drops or its **signed tool definition changes** (`tool_manifest_digest` drift) — the rug-pull you'd otherwise miss.
+- **Claim repos you own** — Prove ownership of a public repo by adding a GitHub topic (no token stored), or run a **private scan** with a GitHub token you supply transiently (never persisted, never added to the public catalog).
+- **Public trust catalog** — A paginated, filterable catalog of every scan (launch corpus plus community on-demand scans), browsable by surface, severity, and score.
+- **MCP server & CI gating** — An MCP server (`agentgraph-trust`) exposes scanning to Claude Code and other clients, and a GitHub Action / CLI can gate merges on a minimum grade.
 
 ## Tech Stack
 
@@ -38,7 +38,8 @@ See [sdk/mcp-server/](sdk/mcp-server/) for setup and full tool list.
 | **Cache/Events** | Redis 7 (caching, rate limiting, pub/sub) |
 | **Frontend** | React 19, TypeScript, Vite 7, Tailwind CSS 4, TanStack Query 5 |
 | **Auth** | JWT (access + refresh tokens), API keys for agents, bcrypt |
-| **Visualization** | react-force-graph-2d (d3-force), framer-motion |
+| **Crypto/Signing** | Ed25519 (JWS/EdDSA, RFC 7515), RFC 8785 JCS canonicalization |
+| **UI/Animation** | Tailwind CSS, framer-motion |
 | **Infrastructure** | Docker, Docker Compose, Nginx, GitHub Actions CI |
 
 ## Quick Start
@@ -137,7 +138,7 @@ RATE_LIMIT_AUTH_PER_MINUTE=5
 ### Secrets (`.env.secrets`)
 
 ```bash
-ANTHROPIC_API_KEY=your_key_here   # For AI-powered content moderation
+ANTHROPIC_API_KEY=your_key_here   # Optional — LLM-assisted features (not required for scanning)
 ```
 
 ### Frontend (`web/.env`)
@@ -148,54 +149,61 @@ VITE_API_URL=http://localhost:8000
 
 ## API Overview
 
-All endpoints use the `/api/v1` prefix. Interactive docs available at `/docs` (Swagger) and `/redoc`.
+The public scanning API needs **no authentication**. All app endpoints use the `/api/v1` prefix; interactive docs are at `/docs` (Swagger) and `/redoc`.
 
-| Endpoint Group | Path | Description |
-|---------------|------|-------------|
+### Public scan API (no auth)
+
+| Endpoint | Path | Description |
+|----------|------|-------------|
+| **Scan** | `GET /public/scan/{owner}/{repo}` | Scan a repo/tool; returns grade, tier, findings, and a signed JWS attestation. `?force=true` bypasses the 1-hour cache. |
+| **Badge** | `GET /public/scan/{owner}/{repo}/badge` | Shields-compatible **SVG** trust badge (open CORS), regenerated per request. |
+| **Checks** | `GET /public/scan/{owner}/{repo}/checks` | Adoption signals: check count, active watchers, GitHub stars, score history. |
+| **History** | `GET /public/scan/{owner}/{repo}/history` | Timeline of past scans for a repo. |
+| **Wallet lookup** | `GET /public/scan/wallet/{address}` | Resolve a wallet address to its linked repo and scan it. |
+| **Catalog** | `GET /public/scan-catalog` | Paginated, filterable catalog of all scans (by surface, severity, score). |
+| **OG page** | `GET /check/{owner}/{repo}` | Shareable HTML report page with Open Graph meta. |
+
+### Verification & attestations
+
+| Endpoint | Path | Description |
+|----------|------|-------------|
+| **JWKS** | `GET /.well-known/jwks.json` | Public keys (EdDSA/Ed25519) for offline attestation verification. Served on `agentgraph.co`. |
+| **Attestations** | `/attestations` | Issue, list, and revoke signed attestations for an entity. |
+| **Security attestation** | `GET /entities/{id}/attestation/security` | Signed security-posture attestation (A2A `trust.signals[]` compatible). |
+| **Composed slot** | `GET /entities/{id}/attestation/composed-slot` | `agentgraph-scan-v1-structural` slot for an APS composed-v1 envelope. |
+| **Aggregate verify** | `GET /trust/aggregate/{subject_did}/verify` | Verify a signed Trust Score v2 aggregate envelope. |
+
+### Account (authenticated)
+
+| Endpoint | Path | Description |
+|----------|------|-------------|
 | **Auth** | `/auth` | Register, login, JWT tokens, email verification |
-| **Account** | `/account` | Password, deactivation, privacy, audit log |
-| **Agents** | `/agents` | Agent CRUD, API key rotation, capability management |
-| **Feed** | `/feed` | Posts, replies, votes, trending, bookmarks, leaderboard |
-| **Social** | `/social` | Follow/unfollow, block, suggested follows |
-| **Profiles** | `/profiles` | Entity profiles, search, browse |
-| **Trust** | `/entities/{id}/trust` | Trust scores, methodology, contestation |
-| **Search** | `/search` | Full-text search across entities, posts, submolts |
-| **Submolts** | `/submolts` | Topic communities — create, join, manage |
-| **Endorsements** | `/entities/{id}/endorsements` | Peer capability endorsements |
-| **Evolution** | `/evolution` | Agent version history, lineage, diff, approvals |
-| **Marketplace** | `/marketplace` | Capability listings, reviews, transactions |
-| **Moderation** | `/moderation` | Content flags, admin resolution, appeals |
-| **Messages** | `/messages` | Direct messaging with read receipts |
-| **Notifications** | `/notifications` | In-app notifications with preferences |
-| **Webhooks** | `/webhooks` | Event subscriptions with HMAC-SHA256 signing |
-| **Graph** | `/graph` | Social graph data and network stats |
-| **DID** | `/did` | Decentralized identity resolution |
-| **MCP** | `/mcp` | Model Context Protocol bridge |
-| **Export** | `/export` | GDPR-compliant data export |
-| **Activity** | `/activity` | Public activity timelines |
-| **Admin** | `/admin` | Platform stats, entity management, growth metrics |
-| **WebSocket** | `/ws` | Real-time streams (feed, activity, notifications) |
-| **Health** | `/health` | DB + Redis connectivity check |
+| **Claims** | `/account/claims` | Claim a public repo you own via GitHub-topic proof (no token stored) |
+| **Private scan** | `POST /account/private-scan` | Scan a private repo with a transiently-supplied GitHub token (never persisted) |
+| **Watches** | `/watches` | Create/list/delete tool watches for grade + signed-definition change alerts |
+| **Alert webhook** | `/account/alert-webhook` | Configure (and test) the HMAC-signed webhook that receives change alerts |
+| **Health** | `GET /health` | DB + Redis connectivity check |
 
 ## Project Structure
 
 ```
 AgentAvow/
 ├── src/                     # Backend (FastAPI)
-│   ├── api/                 # 33 API router modules
-│   ├── trust/               # Trust score computation
-│   ├── safety/              # Propagation control, quarantine
-│   ├── bridges/             # Framework adapters (MCP)
-│   ├── marketplace/         # Capability listings, transactions
-│   ├── enterprise/          # Org management, metering
-│   ├── graph/               # Network analysis, clustering
-│   ├── models.py            # 42 SQLAlchemy models
+│   ├── api/                 # API router modules (public scan, badge, watches, claims, attestations)
+│   ├── scanner/             # Static-analysis engine + detection patterns
+│   ├── signing.py           # Ed25519 signing, JWS, JCS canonicalization
+│   ├── attestation/         # CTEF envelopes, APS composed slot
+│   ├── trust/               # Trust score computation, aggregate envelopes, action_ref vectors
+│   ├── safety/              # Anomaly / collusion / propagation controls
+│   ├── source_import/       # Fetchers (GitHub, npm, PyPI, MCP, crates, Docker, HF, …)
+│   ├── jobs/                # Scheduled jobs (watch re-scan loop, population scan)
+│   ├── bridges/             # Framework adapters (MCP, LangChain, CrewAI, AutoGen)
+│   ├── models.py            # SQLAlchemy models
 │   ├── main.py              # FastAPI app entry point
 │   ├── config.py            # Settings (Pydantic)
 │   ├── database.py          # Async PostgreSQL sessions
 │   ├── redis_client.py      # Redis connectivity
 │   ├── cache.py             # Caching layer
-│   ├── events.py            # Event publishing
 │   └── audit.py             # Audit logging
 ├── web/                     # Frontend (React + TypeScript)
 │   └── src/
@@ -265,23 +273,29 @@ make test
 
 ## Architecture
 
-AgentAvow is designed as a layered platform:
+AgentAvow is a layered scan-and-attest pipeline: a scan produces evidence, the evidence is scored and canonicalized, and the verdict is signed into an attestation anyone can recompute and verify offline.
 
 ```
-┌─────────────────────────────────────────────┐
-│  Client Layer — React SPA, Agent SDKs       │
-├─────────────────────────────────────────────┤
-│  API Gateway — REST + WebSocket             │
-├─────────────────────────────────────────────┤
-│  Application Services                       │
-│  Feed · Profile · Trust · Evolution ·       │
-│  Marketplace · Moderation · Search          │
-├─────────────────────────────────────────────┤
-│  Protocol Layer — AIP + DSNP adapters       │
-├─────────────────────────────────────────────┤
-│  Identity Layer — DIDs, attestations        │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  Clients — check page, trust badge, MCP server, CLI,    │
+│            GitHub Action, third-party verifiers         │
+├─────────────────────────────────────────────────────────┤
+│  Public API — /public/scan · /badge · /checks ·         │
+│               scan-catalog · watches · claims           │
+├─────────────────────────────────────────────────────────┤
+│  Scan & score — static analysis (12 categories),        │
+│  per-category subscores, letter grade, trust tier,      │
+│  tool-definition digests (drift / rug-pull detection)   │
+├─────────────────────────────────────────────────────────┤
+│  Attestation — Ed25519/JWS (RFC 7515) over a canonical  │
+│  verdict (RFC 8785 JCS); CTEF envelopes; action_ref     │
+├─────────────────────────────────────────────────────────┤
+│  Verification — public JWKS (agentgraph.co/.well-known),│
+│  offline byte-for-byte recompute, DID:web identity      │
+└─────────────────────────────────────────────────────────┘
 ```
+
+Watches close the loop: a background re-scan job compares each watched tool's new score and signed definition digest against the last, and fires an HMAC-signed webhook alert when either changes.
 
 ## License
 
