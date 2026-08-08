@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -245,8 +246,18 @@ async def scan_catalog(
     if surface:
         filtered = [r for r in filtered if r.surface == surface]
     if q:
-        needle = q.lower()
-        filtered = [r for r in filtered if needle in (r.name or "").lower()]
+        # Separator-insensitive match across name / full_name / owner so
+        # "news digest", "news-digest", "news_digest" and "kenneives/news-digest"
+        # all find the same repo (users don't type the exact punctuation).
+        def _norm(s: str) -> str:
+            return re.sub(r"[-_\s./]+", "", (s or "").lower())
+        needle = _norm(q)
+        filtered = [
+            r for r in filtered
+            if needle in _norm(getattr(r, "name", ""))
+            or needle in _norm(getattr(r, "full_name", ""))
+            or needle in _norm(getattr(r, "owner", ""))
+        ]
     if severity == "critical":
         filtered = [r for r in filtered if (r.critical or 0) > 0]
     elif severity == "high":

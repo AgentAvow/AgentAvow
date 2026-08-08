@@ -27,6 +27,27 @@ router = APIRouter(prefix="/account", tags=["account"])
 _VALID = "abcdefghijklmnopqrstuvwxyz0123456789-._"
 
 
+async def _repo_accessible_with_token(owner: str, repo: str, token: str) -> bool:
+    """True if the supplied GitHub token can read the repo. For a PRIVATE repo
+    this is the ownership proof — our scanner token can't read a private repo's
+    topics, so the topic method can't verify private repos. The token is used
+    transiently here and never stored or logged."""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {token}",
+                },
+            )
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
 async def _scan_into_catalog(owner: str, repo: str) -> None:
     """Best-effort public scan of a just-claimed repo so it enters the catalog +
     search (claiming a repo should make it discoverable). Fire-and-forget: any
@@ -48,6 +69,15 @@ def _valid_repo(owner: str, repo: str) -> bool:
 class ClaimRequest(BaseModel):
     owner: str = Field(..., max_length=255)
     repo: str = Field(..., max_length=255)
+    # Optional: a read token proving access. When present + valid the claim is
+    # verified immediately (the path for PRIVATE repos, which can't use a topic).
+    token: str | None = Field(None, max_length=255)
+
+
+class VerifyRequest(BaseModel):
+    # Optional read token — supply it to verify a PRIVATE repo (proves access).
+    # Omit it to verify a public repo via its GitHub topic.
+    token: str | None = Field(None, max_length=255)
 
 
 def _serialize(c: RepoClaim) -> dict:
@@ -92,6 +122,14 @@ async def create_claim(
     # Make the claimed repo discoverable — scan it into the catalog in the
     # background (public repos only; private repos use /private-scan).
     background.add_task(_scan_into_catalog, body.owner, body.repo)
+
+    # A token proving repo access verifies the claim immediately — the ONLY way
+    # to verify a private repo (topics aren't readable there). Used transiently.
+    token = (body.token or "").strip()
+    token_verified = bool(token) and await _repo_accessible_with_token(
+        body.owner, body.repo, token,
+    )
+
     existing = (await db.execute(
         select(RepoClaim).where(
             RepoClaim.entity_id == entity.id,
@@ -100,15 +138,24 @@ async def create_claim(
         )
     )).scalar_one_or_none()
     if existing is not None:
+        if token_verified and existing.status != "verified":
+            from sqlalchemy import func as safunc
+            existing.status = "verified"
+            existing.verified_at = safunc.now()
+            await db.flush()
+            await db.refresh(existing)
         return _serialize(existing)
     claim = RepoClaim(
         entity_id=entity.id,
         owner=body.owner,
         repo=body.repo,
         full_name=f"{body.owner}/{body.repo}",
-        status="pending",
+        status="verified" if token_verified else "pending",
         verify_code=secrets.token_hex(8),
     )
+    if token_verified:
+        from sqlalchemy import func as safunc
+        claim.verified_at = safunc.now()
     db.add(claim)
     await db.flush()
     await db.refresh(claim)
@@ -118,14 +165,32 @@ async def create_claim(
 @router.post("/claims/{claim_id}/verify")
 async def verify_claim(
     claim_id: uuid.UUID,
+    body: VerifyRequest | None = None,
     entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_writes),
 ):
-    """Check the repo's public GitHub topics for the verification topic."""
+    """Verify a claim. Public repos: check the GitHub topic. Private repos: pass a
+    read token (proves access — topics aren't readable there). Token is transient."""
     claim = await db.get(RepoClaim, claim_id)
     if claim is None or claim.entity_id != entity.id:
         raise HTTPException(status_code=404, detail="Claim not found")
+
+    # Token path — the private-repo route.
+    token = (body.token.strip() if body and body.token else "")
+    if token:
+        if await _repo_accessible_with_token(claim.owner, claim.repo, token):
+            from sqlalchemy import func as safunc
+            claim.status = "verified"
+            claim.verified_at = safunc.now()
+            await db.flush()
+            await db.refresh(claim)
+            return {"verified": True, **_serialize(claim)}
+        return {
+            "verified": False,
+            "detail": "That token can't read this repo — check it has read access to it.",
+        }
+
     expected = f"agentavow-verify-{claim.verify_code}"
     try:
         import httpx

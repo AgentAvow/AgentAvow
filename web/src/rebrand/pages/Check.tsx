@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, badgeUrl, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
@@ -188,15 +188,23 @@ function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
 
 /** Claim CTA that becomes an owned state for signed-in users who've claimed this repo.
  * Only queries claims when signed in — the anonymous check flow never fires it. */
-function OwnershipCTA({ owner, repo }: { owner: string; repo: string }) {
+function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; token?: string }) {
   const { user } = useAuth()
+  const qc = useQueryClient()
   const { data: claimsData } = useQuery({
     queryKey: ['rebrand-claims'],
     queryFn: async () => (await api.get<{ claims: { owner: string; repo: string; status: string }[] }>('/account/claims')).data,
     enabled: !!user,
   })
+  // From a private scan we hold the token, so claiming can verify ownership in
+  // one step (no topic needed for a private repo).
+  const claimWithToken = useMutation({
+    mutationFn: async () => (await api.post('/account/claims', { owner, repo, token })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rebrand-claims'] }),
+  })
   const owned = !!user && (claimsData?.claims ?? []).some(
-    (c) => c.owner.toLowerCase() === owner.toLowerCase() && c.repo.toLowerCase() === repo.toLowerCase(),
+    (c) => c.owner.toLowerCase() === owner.toLowerCase() && c.repo.toLowerCase() === repo.toLowerCase()
+      && c.status === 'verified',
   )
   if (owned) {
     return (
@@ -207,6 +215,23 @@ function OwnershipCTA({ owner, repo }: { owner: string; repo: string }) {
             <p className="text-text-muted text-[13.5px] mt-0.5">This tool is claimed under your account. Manage its listing, respond to findings, and run private re-scans.</p>
           </div>
           <Link to={rp("/rebrand/tools")} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage &amp; fix →</Link>
+        </div>
+      </Reveal>
+    )
+  }
+  // Private scan (token in hand): claim + verify in one click.
+  if (user && token) {
+    return (
+      <Reveal>
+        <div className="mt-6 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h3 className="text-[15px] font-bold">Own this private repo?</h3>
+            <p className="text-text-muted text-[13.5px] mt-0.5">Claim it now — your read token verifies ownership, no topic needed.</p>
+            {claimWithToken.isError && <p className="text-danger text-[12.5px] mt-1">Couldn't claim — the token may no longer have access.</p>}
+          </div>
+          <button onClick={() => claimWithToken.mutate()} disabled={claimWithToken.isPending}
+            className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0 disabled:opacity-60">
+            {claimWithToken.isPending ? 'Claiming…' : 'Claim &amp; verify'}</button>
         </div>
       </Reveal>
     )
@@ -541,7 +566,7 @@ function Result({ owner, repo, privateResult, privateToken }: {
       <Reveal><div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div></Reveal>
 
       {/* claim / ownership CTA */}
-      <OwnershipCTA owner={owner} repo={repo} />
+      <OwnershipCTA owner={owner} repo={repo} token={isPrivate ? privateToken : undefined} />
       {isPrivate && privateToken && <PublishCTA owner={owner} repo={repo} token={privateToken} />}
 
       {/* findings detail */}
