@@ -142,6 +142,10 @@ class ScanResult:
     # feature is flag-gated), so existing behaviour is unchanged.
     drift: dict = field(default_factory=dict)
     artifact_scan: dict = field(default_factory=dict)
+    # Phase 3 provenance verification summary (empty for scans without a verified
+    # coordinate; flag-gated). Declared here so trust-score/service reads are safe
+    # even when the provenance pass never runs.
+    provenance: dict = field(default_factory=dict)
     error: str | None = None
 
     @property
