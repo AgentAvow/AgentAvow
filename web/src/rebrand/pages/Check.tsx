@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, badgeUrl, publicApi } from '../../lib/scanApi'
+import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo } from '../../components/trust/gradeSystem'
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
@@ -223,6 +224,35 @@ function OwnershipCTA({ owner, repo }: { owner: string; repo: string }) {
   )
 }
 
+/** Owner-only: publish a PRIVATE repo's grade to the public catalog + search.
+ * Only shown for private scans (public repos are listed automatically). */
+function PublishCTA({ owner, repo, token }: { owner: string; repo: string; token: string }) {
+  const publish = useMutation({
+    mutationFn: async () => (await api.post('/account/private-scan/publish', { owner, repo, token })).data,
+  })
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
+        <h3 className="text-[15px] font-bold">Publish to search</h3>
+        <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">
+          Private repos aren't listed in AgentAvow search. Publishing makes this grade public and findable —
+          it's your choice as the owner. <span className="text-text">Public repos are added automatically.</span>
+        </p>
+        {publish.isSuccess ? (
+          <div className="mt-3 text-[13px] text-success">✓ Published — anyone can now find {owner}/{repo} in search.</div>
+        ) : (
+          <button
+            onClick={() => publish.mutate()}
+            disabled={publish.isPending}
+            className="mt-3 text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60"
+          >{publish.isPending ? 'Publishing…' : 'Publish to search'}</button>
+        )}
+        {publish.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn't publish — the token may no longer have access.</div>}
+      </div>
+    </Reveal>
+  )
+}
+
 function Hero() {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
@@ -303,27 +333,38 @@ function ScanningLoader({ owner, repo }: { owner: string; repo: string }) {
 
 export default function RebrandCheck() {
   const { owner, repo } = useParams()
+  const location = useLocation()
+  // A private scan hands its result here via router state so the owner gets the
+  // full detailed report on the real score page (a private repo can't be
+  // re-fetched publicly). The token rides along so the Publish CTA can work.
+  const state = location.state as { privateResult?: PublicScanResponse; token?: string } | null
   if (!owner || !repo) return <Hero />
-  return <Result owner={owner} repo={repo} />
+  return <Result owner={owner} repo={repo} privateResult={state?.privateResult} privateToken={state?.token} />
 }
 
-function Result({ owner, repo }: { owner: string; repo: string }) {
-  const { data: scan, isLoading, isError } = useQuery({
+function Result({ owner, repo, privateResult, privateToken }: {
+  owner: string; repo: string; privateResult?: PublicScanResponse; privateToken?: string
+}) {
+  const isPrivate = !!privateResult
+  const { data: fetched, isLoading, isError } = useQuery({
     queryKey: ['rebrand-scan', owner, repo],
     queryFn: () => fetchPublicScan(owner, repo),
     retry: 0,
+    enabled: !isPrivate,
   })
+  const scan = isPrivate ? privateResult : fetched
   // Real adoption signals — checks (Redis), watchers, GitHub stars, score history.
+  // Skipped for private repos (the public checks endpoint can't see them).
   const { data: adoptionData } = useQuery({
     queryKey: ['rebrand-checks', owner, repo],
     queryFn: async () => (await publicApi.get<{ checks: number; watchers: number; stars: number | null; history: { score: number; at?: number }[] }>(`/public/scan/${owner}/${repo}/checks`)).data,
     retry: 0,
-    enabled: !!scan,
+    enabled: !!scan && !isPrivate,
   })
 
-  if (isLoading) return <ScanningLoader owner={owner} repo={repo} />
+  if (!isPrivate && isLoading) return <ScanningLoader owner={owner} repo={repo} />
 
-  if (isError || !scan) {
+  if (!isPrivate && (isError || !scan)) {
     return (
       <div className="max-w-[620px] mx-auto px-6 py-24 text-center">
         <div className="glass rounded-2xl p-8">
@@ -334,6 +375,8 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
       </div>
     )
   }
+
+  if (!scan) return null
 
   const g = getGradeInfo(scan.trust_score)
   const f = scan.findings
@@ -369,7 +412,10 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
 
         {/* header: verdict + plain-English headline */}
         <div className="relative px-7 pt-7">
-          <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
+            {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">🔒 Private scan · not public</span>}
+          </div>
           <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
           <div className="mt-1 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
           <div className="mt-0.5 text-[13px] font-semibold gradient-text">{scan.trust_tier}</div>
@@ -404,9 +450,9 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
           <p className="mt-2 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this grade drops.</p>
         </div>
 
-        {/* secondary actions */}
+        {/* secondary actions — share/badge are public-only (a private repo has no public badge) */}
         <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
-          <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />
+          {!isPrivate && <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />}
           <button
             onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
             className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
@@ -496,6 +542,7 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
 
       {/* claim / ownership CTA */}
       <OwnershipCTA owner={owner} repo={repo} />
+      {isPrivate && privateToken && <PublishCTA owner={owner} repo={repo} token={privateToken} />}
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (

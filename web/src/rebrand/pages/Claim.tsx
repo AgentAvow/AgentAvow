@@ -4,7 +4,6 @@ import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
-import { getGradeInfo } from '../../components/trust/gradeSystem'
 import { Reveal } from '../components/motion'
 
 /**
@@ -68,24 +67,19 @@ function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
 
 function PrivateScan() {
   const navigate = useNavigate()
-  const qc = useQueryClient()
   const [owner, setOwner] = useState('')
   const [repo, setRepo] = useState('')
   const [token, setToken] = useState('')
+  // On success, hand the full result to the real score page (a private repo
+  // can't be re-fetched publicly) — the token rides along so the owner can Claim
+  // or Publish-to-search from there, with the complete detailed report.
   const scan = useMutation({
-    mutationFn: async () => (await api.post<{ trust_score: number; findings?: { critical?: number; high?: number; total?: number } }>('/account/private-scan', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
+    mutationFn: async () => (await api.post('/account/private-scan', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
+    onSuccess: (data) => navigate(
+      rp(`/rebrand/check/${owner.trim()}/${repo.trim()}`),
+      { state: { privateResult: data, token: token.trim() } },
+    ),
   })
-  // Claim the just-scanned repo, then drop the user into the claim flow to finish
-  // verifying (they're already on this page — invalidating refreshes the list).
-  const claim = useMutation({
-    mutationFn: async () => (await api.post('/account/claims', { owner: owner.trim(), repo: repo.trim() })).data,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['rebrand-claims'] }); navigate(rp('/rebrand/claim')) },
-  })
-  // Publish the private grade to the public search catalog — owner's explicit choice.
-  const publish = useMutation({
-    mutationFn: async () => (await api.post('/account/private-scan/publish', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
-  })
-  const g = scan.data ? getGradeInfo(scan.data.trust_score) : null
   return (
     <div className="mt-10">
       <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Scan a private repo</h2>
@@ -109,41 +103,8 @@ function PrivateScan() {
         <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="github token (ghp_… / github_pat_…)" className="bg-surface border border-border rounded-xl px-3.5 py-2 font-mono text-[13px] outline-none focus:border-primary-light" />
         <button type="submit" disabled={scan.isPending || !owner || !repo || !token} className="self-start text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{scan.isPending ? 'Scanning…' : 'Scan privately'}</button>
       </form>
+      {scan.isPending && <div className="mt-3 text-[13px] text-text-muted">Scanning privately… we'll take you to the full report.</div>}
       {scan.isError && <div className="mt-3 text-[13px] text-danger">Scan failed — check the token has access to this repo.</div>}
-      {g && scan.data && (
-        <div className="mt-3 max-w-[560px]">
-          <div className="glass rounded-xl p-4 flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl grid place-items-center font-extrabold ${g.textClass} ${g.bgClass}`}>{g.grade}</div>
-            <div className="text-[13px] text-text-muted">
-              <div className="font-semibold text-text">{scan.data.trust_score}/100 · private scan</div>
-              <div className="font-mono text-[12px] mt-0.5">{scan.data.findings?.critical ?? 0}C · {scan.data.findings?.high ?? 0}H · {scan.data.findings?.total ?? 0} findings</div>
-            </div>
-          </div>
-
-          {/* next actions — claim it, or publish the grade to public search */}
-          <div className="mt-2.5 flex gap-2 flex-wrap">
-            <button
-              onClick={() => claim.mutate()}
-              disabled={claim.isPending}
-              className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60"
-            >{claim.isPending ? 'Claiming…' : 'Claim this repo'}</button>
-            {!publish.isSuccess && (
-              <button
-                onClick={() => publish.mutate()}
-                disabled={publish.isPending}
-                className="text-[13px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors disabled:opacity-60"
-              >{publish.isPending ? 'Publishing…' : 'Publish to search'}</button>
-            )}
-          </div>
-          {publish.isSuccess ? (
-            <div className="mt-2 text-[12.5px] text-success">✓ Now public — others can find it in search.</div>
-          ) : (
-            <p className="mt-2 text-[11.5px] text-text-muted">Publishing makes this repo's grade visible to everyone in search — it's your choice as the owner.</p>
-          )}
-          {claim.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn't claim — try again.</div>}
-          {publish.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn't publish — check the token still has access.</div>}
-        </div>
-      )}
     </div>
   )
 }
