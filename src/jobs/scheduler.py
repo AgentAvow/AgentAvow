@@ -702,30 +702,65 @@ async def _api_health_loop(interval: int = API_HEALTH_CHECK_INTERVAL) -> None:
 
 
 async def _security_scan_loop(interval: int = SECURITY_SCAN_INTERVAL) -> None:
-    """Job 19: Weekly security re-scan + public scan cache pre-refresh."""
+    """Job 19: Weekly security re-scan + public scan cache pre-refresh.
+
+    Guarded by a GitHub token-health probe: a silently-expired PAT used to 401
+    every repo and fail *quietly* (the old ``except`` just logged). Now a dead
+    token or a raised re-scan both fire a throttled admin alert (once/6h), and a
+    dead token short-circuits the run since nothing would scan. Caps come from
+    config (``security_rescan_limit`` / ``public_cache_refresh_limit``).
+    """
     logger.info("Security scan task started (interval=%ds)", interval)
     while True:
         try:
+            from src.config import settings as _scan_settings
             from src.database import async_session
+            from src.jobs.scan_health import check_and_alert_token
             from src.scanner.service import (
                 refresh_public_scan_cache,
                 rescan_all_agents,
             )
 
-            # Part A: Re-scan agents not scanned in 7+ days
-            async with async_session() as db:
-                scanned = await rescan_all_agents(db, limit=20)
-            if scanned > 0:
-                logger.info("Security re-scan: %d agents scanned", scanned)
+            # Token-health gate — probe GET /rate_limit first. On a dead token,
+            # check_and_alert_token() has already e-mailed the admin (throttled);
+            # skip the run because every repo fetch would 401.
+            health = await check_and_alert_token()
+            if health.dead:
+                logger.error(
+                    "Security re-scan skipped: GitHub token unusable (%s)",
+                    health.reason,
+                )
             else:
-                logger.debug("Security re-scan: no agents due for scan")
+                # Part A: Re-scan agents past the staleness cutoff (config caps)
+                async with async_session() as db:
+                    scanned = await rescan_all_agents(
+                        db, limit=_scan_settings.security_rescan_limit,
+                    )
+                if scanned > 0:
+                    logger.info("Security re-scan: %d agents scanned", scanned)
+                else:
+                    logger.debug("Security re-scan: no agents due for scan")
 
-            # Part B: Pre-refresh public scan cache for popular repos
-            refreshed = await refresh_public_scan_cache(limit=10)
-            if refreshed > 0:
-                logger.info("Public scan cache: %d repos pre-refreshed", refreshed)
-        except Exception:
+                # Part B: Pre-refresh public scan cache for popular repos
+                refreshed = await refresh_public_scan_cache(
+                    limit=_scan_settings.public_cache_refresh_limit,
+                )
+                if refreshed > 0:
+                    logger.info(
+                        "Public scan cache: %d repos pre-refreshed", refreshed,
+                    )
+        except Exception as exc:
+            # This is the failure that went unnoticed when the PAT expired —
+            # alert the admin (throttled) instead of only logging.
             logger.exception("Security re-scan failed")
+            try:
+                from src.jobs.scan_health import alert_rescan_exception
+
+                await alert_rescan_exception(exc)
+            except Exception:
+                logger.debug(
+                    "Failed to send re-scan exception alert", exc_info=True,
+                )
         await asyncio.sleep(interval)
 
 

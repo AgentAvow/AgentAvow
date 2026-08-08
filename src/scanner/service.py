@@ -5,6 +5,7 @@ database. Used by bot onboarding, re-scan triggers, and the scheduler.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -175,18 +176,42 @@ async def get_latest_scan(
     return result.scalar_one_or_none()
 
 
-async def rescan_all_agents(db: AsyncSession, limit: int = 20) -> int:
-    """Re-scan agents with GitHub source URLs not scanned in 7+ days.
+async def rescan_all_agents(
+    db: AsyncSession,
+    limit: int | None = None,
+    *,
+    staleness_days: int | None = None,
+    spacing_seconds: float | None = None,
+    min_budget: int | None = None,
+) -> int:
+    """Re-scan agents with GitHub source URLs not scanned recently.
 
     Uses a lightweight two-step approach to avoid expensive outerjoin at scale:
     1. Fetch candidate entity IDs (active + GitHub source URL) — uses indexes
     2. For each, check latest scan age in-loop (indexed lookup, fast)
 
     Commits after each scan so a failure doesn't lose prior work.
+
+    Caps default from ``config.settings`` (configurable, sized under the PAT's
+    5000 req/hr budget — see the config comment). A budget guard pre-checks
+    GitHub's ``/rate_limit`` and bails if core-remaining drops below
+    ``min_budget`` so a run can't exhaust the hourly budget; a small
+    ``spacing_seconds`` sleep smooths bursts.
     """
     from datetime import timedelta
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    from src.config import settings
+
+    if limit is None:
+        limit = settings.security_rescan_limit
+    if staleness_days is None:
+        staleness_days = settings.security_rescan_staleness_days
+    if spacing_seconds is None:
+        spacing_seconds = settings.security_rescan_spacing_seconds
+    if min_budget is None:
+        min_budget = settings.security_rescan_min_budget
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=staleness_days)
 
     # Step 1: Get active entities with GitHub source.
     # ix_entities_source_type is a B-tree index — fast even at millions of rows.
@@ -222,7 +247,25 @@ async def rescan_all_agents(db: AsyncSession, limit: int = 20) -> int:
             entity_ids.append(eid)
 
     scanned = 0
-    for eid in entity_ids:
+    for idx, eid in enumerate(entity_ids):
+        # Budget guard: the /rate_limit endpoint is free, so check periodically
+        # and bail before we'd exhaust the hourly core budget. Guarantees a run
+        # can't blow past 5000 req/hr even if every repo hits the 200-file cap.
+        if idx == 0 or idx % 10 == 0:
+            try:
+                from src.jobs.scan_health import check_github_token_health
+
+                health = await check_github_token_health()
+                if health.remaining is not None and health.remaining < min_budget:
+                    logger.warning(
+                        "Re-scan stopping early: GitHub core budget low "
+                        "(%d < %d) after %d scans",
+                        health.remaining, min_budget, scanned,
+                    )
+                    break
+            except Exception:
+                logger.debug("Budget guard check failed, continuing", exc_info=True)
+
         try:
             scan = await run_security_scan(db, eid, force=True)
             if scan:
@@ -232,17 +275,27 @@ async def rescan_all_agents(db: AsyncSession, limit: int = 20) -> int:
             logger.exception("Scan failed for entity %s, rolling back", eid)
             await db.rollback()
 
+        # Spacing: smooth bursts so we don't slam GitHub in a tight loop.
+        if spacing_seconds and idx < len(entity_ids) - 1:
+            await asyncio.sleep(spacing_seconds)
+
     logger.info("Re-scanned %d/%d agents", scanned, len(entity_ids))
     return scanned
 
 
-async def refresh_public_scan_cache(limit: int = 10) -> int:
+async def refresh_public_scan_cache(limit: int | None = None) -> int:
     """Pre-refresh Redis cache for popular public scan repos.
 
     Queries cached scan results that are about to expire (> 50 min old
     from the 1-hour TTL) and re-scans them so the cache stays warm.
     Called by the scheduler alongside the agent rescan loop.
+
+    ``limit`` defaults from ``config.settings.public_cache_refresh_limit``.
     """
+    if limit is None:
+        from src.config import settings
+
+        limit = settings.public_cache_refresh_limit
     try:
         from src.redis_client import get_redis
         from src.scanner.scan import scan_repo

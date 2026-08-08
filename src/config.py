@@ -157,6 +157,26 @@ class Settings(BaseSettings):
     github_app_private_key: str | None = None  # full PEM (may have escaped \n)
     github_app_installation_id: str | None = None
 
+    # Security re-scan job (Job 19 in src/jobs/scheduler.py) — periodic re-scan of
+    # catalog entries so grades don't rot. Caps are CONFIGURABLE and sized to stay
+    # under the PAT's 5000 core-req/hr budget.
+    #
+    # Rate-limit math: each scan does ~1 API call per file (repo + tree + up to
+    # scan._MAX_FILES_PER_REPO=200 file fetches), so ~200 calls is the per-scan
+    # ceiling and ~25 maxed-out scans would exhaust 5000/hr. Real repos are far
+    # smaller (~15–45 calls each), so 50 rescans + 25 cache-warms = 75 scans/run
+    # ≈ ~2–3k calls in the common case. The job runs once/24h, so the per-run cap
+    # is also the per-hour ceiling. Two backstops keep the worst case (every repo
+    # at the 200-file cap) from blowing the budget: rescan_all_agents pre-checks
+    # /rate_limit and bails when core-remaining drops under a floor, and
+    # scan_health emits a throttled "rate limit low" admin alert. The aggressive
+    # version of these caps lands later with the GitHub App (higher budget).
+    security_rescan_limit: int = 50           # agents re-scanned per run (was 20)
+    public_cache_refresh_limit: int = 25      # public repos cache-warmed per run (was 10)
+    security_rescan_staleness_days: int = 7   # re-scan agents older than this many days
+    security_rescan_spacing_seconds: float = 1.0  # sleep between scans to smooth bursts
+    security_rescan_min_budget: int = 300     # abort the run if core-remaining drops below this
+
     # Admin account email (used for bot ownership, alerts, marketing)
     admin_email: str = "admin@agentgraph.co"
 
