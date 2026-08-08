@@ -1424,17 +1424,57 @@ def _composite_findings(
     )]
 
 
+_DEP_CATEGORIES = frozenset({"dependency", "install_hook"})
+# Dependency/supply-chain vulns are a real but non-disqualifying signal *until*
+# reachability (direct-prod vs transitive-dev) is known — so their penalty is
+# capped and saturating, never a false-F. A known-malicious (OpenSSF MAL)
+# package is the exception: malicious code in the dep tree is disqualifying.
+_DEP_VULN_CAP = 18       # max points a repo can lose to CVE-class dep findings
+_DEP_MAL_PENALTY = 70    # a MAL match forces the grade down hard
+
+
+def _dependency_penalty(findings: list[Finding]) -> int:
+    """Bounded, saturating penalty for dependency/supply-chain vulns.
+
+    Diminishing returns per severity (the 1st vuln hurts most), capped at
+    ``_DEP_VULN_CAP`` for CVE-class findings so a monorepo's transitive vulns
+    can't false-flip a healthy package to F. A known-malicious package short-
+    circuits to ``_DEP_MAL_PENALTY``."""
+    deps = [f for f in findings if f.category in _DEP_CATEGORIES]
+    if not deps:
+        return 0
+    if any(f.name.startswith("Known-malicious") for f in deps):
+        return _DEP_MAL_PENALTY
+    crit = sum(1 for f in deps if f.severity == "critical")
+    high = sum(1 for f in deps if f.severity == "high")
+    med = sum(1 for f in deps if f.severity == "medium")
+
+    def _sat(n: int, cap: float) -> float:
+        return cap * (1 - 0.5 ** n) if n > 0 else 0.0
+
+    penalty = _sat(crit, 12) + _sat(high, 8) + _sat(med, 4)
+    return int(min(penalty, _DEP_VULN_CAP))
+
+
 def _calculate_trust_score(result: ScanResult) -> int:
     """Calculate a trust score (0-100) based on findings and signals.
 
     Score considers:
-    - Finding counts by severity (deductions)
+    - Code finding counts by severity (deductions)
+    - Dependency/supply-chain vulns via a separate bounded penalty
     - Positive security signals (bonuses)
     - Good practices: README, LICENSE, tests (bonuses)
     - File ratio: if findings are concentrated in few files, reduce penalty
     """
+    # Dependency vulns are scored separately (bounded); the general severity
+    # model applies only to first-party CODE findings.
+    code_findings = [f for f in result.findings if f.category not in _DEP_CATEGORIES]
+    code_critical = sum(1 for f in code_findings if f.severity == "critical")
+    code_high = sum(1 for f in code_findings if f.severity == "high")
+    code_medium = sum(1 for f in code_findings if f.severity == "medium")
+
     # Clean repos start higher — no findings means the code passed review
-    total_findings = result.critical_count + result.high_count + result.medium_count
+    total_findings = code_critical + code_high + code_medium
     score = 80 if total_findings == 0 else 70
 
     # For MCP servers and media/audio tools, discount expected patterns
@@ -1444,20 +1484,20 @@ def _calculate_trust_score(result: ScanResult) -> int:
             {"fs_access", "unsafe_exec"} if result.is_mcp_server else {"fs_access"}
         )
         actual_critical = sum(
-            1 for f in result.findings
+            1 for f in code_findings
             if f.severity == "critical" and f.category not in expected_categories
         )
         actual_high = sum(
-            1 for f in result.findings
+            1 for f in code_findings
             if f.severity == "high" and f.category not in expected_categories
         )
         actual_medium = sum(
-            1 for f in result.findings
+            1 for f in code_findings
             if f.severity == "medium" and f.category not in expected_categories
         )
         # Count expected patterns at 10% weight (not zero — they still matter)
-        expected_medium = result.medium_count - actual_medium
-        expected_high = result.high_count - actual_high
+        expected_medium = code_medium - actual_medium
+        expected_high = code_high - actual_high
         raw_deduction = (
             actual_critical * 15
             + actual_high * 8
@@ -1466,24 +1506,27 @@ def _calculate_trust_score(result: ScanResult) -> int:
             + int(expected_medium * 0.3)
         )
     else:
-        # Standard deductions for non-MCP repos
+        # Standard deductions for non-MCP repos (code findings only)
         raw_deduction = (
-            result.critical_count * 15
-            + result.high_count * 8
-            + result.medium_count * 3
+            code_critical * 15
+            + code_high * 8
+            + code_medium * 3
         )
 
     # File-ratio scaling: if only a small percentage of files have issues,
     # reduce the deduction. A repo with 200 files and 5 findings in 3 files
     # should not be penalized as harshly as one with findings in 50% of files.
     if result.files_scanned > 0 and total_findings > 0:
-        affected_files = len({f.file_path for f in result.findings})
+        affected_files = len({f.file_path for f in code_findings})
         ratio = affected_files / result.files_scanned
         # Scale factor: 0.4 at 1% affected, 1.0 at 25%+ affected
         scale = min(1.0, 0.4 + ratio * 2.4)
         raw_deduction = int(raw_deduction * scale)
 
     score -= raw_deduction
+
+    # Dependency/supply-chain vulns — separate bounded penalty (see helper).
+    score -= _dependency_penalty(result.findings)
 
     # Bonuses for positive signals (capped at +35)
     unique_positives = set(result.positive_signals)
@@ -1547,6 +1590,10 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         expected_mcp_categories.add("fs_access")
 
     for finding in result.findings:
+        # Dependency/supply-chain vulns use the bounded model below, not the
+        # linear per-finding deduction (which would floor a monorepo to 0).
+        if finding.category in _DEP_CATEGORIES:
+            continue
         score_cat = category_map.get(finding.category)
         if score_cat:
             deduction = severity_weights.get(finding.severity, 3)
@@ -1554,6 +1601,10 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
             if finding.category in expected_mcp_categories and finding.severity != "critical":
                 deduction = max(1, deduction // 10)
             scores[score_cat] = max(0, scores[score_cat] - deduction)
+
+    # dependency_health mirrors the bounded overall dependency penalty so the
+    # category card and the grade tell the same story.
+    scores["dependency_health"] = max(0, 100 - _dependency_penalty(result.findings))
 
     return scores
 

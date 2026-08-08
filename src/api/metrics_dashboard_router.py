@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_entity, require_admin
@@ -94,8 +94,12 @@ async def _read_daily_counter(name: str, day_strs: list[str]) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 def _utc_date_expr(col):
     """date() of a tz-aware column, normalized to UTC so it aligns with the
-    UTC day strings we build in Python (independent of DB session timezone)."""
-    return func.date(func.timezone("UTC", col))
+    UTC day strings we build in Python (independent of DB session timezone).
+
+    'UTC' is emitted as a SQL literal (not a bind param) so the expression renders
+    byte-identically in both the SELECT and GROUP BY clauses — otherwise Postgres
+    sees two distinct bind params and raises GroupingError."""
+    return func.date(func.timezone(literal_column("'UTC'"), col))
 
 
 _GRADE_CASE = case(

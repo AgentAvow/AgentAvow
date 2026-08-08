@@ -304,3 +304,49 @@ async def test_analyze_supply_chain_no_lockfiles_uses_depth_only():
     # No OSV call happened, but the depth signals still computed.
     assert res.deps_total == 0
     assert "hash_pinned_actions" in res.github_depth
+
+
+# --- Bounded dependency-penalty aggregation (advisory flip gate) -------------
+from src.scanner.scan import (  # noqa: E402
+    _dependency_penalty,
+    Finding as _F,
+    _DEP_VULN_CAP,
+    _DEP_MAL_PENALTY,
+)
+
+
+def _deps(n, sev, name="Vulnerable dependency: pkg@1.0 (CVE-x)"):
+    return [_F("dependency", f"{name}#{i}", sev, "lock", 1, "") for i in range(n)]
+
+
+def test_dep_penalty_none():
+    assert _dependency_penalty([]) == 0
+
+
+def test_dep_penalty_single_medium_is_minor():
+    assert 0 < _dependency_penalty(_deps(1, "medium")) <= 3
+
+
+def test_dep_penalty_single_critical_modest():
+    # A lone critical is modest while reachability is unknown.
+    assert 4 <= _dependency_penalty(_deps(1, "critical")) <= 10
+
+
+def test_dep_penalty_is_capped_no_false_f():
+    # next.js's real distribution + an extreme one both cap out — never a false-F.
+    nextjs = _deps(5, "critical") + _deps(65, "high") + _deps(21, "medium")
+    heavy = _deps(20, "critical") + _deps(100, "high")
+    assert _dependency_penalty(nextjs) == _DEP_VULN_CAP
+    assert _dependency_penalty(heavy) == _DEP_VULN_CAP
+
+
+def test_dep_penalty_malicious_is_disqualifying():
+    mal = [_F("dependency", "Known-malicious package: evil@1.0 (MAL-2024-1)",
+              "critical", "lock", 1, "")]
+    assert _dependency_penalty(mal) == _DEP_MAL_PENALTY
+    assert _DEP_MAL_PENALTY > _DEP_VULN_CAP * 3
+
+
+def test_dep_penalty_ignores_non_dep_findings():
+    code = [_F("unsafe_exec", "eval()", "critical", "a.py", 1, "")]
+    assert _dependency_penalty(code) == 0
