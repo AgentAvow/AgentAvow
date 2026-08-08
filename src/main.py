@@ -60,6 +60,7 @@ from src.api.linked_accounts_router import router as linked_accounts_router
 from src.api.marketing_router import router as marketing_router
 from src.api.marketplace_router import router as marketplace_router
 from src.api.mcp_router import router as mcp_router
+from src.api.metrics_dashboard_router import router as metrics_dashboard_router
 from src.api.migration_router import router as migration_router
 from src.api.moderation_router import router as moderation_router
 from src.api.notification_router import router as notification_router
@@ -629,6 +630,7 @@ app.include_router(account_router, prefix=settings.api_v1_prefix)
 app.include_router(activity_router, prefix=settings.api_v1_prefix)
 app.include_router(aggregation_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_router, prefix=settings.api_v1_prefix)
+app.include_router(metrics_dashboard_router, prefix=settings.api_v1_prefix)
 app.include_router(attestation_provider_router, prefix=settings.api_v1_prefix)
 app.include_router(attestation_router, prefix=settings.api_v1_prefix)
 app.include_router(admin_jobs_router, prefix=settings.api_v1_prefix)

@@ -241,4 +241,9 @@ async def authenticate_by_api_key(
     entity = await db.get(Entity, api_key.entity_id)
     if entity is None or not entity.is_active:
         return None
+
+    # Best-effort engagement counter (Redis, never blocks auth).
+    from src.api.metrics_dashboard_router import bump_metric
+
+    await bump_metric("api_call")
     return entity

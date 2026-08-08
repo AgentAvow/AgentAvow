@@ -669,6 +669,11 @@ async def get_trust_badge_svg(
     if entity is None or not entity.is_active:
         raise HTTPException(status_code=404, detail="Entity not found")
 
+    # Best-effort engagement counter (Redis, never blocks the render).
+    from src.api.metrics_dashboard_router import bump_metric
+
+    await bump_metric("badge_fetch")
+
     trust = await db.scalar(
         select(TrustScore).where(TrustScore.entity_id == entity_id)
     )
