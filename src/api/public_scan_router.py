@@ -111,6 +111,11 @@ class RecommendedLimits(BaseModel):
 
 class ScanMetadata(BaseModel):
     files_scanned: int = 0
+    # Coverage disclosure in PLAIN JSON (not just the signed attestation): the
+    # total scannable files before the 200-file sample cap, and whether the
+    # grade is only a sample of a large repo. Mirrors filesTotal/sampled in the JWS.
+    files_total: int = 0
+    sampled: bool = False
     primary_language: str = ""
     has_readme: bool = False
     has_license: bool = False
@@ -472,6 +477,14 @@ def _scan_result_to_dict(result: object) -> dict:
 
     tier_info = _compute_tier(result.trust_score)
 
+    # Coverage: total scannable files before the 200-file cap (falls back to
+    # files_scanned until ScanResult grows the field). Surfaced in plain JSON as
+    # both total_scannable_files (attestation payload) and files_total (public model).
+    _total_scannable = getattr(result, "total_scannable_files", None)
+    if _total_scannable is None:
+        _total_scannable = result.files_scanned
+    _sampled = bool(getattr(result, "sampled", False))
+
     return {
         "trust_score": result.trust_score,
         "trust_tier": tier_info["tier"],
@@ -490,12 +503,11 @@ def _scan_result_to_dict(result: object) -> dict:
         "metadata": {
             "files_scanned": result.files_scanned,
             # total_scannable_files + sampled disclose partial coverage (200-file
-            # cap). getattr keeps this resilient until ScanResult grows the fields.
-            "total_scannable_files": getattr(
-                result, "total_scannable_files", None
-            ) if getattr(result, "total_scannable_files", None) is not None
-            else result.files_scanned,
-            "sampled": bool(getattr(result, "sampled", False)),
+            # cap OR a truncated large-monorepo tree). files_total mirrors
+            # total_scannable_files under the name the public ScanMetadata exposes.
+            "total_scannable_files": _total_scannable,
+            "files_total": _total_scannable,
+            "sampled": _sampled,
             "primary_language": result.primary_language,
             "has_readme": result.has_readme,
             "has_license": result.has_license,

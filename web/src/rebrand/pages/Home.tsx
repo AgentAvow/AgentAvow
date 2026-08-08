@@ -21,11 +21,12 @@ const CHECK_HINTS = ['github.com/owner/repo', 'an MCP server', 'an npm package',
 
 // Real, scannable example repos — clicking a chip runs a real scan (works on prod;
 // on-demand scans 502 locally without a GitHub token — see the /check note).
+// Recognizable, non-self-referential mix with a credible C→A spread of live scores.
 const EXAMPLES = [
-  'modelcontextprotocol/servers',
-  'agenttrust/mcp-server',
-  'block/goose',
-  'langchain-ai/langchain',
+  'modelcontextprotocol/servers',    // ~45 · C — canonical MCP servers repo
+  'langchain-ai/langchain',          // ~78 · B
+  'anthropics/anthropic-sdk-python', // ~88 · A
+  'vercel/next.js',                  // ~90 · A
 ]
 
 function Eyebrow({ children }: { children: React.ReactNode }) {

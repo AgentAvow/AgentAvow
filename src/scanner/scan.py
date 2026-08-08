@@ -219,20 +219,49 @@ def _detect_language(files: list[dict]) -> str:
     return lang_map[top_ext]
 
 
+def _tree_blobs(tree: list[dict]) -> list[dict]:
+    """Keep only blob (file) entries under the per-file size cap."""
+    return [
+        item for item in tree
+        if item.get("type") == "blob"
+        and item.get("size", 0) <= _MAX_FILE_SIZE
+    ]
+
+
 async def _fetch_repo_tree(
     owner: str, repo: str, token: str | None = None,
-) -> list[dict]:
-    """Fetch the file tree of a repo via GitHub API."""
+) -> tuple[list[dict], bool, bool]:
+    """Fetch the file tree of a repo via GitHub API.
+
+    Returns ``(files, truncated, repo_ok)``:
+
+    - ``files``     — blob (file) entries under the per-file size cap.
+    - ``truncated`` — GitHub could not return the *whole* tree. Very large
+      monorepos (e.g. ``block/goose``, ``supabase-community/supabase-mcp``)
+      come back with ``{"truncated": true}`` — a partial but real tree — or
+      the recursive ``git/trees`` call errors outright. Either way the caller
+      scans what WAS returned and flags the grade as *sampled* rather than an
+      authoritative whole-repo verdict.
+    - ``repo_ok``   — the repo metadata endpoint returned 200 (repo exists and
+      is reachable). When False the repo is genuinely missing / private /
+      unreachable and the caller surfaces a real error. When True but ``files``
+      is empty we still SUCCEEDED — the caller degrades to a graceful (empty /
+      partial) result instead of turning a big-monorepo tree failure into a 502.
+    """
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"token {token}"
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        # Get default branch
-        resp = await client.get(
-            f"https://api.github.com/repos/{owner}/{repo}",
-            headers=headers,
-        )
+        # Get default branch — this call also confirms the repo is real/public.
+        try:
+            resp = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}",
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("GitHub repo API error for %s/%s: %s", owner, repo, exc)
+            return [], False, False
         if resp.status_code != 200:
             logger.warning(
                 "GitHub repo API returned %d for %s/%s (rate_remaining=%s, auth=%s)",
@@ -240,30 +269,51 @@ async def _fetch_repo_tree(
                 resp.headers.get("x-ratelimit-remaining", "?"),
                 "yes" if token else "no",
             )
-            return []
+            return [], False, False
         default_branch = resp.json().get("default_branch", "main")
 
-        # Get tree (recursive)
-        resp = await client.get(
-            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}",
-            headers=headers,
-            params={"recursive": "1"},
+        tree_url = (
+            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}"
         )
-        if resp.status_code != 200:
+
+        # Recursive tree fetch. For very large monorepos GitHub may cap the
+        # response (truncated:true) or error outright — either way the repo is
+        # real, so we degrade to a partial/sampled tree, never a hard failure.
+        resp = None
+        try:
+            resp = await client.get(
+                tree_url, headers=headers, params={"recursive": "1"},
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("GitHub tree API error for %s/%s: %s", owner, repo, exc)
+
+        if resp is not None and resp.status_code == 200:
+            body = resp.json()
+            return _tree_blobs(body.get("tree", [])), bool(body.get("truncated")), True
+
+        if resp is not None:
             logger.warning(
-                "GitHub tree API returned %d for %s/%s (rate_remaining=%s)",
+                "GitHub tree API returned %d for %s/%s (rate_remaining=%s) — "
+                "degrading to a shallow (root-level) sampled tree",
                 resp.status_code, owner, repo,
                 resp.headers.get("x-ratelimit-remaining", "?"),
             )
-            return []
 
-        tree = resp.json().get("tree", [])
-        # Filter to blobs (files) only
-        return [
-            item for item in tree
-            if item.get("type") == "blob"
-            and item.get("size", 0) <= _MAX_FILE_SIZE
-        ]
+        # Fallback: a non-recursive (root-level) tree still yields a real, if
+        # shallow, sample for a monorepo whose recursive tree was unavailable.
+        # The repo is known-good (metadata returned 200), so this is a degraded
+        # SUCCESS (truncated=True), not an error → no 502.
+        try:
+            shallow = await client.get(tree_url, headers=headers)
+            if shallow.status_code == 200:
+                return _tree_blobs(shallow.json().get("tree", [])), True, True
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "GitHub shallow tree API error for %s/%s: %s", owner, repo, exc,
+            )
+
+        # No tree at all, but the repo exists — empty-but-successful result.
+        return [], True, True
 
 
 async def _fetch_file_content(
@@ -1444,11 +1494,18 @@ async def scan_repo(
     owner, repo = parts
 
     try:
-        # Fetch file tree
-        tree = await _fetch_repo_tree(owner, repo, token)
-        if not tree:
+        # Fetch file tree. A very large monorepo may come back truncated (or its
+        # recursive tree fetch may error) — that's a partial/sampled tree, not a
+        # failure, so we still return a real score rather than a 502.
+        tree, tree_truncated, repo_ok = await _fetch_repo_tree(owner, repo, token)
+        if not repo_ok:
+            # Repo genuinely missing / private / unreachable — a real error.
             result.error = "Could not fetch repo tree (may be empty or private)"
             return result
+        if tree_truncated:
+            # The tree is only a sample of a large repo — never present the grade
+            # as an authoritative whole-repo verdict.
+            result.sampled = True
 
         result.primary_language = _detect_language(tree)
 
@@ -1546,7 +1603,11 @@ async def scan_repo(
         # Coverage disclosure (#4): record the full scannable count BEFORE truncation,
         # and flag when the signed grade is only a sample of the repo.
         result.total_scannable_files = len(scannable_files)
-        result.sampled = result.total_scannable_files > _MAX_FILES_PER_REPO
+        # OR: keep an already-set truncation flag (partial tree from a large
+        # monorepo) even when the returned sample is under the file cap.
+        result.sampled = (
+            result.sampled or result.total_scannable_files > _MAX_FILES_PER_REPO
+        )
         scan_files = scannable_files[:_MAX_FILES_PER_REPO]
 
         # Load allowlist once for the whole scan
