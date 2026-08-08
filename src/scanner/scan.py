@@ -228,6 +228,33 @@ def _tree_blobs(tree: list[dict]) -> list[dict]:
     ]
 
 
+async def _note_github(resp: httpx.Response, context: str) -> None:
+    """Route a metered GitHub response through real-time rate-limit protection.
+
+    Fires throttled admin alerts and maintains the ``github_budget_low``
+    degradation flag off the response's ``X-RateLimit-*`` headers, and — when
+    GitHub signals a 403/429 rate limit — backs off (honoring Retry-After /
+    reset, capped by config) rather than hammering. Best-effort; never raises,
+    so rate-limit protection can't itself break a scan.
+    """
+    try:
+        from src.jobs.scan_health import note_github_response
+
+        backoff = await note_github_response(
+            resp.status_code, resp.headers, context=context,
+        )
+    except Exception:
+        logger.debug("github rate-limit note failed", exc_info=True)
+        return
+    if backoff and backoff > 0:
+        import asyncio
+
+        from src.config import settings
+
+        cap = getattr(settings, "scanner_ratelimit_backoff_cap_seconds", 5.0)
+        await asyncio.sleep(min(backoff, cap))
+
+
 async def _fetch_repo_tree(
     owner: str, repo: str, token: str | None = None,
 ) -> tuple[list[dict], bool, bool, str | None]:
@@ -265,6 +292,8 @@ async def _fetch_repo_tree(
         except httpx.HTTPError as exc:
             logger.warning("GitHub repo API error for %s/%s: %s", owner, repo, exc)
             return [], False, False, None
+        # Real-time rate-limit protection (metered call): alert + degrade flag.
+        await _note_github(resp, f"repo metadata {owner}/{repo}")
         if resp.status_code != 200:
             logger.warning(
                 "GitHub repo API returned %d for %s/%s (rate_remaining=%s, auth=%s)",
@@ -290,6 +319,10 @@ async def _fetch_repo_tree(
         except httpx.HTTPError as exc:
             logger.warning("GitHub tree API error for %s/%s: %s", owner, repo, exc)
 
+        if resp is not None:
+            # Real-time rate-limit protection (metered call): alert + degrade flag.
+            await _note_github(resp, f"repo tree {owner}/{repo}")
+
         if resp is not None and resp.status_code == 200:
             body = resp.json()
             return (
@@ -313,6 +346,8 @@ async def _fetch_repo_tree(
         # SUCCESS (truncated=True), not an error → no 502.
         try:
             shallow = await client.get(tree_url, headers=headers)
+            # Real-time rate-limit protection (metered call): alert + degrade flag.
+            await _note_github(shallow, f"repo shallow tree {owner}/{repo}")
             if shallow.status_code == 200:
                 return (
                     _tree_blobs(shallow.json().get("tree", [])),
@@ -366,6 +401,8 @@ async def _fetch_file_content(
             f"https://api.github.com/repos/{owner}/{repo}/contents/{path}",
             headers=headers,
         )
+        # Real-time rate-limit protection (metered fallback): alert + degrade flag.
+        await _note_github(resp, f"contents {owner}/{repo}/{path}")
         if resp.status_code == 200:
             return resp.text
     return None

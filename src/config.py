@@ -186,6 +186,50 @@ class Settings(BaseSettings):
     security_rescan_spacing_seconds: float = 1.0  # sleep between scans to smooth bursts
     security_rescan_min_budget: int = 300     # abort the run if core-remaining drops below this
 
+    # --- Real-time GitHub rate-limit protection for the PUBLIC scan path -------
+    # The daily re-scan job (Job 19) only probes GitHub's budget once/24h. Under
+    # live user traffic the public scan API can drain or 429 the 5000/hr GitHub
+    # budget mid-day with no signal until the next daily tick. These knobs close
+    # that gap: real-time alerting, a self-imposed fresh-scan rate limit, and
+    # graceful degradation that serves stale cache instead of blowing the budget.
+    #
+    # Alert when GitHub's X-RateLimit-Remaining drops below this (a scan can burn
+    # up to ~200 core calls, though most file reads go through the unmetered raw
+    # host). Fires a throttled admin alert from the live scan path, not just the
+    # daily probe. Mirrors scan_health.LOW_REMAINING_THRESHOLD.
+    github_ratelimit_alert_threshold: int = 500
+    # Throttle window for the real-time rate-limit / low-budget admin alert
+    # (independent of the daily 6h scan-health throttle). ~90 min = nudge once
+    # per couple hours while a problem persists, without spamming.
+    github_ratelimit_alert_throttle_seconds: int = 90 * 60
+    # Degradation floor: when remaining drops below this, the public scan path
+    # serves STALE cache (even past the 1h TTL) and defers fresh GitHub-hitting
+    # scans rather than spending the last of the budget. Lower than the alert
+    # threshold so Kenne is warned (500) well before scans start degrading (200).
+    github_budget_floor: int = 200
+    # TTL on the Redis "github_budget_low" flag — auto-clears so the scan path
+    # recovers on its own once the hourly budget resets, even if the probe lags.
+    github_budget_low_flag_ttl_seconds: int = 20 * 60
+    # Periodic budget probe interval (free GET /rate_limit) that sets/clears the
+    # flag between daily ticks. 15-30 min keeps the flag fresh cheaply.
+    github_budget_probe_interval_seconds: int = 20 * 60
+    # Max seconds the scanner will back off WITHIN a single request when GitHub
+    # signals a rate limit (honors Retry-After / X-RateLimit-Reset, capped so a
+    # rate-limited GitHub can't hang a uvicorn worker past the request timeout).
+    scanner_ratelimit_backoff_cap_seconds: float = 5.0
+
+    # Self-imposed rate limit on the public scan API's FRESH (GitHub-hitting)
+    # scans, so user traffic can't uncontrollably drain the GitHub budget. Cached
+    # (1h) hits do NOT count — only cache-miss / force=true scans do. Per-IP cap;
+    # authenticated callers get 3x (matches the other scan limiter). A clean 429
+    # with Retry-After is returned when exceeded.
+    rate_limit_fresh_scans_per_minute: int = 10
+    # Global fresh-scan cap across ALL IPs, sized under the GitHub budget: ~20/min
+    # ≈ 1200/hr; at ~2-4 metered calls/scan (repo + tree; file reads use the
+    # unmetered raw host) that stays well under 5000/hr with headroom for the
+    # daily re-scan job and badge regeneration.
+    rate_limit_global_fresh_scans_per_minute: int = 20
+
     # Admin account email (used for bot ownership, alerts, marketing)
     admin_email: str = "admin@agentgraph.co"
 

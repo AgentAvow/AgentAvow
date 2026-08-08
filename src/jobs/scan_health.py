@@ -37,6 +37,23 @@ LOW_REMAINING_THRESHOLD = 500
 # Throttle: at most one alert of each ``kind`` per this window (6h).
 _ALERT_THROTTLE_SECONDS = 6 * 60 * 60
 
+# Redis flag the PUBLIC scan path reads cheaply to decide whether to degrade
+# (serve stale cache + defer fresh GitHub-hitting scans). Set by the real-time
+# response inspector below and by the periodic budget probe; auto-expires so the
+# scan path recovers on its own once the hourly budget resets.
+GITHUB_BUDGET_LOW_FLAG = "ag:scanhealth:github_budget_low"
+
+# Default in-request back-off when GitHub gives us no Retry-After/reset to honor.
+_DEFAULT_BACKOFF_SECONDS = 2.0
+
+
+def _int_or_none(value: object) -> int | None:
+    """Parse a header value to int, tolerating None / junk."""
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
 
 @dataclass
 class TokenHealth:
@@ -129,15 +146,21 @@ async def check_github_token_health() -> TokenHealth:
     )
 
 
-async def alert_scan_health(kind: str, subject: str, detail_html: str) -> None:
+async def alert_scan_health(
+    kind: str, subject: str, detail_html: str, throttle_seconds: int | None = None,
+) -> None:
     """E-mail the admin about a scanner-health problem, throttled per ``kind``.
 
-    Reuses ``src.email.send_email`` and a Redis TTL key (once every 6h) so a
-    persistent failure nudges without spamming every scheduler tick — the same
-    throttle pattern as ``reddit_reminder._send_dry_feed_alert``. Distinct
+    Reuses ``src.email.send_email`` and a Redis TTL key (default once every 6h)
+    so a persistent failure nudges without spamming every scheduler tick — the
+    same throttle pattern as ``reddit_reminder._send_dry_feed_alert``. Distinct
     ``kind`` values throttle independently (a dead token and a job exception can
-    each alert once/6h).
+    each alert once/6h). ``throttle_seconds`` overrides the window per ``kind``
+    — the real-time rate-limit alerts pass a shorter (~90 min) window so they
+    surface faster than the daily probe's 6h cadence.
     """
+    if throttle_seconds is None:
+        throttle_seconds = _ALERT_THROTTLE_SECONDS
     throttle_key = f"ag:scanhealth:alert:{kind}"
     try:
         from src.redis_client import get_redis
@@ -145,7 +168,7 @@ async def alert_scan_health(kind: str, subject: str, detail_html: str) -> None:
         r = get_redis()
         if await r.get(throttle_key):
             return
-        await r.set(throttle_key, "1", ex=_ALERT_THROTTLE_SECONDS)
+        await r.set(throttle_key, "1", ex=throttle_seconds)
     except Exception:
         # Redis down — better to send (and possibly repeat) than swallow the alert.
         logger.debug(
@@ -234,3 +257,217 @@ async def alert_rescan_exception(exc: BaseException) -> None:
             "full traceback.</p>"
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Real-time GitHub rate-limit protection (live public-scan path)
+# ---------------------------------------------------------------------------
+# The functions above run only from the daily re-scan job. Under live user
+# traffic the public scan API can drain / 429 the GitHub budget mid-day, so the
+# scan path routes its metered GitHub responses through ``note_github_response``
+# and a cheap periodic probe (``check_github_budget``) keeps the degradation
+# flag fresh between daily ticks.
+
+
+def _reset_str(reset_epoch: int | None) -> str:
+    """Human-readable UTC reset time (+ minutes away) for an X-RateLimit-Reset."""
+    if reset_epoch is None:
+        return "unknown"
+    import time
+    from datetime import datetime, timezone
+
+    try:
+        when = datetime.fromtimestamp(reset_epoch, tz=timezone.utc)
+        mins = max(0, int((reset_epoch - time.time()) / 60))
+        return f"{when.isoformat()} (~{mins} min from now)"
+    except (ValueError, OverflowError, OSError):
+        return str(reset_epoch)
+
+
+async def set_budget_low_flag(ttl: int | None = None) -> None:
+    """Set the Redis ``github_budget_low`` flag the scan path reads to degrade."""
+    if ttl is None:
+        try:
+            from src.config import settings
+
+            ttl = settings.github_budget_low_flag_ttl_seconds
+        except Exception:
+            ttl = 20 * 60
+    try:
+        from src.redis_client import get_redis
+
+        await get_redis().set(GITHUB_BUDGET_LOW_FLAG, "1", ex=ttl)
+    except Exception:
+        logger.debug("Could not set github_budget_low flag", exc_info=True)
+
+
+async def clear_budget_low_flag() -> None:
+    """Clear the degradation flag once the budget has recovered."""
+    try:
+        from src.redis_client import get_redis
+
+        await get_redis().delete(GITHUB_BUDGET_LOW_FLAG)
+    except Exception:
+        logger.debug("Could not clear github_budget_low flag", exc_info=True)
+
+
+async def is_github_budget_low() -> bool:
+    """Cheap read of the degradation flag (used on the hot scan path).
+
+    Fails OPEN (returns False) if Redis is unavailable — a missing flag must
+    never wedge scanning; the per-scan real-time inspector is the backstop.
+    """
+    try:
+        from src.redis_client import get_redis
+
+        return bool(await get_redis().get(GITHUB_BUDGET_LOW_FLAG))
+    except Exception:
+        return False
+
+
+async def alert_github_rate_limited(
+    *, remaining: int | None, reset_epoch: int | None,
+    retry_after: int | None, context: str,
+) -> None:
+    """Throttled admin alert: a live scan call was rate-limited (403/429)."""
+    from src.config import settings
+
+    ra = f"{retry_after}s" if retry_after is not None else "not provided"
+    rem = remaining if remaining is not None else "unknown"
+    await alert_scan_health(
+        "github_ratelimited",
+        "AgentAvow: GitHub RATE-LIMITED on the live scan path",
+        (
+            "<p>A GitHub API call in the public scan path was <b>rate-limited</b> "
+            "(HTTP 403/429 — primary or secondary limit).</p>"
+            f"<p><b>Where:</b> {context}.</p>"
+            f"<p><b>Remaining core budget:</b> {rem}.</p>"
+            f"<p><b>Resets at:</b> {_reset_str(reset_epoch)}.</p>"
+            f"<p><b>Retry-After:</b> {ra}.</p>"
+            "<p>The scan path is now serving stale cache and deferring fresh "
+            "scans (graceful degradation) until the budget recovers. If this "
+            "recurs, widen the budget (GitHub App) or lower "
+            "<code>RATE_LIMIT_GLOBAL_FRESH_SCANS_PER_MINUTE</code> / "
+            "<code>RATE_LIMIT_FRESH_SCANS_PER_MINUTE</code>.</p>"
+        ),
+        throttle_seconds=settings.github_ratelimit_alert_throttle_seconds,
+    )
+
+
+async def alert_github_budget_low(
+    *, remaining: int | None, reset_epoch: int | None, context: str,
+) -> None:
+    """Throttled admin alert: live scan traffic drove the budget below the
+    warning threshold (but not yet rate-limited)."""
+    from src.config import settings
+
+    await alert_scan_health(
+        "github_budget_low_live",
+        "AgentAvow: GitHub budget running LOW (live scan traffic)",
+        (
+            f"<p>Live scan traffic has driven GitHub's remaining core budget to "
+            f"<b>{remaining}</b> requests — below the "
+            f"{settings.github_ratelimit_alert_threshold} warning threshold.</p>"
+            f"<p><b>Where:</b> {context}.</p>"
+            f"<p><b>Resets at:</b> {_reset_str(reset_epoch)}.</p>"
+            f"<p>Below <b>{settings.github_budget_floor}</b> the scan path starts "
+            "serving stale cache and deferring fresh scans. You're being warned "
+            "now, before it's a problem.</p>"
+        ),
+        throttle_seconds=settings.github_ratelimit_alert_throttle_seconds,
+    )
+
+
+async def note_github_response(
+    status_code: int, headers: object, *, context: str = "",
+) -> float | None:
+    """Inspect a GitHub API response from the scan path for rate-limit signals.
+
+    Fires throttled admin alerts and maintains the ``github_budget_low``
+    degradation flag in real time — the "you'll know before it's a problem"
+    signal that the daily probe can't provide.
+
+    * 403/429 with rate-limit markers (Retry-After, or remaining==0) → treat as
+      rate-limited: alert, set the flag, and return a suggested back-off (honors
+      Retry-After, else time-to-reset).
+    * ``X-RateLimit-Remaining`` below the degradation floor → set the flag.
+    * ``X-RateLimit-Remaining`` below the alert threshold → alert.
+
+    Returns a suggested back-off in seconds when rate-limited, else ``None``.
+    Never raises — best-effort protection must not break a scan.
+    """
+    try:
+        from src.config import settings
+
+        alert_threshold = settings.github_ratelimit_alert_threshold
+        floor = settings.github_budget_floor
+    except Exception:
+        alert_threshold, floor = LOW_REMAINING_THRESHOLD, 200
+
+    def _h(name: str) -> object:
+        try:
+            return headers.get(name)  # type: ignore[union-attr]
+        except Exception:
+            return None
+
+    remaining = _int_or_none(_h("x-ratelimit-remaining"))
+    reset = _int_or_none(_h("x-ratelimit-reset"))
+    retry_after = _int_or_none(_h("retry-after"))
+
+    # A 403 is only a rate limit when GitHub says so (Retry-After present, or
+    # the core budget is exhausted). A plain 403 (private repo, bad token) is
+    # NOT a rate limit and must not trip degradation.
+    is_rate_limited = status_code == 429 or (
+        status_code == 403 and (retry_after is not None or remaining == 0)
+    )
+
+    if is_rate_limited:
+        try:
+            await set_budget_low_flag()
+            await alert_github_rate_limited(
+                remaining=remaining, reset_epoch=reset,
+                retry_after=retry_after, context=context or "scan path",
+            )
+        except Exception:
+            logger.debug("rate-limited alert/flag failed", exc_info=True)
+        # Suggested back-off: honor Retry-After, else seconds-to-reset.
+        if retry_after is not None:
+            return float(max(0, retry_after))
+        if reset is not None:
+            import time
+
+            return float(max(0.0, reset - time.time()))
+        return _DEFAULT_BACKOFF_SECONDS
+
+    if remaining is not None:
+        try:
+            if remaining < floor:
+                await set_budget_low_flag()
+            if remaining < alert_threshold:
+                await alert_github_budget_low(
+                    remaining=remaining, reset_epoch=reset,
+                    context=context or "scan path",
+                )
+        except Exception:
+            logger.debug("low-budget alert/flag failed", exc_info=True)
+
+    return None
+
+
+async def check_github_budget() -> TokenHealth:
+    """Periodic (15-30 min) free probe that maintains the degradation flag.
+
+    Reuses :func:`check_github_token_health` (a free ``GET /rate_limit`` call),
+    then sets the ``github_budget_low`` flag when core-remaining is below the
+    floor and clears it once recovered. Runs between the daily re-scan ticks so
+    the scan path's cheap flag read stays accurate.
+    """
+    from src.config import settings
+
+    health = await check_github_token_health()
+    if health.remaining is not None:
+        if health.remaining < settings.github_budget_floor:
+            await set_budget_low_flag()
+        else:
+            await clear_budget_low_flag()
+    return health

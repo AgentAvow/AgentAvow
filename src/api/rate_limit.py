@@ -291,6 +291,50 @@ async def rate_limit_scans(request: Request) -> None:
             )
 
 
+async def enforce_fresh_scan_limit(request: Request) -> None:
+    """Per-IP + global cap on FRESH (GitHub-hitting) public scans.
+
+    Unlike the coarse ``rate_limit_scans`` dependency (which runs before the
+    handler and counts cache hits too), this is called INSIDE the public scan
+    handler at the exact point a cache-miss / ``force=true`` scan is about to
+    hit GitHub. Cached (1h) hits never reach here, so they do NOT consume this
+    budget — only real GitHub-hitting scans do. The global cap protects the
+    shared ~5000/hr GitHub budget from aggregate user traffic; the per-IP cap
+    stops a single client from monopolizing it. Raises a clean 429 with
+    ``Retry-After`` when exceeded.
+    """
+    ip = _get_client_ip(request)
+    per_ip_limit = settings.rate_limit_fresh_scans_per_minute
+    entity_id = _get_entity_id(request)
+    effective_ip_limit = per_ip_limit * 3 if entity_id else per_ip_limit
+
+    # Per-IP cap first — a spammy IP is rejected without consuming a global slot.
+    ip_key = f"freshscan:{ip}"
+    if not await _limiter.check(ip_key, effective_ip_limit):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Fresh-scan rate limit exceeded — cached results are still "
+                "served. Sign in for a higher limit, or retry in a minute."
+            ),
+            headers={"Retry-After": "30", **_rate_limit_response(0, effective_ip_limit)},
+        )
+
+    # Global cap — protects the shared GitHub budget across ALL IPs.
+    global_limit = settings.rate_limit_global_fresh_scans_per_minute
+    if not await _limiter.check("freshscan:global", global_limit):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "AgentAvow is briefly at global fresh-scan capacity — cached "
+                "results are still served; retry a fresh scan shortly."
+            ),
+            headers={"Retry-After": "30", **_rate_limit_response(0, global_limit)},
+        )
+
+    await _set_rate_limit_headers(request, ip_key, effective_ip_limit)
+
+
 async def rate_limit_export(request: Request) -> None:
     """Very strict limit for heavy export endpoints (5/hour)."""
     ip = _get_client_ip(request)

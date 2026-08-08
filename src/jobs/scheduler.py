@@ -43,6 +43,7 @@ _reply_poster_task: asyncio.Task | None = None
 _auto_follow_task: asyncio.Task | None = None
 _security_scan_task: asyncio.Task | None = None
 _api_health_task: asyncio.Task | None = None
+_github_budget_task: asyncio.Task | None = None
 _lock_refresh_task: asyncio.Task | None = None
 
 # Redis distributed lock — prevents multiple workers from running the scheduler
@@ -701,6 +702,34 @@ async def _api_health_loop(interval: int = API_HEALTH_CHECK_INTERVAL) -> None:
         await asyncio.sleep(interval)
 
 
+async def _github_budget_loop() -> None:
+    """Job 23: Periodic GitHub budget probe (every ~20 min, config-driven).
+
+    Bridges the 24h gap of the daily re-scan probe: a free ``GET /rate_limit``
+    call sets/clears the ``github_budget_low`` Redis flag the public scan path
+    reads to decide whether to serve stale cache and defer fresh scans. Cheap
+    (does not consume the GitHub core budget) and independent of user traffic,
+    so the flag stays accurate even when nobody is scanning.
+    """
+    from src.config import settings as _budget_settings
+
+    interval = _budget_settings.github_budget_probe_interval_seconds
+    logger.info("GitHub budget probe started (interval=%ds)", interval)
+    while True:
+        try:
+            from src.jobs.scan_health import check_github_budget
+
+            health = await check_github_budget()
+            if health.remaining is not None:
+                logger.debug(
+                    "GitHub budget probe: %d core requests remaining",
+                    health.remaining,
+                )
+        except Exception:
+            logger.exception("GitHub budget probe failed")
+        await asyncio.sleep(interval)
+
+
 async def _security_scan_loop(interval: int = SECURITY_SCAN_INTERVAL) -> None:
     """Job 19: Weekly security re-scan + public scan cache pre-refresh.
 
@@ -905,7 +934,7 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     global _scheduler_task, _reply_monitor_task, _reply_drafter_task
     global _reply_poster_task
     global _starter_pack_task, _auto_follow_task, _security_scan_task
-    global _api_health_task, _lock_refresh_task
+    global _api_health_task, _github_budget_task, _lock_refresh_task
 
     if _scheduler_task is not None and not _scheduler_task.done():
         logger.debug("Scheduler already running, skipping start")
@@ -957,6 +986,17 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
         logger.info(
             "API health check task created (interval=%ds)",
             API_HEALTH_CHECK_INTERVAL,
+        )
+
+    # Job 23: GitHub budget probe (short loop — keeps the degradation flag fresh)
+    if _github_budget_task is None or _github_budget_task.done():
+        _github_budget_task = asyncio.create_task(
+            _github_budget_loop(),
+            name="github-budget-probe",
+        )
+        logger.info(
+            "GitHub budget probe task created (interval=%ds)",
+            _sched_settings.github_budget_probe_interval_seconds,
         )
 
     # Job 19: Security re-scan (daily loop, checks 7-day cutoff internally)
@@ -1041,7 +1081,7 @@ def stop_scheduler() -> None:
     global _scheduler_task, _reply_monitor_task, _reply_drafter_task
     global _reply_poster_task
     global _starter_pack_task, _auto_follow_task, _security_scan_task
-    global _api_health_task, _lock_refresh_task
+    global _api_health_task, _github_budget_task, _lock_refresh_task
 
     # Cancel the lock refresh first — its CancelledError handler releases the Redis key
     if _lock_refresh_task is not None and not _lock_refresh_task.done():
@@ -1088,3 +1128,8 @@ def stop_scheduler() -> None:
         _api_health_task.cancel()
         logger.info("API health check task cancelled")
     _api_health_task = None
+
+    if _github_budget_task is not None and not _github_budget_task.done():
+        _github_budget_task.cancel()
+        logger.info("GitHub budget probe task cancelled")
+    _github_budget_task = None

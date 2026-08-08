@@ -17,7 +17,7 @@ import math
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -192,6 +192,11 @@ class PublicScanResponse(BaseModel):
 _CACHE_PREFIX = "public_scan:"
 _CACHE_TTL = 3600  # 1 hour
 
+# Stale copy retained far longer than the 1h fresh TTL, so graceful degradation
+# can serve a last-known-good grade when GitHub's budget is too low to re-scan.
+_STALE_CACHE_PREFIX = "public_scan_stale:"
+_STALE_CACHE_TTL = 7 * 24 * 3600  # 7 days
+
 
 async def _get_entity_trust(repo: str, db: AsyncSession) -> dict | None:
     """Look up full entity trust score for an imported repo.
@@ -259,9 +264,54 @@ async def _get_cached(owner: str, repo: str) -> dict | None:
 
 
 async def _set_cached(owner: str, repo: str, data: dict) -> None:
-    """Store scan result in Redis cache."""
+    """Store scan result in Redis cache (fresh 1h copy + long-lived stale copy).
+
+    The stale copy (7d) is what graceful degradation serves when GitHub's budget
+    is too low to run a fresh scan — a last-known-good grade beats erroring.
+    """
     from src import cache
     await cache.set(f"{_CACHE_PREFIX}{owner}/{repo}", data, ttl=_CACHE_TTL)
+    await cache.set(f"{_STALE_CACHE_PREFIX}{owner}/{repo}", data, ttl=_STALE_CACHE_TTL)
+
+
+async def _get_stale_cached(owner: str, repo: str) -> dict | None:
+    """Read the long-lived stale scan copy (for graceful degradation)."""
+    from src import cache
+    return await cache.get(f"{_STALE_CACHE_PREFIX}{owner}/{repo}")
+
+
+async def _cached_scan_response(
+    owner: str, repo: str, cached: dict, db: AsyncSession,
+) -> PublicScanResponse:
+    """Build a PublicScanResponse from a cached/stale scan dict (re-signs fresh).
+
+    Shared by the graceful-degradation path; the attestation is always minted
+    fresh (it expires) even though the underlying scan evidence is cached.
+    """
+    full_name = f"{owner}/{repo}"
+    payload = _build_scan_payload(full_name, cached)
+    jws = create_jws(canonicalize(payload))
+    entity_trust = await _get_entity_trust(full_name, db)
+    trust_envelope = await _build_scan_envelope(owner, repo, cached, db)
+    return PublicScanResponse(
+        repo=full_name,
+        trust_score=cached["trust_score"],
+        security_score=cached["trust_score"],
+        trust_tier=cached["trust_tier"],
+        recommended_limits=RecommendedLimits(**cached["recommended_limits"]),
+        scan_result=cached["scan_result"],
+        findings=FindingsSummary(**cached["findings"]),
+        positive_signals=cached.get("positive_signals", []),
+        category_scores=cached.get("category_scores", {}),
+        metadata=ScanMetadata(**cached["metadata"]),
+        scanned_at=cached["scanned_at"],
+        cached=True,
+        jws=jws,
+        tool_manifest_digest=cached.get("tool_manifest_digest"),
+        tool_digests=cached.get("tool_digests", {}),
+        entity_trust=entity_trust,
+        trust_envelope=trust_envelope,
+    )
 
 
 async def _capture_community_scan(
@@ -643,6 +693,7 @@ async def scan_by_wallet(
 async def public_scan(
     owner: str,
     repo: str,
+    request: Request = None,
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
@@ -704,6 +755,42 @@ async def public_scan(
     # Fetch previous cached score before running a fresh scan (for change detection)
     old_cached = await _get_cached(owner, repo)
     old_score: int | None = old_cached["trust_score"] if old_cached else None
+
+    # --- Graceful degradation when GitHub's budget is low --------------------
+    # The real-time inspector (scan path) or the periodic probe sets a Redis flag
+    # when GitHub's remaining core budget drops below the floor. Rather than
+    # spend the last of the budget on a fresh scan, serve stale cache if we have
+    # ANY (even past the 1h TTL), else tell the caller to retry shortly. This is
+    # a cheap flag read on the hot path (fails open if Redis is down).
+    from src.jobs.scan_health import is_github_budget_low
+
+    if await is_github_budget_low():
+        stale = old_cached or await _get_stale_cached(owner, repo)
+        if stale:
+            logger.info(
+                "GitHub budget low — serving stale cache for %s (deferred fresh scan)",
+                full_name,
+            )
+            return await _cached_scan_response(owner, repo, stale, db)
+        logger.warning(
+            "GitHub budget low — deferring fresh scan for %s (no stale cache)",
+            full_name,
+        )
+        raise HTTPException(
+            503,
+            "AgentAvow is temporarily rate-limited by GitHub — please try again shortly.",
+            headers={"Retry-After": "120"},
+        )
+
+    # --- Self-imposed fresh-scan rate limit (per-IP + global) ----------------
+    # Only reached on a cache-miss / force=true scan, so cached (1h) hits never
+    # consume it. Protects the shared GitHub budget from user traffic. Skipped
+    # for internal callers (no request — the watch/badge/wallet paths call
+    # public_scan() directly and have their own caps).
+    if request is not None:
+        from src.api.rate_limit import enforce_fresh_scan_limit
+
+        await enforce_fresh_scan_limit(request)
 
     # Run scan
     from src.github_auth import get_github_token
