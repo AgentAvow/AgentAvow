@@ -99,6 +99,7 @@ const RebrandCheck = lazy(() => import('./rebrand/pages/Check'))
 const RebrandLogin = lazy(() => import('./rebrand/pages/Login'))
 const RebrandLegal = lazy(() => import('./rebrand/pages/Legal'))
 const RebrandAccount = lazy(() => import('./rebrand/pages/Account'))
+const RebrandMyTools = lazy(() => import('./rebrand/pages/MyTools'))
 const RebrandHowItWorks = lazy(() => import('./rebrand/pages/HowItWorks'))
 const RebrandResearch = lazy(() => import('./rebrand/pages/Research'))
 const RebrandClaim = lazy(() => import('./rebrand/pages/Claim'))
@@ -226,6 +227,7 @@ function AppRoutes() {
           <Route path="check/:owner/:repo" element={<RebrandCheck />} />
           <Route path="login" element={<RebrandLogin />} />
           <Route path="account" element={<RebrandAccount />} />
+          <Route path="tools" element={<RebrandMyTools />} />
           <Route path="how-it-works" element={<RebrandHowItWorks />} />
           <Route path="research" element={<RebrandResearch />} />
           <Route path="claim" element={<RebrandClaim />} />

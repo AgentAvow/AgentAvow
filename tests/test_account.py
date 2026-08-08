@@ -199,6 +199,85 @@ async def test_audit_log_pagination(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_publish_private_scan_creates_community_row(
+    client: AsyncClient, db, monkeypatch,
+):
+    """POST /account/private-scan/publish re-scans with the supplied token and
+    upserts the result into CommunityScan (→ public catalog + search)."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    from src.models import CommunityScan
+
+    token = await _setup_user(
+        client,
+        {
+            "email": "publisher@test.com",
+            "password": "Str0ngP@ss",
+            "display_name": "Publisher",
+        },
+    )
+
+    fake_result = SimpleNamespace(
+        error=None,
+        trust_score=88,
+        critical_count=0,
+        high_count=1,
+        medium_count=2,
+        findings=[],
+        positive_signals=["has_tests"],
+        files_scanned=12,
+        suppressed_count=0,
+        primary_language="Python",
+        has_readme=True,
+        has_license=True,
+        has_tests=True,
+    )
+
+    captured = {}
+
+    async def fake_scan(full_name, token=None, **kwargs):
+        captured["full_name"] = full_name
+        captured["token"] = token
+        return fake_result
+
+    monkeypatch.setattr("src.scanner.scan.scan_repo", fake_scan)
+
+    resp = await client.post(
+        f"{ACCOUNT_URL}/private-scan/publish",
+        json={
+            "owner": "acme",
+            "repo": "private-tool",
+            "token": "ghp_secrettoken12345",
+        },
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["published"] is True
+    assert data["full_name"] == "acme/private-tool"
+    assert data["trust_score"] == 88
+    assert data["grade"] == "A"
+
+    # Token was used transiently for the scan (never persisted).
+    assert captured["token"] == "ghp_secrettoken12345"
+    assert captured["full_name"] == "acme/private-tool"
+
+    # The CommunityScan row was created (now catalog- + search-visible).
+    row = (
+        await db.execute(
+            select(CommunityScan).where(
+                CommunityScan.full_name == "acme/private-tool"
+            )
+        )
+    ).scalar_one_or_none()
+    assert row is not None
+    assert row.trust_score == 88
+    assert row.high == 1
+
+
+@pytest.mark.asyncio
 async def test_old_token_rejected_after_password_change(client: AsyncClient):
     """Verify that password change invalidates all existing tokens."""
     token = await _setup_user(client)

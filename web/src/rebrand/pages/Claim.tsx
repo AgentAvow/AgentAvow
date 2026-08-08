@@ -67,11 +67,23 @@ function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
 }
 
 function PrivateScan() {
+  const navigate = useNavigate()
+  const qc = useQueryClient()
   const [owner, setOwner] = useState('')
   const [repo, setRepo] = useState('')
   const [token, setToken] = useState('')
   const scan = useMutation({
     mutationFn: async () => (await api.post<{ trust_score: number; findings?: { critical?: number; high?: number; total?: number } }>('/account/private-scan', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
+  })
+  // Claim the just-scanned repo, then drop the user into the claim flow to finish
+  // verifying (they're already on this page — invalidating refreshes the list).
+  const claim = useMutation({
+    mutationFn: async () => (await api.post('/account/claims', { owner: owner.trim(), repo: repo.trim() })).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['rebrand-claims'] }); navigate(rp('/rebrand/claim')) },
+  })
+  // Publish the private grade to the public search catalog — owner's explicit choice.
+  const publish = useMutation({
+    mutationFn: async () => (await api.post('/account/private-scan/publish', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
   })
   const g = scan.data ? getGradeInfo(scan.data.trust_score) : null
   return (
@@ -99,12 +111,37 @@ function PrivateScan() {
       </form>
       {scan.isError && <div className="mt-3 text-[13px] text-danger">Scan failed — check the token has access to this repo.</div>}
       {g && scan.data && (
-        <div className="mt-3 glass rounded-xl p-4 flex items-center gap-4 max-w-[560px]">
-          <div className={`w-12 h-12 rounded-xl grid place-items-center font-extrabold ${g.textClass} ${g.bgClass}`}>{g.grade}</div>
-          <div className="text-[13px] text-text-muted">
-            <div className="font-semibold text-text">{scan.data.trust_score}/100 · private scan</div>
-            <div className="font-mono text-[12px] mt-0.5">{scan.data.findings?.critical ?? 0}C · {scan.data.findings?.high ?? 0}H · {scan.data.findings?.total ?? 0} findings</div>
+        <div className="mt-3 max-w-[560px]">
+          <div className="glass rounded-xl p-4 flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-xl grid place-items-center font-extrabold ${g.textClass} ${g.bgClass}`}>{g.grade}</div>
+            <div className="text-[13px] text-text-muted">
+              <div className="font-semibold text-text">{scan.data.trust_score}/100 · private scan</div>
+              <div className="font-mono text-[12px] mt-0.5">{scan.data.findings?.critical ?? 0}C · {scan.data.findings?.high ?? 0}H · {scan.data.findings?.total ?? 0} findings</div>
+            </div>
           </div>
+
+          {/* next actions — claim it, or publish the grade to public search */}
+          <div className="mt-2.5 flex gap-2 flex-wrap">
+            <button
+              onClick={() => claim.mutate()}
+              disabled={claim.isPending}
+              className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60"
+            >{claim.isPending ? 'Claiming…' : 'Claim this repo'}</button>
+            {!publish.isSuccess && (
+              <button
+                onClick={() => publish.mutate()}
+                disabled={publish.isPending}
+                className="text-[13px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors disabled:opacity-60"
+              >{publish.isPending ? 'Publishing…' : 'Publish to search'}</button>
+            )}
+          </div>
+          {publish.isSuccess ? (
+            <div className="mt-2 text-[12.5px] text-success">✓ Now public — others can find it in search.</div>
+          ) : (
+            <p className="mt-2 text-[11.5px] text-text-muted">Publishing makes this repo's grade visible to everyone in search — it's your choice as the owner.</p>
+          )}
+          {claim.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn't claim — try again.</div>}
+          {publish.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn't publish — check the token still has access.</div>}
         </div>
       )}
     </div>

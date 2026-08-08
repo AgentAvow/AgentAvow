@@ -33,6 +33,7 @@ _TABLES = [
     "token_blacklist", "password_reset_tokens", "email_verifications",
     "audit_logs", "evolution_records", "moderation_flags",
     "api_keys", "did_documents", "trust_scores", "votes", "posts",
+    "community_scans",
     "entity_relationships", "submolts", "entities",
 ]
 
@@ -634,6 +635,28 @@ async def _clean_db_once():
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_entities_source_type "
             "ON entities (source_type)"
+        ))
+        # Ensure community_scans table exists (migration t08)
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS community_scans ("
+            "  id UUID PRIMARY KEY,"
+            "  owner VARCHAR(255) NOT NULL,"
+            "  repo VARCHAR(255) NOT NULL,"
+            "  full_name VARCHAR(512) NOT NULL,"
+            "  trust_score INTEGER,"
+            "  critical INTEGER,"
+            "  high INTEGER,"
+            "  findings_count INTEGER,"
+            "  primary_language VARCHAR(120),"
+            "  scan_count INTEGER NOT NULL DEFAULT 1,"
+            "  first_scanned_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
+            "  last_scanned_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
+            "  CONSTRAINT uq_community_scan_target UNIQUE (owner, repo)"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_community_scans_full_name "
+            "ON community_scans (full_name)"
         ))
         await conn.execute(
             text("TRUNCATE " + ", ".join(_TABLES) + " CASCADE")

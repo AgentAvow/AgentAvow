@@ -5,15 +5,24 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import bindparam, func, or_, select, text
+from sqlalchemy import bindparam, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import cache
 from src.api.rate_limit import rate_limit_reads
 from src.cache import TTL_SHORT
 from src.database import get_db
-from src.models import Entity, EntityType, Listing, Post, PrivacyTier, Submolt, TrustScore
-from src.utils import like_pattern
+from src.models import (
+    CommunityScan,
+    Entity,
+    EntityType,
+    Listing,
+    Post,
+    PrivacyTier,
+    Submolt,
+    TrustScore,
+)
+from src.utils import escape_like, like_pattern
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -51,13 +60,24 @@ class SearchSubmoltResult(BaseModel):
     created_at: datetime
 
 
+class SearchToolResult(BaseModel):
+    owner: str
+    repo: str
+    full_name: str
+    trust_score: int | None = None
+    grade: str
+    last_scanned_at: datetime
+
+
 class SearchResponse(BaseModel):
     entities: list[SearchEntityResult]
     posts: list[SearchPostResult]
     submolts: list[SearchSubmoltResult] = []
+    tools: list[SearchToolResult] = []
     entity_count: int
     post_count: int
     submolt_count: int = 0
+    tool_count: int = 0
 
 
 def _make_tsquery(q: str) -> str:
@@ -111,6 +131,7 @@ async def search(
     entities: list[SearchEntityResult] = []
     posts: list[SearchPostResult] = []
     submolts: list[SearchSubmoltResult] = []
+    tools: list[SearchToolResult] = []
 
     # Search entities
     if search_type in ("all", "human", "agent"):
@@ -274,13 +295,54 @@ async def search(
                 created_at=s.created_at,
             ))
 
+    # Search community scans (tools a user publicly scanned — persisted in
+    # CommunityScan). This is a real gap otherwise: a repo someone scanned via
+    # /public/scan never surfaces in global search. CommunityScan has no
+    # tsvector column, so match owner/repo/full_name with an ILIKE prefix;
+    # relevance = exact repo/full_name match first, then most-recently scanned.
+    if search_type == "all":
+        from src.api.public_scan_router import _grade_from_score
+
+        prefix = escape_like(q.strip()) + "%"
+        q_lower = q.strip().lower()
+        relevance = case(
+            (func.lower(CommunityScan.repo) == q_lower, 0),
+            (func.lower(CommunityScan.full_name) == q_lower, 0),
+            (func.lower(CommunityScan.owner) == q_lower, 0),
+            else_=1,
+        )
+        tool_query = (
+            select(CommunityScan)
+            .where(
+                or_(
+                    CommunityScan.owner.ilike(prefix),
+                    CommunityScan.repo.ilike(prefix),
+                    CommunityScan.full_name.ilike(prefix),
+                ),
+            )
+            .order_by(relevance.asc(), CommunityScan.last_scanned_at.desc())
+            .limit(10)
+        )
+        result = await db.execute(tool_query)
+        for c in result.scalars().all():
+            tools.append(SearchToolResult(
+                owner=c.owner,
+                repo=c.repo,
+                full_name=c.full_name,
+                trust_score=c.trust_score,
+                grade=_grade_from_score(c.trust_score or 0),
+                last_scanned_at=c.last_scanned_at,
+            ))
+
     result = SearchResponse(
         entities=entities,
         posts=posts,
         submolts=submolts,
+        tools=tools,
         entity_count=len(entities),
         post_count=len(posts),
         submolt_count=len(submolts),
+        tool_count=len(tools),
     )
     await cache.set(cache_key, result.model_dump(mode="json"), ttl=TTL_SHORT)
     return result

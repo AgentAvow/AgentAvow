@@ -46,8 +46,19 @@ const CHECK_HINTS = ['github.com/owner/repo', 'an MCP server', 'an npm package',
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA. */
 function WatchCTA({ owner, repo }: { owner: string; repo: string }) {
   const { user } = useAuth()
-  const [watching, setWatching] = useState(false)
-  const mutation = useMutation({ mutationFn: () => api.post('/watches', { owner, repo }), onSuccess: () => setWatching(true) })
+  const [clicked, setClicked] = useState(false)
+  // Reflect whether this tool is already watched — the CTA must not offer "Watch"
+  // when the user already watches it. Only queried when signed in.
+  const { data: watches } = useQuery({
+    queryKey: ['rebrand-watches'],
+    queryFn: async () => (await api.get<{ owner: string; repo: string }[]>('/watches')).data,
+    enabled: !!user,
+  })
+  const alreadyWatching = !!user && (watches ?? []).some(
+    (w) => w.owner.toLowerCase() === owner.toLowerCase() && w.repo.toLowerCase() === repo.toLowerCase(),
+  )
+  const watching = alreadyWatching || clicked
+  const mutation = useMutation({ mutationFn: () => api.post('/watches', { owner, repo }), onSuccess: () => setClicked(true) })
   const base = 'w-full flex items-center justify-center gap-2.5 text-[15px] font-bold px-5 py-3.5 rounded-xl transition-all'
   const grad = 'text-white bg-gradient-to-r from-primary to-accent shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5'
   const star = <svg viewBox="0 0 24 24" fill="currentColor" className="w-[17px] h-[17px] shrink-0"><path d="M12 2.5l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 18.6 6.1 21.3l1.2-6.6L2.5 9.5l6.6-.9z"/></svg>
@@ -194,7 +205,7 @@ function OwnershipCTA({ owner, repo }: { owner: string; repo: string }) {
             <h3 className="text-[15px] font-bold text-success">✓ You own this</h3>
             <p className="text-text-muted text-[13.5px] mt-0.5">This tool is claimed under your account. Manage its listing, respond to findings, and run private re-scans.</p>
           </div>
-          <Link to={rp("/rebrand/account")} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage &amp; fix →</Link>
+          <Link to={rp("/rebrand/tools")} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage &amp; fix →</Link>
         </div>
       </Reveal>
     )

@@ -5,6 +5,8 @@ import api from '../lib/api'
 import { timeAgo } from '../lib/formatters'
 import { PageTransition } from '../components/Motion'
 import { TrustGradeBadge } from '../components/trust/TrustProfile'
+import { getGradeInfo } from '../components/trust/gradeSystem'
+import { rp } from '../rebrand/basePath'
 import { SearchResultSkeleton } from '../components/Skeleton'
 import SEOHead from '../components/SEOHead'
 
@@ -35,9 +37,18 @@ interface SearchResult {
     member_count: number
     created_at: string
   }>
+  tools?: Array<{
+    owner: string
+    repo: string
+    full_name: string
+    trust_score: number
+    grade: string
+    last_scanned_at: string | null
+  }>
   entity_count: number
   post_count: number
   submolt_count: number
+  tool_count?: number
 }
 
 type Tab = 'all' | 'human' | 'agent' | 'post'
@@ -89,7 +100,7 @@ export default function Search() {
     }
   }
 
-  const totalResults = (data?.entity_count || 0) + (data?.post_count || 0) + (data?.submolt_count || 0)
+  const totalResults = (data?.entity_count || 0) + (data?.post_count || 0) + (data?.submolt_count || 0) + (data?.tool_count || 0)
   const humanCount = useMemo(() => data?.entities.filter(e => e.type === 'human').length ?? 0, [data?.entities])
   const agentCount = useMemo(() => data?.entities.filter(e => e.type === 'agent').length ?? 0, [data?.entities])
 
@@ -238,6 +249,34 @@ export default function Search() {
                     <p className="text-sm line-clamp-3">{post.content}</p>
                   </Link>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {/* Tools — signed trust grades; shown on "all" tab */}
+          {data.tools && data.tools.length > 0 && activeTab === 'all' && (
+            <section>
+              <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wider mb-3">
+                Tools ({data.tool_count ?? data.tools.length})
+              </h2>
+              <div className="space-y-2">
+                {data.tools.map((tool) => {
+                  const gi = getGradeInfo(tool.trust_score)
+                  return (
+                    <Link
+                      key={tool.full_name}
+                      to={rp(`/rebrand/check/${tool.owner}/${tool.repo}`)}
+                      className="block bg-surface border border-border rounded-lg p-3 hover:border-primary/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm truncate">{tool.full_name}</span>
+                        <span className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[11px] font-bold ${gi.textClass} ${gi.bgClass}`}>
+                          {gi.grade} · {tool.trust_score}
+                        </span>
+                      </div>
+                    </Link>
+                  )
+                })}
               </div>
             </section>
           )}

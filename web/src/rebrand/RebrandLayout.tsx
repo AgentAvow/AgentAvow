@@ -63,6 +63,7 @@ function AccountMenu() {
               <div className="text-[13.5px] font-semibold truncate">{user.display_name}</div>
               <div className="text-[11.5px] text-text-muted truncate">{user.email}</div>
             </div>
+            <Link to={rp("/rebrand/tools")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My Tools</Link>
             <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My watches</Link>
             <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</Link>
             {user.is_admin && <a href="/admin" className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</a>}
@@ -135,6 +136,7 @@ const NAV = [
 function MobileNav({ pathname }: { pathname: string }) {
   const [open, setOpen] = useState(false)
   const reduce = useReducedMotion()
+  const { user } = useAuth()
   // lines sit at y=8 and y=16; to form a clean X they must both meet at y=12
   // (±4) and rotate ±45 about their own centers.
   const top = open ? { rotate: 45, y: 4 } : { rotate: 0, y: 0 }
@@ -159,6 +161,9 @@ function MobileNav({ pathname }: { pathname: string }) {
                   <Link to={rp(to)} onClick={() => setOpen(false)} className={`block py-2.5 text-[15px] ${pathname === rp(to) ? 'text-primary-light font-semibold' : 'text-text-muted'}`}>{label}</Link>
                 </motion.div>
               ))}
+              {user && (
+                <Link to={rp("/rebrand/tools")} onClick={() => setOpen(false)} className={`block py-2.5 text-[15px] ${pathname === rp("/rebrand/tools") ? 'text-primary-light font-semibold' : 'text-text-muted'}`}>My Tools</Link>
+              )}
               <Link to={rp("/rebrand/check")} onClick={() => setOpen(false)} className="mt-3 text-center font-semibold px-4 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check a tool</Link>
             </motion.nav>
           </>

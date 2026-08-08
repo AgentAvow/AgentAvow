@@ -153,6 +153,45 @@ async def test_search_requires_query(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_search_includes_community_scans(client: AsyncClient, db):
+    """A repo a user publicly scanned (persisted in CommunityScan) must surface
+    in global /search under the new ``tools`` array."""
+    from src.models import CommunityScan
+
+    scan = CommunityScan(
+        owner="acme",
+        repo="cool-agent-tool",
+        full_name="acme/cool-agent-tool",
+        trust_score=88,
+        critical=0,
+        high=1,
+        findings_count=3,
+        primary_language="Python",
+    )
+    db.add(scan)
+    await db.flush()
+
+    resp = await client.get(SEARCH_URL, params={"q": "cool-agent-tool"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tool_count"] >= 1
+    tools = {t["full_name"]: t for t in data["tools"]}
+    assert "acme/cool-agent-tool" in tools
+    tool = tools["acme/cool-agent-tool"]
+    assert tool["owner"] == "acme"
+    assert tool["repo"] == "cool-agent-tool"
+    assert tool["trust_score"] == 88
+    assert tool["grade"] == "A"  # 88 → A (81-95)
+    assert tool["last_scanned_at"]
+
+    # Also findable by owner prefix.
+    resp = await client.get(SEARCH_URL, params={"q": "acme"})
+    assert "acme/cool-agent-tool" in {
+        t["full_name"] for t in resp.json()["tools"]
+    }
+
+
+@pytest.mark.asyncio
 async def test_search_limit(client: AsyncClient):
     # Create several users
     for i in range(5):

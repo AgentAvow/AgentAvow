@@ -32,8 +32,6 @@ interface Notif {
   created_at: string
 }
 
-interface Claim { id: string; owner: string; repo: string; full_name: string; status: string; topic: string }
-
 interface WebhookState { url: string | null; active: boolean; last_status: number | null }
 
 /** Alert webhook — POST grade-change alerts to a URL (Slack/CI/your app). */
@@ -139,24 +137,6 @@ function ApiKeys() {
   )
 }
 
-/** A claimed tool — its verification status + a link to view/fix or finish verifying.
- * Claims carry no score, so (rather than an N-query grade fetch) we link straight to
- * the check view where the current signed grade is shown. */
-function ClaimedRow({ c }: { c: Claim }) {
-  const verified = c.status === 'verified'
-  const to = verified ? rp(`/rebrand/check/${c.owner}/${c.repo}`) : rp('/rebrand/claim')
-  return (
-    <Link to={to} className="glass rounded-xl p-4 flex items-center gap-4 hover:border-primary-light transition-colors">
-      <div className="min-w-0 flex-1">
-        <div className="font-mono text-[14px] break-all">{c.full_name}</div>
-        <div className="font-mono text-[11.5px] text-text-muted mt-0.5">{verified ? 'view report & fixes' : 'finish verifying →'}</div>
-      </div>
-      <span className={`font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded shrink-0 ${verified ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>{c.status}</span>
-      <span className="text-text-muted text-[15px] shrink-0" aria-hidden="true">→</span>
-    </Link>
-  )
-}
-
 function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; removing: boolean }) {
   const g = w.last_score != null ? getGradeInfo(w.last_score) : null
   return (
@@ -192,12 +172,6 @@ export default function RebrandAccount() {
     enabled: !!user,
   })
 
-  const { data: claimsData, isLoading: cLoading } = useQuery({
-    queryKey: ['rebrand-claims'],
-    queryFn: async () => (await api.get<{ claims: Claim[] }>('/account/claims')).data,
-    enabled: !!user,
-  })
-
   const { data: notifs } = useQuery({
     queryKey: ['rebrand-notifs'],
     queryFn: async () => (await api.get<{ notifications: Notif[] }>('/notifications', { params: { limit: 20 } })).data,
@@ -212,8 +186,6 @@ export default function RebrandAccount() {
   if (!user) return null
 
   const rows = watches ?? []
-  const claims = claimsData?.claims ?? []
-  const claimsShown = claims.slice(0, 8)
   const alerts = (notifs?.notifications ?? []).filter((n) => n.kind === 'watch_alert')
 
   return (
@@ -254,27 +226,6 @@ export default function RebrandAccount() {
           </div>
         </Reveal>
       )}
-
-      {/* claimed tools */}
-      <div className="mt-8">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Your tools {claims.length > 0 && `· ${claims.length}`}</h2>
-        <p className="text-text-muted text-[13px] mb-3">Repos you've claimed. Verified ones link to the report &amp; fix-it view; pending ones link back to finish verifying.</p>
-        {cLoading ? (
-          <div className="flex flex-col gap-2">{[0, 1].map((i) => <div key={i} className="glass rounded-xl h-[76px] animate-pulse" />)}</div>
-        ) : claims.length === 0 ? (
-          <div className="glass rounded-2xl p-8 text-center">
-            <p className="text-text-muted text-[14px]">No claimed tools yet. Prove you own a repo to unlock a fix-it view, respond to findings, and scan it privately.</p>
-            <Link to={rp("/rebrand/claim")} className="inline-block mt-4 text-[13.5px] font-semibold text-primary-light hover:text-primary">Claim a repo →</Link>
-          </div>
-        ) : (
-          <RevealStagger className="flex flex-col gap-2" stagger={0.04}>
-            {claimsShown.map((c) => <ClaimedRow key={c.id} c={c} />)}
-            {claims.length > claimsShown.length && (
-              <Link to={rp("/rebrand/claim")} className="text-[12.5px] font-semibold text-primary-light hover:text-primary mt-1">View all {claims.length} on the Claim page →</Link>
-            )}
-          </RevealStagger>
-        )}
-      </div>
 
       {/* watches */}
       <div className="mt-8">
