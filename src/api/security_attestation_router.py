@@ -63,6 +63,8 @@ class ScanData(BaseModel):
     positive_signals: list[str] = []
     checks: ScanChecks
     files_scanned: int = 0
+    files_total: int = 0
+    sampled: bool = False
     primary_language: str = ""
 
 
@@ -157,6 +159,15 @@ def _build_payload(
                 "has_tests": vulns.get("has_tests", False) if isinstance(vulns, dict) else False,
             },
             "filesScanned": vulns.get("files_scanned", 0) if isinstance(vulns, dict) else 0,
+            # Coverage disclosure (#4): total scannable files + whether the grade is a
+            # sample. Signed into the payload so partial coverage is never presented as
+            # an authoritative whole-repo verdict. Defaults degrade gracefully when a
+            # stored scan predates these fields.
+            "filesTotal": (
+                vulns.get("total_scannable_files", vulns.get("files_scanned", 0))
+                if isinstance(vulns, dict) else 0
+            ),
+            "sampled": vulns.get("sampled", False) if isinstance(vulns, dict) else False,
             "primaryLanguage": vulns.get("primary_language", "") if isinstance(vulns, dict) else "",
         },
         "trust": {

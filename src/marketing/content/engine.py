@@ -31,33 +31,36 @@ BASE_URL = "https://agentavow.com"
 # Global knowledge injected into all LLM prompts so the marketing bot
 # is aware of recent milestones and the competitive landscape.
 _GLOBAL_KNOWLEDGE = (
-    "\n\n## Current AgentAvow context (March 2026)\n"
-    "- AgentAvow is live at agentavow.com — the trust and identity layer "
-    "for AI agents. Early access: free registration, trust scoring, "
-    "marketplace, API access.\n"
-    "- Competitive landscape: Moltbook (770K agents, zero identity "
-    "verification, acquired by Meta — breach exposed 35K emails + 1.5M "
-    "API tokens), OpenClaw (512 CVEs, 12% malware in skills marketplace). "
-    "These are cautionary tales, not competitors — we're the trust layer.\n"
-    "- Our differentiator: verifiable DIDs, transparent trust scores, "
-    "auditable trails. Every agent gets a cryptographic identity.\n"
-    "- We're actively recruiting agent operators from GitHub, npm, "
-    "PyPI, HuggingFace — verified trust badges for READMEs.\n"
-    "- World/Tools for Humanity: launched 'proof of human' for agentic "
-    "commerce — validates our thesis that agents need identity.\n"
-    "- Bluesky: $100M Series B, AT Protocol — decentralised social "
-    "aligns with our values.\n"
-    "- NVIDIA GTC: $1T AI chip projection. Compute layer (them) + "
-    "trust layer (us).\n"
+    "\n\n## Current AgentAvow context (2026)\n"
+    "- AgentAvow is live at agentavow.com/check — the tool-safety layer for "
+    "AI agents. It gives any tool, MCP server, package, or skill an agent "
+    "connects to a signed, verifiable safety grade (A+ to F) you can "
+    "recompute offline. Free, anonymous, no install.\n"
+    "- The core pitch: a fully identified, fully authorized agent can still "
+    "connect to a poisoned tool. Whether the tool is safe to connect is the "
+    "third axis, next to identity and authorization. That's the gap we close.\n"
+    "- How it works: point it at a GitHub repo, MCP server, npm/PyPI package, "
+    "or OpenClaw skill and get back a letter grade, per-finding detail, and a "
+    "JWS attestation (Ed25519) anyone can verify offline against the public "
+    "JWKS. The score is the product; the signature is the proof under it.\n"
+    "- Watches catch rug-pulls: we re-scan a tool and alert you when its grade "
+    "drops or its signed tool definition changes.\n"
+    "- Competitive landscape: OpenClaw (190K+ stars but 512 CVEs, ~12% malware "
+    "in its skills marketplace — we scanned 231 skills and found 14,350 issues, "
+    "32% graded F), Moltbook (770K agents, zero verification, breach leaked 35K "
+    "emails + 1.5M API tokens). These are the poisoned-tool ecosystems we grade, "
+    "not competitors.\n"
+    "- Distribution: free signed safety badges for GitHub READMEs, an MCP "
+    "server (agentgraph-trust) that scans from Claude Code, and a GitHub "
+    "Action / CLI that gates CI merges on a minimum grade.\n"
     "- Our Bluesky custom feed 'AI Agent News' is live — curated AI agent "
     "developments at bsky.app/profile/agentavow.bsky.social/feed/ai-agent-news\n"
-    "- New: mcp-security-scan — open-source CLI + GitHub Action for "
-    "scanning MCP servers. Repo: github.com/AgentAvow/mcp-security-scan "
-    "(MIT license). Scans for credential theft, data exfiltration, unsafe "
-    "execution, filesystem access, and code obfuscation. Outputs a trust "
-    "score 0-100 that integrates with AgentAvow trust badges. Available as "
-    "a GitHub Action for CI/CD pipelines. This is a pull-based growth tool — "
-    "developers discover AgentAvow through the scanner.\n"
+    "- mcp-security-scan — open-source CLI + GitHub Action (MIT license), "
+    "github.com/AgentAvow/mcp-security-scan. Scans MCP servers for credential "
+    "theft, data exfiltration, unsafe execution, filesystem access, and code "
+    "obfuscation; outputs a 0-100 trust score that integrates with AgentAvow "
+    "safety badges. Pull-based growth: developers discover AgentAvow through "
+    "the scanner.\n"
     "- Our brand IS trust — always be transparent that this content "
     "is bot-generated.\n"
 )
@@ -79,11 +82,30 @@ class GeneratedContent:
     utm_params: dict | None = None
     image_path: str | None = None
     error: str | None = None
+    # Set when the copy persistently trips the strict AI-tell linter on an
+    # AUTO-POST platform. The orchestrator routes these to human_review instead
+    # of auto-publishing them — a persistent AI-tell failure must never auto-post.
+    needs_human_review: bool = False
 
 
 def content_hash(text: str) -> str:
     """SHA-256 hash for deduplication."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _is_auto_post_platform(platform: str) -> bool:
+    """True if PLATFORM_SCHEDULE marks this platform as auto-posting.
+
+    Used by the no-slop gate: a persistent AI-tell failure on an auto-post
+    platform must not publish — the content is routed to human_review instead.
+    Mirrors orchestrator._is_auto_post; kept local to avoid a circular import.
+    """
+    from src.marketing.config import PLATFORM_SCHEDULE
+
+    schedule = PLATFORM_SCHEDULE.get(platform)
+    if schedule is None:
+        return False  # unlisted platforms default to human review
+    return schedule.get("auto_post", False)
 
 
 async def _generate_with_voice_check(
@@ -100,8 +122,12 @@ async def _generate_with_voice_check(
     Adds VOICE_PROMPT_FRAGMENT to the system prompt so the model avoids the
     tells in the first place. If the first draft still fails the linter,
     retries once with the linter's regeneration hint appended. If retry
-    also fails, returns the better of the two drafts and logs a warning —
-    we never block content entirely on a tell, only nudge it.
+    also fails, returns the best-effort (retry) draft and logs a warning.
+
+    This function never publishes anything; it only generates. When the copy
+    persistently trips the linter, the AUTO-POST decision is enforced upstream:
+    ``generate_proactive`` re-checks the final text and, for auto-post
+    platforms, routes a persistent failure to human_review instead of posting.
     """
     augmented_system = system + VOICE_PROMPT_FRAGMENT
     kwargs: dict = {
@@ -140,10 +166,13 @@ async def _generate_with_voice_check(
 
     logger.warning(
         "AI-tell linter rejected both drafts for %s (first=%s, retry=%s); "
-        "shipping retry anyway",
+        "returning best-effort draft — auto-post platforms gate this to "
+        "human_review downstream (see generate_proactive)",
         platform, first_check.reasons, second_check.reasons,
     )
-    # Ship retry — usually closer to passing even if not perfect
+    # Return the retry (usually closest to passing). The proactive path re-checks
+    # the final text and, for AUTO-POST platforms, routes a persistent failure to
+    # human_review rather than publishing slop.
     return retry
 
 
@@ -297,24 +326,29 @@ async def generate_proactive(
     recruitment_context = ""
     if topic.key == "operator_recruitment":
         recruitment_context = (
-            "\n\n## Key facts about operator recruitment\n"
-            "- AgentAvow is in early access — free registration, trust "
-            "scoring, marketplace, API access\n"
-            "- We're actively recruiting agent operators from GitHub, npm, "
-            "PyPI, and HuggingFace\n"
-            "- Every registered agent gets: a W3C DID, trust score, public "
-            "profile, and embeddable README badge\n"
-            "- Trust badges for GitHub READMEs are a key growth mechanic\n"
-            "- Onboarding takes ~2 minutes at agentavow.com/bot-onboarding\n"
-            "- Competitive context: Moltbook (770K agents, zero identity "
-            "verification, 1.5M API tokens leaked), OpenClaw (512 CVEs, "
-            "12% malware in skills marketplace)\n"
-            "- AgentAvow provides what competitors don't: verifiable identity "
-            "(DIDs), trust scoring, auditable evolution trails, and an open "
-            "social graph\n"
+            "\n\n## Key facts about tool-author recruitment\n"
+            "- AgentAvow scans any tool an agent connects to (GitHub repo, MCP "
+            "server, npm/PyPI package, OpenClaw skill) and returns a signed "
+            "safety grade — free, anonymous, no install\n"
+            "- We're reaching out to MCP server authors, AI agent repos, and "
+            "npm/PyPI/skill maintainers to scan their tool and add a signed "
+            "safety badge to their README\n"
+            "- Every scan returns: an A+ to F letter grade, per-finding detail "
+            "pointing at the exact line, and a JWS attestation anyone can verify "
+            "offline against the public JWKS\n"
+            "- Signed safety badges for GitHub READMEs are the key growth "
+            "mechanic; the badge re-renders the current grade and links to the "
+            "full report\n"
+            "- Check any tool in seconds at agentavow.com/check\n"
+            "- Competitive context: Moltbook (770K agents, zero verification, "
+            "1.5M API tokens leaked), OpenClaw (512 CVEs, ~12% malware in skills; "
+            "we scanned 231 skills and found 14,350 issues, 32% graded F)\n"
+            "- The pitch: a fully identified, fully authorized agent can still "
+            "connect to a poisoned tool — AgentAvow grades whether the tool "
+            "itself is safe to connect\n"
             "\n## Links to include\n"
-            "- Register your agent: https://agentavow.com/bot-onboarding\n"
-            "- Discover agents: https://agentavow.com/discover\n"
+            "- Check a tool: https://agentavow.com/check\n"
+            "- Browse the trust catalog: https://agentavow.com/browse\n"
             "- Learn more: https://agentavow.com\n"
         )
 
@@ -431,6 +465,22 @@ async def generate_proactive(
             error=f"Content quality gate: {_quality}",
         )
 
+    # No-slop hard gate: _generate_with_voice_check already retried once. If the
+    # FINAL copy still trips the strict AI-tell linter, it must not auto-publish.
+    # For AUTO-POST platforms we flag it so the orchestrator routes it to
+    # human_review instead of posting slop. Draft/human-review platforms are
+    # reviewed by a human anyway, so their behaviour is unchanged (and the
+    # brief-echo/placeholder hard-block above still fires for everyone).
+    needs_review = False
+    voice_recheck = check_ai_tells(stripped, platform=platform, strict=True)
+    if not voice_recheck.passed and _is_auto_post_platform(platform):
+        needs_review = True
+        logger.warning(
+            "Persistent AI-tell failure on auto-post platform %s/%s (%s) — "
+            "routing to human_review instead of auto-posting",
+            platform, topic.key, voice_recheck.reasons,
+        )
+
     # Apply disclosure footer
     text = stripped
     if tone.disclosure:
@@ -487,6 +537,7 @@ async def generate_proactive(
             "campaign": topic.key,
         },
         image_path=card_path,
+        needs_human_review=needs_review,
     )
 
 
@@ -626,9 +677,11 @@ def _build_github_discussions_prompt(
         f"- End with a question to encourage replies\n"
         f"- Include this link naturally: {utm_link}\n\n"
         f"## About AgentAvow\n"
-        f"AgentAvow is trust infrastructure for AI agents: "
-        f"verifiable identity (W3C DIDs), trust scoring, "
-        f"social graph, and a marketplace. Open source at "
+        f"AgentAvow is the tool-safety layer for AI agents: it gives any tool, "
+        f"MCP server, package, or skill an agent connects to a signed, "
+        f"verifiable safety grade (A+ to F) you can recompute offline against "
+        f"the public JWKS. A fully identified, fully authorized agent can still "
+        f"connect to a poisoned tool — that's the gap it closes. Open source at "
         f"github.com/AgentAvow/AgentAvow.\n"
         f"{news_context}"
         f"{launch_context}"
@@ -671,12 +724,17 @@ def _build_blog_prompt(
         f"- Do NOT prefix with a length/format label — never write 'Long-form "
         f"(1500-2000 words).' or similar; just the article\n\n"
         f"## About AgentAvow\n"
-        f"AgentAvow is a trust infrastructure platform for AI agents. "
-        f"It provides verifiable identity (W3C DIDs), trust scoring, "
-        f"social graph visualization, and a marketplace — creating a unified "
-        f"space where AI agents and humans interact as peers. "
-        f"Key features: on-chain DIDs, auditable agent evolution trails, "
-        f"trust-scored social graph, MCP bridge for tool discovery.\n"
+        f"AgentAvow is the tool-safety layer for AI agents. It gives any tool, "
+        f"MCP server, package, or skill an agent connects to a signed, "
+        f"verifiable safety grade (A+ to F) you can recompute offline against "
+        f"the public JWKS — the 'is this tool safe to connect?' axis next to "
+        f"identity and authorization. A scan runs static analysis across 12 "
+        f"detection categories, composes per-category subscores into a letter "
+        f"grade and trust tier, and signs the canonical verdict into a JWS "
+        f"attestation (Ed25519, RFC 7515). Key features: free anonymous scans, "
+        f"signed README safety badges, offline verification, watch alerts on "
+        f"grade drops and signed tool-definition drift (rug-pull detection), an "
+        f"MCP server and GitHub Action that gate CI on a minimum grade.\n"
         f"{news_context}"
         f"{launch_context}"
         f"{recruitment_context}"

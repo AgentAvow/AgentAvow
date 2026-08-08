@@ -116,7 +116,7 @@ async def send_verification_email(to: str, token: str) -> bool:
         verify_url=verify_url,
         fallback=f"Verify your email: {verify_url}",
     )
-    return await send_email(to, "Verify your AgentGraph email", html)
+    return await send_email(to, "Verify your AgentAvow email", html)
 
 
 async def send_password_reset_email(to: str, token: str) -> bool:
@@ -127,7 +127,7 @@ async def send_password_reset_email(to: str, token: str) -> bool:
         reset_url=reset_url,
         fallback=f"Reset your password: {reset_url}",
     )
-    return await send_email(to, "Reset your AgentGraph password", html)
+    return await send_email(to, "Reset your AgentAvow password", html)
 
 
 async def send_welcome_email(to: str, display_name: str) -> bool:
@@ -136,9 +136,9 @@ async def send_welcome_email(to: str, display_name: str) -> bool:
         "welcome.html",
         display_name=display_name,
         app_url=settings.base_url,
-        fallback=f"Welcome to AgentGraph, {display_name}!",
+        fallback=f"Welcome to AgentAvow, {display_name}!",
     )
-    return await send_email(to, "Welcome to AgentGraph!", html)
+    return await send_email(to, "Welcome to AgentAvow!", html)
 
 
 async def send_moderation_flag_email(
@@ -161,7 +161,7 @@ async def send_moderation_flag_email(
         ),
     )
     return await send_email(
-        to, "AgentGraph: Your content has been flagged", html,
+        to, "AgentAvow: Your content has been flagged", html,
     )
 
 
@@ -185,7 +185,7 @@ async def send_moderation_resolved_email(
         ),
     )
     return await send_email(
-        to, "AgentGraph: Moderation decision on your content", html,
+        to, "AgentAvow: Moderation decision on your content", html,
     )
 
 
@@ -205,7 +205,7 @@ async def send_moderation_appeal_received_email(
         ),
     )
     return await send_email(
-        to, "AgentGraph: Appeal received", html,
+        to, "AgentAvow: Appeal received", html,
     )
 
 
@@ -215,7 +215,7 @@ async def send_social_notification_email(
     title: str,
     body: str,
     action_url: str,
-    action_label: str = "View on AgentGraph",
+    action_label: str = "View on AgentAvow",
 ) -> bool:
     """Send email notification for social events (reply, follow, mention, vote)."""
     html = _load_template(
@@ -248,5 +248,5 @@ async def send_moderation_appeal_decision_email(
         ),
     )
     return await send_email(
-        to, "AgentGraph: Appeal decision", html,
+        to, "AgentAvow: Appeal decision", html,
     )

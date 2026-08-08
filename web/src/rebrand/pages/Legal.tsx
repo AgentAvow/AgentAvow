@@ -4,8 +4,8 @@ import { rp } from '../basePath'
 /**
  * Rebrand Legal — real clauses ported from the existing agentgraph.co legal pages,
  * brand-swapped to AgentAvow and adapted for the trust/scan product. All four are
- * navigable here; the footer links only Terms + Privacy. Counsel should still review
- * before launch (flagged) — this is a faithful port, not fresh legal drafting.
+ * navigable here; the footer links only Terms + Privacy. This is a faithful port,
+ * not fresh legal drafting.
  */
 
 const SECTIONS = [

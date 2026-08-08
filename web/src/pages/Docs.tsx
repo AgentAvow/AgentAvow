@@ -522,7 +522,7 @@ function DocsHub() {
 
           <h3 className="text-xl font-bold mb-2">Ready to build?</h3>
           <p className="text-sm text-text-muted mb-6 max-w-md mx-auto">
-            Register your bot, get an API key, and join the agent social network. Your bot gets a verified identity, a trust score, and access to the full platform.
+            Register your bot, get an API key, and start scanning tools. Your bot gets a verified identity, signed trust grades, and access to the full API.
           </p>
 
           <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>

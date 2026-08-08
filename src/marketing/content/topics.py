@@ -18,76 +18,101 @@ class Topic:
     weight: float = 1.0  # Higher = more frequent
 
 
-# 6 core topic categories
+# Core topic categories — tool-safety is the LEAD.
+# The pitch: AgentAvow gives any tool, MCP server, package, or skill an AI
+# agent connects to a signed, verifiable safety grade you can recompute
+# offline — the "is this tool safe to connect?" third axis, next to identity
+# and authorization. Sharp line: a fully identified, fully authorized agent
+# can still connect to a poisoned tool. That's the gap we close.
 TOPICS: list[Topic] = [
     Topic(
         key="security",
-        name="Security Comparisons",
-        weight=1.5,
+        name="Tool Safety — the third axis",
+        weight=1.8,
         angles={
             "twitter": (
-                "The agent ecosystem has a trust problem: Moltbook's breach "
-                "leaked 1.5M API tokens. OpenClaw has 512 CVEs. "
-                "Agents need verifiable identity — that's what we build."
+                "A fully identified, fully authorized agent can still connect to "
+                "a poisoned tool. AgentAvow gives any tool, MCP server, package, "
+                "or skill an agent connects to a signed safety grade you can "
+                "recompute offline. Check one free: agentavow.com/check"
             ),
             "reddit": (
-                "Analysis: Why agent identity verification prevents security "
-                "disasters like the Moltbook breach and OpenClaw CVEs. Deep "
-                "dive into DIDs, trust scoring, and what 'verified' actually means."
+                "Identity tells you WHO an agent is. Authorization tells you what "
+                "it's allowed to do. Neither tells you whether the tool it just "
+                "connected to is safe. A fully authorized agent will happily call "
+                "a poisoned MCP server or a malicious skill. AgentAvow scans the "
+                "tool itself and returns a signed A-to-F safety grade with "
+                "per-finding detail, and the attestation verifies offline against "
+                "a public key. Breakdown of how the grading and signing work, and "
+                "where tool safety fits next to identity and authorization."
             ),
             "linkedin": (
-                "Enterprise AI deployment requires trust infrastructure. "
-                "When agents interact autonomously, identity verification and "
-                "audit trails aren't optional — they're compliance requirements."
+                "Every agent security conversation is about identity and "
+                "permissions. Both matter. But a fully identified, fully "
+                "authorized agent can still connect to a poisoned tool, and almost "
+                "nobody is grading that. We scan the MCP servers, packages, and "
+                "skills an agent plugs into and issue a signed safety grade anyone "
+                "can recompute offline. What the scans keep surfacing, and why "
+                "tool safety is the third axis."
             ),
             "discord": (
-                "Quick question for the group: how do you verify the identity "
-                "of agents in your stack? We built DID-based verification — "
-                "curious how others are handling this."
+                "How do you all vet the MCP servers and skills your agents "
+                "connect to? Identity and auth don't cover it. A trusted agent "
+                "can still call a poisoned tool. We built signed safety grades "
+                "for exactly that. Curious how others handle it."
             ),
             "bluesky": (
-                "Every agent on AgentAvow has a cryptographically verifiable "
-                "identity. No more leaked tokens, no more spoofing."
+                "A fully identified, fully authorized agent can still connect to a "
+                "poisoned tool. AgentAvow grades the tool itself and signs the "
+                "verdict so you can verify it offline."
             ),
             "devto": (
-                "How We Built Verifiable Agent Identity with DIDs: "
-                "the design and the trade-offs that came with it."
+                "The Third Axis of Agent Security: Why Identity and Authorization "
+                "Don't Tell You If a Tool Is Safe to Connect — and how signed, "
+                "offline-verifiable safety grades close the poisoned-tool gap."
             ),
             "hackernews": (
-                "Show HN: AgentAvow — Trust infrastructure for AI agents "
-                "with verifiable identity (DIDs) and auditable interactions"
+                "Show HN: AgentAvow — a signed, offline-verifiable safety grade "
+                "for any tool, MCP server, package, or skill an AI agent connects to"
             ),
         },
     ),
     Topic(
         key="tutorials",
-        name="Developer Tutorials",
+        name="Developer Tutorials — scan & verify",
         weight=1.2,
         angles={
             "twitter": (
-                "Register your AI agent on AgentAvow in 30 seconds. "
-                "DID, trust score, and API access — all automatic."
+                "Scan any MCP server, npm/PyPI package, or skill in seconds: "
+                "point AgentAvow at the repo and get a signed A-to-F safety grade "
+                "back. No account, no install. agentavow.com/check"
             ),
             "reddit": (
-                "Tutorial: How to register your bot on AgentAvow and "
-                "start building trust. Includes API examples, MCP bridge "
-                "setup, and trust score mechanics."
+                "Tutorial: how to scan a tool your agent connects to and verify "
+                "the result yourself. Covers running a scan on an MCP server or "
+                "package, reading the per-category findings, adding the signed "
+                "safety badge to your README, and recomputing the attestation "
+                "offline against the public JWKS so you're not just trusting our "
+                "word for it."
             ),
             "linkedin": (
-                "Getting started with AgentAvow: A developer's guide to "
-                "agent identity, trust APIs, and cross-framework interop."
+                "A short guide to grading the tools your agents connect to: run a "
+                "free scan, read the findings, add a signed safety badge to your "
+                "README, and verify the attestation offline. No account required."
             ),
             "discord": (
-                "Hey! Quick tutorial on getting your agent set up with "
-                "AgentAvow. Happy to help if you hit any snags."
+                "Quick one: you can scan any MCP server or package for safety in "
+                "about 10 seconds at agentavow.com/check and get a signed grade "
+                "back. Happy to walk through reading the findings if that helps."
             ),
             "bluesky": (
-                "Built a bot? Give it an identity. AgentAvow lets you "
-                "register agents with verifiable DIDs in seconds."
+                "Shipping an MCP server or skill? Scan it, get a signed A-to-F "
+                "safety grade, drop the badge in your README. Free, no install."
             ),
             "devto": (
-                "Building Your First Trusted Agent: A Step-by-Step Guide "
-                "to AgentAvow's Identity and Trust APIs"
+                "Grading and Verifying the Tools Your Agent Connects To: a "
+                "step-by-step guide to scanning an MCP server, reading the "
+                "findings, and recomputing the signed attestation offline."
             ),
         },
     ),
@@ -97,29 +122,31 @@ TOPICS: list[Topic] = [
         weight=1.0,
         angles={
             "twitter": (
-                "The agent ecosystem moves fast. Here's what we're "
-                "watching this week."
+                "The agent ecosystem ships new MCP servers, packages, and skills "
+                "every day. The safety layer for the tools they connect to hasn't "
+                "kept up. Here's what we're watching."
             ),
             "reddit": (
-                "Weekly ecosystem roundup: What's happening in the agent "
-                "space — new frameworks, protocol updates, and what it "
-                "means for developers building with agents."
+                "Weekly ecosystem roundup: new MCP servers, framework updates, "
+                "and notable tool releases — and what their safety posture "
+                "actually looks like once you scan them."
             ),
             "linkedin": (
-                "AI agents are getting more autonomous. The identity and "
-                "trust layer underneath them hasn't kept up."
+                "AI agents connect to more third-party tools every week. The "
+                "layer that tells you whether those tools are safe to connect "
+                "hasn't kept pace."
             ),
             "discord": (
-                "Interesting developments in the agent ecosystem this week. "
-                "Thoughts on what's next?"
+                "Some interesting new MCP servers and skills dropped this week. "
+                "Anyone scanned them before wiring them into an agent?"
             ),
             "bluesky": (
-                "Agent ecosystem update: What's new in frameworks, "
-                "protocols, and infrastructure this week."
+                "Agent ecosystem update: new tools, servers, and skills this "
+                "week, and how they hold up when you scan them for safety."
             ),
             "devto": (
-                "State of the Agent Ecosystem: Frameworks, Protocols, "
-                "and the Infrastructure Gap"
+                "State of the Agent Tool Ecosystem: New MCP Servers, Skills, "
+                "and the Safety Gap Underneath Them"
             ),
         },
     ),
@@ -129,16 +156,18 @@ TOPICS: list[Topic] = [
         weight=1.3,
         angles={
             "twitter": (
-                "New on AgentAvow: {feature}. What it does and why "
-                "we shipped it."
+                "New on AgentAvow: {feature}. What it does for grading the safety "
+                "of the tools your agents connect to."
             ),
             "reddit": (
-                "We just shipped {feature} on AgentAvow. Here's what "
-                "it does, why we built it, and how to use it."
+                "We just shipped {feature} on AgentAvow. Here's what it does, why "
+                "we built it, and how it fits the scan-score-attest-verify "
+                "pipeline for tool safety."
             ),
             "linkedin": (
-                "Announcing {feature} on AgentAvow — expanding the "
-                "trust infrastructure for AI agents and humans."
+                "Announcing {feature} on AgentAvow — extending the safety-grading "
+                "layer for the tools, MCP servers, packages, and skills AI agents "
+                "connect to."
             ),
             "discord": (
                 "Just shipped: {feature}! Let us know what you think."
@@ -148,110 +177,99 @@ TOPICS: list[Topic] = [
                 "Tell us what breaks."
             ),
             "devto": (
-                "Building {feature}: Architecture Decisions and "
-                "Trade-offs in Agent Trust Infrastructure"
+                "Building {feature}: Architecture Decisions and Trade-offs in "
+                "Signed, Offline-Verifiable Tool-Safety Grading"
             ),
         },
     ),
     Topic(
         key="community",
-        name="Community Highlights",
+        name="Scan Highlights",
         weight=0.8,
         angles={
             "twitter": (
                 "This week on AgentAvow: {stats}."
             ),
             "reddit": (
-                "Community update: {stats}. Thanks to everyone building "
-                "on AgentAvow. Here's what's trending."
+                "Scan roundup: {stats}. Thanks to everyone scanning their tools "
+                "and adding signed safety badges. Here's what stood out."
             ),
             "linkedin": (
-                "AgentAvow community update: {stats}."
+                "AgentAvow scan update: {stats}."
             ),
             "discord": (
-                "Community spotlight! {stats}. "
-                "Shoutout to everyone contributing."
+                "Scan spotlight! {stats}. "
+                "Shoutout to everyone grading their tools."
             ),
             "bluesky": (
                 "AgentAvow this week: {stats}."
             ),
             "devto": (
-                "AgentAvow Community Report: Growth, Trends, and "
-                "What Developers Are Building"
+                "AgentAvow Scan Report: What This Week's Tool Grades Revealed"
             ),
         },
     ),
     Topic(
         key="operator_recruitment",
-        name="Operator Recruitment — Join AgentAvow",
-        weight=1.5,
+        name="Tool-Author Outreach — get a signed safety grade",
+        weight=1.6,
         angles={
             "twitter": (
-                "Running an AI agent or MCP server? Get a free verified trust "
-                "badge for your GitHub README. AgentAvow gives your bot a "
-                "cryptographic identity, trust score, and public profile. "
-                "Early access → agentavow.com/bot-onboarding"
+                "Maintain an MCP server, package, or skill? Get a free signed "
+                "safety grade and a badge for your README. Agents can verify it "
+                "offline before they connect. agentavow.com/check"
             ),
             "reddit": (
-                "We built AgentAvow — trust infrastructure for AI agents "
-                "(verified identity, trust scores, auditable trails). If you "
-                "maintain an MCP server, AI agent, or tool library, we're "
-                "offering free verified trust badges for your README. Your "
-                "bot gets: a W3C DID, transparent trust score that grows with "
-                "community endorsements, public profile, and an embeddable "
-                "badge. ~2 min setup at agentavow.com/bot-onboarding."
+                "We built AgentAvow: it scans the tools an AI agent connects to "
+                "(MCP servers, npm/PyPI packages, OpenClaw skills) and issues a "
+                "signed A-to-F safety grade anyone can recompute offline. If you "
+                "maintain one, you can scan it free, see exactly what each finding "
+                "points at, and add a signed safety badge to your README so users "
+                "know the tool is safe to connect before they wire it in. No "
+                "account, no install. agentavow.com/check"
             ),
             "linkedin": (
-                "Agent operators: your bots deserve verifiable identity. "
-                "AgentAvow offers free trust infrastructure — W3C DIDs, "
-                "trust scores, and public profiles for AI agents. Add a "
-                "verified trust badge to your README and show users your "
-                "agent's trust status. Early access is free."
+                "Tool authors: the agents that install your MCP server or package "
+                "have no way to check it's safe to connect. AgentAvow gives your "
+                "tool a signed safety grade and a README badge anyone can verify "
+                "offline. Scanning is free."
             ),
             "discord": (
-                "Hey! If you're building AI agents or MCP servers, check out "
-                "AgentAvow — free verified identity and trust scores for "
-                "your bots. You get a badge for your README too. "
-                "agentavow.com/bot-onboarding"
+                "If you ship an MCP server or skill, you can get a free signed "
+                "safety grade and a README badge for it at agentavow.com/check. "
+                "Agents can verify the grade offline before connecting."
             ),
             "bluesky": (
-                "Building AI agents? Get a free verified trust badge for "
-                "your README. AgentAvow = cryptographic identity + trust "
-                "scores for bots. Early access → agentavow.com/bot-onboarding"
+                "Shipping a tool agents connect to? Get a free signed safety "
+                "grade and a README badge. Verifiable offline. agentavow.com/check"
             ),
             "devto": (
-                "Why Your AI Agent Needs a Verified Identity — and How to "
-                "Get One in 2 Minutes. A guide to trust infrastructure for "
-                "agent operators: W3C DIDs, trust scoring, and adding a "
-                "verified trust badge to your GitHub README."
+                "Give the Tool You Ship a Signed Safety Grade: How to Scan Your "
+                "MCP Server or Package and Add a Verifiable Badge to Your README"
             ),
             "hackernews": (
-                "Show HN: AgentAvow — trust infrastructure for AI agents. "
-                "Free verified identity (W3C DIDs), trust scores, and "
-                "embeddable badges for agent operators. We're building the "
-                "identity layer underneath agent frameworks."
+                "Show HN: AgentAvow — free signed safety grades for the tools AI "
+                "agents connect to (MCP servers, packages, skills). Recompute and "
+                "verify the attestation offline against a public key."
             ),
             "telegram": (
-                "Agent operators: get a free verified trust badge for your "
-                "bot on AgentAvow. Cryptographic identity, trust scores, "
-                "public profile. 2 min setup → agentavow.com/bot-onboarding"
+                "Maintain a tool agents connect to? Get a free signed safety "
+                "grade and README badge from AgentAvow. Verifiable offline. "
+                "agentavow.com/check"
             ),
             "hashnode": (
-                "Why Your AI Agent Needs a Verified Identity — and How to "
-                "Get One in 2 Minutes. A guide to trust infrastructure for "
-                "agent operators: W3C DIDs, trust scoring, and adding a "
-                "verified trust badge to your GitHub README."
+                "Give the Tool You Ship a Signed Safety Grade: How to Scan Your "
+                "MCP Server or Package and Add a Verifiable Badge to Your README"
             ),
             "github_discussions": (
-                "If your project builds AI agents or MCP servers, AgentAvow "
-                "offers free trust infrastructure: verified identity, trust "
-                "scores, and embeddable README badges for your bots."
+                "If your project ships an MCP server, package, or skill an agent "
+                "connects to, AgentAvow gives it a free signed safety grade and a "
+                "README badge anyone can recompute offline."
             ),
             "huggingface": (
-                "Running models or agents on HuggingFace? Get a free "
-                "verified trust badge from AgentAvow — cryptographic "
-                "identity and trust scores for your AI agents. "
-                "agentavow.com/bot-onboarding"
+                "Shipping models, tools, or agents? Get a free signed safety "
+                "grade from AgentAvow for the MCP servers and packages they "
+                "expose, verifiable offline. agentavow.com/check"
             ),
         },
     ),
@@ -261,83 +279,82 @@ TOPICS: list[Topic] = [
         weight=1.4,
         angles={
             "twitter": (
-                "The agent identity crisis is real: World is building 'proof of "
-                "human' for AI shopping agents, OpenClaw has 512 CVEs with "
-                "elevated system access, and Moltbook went viral for fake posts. "
-                "AgentAvow: verified identity for every agent, by design."
+                "OpenClaw: 512 CVEs and ~12% malware in its skills marketplace. "
+                "We scanned 231 of those skills and found 14,350 issues, 32% "
+                "graded F. Agents connect to these tools. AgentAvow grades "
+                "whether they're safe to."
             ),
             "reddit": (
-                "Analysis: The AI agent ecosystem has an identity problem. "
-                "World/Tools for Humanity just launched 'proof of human' for "
-                "agentic commerce. OpenClaw has 1,000 people lining up in China "
-                "despite 512 known CVEs. Moltbook went viral because of fake "
-                "posts — bot content mistaken for authentic human content. "
-                "Meanwhile Bluesky just raised $100M for decentralized social. "
-                "Here's why agent identity infrastructure is the missing layer."
+                "Analysis: the AI agent tool supply chain is the real security "
+                "story. OpenClaw has 512 known CVEs and roughly 12% malware in "
+                "its skills marketplace (CVE-2026-25253, CVSS 8.8) — we scanned "
+                "231 skills ourselves and found 14,350 security issues, 32% "
+                "graded F. Moltbook leaked 35K emails and 1.5M API tokens across "
+                "770K agents with zero verification. Identity and auth were never "
+                "the missing piece here; nobody was grading whether the tools "
+                "themselves were safe to connect. The case for a tool-safety layer."
             ),
             "linkedin": (
-                "Three signals this week that prove AI agents need trust "
-                "infrastructure: (1) World launched 'proof of human' for agent "
-                "commerce — biometric verification for AI shopping agents. "
-                "(2) OpenClaw saw massive adoption in China despite 512 CVEs "
-                "and elevated system access requirements. (3) Bluesky raised "
-                "$100M to build decentralized social protocols. The pattern: "
-                "identity and trust are becoming table stakes."
+                "Three data points on why tool safety is the missing axis in "
+                "agent security: (1) OpenClaw carries 512 CVEs and ~12% malware "
+                "in its skills marketplace — we scanned 231 skills and found "
+                "14,350 issues, 32% graded F. (2) Moltbook leaked 35K emails and "
+                "1.5M API tokens across 770K unverified agents. (3) Every "
+                "framework now ships identity and authorization, yet an "
+                "authorized agent still connects to whatever tool it's pointed "
+                "at. The tool itself is what goes ungraded."
             ),
             "discord": (
-                "Interesting week in the agent space — World is doing biometric "
-                "'proof of human' for AI agents, OpenClaw is exploding in China "
-                "despite the security issues, and Bluesky just raised $100M. "
-                "The identity layer is becoming the real bottleneck."
+                "Wild stat: we scanned 231 OpenClaw skills and found 14,350 "
+                "security issues, 32% graded F. Agents install these without "
+                "checking. That's the poisoned-tool gap in one number."
             ),
             "bluesky": (
-                "World built 'proof of human' for AI shopping agents. OpenClaw "
-                "has 512 CVEs and people are still lining up. The agent ecosystem "
-                "needs trust infrastructure, not just more agents."
+                "We scanned 231 OpenClaw skills and found 14,350 security issues, "
+                "32% graded F. A fully authorized agent will connect to any of "
+                "them. That's the gap AgentAvow grades."
             ),
             "devto": (
-                "The AI Agent Identity Crisis: Why World, OpenClaw, and Moltbook "
-                "Prove We Need Trust Infrastructure — a technical analysis of the "
-                "identity gap in the agent ecosystem and how verifiable DIDs, "
-                "trust scoring, and open social graphs can fix it."
+                "The Agent Tool Supply Chain Is the Security Story: What Scanning "
+                "231 OpenClaw Skills (14,350 issues, 32% graded F) Says About the "
+                "Poisoned-Tool Gap — and how signed safety grades close it."
             ),
             "hackernews": (
-                "Observations on the AI agent identity problem: World is building "
-                "biometric verification for agent commerce, OpenClaw has 512 CVEs "
-                "with massive China adoption, and Moltbook's fake-post problem "
-                "just got acquired by Meta. The missing piece is trust infrastructure."
+                "The AI agent tool supply chain: OpenClaw has 512 CVEs and ~12% "
+                "malware in its skills marketplace; a scan of 231 skills surfaced "
+                "14,350 issues (32% graded F). Identity and authorization don't "
+                "cover whether the tool is safe to connect."
             ),
             "telegram": (
-                "Big week in the agent ecosystem:\n"
-                "- World launched 'proof of human' for AI shopping agents\n"
-                "- OpenClaw: 1000+ people lined up in China despite 512 CVEs\n"
-                "- Moltbook: went viral for fake posts, now owned by Meta\n"
-                "- Bluesky: $100M for decentralized social\n"
-                "- NVIDIA: $1T AI chip projection, NemoClaw for enterprise\n\n"
-                "The pattern? Agent identity and trust are the bottleneck."
+                "The agent tool supply chain, by the numbers:\n"
+                "- OpenClaw: 512 CVEs, ~12% malware in the skills marketplace\n"
+                "- 231 skills scanned: 14,350 issues, 32% graded F\n"
+                "- Moltbook: 35K emails + 1.5M API tokens leaked, 770K "
+                "unverified agents\n\n"
+                "Identity and auth were never the gap. Grading the tool is."
             ),
         },
     ),
     Topic(
         key="platform_updates",
-        name="AgentAvow Platform Updates",
+        name="AgentAvow Scan Activity",
         weight=1.0,
         angles={
             "bluesky": (
-                "Share a brief update on what's happening on AgentAvow: "
-                "new agents registered, recent trust score activity, "
-                "interesting profiles, or new features. Include a link to "
-                "https://agentavow.com. Keep it conversational and genuine — "
-                "like a founder sharing what's new on the platform this week. "
+                "Share a brief, genuine update on what AgentAvow scanned this "
+                "week: notable tools graded, interesting findings, new additions "
+                "to the public trust catalog, or a shipped feature. Include a "
+                "link to https://agentavow.com/check. Keep it conversational, "
+                "like a founder sharing what the scanner surfaced this week. "
                 "Also mention our AI Agent News custom feed: "
                 "https://bsky.app/profile/agentavow.bsky.social/feed/ai-agent-news"
             ),
             "twitter": (
-                "Share a brief update on what's happening on AgentAvow: "
-                "new agents registered, recent trust score activity, "
-                "interesting profiles, or new features. Include a link to "
-                "https://agentavow.com. Keep it conversational and genuine — "
-                "like a founder sharing what's new on the platform this week."
+                "Share a brief, genuine update on what AgentAvow scanned this "
+                "week: notable tools graded, interesting findings, new additions "
+                "to the public trust catalog, or a shipped feature. Include a "
+                "link to https://agentavow.com/check. Keep it conversational, "
+                "like a founder sharing what the scanner surfaced this week."
             ),
         },
     ),

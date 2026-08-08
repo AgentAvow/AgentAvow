@@ -119,6 +119,8 @@ async def run_security_scan(
     vulns = {
         "trust_score": result.trust_score,
         "files_scanned": result.files_scanned,
+        "total_scannable_files": result.total_scannable_files,
+        "sampled": result.sampled,
         "primary_language": result.primary_language,
         "critical_count": result.critical_count,
         "high_count": result.high_count,

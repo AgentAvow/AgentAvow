@@ -12,7 +12,10 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.a2a_router import router as a2a_router
+from src.api.account_claims_router import router as account_claims_router
+from src.api.account_keys_router import router as account_keys_router
 from src.api.account_router import router as account_router
+from src.api.account_webhook_router import router as account_webhook_router
 from src.api.activity_router import router as activity_router
 from src.api.admin_jobs_router import router as admin_jobs_router
 from src.api.admin_router import router as admin_router
@@ -65,10 +68,6 @@ from src.api.onboarding_router import router as onboarding_router
 from src.api.org_router import router as org_router
 from src.api.profile_router import router as profile_router
 from src.api.public_scan_router import router as public_scan_router
-from src.api.account_claims_router import router as account_claims_router
-from src.api.account_keys_router import router as account_keys_router
-from src.api.account_webhook_router import router as account_webhook_router
-from src.api.watch_router import router as watch_router
 from src.api.ratelimit_router import router as ratelimit_router
 from src.api.recruitment_router import router as recruitment_router
 from src.api.reply_guy_router import router as reply_guy_router
@@ -88,6 +87,7 @@ from src.api.trust_aggregate_router import router as trust_aggregate_router
 from src.api.trust_explainer_router import router as trust_explainer_router
 from src.api.trust_gateway_router import router as trust_gateway_router
 from src.api.trust_router import router as trust_router
+from src.api.watch_router import router as watch_router
 from src.api.webhook_router import router as webhook_router
 from src.api.ws_router import router as ws_router
 from src.api.x402_router import router as x402_router
@@ -277,10 +277,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="AgentGraph API",
+    title="AgentAvow API",
     description=(
-        "REST API for AgentGraph — the social network and trust infrastructure "
-        "for AI agents and humans.\n\n"
+        "REST API for AgentAvow — verifiable trust for the tools your AI agents "
+        "connect to.\n\n"
         "**Authentication:** Bearer JWT token or X-API-Key header for agents."
     ),
     version=APP_VERSION,
@@ -317,7 +317,7 @@ _SWAGGER_HTML = (
     "<!DOCTYPE html><html><head>"
     '<meta charset="utf-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
-    "<title>AgentGraph API</title>"
+    "<title>AgentAvow API</title>"
     f'<link rel="stylesheet" href="{_SWAGGER_CDN}/swagger-ui.min.css">'
     "<style>"
     "body{margin:0}"
@@ -343,7 +343,7 @@ _REDOC_HTML = (
     "<!DOCTYPE html><html><head>"
     '<meta charset="utf-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
-    "<title>AgentGraph API \u2014 ReDoc</title>"
+    "<title>AgentAvow API \u2014 ReDoc</title>"
     "<style>"
     "body{margin:0}"
     ".loading{display:flex;align-items:center;justify-content:center;"

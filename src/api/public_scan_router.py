@@ -11,10 +11,12 @@ Endpoints:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -169,7 +171,7 @@ class PublicScanResponse(BaseModel):
     score_note: str = (
         "trust_score is the security scan score (code analysis only). "
         "For full entity trust including identity and external signals, "
-        "import this bot to AgentGraph or use the gateway: "
+        "import this bot to AgentAvow or use the gateway: "
         "POST /api/v1/gateway/check"
     )
     # Proxy gateway hint
@@ -207,7 +209,7 @@ async def _get_entity_trust(repo: str, db: AsyncSession) -> dict | None:
             "imported": False,
             "import_url": f"https://agentgraph.co/bots/import?url=https://github.com/{repo}",
             "message": (
-                "Import this bot to AgentGraph for a full trust profile "
+                "Import this bot to AgentAvow for a full trust profile "
                 "with identity verification, external signals, and "
                 "trust-tiered rate limits."
             ),
@@ -397,14 +399,20 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
     code still scans clean. ``toolDrift`` records drift vs the previous scan.
     """
     now = datetime.now(timezone.utc)
+    _meta = result_data["metadata"]
     scan_block = {
         "trustScore": result_data["trust_score"],
         "trustTier": result_data["trust_tier"],
         "result": result_data["scan_result"],
         "findings": result_data["findings"],
         "positiveSignals": result_data["positive_signals"],
-        "filesScanned": result_data["metadata"]["files_scanned"],
-        "primaryLanguage": result_data["metadata"]["primary_language"],
+        "filesScanned": _meta["files_scanned"],
+        # Coverage disclosure: the 200-file sample cap means a large repo is only
+        # partially scanned. filesTotal (= total_scannable_files) + sampled make
+        # partial coverage explicit in the signed attestation, not just implied.
+        "filesTotal": _meta.get("total_scannable_files", _meta["files_scanned"]),
+        "sampled": bool(_meta.get("sampled", False)),
+        "primaryLanguage": _meta["primary_language"],
         "categoryScores": result_data.get("category_scores", {}),
         "toolManifestDigest": result_data.get("tool_manifest_digest"),
         "toolDigests": result_data.get("tool_digests", {}),
@@ -414,7 +422,7 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
         "type": "SecurityPostureAttestation",
         "issuer": {
             "id": "did:web:agentgraph.co",
-            "name": "AgentGraph",
+            "name": "AgentAvow",
             "url": "https://agentgraph.co",
         },
         "subject": {
@@ -481,6 +489,13 @@ def _scan_result_to_dict(result: object) -> dict:
         "positive_signals": list(set(result.positive_signals)),
         "metadata": {
             "files_scanned": result.files_scanned,
+            # total_scannable_files + sampled disclose partial coverage (200-file
+            # cap). getattr keeps this resilient until ScanResult grows the fields.
+            "total_scannable_files": getattr(
+                result, "total_scannable_files", None
+            ) if getattr(result, "total_scannable_files", None) is not None
+            else result.files_scanned,
+            "sampled": bool(getattr(result, "sampled", False)),
             "primary_language": result.primary_language,
             "has_readme": result.has_readme,
             "has_license": result.has_license,
@@ -684,16 +699,61 @@ async def public_scan(
 
     token = await get_github_token()
     try:
-        result = await scan_repo(
-            full_name=full_name,
-            stars=0,
-            description="",
-            framework="",
-            token=token,
+        # Cap the synchronous scan so a large repo can't hold a uvicorn worker
+        # until nginx cuts the upstream (→ 502). On timeout we degrade
+        # gracefully below instead of hanging the worker.
+        result = await asyncio.wait_for(
+            scan_repo(
+                full_name=full_name,
+                stars=0,
+                description="",
+                framework="",
+                token=token,
+            ),
+            timeout=90,
         )
-    except Exception:
-        logger.exception("Public scan failed for %s", full_name)
+    except asyncio.TimeoutError:
+        logger.warning("Public scan timed out for %s after 90s", full_name)
+        # Prefer serving a stale cached result over failing the request.
+        stale = await _get_cached(owner, repo)
+        if stale:
+            payload = _build_scan_payload(full_name, stale)
+            jws = create_jws(canonicalize(payload))
+            entity_trust = await _get_entity_trust(full_name, db)
+            trust_envelope = await _build_scan_envelope(owner, repo, stale, db)
+            return PublicScanResponse(
+                repo=full_name,
+                trust_score=stale["trust_score"],
+                security_score=stale["trust_score"],
+                trust_tier=stale["trust_tier"],
+                recommended_limits=RecommendedLimits(**stale["recommended_limits"]),
+                scan_result=stale["scan_result"],
+                findings=FindingsSummary(**stale["findings"]),
+                positive_signals=stale.get("positive_signals", []),
+                category_scores=stale.get("category_scores", {}),
+                metadata=ScanMetadata(**stale["metadata"]),
+                scanned_at=stale["scanned_at"],
+                cached=True,
+                jws=jws,
+                tool_manifest_digest=stale.get("tool_manifest_digest"),
+                tool_digests=stale.get("tool_digests", {}),
+                entity_trust=entity_trust,
+                trust_envelope=trust_envelope,
+            )
+        # No cache to fall back on — tell the caller to retry, don't hang or 502.
+        raise HTTPException(
+            503,
+            "Scan is taking longer than expected — please retry shortly.",
+            headers={"Retry-After": "30"},
+        )
+    except httpx.HTTPError as exc:
+        # A genuine GitHub/upstream network failure — 502 is accurate here.
+        logger.warning("GitHub upstream error scanning %s: %s", full_name, exc)
         raise HTTPException(502, "Scan failed — GitHub API may be unavailable")
+    except Exception:
+        # An internal bug, not an upstream outage — don't mislabel it a 502.
+        logger.exception("Public scan internal error for %s", full_name)
+        raise HTTPException(500, "Internal error while scanning repository")
 
     if result.error:
         raise HTTPException(
@@ -716,8 +776,6 @@ async def public_scan(
     new_score = data["trust_score"]
     if new_score != old_score:
         try:
-            import asyncio
-
             from src.trust.outbound_webhooks import notify_scan_change
 
             asyncio.create_task(notify_scan_change(full_name, new_score, old_score))

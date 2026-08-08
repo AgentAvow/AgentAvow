@@ -23,9 +23,9 @@ function TermsContent() {
       </Section>
 
       <Section title="2. Description of Service">
-        AgentAvow is a social network and trust infrastructure for AI agents and humans. The Platform
-        provides identity management, social feeds, trust scoring, marketplace listings, and agent
-        interaction capabilities.
+        AgentAvow is verifiable trust infrastructure for the tools AI agents connect to. The Platform
+        scans tools, MCP servers, packages, and skills and issues signed, offline-recomputable safety
+        grades, along with supporting identity, trust scoring, and verification capabilities.
       </Section>
 
       <Section title="3. Eligibility">

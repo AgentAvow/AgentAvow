@@ -13,73 +13,70 @@ logger = logging.getLogger(__name__)
 
 STATS_TWITTER = (
     "AgentAvow this week:\n"
-    "\u2022 {new_agents} new agents registered\n"
-    "\u2022 {new_humans} new humans joined\n"
-    "\u2022 {total_entities} total entities in the network\n"
-    "\u2022 {posts_this_week} posts in the feed\n"
+    "\u2022 {new_agents} new tools scanned\n"
+    "\u2022 {total_entities} tools in the trust catalog\n"
+    "\u2022 {trust_updates} safety grades recomputed\n"
     "{link}"
 )
 
 STATS_REDDIT = (
-    "## AgentAvow Weekly Stats ({date_range})\n\n"
+    "## AgentAvow Weekly Scan Stats ({date_range})\n\n"
     "| Metric | This Week | Total |\n"
     "|--------|-----------|-------|\n"
-    "| New Agents | {new_agents} | {total_agents} |\n"
-    "| New Humans | {new_humans} | {total_humans} |\n"
-    "| Feed Posts | {posts_this_week} | {total_posts} |\n"
-    "| Trust Scores Updated | {trust_updates} | — |\n"
-    "| Marketplace Listings | {new_listings} | {total_listings} |\n\n"
+    "| Tools Scanned | {new_agents} | {total_agents} |\n"
+    "| Safety Grades Recomputed | {trust_updates} | — |\n"
+    "| Tools in Trust Catalog | — | {total_entities} |\n\n"
     "**Highlights:**\n"
-    "- Most active agent: {top_agent}\n"
-    "- Trending topic: {trending_topic}\n\n"
+    "- Most-checked tool this week: {top_agent}\n"
+    "- What we focused on: {trending_topic}\n\n"
     "{link}"
 )
 
 STATS_LINKEDIN = (
-    "AgentAvow Network Update ({date_range})\n\n"
-    "\u2022 {new_agents} new agents and {new_humans} new humans joined\n"
-    "\u2022 {total_entities} entities now in our trust network\n"
-    "\u2022 {trust_updates} trust scores recomputed\n\n"
+    "AgentAvow Scan Update ({date_range})\n\n"
+    "\u2022 {new_agents} tools scanned for safety this week\n"
+    "\u2022 {total_entities} tools now in the public trust catalog\n"
+    "\u2022 {trust_updates} signed safety grades recomputed\n\n"
     "{link}\n\n"
-    "#AIAgents #TrustInfrastructure #AgentAvow"
+    "#AIAgents #ToolSafety #AgentAvow"
 )
 
 STATS_BLUESKY = (
-    "AgentAvow this week: {new_agents} new agents, "
-    "{new_humans} new humans, {total_entities} total. "
+    "AgentAvow this week: {new_agents} tools scanned, "
+    "{total_entities} in the trust catalog. "
     "{link}"
 )
 
 # --- Agent announcement templates ---
 
 AGENT_ANNOUNCEMENT_TWITTER = (
-    "New on AgentAvow: {agent_name} just registered with "
-    "{capability_count} capabilities. Trust score: {trust_score:.2f}. "
-    "Check them out: {link}"
+    "New scan on AgentAvow: {agent_name} graded, "
+    "{capability_count} findings. Trust score: {trust_score:.2f}. "
+    "Full signed report: {link}"
 )
 
 AGENT_ANNOUNCEMENT_REDDIT = (
-    "## New Agent: {agent_name}\n\n"
-    "**Capabilities:** {capabilities}\n"
-    "**Framework:** {framework}\n"
+    "## New Scan: {agent_name}\n\n"
+    "**Findings:** {capabilities}\n"
+    "**Surface:** {framework}\n"
     "**Trust Score:** {trust_score:.2f}\n\n"
-    "Registered via {registration_method}. "
-    "Profile: {link}"
+    "Scanned via {registration_method}. "
+    "Signed report: {link}"
 )
 
 # --- Import announcement templates ---
 
 IMPORT_ANNOUNCEMENT_TWITTER = (
-    "We just imported {count} agents from {source} — now with "
-    "verified identities on AgentAvow. Explore them: {link}"
+    "We just scanned {count} tools from {source} — each with a "
+    "signed safety grade on AgentAvow. Browse them: {link}"
 )
 
 IMPORT_ANNOUNCEMENT_REDDIT = (
-    "## {count} Agents Imported from {source}\n\n"
-    "We've added {count} agents from {source} to AgentAvow, "
-    "each with a verified DID and trust baseline.\n\n"
-    "Each keeps a portable DID, so its identity verifies anywhere, "
-    "not just where it was built.\n\n"
+    "## {count} Tools Scanned from {source}\n\n"
+    "We've scanned {count} tools from {source} and added them to the "
+    "AgentAvow trust catalog, each with a signed A-to-F safety grade.\n\n"
+    "Every grade ships with a JWS attestation you can recompute offline "
+    "against the public JWKS — verify it yourself, don't take our word.\n\n"
     "Browse them: {link}"
 )
 

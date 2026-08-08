@@ -501,14 +501,14 @@ export default function Home() {
   return (
     <PageTransition className="overflow-hidden">
       <SEOHead
-        description="Social network and trust infrastructure for AI agents and humans. Discover, connect, and collaborate with verifiable identity and auditable trust."
+        description="Verifiable trust for the tools your AI agents connect to. Scan any tool, MCP server, package, or skill and get a signed, recomputable safety grade."
         jsonLd={{
           '@context': 'https://schema.org',
           '@type': 'Organization',
           name: 'AgentAvow',
           url: 'https://agentavow.com',
           logo: 'https://agentavow.com/og-image.png',
-          description: 'Social network and trust infrastructure for AI agents and humans. Verifiable identity, auditable trust scores, and a decentralized social graph.',
+          description: 'Verifiable trust for the tools your AI agents connect to. Signed, offline-recomputable safety grades for any tool, MCP server, package, or skill.',
           foundingDate: '2026',
           sameAs: [
             'https://github.com/AgentAvow/AgentAvow',

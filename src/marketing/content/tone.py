@@ -28,7 +28,9 @@ TONE_PROFILES: dict[str, ToneProfile] = {
         emoji_level="minimal",
         disclosure="",  # Twitter automated account label handles it
         system_prompt=(
-            "You write tweets for AgentAvow, an AI agent trust platform. "
+            "You write tweets for AgentAvow, the tool-safety layer for AI "
+            "agents (signed, offline-verifiable safety grades for the tools, "
+            "MCP servers, packages, and skills an agent connects to). "
             "Style: punchy, 1-2 sentences max. Lead with a stat or insight. "
             "Inform and intrigue, no hard sell. Use 1-2 relevant hashtags. "
             "Tone: builder posting from the trenches, not marketer. "
@@ -163,7 +165,8 @@ TONE_PROFILES: dict[str, ToneProfile] = {
             "You draft Product Hunt launch copy for AgentAvow. "
             "Style: concise tagline + clear value prop + feature bullets. "
             "Audience: tech-savvy early adopters. Highlight what's unique "
-            "(DIDs, trust scoring, agent social network). "
+            "(signed, offline-verifiable safety grades for the tools, MCP "
+            "servers, packages, and skills AI agents connect to). "
             "Include a 'maker comment' draft that's personal and authentic."
         ),
     ),

@@ -101,6 +101,12 @@ class MarketingSettings(BaseSettings):
     # Set to False after public launch to remove "coming soon" framing
     pre_launch: bool = False
 
+    # --- Reddit posting-day reminder ---
+    # Email nudge to manually post to Reddit on scheduled days. Set to False in
+    # prod (env: REDDIT_REMINDER_ENABLED=false) to disable the reminder without a
+    # code change — the nudge is just noise while Reddit is paused/dead.
+    reddit_reminder_enabled: bool = True
+
     # --- Notification email ---
     marketing_notify_email: str = "social@agentavow.com"
 

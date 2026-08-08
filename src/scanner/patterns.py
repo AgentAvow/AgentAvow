@@ -138,11 +138,10 @@ FS_ACCESS_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         re.compile(r"fs\.(?:readFileSync|writeFileSync|readFile|writeFile)\s*\("),
         "medium",
     ),
-    (
-        "Path traversal risk (../ in string)",
-        re.compile(r"""['"]\.\.[\\/]"""),
-        "high",
-    ),
+    # NOTE: the old `['"]\.\.[\\/]` "path traversal" rule was removed — it matched
+    # every relative ES import (`from "../x"`) and tsconfig path, a pure false positive.
+    # Real path-traversal risk comes from a variable concatenated with "..", not a quoted
+    # string literal / import statement, so a bare quoted "../" is not flagged here.
     (
         "rmrf / recursive delete",
         re.compile(r"(?:shutil\.rmtree|fs\.rm.*recursive|rimraf)\s*\("),

@@ -424,8 +424,16 @@ async def run_proactive_cycle(db: AsyncSession) -> dict:
                 )
                 continue
 
-            # Non-auto-post platforms → draft queue for human review
-            if not _is_auto_post(platform_name):
+            # Route to the draft queue (human review) when either:
+            #  - the platform is not an auto-post platform, OR
+            #  - the copy persistently tripped the AI-tell gate on an auto-post
+            #    platform (content.needs_human_review) — the no-slop hard gate,
+            #    so slop can never auto-publish.
+            slop_reroute = (
+                getattr(content, "needs_human_review", False)
+                and _is_auto_post(platform_name)
+            )
+            if not _is_auto_post(platform_name) or slop_reroute:
                 await enqueue_draft(
                     db, platform=platform_name, content=content.text,
                     topic=content.topic, llm_model=content.llm_model,
@@ -439,7 +447,10 @@ async def run_proactive_cycle(db: AsyncSession) -> dict:
                 # with different LLM text, so dedup can't catch it → a pile of drafts/day).
                 await record_post(platform_name)
                 await record_topic(platform_name, content.topic)
-                results["drafts"].append({"platform": platform_name, "topic": content.topic})
+                draft_info = {"platform": platform_name, "topic": content.topic}
+                if slop_reroute:
+                    draft_info["reason"] = "ai_tell_gate"
+                results["drafts"].append(draft_info)
                 continue
 
             # Post it (with image if available)
@@ -764,15 +775,20 @@ async def run_marketing_tick(db: AsyncSession) -> dict:
         logger.exception("Monitoring cycle failed")
         results["monitoring"] = {"error": "cycle_failed"}
 
-    # 5. Reddit posting day reminder (email only — no Reddit API calls)
-    try:
-        from src.marketing.reddit_reminder import send_reddit_reminder
+    # 5. Reddit posting day reminder (email only — no Reddit API calls).
+    # Gated behind reddit_reminder_enabled so prod can disable the nudge via env
+    # (REDDIT_REMINDER_ENABLED=false) without a code change.
+    if marketing_settings.reddit_reminder_enabled:
+        try:
+            from src.marketing.reddit_reminder import send_reddit_reminder
 
-        reddit_reminded = await send_reddit_reminder(db)
-        results["reddit_reminder"] = reddit_reminded
-    except Exception:
-        logger.exception("Reddit reminder failed")
-        results["reddit_reminder"] = False
+            reddit_reminded = await send_reddit_reminder(db)
+            results["reddit_reminder"] = reddit_reminded
+        except Exception:
+            logger.exception("Reddit reminder failed")
+            results["reddit_reminder"] = False
+    else:
+        results["reddit_reminder"] = {"status": "disabled"}
 
     # 6. Send weekly plan reminder (Sunday)
     try:

