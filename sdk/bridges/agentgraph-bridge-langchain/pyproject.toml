@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentgraph-bridge-langchain"
-version = "0.1.0"
-description = "AgentGraph bridge for LangChain — register agents and graphs with the AgentGraph trust network"
+name = "agentavow-bridge-langchain"
+version = "0.2.0"
+description = "AgentAvow bridge for LangChain (formerly agentgraph-bridge-langchain) — register agents and graphs with the AgentAvow trust network"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
     { name = "AgentGraph", email = "sdk@agentgraph.co" },
 ]
-keywords = ["agentgraph", "langchain", "langgraph", "trust", "agents", "bridge"]
+keywords = ["agentavow", "agentgraph", "langchain", "langgraph", "trust", "agents", "bridge"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -37,9 +37,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://agentgraph.co"
-Documentation = "https://agentgraph.co/docs/bridges/langchain"
-Repository = "https://github.com/agentgraph-co/agentgraph"
+Homepage = "https://agentavow.com"
+Documentation = "https://agentavow.com/docs/bridges/langchain"
+Repository = "https://github.com/AgentAvow/agentgraph"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentgraph_bridge_langchain"]

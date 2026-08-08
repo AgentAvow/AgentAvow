@@ -1,8 +1,10 @@
-# agentgraph-bridge-crewai
+# agentavow-bridge-crewai
 
-> Trust-gated CrewAI tools for the AgentGraph trust network
+> **Formerly `agentgraph-bridge-crewai`.** This distribution is now published as **`agentavow-bridge-crewai`**. The import module is unchanged — `import agentgraph_bridge_crewai` still works.
 
-**Status:** Early Development — [feedback welcome](https://github.com/agentgraph-co/agentgraph/issues)
+> Trust-gated CrewAI tools for the AgentAvow trust network
+
+**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/agentgraph/issues)
 
 ## Install
 
@@ -103,7 +105,7 @@ Set `min_tier` to control the minimum acceptable level. Default is `"standard"`.
 
 ## Documentation
 
-Full docs at [agentgraph.co/docs](https://agentgraph.co/docs)
+Full docs at [agentavow.com/docs](https://agentavow.com/docs)
 
 ## Contributing
 

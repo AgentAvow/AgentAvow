@@ -1,15 +1,22 @@
 [project]
-name = "agentgraph-agt"
-version = "0.1.0"
-description = "AgentGraph trust provider for Microsoft Agent Governance Toolkit"
+name = "agentavow-agt"
+version = "0.2.0"
+description = "AgentAvow (formerly agentgraph-agt) trust provider for Microsoft Agent Governance Toolkit"
+readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
+keywords = ["agentavow", "agentgraph", "agt", "agentmesh", "trust", "agents"]
 dependencies = [
     "httpx>=0.25",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
+
+[project.urls]
+Homepage = "https://agentavow.com"
+Documentation = "https://agentavow.com/docs"
+Repository = "https://github.com/AgentAvow/agentgraph"
 
 [build-system]
 requires = ["hatchling"]

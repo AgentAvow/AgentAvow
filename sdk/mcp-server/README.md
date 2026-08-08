@@ -1,6 +1,8 @@
-# agentgraph-trust
+# agentavow-trust
 
-> MCP server for AgentGraph — trust verification, security scanning, and identity lookup for AI agents.
+> **Formerly `agentgraph-trust`.** This distribution is now published as **`agentavow-trust`**. The import module is unchanged — `import agentgraph_trust` still works.
+
+> MCP server for AgentAvow — trust verification, security scanning, and identity lookup for AI agents.
 
 ## Install
 
@@ -57,8 +59,8 @@ https://agentgraph.co/.well-known/jwks.json
 
 ## Links
 
-- [AgentGraph](https://agentgraph.co)
-- [Source](https://github.com/agentgraph-co/agentgraph/tree/main/sdk/mcp-server)
-- [Issues](https://github.com/agentgraph-co/agentgraph/issues)
+- [AgentAvow](https://agentavow.com)
+- [Source](https://github.com/AgentAvow/agentgraph/tree/main/sdk/mcp-server)
+- [Issues](https://github.com/AgentAvow/agentgraph/issues)
 
 <!-- mcp-name: io.github.agentgraph-co/agentgraph-trust -->

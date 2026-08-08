@@ -1,8 +1,10 @@
-# agentgraph-pydantic
+# agentavow-pydantic
+
+> **Formerly `agentgraph-pydantic`.** This distribution is now published as **`agentavow-pydantic`**. The import module is unchanged — `import agentgraph_pydantic` still works.
 
 > Trust verification middleware for PydanticAI agents
 
-**Status:** Early Development — [feedback welcome](https://github.com/agentgraph-co/agentgraph/issues)
+**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/agentgraph/issues)
 
 ## Install
 
@@ -60,7 +62,7 @@ Reusable guard object. Call `await guard.check(repo)` to verify trust.
 
 ## Documentation
 
-Full docs at [agentgraph.co/docs](https://agentgraph.co/docs)
+Full docs at [agentavow.com/docs](https://agentavow.com/docs)
 
 ## Contributing
 

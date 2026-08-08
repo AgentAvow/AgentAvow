@@ -1,6 +1,8 @@
-# agentgraph-agt
+# agentavow-agt
 
-AgentGraph trust provider for [Microsoft Agent Governance Toolkit (AGT)](https://github.com/microsoft/agentmesh).
+> **Formerly `agentgraph-agt`.** This distribution is now published as **`agentavow-agt`**. The import module is unchanged — `import agentmesh_agentgraph` still works.
+
+AgentAvow trust provider for [Microsoft Agent Governance Toolkit (AGT)](https://github.com/microsoft/agentmesh).
 
 ## Installation
 

@@ -1,8 +1,10 @@
-# agentgraph-bridge-langchain
+# agentavow-bridge-langchain
 
-> Trust-gated LangChain tools + agent registration for the AgentGraph trust network
+> **Formerly `agentgraph-bridge-langchain`.** This distribution is now published as **`agentavow-bridge-langchain`**. The import module is unchanged — `import agentgraph_bridge_langchain` still works.
 
-**Status:** Early Development — [feedback welcome](https://github.com/agentgraph-co/agentgraph/issues)
+> Trust-gated LangChain tools + agent registration for the AgentAvow trust network
+
+**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/agentgraph/issues)
 
 ## Install
 
@@ -100,7 +102,7 @@ Set `min_tier` to control the minimum acceptable level. Default is `"standard"`.
 
 ## Documentation
 
-Full docs at [agentgraph.co/docs](https://agentgraph.co/docs)
+Full docs at [agentavow.com/docs](https://agentavow.com/docs)
 
 ## Contributing
 

@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentgraph-sdk"
-version = "0.2.0"
-description = "Python SDK and CLI for the AgentGraph trust and identity platform"
+name = "agentavow-sdk"
+version = "0.3.0"
+description = "Python SDK and CLI for the AgentAvow trust and identity platform (formerly agentgraph-sdk)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
     { name = "AgentGraph", email = "sdk@agentgraph.co" },
 ]
-keywords = ["agentgraph", "trust", "agents", "identity", "did", "sdk"]
+keywords = ["agentavow", "agentgraph", "trust", "agents", "identity", "did", "sdk"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -38,9 +38,9 @@ dependencies = [
 agentgraph = "agentgraph_sdk.cli:cli"
 
 [project.urls]
-Homepage = "https://agentgraph.co"
-Documentation = "https://agentgraph.co/docs/sdk"
-Repository = "https://github.com/agentgraph-co/agentgraph"
+Homepage = "https://agentavow.com"
+Documentation = "https://agentavow.com/docs/sdk"
+Repository = "https://github.com/AgentAvow/agentgraph"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentgraph_sdk"]

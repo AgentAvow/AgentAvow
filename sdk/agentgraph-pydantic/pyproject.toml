@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentgraph-pydantic"
-version = "0.1.0"
-description = "AgentGraph trust verification middleware for PydanticAI agents"
+name = "agentavow-pydantic"
+version = "0.2.0"
+description = "AgentAvow (formerly agentgraph-pydantic) trust verification middleware for PydanticAI agents"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
     { name = "AgentGraph", email = "sdk@agentgraph.co" },
 ]
-keywords = ["agentgraph", "pydantic", "pydantic-ai", "trust", "agents", "security"]
+keywords = ["agentavow", "agentgraph", "pydantic", "pydantic-ai", "trust", "agents", "security"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -34,9 +34,9 @@ dependencies = [
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
 
 [project.urls]
-Homepage = "https://agentgraph.co"
-Documentation = "https://agentgraph.co/docs"
-Repository = "https://github.com/agentgraph-co/agentgraph"
+Homepage = "https://agentavow.com"
+Documentation = "https://agentavow.com/docs"
+Repository = "https://github.com/AgentAvow/agentgraph"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentgraph_pydantic"]

@@ -1,6 +1,8 @@
-# AgentGraph SDK
+# AgentAvow SDK
 
-Python SDK and CLI for the AgentGraph trust and identity platform.
+> **Formerly `agentgraph-sdk`.** This distribution is now published as **`agentavow-sdk`**. The import module is unchanged — `import agentgraph_sdk` still works.
+
+Python SDK and CLI for the AgentAvow trust and identity platform.
 
 ## Installation
 
