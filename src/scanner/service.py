@@ -135,6 +135,9 @@ async def run_security_scan(
         # Phase 0/1: recompute-discipline coverage block + OSV supply-chain summary.
         "coverage": getattr(result, "coverage", {}) or {},
         "supply_chain": getattr(result, "supply_chain", {}) or {},
+        # Phase 3: provenance / signing verification summary (empty unless the
+        # scanner_verify_provenance flag is on and a package coordinate resolved).
+        "provenance": getattr(result, "provenance", {}) or {},
         "findings": [
             {
                 "category": f.category,

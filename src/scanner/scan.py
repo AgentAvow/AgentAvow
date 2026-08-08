@@ -137,6 +137,11 @@ class ScanResult:
     # at their empty defaults and behaves exactly as before.
     coverage: dict = field(default_factory=dict)
     supply_chain: dict = field(default_factory=dict)
+    # Phase 2 artifact scanning: repo↔artifact drift summary + a compact summary of
+    # the published-artifact fetch/scan. Both stay empty for repo-only scans (the
+    # feature is flag-gated), so existing behaviour is unchanged.
+    drift: dict = field(default_factory=dict)
+    artifact_scan: dict = field(default_factory=dict)
     error: str | None = None
 
     @property
@@ -1528,6 +1533,14 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # Dependency/supply-chain vulns — separate bounded penalty (see helper).
     score -= _dependency_penalty(result.findings)
 
+    # Phase 3 provenance/signing — a separate, additive signal (Kenne decision #4).
+    # verified build provenance = small bonus; a package that CLAIMS provenance but
+    # fails verification = small penalty; absent = 0 (N/A, never penalized). Empty
+    # for scans without a package coordinate / with the flag off, so grades of
+    # packages without provenance are unchanged.
+    if isinstance(result.provenance, dict):
+        score += int(result.provenance.get("score_delta", 0) or 0)
+
     # Bonuses for positive signals (capped at +35)
     unique_positives = set(result.positive_signals)
     score += min(len(unique_positives) * 5, 35)
@@ -1572,6 +1585,8 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         "fs_access": "filesystem_access",
         "dependency": "dependency_health",
         "install_hook": "dependency_health",
+        # Phase 2: repo↔artifact drift (injected/modified files) is a code-safety axis.
+        "artifact_drift": "code_safety",
     }
     severity_weights = {"critical": 25, "high": 15, "medium": 8, "low": 3}
 
@@ -1784,12 +1799,233 @@ async def _run_supply_chain(
     result.supply_chain = sc_summary
 
 
+async def _maybe_scan_artifact(
+    result: ScanResult,
+    owner: str,
+    repo: str,
+    tree: list[dict],
+    token: str | None,
+    ref: str | None,
+    artifact: tuple[str, str, str | None] | None,
+    repo_text_hashes: dict[str, str],
+) -> None:
+    """Phase 2 — fetch + scan the PUBLISHED artifact and record repo↔artifact drift.
+
+    Feature-flagged (``settings.scanner_scan_artifact``, default OFF) and FAIL-OPEN:
+    any resolve/download/unpack error leaves the repo-only grade + coverage
+    untouched. When it succeeds it folds artifact findings (install hooks, injected/
+    modified files, plus every 12-category detector run over the real tree) into the
+    scan and upgrades ``coverage.scan_depth`` to ``"artifact"`` with the exact
+    artifact ``sha256`` digest and a pinned registry snapshot date.
+    """
+    from src.config import settings
+
+    if not getattr(settings, "scanner_scan_artifact", False):
+        return
+
+    coord = artifact or _discover_artifact_coord(owner, repo, tree, token, ref)
+    if not coord:
+        return
+    ecosystem, name, version = coord
+
+    try:
+        from src.scanner.artifact_scan import scan_published_artifact
+
+        # Repo path set (from the full tree — no extra network) drives added-file
+        # drift; the fetched text hashes drive modified-file drift.
+        repo_paths = {it["path"] for it in tree if it.get("type") == "blob"}
+
+        art = await scan_published_artifact(
+            ecosystem, name, version,
+            repo_paths=repo_paths,
+            repo_text_hashes=repo_text_hashes,
+        )
+    except Exception:
+        logger.warning("Artifact scan wiring failed for %s/%s — repo-only stands",
+                       owner, repo, exc_info=True)
+        return
+
+    if not art.ok:
+        result.artifact_scan = {"ok": False, "error": art.error,
+                                "ecosystem": ecosystem, "name": name}
+        return
+
+    # Fold artifact findings into the scored grade and record drift.
+    result.findings.extend(art.findings)
+    result.drift = art.drift
+    result.artifact_scan = {
+        "ok": True,
+        "ecosystem": art.ecosystem,
+        "name": art.name,
+        "version": art.version,
+        "kind": art.kind,
+        "digest": art.digest,
+        "download_url": art.download_url,
+        "files_scanned": art.files_scanned,
+        "file_count": art.file_count,
+        "unpacked_size": art.unpacked_size,
+        "drift": art.drift,
+    }
+
+    # Upgrade the coverage block: scan_depth=artifact + the real artifact digest +
+    # a pinned registry snapshot date (Phase 0 recompute discipline).
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT
+
+    if not isinstance(result.coverage, dict):
+        result.coverage = {}
+    result.coverage["surface"] = art.ecosystem
+    result.coverage["scan_depth"] = SCAN_DEPTH_ARTIFACT
+    if art.digest:
+        result.coverage["artifact_digest"] = art.digest
+    snaps = result.coverage.get("db_snapshots")
+    if not isinstance(snaps, dict):
+        snaps = {}
+    if art.registry_snapshot:
+        snaps["registry"] = art.registry_snapshot
+    result.coverage["db_snapshots"] = snaps
+
+
+def _discover_artifact_coord(
+    owner: str, repo: str, tree: list[dict], token: str | None, ref: str | None,
+) -> tuple[str, str, str | None] | None:
+    """Best-effort (ecosystem, name, version) from the repo's root manifest.
+
+    Only reads what we can infer synchronously from the tree — root ``package.json``
+    (npm) or ``pyproject.toml`` / ``setup.py`` (PyPI). Version is left ``None`` so the
+    fetcher resolves the registry's latest. Returns None when no coordinate is found.
+    """
+    root_names = {Path(it["path"]).name.lower(): it["path"]
+                  for it in tree if "/" not in it["path"]}
+    # We only have the tree here (not contents); the caller can pass an explicit
+    # coordinate. Auto-discovery uses the presence of a root manifest as the signal
+    # and defers name resolution to the fetch step via the repo name as a fallback.
+    if "package.json" in root_names:
+        return ("npm", repo, None)
+    if "pyproject.toml" in root_names or "setup.py" in root_names or "setup.cfg" in root_names:
+        return ("pypi", repo, None)
+    return None
+
+
+async def _maybe_verify_provenance(
+    result: ScanResult,
+    owner: str,
+    repo: str,
+    tree: list[dict],
+    token: str | None,
+    ref: str | None,
+    artifact: tuple[str, str, str | None] | None,
+) -> None:
+    """Phase 3 — fetch + cryptographically verify build provenance (npm/PyPI).
+
+    Feature-flagged (``settings.scanner_verify_provenance``, default OFF) and
+    FAIL-OPEN: any resolve/fetch/verify error leaves the grade + coverage
+    untouched and ``coverage.provenance_binding`` stays ``"n/a"``.
+
+    Scoring policy (Kenne decision #4), applied as a SEPARATE additive signal:
+      * absent provenance  → N/A, **never a penalty** (the long tail has none);
+      * present + verified  → a small bonus, and sets
+        ``coverage.provenance_binding = "verified:<repo>@<commit>"`` + the
+        provenance evidence anchor;
+      * CLAIMS provenance but fails verification → a small penalty (real red flag).
+
+    Provenance pairs naturally with the Phase-2 artifact fetch: when the published
+    artifact was resolved we verify THAT exact digest (enabling the subject-digest
+    gate and the top-tier "certified" eligibility). Without a concrete version we
+    skip (fail-open) rather than guess.
+    """
+    from src.config import settings
+
+    if not getattr(settings, "scanner_verify_provenance", False):
+        return
+
+    # Resolve a concrete coordinate. Prefer the Phase-2-resolved artifact (gives a
+    # digest + artifact scan_depth); else an explicit caller coordinate.
+    ecosystem = name = version = None
+    artifact_digest = None
+    filename = None
+    art = result.artifact_scan if isinstance(result.artifact_scan, dict) else {}
+    if art.get("ok"):
+        ecosystem, name, version = art.get("ecosystem"), art.get("name"), art.get("version")
+        artifact_digest = art.get("digest")
+        dl = art.get("download_url")
+        if dl:
+            filename = Path(str(dl).split("?", 1)[0]).name
+    elif artifact and artifact[2]:
+        ecosystem, name, version = artifact
+
+    surface = {"npm": "npm", "pypi": "pypi"}.get((ecosystem or "").lower())
+    if not surface or not name or not version:
+        return  # no verifiable coordinate → stay n/a, fail-open
+
+    claimed_repo = f"https://github.com/{owner}/{repo}"
+    scan_depth = (result.coverage or {}).get("scan_depth", "repo-only")
+
+    try:
+        from src.scanner.provenance import (
+            analyze_provenance,
+            coverage_binding_value,
+            provenance_score_delta,
+        )
+
+        res = await analyze_provenance(
+            surface, name, version,
+            filename=filename,
+            claimed_repo=claimed_repo,
+            artifact_digest=artifact_digest,
+            scan_depth=scan_depth,
+        )
+    except Exception:
+        logger.warning(
+            "Provenance verification wiring failed for %s/%s — repo grade stands",
+            owner, repo, exc_info=True,
+        )
+        return
+
+    delta, reason = provenance_score_delta(res)
+    summary = res.summary()
+    summary["score_delta"] = delta
+    summary["score_reason"] = reason
+    result.provenance = summary
+
+    # Wire into the coverage block (recompute discipline).
+    if not isinstance(result.coverage, dict):
+        result.coverage = {}
+    binding = coverage_binding_value(res)
+    result.coverage["provenance_binding"] = binding
+    if res.snapshot:
+        snaps = result.coverage.get("db_snapshots")
+        if not isinstance(snaps, dict):
+            snaps = {}
+        # Pin the Rekor index / fetch timestamp so the check is offline-recomputable.
+        if res.snapshot.get("rekor_log_index"):
+            snaps["rekor_log_index"] = res.snapshot["rekor_log_index"]
+        result.coverage["db_snapshots"] = snaps
+
+    if res.verified:
+        # Add the provenance evidence anchor and record the verified source binding.
+        from src.scanner.coverage import EVIDENCE_ANCHOR_SBOM, build_evidence_anchors
+
+        has_sbom = EVIDENCE_ANCHOR_SBOM in (result.coverage.get("evidence_anchors") or [])
+        result.coverage["evidence_anchors"] = build_evidence_anchors(
+            has_sbom=has_sbom, has_provenance=True,
+        )
+        linked = result.coverage.get("linked_repo")
+        if not isinstance(linked, dict):
+            linked = {"url": claimed_repo}
+        prov_commit = res.binding.get("commit")
+        if prov_commit:
+            linked["commit"] = prov_commit
+        linked["binding"] = "slsa-provenance"
+        result.coverage["linked_repo"] = linked
+
+
 async def scan_repo(
     full_name: str,
     stars: int = 0,
     description: str = "",
     framework: str = "",
     token: str | None = None,
+    artifact: tuple[str, str, str | None] | None = None,
 ) -> ScanResult:
     """Scan a single GitHub repo for security issues.
 
@@ -1799,6 +2035,10 @@ async def scan_repo(
         description: repo description
         framework: detected framework
         token: GitHub API token (optional but recommended for rate limits)
+        artifact: optional explicit published-artifact coordinate
+            ``(ecosystem, name, version)`` for the Phase-2 artifact scan (npm/pypi).
+            When omitted and the artifact feature flag is on, a coordinate is
+            auto-discovered from the repo's root manifest.
 
     Returns:
         ScanResult with findings and trust score
@@ -1948,12 +2188,18 @@ async def scan_repo(
         per_file_timeout = 15.0  # seconds per file fetch
         sem = asyncio.Semaphore(scan_concurrency)
 
+        # Phase 2: repo file content hashes (path -> sha256 of text), used to detect
+        # repo↔artifact MODIFIED-file drift. Only populated for files we fetched.
+        repo_text_hashes: dict[str, str] = {}
+
         async def _scan_one(item: dict) -> tuple:
             """Fetch and scan a file.
 
-            Returns (findings, positives, suppressed, digest, scanned). ``scanned`` is
-            True only when the file was actually fetched AND scanned — a failed fetch or
-            empty file returns False so it does NOT inflate ``files_scanned`` (#7).
+            Returns (findings, positives, suppressed, digest, text_hash, scanned).
+            ``scanned`` is True only when the file was actually fetched AND scanned —
+            a failed fetch or empty file returns False so it does NOT inflate
+            ``files_scanned`` (#7). ``text_hash`` is ``(path, sha256(text))`` for
+            Phase-2 drift comparison, or None.
             """
             path = item["path"]
             try:
@@ -1963,16 +2209,20 @@ async def scan_repo(
                         timeout=per_file_timeout,
                     )
                 if not content:
-                    return [], [], 0, None, False
+                    return [], [], 0, None, None, False
                 f, p, s = _scan_content(content, path, allowlist)
-                return f, p, s, (path, _canonical_tool_digest(content, path)), True
+                text_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                return (
+                    f, p, s, (path, _canonical_tool_digest(content, path)),
+                    (path, text_hash), True,
+                )
             except (asyncio.TimeoutError, Exception):
-                return [], [], 0, None, False
+                return [], [], 0, None, None, False
 
         tasks = [_scan_one(item) for item in scan_files]
         scan_results = await asyncio.gather(*tasks)
 
-        for findings_list, positives_list, suppressed, digest, scanned in scan_results:
+        for findings_list, positives_list, suppressed, digest, text_hash, scanned in scan_results:
             # Only count files that were actually scanned (#7) — signed filesScanned
             # must reflect real coverage, not attempted fetches.
             if scanned:
@@ -1982,6 +2232,8 @@ async def scan_repo(
             result.suppressed_count += suppressed
             if digest and digest[1]:
                 result.tool_digests[digest[0]] = digest[1]
+            if text_hash and text_hash[1]:
+                repo_text_hashes[text_hash[0]] = text_hash[1]
 
         result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
 
@@ -2017,6 +2269,25 @@ async def scan_repo(
         # coverage block so the subscore is offline-recomputable (Phase 0).
         await _run_supply_chain(
             result, owner, repo, tree, token, ref, sem, per_file_timeout,
+        )
+
+        # --- Phase 2: published-artifact fetch + scan + repo↔artifact drift ----
+        # Feature-flagged (default OFF) and FAIL-OPEN. When enabled it scans the
+        # real npm/PyPI artifact (install hooks, injected/modified files, the full
+        # 12-category engine over the extracted tree) and upgrades coverage to
+        # scan_depth="artifact" with the exact artifact digest.
+        await _maybe_scan_artifact(
+            result, owner, repo, tree, token, ref, artifact, repo_text_hashes,
+        )
+
+        # --- Phase 3: provenance / signing verification ------------------------
+        # Feature-flagged (default OFF) and FAIL-OPEN. Fetches + cryptographically
+        # verifies the published package's build provenance (npm Sigstore / PyPI
+        # PEP 740), binds it to source repo+commit+builder, and feeds a SEPARATE
+        # additive signal: verified→bonus, claims-but-fails→small penalty, absent→
+        # N/A. Runs after the artifact scan so it can verify the exact fetched digest.
+        await _maybe_verify_provenance(
+            result, owner, repo, tree, token, ref, artifact,
         )
 
         # Calculate trust score and per-category sub-scores

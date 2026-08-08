@@ -190,6 +190,33 @@ class Settings(BaseSettings):
     scanner_supply_chain_max_lockfiles: int = 8
     scanner_supply_chain_max_workflows: int = 12
 
+    # --- Phase 3 provenance / signing verification ----------------------------
+    # Fetch + cryptographically verify a published package's build provenance
+    # (npm Sigstore SLSA attestations / PyPI PEP 740) and bind the artifact to its
+    # source repo+commit+CI-builder. ADDITIVE, FEATURE-FLAGGED (default OFF until
+    # reviewed), and FAIL-OPEN: any network/parse/verify error is treated as "not
+    # present" and never breaks a scan. Scoring policy (Kenne decision #4): absent
+    # provenance is N/A (never a penalty); present+verified is a small bonus and
+    # sets coverage.provenance_binding="verified:<repo>@<commit>"; a package that
+    # CLAIMS provenance but fails verification is a small penalty (real red flag).
+    # Verification is offline via `cryptography` (DSSE PAE signature + Fulcio
+    # SAN/issuer identity gate); it does NOT anchor the Fulcio TUF trust-root nor
+    # prove Rekor inclusion — the result records exactly what level was achieved.
+    scanner_verify_provenance: bool = False
+
+    # --- Phase 2: published-ARTIFACT fetch + scan + repo↔artifact drift --------
+    # We grade the GitHub repo, but an agent installs the PUBLISHED package, which
+    # can differ ("clean repo, poisoned tarball" — event-stream, ctx, xz-utils).
+    # When on, after the repo scan we resolve+download the real npm/PyPI artifact
+    # FROM THE REGISTRY ONLY (SSRF-guarded, host-allowlisted, size/zip-bomb capped),
+    # compute its sha256 digest, unpack it STATICALLY (no execution), re-run the
+    # 12-category engine on the extracted tree, detect published install hooks
+    # (npm pre/post/install + setup.py AST), and diff the artifact tree vs the repo
+    # to surface drift. Sets coverage.scan_depth="artifact" + a real artifact_digest.
+    # ADDITIVE, FEATURE-FLAGGED (default OFF — enable after review), and FAIL-OPEN:
+    # any fetch/unpack error falls back to the repo-only grade and never breaks a scan.
+    scanner_scan_artifact: bool = False
+
     # Security re-scan job (Job 19 in src/jobs/scheduler.py) — periodic re-scan of
     # catalog entries so grades don't rot. Caps are CONFIGURABLE and sized to stay
     # under the PAT's 5000 core-req/hr budget.

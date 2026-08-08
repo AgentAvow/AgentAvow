@@ -29,10 +29,24 @@ SCAN_DEPTH_ARTIFACT = "artifact"
 SCAN_DEPTH_ARTIFACT_LIVE = "artifact+live"
 SCAN_DEPTH_DECLARED_ONLY = "declared-only"
 
-# provenance_binding vocabulary (§2.C). We don't verify provenance yet (Phase 3),
-# so a repo-only scan is "n/a" — deliberately NOT "absent" (which implies we
-# looked and found none) and never treated as a signing-axis penalty.
+# provenance_binding vocabulary (§2.C / §4.4). When provenance verification is
+# off (or no package coordinate is available) a scan is "n/a" — deliberately NOT
+# "absent" (which means we looked and found none). Phase 3 sets the richer values:
+#   "verified:<repo>@<commit>" — present + cryptographically verified + source-bound
+#   "mismatch"                 — verified signer but source/subject ≠ claimed (suspicious)
+#   "unverified"               — provenance advertised but signature/identity failed
+#   "absent"                   — we looked, found none (scored N/A, never a penalty)
+#   "n/a"                      — provenance not attempted (flag off / no coordinate)
+# Absence is NEVER a signing-axis penalty (Kenne decision #4).
 PROV_BINDING_NA = "n/a"
+PROV_BINDING_ABSENT = "absent"
+PROV_BINDING_UNVERIFIED = "unverified"
+PROV_BINDING_MISMATCH = "mismatch"
+
+
+def _is_verified_binding(value: str) -> bool:
+    """A provenance_binding that represents a positive, verified binding."""
+    return bool(value) and value.startswith("verified")
 
 
 def _utc_now_iso() -> str:
@@ -90,7 +104,7 @@ def build_coverage(
         # binding describes HOW the repo is bound to the artifact; "declared"
         # means we took the coordinate at face value (no provenance proof yet).
         linked_repo["binding"] = (
-            "slsa-provenance" if provenance_binding == "verified" else "declared"
+            "slsa-provenance" if _is_verified_binding(provenance_binding) else "declared"
         )
     if not anchor:
         # Fall back to a stable repo+commit content identifier.

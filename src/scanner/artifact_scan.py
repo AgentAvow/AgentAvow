@@ -1,0 +1,420 @@
+"""Phase 2 — scan the PUBLISHED artifact + detect repo↔artifact drift.
+
+Runs the SAME 12-category static engine (:func:`src.scanner.scan._scan_content`)
+over the unpacked artifact tree, adds the artifact-only attack surface that
+repo-only scanning is structurally blind to:
+
+  * **Install/build-time exec** — npm ``scripts.preinstall/install/postinstall``
+    in the PACKAGED ``package.json`` (reuses ``_scan_install_hooks``); PyPI
+    ``setup.py`` code that runs at ``pip install`` time from an sdist, detected by
+    **AST** (``os.system`` / ``subprocess`` / ``eval`` / ``exec`` / network / a
+    custom ``cmdclass``) — never executed.
+  * **Repo↔artifact drift** — files present in the artifact but absent from the
+    repo (``added_files``), or present with different content (``modified_files``),
+    plus ``has_install_hook``. Suspicious added *source* files raise findings — the
+    exact "clean repo, poisoned tarball" tell (event-stream, ctx, xz-utils).
+
+Everything here is **static** (no execution), **feature-flagged**
+(``settings.scanner_scan_artifact``, default False), and **fail-open**: any
+fetch/unpack error returns ``ok=False`` and the caller keeps the repo-only grade.
+"""
+from __future__ import annotations
+
+import ast
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import httpx
+
+from src.scanner.artifact_fetch import (
+    ArtifactFetchError,
+    ArtifactFetchResult,
+    fetch_npm_artifact,
+    fetch_pypi_artifact,
+)
+
+logger = logging.getLogger(__name__)
+
+# Registry snapshot date pinned into coverage.db_snapshots (recompute discipline).
+from datetime import datetime, timezone  # noqa: E402
+
+
+def _registry_snapshot() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+@dataclass
+class ArtifactScanResult:
+    """Outcome of an artifact fetch+scan+drift pass (fail-open)."""
+
+    ok: bool = False
+    ecosystem: str = ""
+    name: str = ""
+    version: str = ""
+    kind: str = ""
+    digest: str | None = None            # "sha256:..." of the artifact bytes
+    download_url: str | None = None
+    findings: list = field(default_factory=list)   # list[scan.Finding]
+    files_scanned: int = 0
+    unpacked_size: int = 0
+    file_count: int = 0
+    drift: dict = field(default_factory=dict)
+    registry_snapshot: str | None = None
+    error: str | None = None
+
+
+# Files whose presence-only in the artifact (not the repo) is a strong injection
+# tell: real executable/source code, not generated metadata/build noise.
+_DRIFT_SOURCE_EXTS = frozenset({
+    ".py", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+    ".sh", ".bash", ".rb", ".go", ".rs", ".php", ".pl", ".ps1",
+})
+# Never treat these as suspicious "added" files — they are normally generated at
+# pack time and legitimately absent from the repo.
+_DRIFT_IGNORE_NAMES = frozenset({
+    "package.json", "package-lock.json", "npm-shrinkwrap.json",
+    "pkg-info", "metadata", "record", "wheel", "top_level.txt",
+    "setup.cfg", "requires.txt", "sources.txt", "entry_points.txt",
+})
+_DRIFT_IGNORE_DIR_MARKERS = ("dist-info", "egg-info")
+
+
+# ---------------------------------------------------------------------------
+# PyPI setup.py install-time exec detection (AST — never executed)
+# ---------------------------------------------------------------------------
+
+# Dangerous callables that, at sdist install time, run arbitrary code / network.
+_AST_EXEC_CALLS = frozenset({
+    "system", "popen", "run", "call", "check_output", "check_call", "Popen",
+    "eval", "exec", "compile", "__import__",
+    "urlopen", "urlretrieve", "get", "post", "request", "socket", "connect",
+})
+_AST_NET_CALLS = frozenset({
+    "urlopen", "urlretrieve", "get", "post", "request", "socket", "connect",
+})
+
+
+def _call_name(node: ast.Call) -> str:
+    """Best-effort dotted-tail name of a call target (``a.b.c`` → ``c``)."""
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def detect_pypi_install_exec(source: str, file_path: str) -> list:
+    """AST-scan a ``setup.py`` for code that executes at ``pip install`` time.
+
+    An sdist install runs ``setup.py`` in-process — so any module-level
+    ``os.system``/``subprocess``/``eval``/network call, or a custom ``cmdclass``
+    override, is auto-run-on-install. Returns ``install_hook`` findings. Never
+    executes the file. AST parse failure ⇒ ``[]`` (fail-open; regex engine still runs).
+    """
+    from src.scanner.scan import _REMEDIATION_HINTS, Finding
+
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+
+    findings: list = []
+    has_net = False
+    exec_hits: list[tuple[str, int]] = []
+    cmdclass = False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            fname = _call_name(node)
+            if fname in _AST_EXEC_CALLS:
+                exec_hits.append((fname, getattr(node, "lineno", 1)))
+                if fname in _AST_NET_CALLS:
+                    has_net = True
+            # A custom cmdclass= overrides install/build commands with own code.
+            if fname == "setup" or (isinstance(node.func, ast.Name) and node.func.id == "setup"):
+                for kw in node.keywords:
+                    if kw.arg == "cmdclass":
+                        cmdclass = True
+
+    if exec_hits:
+        # network + exec in setup.py is the pip-install download-and-run pattern.
+        severity = "critical" if has_net else "high"
+        name, line = exec_hits[0]
+        findings.append(Finding(
+            category="install_hook",
+            name=f"setup.py executes code at install time ({name}...)",
+            severity=severity,
+            file_path=file_path,
+            line_number=line,
+            snippet=f"install-time exec via {name}(...) in setup.py",
+            remediation=_REMEDIATION_HINTS.get("install_hook", "Audit install-time code"),
+        ))
+    if cmdclass and not exec_hits:
+        findings.append(Finding(
+            category="install_hook",
+            name="setup.py overrides install/build commands (cmdclass)",
+            severity="medium",
+            file_path=file_path,
+            line_number=1,
+            snippet="custom cmdclass runs at build/install time",
+            remediation=_REMEDIATION_HINTS.get("install_hook", "Audit install-time code"),
+        ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Scan the unpacked tree with the existing 12-category engine
+# ---------------------------------------------------------------------------
+
+def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
+    """Run the 12-category engine + install-hook detectors over the unpacked tree.
+
+    Returns ``(findings, files_scanned, has_install_hook)``. Reuses the repo
+    scanner's ``_scan_content`` / ``_scan_dependencies`` verbatim, so every current
+    detector gains artifact-truth for free.
+    """
+    from src.scanner.scan import (
+        _is_source_file,
+        _load_allowlist,
+        _scan_content,
+        _scan_dependencies,
+        _should_skip_path,
+    )
+
+    findings: list = []
+    files_scanned = 0
+    has_install_hook = False
+    allowlist = _load_allowlist()
+
+    for path, af in fetched.files.items():
+        # Dependency manifests (package.json / setup.py / requirements.txt ...) →
+        # dependency + install-hook detectors (npm lifecycle hooks live here).
+        name_lower = Path(path).name.lower()
+        if name_lower in {"package.json", "setup.py", "setup.cfg", "pyproject.toml",
+                          "requirements.txt", "pipfile"}:
+            if af.text:
+                dep_findings = _scan_dependencies(af.text, path)
+                findings.extend(dep_findings)
+                if any(f.category == "install_hook" for f in dep_findings):
+                    has_install_hook = True
+
+        # PyPI setup.py — AST install-time exec (the sdist install-run surface).
+        if name_lower == "setup.py" and af.text:
+            ast_findings = detect_pypi_install_exec(af.text, path)
+            if ast_findings:
+                findings.extend(ast_findings)
+                if any(f.category == "install_hook" for f in ast_findings):
+                    has_install_hook = True
+
+        # The 12-category static engine over every scannable source file.
+        if af.text and _is_source_file(path) and not _should_skip_path(path):
+            f, _positives, _suppressed = _scan_content(af.text, path, allowlist)
+            findings.extend(f)
+            files_scanned += 1
+
+    return findings, files_scanned, has_install_hook
+
+
+# ---------------------------------------------------------------------------
+# Repo ↔ artifact drift
+# ---------------------------------------------------------------------------
+
+def _is_drift_ignorable(path: str) -> bool:
+    name = Path(path).name.lower()
+    if name in _DRIFT_IGNORE_NAMES:
+        return True
+    low = path.lower()
+    return any(marker in low for marker in _DRIFT_IGNORE_DIR_MARKERS)
+
+
+def compute_drift(
+    fetched: ArtifactFetchResult,
+    repo_paths: set[str] | None,
+    repo_text_hashes: dict[str, str] | None,
+    *,
+    has_install_hook: bool,
+) -> tuple[dict, list]:
+    """Diff the artifact tree against the repo. Returns ``(drift_summary, findings)``.
+
+    * ``added_files``    — in the artifact, absent from the repo.
+    * ``modified_files`` — in both, but content sha differs (only when we have a
+      repo text hash for that path — otherwise not asserted, to avoid false drift).
+    * ``has_install_hook`` — carried through so the summary is self-describing.
+
+    Suspicious *added source* files (real code the repo never committed) raise
+    ``artifact_drift`` findings — the core poisoned-tarball signal.
+    """
+    from src.scanner.scan import Finding
+
+    repo_paths = repo_paths or set()
+    repo_text_hashes = repo_text_hashes or {}
+
+    added: list[str] = []
+    modified: list[str] = []
+    for path, af in fetched.files.items():
+        if _is_drift_ignorable(path):
+            continue
+        if path not in repo_paths and path not in repo_text_hashes:
+            added.append(path)
+        else:
+            repo_hash = repo_text_hashes.get(path)
+            if repo_hash and af.text_sha256 and repo_hash != af.text_sha256:
+                modified.append(path)
+
+    added.sort()
+    modified.sort()
+
+    # We can only compute meaningful drift when we actually know the repo file set.
+    have_repo_view = bool(repo_paths or repo_text_hashes)
+
+    # If NONE of the artifact's non-ignorable files line up with a repo path, the
+    # two trees don't correspond (e.g. a monorepo subdir package, or a repo whose
+    # tree we couldn't fully fetch). Treating every artifact file as "added" there
+    # would be a false-positive storm — so we mark the comparison inconclusive and
+    # raise no drift findings.
+    considered = [p for p in fetched.files if not _is_drift_ignorable(p)]
+    matched = len(considered) - len(added)
+    comparable = have_repo_view and (matched > 0 or not considered)
+
+    drift = {
+        "compared": comparable,
+        "added_files": added if comparable else [],
+        "modified_files": modified,
+        "has_install_hook": bool(has_install_hook),
+        "added_count": len(added) if comparable else 0,
+        "modified_count": len(modified),
+    }
+
+    findings: list = []
+    if not comparable:
+        # Still surface an install-hook finding even when file-tree drift is
+        # inconclusive — the hook is real regardless of tree correspondence.
+        if has_install_hook:
+            findings.append(_install_hook_drift_finding())
+        return drift, findings
+
+    added = drift["added_files"]
+
+    # Added SOURCE files that the repo never committed = injected-code drift.
+    suspicious_added = [
+        p for p in added if Path(p).suffix.lower() in _DRIFT_SOURCE_EXTS
+    ]
+    if suspicious_added:
+        preview = ", ".join(suspicious_added[:5])
+        findings.append(Finding(
+            category="artifact_drift",
+            name=(
+                f"Published artifact ships {len(suspicious_added)} source file(s) "
+                "not in the repo"
+            ),
+            severity="high",
+            file_path=suspicious_added[0],
+            line_number=1,
+            snippet=f"artifact-only source: {preview}"[:120],
+            remediation=(
+                "The published package contains code absent from the git source "
+                "(clean-repo / poisoned-tarball pattern). Verify the tarball was "
+                "built from the tagged commit; treat unexplained additions as malicious."
+            ),
+        ))
+    if modified:
+        preview = ", ".join(modified[:5])
+        findings.append(Finding(
+            category="artifact_drift",
+            name=f"Published artifact modifies {len(modified)} file(s) vs the repo",
+            severity="medium",
+            file_path=modified[0],
+            line_number=1,
+            snippet=f"content differs from repo: {preview}"[:120],
+            remediation=(
+                "Artifact file content differs from the repo source — confirm the "
+                "difference is an expected build transform, not an injected change."
+            ),
+        ))
+    if has_install_hook:
+        findings.append(_install_hook_drift_finding())
+    return drift, findings
+
+
+def _install_hook_drift_finding():
+    from src.scanner.scan import Finding
+
+    return Finding(
+        category="artifact_drift",
+        name="Published artifact contains an install/build-time hook",
+        severity="high",
+        file_path="",
+        line_number=1,
+        snippet="artifact runs code on install (npm lifecycle / setup.py)",
+        remediation=(
+            "Install-time code is the top supply-chain vector — audit it and "
+            "prefer packages with no install hooks."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator (fail-open)
+# ---------------------------------------------------------------------------
+
+async def scan_published_artifact(
+    ecosystem: str,
+    name: str,
+    version: str | None = None,
+    *,
+    repo_paths: set[str] | None = None,
+    repo_text_hashes: dict[str, str] | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> ArtifactScanResult:
+    """Fetch → verify → unpack → scan → drift the published artifact. **Fail-open.**
+
+    ``ecosystem`` is ``"npm"`` or ``"pypi"``. On ANY error returns
+    ``ArtifactScanResult(ok=False, error=...)`` so the caller keeps the repo-only
+    grade — an artifact lookup must never break a scan.
+    """
+    eco = (ecosystem or "").lower()
+    result = ArtifactScanResult(ecosystem=eco, name=name, version=version or "")
+    try:
+        if eco == "npm":
+            fetched = await fetch_npm_artifact(name, version, client=client)
+        elif eco in ("pypi", "python"):
+            fetched = await fetch_pypi_artifact(name, version, client=client)
+        else:
+            result.error = f"unsupported artifact ecosystem: {ecosystem!r}"
+            return result
+
+        if not fetched.ok:
+            result.error = fetched.error or "artifact fetch failed"
+            return result
+
+        findings, files_scanned, has_hook = scan_artifact_files(fetched)
+        drift, drift_findings = compute_drift(
+            fetched, repo_paths, repo_text_hashes, has_install_hook=has_hook,
+        )
+        findings.extend(drift_findings)
+
+        result.ok = True
+        result.ecosystem = fetched.ecosystem
+        result.version = fetched.version
+        result.kind = fetched.kind
+        result.digest = fetched.digest
+        result.download_url = fetched.download_url
+        result.findings = findings
+        result.files_scanned = files_scanned
+        result.unpacked_size = fetched.unpacked_size
+        result.file_count = fetched.file_count
+        result.drift = drift
+        result.registry_snapshot = _registry_snapshot()
+        return result
+    except ArtifactFetchError as exc:
+        result.error = str(exc)
+        logger.warning("Artifact scan guard/fetch failed for %s:%s — repo-only fallback: %s",
+                       eco, name, exc)
+        return result
+    except Exception as exc:  # noqa: BLE001 — fail-open is mandatory
+        result.error = str(exc)
+        logger.warning("Artifact scan errored for %s:%s — repo-only fallback",
+                       eco, name, exc_info=True)
+        return result
