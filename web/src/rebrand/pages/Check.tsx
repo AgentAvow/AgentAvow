@@ -231,7 +231,7 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
           </div>
           <button onClick={() => claimWithToken.mutate()} disabled={claimWithToken.isPending}
             className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0 disabled:opacity-60">
-            {claimWithToken.isPending ? 'Claiming…' : 'Claim &amp; verify'}</button>
+            {claimWithToken.isPending ? 'Claiming…' : 'Claim & verify'}</button>
         </div>
       </Reveal>
     )
