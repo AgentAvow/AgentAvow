@@ -84,14 +84,25 @@ _DRIFT_IGNORE_DIR_MARKERS = ("dist-info", "egg-info")
 # PyPI setup.py install-time exec detection (AST — never executed)
 # ---------------------------------------------------------------------------
 
-# Dangerous callables that, at sdist install time, run arbitrary code / network.
+# Callables that, unguarded at sdist install time, run a SHELL or fetch the
+# network — the real install-time RCE / download-and-run patterns. Deliberately
+# EXCLUDES the eval-family (``exec``/``eval``/``compile``/``__import__``): the
+# ubiquitous ``exec(open('_version.py').read())`` metadata-read pattern is benign,
+# and generic net names (``get``/``post``/``request``/``connect``) collide with
+# ``dict.get``/attribute calls, so they're excluded to keep precision high.
 _AST_EXEC_CALLS = frozenset({
     "system", "popen", "run", "call", "check_output", "check_call", "Popen",
-    "eval", "exec", "compile", "__import__",
-    "urlopen", "urlretrieve", "get", "post", "request", "socket", "connect",
+    "urlopen", "urlretrieve",
 })
-_AST_NET_CALLS = frozenset({
-    "urlopen", "urlretrieve", "get", "post", "request", "socket", "connect",
+_AST_NET_CALLS = frozenset({"urlopen", "urlretrieve"})
+# setuptools commands that run at install/build time. A ``cmdclass`` override of
+# one of these injects code into ``pip install``; overriding only ``test`` or
+# another custom command (common — e.g. requests' ``cmdclass={'test': PyTest}``)
+# is a dev convenience, not an install hook.
+_INSTALL_BUILD_COMMANDS = frozenset({
+    "install", "develop", "build", "build_py", "build_ext", "build_clib",
+    "bdist", "bdist_egg", "bdist_wheel", "egg_info",
+    "install_lib", "install_scripts", "install_data", "install_headers",
 })
 
 
@@ -105,12 +116,79 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
+def _is_cli_publish_guard(test: ast.AST) -> bool:
+    """True if an ``if`` test gates code on a manual CLI subcommand rather than
+    install time — i.e. it inspects ``sys.argv`` or ``__name__`` (``== '__main__'``).
+
+    ``if sys.argv[-1] == 'publish':`` / ``if __name__ == '__main__':`` wrap
+    maintainer helpers (publish/upload/tag) that run when the author types
+    ``python setup.py publish`` — NOT when a consumer runs ``pip install``. Code
+    reachable only under such a guard is not an install hook.
+    """
+    for node in ast.walk(test):
+        if isinstance(node, ast.Attribute) and node.attr == "argv":
+            return True
+        if isinstance(node, ast.Name) and node.id in ("argv", "__name__"):
+            return True
+    return False
+
+
+class _InstallExecVisitor(ast.NodeVisitor):
+    """Collect dangerous calls, tracking whether each is reachable only under a
+    publish/CLI guard (``sys.argv`` / ``__name__``). Guarded calls are maintainer
+    helpers, not install-time code, so they don't count as an install hook."""
+
+    def __init__(self) -> None:
+        self.unguarded: list[tuple[str, int]] = []
+        self.guarded: list[tuple[str, int]] = []
+        self.has_net_unguarded = False
+        self.cmdclass = False
+        self._guard_depth = 0
+
+    def visit_If(self, node: ast.If) -> None:
+        if _is_cli_publish_guard(node.test):
+            # The body runs only under the guard → guarded. The else-branch is the
+            # normal (install) path → visited unguarded.
+            self._guard_depth += 1
+            for child in node.body:
+                self.visit(child)
+            self._guard_depth -= 1
+            for child in node.orelse:
+                self.visit(child)
+        else:
+            self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        fname = _call_name(node)
+        if fname in _AST_EXEC_CALLS:
+            if self._guard_depth > 0:
+                self.guarded.append((fname, getattr(node, "lineno", 1)))
+            else:
+                self.unguarded.append((fname, getattr(node, "lineno", 1)))
+                if fname in _AST_NET_CALLS:
+                    self.has_net_unguarded = True
+        if fname == "setup":
+            for kw in node.keywords:
+                if kw.arg == "cmdclass" and isinstance(kw.value, ast.Dict):
+                    # Flag only if the override targets a real install/build command.
+                    for key in kw.value.keys:
+                        if (
+                            isinstance(key, ast.Constant)
+                            and isinstance(key.value, str)
+                            and key.value in _INSTALL_BUILD_COMMANDS
+                        ):
+                            self.cmdclass = True
+        self.generic_visit(node)
+
+
 def detect_pypi_install_exec(source: str, file_path: str) -> list:
     """AST-scan a ``setup.py`` for code that executes at ``pip install`` time.
 
     An sdist install runs ``setup.py`` in-process — so any module-level
     ``os.system``/``subprocess``/``eval``/network call, or a custom ``cmdclass``
-    override, is auto-run-on-install. Returns ``install_hook`` findings. Never
+    override, is auto-run-on-install. **Guard-aware**: dangerous calls reachable
+    only under a ``sys.argv``/``__name__`` publish guard (a maintainer helper) are
+    NOT install hooks and are ignored. Returns ``install_hook`` findings. Never
     executes the file. AST parse failure ⇒ ``[]`` (fail-open; regex engine still runs).
     """
     from src.scanner.scan import _REMEDIATION_HINTS, Finding
@@ -120,28 +198,14 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
     except (SyntaxError, ValueError):
         return []
 
+    visitor = _InstallExecVisitor()
+    visitor.visit(tree)
+
     findings: list = []
-    has_net = False
-    exec_hits: list[tuple[str, int]] = []
-    cmdclass = False
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            fname = _call_name(node)
-            if fname in _AST_EXEC_CALLS:
-                exec_hits.append((fname, getattr(node, "lineno", 1)))
-                if fname in _AST_NET_CALLS:
-                    has_net = True
-            # A custom cmdclass= overrides install/build commands with own code.
-            if fname == "setup" or (isinstance(node.func, ast.Name) and node.func.id == "setup"):
-                for kw in node.keywords:
-                    if kw.arg == "cmdclass":
-                        cmdclass = True
-
-    if exec_hits:
-        # network + exec in setup.py is the pip-install download-and-run pattern.
-        severity = "critical" if has_net else "high"
-        name, line = exec_hits[0]
+    if visitor.unguarded:
+        # network + exec at install time is the pip-install download-and-run pattern.
+        severity = "critical" if visitor.has_net_unguarded else "high"
+        name, line = visitor.unguarded[0]
         findings.append(Finding(
             category="install_hook",
             name=f"setup.py executes code at install time ({name}...)",
@@ -151,7 +215,7 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
             snippet=f"install-time exec via {name}(...) in setup.py",
             remediation=_REMEDIATION_HINTS.get("install_hook", "Audit install-time code"),
         ))
-    if cmdclass and not exec_hits:
+    elif visitor.cmdclass:
         findings.append(Finding(
             category="install_hook",
             name="setup.py overrides install/build commands (cmdclass)",
@@ -177,6 +241,7 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     """
     from src.scanner.scan import (
         _is_source_file,
+        _is_test_or_doc_file,
         _load_allowlist,
         _scan_content,
         _scan_dependencies,
@@ -200,16 +265,32 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
                 if any(f.category == "install_hook" for f in dep_findings):
                     has_install_hook = True
 
-        # PyPI setup.py — AST install-time exec (the sdist install-run surface).
-        if name_lower == "setup.py" and af.text:
-            ast_findings = detect_pypi_install_exec(af.text, path)
-            if ast_findings:
-                findings.extend(ast_findings)
-                if any(f.category == "install_hook" for f in ast_findings):
-                    has_install_hook = True
+        # PyPI setup.py — analyzed ONLY by the guard-aware install-exec detector,
+        # NOT the general regex engine below: setup.py legitimately contains
+        # publish/CLI helper code (os.system behind `if sys.argv[-1]=='publish'`)
+        # that the guard-unaware regex engine would false-flag as unsafe_exec. The
+        # dedicated detector understands install-time vs maintainer-only reachability.
+        if name_lower == "setup.py":
+            if af.text:
+                ast_findings = detect_pypi_install_exec(af.text, path)
+                if ast_findings:
+                    findings.extend(ast_findings)
+                    if any(f.category == "install_hook" for f in ast_findings):
+                        has_install_hook = True
+            continue
 
-        # The 12-category static engine over every scannable source file.
-        if af.text and _is_source_file(path) and not _should_skip_path(path):
+        # The 12-category static engine over every scannable source file. Test /
+        # doc / example code shipped in an sdist is skipped — it isn't the runtime
+        # or install surface an agent executes, and penalizing it would grade a
+        # package on its test suite (the repo scanner downgrades these; for
+        # artifact-truth we skip them, since install hooks + drift are detected
+        # separately above).
+        if (
+            af.text
+            and _is_source_file(path)
+            and not _should_skip_path(path)
+            and not _is_test_or_doc_file(path)
+        ):
             f, _positives, _suppressed = _scan_content(af.text, path, allowlist)
             findings.extend(f)
             files_scanned += 1
@@ -289,10 +370,10 @@ def compute_drift(
 
     findings: list = []
     if not comparable:
-        # Still surface an install-hook finding even when file-tree drift is
-        # inconclusive — the hook is real regardless of tree correspondence.
-        if has_install_hook:
-            findings.append(_install_hook_drift_finding())
+        # No repo comparison → no drift assertions. A genuine install hook is
+        # already reported as an ``install_hook`` finding by the artifact scan;
+        # emitting an ``artifact_drift`` "hook" finding here would double-count and,
+        # with no repo to diff against, isn't drift at all.
         return drift, findings
 
     added = drift["added_files"]
