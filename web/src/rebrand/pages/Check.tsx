@@ -174,6 +174,44 @@ function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
   )
 }
 
+/** Claim CTA that becomes an owned state for signed-in users who've claimed this repo.
+ * Only queries claims when signed in — the anonymous check flow never fires it. */
+function OwnershipCTA({ owner, repo }: { owner: string; repo: string }) {
+  const { user } = useAuth()
+  const { data: claimsData } = useQuery({
+    queryKey: ['rebrand-claims'],
+    queryFn: async () => (await api.get<{ claims: { owner: string; repo: string; status: string }[] }>('/account/claims')).data,
+    enabled: !!user,
+  })
+  const owned = !!user && (claimsData?.claims ?? []).some(
+    (c) => c.owner.toLowerCase() === owner.toLowerCase() && c.repo.toLowerCase() === repo.toLowerCase(),
+  )
+  if (owned) {
+    return (
+      <Reveal>
+        <div className="mt-6 glass rounded-2xl p-6 border-l-4 border-success/60 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h3 className="text-[15px] font-bold text-success">✓ You own this</h3>
+            <p className="text-text-muted text-[13.5px] mt-0.5">This tool is claimed under your account. Manage its listing, respond to findings, and run private re-scans.</p>
+          </div>
+          <Link to={rp("/rebrand/account")} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage &amp; fix →</Link>
+        </div>
+      </Reveal>
+    )
+  }
+  return (
+    <Reveal>
+      <div className="mt-6 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h3 className="text-[15px] font-bold">Own this tool?</h3>
+          <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get a fix-it report, respond to findings, scan it privately, and take ownership of how it appears on AgentAvow.</p>
+        </div>
+        <Link to={rp(`/rebrand/claim?owner=${owner}&repo=${repo}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
+      </div>
+    </Reveal>
+  )
+}
+
 function Hero() {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
@@ -445,16 +483,8 @@ function Result({ owner, repo }: { owner: string; repo: string }) {
       {/* badge promotion */}
       <Reveal><div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div></Reveal>
 
-      {/* claim CTA */}
-      <Reveal>
-        <div className="mt-6 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h3 className="text-[15px] font-bold">Own this tool?</h3>
-            <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get a fix-it report, respond to findings, scan it privately, and take ownership of how it appears on AgentAvow.</p>
-          </div>
-          <Link to={rp(`/rebrand/claim?owner=${owner}&repo=${repo}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
-        </div>
-      </Reveal>
+      {/* claim / ownership CTA */}
+      <OwnershipCTA owner={owner} repo={repo} />
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (
