@@ -204,11 +204,12 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
 
     # --- Daily time-series (grouped queries, then aligned to day_strs) ---
     async def _series_by_date(date_col) -> dict[str, int]:
+        day_expr = _utc_date_expr(date_col)
         rows = (
             await db.execute(
-                select(_utc_date_expr(date_col).label("d"), func.count().label("cnt"))
+                select(day_expr.label("d"), func.count().label("cnt"))
                 .where(date_col >= cutoff)
-                .group_by(_utc_date_expr(date_col))
+                .group_by(day_expr)
             )
         ).all()
         out: dict[str, int] = {}
