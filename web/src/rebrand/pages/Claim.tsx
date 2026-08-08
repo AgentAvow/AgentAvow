@@ -16,6 +16,7 @@ interface Claim { id: string; owner: string; repo: string; full_name: string; st
 
 function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
   const [msg, setMsg] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const verify = useMutation({
     mutationFn: async () => (await api.post<{ verified: boolean; detail?: string }>(`/account/claims/${c.id}/verify`)).data,
     onSuccess: (d) => { setMsg(d.verified ? null : (d.detail || 'Not verified yet.')); onRefetch() },
@@ -29,13 +30,35 @@ function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
       </div>
       {c.status !== 'verified' && (
         <div className="mt-3 text-[13px] text-text-muted">
-          <p>To verify, add this <a href={`https://github.com/${c.full_name}/settings`} target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">GitHub topic</a> to the repo, then click Verify:</p>
-          <code className="inline-block mt-1.5 font-mono text-[12px] bg-surface border border-border rounded px-2 py-1 break-all">{c.topic}</code>
+          <p className="text-text font-semibold text-[12.5px]">Add this topic to your repo to prove you own it:</p>
+          <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+            <code className="inline-block font-mono text-[12px] bg-surface border border-border rounded px-2 py-1 break-all select-all">{c.topic}</code>
+            <button
+              type="button"
+              onClick={() => { navigator.clipboard?.writeText(c.topic); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+              className="text-[11.5px] font-medium px-2 py-1 rounded-md border border-border text-text-muted hover:text-text hover:border-primary-light"
+            >{copied ? 'Copied ✓' : 'Copy'}</button>
+          </div>
+
+          <ol className="mt-3 flex flex-col gap-1.5 list-decimal pl-4 marker:text-primary-light marker:font-semibold">
+            <li>Open your repo on GitHub: <a href={`https://github.com/${c.full_name}`} target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary font-mono">github.com/{c.full_name}</a></li>
+            <li>On the repo's main page, click the <span className="text-text font-medium">gear icon ⚙️</span> next to <span className="text-text font-medium">“About”</span> (top-right).</li>
+            <li>In the <span className="text-text font-medium">Topics</span> field, paste the topic above and press <span className="text-text font-medium">Enter</span> to add it.</li>
+            <li>Click <span className="text-text font-medium">Save changes</span>.</li>
+            <li>Come back here and click <span className="text-text font-medium">Verify</span>.</li>
+          </ol>
+
+          <details className="mt-2.5 text-[12px]">
+            <summary className="cursor-pointer text-text-muted hover:text-text">Prefer the command line?</summary>
+            <code className="mt-1.5 block font-mono text-[11.5px] bg-surface border border-border rounded px-2 py-1.5 break-all">gh repo edit {c.full_name} --add-topic {c.topic}</code>
+          </details>
+
           <div className="mt-3 flex gap-2">
             <button onClick={() => verify.mutate()} disabled={verify.isPending} className="text-[12.5px] font-semibold px-3.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{verify.isPending ? 'Checking…' : 'Verify'}</button>
             <button onClick={() => remove.mutate()} className="text-[12.5px] text-text-muted hover:text-danger">Remove</button>
           </div>
           {msg && <div className="mt-2 text-[12.5px] text-warning">{msg}</div>}
+          <p className="mt-2 text-[11.5px] text-text-muted">Topic changes can take a few seconds to show up — if Verify says “not found yet,” wait a moment and retry. You can remove the topic after verification; it doesn’t need to stay.</p>
         </div>
       )}
       {c.status === 'verified' && <div className="mt-2 text-[12.5px] text-success">✓ You own this — private scans and listing control unlocked.</div>}
@@ -109,6 +132,22 @@ export default function RebrandClaim() {
           <h1 className="mt-2 text-3xl font-extrabold tracking-tight">Own a tool? Claim it.</h1>
           <p className="mt-2 text-text-muted">Prove you own a repo to unlock a fix-it view, respond to findings, and scan private repos. Verification is a GitHub topic — no access token needed to claim.</p>
         </div>
+      </Reveal>
+
+      <Reveal>
+        <ol className="mt-6 grid gap-3 sm:grid-cols-3">
+          {[
+            { n: '1', t: 'Claim the repo', d: 'Enter owner / repo below. We generate a one-time verification topic for it.' },
+            { n: '2', t: 'Add the topic on GitHub', d: 'Paste the topic into your repo’s About → Topics. It proves you can edit the repo.' },
+            { n: '3', t: 'Verify', d: 'Click Verify — we read the repo’s public topics and confirm the match. Done.' },
+          ].map((s) => (
+            <li key={s.n} className="glass rounded-xl p-4">
+              <div className="w-6 h-6 rounded-md grid place-items-center font-mono text-[12px] font-bold bg-primary/15 text-primary-light">{s.n}</div>
+              <div className="mt-2 font-semibold text-[13.5px]">{s.t}</div>
+              <div className="mt-1 text-[12.5px] text-text-muted">{s.d}</div>
+            </li>
+          ))}
+        </ol>
       </Reveal>
 
       <div className="mt-8">
