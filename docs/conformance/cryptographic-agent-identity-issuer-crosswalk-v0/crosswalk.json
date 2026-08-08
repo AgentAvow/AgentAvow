@@ -1,0 +1,93 @@
+{
+  "artifact": "cryptographic-agent-identity issuer/project crosswalk",
+  "version": "v0",
+  "status": "dual-carry",
+  "carry_duration": "one release",
+  "generated_for": "A2A#1786 — Cryptographic Agent Identity extension (CTEF v0.3.1-aligned)",
+  "a2a_issue": "https://github.com/a2aproject/A2A/issues/1786",
+  "extension_reference_uri": "https://a2a-protocol.org/extensions/cryptographic-agent-identity/v0.3.1",
+  "note": "Project-name crosswalk only. The AgentGraph project is now AgentAvow. This is a rename of the project, NOT a migration of the cryptographic issuer identity. The issuer DID, the CTEF wire format, the four claim_type values, the error codes, and the JCS canonicalization do not move. Nothing a partner verifies against changes.",
+
+  "substrate": {
+    "spec": "CTEF (Composable Trust Evidence Format)",
+    "version": "0.3.1",
+    "frozen_commit": "agentgraph-co/agentgraph@69ad94d",
+    "repo_previous": "agentgraph-co/agentgraph",
+    "repo_current": "AgentAvow/AgentAvow",
+    "repo_redirect": "GitHub 301s the old org/repo and commit refs; @69ad94d still resolves under the new name",
+    "reference_implementation": "src.signing.canonicalize_jcs_strict",
+    "well_known_source": "src/api/jwks_router.py (/.well-known/cte-test-vectors.json)"
+  },
+
+  "project_name": {
+    "previous": "agentgraph",
+    "current": "agentavow",
+    "carry_rule": "Both names are valid for one release. A consumer keyed on either resolves the same substrate. 'agentavow' is the current name; 'agentgraph' is retained as previous for one release so no existing citation dangles."
+  },
+
+  "issuer_identity": {
+    "held_at": "did:web:agentgraph.co",
+    "changed": false,
+    "carry_rule": "The issuer string is held at did:web:agentgraph.co across this release. It is NOT dual-carried and it does NOT rotate to did:web:agentavow.com as part of the rename.",
+    "oatr_issuer_id": "agentgraph",
+    "oatr_issuer_id_changed": false,
+    "future_reroot": "If AgentAvow later re-roots the issuer to did:web:agentavow.com, that will be a signed continuity-layer rotation-attestation (the old key cross-signs the new key), verifiable on its own terms per the continuity claim_type. It will NOT be a string rename in a crosswalk."
+  },
+
+  "wire_invariants": {
+    "changed": false,
+    "canonicalization": {
+      "scheme": "RFC 8785 (JSON Canonicalization Scheme)",
+      "hash_algorithm": "SHA-256",
+      "rules": [
+        "Keys sorted by Unicode code point.",
+        "Non-ASCII above U+001F emitted as literal UTF-8 bytes (not \\uXXXX escapes).",
+        "null values preserved at every depth.",
+        "Integer-valued floats normalized to integers (ECMA-262 section 7.1.12.1)."
+      ],
+      "changed": false
+    },
+    "claim_type": {
+      "closed_set": ["identity", "transport", "authority", "continuity"],
+      "reserved": ["envelope"],
+      "required_on_envelope": true,
+      "changed": false
+    },
+    "error_codes": {
+      "INVALID_CLAIM_SCOPE": "Claim carries fields outside its declared claim_type; rejected before semantic evaluation, fail-closed.",
+      "INVALID_COMPOSITION": "Well-typed claims cannot be combined under the layer composition rule; rejected before semantic evaluation, fail-closed.",
+      "changed": false
+    },
+    "canonical_sha256": {
+      "note": "Pinned SHA-256 of the RFC 8785 canonical bytes for each published test vector at the frozen commit. A verifier fetching either host MUST reproduce these exactly. Divergence means the wire moved, which this crosswalk asserts it did not.",
+      "envelope_vector": "9e7b5031e46de38b5f90e895113a3f24f42a4128d8d99856a2d71e529b0f0d5c",
+      "verdict_vector": "feb42dca4214fc46207138d676ec727d7b3d0caa1eda8c0390d2d6f6fbc28913",
+      "scope_violation_vector": "e584f1cd0885dc938da5fc23ce7e528715a0086e5464c9ed0f3c1c82b364026f",
+      "composition_failure_vector": "f9cd10bc4e8bf34ce3aa6a0e5df0d27989e54ff41c4333c69ae3ecfaf8de0cb5"
+    }
+  },
+
+  "endpoints": {
+    "assertion": "Both hosts serve byte-identical content at the frozen commit. Re-pin to either; the canonical_sha256 values above hold on both.",
+    "previous_host": "https://agentgraph.co/.well-known/cte-test-vectors.json",
+    "current_host": "https://agentavow.com/.well-known/cte-test-vectors.json",
+    "jwks_previous": "https://agentgraph.co/.well-known/jwks.json",
+    "interop_harness": "https://agentgraph.co/.well-known/interop-harness.json"
+  },
+
+  "crosswalk_rows": [
+    {"field": "project_name", "previous": "agentgraph", "current": "agentavow", "wire_change": false},
+    {"field": "issuer.provider.id", "previous": "did:web:agentgraph.co", "current": "did:web:agentgraph.co", "wire_change": false},
+    {"field": "oatr.issuer_id", "previous": "agentgraph", "current": "agentgraph", "wire_change": false},
+    {"field": "@context ns", "previous": "https://agentgraph.co/ns/trust-evidence/v1", "current": "https://agentgraph.co/ns/trust-evidence/v1", "wire_change": false},
+    {"field": "repo", "previous": "agentgraph-co/agentgraph", "current": "AgentAvow/AgentAvow", "wire_change": false},
+    {"field": "well-known host", "previous": "agentgraph.co", "current": "agentgraph.co + agentavow.com (both serve, byte-identical)", "wire_change": false},
+    {"field": "claim_type closed_set", "previous": "identity,transport,authority,continuity", "current": "identity,transport,authority,continuity", "wire_change": false},
+    {"field": "error codes", "previous": "INVALID_CLAIM_SCOPE,INVALID_COMPOSITION", "current": "INVALID_CLAIM_SCOPE,INVALID_COMPOSITION", "wire_change": false},
+    {"field": "canonicalization", "previous": "RFC 8785 JCS + SHA-256", "current": "RFC 8785 JCS + SHA-256", "wire_change": false}
+  ],
+
+  "verification": "Run verify.py in this directory. It fetches both hosts, asserts the two responses are byte-identical, and asserts each of the four canonical_sha256 values above is reproduced. Requires network access to both hosts.",
+  "authored_by": "kennethives@gmail.com",
+  "no_wire_changes": true
+}
