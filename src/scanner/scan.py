@@ -168,6 +168,24 @@ def _should_skip_path(path: str) -> bool:
     return False
 
 
+# Directory markers for throwaway / non-shipped lockfiles. A vuln in a monorepo's
+# example app or test fixture must NOT drag down the grade of the package it
+# actually publishes — those deps are never installed by a consumer of the tool.
+_NON_PROD_DIR_MARKERS = frozenset({
+    "example", "examples", "demo", "demos", "sample", "samples",
+    "test", "tests", "__tests__", "e2e", "integration", "fixture", "fixtures",
+    "benchmark", "benchmarks", "bench", "docs", "doc", "website", "site",
+    "playground", "sandbox", "scripts", "tooling",
+})
+
+
+def _is_production_lockfile(path: str) -> bool:
+    """True if a lockfile path looks like a shipped/production manifest, not an
+    example/test/fixture one. Root-level lockfiles always count."""
+    parts = [p.lower() for p in Path(path).parts[:-1]]  # dirs only
+    return not any(p in _NON_PROD_DIR_MARKERS for p in parts)
+
+
 def _is_source_file(path: str) -> bool:
     """Check if a file should be scanned for source patterns."""
     ext = Path(path).suffix.lower()
@@ -1616,6 +1634,7 @@ async def _run_supply_chain(
                 it for it in tree
                 if Path(it["path"]).name.lower() in lock_names
                 and not _should_skip_path(it["path"])
+                and _is_production_lockfile(it["path"])
             ][: settings.scanner_supply_chain_max_lockfiles]
             wf_items = [
                 it for it in tree
@@ -1654,18 +1673,41 @@ async def _run_supply_chain(
                 use_scorecard=getattr(settings, "scanner_use_scorecard", True),
             )
 
-            osv_findings = [Finding(**d) for d in sc.findings]
-            if sc.ok and osv_findings:
+            # Dedupe identical vulns that repeat across multiple lockfiles — the
+            # same CVE on the same package@version must count once, not per-file.
+            # The finding ``name`` encodes "<kind>: <pkg>@<version> (<vuln_id>)",
+            # so it uniquely identifies a vuln — dedupe on it so the same CVE
+            # repeated across lockfiles counts once.
+            _seen_vulns: set = set()
+            osv_findings = []
+            for d in sc.findings:
+                f = Finding(**d)
+                if f.name in _seen_vulns:
+                    continue
+                _seen_vulns.add(f.name)
+                osv_findings.append(f)
+
+            advisory = getattr(settings, "scanner_osv_advisory", True)
+            scored = False
+            if sc.ok and osv_findings and not advisory:
+                # Fold supply-chain findings into the scored grade only once the
+                # aggregation is validated (advisory=False). Until then they are
+                # collected + signed + surfaced but do not deduct.
                 _dedupe_regex_vs_osv(result, osv_findings)
                 result.findings.extend(osv_findings)
-                if sc.deps_total and not any(
-                    p == "Dependency pinning" for p in result.positive_signals
-                ):
-                    result.positive_signals.append("Dependency pinning")
+                scored = True
+            if sc.ok and sc.deps_total and not any(
+                p == "Dependency pinning" for p in result.positive_signals
+            ):
+                result.positive_signals.append("Dependency pinning")
             db_snapshots = dict(sc.db_snapshots)
             sc_summary = {
                 "ok": sc.ok,
+                "advisory": advisory,
+                "scored": scored,
                 "deps_total": sc.deps_total,
+                "lockfiles_scanned": len(lockfiles),
+                "unique_vulns": len(osv_findings),
                 "ecosystems": sc.ecosystems,
                 "counts": sc.counts,
                 "malicious": sc.malicious,

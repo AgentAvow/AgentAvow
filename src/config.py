@@ -177,6 +177,13 @@ class Settings(BaseSettings):
     scanner_use_osv: bool = True
     scanner_use_depsdev: bool = True       # deps.dev enrichment (license/dependents)
     scanner_use_scorecard: bool = True     # OpenSSF Scorecard aggregate (precomputed)
+    # ADVISORY mode: when True, the OSV supply-chain findings are collected,
+    # signed, and surfaced (supply_chain{} + coverage) but do NOT deduct from the
+    # scored grade. This gates the score-flip until the dev-vs-prod / reachability
+    # filter (Phase 2) lands, so a monorepo's throwaway example/test lockfiles
+    # can't false-flip a healthy package to F. Flip to False to let supply-chain
+    # findings score once the aggregation is validated across a repo sample.
+    scanner_osv_advisory: bool = True
     # Max lockfile + workflow files fetched per scan for the supply-chain pass.
     scanner_supply_chain_max_lockfiles: int = 8
     scanner_supply_chain_max_workflows: int = 12
