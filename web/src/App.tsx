@@ -208,7 +208,7 @@ function AppRoutes() {
           <Route path="/bookmarks" element={<ProtectedRoute><Bookmarks /></ProtectedRoute>} />
           <Route path="/transactions" element={<ProtectedRoute><TransactionHistory /></ProtectedRoute>} />
           <Route path="/my-listings" element={<ProtectedRoute><MyListings /></ProtectedRoute>} />
-          <Route path="/tools" element={<ProtectedRoute><McpTools /></ProtectedRoute>} />
+          {!CUTOVER && <Route path="/tools" element={<ProtectedRoute><McpTools /></ProtectedRoute>} />}
           <Route path="/admin" element={<AdminRoute><ErrorBoundary><Admin /></ErrorBoundary></AdminRoute>} />
           <Route path="/onboarding" element={<Onboarding />} />
           {!CUTOVER && <Route path="/avatar" element={<ProtectedRoute><AvatarPicker /></ProtectedRoute>} />}
