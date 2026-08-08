@@ -26,7 +26,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -347,8 +347,28 @@ async def engagement_metrics_dashboard() -> HTMLResponse:
     The shell carries no data — it fetches the admin-gated ``/admin/metrics``
     JSON client-side using the admin's Bearer token from localStorage (key
     ``token``, same as the SPA). All sensitive data stays behind ``require_admin``.
+
+    The dashboard logic is loaded from a sibling ``dashboard.js`` file rather
+    than an inline ``<script>`` so it runs under the site CSP (``script-src
+    'self'``); an inline script would be blocked and the page would never render.
     """
     return HTMLResponse(_DASHBOARD_HTML)
+
+
+@router.get("/metrics/dashboard.js", include_in_schema=False)
+async def engagement_metrics_dashboard_js() -> Response:
+    """Same-origin JS for the dashboard shell.
+
+    Served as its own file (not inlined) so it satisfies ``script-src 'self'``.
+    Carries no data — it fetches the admin-gated ``/admin/metrics`` JSON with the
+    admin's Bearer token from localStorage. Public, but useless without an admin
+    token; all sensitive data stays behind ``require_admin`` on ``/admin/metrics``.
+    """
+    return Response(
+        _DASHBOARD_JS,
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +447,18 @@ _DASHBOARD_HTML = r"""<!doctype html>
   </header>
   <div id="root"></div>
 </div>
-<script>
+<script src="dashboard.js"></script>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
+# Dashboard JS — served as its own same-origin file (see /metrics/dashboard.js)
+# so it loads under the site CSP (script-src 'self'). An inline <script> would
+# be blocked by CSP and the page would render the shell but never fetch data.
+# ---------------------------------------------------------------------------
+_DASHBOARD_JS = r"""
 const GRADE_COLORS = {"A+":"#A6E3A1","A":"#2DD4BF","B":"#0D9488","C":"#F9E2AF","D":"#E8A44A","F":"#F38BA8"};
 let currentWindow = "7d";
 
@@ -476,23 +507,35 @@ function surfaceTable(bySurface){
 }
 
 function render(d){
+  d = d || {};
+  // Guard every section so a missing/renamed field degrades to 0 instead of
+  // throwing (which would leave the page blank).
+  const scans = d.scans || {};
+  const watches = d.watches || {};
+  const badges = d.badges || {};
+  const attest = d.attestations || {};
+  const apiKeys = d.api_keys || {};
+  const catalog = d.catalog || {};
+  const claims = d.claims || {};
+  const webhooks = d.alert_webhooks || {};
+  const s = d.series || {};
+  const gen = d.generated_at ? new Date(d.generated_at).toLocaleString() : "—";
   document.getElementById("sub").textContent =
-    "Window: "+d.window+"  ·  generated "+new Date(d.generated_at).toLocaleString();
-  const s=d.series||{};
+    "Window: "+(d.window||"?")+"  ·  generated "+gen;
   let html='<div class="grid">'
-    + card("Repos scanned", d.scans.repos_scanned_window, "new: "+fmt(d.scans.new_repos_window), s.repos_scanned)
-    + card("Watches created", d.watches.created_window, fmt(d.watches.active)+" active", s.watches_created)
-    + card("Badge fetches", d.badges.fetches_window, "Redis counter", s.badge_fetches)
-    + card("Attestations issued", d.attestations.issued_window, fmt(d.attestations.issued_total)+" total", null)
-    + card("API keys active", d.api_keys.active, fmt(d.api_keys.calls_window)+" calls (win)", s.api_calls)
-    + card("Catalog size", d.catalog.size_total, fmt(d.catalog.community_scans)+" community", null)
-    + card("Verified claims", d.claims.verified_total, "+"+fmt(d.claims.created_window)+" in window", null)
-    + card("Alert webhooks", d.alert_webhooks.active, "active", null)
+    + card("Repos scanned", scans.repos_scanned_window, "new: "+fmt(scans.new_repos_window), s.repos_scanned)
+    + card("Watches created", watches.created_window, fmt(watches.active)+" active", s.watches_created)
+    + card("Badge fetches", badges.fetches_window, "Redis counter", s.badge_fetches)
+    + card("Attestations issued", attest.issued_window, fmt(attest.issued_total)+" total", null)
+    + card("API keys active", apiKeys.active, fmt(apiKeys.calls_window)+" calls (win)", s.api_calls)
+    + card("Catalog size", catalog.size_total, fmt(catalog.community_scans)+" community", null)
+    + card("Verified claims", claims.verified_total, "+"+fmt(claims.created_window)+" in window", null)
+    + card("Alert webhooks", webhooks.active, "active", null)
     + '</div>';
 
   html+='<div class="two">'
-    + '<section><h2>Grade distribution (scanned corpus)</h2><div class="panel">'+gradeBars(d.scans.grade_distribution)+'</div></section>'
-    + '<section><h2>Scans by surface</h2><div class="panel">'+surfaceTable(d.catalog.by_surface)+'</div></section>'
+    + '<section><h2>Grade distribution (scanned corpus)</h2><div class="panel">'+gradeBars(scans.grade_distribution||{})+'</div></section>'
+    + '<section><h2>Scans by surface</h2><div class="panel">'+surfaceTable(catalog.by_surface||{})+'</div></section>'
     + '</div>';
 
   html+='<section class="notes"><h2>How these are computed</h2><div class="panel"><ul>';
@@ -534,7 +577,4 @@ document.getElementById("windows").addEventListener("click", ev=>{
   load();
 });
 load();
-</script>
-</body>
-</html>
 """

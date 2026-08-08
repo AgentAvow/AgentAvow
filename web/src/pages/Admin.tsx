@@ -174,7 +174,18 @@ export default function Admin() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-xl font-bold mb-4">Admin Dashboard</h1>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h1 className="text-xl font-bold">Admin Dashboard</h1>
+        <a
+          href="/api/v1/admin/metrics/dashboard"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm px-3 py-1.5 rounded-md border border-border text-primary-light hover:bg-surface-hover transition-colors whitespace-nowrap"
+          title="Engagement / usage metrics (opens the signed admin dashboard)"
+        >
+          Metrics &#8599;
+        </a>
+      </div>
 
       <div className="flex items-end gap-x-0 mb-6 border-b border-border overflow-x-auto sm:flex-wrap scrollbar-none" role="tablist" aria-label="Admin sections">
         {TAB_SECTIONS.map((section, idx) => (
