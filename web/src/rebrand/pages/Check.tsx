@@ -214,7 +214,7 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
             <h3 className="text-[15px] font-bold text-success">✓ You own this</h3>
             <p className="text-text-muted text-[13.5px] mt-0.5">This tool is claimed under your account. Manage its listing, respond to findings, and run private re-scans.</p>
           </div>
-          <Link to={rp("/rebrand/tools")} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage &amp; fix →</Link>
+          <Link to={rp("/rebrand/tools") + "#your-repos"} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage &amp; fix →</Link>
         </div>
       </Reveal>
     )
@@ -394,8 +394,11 @@ function Result({ owner, repo, privateResult, privateToken }: {
       <div className="max-w-[620px] mx-auto px-6 py-24 text-center">
         <div className="glass rounded-2xl p-8">
           <h2 className="text-xl font-semibold">Couldn't scan {owner}/{repo}</h2>
-          <p className="mt-2 text-text-muted text-[14px]">The scanner didn't return a result. It may be a private repo, or the scan service is busy. Try a repo already in the catalog, or check back shortly.</p>
-          <Link to={rp("/rebrand/browse")} className="inline-block mt-5 text-[13.5px] font-semibold text-primary-light hover:text-primary">Browse scored tools →</Link>
+          <p className="mt-2 text-text-muted text-[14px]">The scanner didn't return a result. <strong className="text-text">If this is a private repo</strong>, its report isn't public — re-scan it privately with a read-only token to see it. Otherwise the scan service may be busy; try again shortly.</p>
+          <div className="mt-5 flex items-center justify-center gap-4 flex-wrap">
+            <Link to={rp(`/rebrand/tools?owner=${owner}&repo=${repo}`)} className="text-[13.5px] font-semibold text-primary-light hover:text-primary">Scan it privately →</Link>
+            <Link to={rp("/rebrand/browse")} className="text-[13.5px] font-semibold text-text-muted hover:text-text">Browse scored tools →</Link>
+          </div>
         </div>
       </div>
     )

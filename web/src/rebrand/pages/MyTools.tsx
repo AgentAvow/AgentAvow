@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../../lib/api'
@@ -95,8 +95,9 @@ function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
  * score page (with the token) so the owner can Claim / Publish from there. */
 function PrivateScan() {
   const navigate = useNavigate()
-  const [owner, setOwner] = useState('')
-  const [repo, setRepo] = useState('')
+  const [params] = useSearchParams()
+  const [owner, setOwner] = useState(params.get('owner') || '')
+  const [repo, setRepo] = useState(params.get('repo') || '')
   const [token, setToken] = useState('')
   const scan = useMutation({
     mutationFn: async () => (await api.post('/account/private-scan', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
@@ -139,6 +140,7 @@ export default function RebrandMyTools() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [params] = useSearchParams()
+  const location = useLocation()
   const [owner, setOwner] = useState(params.get('owner') || '')
   const [repo, setRepo] = useState(params.get('repo') || '')
 
@@ -157,8 +159,18 @@ export default function RebrandMyTools() {
   })
   const refetch = () => qc.invalidateQueries({ queryKey: ['rebrand-claims'] })
 
+  // Owners arriving from a score page's "Manage & fix" land on their verified list.
+  useEffect(() => {
+    if (location.hash === '#your-repos' && !cLoading) {
+      const t = setTimeout(() => document.getElementById('your-repos')?.scrollIntoView({ behavior: 'smooth' }), 250)
+      return () => clearTimeout(t)
+    }
+  }, [location.hash, cLoading])
+
   if (!user) return null
   const claims = data?.claims ?? []
+  const pending = claims.filter((c) => c.status !== 'verified')
+  const verified = claims.filter((c) => c.status === 'verified')
 
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
@@ -170,7 +182,7 @@ export default function RebrandMyTools() {
         </div>
       </Reveal>
 
-      {/* CLAIM UX — top */}
+      {/* CLAIM UX — form + any in-progress (pending) claims stay here */}
       <div className="mt-8">
         <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Claim a repo</h2>
         <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="flex gap-2">
@@ -180,31 +192,38 @@ export default function RebrandMyTools() {
           <button type="submit" disabled={create.isPending || !owner.trim() || !repo.trim()} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">{create.isPending ? 'Claiming…' : 'Claim'}</button>
         </form>
         {create.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t claim — check the owner / repo and try again.</div>}
+
+        {pending.length > 0 && (
+          <div className="mt-4 flex flex-col gap-2.5">
+            <div className="text-[12px] font-mono uppercase tracking-wide text-warning">Awaiting verification · {pending.length}</div>
+            {pending.map((c) => <ClaimRow key={c.id} c={c} onRefetch={refetch} />)}
+          </div>
+        )}
       </div>
 
       {/* divider */}
       <div className="mt-8 border-t border-border/60" />
 
-      {/* REPO LIST — status + report + remove */}
+      {/* PRIVATE SCAN */}
       <div className="mt-8">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Your repos {claims.length > 0 && `· ${claims.length}`}</h2>
-        {cLoading ? (
-          <div className="flex flex-col gap-2">{[0, 1].map((i) => <div key={i} className="glass rounded-xl h-[76px] animate-pulse" />)}</div>
-        ) : claims.length === 0 ? (
-          <div className="text-text-muted text-[13px]">No claimed repos yet — claim one above, or <Link to={rp("/rebrand/browse")} className="text-primary-light hover:text-primary">find your tool →</Link></div>
-        ) : (
-          <RevealStagger className="flex flex-col gap-2.5" stagger={0.04}>
-            {claims.map((c) => <ClaimRow key={c.id} c={c} onRefetch={refetch} />)}
-          </RevealStagger>
-        )}
+        <PrivateScan />
       </div>
 
       {/* divider */}
       <div className="mt-10 border-t border-border/60" />
 
-      {/* PRIVATE SCAN */}
-      <div className="mt-10">
-        <PrivateScan />
+      {/* YOUR REPOS — verified only */}
+      <div className="mt-8 scroll-mt-24" id="your-repos">
+        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Your repos {verified.length > 0 && `· ${verified.length}`}</h2>
+        {cLoading ? (
+          <div className="flex flex-col gap-2">{[0, 1].map((i) => <div key={i} className="glass rounded-xl h-[64px] animate-pulse" />)}</div>
+        ) : verified.length === 0 ? (
+          <div className="text-text-muted text-[13px]">No verified repos yet. Verify a claim above to see it here — then jump straight to its report.</div>
+        ) : (
+          <RevealStagger className="flex flex-col gap-2.5" stagger={0.04}>
+            {verified.map((c) => <ClaimRow key={c.id} c={c} onRefetch={refetch} />)}
+          </RevealStagger>
+        )}
       </div>
     </div>
   )
