@@ -173,9 +173,16 @@ EXFILTRATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "high",
     ),
     (
+        # Exfil = the WHOLE environment sent outbound (env dump), NOT a single
+        # var. `os.environ.get('HTTP_PROXY')` / `os.environ['API_KEY']` are normal
+        # (proxy config, auth) and are excluded by the negative lookahead — only
+        # the bare `os.environ` mapping passed into a send call matches. This kills
+        # the false critical on general HTTP-client libs (e.g. requests) whose code
+        # reads proxy env + contains the word "request" everywhere.
         "Environment variable exfil",
         re.compile(
-            r"""os\.environ.*(?:post|send|request|fetch)""",
+            r"""(?:\.post|\.put|\.send|fetch|urlopen|requests\.\w+|httpx\.\w+)"""
+            r"""\s*\([^)]{0,200}\bos\.environ\b(?!\s*(?:\.get\b|\.setdefault\b|\[))""",
             re.IGNORECASE,
         ),
         "critical",
