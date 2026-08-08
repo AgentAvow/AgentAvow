@@ -230,10 +230,10 @@ def _tree_blobs(tree: list[dict]) -> list[dict]:
 
 async def _fetch_repo_tree(
     owner: str, repo: str, token: str | None = None,
-) -> tuple[list[dict], bool, bool]:
+) -> tuple[list[dict], bool, bool, str | None]:
     """Fetch the file tree of a repo via GitHub API.
 
-    Returns ``(files, truncated, repo_ok)``:
+    Returns ``(files, truncated, repo_ok, ref)``:
 
     - ``files``     — blob (file) entries under the per-file size cap.
     - ``truncated`` — GitHub could not return the *whole* tree. Very large
@@ -247,6 +247,9 @@ async def _fetch_repo_tree(
       unreachable and the caller surfaces a real error. When True but ``files``
       is empty we still SUCCEEDED — the caller degrades to a graceful (empty /
       partial) result instead of turning a big-monorepo tree failure into a 502.
+    - ``ref``       — the repo's default branch, or ``None`` when the tree fetch
+      failed. Threaded into :func:`_fetch_file_content` so bulk content reads can
+      go through the unmetered ``raw.githubusercontent.com`` host.
     """
     headers = {"Accept": "application/vnd.github+json"}
     if token:
@@ -261,7 +264,7 @@ async def _fetch_repo_tree(
             )
         except httpx.HTTPError as exc:
             logger.warning("GitHub repo API error for %s/%s: %s", owner, repo, exc)
-            return [], False, False
+            return [], False, False, None
         if resp.status_code != 200:
             logger.warning(
                 "GitHub repo API returned %d for %s/%s (rate_remaining=%s, auth=%s)",
@@ -269,7 +272,7 @@ async def _fetch_repo_tree(
                 resp.headers.get("x-ratelimit-remaining", "?"),
                 "yes" if token else "no",
             )
-            return [], False, False
+            return [], False, False, None
         default_branch = resp.json().get("default_branch", "main")
 
         tree_url = (
@@ -289,7 +292,12 @@ async def _fetch_repo_tree(
 
         if resp is not None and resp.status_code == 200:
             body = resp.json()
-            return _tree_blobs(body.get("tree", [])), bool(body.get("truncated")), True
+            return (
+                _tree_blobs(body.get("tree", [])),
+                bool(body.get("truncated")),
+                True,
+                default_branch,
+            )
 
         if resp is not None:
             logger.warning(
@@ -306,25 +314,54 @@ async def _fetch_repo_tree(
         try:
             shallow = await client.get(tree_url, headers=headers)
             if shallow.status_code == 200:
-                return _tree_blobs(shallow.json().get("tree", [])), True, True
+                return (
+                    _tree_blobs(shallow.json().get("tree", [])),
+                    True,
+                    True,
+                    default_branch,
+                )
         except httpx.HTTPError as exc:
             logger.warning(
                 "GitHub shallow tree API error for %s/%s: %s", owner, repo, exc,
             )
 
         # No tree at all, but the repo exists — empty-but-successful result.
-        return [], True, True
+        return [], True, True, default_branch
 
 
 async def _fetch_file_content(
     owner: str, repo: str, path: str, token: str | None = None,
+    ref: str | None = None,
 ) -> str | None:
-    """Fetch raw file content from GitHub."""
-    headers = {"Accept": "application/vnd.github.raw+json"}
-    if token:
-        headers["Authorization"] = f"token {token}"
+    """Fetch raw file content from GitHub.
+
+    When ``ref`` is known and the raw-content optimization is enabled
+    (``settings.scanner_use_raw_content``), fetch via ``raw.githubusercontent.com``
+    first. That host is UNMETERED — it does not consume the GitHub API
+    rate-limit budget — so routing the bulk per-file reads through it cuts the
+    dominant ~1-API-call-per-file cost of a scan. Any non-200 (private repos
+    404 on unauthenticated raw; transient raw misses) falls back to the
+    authenticated Contents API so private/edge cases still resolve.
+    """
+    from src.config import settings
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        # Unmetered fast path: raw.githubusercontent (public repos, no auth).
+        if ref and getattr(settings, "scanner_use_raw_content", True):
+            raw_url = (
+                f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+            )
+            try:
+                raw_resp = await client.get(raw_url)
+                if raw_resp.status_code == 200:
+                    return raw_resp.text
+            except httpx.HTTPError:
+                pass  # fall through to the authenticated Contents API
+
+        # Authenticated Contents API fallback (private repos / raw 404s).
+        headers = {"Accept": "application/vnd.github.raw+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
         resp = await client.get(
             f"https://api.github.com/repos/{owner}/{repo}/contents/{path}",
             headers=headers,
@@ -1497,7 +1534,7 @@ async def scan_repo(
         # Fetch file tree. A very large monorepo may come back truncated (or its
         # recursive tree fetch may error) — that's a partial/sampled tree, not a
         # failure, so we still return a real score rather than a 502.
-        tree, tree_truncated, repo_ok = await _fetch_repo_tree(owner, repo, token)
+        tree, tree_truncated, repo_ok, ref = await _fetch_repo_tree(owner, repo, token)
         if not repo_ok:
             # Repo genuinely missing / private / unreachable — a real error.
             result.error = "Could not fetch repo tree (may be empty or private)"
@@ -1532,7 +1569,9 @@ async def scan_repo(
             # Check if package.json or pyproject.toml mentions MCP
             for item in tree:
                 if Path(item["path"]).name.lower() in mcp_dep_files:
-                    content = await _fetch_file_content(owner, repo, item["path"], token)
+                    content = await _fetch_file_content(
+                        owner, repo, item["path"], token, ref=ref,
+                    )
                     low = (content or "").lower()
                     mcp_match = "mcp" in low or "modelcontextprotocol" in low
                     if mcp_match or "model-context-protocol" in low:
@@ -1578,7 +1617,9 @@ async def scan_repo(
         user_excludes: set[str] = set()
         for item in tree:
             if item["path"] in (".agentgraph-scan.yml", ".agentgraph-scan.yaml"):
-                cfg_content = await _fetch_file_content(owner, repo, item["path"], token)
+                cfg_content = await _fetch_file_content(
+                    owner, repo, item["path"], token, ref=ref,
+                )
                 if cfg_content:
                     try:
                         import yaml  # noqa: E402
@@ -1631,7 +1672,7 @@ async def scan_repo(
             try:
                 async with sem:
                     content = await asyncio.wait_for(
-                        _fetch_file_content(owner, repo, path, token),
+                        _fetch_file_content(owner, repo, path, token, ref=ref),
                         timeout=per_file_timeout,
                     )
                 if not content:
@@ -1669,7 +1710,7 @@ async def scan_repo(
                 async with sem:
                     dep_content = await asyncio.wait_for(
                         _fetch_file_content(
-                            owner, repo, dep_item["path"], token,
+                            owner, repo, dep_item["path"], token, ref=ref,
                         ),
                         timeout=per_file_timeout,
                     )

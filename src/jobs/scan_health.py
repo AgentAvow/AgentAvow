@@ -47,12 +47,17 @@ class TokenHealth:
     remaining: int | None    # core requests remaining this hour, if known
     dead: bool               # True when the token is invalid/expired (401)
     reason: str              # human-readable summary
+    mechanism: str = "unknown"  # "github_app" | "pat" — which credential is active
 
 
 async def check_github_token_health() -> TokenHealth:
-    """Probe the app's ``settings.github_token`` against ``GET /rate_limit``.
+    """Probe the *active* GitHub credential against ``GET /rate_limit``.
 
-    * 401 → the token is dead/invalid/expired (``dead=True``).
+    Validates whichever mechanism ``get_github_token()`` resolves to — the
+    GitHub App installation token when App creds are configured, else the legacy
+    PAT — so the health check follows the same switchover as the scanner itself.
+
+    * 401 → the credential is dead/invalid/expired (``dead=True``).
     * 200 with a low ``remaining`` → near the hourly budget (``ok=False``).
     * 200 with healthy ``remaining`` → all good (``ok=True``).
 
@@ -60,18 +65,21 @@ async def check_github_token_health() -> TokenHealth:
     ``ok=False, dead=False`` so the caller can log the blip without misfiring a
     "rotate your token" alert.
     """
-    from src.config import settings
+    from src.github_auth import _app_configured, get_github_token
 
-    token = settings.github_token
+    mechanism = "github_app" if _app_configured() else "pat"
+    token = await get_github_token()
     if not token:
         return TokenHealth(
             ok=False, status=0, remaining=None, dead=True,
-            reason="No GITHUB_TOKEN configured",
+            reason="No GitHub credentials configured (neither App nor PAT)",
+            mechanism=mechanism,
         )
 
+    # Bearer works for both installation tokens and classic/fine-grained PATs.
     headers = {
         "Accept": "application/vnd.github+json",
-        "Authorization": f"token {token}",
+        "Authorization": f"Bearer {token}",
     }
     try:
         import httpx
@@ -83,12 +91,14 @@ async def check_github_token_health() -> TokenHealth:
         return TokenHealth(
             ok=False, status=0, remaining=None, dead=False,
             reason=f"rate_limit probe connection error: {exc}",
+            mechanism=mechanism,
         )
 
     if resp.status_code == 401:
         return TokenHealth(
             ok=False, status=401, remaining=None, dead=True,
-            reason="GitHub returned 401 Unauthorized — token expired or revoked",
+            reason=f"GitHub returned 401 Unauthorized — {mechanism} credential expired or revoked",
+            mechanism=mechanism,
         )
     if resp.status_code != 200:
         # 403 can be a hard block or a secondary rate limit; treat as unhealthy
@@ -96,6 +106,7 @@ async def check_github_token_health() -> TokenHealth:
         return TokenHealth(
             ok=False, status=resp.status_code, remaining=None, dead=False,
             reason=f"GitHub /rate_limit returned {resp.status_code}",
+            mechanism=mechanism,
         )
 
     try:
@@ -108,11 +119,13 @@ async def check_github_token_health() -> TokenHealth:
         return TokenHealth(
             ok=False, status=200, remaining=remaining, dead=False,
             reason=f"GitHub rate limit low — only {remaining} core requests remaining",
+            mechanism=mechanism,
         )
 
     return TokenHealth(
         ok=True, status=200, remaining=remaining, dead=False,
-        reason=f"token healthy ({remaining} core requests remaining)",
+        reason=f"{mechanism} credential healthy ({remaining} core requests remaining)",
+        mechanism=mechanism,
     )
 
 
@@ -162,16 +175,33 @@ async def check_and_alert_token() -> TokenHealth:
     """
     health = await check_github_token_health()
     if health.dead:
+        if health.mechanism == "github_app":
+            fix_html = (
+                "<p><b>Fix:</b> the GitHub App private key was rejected — verify "
+                "<code>GITHUB_APP_ID</code>, <code>GITHUB_APP_PRIVATE_KEY</code>, and "
+                "<code>GITHUB_APP_INSTALLATION_ID</code> in <code>.env.secrets</code> "
+                "(a rotated/removed key or an uninstalled App will 401), then restart "
+                "the backend. Removing the App creds falls back to "
+                "<code>GITHUB_TOKEN</code> automatically.</p>"
+            )
+        else:
+            fix_html = (
+                "<p><b>Fix:</b> rotate <code>GITHUB_TOKEN</code> in "
+                "<code>.env.secrets</code> and restart the backend — or configure the "
+                "GitHub App creds (<code>GITHUB_APP_ID</code> / "
+                "<code>GITHUB_APP_PRIVATE_KEY</code> / "
+                "<code>GITHUB_APP_INSTALLATION_ID</code>) so the token never expires.</p>"
+            )
         await alert_scan_health(
             "github_token_dead",
-            "AgentAvow: GitHub scanner token is DEAD (re-scans failing)",
+            "AgentAvow: GitHub scanner credential is DEAD (re-scans failing)",
             (
                 "<p>The security re-scan job could not authenticate to GitHub.</p>"
+                f"<p><b>Active mechanism:</b> {health.mechanism}.</p>"
                 f"<p><b>What happened:</b> {health.reason}.</p>"
                 "<p>Every repo scan will 401 until this is fixed, so catalog "
                 "grades will go stale.</p>"
-                "<p><b>Fix:</b> rotate <code>GITHUB_TOKEN</code> in "
-                "<code>.env.secrets</code> and restart the backend.</p>"
+                + fix_html
             ),
         )
     elif not health.ok and health.remaining is not None:

@@ -153,9 +153,18 @@ class Settings(BaseSettings):
 
     # GitHub App credentials (preferred over PAT — private key does not expire)
     # See src/github_auth.py for the token-minting flow.
+    # github_app_private_key accepts raw PEM, escaped-\n PEM, or base64-of-PEM.
     github_app_id: str | None = None
-    github_app_private_key: str | None = None  # full PEM (may have escaped \n)
+    github_app_private_key: str | None = None  # PEM (raw, escaped-\n, or base64)
     github_app_installation_id: str | None = None
+
+    # Route bulk repo file-content fetches through raw.githubusercontent.com,
+    # which is UNMETERED (does not consume the GitHub API rate-limit budget) —
+    # cuts the ~1-API-call-per-file cost of a scan dramatically. The authenticated
+    # tree fetch still uses the API (it needs auth), and any raw miss (private
+    # repo → 404, transient error) falls back to the Contents API automatically.
+    # Set to False to force every content fetch back through the authenticated API.
+    scanner_use_raw_content: bool = True
 
     # Security re-scan job (Job 19 in src/jobs/scheduler.py) — periodic re-scan of
     # catalog entries so grades don't rot. Caps are CONFIGURABLE and sized to stay

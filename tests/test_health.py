@@ -15,7 +15,7 @@ async def test_health_check():
     assert resp.status_code in (200, 503)
     data = resp.json()
     assert data["status"] in ("ok", "degraded")
-    assert data["service"] == "AgentGraph"
+    assert data["service"] == "AgentAvow"
     assert "checks" in data
     assert "database" in data["checks"]
     assert "redis" in data["checks"]
