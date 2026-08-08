@@ -132,6 +132,9 @@ async def run_security_scan(
         "has_readme": result.has_readme,
         "has_license": result.has_license,
         "has_tests": result.has_tests,
+        # Phase 0/1: recompute-discipline coverage block + OSV supply-chain summary.
+        "coverage": getattr(result, "coverage", {}) or {},
+        "supply_chain": getattr(result, "supply_chain", {}) or {},
         "findings": [
             {
                 "category": f.category,

@@ -332,5 +332,8 @@ async def get_composed_slot(
         findings=findings_counts,
         evidence_hash=evidence_hash,
         evidence_url=evidence_url,
+        # Phase 0: pass through the recompute-discipline coverage block if the
+        # stored scan carries one (older scans simply omit it — additive).
+        coverage=(vulns.get("coverage") or None),
     )
     return build_agentgraph_slot(inputs)

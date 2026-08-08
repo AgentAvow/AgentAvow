@@ -166,6 +166,21 @@ class Settings(BaseSettings):
     # Set to False to force every content fetch back through the authenticated API.
     scanner_use_raw_content: bool = True
 
+    # --- Phase 1 supply-chain pipeline (OSV / deps.dev / OpenSSF Scorecard) ----
+    # Replaces the ~20-package regex dependency check with a real vuln DB: parse
+    # the repo's lockfiles → OSV querybatch → hydrate severity → count CVE/GHSA/
+    # MAL by band (a MAL- known-malicious match is an automatic critical). All
+    # calls are free/no-auth. Fully FEATURE-FLAGGED and FAIL-OPEN: if OSV/deps.dev/
+    # Scorecard are unreachable the scan falls back to the legacy regex behaviour
+    # and logs — a supply-chain lookup must never break a scan. Flip
+    # scanner_use_osv=False to disable the whole pipeline and revert to regex-only.
+    scanner_use_osv: bool = True
+    scanner_use_depsdev: bool = True       # deps.dev enrichment (license/dependents)
+    scanner_use_scorecard: bool = True     # OpenSSF Scorecard aggregate (precomputed)
+    # Max lockfile + workflow files fetched per scan for the supply-chain pass.
+    scanner_supply_chain_max_lockfiles: int = 8
+    scanner_supply_chain_max_workflows: int = 12
+
     # Security re-scan job (Job 19 in src/jobs/scheduler.py) — periodic re-scan of
     # catalog entries so grades don't rot. Caps are CONFIGURABLE and sized to stay
     # under the PAT's 5000 core-req/hr budget.

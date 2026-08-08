@@ -216,6 +216,10 @@ class ScanInputs:
     findings: dict[str, int]
     evidence_hash: str  # pre-computed "sha256:<hex>"
     evidence_url: str
+    # Phase 0 recompute discipline: the coverage{} block (surface, scan_depth,
+    # db_snapshots, evidence_anchors, point_in_time). Optional + additive — when
+    # absent the slot emits exactly as before, so older scans stay valid.
+    coverage: dict[str, Any] | None = None
 
 
 def build_agentgraph_slot(inputs: ScanInputs) -> dict[str, Any]:
@@ -261,6 +265,10 @@ def build_agentgraph_slot(inputs: ScanInputs) -> dict[str, Any]:
         "evidence_hash": inputs.evidence_hash,
         "canonicalization_spec": CANONICALIZATION_SPEC,
     }
+    # Phase 0: disclose surface + external-DB coverage so a consumer knows exactly
+    # what the grade covers and can recompute it offline "as-of DB@<date>" (§4.4).
+    if inputs.coverage:
+        slot["coverage"] = inputs.coverage
     return slot
 
 

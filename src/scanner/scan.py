@@ -131,6 +131,12 @@ class ScanResult:
     # can prove a tool definition drifted (rug-pull) even if the code still scans clean.
     tool_digests: dict[str, str] = field(default_factory=dict)  # path -> "sha256:..."
     tool_manifest_digest: str | None = None  # combined digest folded into the attestation
+    # Phase 0/1 supply-chain: the recompute-discipline coverage block (surface,
+    # scan_depth, db_snapshots, point_in_time) and the OSV/deps.dev summary. Both
+    # are additive — a scan with the OSV pipeline disabled/unreachable leaves them
+    # at their empty defaults and behaves exactly as before.
+    coverage: dict = field(default_factory=dict)
+    supply_chain: dict = field(default_factory=dict)
     error: str | None = None
 
     @property
@@ -1534,6 +1540,157 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
     return scores
 
 
+def _dedupe_regex_vs_osv(result: ScanResult, osv_findings: list[Finding]) -> None:
+    """Drop legacy regex ``dependency`` findings that OSV already covers.
+
+    OSV findings name a concrete ``pkg@version (VULN-ID)``; the regex findings are
+    ``Vulnerable dependency: <pkg>``. When OSV has flagged package ``X`` we remove
+    the coarser regex finding for ``X`` so the same package isn't double-counted
+    against the dependency subscore. Regex findings for packages OSV didn't cover
+    (e.g. a range-only manifest with no lockfile pin) are kept.
+    """
+    osv_pkgs: set[str] = set()
+    for f in osv_findings:
+        # name form: "... : <name>@<version> (<id>)" — take the token before '@'.
+        after_colon = f.name.split(": ", 1)[-1]
+        pkg = after_colon.split("@", 1)[0].strip().lower()
+        if pkg:
+            osv_pkgs.add(pkg)
+    if not osv_pkgs:
+        return
+
+    def _regex_pkg(f: Finding) -> str | None:
+        if f.category != "dependency" or "Vulnerable dependency:" not in f.name:
+            return None
+        return f.name.split(":", 1)[-1].strip().lower()
+
+    result.findings = [
+        f for f in result.findings
+        if not (_regex_pkg(f) is not None and _regex_pkg(f) in osv_pkgs)
+    ]
+
+
+async def _run_supply_chain(
+    result: ScanResult,
+    owner: str,
+    repo: str,
+    tree: list[dict],
+    token: str | None,
+    ref: str | None,
+    sem,
+    per_file_timeout: float,
+) -> None:
+    """Phase 0 coverage block + Phase 1 OSV supply-chain pass (fail-open).
+
+    Always attaches the Phase-0 ``coverage`` block (recompute discipline). When
+    ``settings.scanner_use_osv`` is on it additionally fetches the repo's real
+    lockfiles + workflow YAMLs, runs the OSV/deps.dev/Scorecard pipeline, folds
+    the resulting CVE/GHSA/MAL findings into the scan, and pins every DB snapshot
+    date into ``coverage.db_snapshots``. Any failure leaves the legacy regex
+    findings untouched.
+    """
+    import asyncio
+
+    from src.config import settings
+    from src.scanner.coverage import (
+        SCAN_DEPTH_REPO_ONLY,
+        build_coverage,
+        build_evidence_anchors,
+    )
+
+    repo_url = f"https://github.com/{owner}/{repo}"
+    db_snapshots: dict[str, str] = {}
+    sc_summary: dict = {}
+
+    if getattr(settings, "scanner_use_osv", True):
+        try:
+            from src.scanner.supply_chain import analyze_supply_chain
+
+            # Reuse the tree + raw fetch to pull lockfiles and workflow YAMLs.
+            lock_names = {
+                "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+                "requirements.txt", "poetry.lock", "pipfile.lock",
+                "cargo.lock", "go.sum",
+            }
+            lock_items = [
+                it for it in tree
+                if Path(it["path"]).name.lower() in lock_names
+                and not _should_skip_path(it["path"])
+            ][: settings.scanner_supply_chain_max_lockfiles]
+            wf_items = [
+                it for it in tree
+                if it["path"].startswith(".github/workflows/")
+                and it["path"].lower().endswith((".yml", ".yaml"))
+            ][: settings.scanner_supply_chain_max_workflows]
+
+            async def _fetch(path: str) -> tuple[str, str]:
+                try:
+                    async with sem:
+                        content = await asyncio.wait_for(
+                            _fetch_file_content(owner, repo, path, token, ref=ref),
+                            timeout=per_file_timeout,
+                        )
+                    return path, content or ""
+                except (asyncio.TimeoutError, Exception):
+                    return path, ""
+
+            fetch_tasks = [_fetch(it["path"]) for it in (lock_items + wf_items)]
+            fetched = await asyncio.gather(*fetch_tasks) if fetch_tasks else []
+            lockfiles = {
+                p: c for p, c in fetched
+                if Path(p).name.lower() in lock_names and c
+            }
+            workflow_texts = [
+                c for p, c in fetched
+                if p.startswith(".github/workflows/") and c
+            ]
+
+            sc = await analyze_supply_chain(
+                lockfiles,
+                owner=owner,
+                repo=repo,
+                workflow_texts=workflow_texts,
+                use_depsdev=getattr(settings, "scanner_use_depsdev", True),
+                use_scorecard=getattr(settings, "scanner_use_scorecard", True),
+            )
+
+            osv_findings = [Finding(**d) for d in sc.findings]
+            if sc.ok and osv_findings:
+                _dedupe_regex_vs_osv(result, osv_findings)
+                result.findings.extend(osv_findings)
+                if sc.deps_total and not any(
+                    p == "Dependency pinning" for p in result.positive_signals
+                ):
+                    result.positive_signals.append("Dependency pinning")
+            db_snapshots = dict(sc.db_snapshots)
+            sc_summary = {
+                "ok": sc.ok,
+                "deps_total": sc.deps_total,
+                "ecosystems": sc.ecosystems,
+                "counts": sc.counts,
+                "malicious": sc.malicious,
+                "scorecard": sc.scorecard,
+                "github_depth": sc.github_depth,
+                "db_snapshots": sc.db_snapshots,
+            }
+        except Exception:
+            logger.warning(
+                "Supply-chain pass errored for %s/%s — keeping regex deps",
+                owner, repo, exc_info=True,
+            )
+
+    # Phase 0 coverage block — always emitted (recompute discipline).
+    result.coverage = build_coverage(
+        surface="github",
+        repo_url=repo_url,
+        commit=ref,
+        scan_depth=SCAN_DEPTH_REPO_ONLY,
+        db_snapshots=db_snapshots,
+    )
+    result.coverage["evidence_anchors"] = build_evidence_anchors()
+    result.supply_chain = sc_summary
+
+
 async def scan_repo(
     full_name: str,
     stars: int = 0,
@@ -1758,6 +1915,16 @@ async def scan_repo(
                     result.findings.extend(dep_findings)
             except (asyncio.TimeoutError, Exception):
                 pass
+
+        # --- Phase 1: real supply-chain (OSV / deps.dev / Scorecard) ----------
+        # Parse the repo's real lockfiles → OSV → severity-weighted CVE/GHSA/MAL
+        # findings that replace the regex list for covered ecosystems. Additive,
+        # feature-flagged, and FAIL-OPEN: on any error the legacy regex findings
+        # above stand and the scan proceeds. Every DB date is pinned into the
+        # coverage block so the subscore is offline-recomputable (Phase 0).
+        await _run_supply_chain(
+            result, owner, repo, tree, token, ref, sem, per_file_timeout,
+        )
 
         # Calculate trust score and per-category sub-scores
         result.trust_score = _calculate_trust_score(result)

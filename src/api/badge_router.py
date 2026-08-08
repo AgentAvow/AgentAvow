@@ -6,7 +6,7 @@ import re as _re
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -650,6 +650,7 @@ async def get_readme_badge(
 )
 async def get_trust_badge_svg(
     entity_id: uuid.UUID,
+    request: Request,
     style: _STYLE_OPTIONS = Query(
         "compact", description="Badge visual style",
     ),
@@ -673,6 +674,15 @@ async def get_trust_badge_svg(
     from src.api.metrics_dashboard_router import bump_metric
 
     await bump_metric("badge_fetch")
+
+    # Best-effort adoption axis-D signal: log the Referer host so we can count
+    # distinct badge-embed domains (30d). MUST never break the badge render.
+    try:
+        from src.scanner.adoption_sources import record_badge_referer
+
+        await record_badge_referer(str(entity_id), request.headers.get("referer"))
+    except Exception:
+        pass
 
     trust = await db.scalar(
         select(TrustScore).where(TrustScore.entity_id == entity_id)

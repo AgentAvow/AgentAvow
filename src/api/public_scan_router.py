@@ -472,6 +472,16 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
         "toolManifestDigest": result_data.get("tool_manifest_digest"),
         "toolDigests": result_data.get("tool_digests", {}),
     }
+    # Phase 0/1: pin the recompute-discipline coverage block (surface,
+    # scan_depth, db_snapshots, evidence_anchors) into the SIGNED payload so the
+    # supply-chain subscore is offline-recomputable "as-of DB@<date>". Additive —
+    # older cached scans without a coverage block simply omit it.
+    _coverage = result_data.get("coverage") or {}
+    if _coverage:
+        scan_block["coverage"] = _coverage
+    _supply_chain = result_data.get("supply_chain") or {}
+    if _supply_chain:
+        scan_block["supplyChain"] = _supply_chain
     payload = {
         "@context": "https://schema.agentgraph.co/attestation/security/v1",
         "type": "SecurityPostureAttestation",
@@ -567,6 +577,10 @@ def _scan_result_to_dict(result: object) -> dict:
         "category_scores": getattr(result, "category_scores", {}),
         "tool_digests": getattr(result, "tool_digests", {}) or {},
         "tool_manifest_digest": getattr(result, "tool_manifest_digest", None),
+        # Phase 0/1: recompute-discipline coverage block (surface, scan_depth,
+        # db_snapshots, evidence_anchors) + the OSV/deps.dev supply-chain summary.
+        "coverage": getattr(result, "coverage", {}) or {},
+        "supply_chain": getattr(result, "supply_chain", {}) or {},
         "scanned_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -1222,9 +1236,18 @@ async def _github_stars(owner: str, repo: str) -> int | None:
 
 
 @router.get("/{owner}/{repo}/checks", dependencies=[Depends(rate_limit_reads)])
-async def scan_checks(owner: str, repo: str, db: AsyncSession = Depends(get_db)) -> dict:
+async def scan_checks(
+    owner: str,
+    repo: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """Real adoption signals — AgentAvow check count, active watchers, GitHub stars
-    (public, no claim needed), and the score-history timeline. Increments checks."""
+    (public, no claim needed), and the score-history timeline. Increments checks.
+
+    The raw ``checks`` INCR is retained as a vanity number only; the credible,
+    hard-to-inflate signal is ``unique_checkers`` — a HyperLogLog of distinct
+    authed identities (fallback hashed IP+UA) used by the adoption metric."""
     import json as _json
 
     from sqlalchemy import func as safunc
@@ -1247,6 +1270,28 @@ async def scan_checks(owner: str, repo: str, db: AsyncSession = Depends(get_db))
                 pass
     except Exception:
         checks = 0
+
+    # First-party adoption axis-D: dedup on identity (never inflatable). Best-
+    # effort — a Redis miss leaves unique_checkers at 0 and never fails the call.
+    unique_checkers = 0
+    try:
+        from src.api.rate_limit import _get_client_ip, _get_entity_id
+        from src.scanner.adoption_sources import (
+            checker_identity,
+            get_unique_checkers,
+            record_unique_checker,
+        )
+
+        identity = checker_identity(
+            _get_entity_id(request),
+            _get_client_ip(request),
+            request.headers.get("user-agent", ""),
+        )
+        await record_unique_checker(owner, repo, identity)
+        unique_checkers = await get_unique_checkers(owner, repo)
+    except Exception:
+        unique_checkers = 0
+
     watchers = await db.scalar(
         select(safunc.count()).select_from(ToolWatch).where(
             ToolWatch.owner == owner,
@@ -1257,10 +1302,108 @@ async def scan_checks(owner: str, repo: str, db: AsyncSession = Depends(get_db))
     stars = await _github_stars(owner, repo)
     return {
         "checks": checks,
+        "unique_checkers": unique_checkers,
         "watchers": int(watchers),
         "stars": stars,
         "history": history,
     }
+
+
+@router.get("/{owner}/{repo}/adoption", dependencies=[Depends(rate_limit_reads)])
+async def scan_adoption(
+    owner: str,
+    repo: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Adoption / engagement score — DISTINCT from the trust grade.
+
+    Adoption answers "do real, independent parties rely on this?"; the trust
+    letter answers "is it safe?". This endpoint never returns or affects the
+    trust grade — it is a separate score with its own tier and "rising" vs
+    "established" badge. First-party raw counts are kept internal; the published
+    formula and per-axis breakdown are returned. Fail-open across every source.
+    """
+    from src.scanner.adoption import (
+        build_axis_dependents,
+        build_axis_downloads,
+        build_axis_first_party,
+        build_axis_stars,
+        compute_adoption,
+    )
+    from src.scanner.adoption_sources import (
+        fetch_ecosystems_dependents,
+        fetch_npm_downloads,
+        get_badge_embed_domains,
+        get_graph_connections,
+        get_unique_checkers,
+        get_verify_pulls,
+    )
+
+    axes = []
+    raw_inputs: dict = {}
+
+    # (A) registry downloads — try npm by repo name (best-effort, fail-open).
+    dl = await fetch_npm_downloads(repo)
+    # (B) reverse-dependents — ecosyste.ms npm registry.
+    dep = await fetch_ecosystems_dependents("npmjs.org", repo)
+
+    dep_pkgs = (dep or {}).get("dependent_packages")
+    dep_repos = (dep or {}).get("dependent_repos")
+
+    if dl:
+        raw_inputs["A"] = dl
+        axes.append(
+            build_axis_downloads(
+                total_downloads=dl.get("total"),
+                series=dl.get("series"),
+                dependents_for_ratio=int(dep_pkgs or 0) + int(dep_repos or 0),
+            )
+        )
+    if dep:
+        raw_inputs["B"] = dep
+        axes.append(
+            build_axis_dependents(
+                dependent_packages=dep_pkgs,
+                dependent_repos=dep_repos,
+            )
+        )
+
+    # (C) social stars velocity.
+    stars = await _github_stars(owner, repo)
+    if stars is not None:
+        raw_inputs["C"] = {"source": "github:stargazers_count", "stars": stars}
+        axes.append(build_axis_stars(stars=stars))
+
+    # (D) first-party (ours) — unique checkers, badge-embed domains, verify pulls.
+    from src.models import Entity
+
+    uniq = await get_unique_checkers(owner, repo)
+    domains = 0
+    entity = await db.scalar(
+        select(Entity).where(
+            Entity.is_active.is_(True),
+            Entity.source_url.ilike(f"%github.com/{owner}/{repo}%"),
+        )
+    )
+    if entity is not None:
+        domains = await get_badge_embed_domains(str(entity.id))
+    verify_pulls = await get_verify_pulls(owner, repo)
+    graph_conn = await get_graph_connections(owner, repo)
+    fp_axis, fp_volume = build_axis_first_party(
+        unique_checkers=uniq,
+        badge_embed_domains=domains,
+        verify_pulls=verify_pulls,
+        graph_connections=graph_conn,
+    )
+    if fp_axis.present:
+        axes.append(fp_axis)
+
+    # (E) MCP / agent-registry usage — from cached community signals if present.
+    # (Wired via source_import fetchers; absent here unless the tool is an MCP
+    # server with cached Smithery/PulseMCP data.)
+
+    result = compute_adoption(axes, first_party_volume_factor=fp_volume)
+    return result.to_public_dict()
 
 
 def _verdict_text(grade: str) -> str:
