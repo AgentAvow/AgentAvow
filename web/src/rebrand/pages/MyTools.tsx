@@ -149,7 +149,13 @@ function GitHubAppConnect() {
   })
   const connect = useMutation({
     mutationFn: async (installation_id: string) => (await api.post('/account/github-app/connect', { installation_id })).data,
-    onSuccess: () => qc.refetchQueries({ queryKey: ['github-app-status'] }),
+    onSuccess: () => {
+      qc.refetchQueries({ queryKey: ['github-app-status'] })
+      // Scans + verified claims are created in the background — refetch now and
+      // again shortly so the repos surface in "Your repos" as they finish.
+      qc.refetchQueries({ queryKey: ['rebrand-claims'] })
+      setTimeout(() => qc.refetchQueries({ queryKey: ['rebrand-claims'] }), 8000)
+    },
   })
   const disconnect = useMutation({
     mutationFn: async (pk: string) => api.delete(`/account/github-app/${pk}`),

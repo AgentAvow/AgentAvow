@@ -198,7 +198,7 @@ export default function RebrandAccount() {
           <div className="max-w-[60ch]">
             <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">My watches</span>
             <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Watch tools for changes</h1>
-            <p className="mt-2 text-text-muted text-[14px]">We re-scan the tools you watch and alert you the moment a grade <span className="text-text">drops</span> or a tool&apos;s <span className="text-text">signed definition changes</span> — so you catch a tool getting riskier before your agents keep using it.</p>
+            <p className="mt-2 text-text-muted text-[14px]">We re-scan the tools you watch and tell you when something changes — a grade <span className="text-text">drops</span>, a <span className="text-text">signed definition changes</span>, or a tool you flagged gets <span className="text-text">safer</span> — so you always know where the tools your agents rely on stand.</p>
           </div>
           <div className="flex gap-2 shrink-0">
             <Link to={rp("/rebrand/tools")} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claim a repo</Link>
