@@ -205,7 +205,7 @@ class Settings(BaseSettings):
     # Verification is offline via `cryptography` (DSSE PAE signature + Fulcio
     # SAN/issuer identity gate); it does NOT anchor the Fulcio TUF trust-root nor
     # prove Rekor inclusion — the result records exactly what level was achieved.
-    scanner_verify_provenance: bool = False
+    scanner_verify_provenance: bool = True   # enabled 08-09 (additive bonus; verified=+4, absent=0)
 
     # --- Phase 2: published-ARTIFACT fetch + scan + repo↔artifact drift --------
     # We grade the GitHub repo, but an agent installs the PUBLISHED package, which
@@ -218,7 +218,7 @@ class Settings(BaseSettings):
     # to surface drift. Sets coverage.scan_depth="artifact" + a real artifact_digest.
     # ADDITIVE, FEATURE-FLAGGED (default OFF — enable after review), and FAIL-OPEN:
     # any fetch/unpack error falls back to the repo-only grade and never breaks a scan.
-    scanner_scan_artifact: bool = False
+    scanner_scan_artifact: bool = True   # enabled 08-09 — validate grades + latency live
 
     # --- Phase 5: maintainer / behavioral trust signals -----------------------
     # Cheap GitHub-METADATA maintainer signals (NO code execution, NO sandbox):
