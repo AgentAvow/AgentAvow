@@ -80,13 +80,12 @@ class VerifyRequest(BaseModel):
     token: str | None = Field(None, max_length=255)
 
 
-def _serialize(c: RepoClaim, private_pub: dict | None = None) -> dict:
+def _serialize(c: RepoClaim, meta: dict | None = None) -> dict:
     # `private` is AUTHORITATIVE on the claim (set at claim time): public
     # topic-proof claims are False; GitHub-App claims of private repos are True.
-    # `private_pub` maps (owner, repo) -> published bool for repos that have a
-    # stored PrivateScanResult, so we can also report whether it's been scanned
-    # yet (publish needs a stored result) and whether it's currently listed.
-    pub = (private_pub or {}).get((c.owner, c.repo)) if private_pub is not None else None
+    # `meta` maps full_name -> {scanned, published, grade, score} so the unified
+    # "Your tools" list can show a grade + state without a per-row fetch.
+    m = (meta or {}).get(c.full_name) or {}
     return {
         "id": str(c.id),
         "owner": c.owner,
@@ -96,8 +95,10 @@ def _serialize(c: RepoClaim, private_pub: dict | None = None) -> dict:
         "topic": f"agentavow-verify-{c.verify_code}",
         "verified_at": c.verified_at.isoformat() if c.verified_at else None,
         "private": bool(c.is_private),
-        "scanned": pub is not None,
-        "published": bool(pub) if pub is not None else False,
+        "scanned": bool(m.get("scanned", False)),
+        "published": bool(m.get("published", False)),
+        "grade": m.get("grade"),
+        "score": m.get("score"),
     }
 
 
@@ -107,20 +108,46 @@ async def list_claims(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_reads),
 ):
+    from src.api.public_scan_router import _grade_from_score
+    from src.models import CommunityScan
+
     result = await db.execute(
         select(RepoClaim)
         .where(RepoClaim.entity_id == entity.id)
         .order_by(RepoClaim.created_at.desc())
     )
     claims = result.scalars().all()
-    # Fetch this owner's private-scan rows once and key by (owner, repo) so each
-    # claim can carry its private/published state (drives the publish-to-search CTA).
+
+    # Build a per-repo meta map (keyed by full_name) so each row carries its grade
+    # + state. Private repos read from the owner's PrivateScanResult; public repos
+    # read the latest catalog grade from CommunityScan.
+    meta: dict[str, dict] = {}
     priv_rows = (await db.execute(
-        select(PrivateScanResult.owner, PrivateScanResult.repo, PrivateScanResult.published)
-        .where(PrivateScanResult.entity_id == entity.id)
+        select(
+            PrivateScanResult.full_name, PrivateScanResult.published,
+            PrivateScanResult.grade, PrivateScanResult.trust_score,
+        ).where(PrivateScanResult.entity_id == entity.id)
     )).all()
-    private_pub = {(o, r): bool(p) for (o, r, p) in priv_rows}
-    return {"claims": [_serialize(c, private_pub) for c in claims]}
+    for fn, pub, grade, score in priv_rows:
+        meta[fn] = {"scanned": True, "published": bool(pub), "grade": grade, "score": score}
+
+    pub_names = [c.full_name for c in claims if not c.is_private]
+    if pub_names:
+        cs_rows = (await db.execute(
+            select(CommunityScan.full_name, CommunityScan.trust_score)
+            .where(CommunityScan.full_name.in_(pub_names))
+        )).all()
+        for fn, score in cs_rows:
+            if fn in meta:
+                continue
+            meta[fn] = {
+                "scanned": True,
+                "published": True,  # public repos are inherently listed
+                "grade": _grade_from_score(score) if score is not None else None,
+                "score": score,
+            }
+
+    return {"claims": [_serialize(c, meta) for c in claims]}
 
 
 @router.post("/claims", status_code=201)

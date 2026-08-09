@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
+import { getGradeInfo } from '../../components/trust/gradeSystem'
 import { Reveal } from '../components/motion'
 
 // Confetti pieces — fixed trajectories so the burst is stable across renders.
@@ -37,234 +38,137 @@ function ConfettiBurst() {
   )
 }
 
-/**
- * "My Tools" — the single home for claiming + managing the repos you own. Claim
- * UX at the top (public = GitHub topic, private = read-only token), then the list
- * of your repos with status, a link to each report, and remove. Scan a private
- * repo lives at the bottom. (The old /claim route redirects here.)
- */
-
-interface Claim { id: string; owner: string; repo: string; full_name: string; status: string; topic: string; private?: boolean; scanned?: boolean; published?: boolean }
-
-/** Publish-to-search control for a verified PRIVATE repo (row in "Your repos").
- * Publishing lists the GRADE (never the code) in public search; once listed, the
- * only action is Unlist. Sharing lives on the score page, not here. Public repos
- * are inherently listed, so this only renders for private ones. */
-function PrivatePublish({ owner, repo, scanned, published, onRefetch }: { owner: string; repo: string; scanned: boolean; published: boolean; onRefetch: () => void }) {
-  const reduce = useReducedMotion()
-  const [celebrating, setCelebrating] = useState(false)
-  const publish = useMutation({
-    mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/publish`)).data,
-    onSuccess: () => { if (!reduce) { setCelebrating(true); setTimeout(() => setCelebrating(false), 1600) } onRefetch() },
-  })
-  const unpublish = useMutation({
-    mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/unpublish`)).data,
-    onSuccess: onRefetch,
-  })
-
-  return (
-    <div className="relative mt-2.5 pt-2.5 border-t border-border/50 flex items-center justify-between gap-3 flex-wrap">
-      {celebrating && <ConfettiBurst />}
-      {published ? (
-        <>
-          <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light">🌐 Listed in search</span>
-          <button onClick={() => unpublish.mutate()} disabled={unpublish.isPending} className="text-[12px] text-text-muted hover:text-danger">{unpublish.isPending ? 'Unlisting…' : 'Unlist'}</button>
-        </>
-      ) : !scanned ? (
-        <div className="text-[12px] text-text-muted">🔒 Private — scanning… publish appears once the first scan finishes.</div>
-      ) : (
-        <>
-          <div className="text-[12px] text-text-muted max-w-[46ch]">🔒 Private — not in search. Publish the <span className="text-text font-medium">grade</span>; your code stays private.</div>
-          <button onClick={() => publish.mutate()} disabled={publish.isPending}
-            className="shrink-0 text-[12.5px] font-semibold px-3.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
-            {publish.isPending ? 'Publishing…' : '🌐 Publish to search'}</button>
-        </>
-      )}
-      {publish.isError && <div className="w-full text-[12px] text-danger">Couldn&apos;t publish — try again.</div>}
-    </div>
-  )
+interface Claim {
+  id: string; owner: string; repo: string; full_name: string; status: string; topic: string
+  private?: boolean; scanned?: boolean; published?: boolean; grade?: string | null; score?: number | null
 }
-
-/** One claimed repo. Verified → success + report link + remove. Pending → the
- * public-repo topic verification + remove (private repos go through the GitHub
- * App section below, not this form). */
-function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
-  const reduce = useReducedMotion()
-  const [msg, setMsg] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
-  // Brief celebratory moment on a pending → verified transition. We hold the
-  // refetch until the burst finishes so the row stays put while it plays.
-  const [celebrating, setCelebrating] = useState(false)
-  const verify = useMutation({
-    mutationFn: async () =>
-      (await api.post<{ verified: boolean; detail?: string }>(
-        `/account/claims/${c.id}/verify`, {},
-      )).data,
-    onSuccess: (d) => {
-      if (!d.verified) { setMsg(d.detail || 'Not verified yet.'); onRefetch(); return }
-      setMsg(null)
-      if (reduce) { onRefetch(); return }
-      setCelebrating(true)
-      setTimeout(() => { setCelebrating(false); onRefetch() }, 1500)
-    },
-  })
-  const remove = useMutation({ mutationFn: () => api.delete(`/account/claims/${c.id}`), onSuccess: onRefetch })
-  const verified = c.status === 'verified'
-  return (
-    <div className="glass rounded-xl p-4 relative overflow-hidden">
-      {celebrating && <ConfettiBurst />}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="font-mono text-[14px] break-all">{c.full_name}</div>
-        <span className={`font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded ${verified || celebrating ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>{verified || celebrating ? 'verified' : 'unverified'}</span>
-      </div>
-
-      {celebrating ? (
-        <motion.div
-          className="mt-2 flex items-center gap-2 text-success"
-          initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.3, ease: 'easeOut' }}
-        >
-          <motion.span
-            className="grid place-items-center w-6 h-6 rounded-full bg-success/20 text-success text-[13px] shrink-0"
-            initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 420, damping: 12 }}
-          >✓</motion.span>
-          <span className="text-[13px] font-semibold">Verified — you own this!</span>
-        </motion.div>
-      ) : verified ? (
-        <>
-          <div className="mt-2 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-[12.5px] text-success">✓ Verified — you own this.</div>
-            <div className="flex items-center gap-3 shrink-0">
-              <Link to={rp(`/rebrand/check/${c.owner}/${c.repo}`)} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">View report →</Link>
-              <button onClick={() => remove.mutate()} className="text-[12px] text-text-muted hover:text-danger">Remove</button>
-            </div>
-          </div>
-          {c.private && <PrivatePublish owner={c.owner} repo={c.repo} scanned={!!c.scanned} published={!!c.published} onRefetch={onRefetch} />}
-        </>
-      ) : (
-        <div className="mt-3 text-[13px] text-text-muted">
-          <p className="text-text font-semibold text-[12.5px]">Prove you own this public repo — add a GitHub topic:</p>
-
-          {/* PUBLIC repo — GitHub topic (private repos use the GitHub App section below) */}
-          <div className="mt-2.5 rounded-lg border border-border/70 p-3">
-            <div className="text-[12.5px] font-semibold text-text">Public repo → add a GitHub topic</div>
-            <div className="mt-2 flex items-center gap-2 flex-wrap">
-              <code className="inline-block font-mono text-[12px] bg-surface border border-border rounded px-2 py-1 break-all select-all">{c.topic}</code>
-              <button type="button"
-                onClick={() => { navigator.clipboard?.writeText(c.topic); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
-                className="text-[11.5px] font-medium px-2 py-1 rounded-md border border-border text-text-muted hover:text-text hover:border-primary-light"
-              >{copied ? 'Copied ✓' : 'Copy'}</button>
-            </div>
-            <ol className="mt-2.5 flex flex-col gap-1 list-decimal pl-4 marker:text-primary-light marker:font-semibold text-[12.5px]">
-              <li>Open <a href={`https://github.com/${c.full_name}`} target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary font-mono">github.com/{c.full_name}</a> → click the <span className="text-text font-medium">gear ⚙️</span> next to <span className="text-text font-medium">&ldquo;About&rdquo;</span>.</li>
-              <li>Paste the topic into <span className="text-text font-medium">Topics</span>, press <span className="text-text font-medium">Enter</span>, then <span className="text-text font-medium">Save changes</span>.</li>
-              <li>Come back and click <span className="text-text font-medium">Verify topic</span> (topics can take a few seconds — retry if needed).</li>
-            </ol>
-            <details className="mt-2 text-[12px]">
-              <summary className="cursor-pointer text-text-muted hover:text-text">Prefer the command line?</summary>
-              <code className="mt-1.5 block font-mono text-[11.5px] bg-surface border border-border rounded px-2 py-1.5 break-all">gh repo edit {c.full_name} --add-topic {c.topic}</code>
-            </details>
-            <button onClick={() => verify.mutate()} disabled={verify.isPending} className="mt-2.5 text-[12.5px] font-semibold px-3.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{verify.isPending ? 'Checking…' : 'Verify topic'}</button>
-          </div>
-
-          <div className="mt-3">
-            <button onClick={() => remove.mutate()} className="text-[12.5px] text-text-muted hover:text-danger">Remove claim</button>
-          </div>
-          {msg && <div className="mt-2 text-[12.5px] text-warning">{msg}</div>}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Scan a private repo with a transient read token → hands the full result to the
- * score page (with the token) so the owner can Claim / Publish from there. */
-function PrivateScan() {
-  const navigate = useNavigate()
-  const [params] = useSearchParams()
-  const [owner, setOwner] = useState(params.get('owner') || '')
-  const [repo, setRepo] = useState(params.get('repo') || '')
-  const [token, setToken] = useState('')
-  const scan = useMutation({
-    mutationFn: async () => (await api.post('/account/private-scan', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
-    onSuccess: (data) => navigate(
-      rp(`/rebrand/check/${owner.trim()}/${repo.trim()}`),
-      { state: { privateResult: data, token: token.trim() } },
-    ),
-  })
-  return (
-    <div>
-      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">One-time private repo scan</h2>
-      <p className="text-text-muted text-[13px] mb-3">A single scan with no ongoing access — paste a read token, used for this scan only and <strong className="text-text">never stored or logged</strong>. For continuous scanning + alerts, use the GitHub App above.</p>
-      <form onSubmit={(e) => { e.preventDefault(); scan.mutate() }} className="glass rounded-2xl p-5 flex flex-col gap-2.5 max-w-[560px]">
-        <div className="flex gap-2">
-          <input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="owner" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
-          <span className="self-center text-text-muted">/</span>
-          <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
-        </div>
-        <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="github token (ghp_… / github_pat_…)" className="bg-surface border border-border rounded-xl px-3.5 py-2 font-mono text-[13px] outline-none focus:border-primary-light" />
-        <details className="text-[12px]">
-          <summary className="cursor-pointer text-primary-light hover:text-primary font-medium">How to create a read-only token (30 seconds)</summary>
-          <ol className="mt-2 flex flex-col gap-1.5 list-decimal pl-4 marker:text-primary-light marker:font-semibold text-text-muted">
-            <li>On GitHub, go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">Settings → Developer settings → Personal access tokens → Fine-grained tokens → <span className="text-text font-medium">Generate new token</span></a>.</li>
-            <li>Under <span className="text-text font-medium">Repository access</span>, choose <span className="text-text font-medium">Only select repositories</span> and pick just this one repo.</li>
-            <li>Under <span className="text-text font-medium">Permissions → Repository</span>, set <span className="text-text font-medium">Contents</span> to <span className="text-text font-medium">Read-only</span>. Nothing else is needed.</li>
-            <li>Click <span className="text-text font-medium">Generate token</span> and copy it into the field above.</li>
-          </ol>
-        </details>
-        <button type="submit" disabled={scan.isPending || !owner || !repo || !token} className="self-start text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{scan.isPending ? 'Scanning…' : 'Scan privately'}</button>
-      </form>
-      {scan.isPending && <div className="mt-3 text-[13px] text-text-muted">Scanning privately… we&apos;ll take you to the full report.</div>}
-      {scan.isError && <div className="mt-3 text-[13px] text-danger">Scan failed — check the token has access to this repo.</div>}
-    </div>
-  )
-}
-
 interface Installation { id: string; installation_id: string; account_login: string | null; revoked: boolean; repos?: { full_name: string; private: boolean }[] }
 
-/** Connect the AgentAvow GitHub App for scheduled scans of private repos — no
- * token to paste, revocable in GitHub. Gracefully shows "coming soon" until the
- * App is registered (github_app_slug configured). */
-function GitHubAppConnect() {
-  const qc = useQueryClient()
-  const reduce = useReducedMotion()
-  const [params, setParams] = useSearchParams()
-  const [celebrating, setCelebrating] = useState(false)
-  const { data, isLoading } = useQuery({
-    queryKey: ['github-app-status'],
+// ── shared query hooks (react-query dedupes by key across components) ─────────
+const CLAIMS_KEY = ['rebrand-claims']
+const APP_KEY = ['github-app-status']
+function useClaims(enabled: boolean) {
+  return useQuery({
+    queryKey: CLAIMS_KEY,
+    queryFn: async () => (await api.get<{ claims: Claim[] }>('/account/claims')).data,
+    enabled,
+    // While a just-verified repo is still being scanned (private via the App, or
+    // public into the catalog), poll so its grade + actions appear on their own —
+    // no manual refresh needed.
+    refetchInterval: (query) => {
+      const cs = (query.state.data as { claims: Claim[] } | undefined)?.claims ?? []
+      return cs.some((c) => c.status === 'verified' && !c.scanned) ? 5000 : false
+    },
+  })
+}
+function useAppStatus() {
+  return useQuery({
+    queryKey: APP_KEY,
     queryFn: async () => (await api.get<{ installations: Installation[]; app_configured: boolean }>('/account/github-app/status')).data,
     retry: 0,
   })
-  // Which of the App's repos are already claimed (verified) — shared cache key.
-  const { data: claimsData } = useQuery({
-    queryKey: ['rebrand-claims'],
-    queryFn: async () => (await api.get<{ claims: { full_name: string; status: string }[] }>('/account/claims')).data,
+}
+
+/** A small grade pill — same color scale as the score pages. */
+function GradeBadge({ score, grade }: { score?: number | null; grade?: string | null }) {
+  if (score == null && !grade) return null
+  const info = score != null ? getGradeInfo(score) : null
+  const label = grade || info?.grade || '—'
+  const color = info?.color || 'var(--color-text-muted)'
+  return (
+    <span
+      className="grid place-items-center min-w-[30px] h-[24px] px-1.5 rounded-md font-mono text-[12px] font-bold shrink-0"
+      style={{ background: `${color}1f`, color }}
+      title={score != null ? `${label} · ${score}/100` : label}
+    >{label}</span>
+  )
+}
+
+// ── ZONE 1 — Add a tool ──────────────────────────────────────────────────────
+
+/** The single entry point for adding a repo. Public repos verify by topic; a
+ * private/unreadable repo nudges the owner to the GitHub App in Connections. */
+function AddToolForm() {
+  const qc = useQueryClient()
+  const [owner, setOwner] = useState('')
+  const [repo, setRepo] = useState('')
+  const [privateHint, setPrivateHint] = useState<string | null>(null)
+  const create = useMutation({
+    mutationFn: async () => (await api.post<{ needs_private_flow?: boolean; detail?: string }>('/account/claims', { owner: owner.trim(), repo: repo.trim() })).data,
+    onSuccess: async (data) => {
+      if (data?.needs_private_flow) { setPrivateHint(data.detail || 'This looks like a private repo — connect the GitHub App in Connections below.'); return }
+      setPrivateHint(null); setOwner(''); setRepo(''); await qc.refetchQueries({ queryKey: CLAIMS_KEY })
+    },
   })
-  const claimed = new Set((claimsData?.claims ?? []).filter((c) => c.status === 'verified').map((c) => c.full_name.toLowerCase()))
-  const connect = useMutation({
-    mutationFn: async (installation_id: string) => (await api.post('/account/github-app/connect', { installation_id })).data,
-    // Connecting grants access; the repos are then claimed one-by-one below.
-    onSuccess: () => qc.refetchQueries({ queryKey: ['github-app-status'] }),
-  })
-  const claimRepo = useMutation({
+  return (
+    <div>
+      <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="flex gap-2">
+        <input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="owner" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
+        <span className="self-center text-text-muted">/</span>
+        <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
+        <button type="submit" disabled={create.isPending || !owner.trim() || !repo.trim()} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">{create.isPending ? 'Claiming…' : 'Claim'}</button>
+      </form>
+      <p className="mt-2 text-[12.5px] text-text-muted">Public repo? We verify with a GitHub topic. Private repo? Connect the GitHub App in <span className="text-text">Connections</span> — then claim it below.</p>
+      {create.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t claim — check the owner / repo and try again.</div>}
+      {privateHint && <div className="mt-2 text-[12.5px] text-warning">🔒 {privateHint}</div>}
+    </div>
+  )
+}
+
+/** Claim a private repo that's reachable through a connected GitHub App install.
+ * Shows the repos you can claim right where you add tools — one claim per repo. */
+function AppRepoPicker({ repos }: { repos: { full_name: string; private: boolean }[] }) {
+  const qc = useQueryClient()
+  const reduce = useReducedMotion()
+  const [celebrating, setCelebrating] = useState(false)
+  const claim = useMutation({
     mutationFn: async (fullName: string) => {
       const [o, r] = fullName.split('/')
       return (await api.post('/account/github-app/claim-repo', { owner: o, repo: r })).data
     },
-    // Claiming a repo = celebrate; it moves to "Your repos" as the scan finishes.
     onSuccess: () => {
       if (!reduce) { setCelebrating(true); setTimeout(() => setCelebrating(false), 1600) }
-      qc.refetchQueries({ queryKey: ['rebrand-claims'] })
-      setTimeout(() => qc.refetchQueries({ queryKey: ['rebrand-claims'] }), 8000)
+      qc.refetchQueries({ queryKey: CLAIMS_KEY })
+      qc.refetchQueries({ queryKey: APP_KEY })
+      setTimeout(() => qc.refetchQueries({ queryKey: CLAIMS_KEY }), 8000)
     },
+  })
+  if (repos.length === 0) return null
+  return (
+    <div className="relative mt-4">
+      {celebrating && <ConfettiBurst />}
+      <div className="text-[12.5px] text-text-muted mb-2">Or claim a private repo you&apos;ve connected:</div>
+      <div className="glass rounded-xl divide-y divide-border/50">
+        {repos.map((r) => {
+          const busy = claim.isPending && claim.variables === r.full_name
+          return (
+            <div key={r.full_name} className="flex items-center justify-between gap-3 px-4 py-2.5">
+              <span className="font-mono text-[12.5px] break-all min-w-0">{r.full_name} {r.private && <span className="text-text-muted">· private</span>}</span>
+              <button onClick={() => claim.mutate(r.full_name)} disabled={busy} className="shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{busy ? 'Claiming…' : 'Claim'}</button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── ZONE 2 — Connections ─────────────────────────────────────────────────────
+
+/** GitHub App connection as a single account-level row — connect / status /
+ * disconnect. The repos it grants are claimed from "Add a tool" and live in
+ * "Your tools"; this row is just the connection itself. */
+function GitHubAppConnection() {
+  const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const { data, isLoading } = useAppStatus()
+  const connect = useMutation({
+    mutationFn: async (installation_id: string) => (await api.post('/account/github-app/connect', { installation_id })).data,
+    onSuccess: () => qc.refetchQueries({ queryKey: APP_KEY }),
   })
   const disconnect = useMutation({
     mutationFn: async (pk: string) => api.delete(`/account/github-app/${pk}`),
-    // Backend removes the App's claims/results — refetch both so the repos drop
-    // out of "Your repos" too, not just the install list.
-    onSuccess: () => {
-      qc.refetchQueries({ queryKey: ['github-app-status'] })
-      qc.refetchQueries({ queryKey: ['rebrand-claims'] })
-    },
+    onSuccess: () => { qc.refetchQueries({ queryKey: APP_KEY }); qc.refetchQueries({ queryKey: CLAIMS_KEY }) },
   })
   // GitHub redirects back with ?gh_installation_id= after an install — associate it.
   useEffect(() => {
@@ -292,94 +196,201 @@ function GitHubAppConnect() {
   const configured = data?.app_configured
   const installs = (data?.installations ?? []).filter((i) => !i.revoked)
 
+  if (isLoading || configured === undefined) {
+    return <div className="glass rounded-xl h-[60px] animate-pulse" />
+  }
+  if (!configured) {
+    return <div className="glass rounded-xl p-4 text-[13px] text-text-muted">GitHub App — coming soon. Until then, use the one-time token scan below.</div>
+  }
   return (
-    <div className="relative">
-      {celebrating && <ConfettiBurst />}
-      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Claim a Private repo → GitHub App</h2>
-      <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow App on your private repos, then <span className="text-text">claim each one below to scan it</span> — with automatic re-scans and drop alerts over time. No token to paste, no topic to add, and you can revoke it in GitHub anytime. We never store a long-lived secret.</p>
-      {connect.isPending && <div className="mb-2 text-[12.5px] text-text-muted">Linking your installation…</div>}
-      {connect.isSuccess && <div className="mb-2 text-[12.5px] text-success">✓ Connected — claim the repos below to scan &amp; list them.</div>}
-      {isLoading || configured === undefined ? (
-        <div className="glass rounded-xl h-[64px] animate-pulse max-w-[560px]" />
-      ) : !configured ? (
-        <div className="glass rounded-xl p-4 text-[13px] text-text-muted max-w-[560px]">Coming soon — the GitHub App is being set up. Until then, use the one-time private scan below.</div>
-      ) : installs.length > 0 ? (
-        <div className="flex flex-col gap-2 max-w-[560px]">
-          {installs.map((i) => (
-            <div key={i.id} className="glass rounded-xl p-4">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="font-mono text-[13.5px]">@{i.account_login || 'installed'}</div>
-                <button onClick={() => disconnect.mutate(i.id)} className="text-[12px] text-text-muted hover:text-danger">Disconnect</button>
-              </div>
-              {i.repos && i.repos.length > 0 && (
-                <div className="mt-2.5 flex flex-col divide-y divide-border/50">
-                  {i.repos.map((r) => {
-                    const isClaimed = claimed.has(r.full_name.toLowerCase())
-                    const busy = claimRepo.isPending && claimRepo.variables === r.full_name
-                    return (
-                      <div key={r.full_name} className="flex items-center justify-between gap-3 py-2">
-                        <span className="font-mono text-[12.5px] break-all">{r.full_name} {r.private && <span className="text-text-muted">· private</span>}</span>
-                        {isClaimed ? (
-                          <span className="text-[11.5px] font-semibold text-success shrink-0">claimed ✓</span>
-                        ) : (
-                          <button onClick={() => claimRepo.mutate(r.full_name)} disabled={busy}
-                            className="shrink-0 text-[12px] font-semibold px-3 py-1 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{busy ? 'Claiming…' : 'Claim'}</button>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-          <button onClick={startInstall} disabled={installing} className="self-start text-[12.5px] font-semibold text-primary-light hover:text-primary disabled:opacity-60">{installing ? 'Opening GitHub…' : '+ Add or manage repos →'}</button>
+    <div className="flex flex-col gap-2">
+      {connect.isPending && <div className="text-[12.5px] text-text-muted">Linking your installation…</div>}
+      {installs.length === 0 ? (
+        <div className="glass rounded-xl p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="text-[13.5px] font-semibold">GitHub App</div>
+            <div className="text-[12.5px] text-text-muted">Continuous private-repo scans + drop alerts. No token to paste; revocable in GitHub anytime.</div>
+          </div>
+          <button onClick={startInstall} disabled={installing} className="shrink-0 text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{installing ? 'Opening…' : 'Connect GitHub App'}</button>
         </div>
       ) : (
-        <button onClick={startInstall} disabled={installing} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{installing ? 'Opening GitHub…' : 'Connect GitHub App'}</button>
+        installs.map((i) => (
+          <div key={i.id} className="glass rounded-xl p-4 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="grid place-items-center w-7 h-7 rounded-full bg-success/15 text-success text-[13px] shrink-0">🔗</span>
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-semibold">GitHub App connected</div>
+                <div className="font-mono text-[12px] text-text-muted truncate">@{i.account_login || 'installed'} · {(i.repos?.length ?? 0)} repos available</div>
+              </div>
+            </div>
+            <button onClick={() => disconnect.mutate(i.id)} className="shrink-0 text-[12px] text-text-muted hover:text-danger">Disconnect</button>
+          </div>
+        ))
       )}
-      {installErr && <div className="mt-2 text-[12.5px] text-danger">{installErr}</div>}
-      {connect.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t link that installation — click Connect again.</div>}
+      {installErr && <div className="text-[12.5px] text-danger">{installErr}</div>}
     </div>
   )
 }
 
+/** One-time private scan with a transient read token → hands the result to the
+ * score page. The single secondary/expander path (rare, advanced). */
+function OneTimeScanExpander() {
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const [owner, setOwner] = useState(params.get('owner') || '')
+  const [repo, setRepo] = useState(params.get('repo') || '')
+  const [token, setToken] = useState('')
+  const scan = useMutation({
+    mutationFn: async () => (await api.post('/account/private-scan', { owner: owner.trim(), repo: repo.trim(), token: token.trim() })).data,
+    onSuccess: (data) => navigate(
+      rp(`/rebrand/check/${owner.trim()}/${repo.trim()}`),
+      { state: { privateResult: data, token: token.trim() } },
+    ),
+  })
+  return (
+    <details className="mt-3">
+      <summary className="cursor-pointer text-[12.5px] text-text-muted hover:text-text">Advanced: one-time scan with a token (no ongoing access) →</summary>
+      <div className="mt-3">
+        <p className="text-text-muted text-[12.5px] mb-2.5">A single scan with no ongoing access — paste a read token, used for this scan only and <strong className="text-text">never stored or logged</strong>. For continuous scanning + alerts, connect the GitHub App above instead.</p>
+        <form onSubmit={(e) => { e.preventDefault(); scan.mutate() }} className="glass rounded-2xl p-5 flex flex-col gap-2.5">
+          <div className="flex gap-2">
+            <input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="owner" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
+            <span className="self-center text-text-muted">/</span>
+            <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
+          </div>
+          <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="github token (ghp_… / github_pat_…)" className="bg-surface border border-border rounded-xl px-3.5 py-2 font-mono text-[13px] outline-none focus:border-primary-light" />
+          <details className="text-[12px]">
+            <summary className="cursor-pointer text-primary-light hover:text-primary font-medium">How to create a read-only token (30 seconds)</summary>
+            <ol className="mt-2 flex flex-col gap-1.5 list-decimal pl-4 marker:text-primary-light marker:font-semibold text-text-muted">
+              <li>On GitHub, go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">Settings → Developer settings → Personal access tokens → Fine-grained tokens → <span className="text-text font-medium">Generate new token</span></a>.</li>
+              <li>Under <span className="text-text font-medium">Repository access</span>, choose <span className="text-text font-medium">Only select repositories</span> and pick just this one repo.</li>
+              <li>Under <span className="text-text font-medium">Permissions → Repository</span>, set <span className="text-text font-medium">Contents</span> to <span className="text-text font-medium">Read-only</span>. Nothing else is needed.</li>
+              <li>Click <span className="text-text font-medium">Generate token</span> and copy it into the field above.</li>
+            </ol>
+          </details>
+          <button type="submit" disabled={scan.isPending || !owner || !repo || !token} className="self-start text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{scan.isPending ? 'Scanning…' : 'Scan privately'}</button>
+          {scan.isError && <div className="text-[13px] text-danger">Scan failed — check the token has access to this repo.</div>}
+        </form>
+      </div>
+    </details>
+  )
+}
+
+// ── ZONE 3 — Your tools ──────────────────────────────────────────────────────
+
+/** One claimed repo — a single consistent row for every state: pending public
+ * (verify in-row), verified public, private scanning, private publishable, and
+ * private listed. Grade + state on the left, one actions cluster on the right. */
+function ToolRow({ c }: { c: Claim }) {
+  const qc = useQueryClient()
+  const reduce = useReducedMotion()
+  const [msg, setMsg] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [showVerify, setShowVerify] = useState(false)
+  const [celebrating, setCelebrating] = useState(false)
+  const refetchAll = () => { qc.refetchQueries({ queryKey: CLAIMS_KEY }); qc.refetchQueries({ queryKey: APP_KEY }) }
+  const verify = useMutation({
+    mutationFn: async () => (await api.post<{ verified: boolean; detail?: string }>(`/account/claims/${c.id}/verify`, {})).data,
+    onSuccess: (d) => {
+      if (!d.verified) { setMsg(d.detail || 'Not verified yet.'); return }
+      setMsg(null); setShowVerify(false)
+      if (reduce) { refetchAll(); return }
+      setCelebrating(true); setTimeout(() => { setCelebrating(false); refetchAll() }, 1500)
+    },
+  })
+  const remove = useMutation({ mutationFn: () => api.delete(`/account/claims/${c.id}`), onSuccess: refetchAll })
+  const publish = useMutation({
+    mutationFn: async () => (await api.post(`/account/private-report/${c.owner}/${c.repo}/publish`)).data,
+    onSuccess: () => { if (!reduce) { setCelebrating(true); setTimeout(() => setCelebrating(false), 1600) } refetchAll() },
+  })
+  const unpublish = useMutation({
+    mutationFn: async () => (await api.post(`/account/private-report/${c.owner}/${c.repo}/unpublish`)).data,
+    onSuccess: refetchAll,
+  })
+
+  const verified = c.status === 'verified' || celebrating
+  const btn = 'text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60'
+  const link = 'text-[12.5px] font-semibold text-primary-light hover:text-primary'
+  const muted = 'text-[12px] text-text-muted hover:text-danger'
+
+  // Left-side state indicator: grade badge once scanned, else a status chip.
+  let leftChip: React.ReactNode = null
+  if (verified && c.scanned) leftChip = <GradeBadge score={c.score} grade={c.grade} />
+  else if (verified && c.private && !c.scanned) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light shrink-0">scanning…</span>
+  else if (!verified) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-warning/15 text-warning shrink-0">unverified</span>
+
+  // Right-side actions cluster, consistent order: [state] [primary] [report] [remove]
+  const actions: React.ReactNode[] = []
+  if (!verified) {
+    actions.push(<button key="v" onClick={() => setShowVerify((s) => !s)} className={link}>Verify topic {showVerify ? '▾' : '▸'}</button>)
+  } else {
+    if (c.private && c.scanned && !c.published) actions.push(<button key="pub" onClick={() => publish.mutate()} disabled={publish.isPending} className={btn}>{publish.isPending ? 'Publishing…' : '🌐 Publish'}</button>)
+    if (c.private && c.published) actions.push(<span key="listed" className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light">🌐 Listed</span>)
+    if (c.private && c.published) actions.push(<button key="unpub" onClick={() => unpublish.mutate()} disabled={unpublish.isPending} className={muted + ' hover:text-text'}>{unpublish.isPending ? 'Unlisting…' : 'Unlist'}</button>)
+    if (c.scanned) actions.push(<Link key="rep" to={rp(`/rebrand/check/${c.owner}/${c.repo}`)} className={link}>Report →</Link>)
+  }
+  actions.push(<button key="rm" onClick={() => remove.mutate()} className={muted}>Remove</button>)
+
+  return (
+    <div className="glass rounded-xl p-4 relative overflow-hidden">
+      {celebrating && <ConfettiBurst />}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {leftChip}
+          <span className="font-mono text-[13.5px] break-all min-w-0">{c.full_name}</span>
+          {c.private && <span className="text-[11px] text-text-muted shrink-0">🔒 private</span>}
+        </div>
+        <div className="flex items-center gap-3 shrink-0">{actions}</div>
+      </div>
+
+      {/* pending public repo → topic verification expands in-row (the one expander) */}
+      {!verified && showVerify && (
+        <div className="mt-3 rounded-lg border border-border/70 p-3 text-[12.5px] text-text-muted">
+          <div className="font-semibold text-text">Prove you own this public repo — add a GitHub topic:</div>
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            <code className="inline-block font-mono text-[12px] bg-surface border border-border rounded px-2 py-1 break-all select-all">{c.topic}</code>
+            <button type="button" onClick={() => { navigator.clipboard?.writeText(c.topic); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="text-[11.5px] font-medium px-2 py-1 rounded-md border border-border text-text-muted hover:text-text hover:border-primary-light">{copied ? 'Copied ✓' : 'Copy'}</button>
+          </div>
+          <ol className="mt-2.5 flex flex-col gap-1 list-decimal pl-4 marker:text-primary-light marker:font-semibold">
+            <li>Open <a href={`https://github.com/${c.full_name}`} target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary font-mono">github.com/{c.full_name}</a> → the <span className="text-text font-medium">gear ⚙️</span> by <span className="text-text font-medium">&ldquo;About&rdquo;</span>.</li>
+            <li>Paste the topic into <span className="text-text font-medium">Topics</span>, press <span className="text-text font-medium">Enter</span>, then <span className="text-text font-medium">Save changes</span>.</li>
+            <li>Come back and click <span className="text-text font-medium">Verify</span> (topics can take a few seconds).</li>
+          </ol>
+          <details className="mt-2">
+            <summary className="cursor-pointer hover:text-text">Prefer the command line?</summary>
+            <code className="mt-1.5 block font-mono text-[11.5px] bg-surface border border-border rounded px-2 py-1.5 break-all">gh repo edit {c.full_name} --add-topic {c.topic}</code>
+          </details>
+          <button onClick={() => verify.mutate()} disabled={verify.isPending} className={btn + ' mt-2.5'}>{verify.isPending ? 'Checking…' : 'Verify topic'}</button>
+          {msg && <div className="mt-2 text-warning">{msg}</div>}
+        </div>
+      )}
+      {celebrating && (
+        <motion.div className="mt-2 text-[12.5px] font-semibold text-success" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>✓ Verified — you own this!</motion.div>
+      )}
+    </div>
+  )
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+
+/**
+ * "My Tools" — one home for adding + managing the repos you own, organized by
+ * job (not method): Add a tool → Connections → Your tools. Every repo lives in
+ * one unified list with a consistent row, whatever way it was claimed.
+ */
 export default function RebrandMyTools() {
   const { user, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
-  const qc = useQueryClient()
-  const [params] = useSearchParams()
   const location = useLocation()
-  const [owner, setOwner] = useState(params.get('owner') || '')
-  const [repo, setRepo] = useState(params.get('repo') || '')
 
   useEffect(() => {
     if (!authLoading && !user) navigate(rp('/rebrand/login'))
   }, [authLoading, user, navigate])
 
-  const { data, isLoading: cLoading } = useQuery({
-    queryKey: ['rebrand-claims'],
-    queryFn: async () => (await api.get<{ claims: Claim[] }>('/account/claims')).data,
-    enabled: !!user,
-    // While a just-claimed private repo is still being scanned in the background,
-    // poll so its publish control appears on its own — no manual refresh needed.
-    refetchInterval: (query) => {
-      const cs = (query.state.data as { claims: Claim[] } | undefined)?.claims ?? []
-      return cs.some((c) => c.status === 'verified' && c.private && !c.scanned) ? 5000 : false
-    },
-  })
-  const [privateHint, setPrivateHint] = useState<string | null>(null)
-  const create = useMutation({
-    mutationFn: async () => (await api.post<{ needs_private_flow?: boolean; detail?: string }>('/account/claims', { owner: owner.trim(), repo: repo.trim() })).data,
-    // Force an immediate refetch (staleTime would otherwise defer it → the new
-    // claim only appeared after a hard refresh).
-    onSuccess: async (data) => {
-      if (data?.needs_private_flow) { setPrivateHint(data.detail || 'This looks like a private repo — connect the GitHub App below.'); return }
-      setPrivateHint(null); setOwner(''); setRepo(''); await qc.refetchQueries({ queryKey: ['rebrand-claims'] })
-    },
-  })
-  const refetch = () => qc.refetchQueries({ queryKey: ['rebrand-claims'] })
+  const { data, isLoading: cLoading } = useClaims(!!user)
+  const { data: appData } = useAppStatus()
 
-  // Owners arriving from a score page's "Manage & fix" land on their verified list.
+  // Owners arriving from a score page's "Manage" land on their tools list.
   useEffect(() => {
     if (location.hash === '#your-repos' && !cLoading) {
       const t = setTimeout(() => document.getElementById('your-repos')?.scrollIntoView({ behavior: 'smooth' }), 250)
@@ -389,67 +400,60 @@ export default function RebrandMyTools() {
 
   if (!user) return null
   const claims = data?.claims ?? []
-  const pending = claims.filter((c) => c.status !== 'verified')
-  const verified = claims.filter((c) => c.status === 'verified')
+  const claimedNames = new Set(claims.map((c) => c.full_name.toLowerCase()))
+  // Repos the connected App can reach but that aren't claimed yet → claimable.
+  const unclaimedAppRepos = (appData?.installations ?? [])
+    .filter((i) => !i.revoked)
+    .flatMap((i) => i.repos ?? [])
+    .filter((r) => !claimedNames.has(r.full_name.toLowerCase()))
+    // de-dupe across installs
+    .filter((r, idx, arr) => arr.findIndex((x) => x.full_name === r.full_name) === idx)
+
+  // One list, most-recently-actionable first: pending, then scanning, then rest.
+  const rank = (c: Claim) => (c.status !== 'verified' ? 0 : c.private && !c.scanned ? 1 : 2)
+  const tools = [...claims].sort((a, b) => rank(a) - rank(b))
 
   return (
-    <div className="max-w-[760px] mx-auto px-6 py-14">
+    <div className="max-w-[680px] mx-auto px-6 py-14">
       <Reveal>
-        <div className="max-w-[62ch]">
+        <div>
           <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">My Tools</span>
-          <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Claim & manage your tools</h1>
-          <p className="mt-2 text-text-muted text-[14px]">Prove you own a repo to scan it privately, get continuous re-scans with change alerts, and own how it’s listed. <span className="text-text">Public repos</span> verify with a GitHub topic; for <span className="text-text">private repos</span>, connect the GitHub App (recommended — continuous scans) or run a one-time token scan.</p>
+          <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Your tools</h1>
+          <p className="mt-2 text-text-muted text-[14px] max-w-[62ch]">Claim the repos you own to scan them, get continuous re-scans with change alerts, and control how each is listed. Public repos verify with a GitHub topic; private repos connect through the GitHub App.</p>
         </div>
       </Reveal>
 
-      {/* CLAIM UX — form + any in-progress (pending) claims stay here */}
-      <div className="mt-8">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Claim a public repo</h2>
-        <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="flex gap-2">
-          <input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="owner" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
-          <span className="self-center text-text-muted">/</span>
-          <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
-          <button type="submit" disabled={create.isPending || !owner.trim() || !repo.trim()} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">{create.isPending ? 'Claiming…' : 'Claim'}</button>
-        </form>
-        {create.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t claim — check the owner / repo and try again.</div>}
-        {privateHint && <div className="mt-2 text-[12.5px] text-warning">🔒 {privateHint}</div>}
+      {/* ZONE 1 — Add a tool */}
+      <section className="mt-10">
+        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Add a tool</h2>
+        <AddToolForm />
+        <AppRepoPicker repos={unclaimedAppRepos} />
+      </section>
 
-        {pending.length > 0 && (
-          <div className="mt-4 flex flex-col gap-2.5">
-            <div className="text-[12px] font-mono uppercase tracking-wide text-warning">Awaiting verification · {pending.length}</div>
-            {pending.map((c) => <ClaimRow key={c.id} c={c} onRefetch={refetch} />)}
-          </div>
-        )}
-      </div>
-
-      {/* divider */}
-      <div className="mt-8 border-t border-border/60" />
-
-      {/* PRIVATE REPOS — GitHub App is the primary path; one-time scan is the alt */}
-      <div className="mt-8">
-        <GitHubAppConnect />
-        <details className="mt-5 max-w-[560px]">
-          <summary className="cursor-pointer text-[13px] text-text-muted hover:text-text">Just need a one-time scan? Scan a private repo with a token instead →</summary>
-          <div className="mt-4"><PrivateScan /></div>
-        </details>
-      </div>
-
-      {/* divider */}
       <div className="mt-10 border-t border-border/60" />
 
-      {/* YOUR REPOS — verified only */}
-      <div className="mt-8 scroll-mt-24" id="your-repos">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Your repos {verified.length > 0 && `· ${verified.length}`}</h2>
+      {/* ZONE 2 — Connections */}
+      <section className="mt-8">
+        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Connections</h2>
+        <GitHubAppConnection />
+        <OneTimeScanExpander />
+      </section>
+
+      <div className="mt-10 border-t border-border/60" />
+
+      {/* ZONE 3 — Your tools */}
+      <section className="mt-8 scroll-mt-24" id="your-repos">
+        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Your tools {tools.length > 0 && `· ${tools.length}`}</h2>
         {cLoading ? (
-          <div className="flex flex-col gap-2">{[0, 1].map((i) => <div key={i} className="glass rounded-xl h-[64px] animate-pulse" />)}</div>
-        ) : verified.length === 0 ? (
-          <div className="text-text-muted text-[13px]">No verified repos yet. Verify a claim above to see it here — then jump straight to its report.</div>
+          <div className="flex flex-col gap-2.5">{[0, 1].map((i) => <div key={i} className="glass rounded-xl h-[64px] animate-pulse" />)}</div>
+        ) : tools.length === 0 ? (
+          <div className="text-text-muted text-[13px]">No tools yet. Claim a public repo above, or connect the GitHub App to claim a private one.</div>
         ) : (
           <div className="flex flex-col gap-2.5">
-            {verified.map((c) => <ClaimRow key={c.id} c={c} onRefetch={refetch} />)}
+            {tools.map((c) => <ToolRow key={c.id} c={c} />)}
           </div>
         )}
-      </div>
+      </section>
     </div>
   )
 }
