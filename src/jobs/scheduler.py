@@ -874,11 +874,13 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 try:
                     watcher = await db.get(Entity, w.watcher_id)
                     if watcher is not None and watcher.email:
-                        from src.email import send_email
+                        from src.email import render_watch_notification, send_email
 
-                        await send_email(
-                            watcher.email, f"AgentAvow alert: {title}", f"<p>{body}</p>"
+                        subj, html = render_watch_notification(
+                            "drop" if dropped else "drift",
+                            w.owner, w.repo, w.last_score, new_score,
                         )
+                        await send_email(watcher.email, subj, html)
                 except Exception:
                     pass
                 # Webhook alert-delivery — POST to the watcher's configured URL.
@@ -924,10 +926,11 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                     )
                     watcher = await db.get(Entity, w.watcher_id)
                     if watcher is not None and watcher.email:
-                        from src.email import send_email
-                        await send_email(
-                            watcher.email, f"AgentAvow: {title}", f"<p>{body}</p>",
+                        from src.email import render_watch_notification, send_email
+                        subj, html = render_watch_notification(
+                            "improve", w.owner, w.repo, w.last_score, new_score,
                         )
+                        await send_email(watcher.email, subj, html)
                 except Exception:
                     logger.debug("good-news notification failed for %s/%s", w.owner, w.repo)
             fresh = await db.get(ToolWatch, w.id)

@@ -14,6 +14,78 @@ logger = logging.getLogger(__name__)
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
+def _grade_and_color(score: int | None) -> tuple[str, str]:
+    """Letter grade + hex color for a 0-100 score (mirrors the app's grade bands)."""
+    s = score if score is not None else 0
+    if s >= 97:
+        return "A+", "#22c55e"
+    if s >= 90:
+        return "A", "#22c55e"
+    if s >= 80:
+        return "B", "#3b82f6"
+    if s >= 70:
+        return "C", "#eab308"
+    if s >= 50:
+        return "D", "#f97316"
+    return "F", "#ef4444"
+
+
+def render_watch_notification(
+    kind: str, owner: str, repo: str,
+    old_score: int | None, new_score: int | None,
+) -> tuple[str, str]:
+    """Build (subject, html) for a watch email. ``kind`` is drop | improve | drift."""
+    full = f"{owner}/{repo}"
+    base = settings.base_url.rstrip("/")
+    grade, badge_color = _grade_and_color(new_score)
+    delta = (new_score - old_score) if (new_score is not None and old_score is not None) else 0
+
+    if kind == "improve":
+        accent, tag = "#22c55e", "Good news"
+        headline = f"{repo} improved 🎉"
+        score_line = f"{old_score} → {new_score} · up {abs(delta)} pts"
+        message = (
+            f"A tool you're watching got safer. <b style=\"color:#f1f5f9;\">{full}</b> "
+            f"rose from {old_score} to {new_score}/100 on its latest re-scan — worth a look "
+            f"at what changed."
+        )
+        cta_label, subject = "See what improved", f"AgentAvow · {repo} improved 🎉"
+    elif kind == "drift":
+        accent, tag = "#f59e0b", "Definition changed"
+        headline = f"{repo}'s signed definition changed"
+        score_line = "tool definition changed"
+        message = (
+            f"The signed tool definition for <b style=\"color:#f1f5f9;\">{full}</b> changed "
+            f"since your last check — the kind of silent update a rug-pull hides behind. "
+            f"Review what moved before your agents keep using it."
+        )
+        cta_label, subject = "Review the change", f"AgentAvow alert · {repo} definition changed"
+    else:  # drop
+        accent, tag = "#ef4444", "Grade dropped"
+        headline = f"{repo} got riskier"
+        score_line = f"{old_score} → {new_score} · down {abs(delta)} pts"
+        message = (
+            f"A tool you're watching dropped a grade. <b style=\"color:#f1f5f9;\">{full}</b> "
+            f"fell from {old_score} to {new_score}/100 — review it before your agents keep "
+            f"connecting to it."
+        )
+        cta_label, subject = "See the report", f"AgentAvow alert · {repo} grade dropped"
+
+    html = _load_template(
+        "watch_notification.html",
+        _raw={
+            "accent": accent, "badge_color": badge_color, "grade": grade,
+            "tag": tag, "headline": headline, "repo": full,
+            "new_score": str(new_score if new_score is not None else "—"),
+            "score_line": score_line, "message": message,
+            "cta_label": cta_label,
+            "cta_url": f"{base}/check/{owner}/{repo}",
+            "watches_url": f"{base}/account",
+        },
+    )
+    return subject, html
+
+
 def _load_template(
     name: str,
     *,
