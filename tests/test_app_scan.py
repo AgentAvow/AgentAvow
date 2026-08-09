@@ -259,6 +259,62 @@ async def test_scan_installation_first_scan_no_alert(db: AsyncSession, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_delete_private_claim_unlists_from_search(
+    db: AsyncSession, client: AsyncClient,
+):
+    """Removing a PRIVATE claim also deletes its public CommunityScan row (unlists
+    from Browse/search) and its stored PrivateScanResult. A PUBLIC claim's catalog
+    row is left intact."""
+    from src.models import CommunityScan
+
+    token = await _register(client, "del_owner@test.com")
+    ent = (await db.execute(
+        select(Entity).where(Entity.email == "del_owner@test.com")
+    )).scalar_one()
+    priv = RepoClaim(
+        id=uuid.uuid4(), entity_id=ent.id, owner="me", repo="priv",
+        full_name="me/priv", status="verified", verify_code="a",
+        is_private=True, verified_at=func.now(),
+    )
+    pub = RepoClaim(
+        id=uuid.uuid4(), entity_id=ent.id, owner="me", repo="pubrepo",
+        full_name="me/pubrepo", status="verified", verify_code="b",
+        is_private=False, verified_at=func.now(),
+    )
+    db.add_all([priv, pub])
+    db.add(PrivateScanResult(
+        entity_id=ent.id, owner="me", repo="priv", full_name="me/priv",
+        trust_score=80, grade="B", result_json={"trust_score": 80},
+        source="app", published=True,
+    ))
+    db.add(CommunityScan(owner="me", repo="priv", full_name="me/priv", trust_score=80))
+    db.add(CommunityScan(owner="me", repo="pubrepo", full_name="me/pubrepo", trust_score=90))
+    await db.flush()
+
+    # Remove the private claim.
+    r1 = await client.delete(
+        f"/api/v1/account/claims/{priv.id}", headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r1.status_code == 204
+    cs_priv = (await db.execute(select(CommunityScan).where(
+        CommunityScan.owner == "me", CommunityScan.repo == "priv"))).scalar_one_or_none()
+    assert cs_priv is None
+    psr = (await db.execute(select(PrivateScanResult).where(
+        PrivateScanResult.entity_id == ent.id,
+        PrivateScanResult.repo == "priv"))).scalar_one_or_none()
+    assert psr is None
+
+    # Remove the public claim — its catalog row survives (public regardless of owner).
+    r2 = await client.delete(
+        f"/api/v1/account/claims/{pub.id}", headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r2.status_code == 204
+    cs_pub = (await db.execute(select(CommunityScan).where(
+        CommunityScan.owner == "me", CommunityScan.repo == "pubrepo"))).scalar_one_or_none()
+    assert cs_pub is not None
+
+
+@pytest.mark.asyncio
 async def test_ensure_verified_claim_records_is_private(db: AsyncSession):
     """_ensure_verified_claim persists is_private on create and never downgrades a
     True flag on a later re-scan (which passes is_private=None)."""

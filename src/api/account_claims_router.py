@@ -288,6 +288,22 @@ async def delete_claim(
     claim = await db.get(RepoClaim, claim_id)
     if claim is None or claim.entity_id != entity.id:
         raise HTTPException(status_code=404, detail="Claim not found")
+    # Removing a PRIVATE claim also withdraws it from public search (delete the
+    # CommunityScan row) and drops the owner-scoped stored report — otherwise an
+    # unclaimed private repo would linger in Browse/search. Public repos stay in
+    # the catalog (they're public regardless of who claims them).
+    if claim.is_private:
+        from sqlalchemy import delete as sa_delete
+
+        from src.models import CommunityScan
+        await db.execute(sa_delete(CommunityScan).where(
+            CommunityScan.owner == claim.owner, CommunityScan.repo == claim.repo,
+        ))
+        await db.execute(sa_delete(PrivateScanResult).where(
+            PrivateScanResult.entity_id == entity.id,
+            PrivateScanResult.owner == claim.owner,
+            PrivateScanResult.repo == claim.repo,
+        ))
     await db.delete(claim)
     await db.flush()
 
