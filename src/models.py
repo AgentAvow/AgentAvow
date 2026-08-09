@@ -2485,5 +2485,41 @@ class CommunityScan(Base):
     )
 
 
+class PrivateScanResult(Base):
+    """The stored result of a scheduled PRIVATE-repo scan run via a connected
+    GitHub App installation. Owner-scoped and NEVER surfaced in the public catalog
+    or search — unlike CommunityScan, this row is only ever returned to the account
+    that owns the installation.
+
+    ``result_json`` stores the full ``_scan_result_to_dict`` output so the frontend
+    "View report" can re-render the report offline without re-scanning. ``prev_score``
+    holds the previous scan's trust_score so the re-scan loop can detect drops /
+    improvements. One row per (entity, owner, repo) — the latest scan wins."""
+
+    __tablename__ = "private_scan_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    owner = Column(String(255), nullable=False)
+    repo = Column(String(255), nullable=False)
+    full_name = Column(String(512), nullable=False)
+    trust_score = Column(Integer, nullable=True)
+    grade = Column(String(4), nullable=True)
+    # Full _scan_result_to_dict output — lets the report re-render without re-scan.
+    result_json = Column(JSONB, nullable=True)
+    prev_score = Column(Integer, nullable=True)  # previous trust_score (change detection)
+    source = Column(String(16), default="app", nullable=False)  # "app" (GitHub App install)
+    scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("entity_id", "owner", "repo", name="uq_private_scan_target"),
+    )
+
+
 # Import marketing models so Alembic can discover them
 from src.marketing.models import MarketingCampaign, MarketingPost  # noqa: E402, F401

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_current_entity
 from src.api.rate_limit import rate_limit_reads, rate_limit_scans, rate_limit_writes
 from src.database import get_db
-from src.models import Entity, RepoClaim
+from src.models import Entity, PrivateScanResult, RepoClaim
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +235,42 @@ async def delete_claim(
         raise HTTPException(status_code=404, detail="Claim not found")
     await db.delete(claim)
     await db.flush()
+
+
+@router.get("/private-report/{owner}/{repo}")
+async def private_report(
+    owner: str,
+    repo: str,
+    entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_reads),
+):
+    """Return the caller's stored private-repo scan report (from the scheduled
+    GitHub App scan). Backs the frontend "View report" for a connected private
+    repo — re-renders from the stored ``result_json`` without re-scanning.
+
+    Owner-scoped: only the account that owns the scan can read it. 404 if there
+    is no stored report for this owner/repo under the caller's account."""
+    row = (
+        await db.execute(
+            select(PrivateScanResult).where(
+                PrivateScanResult.entity_id == entity.id,
+                PrivateScanResult.owner == owner,
+                PrivateScanResult.repo == repo,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No private report for this repo")
+    return {
+        "repo": row.full_name,
+        "private": True,
+        "grade": row.grade,
+        "prev_score": row.prev_score,
+        "source": row.source,
+        "scanned_at": row.scanned_at.isoformat() if row.scanned_at else None,
+        **(row.result_json or {}),
+    }
 
 
 class PrivateScanRequest(BaseModel):

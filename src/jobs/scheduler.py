@@ -948,6 +948,53 @@ async def _watch_rescan_loop(interval: int = WATCH_RESCAN_INTERVAL) -> None:
         await asyncio.sleep(interval)
 
 
+# GitHub App private-repo re-scan: daily, re-scan every connected (non-revoked)
+# installation's repos and alert the owner on grade drops / definition drift.
+APP_RESCAN_INTERVAL = 24 * 60 * 60
+
+
+async def _run_app_rescan(limit: int = 100) -> None:
+    """Re-scan every connected, non-revoked GitHub App installation's private
+    repos. Own session per install, fail-open — one bad installation can't sink
+    the rest."""
+    from sqlalchemy import select
+
+    from src.database import async_session
+    from src.jobs.app_scan import scan_installation
+    from src.models import GitHubAppInstallation
+
+    async with async_session() as db:
+        installs = (
+            await db.execute(
+                select(GitHubAppInstallation)
+                .where(GitHubAppInstallation.revoked_at.is_(None))
+                .limit(limit)
+            )
+        ).scalars().all()
+
+    for inst in installs:
+        async with async_session() as db:
+            try:
+                summary = await scan_installation(db, inst)
+                await db.commit()
+                if summary.get("scanned"):
+                    logger.info("App re-scan: %s", summary)
+            except Exception:
+                logger.exception(
+                    "App re-scan failed for installation %s", inst.installation_id
+                )
+
+
+async def _app_rescan_loop(interval: int = APP_RESCAN_INTERVAL) -> None:
+    logger.info("App re-scan loop started (interval=%ds)", interval)
+    while True:
+        try:
+            await _run_app_rescan()
+        except Exception:
+            logger.exception("App re-scan loop iteration failed")
+        await asyncio.sleep(interval)
+
+
 async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     """Start the background scheduler task.
 
@@ -1096,6 +1143,12 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     asyncio.create_task(
         _watch_rescan_loop(),
         name="watch-rescan",
+    )
+
+    # GitHub App private-repo re-scan (daily loop over connected installations)
+    asyncio.create_task(
+        _app_rescan_loop(),
+        name="app-rescan",
     )
 
     return _scheduler_task

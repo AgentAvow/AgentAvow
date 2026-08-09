@@ -18,9 +18,10 @@ id that isn't theirs. Tracked in the action plan.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -32,7 +33,28 @@ from src.config import settings
 from src.database import get_db
 from src.models import Entity, GitHubAppInstallation
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/account/github-app", tags=["account"])
+
+
+async def _scan_installation_bg(installation_pk: uuid.UUID) -> None:
+    """Best-effort: scan a freshly-connected installation in its own session so
+    connecting immediately scans + verified-claims the owner's repos. Fire-and-
+    forget — any failure is swallowed (a connect must never fail because the scan
+    did). Runs after the response, so the installation row is already committed."""
+    try:
+        from src.database import async_session
+        from src.jobs.app_scan import scan_installation
+
+        async with async_session() as db:
+            inst = await db.get(GitHubAppInstallation, installation_pk)
+            if inst is None or inst.revoked_at is not None:
+                return
+            await scan_installation(db, inst)
+            await db.commit()
+    except Exception:
+        logger.debug("connect auto-scan failed for %s", installation_pk, exc_info=True)
 
 
 def _serialize(i: GitHubAppInstallation) -> dict:
@@ -89,8 +111,9 @@ async def setup_callback(installation_id: str | None = None, setup_action: str |
     base = settings.base_url.rstrip("/")
     if not installation_id:
         return RedirectResponse(url=f"{base}/rebrand/tools?gh_setup=error", status_code=302)
+    _action = setup_action or "install"
     return RedirectResponse(
-        url=f"{base}/rebrand/tools?gh_installation_id={installation_id}&gh_setup={setup_action or 'install'}",
+        url=f"{base}/rebrand/tools?gh_installation_id={installation_id}&gh_setup={_action}",
         status_code=302,
     )
 
@@ -102,6 +125,7 @@ class ConnectRequest(BaseModel):
 @router.post("/connect", status_code=201)
 async def connect(
     body: ConnectRequest,
+    background: BackgroundTasks,
     entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_writes),
@@ -146,6 +170,8 @@ async def connect(
         existing.account_type = acct.get("type")
         await db.flush()
         await db.refresh(existing)
+        # Scan immediately so reconnecting re-scans + verified-claims the repos.
+        background.add_task(_scan_installation_bg, existing.id)
         return _serialize(existing)
 
     inst = GitHubAppInstallation(
@@ -157,6 +183,8 @@ async def connect(
     db.add(inst)
     await db.flush()
     await db.refresh(inst)
+    # Scan immediately so connecting scans + verified-claims the repos right away.
+    background.add_task(_scan_installation_bg, inst.id)
     return _serialize(inst)
 
 
@@ -183,7 +211,10 @@ async def status(
         except Exception:
             info["repos"] = []
         out.append(info)
-    return {"installations": out, "app_configured": bool(getattr(settings, "github_app_slug", None))}
+    return {
+        "installations": out,
+        "app_configured": bool(getattr(settings, "github_app_slug", None)),
+    }
 
 
 @router.delete("/{installation_pk}", status_code=204)
