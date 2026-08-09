@@ -47,7 +47,7 @@ const SECTIONS: Section[] = [
     title: 'Account & watching',
     items: [
       { q: 'What does "watching" a tool do?', a: 'We re-scan the tools you watch and alert you — by email, in-app, or webhook — the moment a grade drops or a signed definition changes. That\'s the rug-pull you\'d otherwise miss.' },
-      { q: 'How do I claim a tool I own?', a: 'Add a GitHub topic we give you to the repo to prove ownership. A verified claim unlocks private scans, continuous re-scans with change alerts, and control over how the tool appears in the catalog and search.' },
+      { q: 'How do I claim a tool I own?', a: 'Add a GitHub topic we give you to the repo to prove ownership. A verified claim unlocks private scans, continuous re-scans with change alerts, and own how the tool appears in the catalog and search.' },
     ],
   },
 ]
