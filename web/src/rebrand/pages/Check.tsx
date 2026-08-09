@@ -251,8 +251,15 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
 
 /** Owner opt-in: publish a connected private repo's stored grade to public search. */
 function PublishStoredCTA({ owner, repo, published }: { owner: string; repo: string; published: boolean }) {
+  const qc = useQueryClient()
   const publish = useMutation({
     mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/publish`)).data,
+    // Refetch the stored report so `published` flips → the share row appears here,
+    // and the claims list (My Tools) picks up the new published state too.
+    onSuccess: () => {
+      qc.refetchQueries({ queryKey: ['rebrand-private-report', owner, repo] })
+      qc.refetchQueries({ queryKey: ['rebrand-claims'] })
+    },
   })
   const done = published || publish.isSuccess
   return (
@@ -387,6 +394,9 @@ function Result({ owner, repo, privateResult }: {
   const storedPrivate = !oneTimePrivate && !fetched && !!privateReport
   const isPrivate = oneTimePrivate || storedPrivate
   const scan = oneTimePrivate ? privateResult : (fetched ?? privateReport)
+  // A private repo the owner has published to search HAS a public page/badge, so
+  // sharing works — open the share row for it too (one-time scans never publish).
+  const published = !!(scan as { published?: boolean } | null)?.published
   // Real adoption signals — checks (Redis), watchers, GitHub stars, score history.
   // Skipped for private repos (the public checks endpoint can't see them).
   const { data: adoptionData } = useQuery({
@@ -489,7 +499,7 @@ function Result({ owner, repo, privateResult }: {
 
         {/* secondary actions — share/badge are public-only (a private repo has no public badge) */}
         <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
-          {!isPrivate && <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />}
+          {(!isPrivate || published) && <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />}
           <button
             onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
             className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
@@ -588,7 +598,7 @@ function Result({ owner, repo, privateResult }: {
       ) : (
         <OwnershipCTA owner={owner} repo={repo} />
       )}
-      {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} published={!!(scan as { published?: boolean }).published} />}
+      {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} published={published} />}
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (

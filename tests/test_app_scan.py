@@ -321,3 +321,80 @@ async def test_private_report_returns_owner_json_and_404s_for_others(
         f"{REPORT_URL}/me/secret", headers={"Authorization": f"Bearer {token_b}"},
     )
     assert resp_b.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_unpublish_removes_catalog_row_and_clears_flag(
+    db: AsyncSession, client: AsyncClient,
+):
+    """Unpublishing a previously-published private repo deletes its CommunityScan
+    row (drops out of Browse/search/badge) and clears `published`; the private
+    result itself stays (still scanned + watched)."""
+    from src.models import CommunityScan
+
+    token = await _register(client, "unpub_owner@test.com")
+    ent = (await db.execute(
+        select(Entity).where(Entity.email == "unpub_owner@test.com")
+    )).scalar_one()
+    db.add(PrivateScanResult(
+        entity_id=ent.id, owner="me", repo="pub", full_name="me/pub",
+        trust_score=80, grade="B", result_json={"trust_score": 80},
+        source="app", published=True,
+    ))
+    db.add(CommunityScan(owner="me", repo="pub", full_name="me/pub", trust_score=80))
+    await db.flush()
+
+    resp = await client.post(
+        f"{REPORT_URL}/me/pub/unpublish", headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["published"] is False
+
+    # The private row survives but is no longer flagged published.
+    row = (await db.execute(
+        select(PrivateScanResult).where(PrivateScanResult.entity_id == ent.id)
+    )).scalar_one()
+    assert row.published is False
+    # The public catalog row is gone.
+    cs = (await db.execute(
+        select(CommunityScan).where(CommunityScan.owner == "me", CommunityScan.repo == "pub")
+    )).scalar_one_or_none()
+    assert cs is None
+
+
+@pytest.mark.asyncio
+async def test_list_claims_carries_private_published_flags(
+    db: AsyncSession, client: AsyncClient,
+):
+    """GET /account/claims tags each claim: a private repo (has a PrivateScanResult)
+    reports private=True + its published state; a public repo reports private=False."""
+    token = await _register(client, "flags_owner@test.com")
+    ent = (await db.execute(
+        select(Entity).where(Entity.email == "flags_owner@test.com")
+    )).scalar_one()
+    # A private, published claim.
+    db.add(RepoClaim(
+        id=uuid.uuid4(), entity_id=ent.id, owner="me", repo="priv",
+        full_name="me/priv", status="verified", verify_code="a", verified_at=func.now(),
+    ))
+    db.add(PrivateScanResult(
+        entity_id=ent.id, owner="me", repo="priv", full_name="me/priv",
+        trust_score=90, grade="A", result_json={"trust_score": 90},
+        source="app", published=True,
+    ))
+    # A public claim (no PrivateScanResult).
+    db.add(RepoClaim(
+        id=uuid.uuid4(), entity_id=ent.id, owner="me", repo="pubrepo",
+        full_name="me/pubrepo", status="verified", verify_code="b", verified_at=func.now(),
+    ))
+    await db.flush()
+
+    resp = await client.get(
+        "/api/v1/account/claims", headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    by_name = {c["full_name"]: c for c in resp.json()["claims"]}
+    assert by_name["me/priv"]["private"] is True
+    assert by_name["me/priv"]["published"] is True
+    assert by_name["me/pubrepo"]["private"] is False
+    assert by_name["me/pubrepo"]["published"] is False

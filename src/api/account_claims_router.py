@@ -80,7 +80,11 @@ class VerifyRequest(BaseModel):
     token: str | None = Field(None, max_length=255)
 
 
-def _serialize(c: RepoClaim) -> dict:
+def _serialize(c: RepoClaim, private_pub: dict | None = None) -> dict:
+    # A private repo (scanned via the GitHub App / one-time token) has a stored
+    # PrivateScanResult; `private_pub` maps (owner, repo) -> published bool for
+    # those. Public (topic-verified) repos aren't in the map → private=False.
+    pub = (private_pub or {}).get((c.owner, c.repo)) if private_pub is not None else None
     return {
         "id": str(c.id),
         "owner": c.owner,
@@ -89,6 +93,8 @@ def _serialize(c: RepoClaim) -> dict:
         "status": c.status,
         "topic": f"agentavow-verify-{c.verify_code}",
         "verified_at": c.verified_at.isoformat() if c.verified_at else None,
+        "private": pub is not None,
+        "published": bool(pub) if pub is not None else False,
     }
 
 
@@ -103,7 +109,15 @@ async def list_claims(
         .where(RepoClaim.entity_id == entity.id)
         .order_by(RepoClaim.created_at.desc())
     )
-    return {"claims": [_serialize(c) for c in result.scalars().all()]}
+    claims = result.scalars().all()
+    # Fetch this owner's private-scan rows once and key by (owner, repo) so each
+    # claim can carry its private/published state (drives the publish-to-search CTA).
+    priv_rows = (await db.execute(
+        select(PrivateScanResult.owner, PrivateScanResult.repo, PrivateScanResult.published)
+        .where(PrivateScanResult.entity_id == entity.id)
+    )).all()
+    private_pub = {(o, r): bool(p) for (o, r, p) in priv_rows}
+    return {"claims": [_serialize(c, private_pub) for c in claims]}
 
 
 @router.post("/claims", status_code=201)
@@ -342,7 +356,50 @@ async def publish_private_report(
         raise HTTPException(status_code=502, detail=f"Publish failed: {e}") from e
     row.published = True
     await db.flush()
-    return {"published": True, "full_name": row.full_name, "trust_score": row.trust_score, "grade": row.grade}
+    return {
+        "published": True,
+        "full_name": row.full_name,
+        "trust_score": row.trust_score,
+        "grade": row.grade,
+    }
+
+
+@router.post("/private-report/{owner}/{repo}/unpublish")
+async def unpublish_private_report(
+    owner: str,
+    repo: str,
+    entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_writes),
+):
+    """Owner opt-out: remove a previously-published private repo from the public
+    catalog + search. Deletes the CommunityScan row (so it drops out of Browse /
+    search / badge) and clears the stored `published` flag. The repo stays scanned
+    and watched privately — only its public listing is withdrawn. Idempotent."""
+    from sqlalchemy import delete as sa_delete
+
+    from src.models import CommunityScan
+
+    row = (
+        await db.execute(
+            select(PrivateScanResult).where(
+                PrivateScanResult.entity_id == entity.id,
+                PrivateScanResult.owner == owner,
+                PrivateScanResult.repo == repo,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No private report for this repo")
+    # Drop it from the public catalog (Browse/search/badge all read CommunityScan).
+    await db.execute(
+        sa_delete(CommunityScan).where(
+            CommunityScan.owner == owner, CommunityScan.repo == repo
+        )
+    )
+    row.published = False
+    await db.flush()
+    return {"published": False, "full_name": row.full_name}
 
 
 class PrivateScanRequest(BaseModel):
