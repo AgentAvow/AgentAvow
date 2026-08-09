@@ -227,11 +227,43 @@ async def disconnect(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_writes),
 ):
-    """Forget an installation locally (the owner should also uninstall in GitHub)."""
+    """Forget an installation locally (the owner should also uninstall in GitHub).
+    Also removes the App-derived verified claims + stored private results for this
+    installation's repos, so they drop out of 'Your repos' on disconnect."""
+    from sqlalchemy import delete as sa_delete
     from sqlalchemy import func as safunc
+
+    from src.models import PrivateScanResult, RepoClaim
 
     inst = await db.get(GitHubAppInstallation, installation_pk)
     if inst is None or inst.entity_id != entity.id:
         raise HTTPException(status_code=404, detail="Not found")
+
+    # Best-effort cleanup: list the install's repos (token usually still valid at
+    # disconnect) and drop their claims + private results under this owner. If the
+    # token is already dead (uninstalled in GitHub first), just mark it revoked.
+    try:
+        repos = await _installation_repos(inst.installation_id)
+        for r in repos:
+            fn = (r or {}).get("full_name")
+            if not fn or "/" not in fn:
+                continue
+            owner, repo = fn.split("/", 1)
+            await db.execute(sa_delete(PrivateScanResult).where(
+                PrivateScanResult.entity_id == entity.id,
+                PrivateScanResult.owner == owner,
+                PrivateScanResult.repo == repo,
+            ))
+            await db.execute(sa_delete(RepoClaim).where(
+                RepoClaim.entity_id == entity.id,
+                RepoClaim.owner == owner,
+                RepoClaim.repo == repo,
+            ))
+    except Exception:
+        logger.debug(
+            "disconnect cleanup skipped for %s (token unavailable)",
+            inst.installation_id, exc_info=True,
+        )
+
     inst.revoked_at = safunc.now()
     await db.flush()

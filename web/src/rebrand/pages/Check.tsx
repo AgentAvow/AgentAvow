@@ -212,9 +212,9 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
         <div className="mt-6 glass rounded-2xl p-6 border-l-4 border-success/60 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h3 className="text-[15px] font-bold text-success">✓ You own this</h3>
-            <p className="text-text-muted text-[13.5px] mt-0.5">This tool is claimed under your account. Run private re-scans, get change alerts, and own how it’s listed.</p>
+            <p className="text-text-muted text-[13.5px] mt-0.5">This tool is claimed under your account. Manage it, run re-scans, and control alerts.</p>
           </div>
-          <Link to={rp("/rebrand/tools") + "#your-repos"} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage &amp; fix →</Link>
+          <Link to={rp("/rebrand/tools") + "#your-repos"} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shrink-0">Manage in My Tools →</Link>
         </div>
       </Reveal>
     )
@@ -244,35 +244,6 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
           <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to scan it privately, get change alerts, and own how it appears on AgentAvow.</p>
         </div>
         <Link to={rp(`/rebrand/claim?owner=${owner}&repo=${repo}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this tool</Link>
-      </div>
-    </Reveal>
-  )
-}
-
-/** Owner-only: publish a PRIVATE repo's grade to the public catalog + search.
- * Only shown for private scans (public repos are listed automatically). */
-function PublishCTA({ owner, repo, token }: { owner: string; repo: string; token: string }) {
-  const publish = useMutation({
-    mutationFn: async () => (await api.post('/account/private-scan/publish', { owner, repo, token })).data,
-  })
-  return (
-    <Reveal>
-      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
-        <h3 className="text-[15px] font-bold">Publish to search</h3>
-        <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">
-          Private repos aren't listed in AgentAvow search. Publishing makes this grade public and findable —
-          it's your choice as the owner. <span className="text-text">Public repos are added automatically.</span>
-        </p>
-        {publish.isSuccess ? (
-          <div className="mt-3 text-[13px] text-success">✓ Published — anyone can now find {owner}/{repo} in search.</div>
-        ) : (
-          <button
-            onClick={() => publish.mutate()}
-            disabled={publish.isPending}
-            className="mt-3 text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60"
-          >{publish.isPending ? 'Publishing…' : 'Publish to search'}</button>
-        )}
-        {publish.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn't publish — the token may no longer have access.</div>}
       </div>
     </Reveal>
   )
@@ -364,20 +335,34 @@ export default function RebrandCheck() {
   // re-fetched publicly). The token rides along so the Publish CTA can work.
   const state = location.state as { privateResult?: PublicScanResponse; token?: string } | null
   if (!owner || !repo) return <Hero />
-  return <Result owner={owner} repo={repo} privateResult={state?.privateResult} privateToken={state?.token} />
+  return <Result owner={owner} repo={repo} privateResult={state?.privateResult} />
 }
 
-function Result({ owner, repo, privateResult, privateToken }: {
-  owner: string; repo: string; privateResult?: PublicScanResponse; privateToken?: string
+function Result({ owner, repo, privateResult }: {
+  owner: string; repo: string; privateResult?: PublicScanResponse
 }) {
-  const isPrivate = !!privateResult
-  const { data: fetched, isLoading, isError } = useQuery({
+  const { user } = useAuth()
+  // A one-time private scan arrives via router state — ephemeral, nothing is stored.
+  const oneTimePrivate = !!privateResult
+  const { data: fetched, isLoading } = useQuery({
     queryKey: ['rebrand-scan', owner, repo],
     queryFn: () => fetchPublicScan(owner, repo),
     retry: 0,
-    enabled: !isPrivate,
+    enabled: !oneTimePrivate,
   })
-  const scan = isPrivate ? privateResult : fetched
+  // When the public scan finds nothing and the viewer is signed in, fall back to the
+  // owner's stored private report (via the GitHub App). 404 → they have none stored.
+  const publicMissing = !oneTimePrivate && !isLoading && !fetched
+  const { data: privateReport, isLoading: prLoading } = useQuery({
+    queryKey: ['rebrand-private-report', owner, repo],
+    queryFn: async () => (await api.get<PublicScanResponse>(`/account/private-report/${owner}/${repo}`)).data,
+    retry: 0,
+    enabled: !!user && publicMissing,
+  })
+  // A stored private report is a MANAGED repo — distinct from a one-time scan.
+  const storedPrivate = !oneTimePrivate && !fetched && !!privateReport
+  const isPrivate = oneTimePrivate || storedPrivate
+  const scan = oneTimePrivate ? privateResult : (fetched ?? privateReport)
   // Real adoption signals — checks (Redis), watchers, GitHub stars, score history.
   // Skipped for private repos (the public checks endpoint can't see them).
   const { data: adoptionData } = useQuery({
@@ -387,9 +372,11 @@ function Result({ owner, repo, privateResult, privateToken }: {
     enabled: !!scan && !isPrivate,
   })
 
-  if (!isPrivate && isLoading) return <ScanningLoader owner={owner} repo={repo} />
+  if (!oneTimePrivate && isLoading) return <ScanningLoader owner={owner} repo={repo} />
+  // Public scan came back empty — we may still be checking the owner's private report.
+  if (publicMissing && !!user && prLoading) return <ScanningLoader owner={owner} repo={repo} />
 
-  if (!isPrivate && (isError || !scan)) {
+  if (!scan) {
     return (
       <div className="max-w-[620px] mx-auto px-6 py-24 text-center">
         <div className="glass rounded-2xl p-8">
@@ -403,8 +390,6 @@ function Result({ owner, repo, privateResult, privateToken }: {
       </div>
     )
   }
-
-  if (!scan) return null
 
   const g = getGradeInfo(scan.trust_score)
   const f = scan.findings
@@ -442,7 +427,7 @@ function Result({ owner, repo, privateResult, privateToken }: {
         <div className="relative px-7 pt-7">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
-            {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">🔒 Private scan · not public</span>}
+            {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">{storedPrivate ? '🔒 Private · via GitHub App' : '🔒 Private scan · not public'}</span>}
           </div>
           <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
           <div className="mt-1 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
@@ -568,9 +553,17 @@ function Result({ owner, repo, privateResult, privateToken }: {
       {/* badge promotion */}
       <Reveal><div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div></Reveal>
 
-      {/* claim / ownership CTA */}
-      <OwnershipCTA owner={owner} repo={repo} token={isPrivate ? privateToken : undefined} />
-      {isPrivate && privateToken && <PublishCTA owner={owner} repo={repo} token={privateToken} />}
+      {/* claim / ownership CTA — a one-time scan is ephemeral (report only, nothing stored) */}
+      {oneTimePrivate ? (
+        <Reveal>
+          <div className="mt-6 glass rounded-2xl p-6 border-l-4 border-warning/50">
+            <h3 className="text-[15px] font-bold">This is a one-time scan</h3>
+            <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Nothing is stored or listed. For continuous scanning + change alerts, connect the GitHub App on your <Link to={rp('/rebrand/tools')} className="text-primary-light hover:text-primary font-semibold">tools page</Link>.</p>
+          </div>
+        </Reveal>
+      ) : (
+        <OwnershipCTA owner={owner} repo={repo} />
+      )}
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (

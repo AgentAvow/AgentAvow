@@ -2,9 +2,40 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { motion, useReducedMotion } from 'framer-motion'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { Reveal, RevealStagger } from '../components/motion'
+
+// Confetti pieces — fixed trajectories so the burst is stable across renders.
+// Colors pull from the brand palette (primary / accent / success / warning).
+const CONFETTI = [
+  { x: -68, y: -30, r: -140, c: '#2DD4BF', d: 0 }, { x: -40, y: -52, r: 120, c: '#8B5CF6', d: 0.04 },
+  { x: -14, y: -60, r: -90, c: '#22C55E', d: 0.02 }, { x: 12, y: -58, r: 160, c: '#F59E0B', d: 0.06 },
+  { x: 40, y: -50, r: -120, c: '#2DD4BF', d: 0.03 }, { x: 66, y: -28, r: 100, c: '#8B5CF6', d: 0.05 },
+  { x: -58, y: 6, r: 150, c: '#22C55E', d: 0.08 }, { x: 58, y: 4, r: -150, c: '#F59E0B', d: 0.07 },
+  { x: -30, y: -12, r: 80, c: '#F59E0B', d: 0.1 }, { x: 30, y: -14, r: -80, c: '#22C55E', d: 0.09 },
+  { x: -48, y: -40, r: 110, c: '#F59E0B', d: 0.12 }, { x: 48, y: -38, r: -110, c: '#2DD4BF', d: 0.11 },
+]
+
+/** A brief, tasteful confetti burst from the row's center. Absolutely positioned
+ * spans, ~1.2s, no dependency beyond framer-motion (already used app-wide). */
+function ConfettiBurst() {
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+      {CONFETTI.map((p, i) => (
+        <motion.span
+          key={i}
+          className="absolute left-1/2 top-1/2 w-1.5 h-2.5 rounded-[1px]"
+          style={{ background: p.c }}
+          initial={{ opacity: 1, x: 0, y: 0, rotate: 0, scale: 1 }}
+          animate={{ opacity: [1, 1, 0], x: p.x, y: p.y, rotate: p.r, scale: [1, 1, 0.5] }}
+          transition={{ duration: 1.2, ease: 'easeOut', delay: p.d }}
+        />
+      ))}
+    </div>
+  )
+}
 
 /**
  * "My Tools" — the single home for claiming + managing the repos you own. Claim
@@ -15,29 +46,51 @@ import { Reveal, RevealStagger } from '../components/motion'
 
 interface Claim { id: string; owner: string; repo: string; full_name: string; status: string; topic: string }
 
-/** One claimed repo. Verified → success + report link + remove. Pending → the two
- * verification paths (public topic / private token) + remove. */
+/** One claimed repo. Verified → success + report link + remove. Pending → the
+ * public-repo topic verification + remove (private repos go through the GitHub
+ * App section below, not this form). */
 function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
+  const reduce = useReducedMotion()
   const [msg, setMsg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [token, setToken] = useState('')
+  // Brief celebratory moment on a pending → verified transition. We hold the
+  // refetch until the burst finishes so the row stays put while it plays.
+  const [celebrating, setCelebrating] = useState(false)
   const verify = useMutation({
-    mutationFn: async (tok?: string) =>
+    mutationFn: async () =>
       (await api.post<{ verified: boolean; detail?: string }>(
-        `/account/claims/${c.id}/verify`, tok ? { token: tok } : {},
+        `/account/claims/${c.id}/verify`, {},
       )).data,
-    onSuccess: (d) => { setMsg(d.verified ? null : (d.detail || 'Not verified yet.')); onRefetch() },
+    onSuccess: (d) => {
+      if (!d.verified) { setMsg(d.detail || 'Not verified yet.'); onRefetch(); return }
+      setMsg(null)
+      if (reduce) { onRefetch(); return }
+      setCelebrating(true)
+      setTimeout(() => { setCelebrating(false); onRefetch() }, 1500)
+    },
   })
   const remove = useMutation({ mutationFn: () => api.delete(`/account/claims/${c.id}`), onSuccess: onRefetch })
   const verified = c.status === 'verified'
   return (
-    <div className="glass rounded-xl p-4">
+    <div className="glass rounded-xl p-4 relative overflow-hidden">
+      {celebrating && <ConfettiBurst />}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="font-mono text-[14px] break-all">{c.full_name}</div>
-        <span className={`font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded ${verified ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>{verified ? 'verified' : 'unverified'}</span>
+        <span className={`font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded ${verified || celebrating ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>{verified || celebrating ? 'verified' : 'unverified'}</span>
       </div>
 
-      {verified ? (
+      {celebrating ? (
+        <motion.div
+          className="mt-2 flex items-center gap-2 text-success"
+          initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.3, ease: 'easeOut' }}
+        >
+          <motion.span
+            className="grid place-items-center w-6 h-6 rounded-full bg-success/20 text-success text-[13px] shrink-0"
+            initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 420, damping: 12 }}
+          >✓</motion.span>
+          <span className="text-[13px] font-semibold">Verified — you own this!</span>
+        </motion.div>
+      ) : verified ? (
         <div className="mt-2 flex items-center justify-between gap-3 flex-wrap">
           <div className="text-[12.5px] text-success">✓ Verified — you own this.</div>
           <div className="flex items-center gap-3 shrink-0">
@@ -47,9 +100,9 @@ function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
         </div>
       ) : (
         <div className="mt-3 text-[13px] text-text-muted">
-          <p className="text-text font-semibold text-[12.5px]">Prove you own this repo — pick the one that fits:</p>
+          <p className="text-text font-semibold text-[12.5px]">Prove you own this public repo — add a GitHub topic:</p>
 
-          {/* PUBLIC repo — GitHub topic */}
+          {/* PUBLIC repo — GitHub topic (private repos use the GitHub App section below) */}
           <div className="mt-2.5 rounded-lg border border-border/70 p-3">
             <div className="text-[12.5px] font-semibold text-text">Public repo → add a GitHub topic</div>
             <div className="mt-2 flex items-center gap-2 flex-wrap">
@@ -68,18 +121,8 @@ function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
               <summary className="cursor-pointer text-text-muted hover:text-text">Prefer the command line?</summary>
               <code className="mt-1.5 block font-mono text-[11.5px] bg-surface border border-border rounded px-2 py-1.5 break-all">gh repo edit {c.full_name} --add-topic {c.topic}</code>
             </details>
-            <button onClick={() => verify.mutate(undefined)} disabled={verify.isPending} className="mt-2.5 text-[12.5px] font-semibold px-3.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{verify.isPending ? 'Checking…' : 'Verify topic'}</button>
+            <button onClick={() => verify.mutate()} disabled={verify.isPending} className="mt-2.5 text-[12.5px] font-semibold px-3.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{verify.isPending ? 'Checking…' : 'Verify topic'}</button>
           </div>
-
-          {/* PRIVATE repo — read token */}
-          <details className="mt-2.5 rounded-lg border border-border/70 p-3">
-            <summary className="cursor-pointer text-[12.5px] font-semibold text-text">Private repo → verify with a read-only token</summary>
-            <p className="mt-2 text-[12.5px]">Private repos can&apos;t use a topic (we can&apos;t read them). Paste a fine-grained <span className="text-text font-medium">read-only</span> token for this repo — it proves access, is used once, and is <span className="text-text font-medium">never stored</span>.</p>
-            <div className="mt-2 flex gap-2 flex-wrap">
-              <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="github_pat_…" className="flex-1 min-w-[200px] bg-surface border border-border rounded-lg px-3 py-1.5 font-mono text-[12.5px] outline-none focus:border-primary-light" />
-              <button onClick={() => verify.mutate(token.trim())} disabled={!token.trim() || verify.isPending} className="text-[12.5px] font-semibold px-3.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{verify.isPending ? 'Checking…' : 'Verify with token'}</button>
-            </div>
-          </details>
 
           <div className="mt-3">
             <button onClick={() => remove.mutate()} className="text-[12.5px] text-text-muted hover:text-danger">Remove claim</button>
@@ -141,7 +184,9 @@ interface Installation { id: string; installation_id: string; account_login: str
  * App is registered (github_app_slug configured). */
 function GitHubAppConnect() {
   const qc = useQueryClient()
+  const reduce = useReducedMotion()
   const [params, setParams] = useSearchParams()
+  const [celebrating, setCelebrating] = useState(false)
   const { data } = useQuery({
     queryKey: ['github-app-status'],
     queryFn: async () => (await api.get<{ installations: Installation[]; app_configured: boolean }>('/account/github-app/status')).data,
@@ -150,6 +195,8 @@ function GitHubAppConnect() {
   const connect = useMutation({
     mutationFn: async (installation_id: string) => (await api.post('/account/github-app/connect', { installation_id })).data,
     onSuccess: () => {
+      // Connecting = private repos added → celebrate (same as a public verify).
+      if (!reduce) { setCelebrating(true); setTimeout(() => setCelebrating(false), 1600) }
       qc.refetchQueries({ queryKey: ['github-app-status'] })
       // Scans + verified claims are created in the background — refetch now and
       // again shortly so the repos surface in "Your repos" as they finish.
@@ -159,7 +206,12 @@ function GitHubAppConnect() {
   })
   const disconnect = useMutation({
     mutationFn: async (pk: string) => api.delete(`/account/github-app/${pk}`),
-    onSuccess: () => qc.refetchQueries({ queryKey: ['github-app-status'] }),
+    // Backend removes the App's claims/results — refetch both so the repos drop
+    // out of "Your repos" too, not just the install list.
+    onSuccess: () => {
+      qc.refetchQueries({ queryKey: ['github-app-status'] })
+      qc.refetchQueries({ queryKey: ['rebrand-claims'] })
+    },
   })
   // GitHub redirects back with ?gh_installation_id= after an install — associate it.
   useEffect(() => {
@@ -188,7 +240,8 @@ function GitHubAppConnect() {
   const installs = (data?.installations ?? []).filter((i) => !i.revoked)
 
   return (
-    <div>
+    <div className="relative">
+      {celebrating && <ConfettiBurst />}
       <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Claim a Private repo → GitHub App</h2>
       <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow App on a private repo to <span className="text-text">claim it + scan it, with automatic re-scans and drop alerts over time</span> — no token to paste, no topic to add. You pick exactly which repos, and can revoke it in GitHub anytime. We never store a long-lived secret.</p>
       {connect.isPending && <div className="mb-2 text-[12.5px] text-text-muted">Linking your installation…</div>}
