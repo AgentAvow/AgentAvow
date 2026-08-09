@@ -155,6 +155,7 @@ class PublicScanResponse(BaseModel):
     scan_result: str  # clean, warnings, critical, error
     findings: FindingsSummary
     positive_signals: list[str] = []
+    certified: dict = {}  # A+ certified-tier eligibility {eligible, checks} (roadmap §7)
     category_scores: dict[str, int] = {}  # per-category 0-100 sub-scores
     metadata: ScanMetadata
     scanned_at: str
@@ -300,6 +301,7 @@ async def _cached_scan_response(
         trust_tier=cached["trust_tier"],
         recommended_limits=RecommendedLimits(**cached["recommended_limits"]),
         scan_result=cached["scan_result"],
+        certified=cached.get("certified") or {},
         findings=FindingsSummary(**cached["findings"]),
         positive_signals=cached.get("positive_signals", []),
         category_scores=cached.get("category_scores", {}),
@@ -916,6 +918,7 @@ async def public_scan(
         recommended_limits=RecommendedLimits(**data["recommended_limits"]),
         scan_result=data["scan_result"],
         findings=FindingsSummary(**data["findings"]),
+        certified=data.get("certified") or {},
         positive_signals=data["positive_signals"],
         category_scores=data.get("category_scores", {}),
         metadata=ScanMetadata(**data["metadata"]),
