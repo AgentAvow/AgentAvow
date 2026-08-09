@@ -192,14 +192,25 @@ function GitHubAppConnect() {
     queryFn: async () => (await api.get<{ installations: Installation[]; app_configured: boolean }>('/account/github-app/status')).data,
     retry: 0,
   })
+  // Which of the App's repos are already claimed (verified) — shared cache key.
+  const { data: claimsData } = useQuery({
+    queryKey: ['rebrand-claims'],
+    queryFn: async () => (await api.get<{ claims: { full_name: string; status: string }[] }>('/account/claims')).data,
+  })
+  const claimed = new Set((claimsData?.claims ?? []).filter((c) => c.status === 'verified').map((c) => c.full_name.toLowerCase()))
   const connect = useMutation({
     mutationFn: async (installation_id: string) => (await api.post('/account/github-app/connect', { installation_id })).data,
+    // Connecting grants access; the repos are then claimed one-by-one below.
+    onSuccess: () => qc.refetchQueries({ queryKey: ['github-app-status'] }),
+  })
+  const claimRepo = useMutation({
+    mutationFn: async (fullName: string) => {
+      const [o, r] = fullName.split('/')
+      return (await api.post('/account/github-app/claim-repo', { owner: o, repo: r })).data
+    },
+    // Claiming a repo = celebrate; it moves to "Your repos" as the scan finishes.
     onSuccess: () => {
-      // Connecting = private repos added → celebrate (same as a public verify).
       if (!reduce) { setCelebrating(true); setTimeout(() => setCelebrating(false), 1600) }
-      qc.refetchQueries({ queryKey: ['github-app-status'] })
-      // Scans + verified claims are created in the background — refetch now and
-      // again shortly so the repos surface in "Your repos" as they finish.
       qc.refetchQueries({ queryKey: ['rebrand-claims'] })
       setTimeout(() => qc.refetchQueries({ queryKey: ['rebrand-claims'] }), 8000)
     },
@@ -243,9 +254,9 @@ function GitHubAppConnect() {
     <div className="relative">
       {celebrating && <ConfettiBurst />}
       <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Claim a Private repo → GitHub App</h2>
-      <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow App on a private repo to <span className="text-text">claim it + scan it, with automatic re-scans and drop alerts over time</span> — no token to paste, no topic to add. You pick exactly which repos, and can revoke it in GitHub anytime. We never store a long-lived secret.</p>
+      <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow App on your private repos, then <span className="text-text">claim each one below to scan it</span> — with automatic re-scans and drop alerts over time. No token to paste, no topic to add, and you can revoke it in GitHub anytime. We never store a long-lived secret.</p>
       {connect.isPending && <div className="mb-2 text-[12.5px] text-text-muted">Linking your installation…</div>}
-      {connect.isSuccess && <div className="mb-2 text-[12.5px] text-success">✓ Connected — automatic scans will start shortly.</div>}
+      {connect.isSuccess && <div className="mb-2 text-[12.5px] text-success">✓ Connected — claim the repos below to scan &amp; list them.</div>}
       {!configured ? (
         <div className="glass rounded-xl p-4 text-[13px] text-text-muted max-w-[560px]">Coming soon — the GitHub App is being set up. Until then, use the one-time private scan below.</div>
       ) : installs.length > 0 ? (
@@ -257,7 +268,23 @@ function GitHubAppConnect() {
                 <button onClick={() => disconnect.mutate(i.id)} className="text-[12px] text-text-muted hover:text-danger">Disconnect</button>
               </div>
               {i.repos && i.repos.length > 0 && (
-                <div className="mt-2 text-[12px] text-text-muted">{i.repos.length} repo{i.repos.length === 1 ? '' : 's'} connected · {i.repos.filter((r) => r.private).length} private</div>
+                <div className="mt-2.5 flex flex-col divide-y divide-border/50">
+                  {i.repos.map((r) => {
+                    const isClaimed = claimed.has(r.full_name.toLowerCase())
+                    const busy = claimRepo.isPending && claimRepo.variables === r.full_name
+                    return (
+                      <div key={r.full_name} className="flex items-center justify-between gap-3 py-2">
+                        <span className="font-mono text-[12.5px] break-all">{r.full_name} {r.private && <span className="text-text-muted">· private</span>}</span>
+                        {isClaimed ? (
+                          <span className="text-[11.5px] font-semibold text-success shrink-0">claimed ✓</span>
+                        ) : (
+                          <button onClick={() => claimRepo.mutate(r.full_name)} disabled={busy}
+                            className="shrink-0 text-[12px] font-semibold px-3 py-1 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{busy ? 'Claiming…' : 'Claim'}</button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               )}
             </div>
           ))}

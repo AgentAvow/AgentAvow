@@ -92,27 +92,6 @@ async def _installation_repos(installation_id: str) -> list[dict]:
     ]
 
 
-async def _verify_installation_claims(db, entity_id, installation_id: str) -> None:
-    """Synchronously create a VERIFIED RepoClaim for each repo an installation can
-    access — the install itself is the ownership proof. Fast (list + upsert, no
-    scan) so the repos show in 'Your repos' the moment connect returns; the actual
-    scan/result runs in the background task. Best-effort."""
-    try:
-        from src.jobs.app_scan import _ensure_verified_claim
-
-        repos = await _installation_repos(installation_id)
-        for r in repos[:25]:
-            fn = (r or {}).get("full_name")
-            if not fn or "/" not in fn:
-                continue
-            owner, repo = fn.split("/", 1)
-            await _ensure_verified_claim(db, entity_id, owner, repo, fn)
-    except Exception:
-        logger.debug(
-            "verify-claims-on-connect failed for %s", installation_id, exc_info=True
-        )
-
-
 @router.get("/install-url")
 async def install_url(
     entity: Entity = Depends(get_current_entity),
@@ -194,10 +173,8 @@ async def connect(
         existing.account_type = acct.get("type")
         await db.flush()
         await db.refresh(existing)
-        await _verify_installation_claims(db, entity.id, inst_id)
-        # The full scan (result + alerts) runs in the background — slow for private
-        # repos, so it must NOT gate the connect response.
-        background.add_task(_scan_installation_bg, existing.id)
+        # Connecting grants access only — the owner claims each repo explicitly
+        # (POST /claim-repo), which is when it's verified + scanned + listed.
         return _serialize(existing)
 
     inst = GitHubAppInstallation(
@@ -209,10 +186,54 @@ async def connect(
     db.add(inst)
     await db.flush()
     await db.refresh(inst)
-    await _verify_installation_claims(db, entity.id, inst_id)
-    # Scan immediately so connecting scans + verified-claims the repos right away.
-    background.add_task(_scan_installation_bg, inst.id)
     return _serialize(inst)
+
+
+class ClaimRepoRequest(BaseModel):
+    owner: str = Field(..., max_length=255)
+    repo: str = Field(..., max_length=255)
+
+
+@router.post("/claim-repo", status_code=201)
+async def claim_repo(
+    body: ClaimRepoRequest,
+    background: BackgroundTasks,
+    entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_writes),
+):
+    """Claim ONE repo the owner reaches through a connected App installation. The
+    install proves ownership, so we verify-claim it immediately (fast → shows in
+    'Your repos' now) and scan it in the background (result populates shortly)."""
+    from src.jobs.app_scan import _ensure_verified_claim
+
+    owner, repo = body.owner.strip(), body.repo.strip()
+    full_name = f"{owner}/{repo}"
+
+    # Find a live installation of the caller that can actually reach this repo.
+    rows = (await db.execute(
+        select(GitHubAppInstallation).where(
+            GitHubAppInstallation.entity_id == entity.id,
+            GitHubAppInstallation.revoked_at.is_(None),
+        )
+    )).scalars().all()
+    match = None
+    for i in rows:
+        try:
+            repos = await _installation_repos(i.installation_id)
+        except Exception:
+            repos = []
+        if any((r or {}).get("full_name") == full_name for r in repos):
+            match = i
+            break
+    if match is None:
+        raise HTTPException(status_code=404, detail="No connected installation can access that repo")
+
+    await _ensure_verified_claim(db, entity.id, owner, repo, full_name)
+    await db.flush()
+    # Scan (result + alerts) in the background — slow for private repos.
+    background.add_task(_scan_installation_bg, match.id)
+    return {"claimed": True, "full_name": full_name}
 
 
 @router.get("/status")
