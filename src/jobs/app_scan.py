@@ -201,10 +201,16 @@ async def _scan_and_store(db, entity_id, owner: str, repo: str, full_name: str, 
     )
 
 
-async def _ensure_verified_claim(db, entity_id, owner: str, repo: str, full_name: str) -> None:
+async def _ensure_verified_claim(
+    db, entity_id, owner: str, repo: str, full_name: str, is_private: bool | None = None
+) -> None:
     """Ensure a verified RepoClaim exists for (entity, owner, repo). Idempotent —
     if one already exists it's just marked verified; otherwise a verified claim is
-    created. The App install proves ownership, so no topic/token check is needed."""
+    created. The App install proves ownership, so no topic/token check is needed.
+
+    ``is_private`` (when provided) is recorded authoritatively — it drives the
+    publish-to-search affordance. Passed by the App claim path (which knows the
+    repo's visibility); left None by re-scans so an existing flag is never lost."""
     from sqlalchemy import func as safunc
     from sqlalchemy import select
 
@@ -221,9 +227,15 @@ async def _ensure_verified_claim(db, entity_id, owner: str, repo: str, full_name
     ).scalar_one_or_none()
 
     if claim is not None:
+        changed = False
         if claim.status != "verified":
             claim.status = "verified"
             claim.verified_at = safunc.now()
+            changed = True
+        if is_private is not None and bool(claim.is_private) != bool(is_private):
+            claim.is_private = bool(is_private)
+            changed = True
+        if changed:
             await db.flush()
         return
 
@@ -235,6 +247,7 @@ async def _ensure_verified_claim(db, entity_id, owner: str, repo: str, full_name
             full_name=full_name,
             status="verified",
             verify_code=secrets.token_hex(8),  # NOT NULL — unused for App-proof claims
+            is_private=bool(is_private) if is_private is not None else False,
             verified_at=safunc.now(),
         )
     )

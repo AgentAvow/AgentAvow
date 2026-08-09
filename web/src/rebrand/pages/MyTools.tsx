@@ -44,13 +44,13 @@ function ConfettiBurst() {
  * repo lives at the bottom. (The old /claim route redirects here.)
  */
 
-interface Claim { id: string; owner: string; repo: string; full_name: string; status: string; topic: string; private?: boolean; published?: boolean }
+interface Claim { id: string; owner: string; repo: string; full_name: string; status: string; topic: string; private?: boolean; scanned?: boolean; published?: boolean }
 
 /** Publish-to-search control for a verified PRIVATE repo (row in "Your repos").
  * Publishing lists the GRADE (never the code) in public search; once listed, the
  * only action is Unlist. Sharing lives on the score page, not here. Public repos
  * are inherently listed, so this only renders for private ones. */
-function PrivatePublish({ owner, repo, published, onRefetch }: { owner: string; repo: string; published: boolean; onRefetch: () => void }) {
+function PrivatePublish({ owner, repo, scanned, published, onRefetch }: { owner: string; repo: string; scanned: boolean; published: boolean; onRefetch: () => void }) {
   const reduce = useReducedMotion()
   const [celebrating, setCelebrating] = useState(false)
   const publish = useMutation({
@@ -70,6 +70,8 @@ function PrivatePublish({ owner, repo, published, onRefetch }: { owner: string; 
           <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light">🌐 Listed in search</span>
           <button onClick={() => unpublish.mutate()} disabled={unpublish.isPending} className="text-[12px] text-text-muted hover:text-danger">{unpublish.isPending ? 'Unlisting…' : 'Unlist'}</button>
         </>
+      ) : !scanned ? (
+        <div className="text-[12px] text-text-muted">🔒 Private — scanning… publish appears once the first scan finishes.</div>
       ) : (
         <>
           <div className="text-[12px] text-text-muted max-w-[46ch]">🔒 Private — not in search. Publish the <span className="text-text font-medium">grade</span>; your code stays private.</div>
@@ -136,7 +138,7 @@ function ClaimRow({ c, onRefetch }: { c: Claim; onRefetch: () => void }) {
               <button onClick={() => remove.mutate()} className="text-[12px] text-text-muted hover:text-danger">Remove</button>
             </div>
           </div>
-          {c.private && <PrivatePublish owner={c.owner} repo={c.repo} published={!!c.published} onRefetch={onRefetch} />}
+          {c.private && <PrivatePublish owner={c.owner} repo={c.repo} scanned={!!c.scanned} published={!!c.published} onRefetch={onRefetch} />}
         </>
       ) : (
         <div className="mt-3 text-[13px] text-text-muted">
@@ -358,6 +360,12 @@ export default function RebrandMyTools() {
     queryKey: ['rebrand-claims'],
     queryFn: async () => (await api.get<{ claims: Claim[] }>('/account/claims')).data,
     enabled: !!user,
+    // While a just-claimed private repo is still being scanned in the background,
+    // poll so its publish control appears on its own — no manual refresh needed.
+    refetchInterval: (query) => {
+      const cs = (query.state.data as { claims: Claim[] } | undefined)?.claims ?? []
+      return cs.some((c) => c.status === 'verified' && c.private && !c.scanned) ? 5000 : false
+    },
   })
   const [privateHint, setPrivateHint] = useState<string | null>(null)
   const create = useMutation({

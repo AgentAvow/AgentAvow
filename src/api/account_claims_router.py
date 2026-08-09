@@ -81,9 +81,11 @@ class VerifyRequest(BaseModel):
 
 
 def _serialize(c: RepoClaim, private_pub: dict | None = None) -> dict:
-    # A private repo (scanned via the GitHub App / one-time token) has a stored
-    # PrivateScanResult; `private_pub` maps (owner, repo) -> published bool for
-    # those. Public (topic-verified) repos aren't in the map → private=False.
+    # `private` is AUTHORITATIVE on the claim (set at claim time): public
+    # topic-proof claims are False; GitHub-App claims of private repos are True.
+    # `private_pub` maps (owner, repo) -> published bool for repos that have a
+    # stored PrivateScanResult, so we can also report whether it's been scanned
+    # yet (publish needs a stored result) and whether it's currently listed.
     pub = (private_pub or {}).get((c.owner, c.repo)) if private_pub is not None else None
     return {
         "id": str(c.id),
@@ -93,7 +95,8 @@ def _serialize(c: RepoClaim, private_pub: dict | None = None) -> dict:
         "status": c.status,
         "topic": f"agentavow-verify-{c.verify_code}",
         "verified_at": c.verified_at.isoformat() if c.verified_at else None,
-        "private": pub is not None,
+        "private": bool(c.is_private),
+        "scanned": pub is not None,
         "published": bool(pub) if pub is not None else False,
     }
 

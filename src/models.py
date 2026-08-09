@@ -2404,6 +2404,11 @@ class RepoClaim(Base):
     full_name = Column(String(512), nullable=False)
     status = Column(String(20), default="pending", nullable=False)  # pending | verified
     verify_code = Column(String(64), nullable=False)
+    # Whether the claimed repo is PRIVATE (via GitHub App / token). Authoritative,
+    # set at claim time — public (topic-proof) claims are always False. Drives the
+    # "publish to search" affordance (public repos are auto-listed; private ones
+    # are listed only on explicit publish).
+    is_private = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     verified_at = Column(DateTime(timezone=True), nullable=True)
 

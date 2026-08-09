@@ -61,10 +61,16 @@ async def _ensure_tables():
             "  full_name VARCHAR(512) NOT NULL,"
             "  status VARCHAR(20) NOT NULL DEFAULT 'pending',"
             "  verify_code VARCHAR(64) NOT NULL,"
+            "  is_private BOOLEAN NOT NULL DEFAULT false,"
             "  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
             "  verified_at TIMESTAMPTZ,"
             "  CONSTRAINT uq_repo_claim_target UNIQUE (entity_id, owner, repo)"
             ")"
+        ))
+        # A test DB from before the `is_private` column exists needs it added.
+        await conn.execute(text(
+            "ALTER TABLE repo_claims "
+            "ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT false"
         ))
         await conn.execute(text(
             "CREATE TABLE IF NOT EXISTS private_scan_results ("
@@ -252,6 +258,26 @@ async def test_scan_installation_first_scan_no_alert(db: AsyncSession, monkeypat
     assert claim.status == "verified"
 
 
+@pytest.mark.asyncio
+async def test_ensure_verified_claim_records_is_private(db: AsyncSession):
+    """_ensure_verified_claim persists is_private on create and never downgrades a
+    True flag on a later re-scan (which passes is_private=None)."""
+    from src.jobs.app_scan import _ensure_verified_claim
+
+    ent = await _make_entity(db)
+    await _ensure_verified_claim(db, ent.id, "me", "secret", "me/secret", is_private=True)
+    claim = (await db.execute(
+        select(RepoClaim).where(RepoClaim.entity_id == ent.id, RepoClaim.repo == "secret")
+    )).scalar_one()
+    assert claim.is_private is True
+    assert claim.status == "verified"
+
+    # A re-scan (is_private omitted) must not clear the flag.
+    await _ensure_verified_claim(db, ent.id, "me", "secret", "me/secret")
+    await db.refresh(claim)
+    assert claim.is_private is True
+
+
 # ── View endpoint ─────────────────────────────────────────────────────────
 
 REGISTER_URL = "/api/v1/auth/register"
@@ -366,8 +392,9 @@ async def test_unpublish_removes_catalog_row_and_clears_flag(
 async def test_list_claims_carries_private_published_flags(
     db: AsyncSession, client: AsyncClient,
 ):
-    """GET /account/claims tags each claim: a private repo (has a PrivateScanResult)
-    reports private=True + its published state; a public repo reports private=False."""
+    """GET /account/claims tags each claim from the AUTHORITATIVE is_private flag:
+    a private repo reports private=True + scanned/published state; a public repo
+    reports private=False regardless of any stray scan rows."""
     token = await _register(client, "flags_owner@test.com")
     ent = (await db.execute(
         select(Entity).where(Entity.email == "flags_owner@test.com")
@@ -375,17 +402,25 @@ async def test_list_claims_carries_private_published_flags(
     # A private, published claim.
     db.add(RepoClaim(
         id=uuid.uuid4(), entity_id=ent.id, owner="me", repo="priv",
-        full_name="me/priv", status="verified", verify_code="a", verified_at=func.now(),
+        full_name="me/priv", status="verified", verify_code="a",
+        is_private=True, verified_at=func.now(),
     ))
     db.add(PrivateScanResult(
         entity_id=ent.id, owner="me", repo="priv", full_name="me/priv",
         trust_score=90, grade="A", result_json={"trust_score": 90},
         source="app", published=True,
     ))
-    # A public claim (no PrivateScanResult).
+    # A private claim NOT yet scanned (no PrivateScanResult) — scanned=False.
+    db.add(RepoClaim(
+        id=uuid.uuid4(), entity_id=ent.id, owner="me", repo="fresh",
+        full_name="me/fresh", status="verified", verify_code="c",
+        is_private=True, verified_at=func.now(),
+    ))
+    # A public claim (private=False even if a stray scan row exists).
     db.add(RepoClaim(
         id=uuid.uuid4(), entity_id=ent.id, owner="me", repo="pubrepo",
-        full_name="me/pubrepo", status="verified", verify_code="b", verified_at=func.now(),
+        full_name="me/pubrepo", status="verified", verify_code="b",
+        is_private=False, verified_at=func.now(),
     ))
     await db.flush()
 
@@ -395,6 +430,9 @@ async def test_list_claims_carries_private_published_flags(
     assert resp.status_code == 200
     by_name = {c["full_name"]: c for c in resp.json()["claims"]}
     assert by_name["me/priv"]["private"] is True
+    assert by_name["me/priv"]["scanned"] is True
     assert by_name["me/priv"]["published"] is True
+    assert by_name["me/fresh"]["private"] is True
+    assert by_name["me/fresh"]["scanned"] is False
+    assert by_name["me/fresh"]["published"] is False
     assert by_name["me/pubrepo"]["private"] is False
-    assert by_name["me/pubrepo"]["published"] is False

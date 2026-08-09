@@ -218,18 +218,21 @@ async def claim_repo(
         )
     )).scalars().all()
     match = None
+    is_private = False
     for i in rows:
         try:
             repos = await _installation_repos(i.installation_id)
         except Exception:
             repos = []
-        if any((r or {}).get("full_name") == full_name for r in repos):
+        hit = next((r for r in repos if (r or {}).get("full_name") == full_name), None)
+        if hit is not None:
             match = i
+            is_private = bool(hit.get("private", False))
             break
     if match is None:
-        raise HTTPException(status_code=404, detail="No connected installation can access that repo")
+        raise HTTPException(status_code=404, detail="No connected installation can reach that repo")
 
-    await _ensure_verified_claim(db, entity.id, owner, repo, full_name)
+    await _ensure_verified_claim(db, entity.id, owner, repo, full_name, is_private=is_private)
     # Commit NOW so the repo_claims row lock releases immediately. Otherwise the
     # request transaction stays open (idle-in-transaction) for the whole slow
     # background scan, blocking every other claim write (they pile up on the lock).
