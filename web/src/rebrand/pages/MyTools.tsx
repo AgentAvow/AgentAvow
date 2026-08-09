@@ -135,6 +135,76 @@ function PrivateScan() {
   )
 }
 
+interface Installation { id: string; installation_id: string; account_login: string | null; revoked: boolean; repos?: { full_name: string; private: boolean }[] }
+
+/** Connect the AgentAvow GitHub App for scheduled scans of private repos — no
+ * token to paste, revocable in GitHub. Gracefully shows "coming soon" until the
+ * App is registered (github_app_slug configured). */
+function GitHubAppConnect() {
+  const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const { data } = useQuery({
+    queryKey: ['github-app-status'],
+    queryFn: async () => (await api.get<{ installations: Installation[]; app_configured: boolean }>('/account/github-app/status')).data,
+    retry: 0,
+  })
+  const connect = useMutation({
+    mutationFn: async (installation_id: string) => (await api.post('/account/github-app/connect', { installation_id })).data,
+    onSuccess: () => qc.refetchQueries({ queryKey: ['github-app-status'] }),
+  })
+  const disconnect = useMutation({
+    mutationFn: async (pk: string) => api.delete(`/account/github-app/${pk}`),
+    onSuccess: () => qc.refetchQueries({ queryKey: ['github-app-status'] }),
+  })
+  // GitHub redirects back with ?gh_installation_id= after an install — associate it.
+  useEffect(() => {
+    const gid = params.get('gh_installation_id')
+    if (gid && !connect.isPending && !connect.isSuccess) {
+      connect.mutate(gid)
+      params.delete('gh_installation_id'); params.delete('gh_setup')
+      setParams(params, { replace: true })
+    }
+  }, [params, connect, setParams])
+
+  const startInstall = async () => {
+    try {
+      const { url } = (await api.get<{ url: string }>('/account/github-app/install-url')).data
+      window.location.href = url
+    } catch { /* app not configured yet */ }
+  }
+
+  const configured = data?.app_configured
+  const installs = (data?.installations ?? []).filter((i) => !i.revoked)
+
+  return (
+    <div>
+      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Scheduled private scans · GitHub App</h2>
+      <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow GitHub App on your private repos for <span className="text-text">automatic re-scans + drop alerts</span> — no token to paste, and you can revoke it in GitHub anytime. We never store a long-lived secret.</p>
+      {!configured ? (
+        <div className="glass rounded-xl p-4 text-[13px] text-text-muted max-w-[560px]">Coming soon — the GitHub App is being set up. Until then, use <span className="text-text">Scan a private repo</span> above for one-off private scans.</div>
+      ) : installs.length > 0 ? (
+        <div className="flex flex-col gap-2 max-w-[560px]">
+          {installs.map((i) => (
+            <div key={i.id} className="glass rounded-xl p-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="font-mono text-[13.5px]">@{i.account_login || 'installed'}</div>
+                <button onClick={() => disconnect.mutate(i.id)} className="text-[12px] text-text-muted hover:text-danger">Disconnect</button>
+              </div>
+              {i.repos && i.repos.length > 0 && (
+                <div className="mt-2 text-[12px] text-text-muted">{i.repos.length} repo{i.repos.length === 1 ? '' : 's'} connected · {i.repos.filter((r) => r.private).length} private</div>
+              )}
+            </div>
+          ))}
+          <button onClick={startInstall} className="self-start text-[12.5px] font-semibold text-primary-light hover:text-primary">+ Add more repos →</button>
+        </div>
+      ) : (
+        <button onClick={startInstall} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Connect GitHub App</button>
+      )}
+      {connect.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t link that installation — try Connect again.</div>}
+    </div>
+  )
+}
+
 export default function RebrandMyTools() {
   const { user, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
@@ -209,6 +279,12 @@ export default function RebrandMyTools() {
       {/* PRIVATE SCAN */}
       <div className="mt-8">
         <PrivateScan />
+      </div>
+
+      {/* GITHUB APP — scheduled private scans */}
+      <div className="mt-8 border-t border-border/60" />
+      <div className="mt-8">
+        <GitHubAppConnect />
       </div>
 
       {/* divider */}
