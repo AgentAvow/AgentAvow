@@ -83,11 +83,27 @@ async def scan_installation(db, installation) -> dict:
         summary["error"] = "repo_list_failed"
         return summary
 
+    from sqlalchemy import select
+
+    from src.models import RepoClaim
+
     for r in repos[:_MAX_REPOS_PER_INSTALL]:
         full_name = (r or {}).get("full_name")
         if not full_name or "/" not in full_name:
             continue
         owner, repo = full_name.split("/", 1)
+        # Only RE-scan repos the owner has EXPLICITLY claimed — never auto-claim a
+        # whole installation. Claiming is a per-repo action (POST /claim-repo).
+        claimed = (await db.execute(
+            select(RepoClaim).where(
+                RepoClaim.entity_id == entity_id,
+                RepoClaim.owner == owner,
+                RepoClaim.repo == repo,
+                RepoClaim.status == "verified",
+            )
+        )).scalar_one_or_none()
+        if claimed is None:
+            continue
         try:
             fired = await _scan_and_store(db, entity_id, owner, repo, full_name, token)
             summary["scanned"] += 1
@@ -98,6 +114,23 @@ async def scan_installation(db, installation) -> dict:
             logger.warning("app_scan: repo scan failed for %s", full_name, exc_info=True)
 
     return summary
+
+
+async def scan_one_repo(db, installation_id: str, entity_id, owner: str, repo: str) -> int:
+    """Scan a SINGLE claimed repo (the per-repo claim flow) — mint a token, scan,
+    store the result, refresh the verified claim, and fire alerts. Fail-open."""
+    from src.github_auth import mint_installation_token
+
+    try:
+        token = await mint_installation_token(installation_id)
+    except Exception:
+        logger.warning("scan_one_repo: token mint failed for %s", installation_id)
+        return 0
+    try:
+        return await _scan_and_store(db, entity_id, owner, repo, f"{owner}/{repo}", token)
+    except Exception:
+        logger.warning("scan_one_repo failed for %s/%s", owner, repo, exc_info=True)
+        return 0
 
 
 async def _scan_and_store(db, entity_id, owner: str, repo: str, full_name: str, token: str) -> int:
@@ -261,4 +294,4 @@ async def _maybe_notify(
     return 0
 
 
-__all__ = ["scan_installation"]
+__all__ = ["scan_installation", "scan_one_repo"]

@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from src.database import get_db
@@ -146,6 +146,11 @@ async def test_scan_installation_stores_verifies_and_alerts(db: AsyncSession, mo
         account_type="User",
     )
     db.add(inst)
+    # The repo is already CLAIMED — scan_installation only re-scans claimed repos.
+    db.add(RepoClaim(
+        id=uuid.uuid4(), entity_id=ent.id, owner="me", repo="repo",
+        full_name="me/repo", status="verified", verify_code="pre", verified_at=func.now(),
+    ))
     # Prior scan at 90 so the fresh 50 is a clear drop (>5) → watch_alert.
     db.add(PrivateScanResult(
         entity_id=ent.id,
@@ -230,11 +235,11 @@ async def test_scan_installation_first_scan_no_alert(db: AsyncSession, monkeypat
         scan_result=_fake_scan_result(trust_score=88),
     )
 
-    from src.jobs.app_scan import scan_installation
+    from src.jobs.app_scan import scan_one_repo
 
-    summary = await scan_installation(db, inst)
-    assert summary["scanned"] == 1
-    assert summary["alerts"] == 0
+    # The per-repo claim path scans one repo, stores it, and ensures a verified claim.
+    alerts = await scan_one_repo(db, "99002", ent.id, "me", "fresh")
+    assert alerts == 0
 
     row = (await db.execute(
         select(PrivateScanResult).where(PrivateScanResult.entity_id == ent.id)

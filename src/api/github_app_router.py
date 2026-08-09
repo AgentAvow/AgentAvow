@@ -234,8 +234,22 @@ async def claim_repo(
     # request transaction stays open (idle-in-transaction) for the whole slow
     # background scan, blocking every other claim write (they pile up on the lock).
     await db.commit()
-    background.add_task(_scan_installation_bg, match.id)
+    # Scan ONLY this repo in the background — never the whole installation.
+    background.add_task(_scan_one_repo_bg, match.installation_id, entity.id, owner, repo)
     return {"claimed": True, "full_name": full_name}
+
+
+async def _scan_one_repo_bg(installation_id: str, entity_id, owner: str, repo: str) -> None:
+    """Best-effort background scan of a single just-claimed repo (own session)."""
+    try:
+        from src.database import async_session
+        from src.jobs.app_scan import scan_one_repo
+
+        async with async_session() as db:
+            await scan_one_repo(db, installation_id, entity_id, owner, repo)
+            await db.commit()
+    except Exception:
+        logger.debug("claim scan failed for %s/%s", owner, repo, exc_info=True)
 
 
 @router.get("/status")
