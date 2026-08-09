@@ -108,18 +108,8 @@ function PrivateScan() {
   })
   return (
     <div>
-      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">One-time private scan</h2>
+      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">One-time private repo scan</h2>
       <p className="text-text-muted text-[13px] mb-3">A single scan with no ongoing access — paste a read token, used for this scan only and <strong className="text-text">never stored or logged</strong>. For continuous scanning + alerts, use the GitHub App above.</p>
-      <details className="mb-3 text-[12.5px] max-w-[560px]">
-        <summary className="cursor-pointer text-primary-light hover:text-primary font-medium">How to create a read-only token (30 seconds)</summary>
-        <ol className="mt-2.5 flex flex-col gap-1.5 list-decimal pl-4 marker:text-primary-light marker:font-semibold text-text-muted">
-          <li>On GitHub, go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">Settings → Developer settings → Personal access tokens → Fine-grained tokens → <span className="text-text font-medium">Generate new token</span></a>.</li>
-          <li>Under <span className="text-text font-medium">Repository access</span>, choose <span className="text-text font-medium">Only select repositories</span> and pick just this one repo.</li>
-          <li>Under <span className="text-text font-medium">Permissions → Repository</span>, set <span className="text-text font-medium">Contents</span> to <span className="text-text font-medium">Read-only</span>. Nothing else is needed.</li>
-          <li>Click <span className="text-text font-medium">Generate token</span> and copy it.</li>
-          <li>Paste it below and scan. The token is used for this scan only and <strong className="text-text">never stored</strong>.</li>
-        </ol>
-      </details>
       <form onSubmit={(e) => { e.preventDefault(); scan.mutate() }} className="glass rounded-2xl p-5 flex flex-col gap-2.5 max-w-[560px]">
         <div className="flex gap-2">
           <input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="owner" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
@@ -127,6 +117,15 @@ function PrivateScan() {
           <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
         </div>
         <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="github token (ghp_… / github_pat_…)" className="bg-surface border border-border rounded-xl px-3.5 py-2 font-mono text-[13px] outline-none focus:border-primary-light" />
+        <details className="text-[12px]">
+          <summary className="cursor-pointer text-primary-light hover:text-primary font-medium">How to create a read-only token (30 seconds)</summary>
+          <ol className="mt-2 flex flex-col gap-1.5 list-decimal pl-4 marker:text-primary-light marker:font-semibold text-text-muted">
+            <li>On GitHub, go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:text-primary">Settings → Developer settings → Personal access tokens → Fine-grained tokens → <span className="text-text font-medium">Generate new token</span></a>.</li>
+            <li>Under <span className="text-text font-medium">Repository access</span>, choose <span className="text-text font-medium">Only select repositories</span> and pick just this one repo.</li>
+            <li>Under <span className="text-text font-medium">Permissions → Repository</span>, set <span className="text-text font-medium">Contents</span> to <span className="text-text font-medium">Read-only</span>. Nothing else is needed.</li>
+            <li>Click <span className="text-text font-medium">Generate token</span> and copy it into the field above.</li>
+          </ol>
+        </details>
         <button type="submit" disabled={scan.isPending || !owner || !repo || !token} className="self-start text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{scan.isPending ? 'Scanning…' : 'Scan privately'}</button>
       </form>
       {scan.isPending && <div className="mt-3 text-[13px] text-text-muted">Scanning privately… we&apos;ll take you to the full report.</div>}
@@ -184,7 +183,7 @@ function GitHubAppConnect() {
 
   return (
     <div>
-      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Private repos → GitHub App <span className="text-primary-light">(recommended)</span></h2>
+      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Claim a Private repo → GitHub App</h2>
       <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow App on a private repo to <span className="text-text">claim it + scan it, with automatic re-scans and drop alerts over time</span> — no token to paste, no topic to add. You pick exactly which repos, and can revoke it in GitHub anytime. We never store a long-lived secret.</p>
       {connect.isPending && <div className="mb-2 text-[12.5px] text-text-muted">Linking your installation…</div>}
       {connect.isSuccess && <div className="mb-2 text-[12.5px] text-success">✓ Connected — automatic scans will start shortly.</div>}
@@ -265,7 +264,7 @@ export default function RebrandMyTools() {
 
       {/* CLAIM UX — form + any in-progress (pending) claims stay here */}
       <div className="mt-8">
-        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Claim a repo</h2>
+        <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Claim a public repo</h2>
         <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="flex gap-2">
           <input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="owner" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
           <span className="self-center text-text-muted">/</span>
