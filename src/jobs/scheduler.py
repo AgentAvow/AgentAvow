@@ -852,6 +852,10 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             drift = bool(
                 w.last_manifest_digest and new_digest and new_digest != w.last_manifest_digest
             )
+            improved = (
+                w.last_score is not None and new_score is not None
+                and new_score > w.last_score + 5
+            )
             if dropped or drift:
                 reason = "grade dropped" if dropped else "signed definition changed"
                 title = f"{w.owner}/{w.repo} — {reason}"
@@ -905,6 +909,27 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                         hook.last_delivery_at = datetime.now(timezone.utc)
                 except Exception:
                     logger.debug("webhook alert delivery failed for %s/%s", w.owner, w.repo)
+            elif improved:
+                # Good news — a watched tool got safer. A lighter, positive nudge
+                # (also a reason to bring the watcher back to the site).
+                title = f"{w.owner}/{w.repo} — grade improved 🎉"
+                body = (
+                    f"Good news: a tool you're watching improved "
+                    f"({w.last_score} → {new_score}/100). See what changed."
+                )
+                try:
+                    await create_notification(
+                        db, w.watcher_id, "watch_good_news", title, body,
+                        reference_id=f"{w.owner}/{w.repo}",
+                    )
+                    watcher = await db.get(Entity, w.watcher_id)
+                    if watcher is not None and watcher.email:
+                        from src.email import send_email
+                        await send_email(
+                            watcher.email, f"AgentAvow: {title}", f"<p>{body}</p>",
+                        )
+                except Exception:
+                    logger.debug("good-news notification failed for %s/%s", w.owner, w.repo)
             fresh = await db.get(ToolWatch, w.id)
             if fresh is not None:
                 fresh.last_score = new_score
