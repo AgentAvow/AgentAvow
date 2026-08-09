@@ -623,8 +623,12 @@ function Result({ owner, repo, privateResult }: {
         </div>
       </Reveal>
 
-      {/* A+ "Certified" transparency panel (roadmap §7.5) — renders when present */}
-      <CertifiedPanel certified={(scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified} />
+      {/* A+ "Certified" transparency panel (roadmap §7.5) — only meaningful for
+          A-band-or-above (or already-certified) repos; the "how to earn A+" guide
+          is noise on a low grade. */}
+      {(scan.trust_score >= 81 || (scan as { certified?: { eligible?: boolean } }).certified?.eligible) && (
+        <CertifiedPanel certified={(scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified} />
+      )}
 
       {/* score history timeline (living record) */}
       <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} />
