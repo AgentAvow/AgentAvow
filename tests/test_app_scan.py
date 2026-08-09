@@ -78,9 +78,15 @@ async def _ensure_tables():
             "  result_json JSONB,"
             "  prev_score INTEGER,"
             "  source VARCHAR(16) NOT NULL DEFAULT 'app',"
+            "  published BOOLEAN NOT NULL DEFAULT false,"
             "  scanned_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
             "  CONSTRAINT uq_private_scan_target UNIQUE (entity_id, owner, repo)"
             ")"
+        ))
+        # A test DB from before the `published` column exists needs it added.
+        await conn.execute(text(
+            "ALTER TABLE private_scan_results "
+            "ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT false"
         ))
     await engine.dispose()
 

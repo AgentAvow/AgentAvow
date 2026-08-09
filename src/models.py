@@ -2514,6 +2514,8 @@ class PrivateScanResult(Base):
     result_json = Column(JSONB, nullable=True)
     prev_score = Column(Integer, nullable=True)  # previous trust_score (change detection)
     source = Column(String(16), default="app", nullable=False)  # "app" (GitHub App install)
+    # Owner opted to publish this private repo's grade to the public catalog/search.
+    published = Column(Boolean, default=False, server_default="false", nullable=False)
     scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (

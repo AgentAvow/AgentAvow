@@ -249,6 +249,30 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
   )
 }
 
+/** Owner opt-in: publish a connected private repo's stored grade to public search. */
+function PublishStoredCTA({ owner, repo, published }: { owner: string; repo: string; published: boolean }) {
+  const publish = useMutation({
+    mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/publish`)).data,
+  })
+  const done = published || publish.isSuccess
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
+        <h3 className="text-[15px] font-bold">Publish to search</h3>
+        <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Private repos aren&apos;t listed in AgentAvow search. Publishing makes this grade public and findable — your choice as the owner.</p>
+        {done ? (
+          <div className="mt-3 text-[13px] text-success">✓ Published — anyone can now find {owner}/{repo} in search.</div>
+        ) : (
+          <button onClick={() => publish.mutate()} disabled={publish.isPending}
+            className="mt-3 text-[13.5px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
+            {publish.isPending ? 'Publishing…' : 'Publish to search'}</button>
+        )}
+        {publish.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t publish — try again.</div>}
+      </div>
+    </Reveal>
+  )
+}
+
 function Hero() {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
@@ -564,6 +588,7 @@ function Result({ owner, repo, privateResult }: {
       ) : (
         <OwnershipCTA owner={owner} repo={repo} />
       )}
+      {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} published={!!(scan as { published?: boolean }).published} />}
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (

@@ -92,6 +92,27 @@ async def _installation_repos(installation_id: str) -> list[dict]:
     ]
 
 
+async def _verify_installation_claims(db, entity_id, installation_id: str) -> None:
+    """Synchronously create a VERIFIED RepoClaim for each repo an installation can
+    access — the install itself is the ownership proof. Fast (list + upsert, no
+    scan) so the repos show in 'Your repos' the moment connect returns; the actual
+    scan/result runs in the background task. Best-effort."""
+    try:
+        from src.jobs.app_scan import _ensure_verified_claim
+
+        repos = await _installation_repos(installation_id)
+        for r in repos[:25]:
+            fn = (r or {}).get("full_name")
+            if not fn or "/" not in fn:
+                continue
+            owner, repo = fn.split("/", 1)
+            await _ensure_verified_claim(db, entity_id, owner, repo, fn)
+    except Exception:
+        logger.debug(
+            "verify-claims-on-connect failed for %s", installation_id, exc_info=True
+        )
+
+
 @router.get("/install-url")
 async def install_url(
     entity: Entity = Depends(get_current_entity),
@@ -173,7 +194,9 @@ async def connect(
         existing.account_type = acct.get("type")
         await db.flush()
         await db.refresh(existing)
-        # Scan immediately so reconnecting re-scans + verified-claims the repos.
+        await _verify_installation_claims(db, entity.id, inst_id)
+        # The full scan (result + alerts) runs in the background — slow for private
+        # repos, so it must NOT gate the connect response.
         background.add_task(_scan_installation_bg, existing.id)
         return _serialize(existing)
 
@@ -186,6 +209,7 @@ async def connect(
     db.add(inst)
     await db.flush()
     await db.refresh(inst)
+    await _verify_installation_claims(db, entity.id, inst_id)
     # Scan immediately so connecting scans + verified-claims the repos right away.
     background.add_task(_scan_installation_bg, inst.id)
     return _serialize(inst)

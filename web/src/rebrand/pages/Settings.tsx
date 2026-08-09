@@ -111,7 +111,6 @@ export default function RebrandSettings() {
             <button onClick={() => resendVerify.mutate()} disabled={resendVerify.isPending || resendVerify.isSuccess} className="text-[12.5px] font-semibold text-primary-light hover:text-primary disabled:opacity-60">{resendVerify.isSuccess ? 'Sent ✓' : resendVerify.isPending ? 'Sending…' : 'Resend'}</button>
           </div>
         )}
-        <p className="mt-3 text-[12px] text-text-muted">Watches, alerts & API keys are on your <Link to={rp('/rebrand/account')} className="text-primary-light hover:text-primary">account page</Link>.</p>
       </Card>
 
       {/* change password */}

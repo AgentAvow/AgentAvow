@@ -290,11 +290,15 @@ export default function RebrandMyTools() {
     queryFn: async () => (await api.get<{ claims: Claim[] }>('/account/claims')).data,
     enabled: !!user,
   })
+  const [privateHint, setPrivateHint] = useState<string | null>(null)
   const create = useMutation({
-    mutationFn: async () => (await api.post('/account/claims', { owner: owner.trim(), repo: repo.trim() })).data,
+    mutationFn: async () => (await api.post<{ needs_private_flow?: boolean; detail?: string }>('/account/claims', { owner: owner.trim(), repo: repo.trim() })).data,
     // Force an immediate refetch (staleTime would otherwise defer it → the new
     // claim only appeared after a hard refresh).
-    onSuccess: async () => { setOwner(''); setRepo(''); await qc.refetchQueries({ queryKey: ['rebrand-claims'] }) },
+    onSuccess: async (data) => {
+      if (data?.needs_private_flow) { setPrivateHint(data.detail || 'This looks like a private repo — connect the GitHub App below.'); return }
+      setPrivateHint(null); setOwner(''); setRepo(''); await qc.refetchQueries({ queryKey: ['rebrand-claims'] })
+    },
   })
   const refetch = () => qc.refetchQueries({ queryKey: ['rebrand-claims'] })
 
@@ -331,6 +335,7 @@ export default function RebrandMyTools() {
           <button type="submit" disabled={create.isPending || !owner.trim() || !repo.trim()} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">{create.isPending ? 'Claiming…' : 'Claim'}</button>
         </form>
         {create.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t claim — check the owner / repo and try again.</div>}
+        {privateHint && <div className="mt-2 text-[12.5px] text-warning">🔒 {privateHint}</div>}
 
         {pending.length > 0 && (
           <div className="mt-4 flex flex-col gap-2.5">

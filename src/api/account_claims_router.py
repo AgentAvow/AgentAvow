@@ -119,13 +119,45 @@ async def create_claim(
     catalog + search (claiming ≠ scanning otherwise)."""
     if not _valid_repo(body.owner, body.repo):
         raise HTTPException(status_code=400, detail="Invalid owner/repo")
+
+    token = (body.token or "").strip()
+
+    # Public-claim path (no token): if we can't read the repo publicly it's private
+    # (or doesn't exist) — the topic method can't work, so steer the owner to the
+    # GitHub App flow instead of creating a claim that would sit pending forever.
+    if not token:
+        try:
+            import httpx
+
+            from src.github_auth import get_github_token
+
+            gh = await get_github_token()
+            headers = {"Accept": "application/vnd.github+json"}
+            if gh:
+                headers["Authorization"] = f"Bearer {gh}"
+            async with httpx.AsyncClient(timeout=8) as client:
+                resp = await client.get(
+                    f"https://api.github.com/repos/{body.owner}/{body.repo}",
+                    headers=headers,
+                )
+            if resp.status_code != 200:
+                return {
+                    "needs_private_flow": True,
+                    "detail": (
+                        "We can't read this repo publicly. If it's private, connect the "
+                        "GitHub App below to claim + scan it. If it's public, double-check "
+                        "the owner / repo."
+                    ),
+                }
+        except Exception:
+            pass  # transient network issue — fall through and create as usual
+
     # Make the claimed repo discoverable — scan it into the catalog in the
-    # background (public repos only; private repos use /private-scan).
+    # background (public repos only; private repos use the App / private-scan).
     background.add_task(_scan_into_catalog, body.owner, body.repo)
 
     # A token proving repo access verifies the claim immediately — the ONLY way
     # to verify a private repo (topics aren't readable there). Used transiently.
-    token = (body.token or "").strip()
     token_verified = bool(token) and await _repo_accessible_with_token(
         body.owner, body.repo, token,
     )
@@ -268,9 +300,43 @@ async def private_report(
         "grade": row.grade,
         "prev_score": row.prev_score,
         "source": row.source,
+        "published": bool(row.published),
         "scanned_at": row.scanned_at.isoformat() if row.scanned_at else None,
         **(row.result_json or {}),
     }
+
+
+@router.post("/private-report/{owner}/{repo}/publish")
+async def publish_private_report(
+    owner: str,
+    repo: str,
+    entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_writes),
+):
+    """Owner opt-in: publish a connected private repo's stored grade to the public
+    catalog + search. Unlike the one-time /private-scan/publish (which re-scans
+    with a token), this publishes the ALREADY-STORED App scan result — no token
+    needed. Makes the repo's grade + name public; the owner's explicit choice."""
+    row = (
+        await db.execute(
+            select(PrivateScanResult).where(
+                PrivateScanResult.entity_id == entity.id,
+                PrivateScanResult.owner == owner,
+                PrivateScanResult.repo == repo,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No private report to publish")
+    try:
+        from src.api.public_scan_router import _capture_community_scan
+        await _capture_community_scan(owner, repo, row.result_json or {}, db)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Publish failed: {e}") from e
+    row.published = True
+    await db.flush()
+    return {"published": True, "full_name": row.full_name, "trust_score": row.trust_score, "grade": row.grade}
 
 
 class PrivateScanRequest(BaseModel):
