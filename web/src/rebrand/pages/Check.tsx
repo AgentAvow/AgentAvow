@@ -249,6 +249,43 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
   )
 }
 
+/** The secondary-action slot for a stored PRIVATE repo, sitting right below the
+ * watch CTA. Not listed → a clear "Publish to search" CTA; on publish it animates
+ * into the share row (which is also what shows if it's already listed). */
+function PrivateSearchSlot({ owner, repo, score, grade, published }: { owner: string; repo: string; score: number; grade: string; published: boolean }) {
+  const qc = useQueryClient()
+  const reduce = useReducedMotion()
+  const publish = useMutation({
+    mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/publish`)).data,
+    onSuccess: () => {
+      qc.refetchQueries({ queryKey: ['rebrand-private-report', owner, repo] })
+      qc.refetchQueries({ queryKey: ['rebrand-claims'] })
+    },
+  })
+  if (published || publish.isSuccess) {
+    return (
+      <motion.div
+        initial={reduce ? false : { opacity: 0, y: 10, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.45, ease: 'easeOut' }}
+        className="flex flex-col items-center gap-2"
+      >
+        <div className="text-[12px] text-success font-medium">🌐 Listed in search — share it</div>
+        <ShareRow owner={owner} repo={repo} score={score} grade={grade} />
+      </motion.div>
+    )
+  }
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <button onClick={() => publish.mutate()} disabled={publish.isPending}
+        className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
+        {publish.isPending ? 'Publishing…' : '🌐 Publish to search'}</button>
+      <p className="text-[11.5px] text-text-muted text-center max-w-[42ch]">List the grade in search — your code stays private.</p>
+      {publish.isError && <div className="text-[11.5px] text-danger">Couldn&apos;t publish — try again.</div>}
+    </div>
+  )
+}
+
 /** Owner opt-in: publish a connected private repo's stored grade to public search. */
 function PublishStoredCTA({ owner, repo, published }: { owner: string; repo: string; published: boolean }) {
   const qc = useQueryClient()
@@ -497,9 +534,11 @@ function Result({ owner, repo, privateResult }: {
           <p className="mt-2 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this grade drops.</p>
         </div>
 
-        {/* secondary actions — share/badge are public-only (a private repo has no public badge) */}
+        {/* secondary actions — public repos share; a stored private repo publishes
+            to search here (then animates into share). One-time scans show neither. */}
         <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
-          {(!isPrivate || published) && <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />}
+          {!isPrivate && <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />}
+          {storedPrivate && <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} published={published} />}
           <button
             onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
             className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"

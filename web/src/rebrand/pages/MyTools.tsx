@@ -46,15 +46,13 @@ function ConfettiBurst() {
 
 interface Claim { id: string; owner: string; repo: string; full_name: string; status: string; topic: string; private?: boolean; published?: boolean }
 
-/** Publish-to-search control for a verified PRIVATE repo. Publishing lists the
- * GRADE (never the code) in public search; once listed, share it or unlist it.
- * Public repos are inherently listed, so this only renders for private ones. */
+/** Publish-to-search control for a verified PRIVATE repo (row in "Your repos").
+ * Publishing lists the GRADE (never the code) in public search; once listed, the
+ * only action is Unlist. Sharing lives on the score page, not here. Public repos
+ * are inherently listed, so this only renders for private ones. */
 function PrivatePublish({ owner, repo, published, onRefetch }: { owner: string; repo: string; published: boolean; onRefetch: () => void }) {
   const reduce = useReducedMotion()
   const [celebrating, setCelebrating] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const url = typeof window !== 'undefined' ? `${window.location.origin}/check/${owner}/${repo}` : ''
-  const text = `${owner}/${repo} — see its signed AgentAvow trust grade.`
   const publish = useMutation({
     mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/publish`)).data,
     onSuccess: () => { if (!reduce) { setCelebrating(true); setTimeout(() => setCelebrating(false), 1600) } onRefetch() },
@@ -63,36 +61,24 @@ function PrivatePublish({ owner, repo, published, onRefetch }: { owner: string; 
     mutationFn: async () => (await api.post(`/account/private-report/${owner}/${repo}/unpublish`)).data,
     onSuccess: onRefetch,
   })
-  const iconBtn = 'grid place-items-center w-7 h-7 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors'
 
-  if (!published) {
-    return (
-      <div className="relative mt-2.5 pt-2.5 border-t border-border/50">
-        {celebrating && <ConfettiBurst />}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+  return (
+    <div className="relative mt-2.5 pt-2.5 border-t border-border/50 flex items-center justify-between gap-3 flex-wrap">
+      {celebrating && <ConfettiBurst />}
+      {published ? (
+        <>
+          <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light">🌐 Listed in search</span>
+          <button onClick={() => unpublish.mutate()} disabled={unpublish.isPending} className="text-[12px] text-text-muted hover:text-danger">{unpublish.isPending ? 'Unlisting…' : 'Unlist'}</button>
+        </>
+      ) : (
+        <>
           <div className="text-[12px] text-text-muted max-w-[46ch]">🔒 Private — not in search. Publish the <span className="text-text font-medium">grade</span>; your code stays private.</div>
           <button onClick={() => publish.mutate()} disabled={publish.isPending}
             className="shrink-0 text-[12.5px] font-semibold px-3.5 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
             {publish.isPending ? 'Publishing…' : '🌐 Publish to search'}</button>
-        </div>
-        {publish.isError && <div className="mt-1.5 text-[12px] text-danger">Couldn&apos;t publish — try again.</div>}
-      </div>
-    )
-  }
-  return (
-    <div className="mt-2.5 pt-2.5 border-t border-border/50 flex items-center justify-between gap-3 flex-wrap">
-      <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light">🌐 Listed in search</span>
-      <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={() => { navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) }}
-          className="text-[12px] font-semibold px-2.5 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors">{copied ? 'Copied ✓' : '🔗 Copy'}</button>
-        <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`} target="_blank" rel="noopener noreferrer" className={iconBtn} aria-label="Share on X">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-[13px] h-[13px]"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-        </a>
-        <a href={`https://bsky.app/intent/compose?text=${encodeURIComponent(text + ' ' + url)}`} target="_blank" rel="noopener noreferrer" className={iconBtn} aria-label="Share on Bluesky">
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-[13px] h-[13px]"><path d="M12 10.8c-1.087-2.114-4.046-6.053-6.798-7.995C2.566.944 1.561 1.266.902 1.565.139 1.908 0 3.08 0 3.768c0 .69.378 5.65.624 6.479.785 2.627 3.6 3.476 6.18 3.232-4.165.712-8.232 2.625-4.412 8.51C5.777 26.373 11.268 21.248 12 17.04c.732 4.208 6.13 9.282 9.608 4.95 3.82-5.886-.247-7.799-4.412-8.511 2.58.244 5.395-.605 6.18-3.232.246-.828.624-5.79.624-6.479 0-.688-.139-1.86-.902-2.203-.659-.299-1.664-.621-4.3 1.24C16.046 4.748 13.087 8.687 12 10.8z"/></svg>
-        </a>
-        <button onClick={() => unpublish.mutate()} disabled={unpublish.isPending} className="text-[12px] text-text-muted hover:text-danger">{unpublish.isPending ? 'Unlisting…' : 'Unlist'}</button>
-      </div>
+        </>
+      )}
+      {publish.isError && <div className="w-full text-[12px] text-danger">Couldn&apos;t publish — try again.</div>}
     </div>
   )
 }
