@@ -108,12 +108,15 @@ async def install_url(
 async def setup_callback(installation_id: str | None = None, setup_action: str | None = None):
     """GitHub redirects here after an install. Bounce to the frontend (which holds
     the auth token) so it can POST /connect to associate the installation."""
+    # The live (cutover) site serves the rebrand at root, so the My Tools page is
+    # /tools — NOT /rebrand/tools (which falls through to the homepage catch-all,
+    # where the connect handler isn't mounted → the install id is dropped).
     base = settings.base_url.rstrip("/")
     if not installation_id:
-        return RedirectResponse(url=f"{base}/rebrand/tools?gh_setup=error", status_code=302)
+        return RedirectResponse(url=f"{base}/tools?gh_setup=error", status_code=302)
     _action = setup_action or "install"
     return RedirectResponse(
-        url=f"{base}/rebrand/tools?gh_installation_id={installation_id}&gh_setup={_action}",
+        url=f"{base}/tools?gh_installation_id={installation_id}&gh_setup={_action}",
         status_code=302,
     )
 
