@@ -392,6 +392,21 @@ export default function RebrandHome() {
         </Reveal>
       </section>
 
+      {/* Claim CTA band */}
+      <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal>
+          <div className="glass rounded-2xl p-8 md:p-10 flex items-center justify-between gap-6 flex-wrap"
+            style={{ background: 'linear-gradient(120deg, rgba(99,102,241,0.10), transparent 60%), var(--color-surface)' }}>
+            <div className="max-w-[54ch]">
+              <Eyebrow>Own a tool?</Eyebrow>
+              <h2 className="mt-3 text-2xl md:text-3xl font-bold">Claim it — and own how it shows up.</h2>
+              <p className="mt-3 text-text-muted">Prove you own a repo to run private scans, get alerted the moment its grade changes, and own how it appears in the catalog &amp; search. <span className="text-text">Public repos</span> verify with a GitHub topic; <span className="text-text">private repos</span> connect the GitHub App — scanned continuously, no token to paste.</p>
+            </div>
+            <Link to={rp("/rebrand/tools")} className="shrink-0 font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all">Claim your tool →</Link>
+          </div>
+        </Reveal>
+      </section>
+
     </div>
   )
 }

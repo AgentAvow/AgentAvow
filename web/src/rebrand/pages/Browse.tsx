@@ -176,6 +176,7 @@ export default function RebrandBrowse() {
             Browse tools by their signed safety grade. Instead of star ratings, every grade is backed by scan
             evidence anyone can recompute.{total != null && <> {total.toLocaleString()} scanned so far.</>}
           </p>
+          <p className="mt-2.5 text-[13.5px] text-text-muted">Own one of these? <Link to={rp("/rebrand/tools")} className="text-primary-light hover:text-primary font-medium">Claim it →</Link> to run private scans, get change alerts, and own how it appears.</p>
         </div>
         {summary && <SummaryStrip s={summary} />}
       </div>
