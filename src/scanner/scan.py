@@ -146,6 +146,14 @@ class ScanResult:
     # coordinate; flag-gated). Declared here so trust-score/service reads are safe
     # even when the provenance pass never runs.
     provenance: dict = field(default_factory=dict)
+    # Phase 5 maintainer/behavioral signals summary (empty unless the flag is on;
+    # GitHub-metadata only). Declared here so trust-score reads are safe even when
+    # the maintainer pass never runs.
+    maintainer: dict = field(default_factory=dict)
+    # A+ "Certified" tier eligibility (roadmap §7): {eligible, checks{}}. Dormant
+    # (eligible=False) until artifact-scan + provenance are enabled — that's the
+    # design (A+ requires the cryptographic signals). Never lowers a grade.
+    certified: dict = field(default_factory=dict)
     error: str | None = None
 
     @property
@@ -1465,6 +1473,34 @@ def _dependency_penalty(findings: list[Finding]) -> int:
     return int(min(penalty, _DEP_VULN_CAP))
 
 
+def _certified_status(result: ScanResult) -> dict:
+    """A+ 'Certified' eligibility — the 6-point conjunctive gate (roadmap §7). ALL
+    must hold. Dormant (eligible=False) while artifact-scan/provenance are off —
+    by design, A+ requires the cryptographic signals. Purely additive: this only
+    gates the top A+ label, it never lowers a grade."""
+    cov = result.coverage or {}
+    prov = result.provenance or {}
+    drift = result.drift or {}
+    checks = {
+        # 1. we scanned the published artifact, not just the repo
+        "artifact_scanned": cov.get("scan_depth") in ("artifact", "artifact+live"),
+        # 2. build provenance cryptographically binds artifact -> source
+        "provenance_verified": bool(prov.get("verified")) and bool(prov.get("source_matches_claim")),
+        # 3. the published artifact matches its source (no injected/added files, no install hook)
+        "no_drift": not (drift.get("added_files") or drift.get("modified_files") or drift.get("has_install_hook")),
+        # 4. zero critical/high across code + supply-chain, and no known-malicious dep
+        "no_critical_or_high": (
+            result.critical_count == 0 and result.high_count == 0
+            and not any(f.name.startswith("Known-malicious") for f in result.findings)
+        ),
+        # 5. a signed, recomputable verdict (coverage block with pinned snapshots)
+        "recompute_ready": bool(cov),
+        # 6. no material coverage gaps (not a sampled / truncated scan)
+        "full_coverage": not getattr(result, "sampled", False),
+    }
+    return {"eligible": all(checks.values()), "checks": checks}
+
+
 def _calculate_trust_score(result: ScanResult) -> int:
     """Calculate a trust score (0-100) based on findings and signals.
 
@@ -1544,6 +1580,14 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # packages without provenance are unchanged.
     if isinstance(result.provenance, dict):
         score += int(result.provenance.get("score_delta", 0) or 0)
+
+    # Phase 5 maintainer/behavioral — a separate, BOUNDED negative signal only
+    # (Phase-5 policy). Clear negatives (archived/abandoned) deduct a small, capped
+    # number of points; positives are folded into positive_signals above (so they
+    # go through the standard +5-each bonus). Absent/unreadable → 0, never a
+    # penalty; empty for scans with the flag off, so grades are unchanged.
+    if isinstance(result.maintainer, dict):
+        score += int(result.maintainer.get("score_delta", 0) or 0)
 
     # Bonuses for positive signals (capped at +35)
     unique_positives = set(result.positive_signals)
@@ -2023,6 +2067,60 @@ async def _maybe_verify_provenance(
         result.coverage["linked_repo"] = linked
 
 
+async def _maybe_maintainer_signals(
+    result: ScanResult,
+    owner: str,
+    repo: str,
+    token: str | None,
+) -> None:
+    """Phase 5 — cheap GitHub-METADATA maintainer/behavioral signals (fail-open).
+
+    Feature-flagged (``settings.scanner_maintainer_signals``, default OFF) and
+    FAIL-OPEN: any error leaves the grade untouched. NO code execution, NO sandbox
+    — only a handful (~5, capped) of read-only GitHub API calls. When on it:
+      * appends strong positive labels (active maintenance, protected branch, org
+        2FA, signed commits, contributor diversity) to ``positive_signals`` so they
+        earn the standard +5-each bonus, and
+      * records a small, BOUNDED negative ``score_delta`` for clear negatives
+        (archived/abandoned) — capped so it can never false-flip a small/new repo
+        to F. Absent/unreadable signals contribute 0.
+    """
+    from src.config import settings
+
+    if not getattr(settings, "scanner_maintainer_signals", False):
+        return
+
+    try:
+        from src.scanner.maintainer import (
+            analyze_maintainer_signals,
+            maintainer_penalty,
+        )
+
+        sig = await analyze_maintainer_signals(
+            owner, repo, token,
+            max_calls=getattr(settings, "scanner_maintainer_max_calls", 5),
+        )
+    except Exception:
+        logger.warning(
+            "Maintainer-signal wiring failed for %s/%s — grade stands",
+            owner, repo, exc_info=True,
+        )
+        return
+
+    if not sig.ok:
+        # Nothing readable (fail-open): record the attempt, no score change.
+        result.maintainer = sig.summary()
+        return
+
+    # Positives → the scanner's normal positive_signals bonus (deduped as a set
+    # in _calculate_trust_score). Clear negatives → a bounded score penalty.
+    result.positive_signals.extend(sig.positive_signals)
+    penalty = maintainer_penalty(sig)
+    summary = sig.summary()
+    summary["score_delta"] = -penalty
+    result.maintainer = summary
+
+
 async def scan_repo(
     full_name: str,
     stars: int = 0,
@@ -2294,9 +2392,19 @@ async def scan_repo(
             result, owner, repo, tree, token, ref, artifact,
         )
 
+        # --- Phase 5: maintainer / behavioral signals --------------------------
+        # Feature-flagged (default OFF) and FAIL-OPEN. GitHub-METADATA only (no
+        # code execution, no sandbox): bus factor, release cadence/staleness,
+        # archived/abandoned, issue responsiveness, branch protection, org 2FA,
+        # signed-commit ratio. Strong positives feed positive_signals; clear
+        # negatives apply a small BOUNDED penalty (never a false-F). Capped at ~5
+        # extra API calls, reusing the token.
+        await _maybe_maintainer_signals(result, owner, repo, token)
+
         # Calculate trust score and per-category sub-scores
         result.trust_score = _calculate_trust_score(result)
         result.category_scores = _calculate_category_scores(result)
+        result.certified = _certified_status(result)
 
     except httpx.TimeoutException:
         result.error = "Request timed out"

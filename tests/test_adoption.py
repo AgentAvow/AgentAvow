@@ -10,7 +10,11 @@ from __future__ import annotations
 import pytest
 
 from src.scanner import adoption as adopt
-from src.scanner.adoption_sources import _referer_host, checker_identity
+from src.scanner.adoption_sources import (
+    _extract_mcp_signals,
+    _referer_host,
+    checker_identity,
+)
 
 # ---------------------------------------------------------------------------
 # Formula + blend
@@ -220,6 +224,35 @@ def test_axis_mcp_registry_absent():
     assert adopt.build_axis_mcp_registry().present is False
 
 
+def test_axis_mcp_registry_weight_ramp_scales_with_usage():
+    # A freshly-listed MCP server (thin registry usage) gets a ramped-down
+    # axis-E weight; a well-used one reaches full weight.
+    cold = adopt.build_axis_mcp_registry(smithery_downloads=50, tool_call_count=0)
+    hot = adopt.build_axis_mcp_registry(
+        smithery_downloads=6000, tool_call_count=20000,
+    )
+    assert cold.weight_ramp < 0.05
+    assert hot.weight_ramp == pytest.approx(1.0)
+    # Stars are excluded from ramp volume (gameable, live in axis C).
+    stars_only = adopt.build_axis_mcp_registry(pulsemcp_stars=9999)
+    assert stars_only.present and stars_only.weight_ramp == 0.0
+
+
+def test_axis_e_ramp_prevents_cold_mcp_from_spiking_blend():
+    # Same real dependents axis B, blended with a cold vs a hot MCP axis E.
+    # The cold (thinly-used) MCP server must contribute far less, so its
+    # absolute_tier is materially lower — the ramp does its job.
+    b = adopt.build_axis_dependents(dependent_packages=400)
+    cold_e = adopt.build_axis_mcp_registry(smithery_downloads=30)
+    hot_e = adopt.build_axis_mcp_registry(
+        smithery_downloads=6000, tool_call_count=20000,
+    )
+    cold_res = adopt.compute_adoption([b, cold_e])
+    hot_res = adopt.compute_adoption([b, hot_e])
+    assert "E" in cold_res.present_axes
+    assert hot_res.absolute_tier > cold_res.absolute_tier
+
+
 # ---------------------------------------------------------------------------
 # Cold-start fallback
 # ---------------------------------------------------------------------------
@@ -364,3 +397,203 @@ def test_checker_identity_prefers_entity_then_hashes():
     # deterministic + no raw IP leaked
     assert anon == checker_identity(None, "1.2.3.4", "UA")
     assert "1.2.3.4" not in anon
+
+
+# ---------------------------------------------------------------------------
+# Axis D — verify-pulls (mocked Redis)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_record_verify_pull_dedups_and_counts_raw():
+    from unittest.mock import AsyncMock, patch
+
+    from src.scanner import adoption_sources as srcs
+
+    r = AsyncMock()
+    with patch("src.redis_client.get_redis", return_value=r):
+        # With an identity: raw INCR + distinct PFADD both happen.
+        await srcs.record_verify_pull("o", "r", "e:consumer-1")
+        r.incr.assert_awaited()  # raw vanity counter
+        r.pfadd.assert_awaited()  # distinct-consumer HLL
+        incr_key = r.incr.await_args.args[0]
+        pfadd_key = r.pfadd.await_args.args[0]
+        assert incr_key == "adopt:verify:raw:o/r"
+        assert pfadd_key == "adopt:verify:o/r"
+
+
+@pytest.mark.asyncio
+async def test_record_verify_pull_without_identity_only_counts_raw():
+    from unittest.mock import AsyncMock, patch
+
+    from src.scanner import adoption_sources as srcs
+
+    r = AsyncMock()
+    with patch("src.redis_client.get_redis", return_value=r):
+        # record_verify_pull(owner, repo) — the signature the roadmap asks for.
+        await srcs.record_verify_pull("o", "r")
+        r.incr.assert_awaited()  # raw counter still incremented
+        r.pfadd.assert_not_awaited()  # no identity → nothing added to the HLL
+
+
+@pytest.mark.asyncio
+async def test_get_verify_pulls_reads_dedup_estimate():
+    from unittest.mock import AsyncMock, patch
+
+    from src.scanner import adoption_sources as srcs
+
+    r = AsyncMock()
+    r.pfcount = AsyncMock(return_value=7)
+    r.get = AsyncMock(return_value=b"999")
+    with patch("src.redis_client.get_redis", return_value=r):
+        # Scored value is the distinct estimate, not the inflatable raw counter.
+        assert await srcs.get_verify_pulls("o", "r") == 7
+        assert await srcs.get_verify_pulls_raw("o", "r") == 999
+
+
+@pytest.mark.asyncio
+async def test_verify_pulls_fail_open_on_redis_error():
+    from unittest.mock import patch
+
+    from src.scanner import adoption_sources as srcs
+
+    def _boom():
+        raise RuntimeError("no redis")
+
+    with patch("src.redis_client.get_redis", side_effect=_boom):
+        # Never raises; degrades to 0 and the recording is a no-op.
+        assert await srcs.get_verify_pulls("o", "r") == 0
+        await srcs.record_verify_pull("o", "r", "id")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Axis D — in-graph agent connections (mocked DB)
+# ---------------------------------------------------------------------------
+
+class _FakeSession:
+    """Async-context-manager session whose .scalar returns queued values."""
+
+    def __init__(self, values):
+        self._values = list(values)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def scalar(self, *a, **k):
+        return self._values.pop(0) if self._values else None
+
+
+@pytest.mark.asyncio
+async def test_graph_connections_counts_distinct_agents():
+    from unittest.mock import patch
+
+    from src.scanner import adoption_sources as srcs
+
+    # scalar #1 → tool entity id resolved; scalar #2 → distinct-agent count.
+    with patch(
+        "src.database.async_session",
+        return_value=_FakeSession(["tool-uuid", 4]),
+    ):
+        assert await srcs.get_graph_connections("o", "r") == 4
+
+
+@pytest.mark.asyncio
+async def test_graph_connections_zero_when_tool_not_in_graph():
+    from unittest.mock import patch
+
+    from src.scanner import adoption_sources as srcs
+
+    # scalar #1 → None (no such entity) → short-circuit to 0, no second query.
+    with patch(
+        "src.database.async_session",
+        return_value=_FakeSession([None]),
+    ):
+        assert await srcs.get_graph_connections("o", "r") == 0
+
+
+@pytest.mark.asyncio
+async def test_graph_connections_fail_open():
+    from unittest.mock import patch
+
+    from src.scanner import adoption_sources as srcs
+
+    def _boom(*a, **k):
+        raise RuntimeError("no db")
+
+    with patch("src.database.async_session", side_effect=_boom):
+        assert await srcs.get_graph_connections("o", "r") == 0
+
+
+# ---------------------------------------------------------------------------
+# Axis E — MCP registry signal reader (mocked DB / fetchers)
+# ---------------------------------------------------------------------------
+
+def test_extract_mcp_signals_projects_known_keys():
+    assert _extract_mcp_signals(None) is None
+    assert _extract_mcp_signals({}) is None
+    assert _extract_mcp_signals({"unrelated": 1}) is None
+    out = _extract_mcp_signals(
+        {"smithery_downloads": 500, "tool_call_count": 12, "junk": "x"}
+    )
+    assert out == {"smithery_downloads": 500, "tool_call_count": 12}
+
+
+class _FakeEntity:
+    def __init__(self, onboarding_data=None, source_type=None, source_url=None):
+        self.onboarding_data = onboarding_data or {}
+        self.source_type = source_type
+        self.source_url = source_url
+
+
+@pytest.mark.asyncio
+async def test_mcp_signals_from_cached_community_signals():
+    from unittest.mock import patch
+
+    from src.scanner import adoption_sources as srcs
+
+    entity = _FakeEntity(
+        onboarding_data={
+            "community_signals": {"smithery_downloads": 8000, "smithery_stars": 40}
+        },
+        source_type="smithery",
+        source_url="https://smithery.ai/server/x",
+    )
+    with patch(
+        "src.database.async_session",
+        return_value=_FakeSession([entity]),
+    ):
+        sig = await srcs.get_mcp_registry_signals("o", "r")
+    assert sig == {"smithery_downloads": 8000, "smithery_stars": 40}
+    # And it feeds the engine cleanly.
+    ax = adopt.build_axis_mcp_registry(**sig)
+    assert ax.present
+
+
+@pytest.mark.asyncio
+async def test_mcp_signals_none_when_not_mcp_tool():
+    from unittest.mock import patch
+
+    from src.scanner import adoption_sources as srcs
+
+    # Entity with no cached signals and no MCP source_type → None (axis absent).
+    entity = _FakeEntity(onboarding_data={}, source_type="github", source_url="u")
+    with patch(
+        "src.database.async_session",
+        return_value=_FakeSession([entity]),
+    ):
+        assert await srcs.get_mcp_registry_signals("o", "r") is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_signals_fail_open_when_no_entity():
+    from unittest.mock import patch
+
+    from src.scanner import adoption_sources as srcs
+
+    with patch(
+        "src.database.async_session",
+        return_value=_FakeSession([None]),
+    ):
+        assert await srcs.get_mcp_registry_signals("o", "r") is None

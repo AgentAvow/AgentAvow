@@ -15,17 +15,25 @@ Axis wiring status (see the module functions):
                                                  sampling of stargazer accounts is
                                                  a STUB hook — pass suspect_accounts)
     (D) first-party (ours)           — WIRED   (unique-checker HLL, badge-embed
-                                                 domain diversity, raw vanity);
-                                       STUB     (verify-pulls, graph-connections
-                                                 readers return 0 until populated)
+                                                 domain diversity, raw vanity,
+                                                 verify-pulls HLL, in-graph agent
+                                                 connections from the entity graph)
     (E) MCP / agent-registry usage   — WIRED   (Smithery / PulseMCP community
-                                                 signals already fetched)
+                                                 signals — cached on the tool's
+                                                 Entity, or re-fetched live via the
+                                                 source_import MCP fetchers)
 
 First-party Redis keyspace (all best-effort, all TTL'd):
 
     adopt:uniq:{owner}/{repo}          HyperLogLog of distinct checker identities
     adopt:badge:ref:{entity}:{day}     SET of distinct Referer hosts per UTC day
     adopt:verify:{owner}/{repo}        HyperLogLog of distinct verify/recompute consumers
+    adopt:verify:raw:{owner}/{repo}    INTERNAL raw INCR counter of verify pulls (vanity)
+
+**Publication policy:** the first-party raw counts here (raw verify INCR, raw
+graph rows) stay INTERNAL — only the deduplicated / distinct estimates
+(``get_verify_pulls`` PFCOUNT, ``get_graph_connections`` distinct-agent count)
+are surfaced to scoring and the public adoption view.
 """
 from __future__ import annotations
 
@@ -150,27 +158,60 @@ async def get_badge_embed_domains(entity_id: str, days: int = 30) -> int:
 
 
 # ---------------------------------------------------------------------------
-# (D) First-party — verify-pulls (STUB reader) + graph-connections (STUB)
+# (D) First-party — verify-pulls + in-graph agent connections
 # ---------------------------------------------------------------------------
 
-async def record_verify_pull(owner: str, repo: str, identity: str) -> None:
-    """Record a distinct verify/offline-recompute/JWKS consumer. Best-effort.
+async def record_verify_pull(
+    owner: str, repo: str, identity: str | None = None,
+) -> None:
+    """Record one attestation-verify / offline-recompute / JWKS-key pull.
 
-    Hook to be called from jwks_router / composed_slot verify paths.
+    First-party axis-D signal: the deepest proof of downstream reliance is a
+    distinct consumer actually *verifying* a scan's signed attestation (offline
+    recompute, JWKS fetch, composed-slot verify).  Best-effort — MUST NEVER
+    break the verify/JWKS response.
+
+    Two things are recorded:
+
+    - ``adopt:verify:raw:{owner}/{repo}`` — a plain INCR counter of every pull
+      (INTERNAL vanity number; inflatable, so never scored).
+    - ``adopt:verify:{owner}/{repo}`` — a HyperLogLog of *distinct* consumer
+      identities (the deduplicated estimate that IS scored, per the §3
+      anti-gaming design).  Only updated when an ``identity`` is supplied.
+
+    ``identity`` should be a stable, privacy-preserving consumer id (reuse
+    ``checker_identity(entity_id, ip, user_agent)`` at the call site).
+
+    CALLER WIRING (one line each — to be added by whoever owns those routes;
+    this module only provides the helper):
+
+        # src/api/jwks_router.py — on a per-tool JWKS / verify hit:
+        await record_verify_pull(owner, repo, checker_identity(eid, ip, ua))
+
+        # src/attestation/composed_slot.py verify path — on offline recompute:
+        await record_verify_pull(owner, repo, identity)
     """
     try:
         from src.redis_client import get_redis
 
         r = get_redis()
-        key = f"adopt:verify:{owner}/{repo}"
-        await r.pfadd(key, identity)
-        await r.expire(key, _VERIFY_TTL)
+        raw_key = f"adopt:verify:raw:{owner}/{repo}"
+        await r.incr(raw_key)
+        await r.expire(raw_key, _VERIFY_TTL)
+        if identity:
+            uniq_key = f"adopt:verify:{owner}/{repo}"
+            await r.pfadd(uniq_key, identity)
+            await r.expire(uniq_key, _VERIFY_TTL)
     except Exception:
         pass
 
 
 async def get_verify_pulls(owner: str, repo: str) -> int:
-    """Distinct verify-path consumers. 0 until the verify hooks are populated."""
+    """Distinct verify-path consumers (deduplicated PFCOUNT) — the SCORED value.
+
+    0 on failure or until the verify hooks call ``record_verify_pull`` with an
+    identity.  This distinct estimate (never the raw INCR) feeds axis D.
+    """
     try:
         from src.redis_client import get_redis
 
@@ -180,13 +221,200 @@ async def get_verify_pulls(owner: str, repo: str) -> int:
         return 0
 
 
-async def get_graph_connections(owner: str, repo: str) -> int:
-    """STUB: distinct in-graph agents whose signed manifests reference this tool.
+async def get_verify_pulls_raw(owner: str, repo: str) -> int:
+    """INTERNAL raw verify-pull count (vanity). Never surfaced publicly / scored."""
+    try:
+        from src.redis_client import get_redis
 
-    Traverses src/graph/lineage.py / src/analytics/network_metrics.py in a full
-    build.  Returns 0 (axis-D sub-signal simply contributes nothing) until wired.
+        r = get_redis()
+        val = await r.get(f"adopt:verify:raw:{owner}/{repo}")
+        if val is None:
+            return 0
+        if isinstance(val, bytes):
+            val = val.decode("utf-8", "ignore")
+        return int(val)
+    except Exception:
+        return 0
+
+
+async def get_graph_connections(owner: str, repo: str) -> int:
+    """Distinct in-graph agents that connect to / depend on this tool.
+
+    Fail-open reader over our OWN entity graph (``src/models`` —
+    ``EntityRelationship``): resolve the tool's Entity by its ``source_url``
+    (``github.com/{owner}/{repo}``) and count the DISTINCT active AGENT entities
+    that point at it via a SERVICE or COLLABORATION relationship — i.e. real
+    registered agents whose manifests wire this tool in.  This is the
+    unfakeable first-party depth signal (§3.3 axis D): it requires *other*
+    registered agents in our graph to actually connect to the tool.
+
+    ``src/graph/lineage.py`` only computes evolution *fork* trees (a different
+    relation), so it exposes no query we can reuse here; this reader queries the
+    relationship graph directly.  Returns 0 fail-open (missing tool, no DB, or
+    any error) so a cold-start / un-imported tool simply contributes nothing to
+    axis D — never a scored zero.
     """
-    return 0
+    try:
+        from sqlalchemy import func, select
+
+        from src.database import async_session
+        from src.models import (
+            Entity,
+            EntityRelationship,
+            EntityType,
+            RelationshipType,
+        )
+
+        async with async_session() as db:
+            tool_id = await db.scalar(
+                select(Entity.id).where(
+                    Entity.is_active.is_(True),
+                    Entity.source_url.ilike(f"%github.com/{owner}/{repo}%"),
+                ).limit(1)
+            )
+            if tool_id is None:
+                return 0
+            count = await db.scalar(
+                select(func.count(func.distinct(EntityRelationship.source_entity_id)))
+                .select_from(EntityRelationship)
+                .join(Entity, Entity.id == EntityRelationship.source_entity_id)
+                .where(
+                    EntityRelationship.target_entity_id == tool_id,
+                    EntityRelationship.type.in_(
+                        [RelationshipType.SERVICE, RelationshipType.COLLABORATION]
+                    ),
+                    Entity.type == EntityType.AGENT,
+                    Entity.is_active.is_(True),
+                )
+            )
+            return int(count or 0)
+    except Exception:
+        logger.debug(
+            "graph-connections read failed for %s/%s", owner, repo, exc_info=True,
+        )
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# (E) MCP / agent-registry usage — fail-open reader for the repo-scan path
+# ---------------------------------------------------------------------------
+
+# Community-signal keys the axis-E engine understands (see
+# ``adoption.build_axis_mcp_registry``).  Only these are lifted from a stored /
+# fetched ``community_signals`` blob; everything else is ignored.
+_MCP_SIGNAL_KEYS = (
+    "smithery_downloads",
+    "smithery_stars",
+    "pulsemcp_stars",
+    "tool_call_count",
+    "marketplace_installs",
+)
+
+
+def _extract_mcp_signals(community_signals: dict | None) -> dict | None:
+    """Project an arbitrary community_signals blob onto the axis-E keys.
+
+    Returns a dict of the recognized keys with non-None values, or None when the
+    blob carries no MCP-registry usage signal.
+    """
+    if not community_signals:
+        return None
+    out = {
+        k: community_signals[k]
+        for k in _MCP_SIGNAL_KEYS
+        if community_signals.get(k) is not None
+    }
+    return out or None
+
+
+async def get_mcp_registry_signals(owner: str, repo: str) -> dict | None:
+    """MCP / agent-registry usage signals for a scanned tool (axis E).
+
+    The scoring engine already accepts Smithery / PulseMCP ``community_signals``
+    but nothing fed it from the repo-scan path; this fail-open reader closes
+    that gap.  Resolution order (best-effort, all fail-open):
+
+    1. **Cached** — the tool's Entity may already carry a ``community_signals``
+       blob captured at import time (Smithery / PulseMCP fetchers stash it in
+       ``onboarding_data``); prefer that (offline, recomputable).
+    2. **Live** — if the Entity was imported as an MCP registry listing
+       (``source_type`` smithery / pulsemcp with a ``source_url``), re-fetch via
+       the existing ``source_import`` MCP fetchers.
+
+    Returns a dict of axis-E keys (``smithery_downloads`` etc.) to hand to
+    ``adoption.build_axis_mcp_registry(**signals)``, or None when the tool is not
+    an MCP-registry-listed server (axis E simply stays absent — never a zero).
+
+    CALLER WIRING (the repo-scan adoption path — e.g. ``scan_adoption`` in
+    ``public_scan_router`` — should add, alongside the other axis readers):
+
+        mcp = await get_mcp_registry_signals(owner, repo)
+        if mcp:
+            raw_inputs["E"] = {"source": "mcp-registry", **mcp}
+            axes.append(build_axis_mcp_registry(**mcp))
+    """
+    entity = None
+    try:
+        from sqlalchemy import select
+
+        from src.database import async_session
+        from src.models import Entity
+
+        async with async_session() as db:
+            entity = await db.scalar(
+                select(Entity).where(
+                    Entity.is_active.is_(True),
+                    Entity.source_url.ilike(f"%github.com/{owner}/{repo}%"),
+                ).limit(1)
+            )
+    except Exception:
+        logger.debug(
+            "mcp-registry entity lookup failed for %s/%s", owner, repo,
+            exc_info=True,
+        )
+        entity = None
+
+    if entity is None:
+        return None
+
+    # 1. Cached community_signals stashed on the entity at import time.
+    try:
+        cached = (getattr(entity, "onboarding_data", None) or {}).get(
+            "community_signals"
+        )
+        signals = _extract_mcp_signals(cached)
+        if signals:
+            return signals
+    except Exception:
+        pass
+
+    # 2. Live re-fetch via the existing MCP fetchers.
+    source_type = getattr(entity, "source_type", None)
+    source_url = getattr(entity, "source_url", None)
+    if not source_url:
+        return None
+    try:
+        if source_type == "smithery":
+            from src.source_import.smithery_fetcher import (
+                fetch_smithery,
+                parse_smithery_url,
+            )
+
+            res = await fetch_smithery(parse_smithery_url(source_url), source_url)
+            return _extract_mcp_signals(res.community_signals)
+        if source_type == "pulsemcp":
+            from src.source_import.pulsemcp_fetcher import (
+                fetch_pulsemcp,
+                parse_pulsemcp_url,
+            )
+
+            res = await fetch_pulsemcp(parse_pulsemcp_url(source_url), source_url)
+            return _extract_mcp_signals(res.community_signals)
+    except Exception:
+        logger.debug(
+            "live MCP-registry fetch failed for %s/%s", owner, repo, exc_info=True,
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------

@@ -220,6 +220,24 @@ class Settings(BaseSettings):
     # any fetch/unpack error falls back to the repo-only grade and never breaks a scan.
     scanner_scan_artifact: bool = False
 
+    # --- Phase 5: maintainer / behavioral trust signals -----------------------
+    # Cheap GitHub-METADATA maintainer signals (NO code execution, NO sandbox):
+    # bus factor / contributor concentration (/contributors), release cadence +
+    # last-push staleness (/releases + pushed_at), archived/abandoned flags,
+    # open-issue responsiveness, default-branch protection (/branches), org 2FA
+    # (/orgs), and a signed-commit ratio (/commits). ADDITIVE, FEATURE-FLAGGED
+    # (default OFF until reviewed), and FAIL-OPEN: any API error → empty signals,
+    # the scan is unaffected. Cost-aware: capped at ~5 extra API calls per scan
+    # (scanner_maintainer_max_calls), reusing the existing token/client. Scoring
+    # (§2.E anti-gaming): strong positives (active maintenance, protected branch,
+    # org 2FA, signed commits, contributor diversity) flow through the normal
+    # positive_signals bonus; clear negatives (archived/abandoned) apply a small
+    # BOUNDED penalty (capped like the dependency model, never a false-F on a
+    # small/new repo). Absent/unreadable signals contribute 0 (absence never
+    # penalized).
+    scanner_maintainer_signals: bool = True  # additive positives + bounded penalty; validated live
+    scanner_maintainer_max_calls: int = 5
+
     # Security re-scan job (Job 19 in src/jobs/scheduler.py) — periodic re-scan of
     # catalog entries so grades don't rot. Caps are CONFIGURABLE and sized to stay
     # under the PAT's 5000 core-req/hr budget.

@@ -559,6 +559,7 @@ def _scan_result_to_dict(result: object) -> dict:
             "suppressed_lines": result.suppressed_count,
             "items": finding_items,
         },
+        "certified": getattr(result, "certified", {}) or {},
         "positive_signals": list(set(result.positive_signals)),
         "metadata": {
             "files_scanned": result.files_scanned,

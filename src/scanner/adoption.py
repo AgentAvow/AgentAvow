@@ -104,9 +104,16 @@ _INTERNAL_FAKE_STAR_MAX_DISCOUNT = 0.6
 _INTERNAL_CURVE_ANOMALY_DISCOUNT = 0.35
 # First-party weight-ramp: axis D reaches full published weight only once we
 # have observed this much first-party volume (unique checkers + badge domains +
-# verify pulls).  Below it, D's weight scales linearly so a cold-start tool is
-# not scored on 3 badge embeds.
+# verify pulls + in-graph connections).  Below it, D's weight scales linearly so
+# a cold-start tool is not scored on 3 badge embeds.
 _INTERNAL_FIRST_PARTY_FULL_VOLUME = 50.0
+# MCP/agent-registry weight-ramp (axis E): E reaches its full published weight
+# only once we've observed this much genuine registry USAGE (Smithery downloads
+# + marketplace installs + tool-call counts).  Below it, E's weight scales
+# linearly so a freshly-listed MCP server with a handful of registry downloads
+# can't spike the score off axis E alone.  Registry *stars* are deliberately
+# excluded from the ramp volume (they're gameable and already live in axis C).
+_INTERNAL_MCP_FULL_VOLUME = 5000.0
 # "rising" badge: momentum exceeds absolute by at least this margin.
 _INTERNAL_RISING_MARGIN = 0.15
 # Minimum present axes below which we flag "insufficient data".
@@ -133,6 +140,12 @@ class AxisResult:
     momentum: float = 0.0
     discounts: list = field(default_factory=list)
     first_party: bool = False
+    # Per-axis weight-ramp (0.0-1.0): scales this axis's published weight down
+    # while the underlying signal volume is too thin to trust (cold-start).
+    # 1.0 = full published weight.  Axis D's ramp is supplied separately via
+    # ``compute_adoption(first_party_volume_factor=…)``; axis E carries its ramp
+    # here (set by ``build_axis_mcp_registry``).
+    weight_ramp: float = 1.0
     # Raw inputs snapshot for recomputability. For first-party axes this is kept
     # internal (redacted by to_public_dict()).
     raw: dict = field(default_factory=dict)
@@ -484,11 +497,21 @@ def build_axis_mcp_registry(
     star_s = _log_normalize(stars, 5_000)
     absolute = min(1.0, 0.45 * dl_s + 0.35 * call_s + 0.20 * star_s)
 
+    # Weight-ramp: a freshly-listed MCP server shouldn't get full axis-E weight
+    # off a handful of registry downloads.  Volume counts genuine USAGE only
+    # (downloads + installs + tool-calls); stars are excluded (gameable, axis C).
+    mcp_volume = float(downloads + calls)
+    weight_ramp = (
+        min(1.0, mcp_volume / _INTERNAL_MCP_FULL_VOLUME)
+        if _INTERNAL_MCP_FULL_VOLUME else 1.0
+    )
+
     return AxisResult(
         axis="E",
         present=True,
         absolute=absolute,
         momentum=0.5,  # registries rarely expose trend; neutral
+        weight_ramp=weight_ramp,
         raw={
             "smithery_downloads": smithery_downloads,
             "smithery_stars": smithery_stars,
@@ -642,12 +665,18 @@ def compute_adoption(
         )
 
     # Effective per-axis weights: published base, renormalized over present
-    # axes, with axis D ramped by our first-party volume.
+    # axes, ramped down while an axis's signal volume is too thin to trust.
+    # Axis D's ramp comes in via ``first_party_volume_factor`` (built by
+    # ``build_axis_first_party`` from unique-checkers/badge-domains/verify-pulls/
+    # in-graph connections); every other axis carries its ramp on the
+    # ``AxisResult`` itself (axis E sets it from registry usage volume).  This
+    # keeps a newly-wired axis-D or axis-E signal from spiking a cold-start tool.
     eff_weights: dict = {}
     for a in present:
         w = PUBLISHED_AXIS_WEIGHTS.get(a.axis, 0.0)
         if a.axis == "D":
             w *= max(0.0, min(1.0, first_party_volume_factor))
+        w *= max(0.0, min(1.0, getattr(a, "weight_ramp", 1.0)))
         eff_weights[a.axis] = w
 
     total_w = sum(eff_weights.values())
