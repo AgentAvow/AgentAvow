@@ -187,7 +187,7 @@ function GitHubAppConnect() {
   const reduce = useReducedMotion()
   const [params, setParams] = useSearchParams()
   const [celebrating, setCelebrating] = useState(false)
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['github-app-status'],
     queryFn: async () => (await api.get<{ installations: Installation[]; app_configured: boolean }>('/account/github-app/status')).data,
     retry: 0,
@@ -257,7 +257,9 @@ function GitHubAppConnect() {
       <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow App on your private repos, then <span className="text-text">claim each one below to scan it</span> — with automatic re-scans and drop alerts over time. No token to paste, no topic to add, and you can revoke it in GitHub anytime. We never store a long-lived secret.</p>
       {connect.isPending && <div className="mb-2 text-[12.5px] text-text-muted">Linking your installation…</div>}
       {connect.isSuccess && <div className="mb-2 text-[12.5px] text-success">✓ Connected — claim the repos below to scan &amp; list them.</div>}
-      {!configured ? (
+      {isLoading || configured === undefined ? (
+        <div className="glass rounded-xl h-[64px] animate-pulse max-w-[560px]" />
+      ) : !configured ? (
         <div className="glass rounded-xl p-4 text-[13px] text-text-muted max-w-[560px]">Coming soon — the GitHub App is being set up. Until then, use the one-time private scan below.</div>
       ) : installs.length > 0 ? (
         <div className="flex flex-col gap-2 max-w-[560px]">
@@ -395,9 +397,9 @@ export default function RebrandMyTools() {
         ) : verified.length === 0 ? (
           <div className="text-text-muted text-[13px]">No verified repos yet. Verify a claim above to see it here — then jump straight to its report.</div>
         ) : (
-          <RevealStagger className="flex flex-col gap-2.5" stagger={0.04}>
+          <div className="flex flex-col gap-2.5">
             {verified.map((c) => <ClaimRow key={c.id} c={c} onRefetch={refetch} />)}
-          </RevealStagger>
+          </div>
         )}
       </div>
     </div>
