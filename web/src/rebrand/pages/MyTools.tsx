@@ -155,9 +155,11 @@ export default function RebrandMyTools() {
   })
   const create = useMutation({
     mutationFn: async () => (await api.post('/account/claims', { owner: owner.trim(), repo: repo.trim() })).data,
-    onSuccess: () => { setOwner(''); setRepo(''); qc.invalidateQueries({ queryKey: ['rebrand-claims'] }) },
+    // Force an immediate refetch (staleTime would otherwise defer it → the new
+    // claim only appeared after a hard refresh).
+    onSuccess: async () => { setOwner(''); setRepo(''); await qc.refetchQueries({ queryKey: ['rebrand-claims'] }) },
   })
-  const refetch = () => qc.invalidateQueries({ queryKey: ['rebrand-claims'] })
+  const refetch = () => qc.refetchQueries({ queryKey: ['rebrand-claims'] })
 
   // Owners arriving from a score page's "Manage & fix" land on their verified list.
   useEffect(() => {

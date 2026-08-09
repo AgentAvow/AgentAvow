@@ -200,7 +200,7 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
   // one step (no topic needed for a private repo).
   const claimWithToken = useMutation({
     mutationFn: async () => (await api.post('/account/claims', { owner, repo, token })).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['rebrand-claims'] }),
+    onSuccess: () => qc.refetchQueries({ queryKey: ['rebrand-claims'] }),
   })
   const owned = !!user && (claimsData?.claims ?? []).some(
     (c) => c.owner.toLowerCase() === owner.toLowerCase() && c.repo.toLowerCase() === repo.toLowerCase()
