@@ -258,7 +258,7 @@ export default function RebrandMyTools() {
         <div className="max-w-[62ch]">
           <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">My Tools</span>
           <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Claim & manage your tools</h1>
-          <p className="mt-2 text-text-muted text-[14px]">Prove you own a repo to unlock a fix-it view, respond to findings, and scan it privately. <span className="text-text">Public repos</span> verify with a GitHub topic; for <span className="text-text">private repos</span>, connect the GitHub App (recommended — continuous scans) or run a one-time token scan.</p>
+          <p className="mt-2 text-text-muted text-[14px]">Prove you own a repo to scan it privately, get continuous re-scans with change alerts, and control how it’s listed. <span className="text-text">Public repos</span> verify with a GitHub topic; for <span className="text-text">private repos</span>, connect the GitHub App (recommended — continuous scans) or run a one-time token scan.</p>
         </div>
       </Reveal>
 

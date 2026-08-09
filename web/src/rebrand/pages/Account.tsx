@@ -147,12 +147,15 @@ function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; r
         <div className="w-11 h-11 rounded-xl grid place-items-center font-mono text-[10px] text-text-muted bg-surface-hover shrink-0">n/a</div>
       )}
       <div className="min-w-0 flex-1">
-        <Link to={rp(`/rebrand/check/${w.owner}/${w.repo}`)} className="font-mono text-[14px] break-all hover:text-primary-light">{w.owner}/{w.repo}</Link>
+        <div className="font-mono text-[14px] break-all">{w.owner}/{w.repo}</div>
         <div className="font-mono text-[11.5px] text-text-muted mt-0.5">{w.last_score != null ? `${w.last_score}/100 at last check` : 'awaiting first check'}</div>
       </div>
-      <button onClick={onRemove} disabled={removing} className="text-[12px] text-text-muted hover:text-danger transition-colors disabled:opacity-50 shrink-0">
-        {removing ? '…' : 'Unwatch'}
-      </button>
+      <div className="flex items-center gap-3 shrink-0">
+        <Link to={rp(`/rebrand/check/${w.owner}/${w.repo}`)} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">View report →</Link>
+        <button onClick={onRemove} disabled={removing} className="text-[12px] text-text-muted hover:text-danger transition-colors disabled:opacity-50">
+          {removing ? '…' : 'Unwatch'}
+        </button>
+      </div>
     </div>
   )
 }
