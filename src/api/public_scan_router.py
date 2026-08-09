@@ -155,7 +155,10 @@ class PublicScanResponse(BaseModel):
     scan_result: str  # clean, warnings, critical, error
     findings: FindingsSummary
     positive_signals: list[str] = []
+    grade: str = ""  # letter grade with the A+ certified gate applied (roadmap §7)
     certified: dict = {}  # A+ certified-tier eligibility {eligible, checks} (roadmap §7)
+    coverage: dict = {}  # scan_depth / provenance_binding / db_snapshots (recompute discipline)
+    provenance: dict = {}  # verified build-provenance summary (Phase 3), if any
     category_scores: dict[str, int] = {}  # per-category 0-100 sub-scores
     metadata: ScanMetadata
     scanned_at: str
@@ -547,8 +550,12 @@ def _scan_result_to_dict(result: object) -> dict:
         _total_scannable = result.files_scanned
     _sampled = bool(getattr(result, "sampled", False))
 
+    _certified = getattr(result, "certified", {}) or {}
     return {
         "trust_score": result.trust_score,
+        # Letter grade with the A+ certified gate applied (flag-gated; == score-only
+        # grade when the gate is off). Stored so every consumer reads one grade.
+        "grade": _display_grade(result.trust_score, _certified.get("eligible")),
         "trust_tier": tier_info["tier"],
         "recommended_limits": tier_info["recommended_limits"],
         "scan_result": scan_result,
@@ -561,7 +568,8 @@ def _scan_result_to_dict(result: object) -> dict:
             "suppressed_lines": result.suppressed_count,
             "items": finding_items,
         },
-        "certified": getattr(result, "certified", {}) or {},
+        "certified": _certified,
+        "provenance": getattr(result, "provenance", {}) or {},
         "positive_signals": list(set(result.positive_signals)),
         "metadata": {
             "files_scanned": result.files_scanned,
@@ -758,6 +766,10 @@ async def public_scan(
                 scan_result=cached["scan_result"],
                 findings=FindingsSummary(**cached["findings"]),
                 positive_signals=cached.get("positive_signals", []),
+                grade=cached.get("grade") or _grade_from_score(cached["trust_score"]),
+                certified=cached.get("certified", {}),
+                coverage=cached.get("coverage", {}),
+                provenance=cached.get("provenance", {}),
                 category_scores=cached.get("category_scores", {}),
                 metadata=ScanMetadata(**cached["metadata"]),
                 scanned_at=cached["scanned_at"],
@@ -846,6 +858,10 @@ async def public_scan(
                 scan_result=stale["scan_result"],
                 findings=FindingsSummary(**stale["findings"]),
                 positive_signals=stale.get("positive_signals", []),
+                grade=stale.get("grade") or _grade_from_score(stale["trust_score"]),
+                certified=stale.get("certified", {}),
+                coverage=stale.get("coverage", {}),
+                provenance=stale.get("provenance", {}),
                 category_scores=stale.get("category_scores", {}),
                 metadata=ScanMetadata(**stale["metadata"]),
                 scanned_at=stale["scanned_at"],
@@ -918,7 +934,10 @@ async def public_scan(
         recommended_limits=RecommendedLimits(**data["recommended_limits"]),
         scan_result=data["scan_result"],
         findings=FindingsSummary(**data["findings"]),
+        grade=data.get("grade") or _grade_from_score(data["trust_score"]),
         certified=data.get("certified") or {},
+        coverage=data.get("coverage", {}),
+        provenance=data.get("provenance", {}),
         positive_signals=data["positive_signals"],
         category_scores=data.get("category_scores", {}),
         metadata=ScanMetadata(**data["metadata"]),
@@ -1103,6 +1122,26 @@ def _grade_from_score(score: int) -> str:
     return "F"
 
 
+def _display_grade(score: int, certified_eligible: bool | None) -> str:
+    """The LETTER grade, with the A+ 'Certified' gate applied (roadmap §7).
+
+    A+ is not "a high score" — it's a distinct, earned certification (artifact-
+    scanned + verified provenance + no drift + zero crit/high + recompute-clean).
+    So when the gate is enabled:
+      - a certified scan in the A band (score >= 81) earns **A+**;
+      - a NON-certified scan, however clean (score >= 96), is capped at **A** —
+        a repo-only scan can never be A+.
+    This adjusts only the LABEL, never the 0-100 score or the trust tier. With the
+    flag OFF (default), this is exactly ``_grade_from_score`` — no behavior change.
+    """
+    if not getattr(settings, "scanner_certified_grade_gate", False):
+        return _grade_from_score(score)
+    if certified_eligible and score >= 81:
+        return "A+"
+    base = _grade_from_score(score)
+    return "A" if base == "A+" else base  # 96+ but uncertified → A, not A+
+
+
 def _grade_color(grade: str) -> str:
     """Return badge color for a letter grade."""
     return {
@@ -1156,7 +1195,8 @@ async def scan_badge(
         cached = await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
-            grade = _grade_from_score(score)
+            _elig = (cached.get("certified") or {}).get("eligible")
+            grade = cached.get("grade") or _display_grade(score, _elig)
             score_type = "Scan"
         else:
             # Cache miss: regenerate on demand rather than decaying to a grey
@@ -1167,7 +1207,7 @@ async def scan_badge(
             try:
                 fresh = await public_scan(owner=owner, repo=repo, force=False, db=db)
                 score = fresh.security_score
-                grade = _grade_from_score(score)
+                grade = fresh.grade or _grade_from_score(score)
                 score_type = "Scan"
             except Exception:
                 logger.warning("badge regenerate failed for %s/%s", owner, repo, exc_info=True)
@@ -1551,7 +1591,8 @@ async def scan_og_image(
         cached = await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
-            grade = _grade_from_score(score)
+            _elig = (cached.get("certified") or {}).get("eligible")
+            grade = cached.get("grade") or _display_grade(score, _elig)
             findings = cached.get("findings", {})
             critical = findings.get("critical", 0)
             high = findings.get("high", 0)

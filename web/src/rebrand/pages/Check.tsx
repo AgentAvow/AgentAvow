@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, badgeUrl, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
-import { getGradeInfo } from '../../components/trust/gradeSystem'
+import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trust/gradeSystem'
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
@@ -286,6 +286,53 @@ function PrivateSearchSlot({ owner, repo, score, grade, published }: { owner: st
   )
 }
 
+/** The A+ "Certified" panel (roadmap §7.5) — the transparent 6-point checklist.
+ * Renders only when the backend supplied a `certified.checks` map (a full public
+ * scan). Certified means every check currently passes; otherwise it doubles as a
+ * "how to earn A+" guide by showing exactly which requirements aren't met yet. */
+const _CERT_LABELS: Array<[string, string]> = [
+  ['artifact_scanned', 'Published artifact scanned — not just the repo'],
+  ['provenance_verified', 'Build provenance verified & cryptographically bound to source'],
+  ['no_drift', 'No artifact-vs-source drift and no install-time hooks'],
+  ['no_critical_or_high', 'Zero critical/high findings · no known-malicious dependencies'],
+  ['recompute_ready', 'Signed verdict recomputes offline against pinned snapshots'],
+  ['full_coverage', 'Full coverage — not a sampled/truncated scan'],
+]
+function CertifiedPanel({ certified }: { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }) {
+  const checks = certified?.checks
+  if (!checks || Object.keys(checks).length === 0) return null
+  const eligible = !!certified?.eligible
+  const accent = eligible ? '#14B8A6' : 'var(--color-border)'
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4" style={{ borderLeftColor: accent }}>
+        <div className="flex items-center gap-2 flex-wrap">
+          {eligible ? (
+            <span className="inline-flex items-center gap-1.5 font-bold text-[15px]" style={{ color: '#14B8A6' }}>
+              <span aria-hidden>✦</span> AgentAvow Certified
+            </span>
+          ) : (
+            <h3 className="text-[15px] font-bold">Not yet Certified (A+)</h3>
+          )}
+        </div>
+        <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">
+          {eligible
+            ? 'This tool meets every requirement for AgentAvow Certified — the top tier. Certification is re-checked on every scan, so it stays true only while it stays true.'
+            : 'A+ (Certified) is earned, not just a high score — it requires all of the following. Anything unchecked shows exactly what to fix to earn it:'}
+        </p>
+        <ul className="mt-3 flex flex-col gap-1.5">
+          {_CERT_LABELS.filter(([k]) => checks[k] !== undefined).map(([k, label]) => (
+            <li key={k} className="flex items-start gap-2 text-[13px]">
+              <span className={checks[k] ? 'text-success' : 'text-text-muted'} aria-hidden>{checks[k] ? '✓' : '○'}</span>
+              <span className={checks[k] ? 'text-text' : 'text-text-muted'}>{label}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Reveal>
+  )
+}
+
 /** Owner opt-in: publish a connected private repo's stored grade to public search. */
 function PublishStoredCTA({ owner, repo, published }: { owner: string; repo: string; published: boolean }) {
   const qc = useQueryClient()
@@ -462,7 +509,14 @@ function Result({ owner, repo, privateResult }: {
     )
   }
 
-  const g = getGradeInfo(scan.trust_score)
+  // Prefer the backend's letter grade (it applies the A+ "Certified" gate); fall
+  // back to deriving from the score for older responses that omit it. Identical to
+  // score-derived while the gate is off, so the display is unchanged until it flips.
+  const _VALID_GRADES = ['A+', 'A', 'B', 'C', 'D', 'F']
+  const _backendGrade = (scan as { grade?: string }).grade
+  const g = _backendGrade && _VALID_GRADES.includes(_backendGrade)
+    ? gradeInfo(_backendGrade as LetterGrade)
+    : getGradeInfo(scan.trust_score)
   const f = scan.findings
   const cats = scan.category_scores || {}
   const sum = summarize(scan, scan.repo)
@@ -568,6 +622,9 @@ function Result({ owner, repo, privateResult }: {
           </div>
         </div>
       </Reveal>
+
+      {/* A+ "Certified" transparency panel (roadmap §7.5) — renders when present */}
+      <CertifiedPanel certified={(scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified} />
 
       {/* score history timeline (living record) */}
       <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} />

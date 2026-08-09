@@ -65,6 +65,14 @@ export interface PublicScanResponse {
   scan_result: string
   findings: FindingsSummary
   positive_signals: string[]
+  // Letter grade with the A+ "Certified" gate applied (roadmap §7). May be absent
+  // on older cached responses — fall back to deriving from trust_score.
+  grade?: string
+  // A+ certified-tier eligibility: { eligible, checks: {check_name: bool} }.
+  certified?: { eligible?: boolean; checks?: Record<string, boolean> }
+  // Recompute-discipline coverage: scan_depth / provenance_binding / db_snapshots.
+  coverage?: { scan_depth?: string; provenance_binding?: string; [k: string]: unknown }
+  provenance?: { verified?: boolean; source_matches_claim?: boolean; [k: string]: unknown }
   category_scores: Partial<CategoryScores>
   metadata: ScanMetadata
   scanned_at: string

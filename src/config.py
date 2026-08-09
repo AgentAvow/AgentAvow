@@ -238,6 +238,18 @@ class Settings(BaseSettings):
     scanner_maintainer_signals: bool = True  # additive positives + bounded penalty; validated live
     scanner_maintainer_max_calls: int = 5
 
+    # --- A+ "Certified" grade gate (roadmap §7) -------------------------------
+    # When ON, the top "A+" label is reserved for tools that pass the full 6-point
+    # certified gate (artifact-scanned + verified provenance bound to source + no
+    # drift + zero critical/high + recompute-clean + full coverage). A repo-only
+    # scan scoring 96+ is then capped at "A" (never A+), and a certified scan in
+    # the A band (81+) earns "A+ (Certified)". This ONLY changes the letter LABEL,
+    # never the 0-100 score or the trust tier. Default OFF: until it's on,
+    # _display_grade == _grade_from_score (score-only), so grades are unchanged.
+    # The `certified` block is still computed + surfaced regardless of this flag,
+    # so the score page can show certified status before the label gate is flipped.
+    scanner_certified_grade_gate: bool = False
+
     # Security re-scan job (Job 19 in src/jobs/scheduler.py) — periodic re-scan of
     # catalog entries so grades don't rot. Caps are CONFIGURABLE and sized to stay
     # under the PAT's 5000 core-req/hr budget.
