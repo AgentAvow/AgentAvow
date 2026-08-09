@@ -108,8 +108,8 @@ function PrivateScan() {
   })
   return (
     <div>
-      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Scan a private repo</h2>
-      <p className="text-text-muted text-[13px] mb-3">Paste a GitHub token with read access. It&apos;s used for this scan only — <strong className="text-text">never stored or logged</strong>.</p>
+      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">One-time private scan</h2>
+      <p className="text-text-muted text-[13px] mb-3">A single scan with no ongoing access — paste a read token, used for this scan only and <strong className="text-text">never stored or logged</strong>. For continuous scanning + alerts, use the GitHub App above.</p>
       <details className="mb-3 text-[12.5px] max-w-[560px]">
         <summary className="cursor-pointer text-primary-light hover:text-primary font-medium">How to create a read-only token (30 seconds)</summary>
         <ol className="mt-2.5 flex flex-col gap-1.5 list-decimal pl-4 marker:text-primary-light marker:font-semibold text-text-muted">
@@ -166,11 +166,17 @@ function GitHubAppConnect() {
     }
   }, [params, connect, setParams])
 
+  const [installing, setInstalling] = useState(false)
+  const [installErr, setInstallErr] = useState<string | null>(null)
   const startInstall = async () => {
+    setInstalling(true); setInstallErr(null)
     try {
       const { url } = (await api.get<{ url: string }>('/account/github-app/install-url')).data
-      window.location.href = url
-    } catch { /* app not configured yet */ }
+      window.location.href = url  // navigates away to GitHub
+    } catch {
+      setInstalling(false)
+      setInstallErr("Couldn't open the GitHub install page. Try again in a moment.")
+    }
   }
 
   const configured = data?.app_configured
@@ -178,10 +184,12 @@ function GitHubAppConnect() {
 
   return (
     <div>
-      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Scheduled private scans · GitHub App</h2>
-      <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow GitHub App on your private repos for <span className="text-text">automatic re-scans + drop alerts</span> — no token to paste, and you can revoke it in GitHub anytime. We never store a long-lived secret.</p>
+      <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Private repos → GitHub App <span className="text-primary-light">(recommended)</span></h2>
+      <p className="text-text-muted text-[13px] mb-3 max-w-[62ch]">Install the AgentAvow App on a private repo to <span className="text-text">claim it + scan it, with automatic re-scans and drop alerts over time</span> — no token to paste, no topic to add. You pick exactly which repos, and can revoke it in GitHub anytime. We never store a long-lived secret.</p>
+      {connect.isPending && <div className="mb-2 text-[12.5px] text-text-muted">Linking your installation…</div>}
+      {connect.isSuccess && <div className="mb-2 text-[12.5px] text-success">✓ Connected — automatic scans will start shortly.</div>}
       {!configured ? (
-        <div className="glass rounded-xl p-4 text-[13px] text-text-muted max-w-[560px]">Coming soon — the GitHub App is being set up. Until then, use <span className="text-text">Scan a private repo</span> above for one-off private scans.</div>
+        <div className="glass rounded-xl p-4 text-[13px] text-text-muted max-w-[560px]">Coming soon — the GitHub App is being set up. Until then, use the one-time private scan below.</div>
       ) : installs.length > 0 ? (
         <div className="flex flex-col gap-2 max-w-[560px]">
           {installs.map((i) => (
@@ -195,12 +203,13 @@ function GitHubAppConnect() {
               )}
             </div>
           ))}
-          <button onClick={startInstall} className="self-start text-[12.5px] font-semibold text-primary-light hover:text-primary">+ Add more repos →</button>
+          <button onClick={startInstall} disabled={installing} className="self-start text-[12.5px] font-semibold text-primary-light hover:text-primary disabled:opacity-60">{installing ? 'Opening GitHub…' : '+ Add or manage repos →'}</button>
         </div>
       ) : (
-        <button onClick={startInstall} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Connect GitHub App</button>
+        <button onClick={startInstall} disabled={installing} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{installing ? 'Opening GitHub…' : 'Connect GitHub App'}</button>
       )}
-      {connect.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t link that installation — try Connect again.</div>}
+      {installErr && <div className="mt-2 text-[12.5px] text-danger">{installErr}</div>}
+      {connect.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t link that installation — click Connect again.</div>}
     </div>
   )
 }
@@ -250,7 +259,7 @@ export default function RebrandMyTools() {
         <div className="max-w-[62ch]">
           <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">My Tools</span>
           <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Claim & manage your tools</h1>
-          <p className="mt-2 text-text-muted text-[14px]">Prove you own a repo to unlock a fix-it view, respond to findings, and scan it privately. <span className="text-text">Public repos</span> verify with a GitHub topic; <span className="text-text">private repos</span> with a read-only token — no topic needed.</p>
+          <p className="mt-2 text-text-muted text-[14px]">Prove you own a repo to unlock a fix-it view, respond to findings, and scan it privately. <span className="text-text">Public repos</span> verify with a GitHub topic; for <span className="text-text">private repos</span>, connect the GitHub App (recommended — continuous scans) or run a one-time token scan.</p>
         </div>
       </Reveal>
 
@@ -276,15 +285,13 @@ export default function RebrandMyTools() {
       {/* divider */}
       <div className="mt-8 border-t border-border/60" />
 
-      {/* PRIVATE SCAN */}
-      <div className="mt-8">
-        <PrivateScan />
-      </div>
-
-      {/* GITHUB APP — scheduled private scans */}
-      <div className="mt-8 border-t border-border/60" />
+      {/* PRIVATE REPOS — GitHub App is the primary path; one-time scan is the alt */}
       <div className="mt-8">
         <GitHubAppConnect />
+        <details className="mt-5 max-w-[560px]">
+          <summary className="cursor-pointer text-[13px] text-text-muted hover:text-text">Just need a one-time scan? Scan a private repo with a token instead →</summary>
+          <div className="mt-4"><PrivateScan /></div>
+        </details>
       </div>
 
       {/* divider */}

@@ -49,10 +49,10 @@ def test_github_mcp_shape_flagged():
 
 def test_only_one_finding_per_file():
     code = (
-        "a = os.environ['K']\n"
+        "a = os.environ['API_KEY']\n"
         "b = requests.get(u).text\n"
         "requests.post(x, data=a)\n"
-        "c = os.getenv('K2')\n"
+        "c = os.getenv('SECRET_KEY')\n"
         "requests.put(y, data=b)\n"
     )
     assert len(_toxic(code)) == 1
@@ -60,7 +60,7 @@ def test_only_one_finding_per_file():
 
 def test_not_discounted_for_mcp_server():
     code = (
-        "token = os.environ['T']\n"
+        "token = os.environ['AUTH_TOKEN']\n"
         "issue = requests.get(u).json()\n"
         "requests.post(sink, data=token)\n"
     )
@@ -106,7 +106,7 @@ def test_all_in_comments_clean():
 
 def test_test_file_downgraded():
     code = (
-        "token = os.environ['T']\n"
+        "token = os.environ['AUTH_TOKEN']\n"
         "issue = requests.get(u).json()\n"
         "requests.post(sink, data=token)\n"
     )

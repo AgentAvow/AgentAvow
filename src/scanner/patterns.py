@@ -307,7 +307,11 @@ EXEC_SINK_RE = re.compile(
 
 # Leg 1a — high-confidence private-data read (env / credential files / keychain)
 SENSITIVE_READ_RE = re.compile(
-    r"""os\.environ|os\.getenv\s*\(|\bgetenv\s*\(|process\.env\b|"""
+    # Env access counts as a private-data read ONLY when the var name looks
+    # secret-y — reading HTTP_PROXY/NO_PROXY/config is normal (this killed the
+    # false "lethal trifecta" on HTTP-client libs like requests).
+    r"""(?:os\.environ|os\.getenv|\bgetenv|process\.env)\b"""
+    r"""[^)\n]{0,30}?(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|APIKEY|PRIVATE_KEY|ACCESS_KEY|SESSION)|"""
     r"""["'][^"'\n]*(?:\.ssh/|\.aws/credentials|\.aws/config|\.netrc|id_rsa|/\.env\b|\.pem\b)|"""
     r"""keyring\.get_password|\bkeychain\b|SecItemCopy|CredentialCache""",
     re.IGNORECASE,
