@@ -2412,6 +2412,33 @@ class RepoClaim(Base):
     )
 
 
+class GitHubAppInstallation(Base):
+    """An owner's installation of the AgentAvow GitHub App, granting scoped
+    read-only access to their (public or PRIVATE) repos for scheduled re-scans.
+    We store only the installation id — GitHub mints short-lived, auto-rotating
+    installation tokens on demand, so no long-lived secret is kept. Revocable by
+    the owner in GitHub at any time."""
+
+    __tablename__ = "github_app_installations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    installation_id = Column(String(32), nullable=False, index=True)
+    account_login = Column(String(255), nullable=True)  # the GitHub account it's installed on
+    account_type = Column(String(20), nullable=True)     # "User" | "Organization"
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("entity_id", "installation_id", name="uq_gh_app_installation"),
+    )
+
+
 class AlertWebhook(Base):
     """Per-account webhook that receives grade-change alerts for the user's watched
     tools. The daily re-scan loop POSTs here when a watched tool's grade drops or its

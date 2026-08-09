@@ -157,6 +157,9 @@ class Settings(BaseSettings):
     github_app_id: str | None = None
     github_app_private_key: str | None = None  # PEM (raw, escaped-\n, or base64)
     github_app_installation_id: str | None = None
+    # Public "slug" of the App (the github.com/apps/<slug> name) — used to build
+    # the per-owner install URL for opt-in private-repo scanning.
+    github_app_slug: str | None = None
 
     # Route bulk repo file-content fetches through raw.githubusercontent.com,
     # which is UNMETERED (does not consume the GitHub API rate-limit budget) —

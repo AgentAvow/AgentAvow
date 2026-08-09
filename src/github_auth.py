@@ -133,6 +133,29 @@ async def _fetch_installation_token() -> _CachedToken:
     )
 
 
+async def mint_installation_token(installation_id: str) -> str:
+    """Mint a short-lived (1h) access token for a SPECIFIC App installation —
+    used for per-owner private-repo scanning. Requires the App to be configured
+    (App ID + private key). Not cached: callers scan then discard. Raises on error."""
+    if not (getattr(settings, "github_app_id", None)
+            and getattr(settings, "github_app_private_key", None)):
+        raise RuntimeError("GitHub App not configured (app_id / private_key missing)")
+    app_jwt = _mint_app_jwt()
+    url = _INSTALLATION_TOKEN_URL_TMPL.format(installation_id=installation_id)
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {app_jwt}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(url, headers=headers)
+    if resp.status_code != 201:
+        raise RuntimeError(
+            f"installation-token exchange failed: HTTP {resp.status_code}"
+        )
+    return resp.json()["token"]
+
+
 async def get_github_token() -> str | None:
     """Return a valid GitHub token, or ``None`` if nothing is configured.
 
