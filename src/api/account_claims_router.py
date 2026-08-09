@@ -176,7 +176,11 @@ async def create_claim(
             existing.verified_at = safunc.now()
             await db.flush()
             await db.refresh(existing)
-        return _serialize(existing)
+        # Commit before the background scan runs (see claim-repo note) so the row
+        # lock releases immediately instead of being held for the whole scan.
+        payload = _serialize(existing)
+        await db.commit()
+        return payload
     claim = RepoClaim(
         entity_id=entity.id,
         owner=body.owner,
@@ -191,7 +195,9 @@ async def create_claim(
     db.add(claim)
     await db.flush()
     await db.refresh(claim)
-    return _serialize(claim)
+    payload = _serialize(claim)
+    await db.commit()  # release the lock before the background catalog scan
+    return payload
 
 
 @router.post("/claims/{claim_id}/verify")

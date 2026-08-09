@@ -230,8 +230,10 @@ async def claim_repo(
         raise HTTPException(status_code=404, detail="No connected installation can access that repo")
 
     await _ensure_verified_claim(db, entity.id, owner, repo, full_name)
-    await db.flush()
-    # Scan (result + alerts) in the background — slow for private repos.
+    # Commit NOW so the repo_claims row lock releases immediately. Otherwise the
+    # request transaction stays open (idle-in-transaction) for the whole slow
+    # background scan, blocking every other claim write (they pile up on the lock).
+    await db.commit()
     background.add_task(_scan_installation_bg, match.id)
     return {"claimed": True, "full_name": full_name}
 
