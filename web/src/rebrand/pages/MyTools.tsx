@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
-import { Reveal, RevealStagger } from '../components/motion'
+import { Reveal } from '../components/motion'
 
 // Confetti pieces — fixed trajectories so the burst is stable across renders.
 // Colors pull from the brand palette (primary / accent / success / warning).
