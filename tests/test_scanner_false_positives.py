@@ -121,3 +121,37 @@ class TestContextAwareFs:
         # is a variable so it won't match the safe pattern
         unsafe_fs = [f for f in findings if f.category == "fs_access"]
         assert len(unsafe_fs) > 0
+
+
+class TestRegexExecNotUnsafeExec:
+    """The `.exec()` RegExp method must not be flagged as child_process exec —
+    the dominant false positive in regex-heavy JS libs (e.g. lodash)."""
+
+    def test_regexp_exec_method_not_flagged_js(self):
+        for code in (
+            "var result = reFlags.exec(source);\n",
+            "while ((match = pattern.exec(str))) {}\n",
+            "return reIsNative.exec(func) != null;\n",
+        ):
+            findings, _, _ = _scan_content(code, "lodash.js")
+            assert not any(f.category == "unsafe_exec" for f in findings), code
+
+    def test_real_child_process_exec_still_flagged_js(self):
+        for code in (
+            "child_process.exec(userInput);\n",
+            "const { exec } = require('child_process'); exec(cmd);\n",
+            "cp.spawn(bin, args);\n",
+            "execSync('rm -rf /');\n",
+        ):
+            findings, _, _ = _scan_content(code, "tool.js")
+            assert any(f.category == "unsafe_exec" for f in findings), code
+
+    def test_python_exec_method_not_flagged(self):
+        code = "value = compiled_re.exec(payload)\n"
+        findings, _, _ = _scan_content(code, "tool.py")
+        assert not any(f.category == "unsafe_exec" for f in findings)
+
+    def test_python_bare_exec_still_flagged(self):
+        code = "exec(untrusted_code)\n"
+        findings, _, _ = _scan_content(code, "tool.py")
+        assert any(f.category == "unsafe_exec" for f in findings)

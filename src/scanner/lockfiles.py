@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # OSV ecosystem identifiers (https://ossf.github.io/osv-schema/#affectedpackage-field)
@@ -45,11 +45,19 @@ _MAX_DEPS = 4000
 
 @dataclass(frozen=True)
 class Dep:
-    """One resolved dependency, ready for an OSV querybatch entry."""
+    """One resolved dependency, ready for an OSV querybatch entry.
+
+    ``dev`` marks a development-only dependency (npm ``dev:true`` / Pipfile
+    ``develop``). Dev deps are NOT installed by consumers of the published
+    package, so their vulns must not lower the trust grade — the supply-chain
+    pass filters them out. ``compare=False`` keeps (ecosystem, name, version)
+    dedup unaffected by the flag.
+    """
 
     ecosystem: str
     name: str
     version: str
+    dev: bool = field(default=False, compare=False)
 
     def as_osv_query(self) -> dict:
         return {
@@ -90,7 +98,10 @@ def parse_package_lock(text: str) -> list[Dep]:
                 continue
             name = path.split("node_modules/")[-1]
             if name:
-                out.append(Dep(ECO_NPM, name, _clean_version(ver)))
+                # npm marks devDependencies (and their dev-only transitives) with
+                # `dev: true`; `devOptional` is dev-or-optional. Either → dev.
+                is_dev = bool(meta.get("dev") or meta.get("devOptional"))
+                out.append(Dep(ECO_NPM, name, _clean_version(ver), dev=is_dev))
 
     # v1: recursive "dependencies" tree.
     def _walk(node: dict) -> None:
@@ -102,7 +113,7 @@ def parse_package_lock(text: str) -> list[Dep]:
                 continue
             ver = meta.get("version")
             if isinstance(ver, str) and isinstance(name, str):
-                out.append(Dep(ECO_NPM, name, _clean_version(ver)))
+                out.append(Dep(ECO_NPM, name, _clean_version(ver), dev=bool(meta.get("dev"))))
             _walk(meta)
 
     if isinstance(data, dict) and not packages:
@@ -248,6 +259,7 @@ def parse_pipfile_lock(text: str) -> list[Dep]:
     if not isinstance(data, dict):
         return out
     for section in ("default", "develop"):
+        is_dev = section == "develop"
         block = data.get(section)
         if not isinstance(block, dict):
             continue
@@ -256,7 +268,7 @@ def parse_pipfile_lock(text: str) -> list[Dep]:
                 continue
             ver = meta.get("version")
             if isinstance(ver, str) and ver.startswith("=="):
-                out.append(Dep(ECO_PYPI, name, _clean_version(ver)))
+                out.append(Dep(ECO_PYPI, name, _clean_version(ver), dev=is_dev))
     return out
 
 

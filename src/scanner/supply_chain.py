@@ -69,7 +69,8 @@ class SupplyChainResult:
 
     ok: bool = False  # True only when OSV was actually queried successfully
     findings: list[dict] = field(default_factory=list)  # scanner-Finding dicts
-    deps_total: int = 0
+    deps_total: int = 0  # production deps actually queried (dev excluded)
+    deps_dev_excluded: int = 0  # dev-only deps skipped (never shipped to consumers)
     ecosystems: list[str] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)  # severity -> count
     malicious: list[str] = field(default_factory=list)  # MAL- advisory ids
@@ -481,8 +482,14 @@ async def analyze_supply_chain(
     except Exception:
         logger.debug("github-depth signal computation failed", exc_info=True)
 
-    deps = parse_all(lockfiles)
+    # Dev-only dependencies are never installed by consumers of the PUBLISHED
+    # package, so a vuln in one must not lower the trust grade (this is what
+    # tanked zero-runtime-dep libraries like lodash to F on their dev/test deps).
+    # Grade production dependencies only.
+    all_deps = parse_all(lockfiles)
+    deps = [d for d in all_deps if not d.dev]
     result.deps_total = len(deps)
+    result.deps_dev_excluded = len(all_deps) - len(deps)
     result.ecosystems = sorted({d.ecosystem for d in deps})
     if not deps:
         # No parseable lockfile — nothing for OSV to do, but depth signals stand.

@@ -350,3 +350,52 @@ def test_dep_penalty_malicious_is_disqualifying():
 def test_dep_penalty_ignores_non_dep_findings():
     code = [_F("unsafe_exec", "eval()", "critical", "a.py", 1, "")]
     assert _dependency_penalty(code) == 0
+
+
+# ── dev-dependency exclusion (precision: dev vulns never ship to consumers) ────
+
+def test_package_lock_captures_dev_flag():
+    text = """
+    {"lockfileVersion": 3, "packages": {
+      "": {"name": "root"},
+      "node_modules/left-pad": {"version": "1.3.0"},
+      "node_modules/mocha": {"version": "2.0.0", "dev": true},
+      "node_modules/eslint": {"version": "1.0.0", "devOptional": true}
+    }}
+    """
+    deps = lf.parse_package_lock(text)
+    by_name = {d.name: d for d in deps}
+    assert by_name["left-pad"].dev is False
+    assert by_name["mocha"].dev is True
+    assert by_name["eslint"].dev is True
+
+
+def test_pipfile_lock_develop_is_dev():
+    text = """
+    {"default": {"requests": {"version": "==2.0.0"}},
+     "develop": {"pytest": {"version": "==7.0.0"}}}
+    """
+    deps = lf.parse_pipfile_lock(text)
+    by_name = {d.name: d for d in deps}
+    assert by_name["requests"].dev is False
+    assert by_name["pytest"].dev is True
+
+
+@pytest.mark.asyncio
+async def test_analyze_excludes_dev_deps_from_osv():
+    """A lockfile of ONLY dev deps yields no production deps to query — so no OSV
+    call, no vuln findings (mirrors lodash: zero runtime deps, heavy dev tree)."""
+    lockfiles = {
+        "package-lock.json": (
+            '{"lockfileVersion": 3, "packages": {'
+            '"": {"name": "root"},'
+            '"node_modules/mocha": {"version": "2.0.0", "dev": true},'
+            '"node_modules/grunt": {"version": "0.4.0", "dev": true}}}'
+        )
+    }
+    # No transport needed: with all deps dev-excluded, the pipeline returns before
+    # any network call.
+    result = await analyze_supply_chain(lockfiles)
+    assert result.deps_total == 0
+    assert result.deps_dev_excluded == 2
+    assert result.findings == []

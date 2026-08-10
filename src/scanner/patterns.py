@@ -86,7 +86,10 @@ UNSAFE_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "exec() call (Python)",
-        re.compile(r"\bexec\s*\("),
+        # Python's exec() builtin is called BARE (exec("...")). The negative
+        # lookbehind stops it matching a method call like `regexp.exec(str)` /
+        # `pattern.exec(x)`, which is RegExp.prototype.exec, not code execution.
+        re.compile(r"(?<![.\w])exec\s*\("),
         "high",
     ),
     (
@@ -96,7 +99,15 @@ UNSAFE_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "execSync / spawn (Node.js)",
-        re.compile(r"\b(?:execSync|spawnSync|exec)\s*\("),
+        # child_process exec/spawn — but NOT `re.exec(...)` (RegExp.prototype.exec),
+        # the dominant false positive in any regex-heavy JS lib. Match the Node
+        # forms when they're bare/destructured (`exec(cmd)`, `execSync(...)`) — the
+        # lookbehind excludes `x.exec(` method calls — OR when explicitly qualified
+        # as `child_process.exec(` / `cp.spawn(`.
+        re.compile(
+            r"(?<![.\w])(?:execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)\s*\("
+            r"|(?:child_process|cp)\s*\.\s*(?:execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)\s*\("
+        ),
         "high",
     ),
     (
