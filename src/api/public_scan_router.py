@@ -729,6 +729,61 @@ async def scan_package_endpoint(
 
 
 @router.get(
+    "/mcp",
+    response_model=PublicScanResponse,
+    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+)
+async def scan_mcp_endpoint(
+    endpoint: str = Query(..., description="The MCP server's Streamable-HTTP URL"),
+    request: Request = None,
+    force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    db: AsyncSession = Depends(get_db),
+) -> PublicScanResponse:
+    """Grade a LIVE **MCP server** by its endpoint URL — enumerates the served
+    `tools/list` and scores the capability surface (tool-poisoning, schema risk,
+    dangerous-capability taxonomy + lethal trifecta, annotation truthfulness).
+    `coverage.surface = mcp`, live-observed (point-in-time). Streamable-HTTP only.
+    E.g. `/public/scan/mcp?endpoint=https://mcp.example.com/mcp`."""
+    import hashlib
+
+    from src.ssrf import validate_url_https
+
+    try:
+        url = validate_url_https(endpoint, field_name="endpoint")
+    except Exception:
+        raise HTTPException(400, "endpoint must be a valid https:// URL")
+    full = f"mcp:{url}"
+    key = "mcp_" + hashlib.sha256(url.encode()).hexdigest()[:22]
+
+    if not force:
+        cached = await _get_cached("mcp", key)
+        if cached:
+            jws = create_jws(canonicalize(_build_scan_payload(full, cached)))
+            return _package_response(full, cached, jws, cached=True)
+
+    if request is not None:
+        from src.api.rate_limit import enforce_fresh_scan_limit
+        await enforce_fresh_scan_limit(request)
+
+    from src.scanner.scan import scan_mcp
+
+    try:
+        result = await asyncio.wait_for(scan_mcp(url), timeout=45)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            503, "MCP handshake timed out — please retry shortly.",
+            headers={"Retry-After": "20"},
+        )
+    if result.error:
+        raise HTTPException(502, f"Scan error: {result.error}")
+
+    data = _scan_result_to_dict(result)
+    await _set_cached("mcp", key, data)
+    jws = create_jws(canonicalize(_build_scan_payload(full, data)))
+    return _package_response(full, data, jws, cached=False)
+
+
+@router.get(
     "/wallet/{wallet_address}",
     dependencies=[Depends(rate_limit_reads)],
     response_model=None,

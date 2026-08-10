@@ -2194,6 +2194,56 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     return result
 
 
+async def scan_mcp(endpoint_url: str) -> ScanResult:
+    """Grade a LIVE MCP server by its endpoint URL (roadmap §2.D). Handshakes the
+    server, enumerates its advertised ``tools/list`` (+ resources/prompts), and
+    scores the SERVED surface — tool-poisoning in descriptions, input-schema risk,
+    dangerous-capability taxonomy + lethal trifecta, annotation truthfulness.
+
+    ``coverage.surface = "mcp"``, ``scan_depth = "artifact+live"`` (live-observed,
+    point-in-time — the served surface can change, so this is not offline-recompute
+    anchored). Fail-open: a handshake failure returns a ScanResult with ``.error``.
+    """
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT_LIVE, build_coverage
+    from src.scanner.mcp_scan import analyze_mcp, fetch_mcp_tools
+
+    result = ScanResult(repo=f"mcp:{endpoint_url}", stars=0, description="", framework="")
+    result.is_mcp_server = True
+    data = await fetch_mcp_tools(endpoint_url)
+    if not data:
+        result.error = (
+            "Could not handshake the MCP server — check it's a reachable "
+            "Streamable-HTTP endpoint (stdio/SSE-only servers aren't supported yet)."
+        )
+        return result
+
+    mcp = analyze_mcp(
+        data.get("tools"),
+        resources=data.get("resources"),
+        prompts=data.get("prompts"),
+        server_info=data.get("server_info"),
+    )
+    result.findings = mcp.findings
+    result.files_scanned = mcp.tool_count
+    result.total_scannable_files = mcp.tool_count
+    result.primary_language = "MCP"
+    if mcp.tool_count and not mcp.lethal_trifecta and result.critical_count == 0:
+        result.positive_signals.append(f"{mcp.tool_count} tools enumerated · no lethal trifecta")
+    result.artifact_scan = {
+        "surface": "mcp", "server_name": mcp.server_name,
+        "tool_count": mcp.tool_count, "resource_count": mcp.resource_count,
+        "prompt_count": mcp.prompt_count, "capabilities": mcp.capabilities,
+        "lethal_trifecta": mcp.lethal_trifecta,
+    }
+    result.coverage = build_coverage(
+        surface="mcp", scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=True,
+    )
+    result.trust_score = _calculate_trust_score(result)
+    result.category_scores = _calculate_category_scores(result)
+    result.certified = _certified_status(result)
+    return result
+
+
 async def _maybe_maintainer_signals(
     result: ScanResult,
     owner: str,
