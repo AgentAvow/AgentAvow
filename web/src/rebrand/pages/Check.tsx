@@ -368,8 +368,8 @@ function Hero() {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
   const hint = useRotatingPlaceholder(CHECK_HINTS)
-  const go = () => {
-    const v = value.trim()
+  const go = (raw?: string) => {
+    const v = (raw ?? value).trim()
     // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
     const pkg = v.match(/^(npm|pypi|python)\s*:\s*(.+)$/i)
     if (pkg) {
@@ -380,6 +380,11 @@ function Hero() {
     const m = v.match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
     if (m) navigate(rp(`/rebrand/check/${m[1]}/${m[2]}`))
   }
+  const EXAMPLES: Array<[string, string]> = [
+    ['GitHub repo', 'github.com/vercel/next.js'],
+    ['npm package', 'npm:sigstore'],
+    ['PyPI package', 'pypi:requests'],
+  ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
       <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this tool <span className="gradient-text-bio">safe</span>?</h1>
@@ -389,7 +394,17 @@ function Hero() {
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px] text-text placeholder:text-text-muted" />
         <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check</button>
       </form>
-      <div className="mt-3 font-mono text-[11.5px] text-text-muted/70">no account · signed result you can verify offline</div>
+      <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+        <span className="text-[11.5px] text-text-muted/70">Try:</span>
+        {EXAMPLES.map(([label, coord]) => (
+          <button key={coord} type="button" onClick={() => go(coord)}
+            className="font-mono text-[11.5px] px-2.5 py-1 rounded-full border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors">
+            {coord}
+            <span className="ml-1.5 text-text-muted/50">{label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 font-mono text-[11.5px] text-text-muted/70">no account · signed result you can verify offline · GitHub repos, npm &amp; PyPI packages</div>
     </div>
   )
 }
@@ -447,6 +462,64 @@ function ScanningLoader({ owner, repo }: { owner: string; repo: string }) {
       </div>
       <p className="mt-6 text-[12.5px] text-text-muted/70">First scan of a tool takes a moment — we're reading the actual code, not guessing.</p>
     </div>
+  )
+}
+
+/** Adoption panel — the real 5-axis "do independent parties rely on this?" score,
+ * DISTINCT from safety. Surfaces the tier + rising/established badge + per-axis
+ * breakdown from the /adoption endpoint. Hidden when there's no signal (cold-start
+ * tools would just show an empty panel). */
+const _ADOPTION_AXES: Record<string, string> = {
+  A: 'Downloads + trend', B: 'Reverse-dependents', C: 'Stars + velocity',
+  D: 'First-party (AgentAvow)', E: 'MCP / registry usage',
+}
+interface AdoptionResp {
+  adoption_score_100?: number; tier?: string; badge?: string; insufficient_data?: boolean
+  axes?: Array<{ axis: string; label: string; absolute: number; momentum: number }>
+}
+function AdoptionPanel({ owner, repo }: { owner: string; repo: string }) {
+  const { data } = useQuery({
+    queryKey: ['rebrand-adoption', owner, repo],
+    queryFn: async () => (await publicApi.get<AdoptionResp>(`/public/scan/${owner}/${repo}/adoption`)).data,
+    retry: 0,
+  })
+  const axes = data?.axes ?? []
+  if (!data || axes.length === 0) return null  // no independent signal → don't clutter
+  const score = data.adoption_score_100 ?? 0
+  const badge = data.badge
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-accent/50">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className="text-[15px] font-bold">Adoption</h3>
+          {badge && (
+            <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded"
+              style={{ background: badge === 'rising' ? 'rgba(56,189,248,.14)' : 'rgba(129,140,248,.14)', color: badge === 'rising' ? '#7dd3fc' : '#a5b4fc' }}>
+              {badge === 'rising' ? '↑ Rising' : `◆ ${badge}`}
+            </span>
+          )}
+        </div>
+        <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">Do real, independent parties rely on this? A <span className="text-text">separate</span> score from safety — popular is not the same as safe.</p>
+        {!data.insufficient_data && (
+          <div className="mt-3 flex items-center gap-3">
+            <div className="flex-1 h-2 rounded-full bg-surface-hover overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-primary to-accent" style={{ width: `${score}%` }} /></div>
+            <span className="font-mono text-[12px] text-text-muted tabular-nums">{score}/100</span>
+          </div>
+        )}
+        <div className="mt-4 flex flex-col gap-2">
+          {axes.map((a) => {
+            const w = Math.round((a.absolute || 0) * 100)
+            return (
+              <div key={a.axis} className="grid grid-cols-[140px_1fr_auto] items-center gap-3 text-[12px]">
+                <span className="text-text-muted truncate">{_ADOPTION_AXES[a.axis] || a.label}</span>
+                <span className="h-1.5 rounded-full bg-surface-hover overflow-hidden"><span className="block h-full rounded-full bg-accent" style={{ width: `${w}%` }} /></span>
+                <span className="font-mono text-[11px] text-text-muted/70 tabular-nums">{a.momentum > 0.05 ? '↑' : a.momentum < -0.05 ? '↓' : '·'} {w}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </Reveal>
   )
 }
 
@@ -737,6 +810,9 @@ function Result({ owner, repo, privateResult }: {
       {(scan.trust_score >= 81 || (scan as { certified?: { eligible?: boolean } }).certified?.eligible) && (
         <CertifiedPanel certified={(scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified} />
       )}
+
+      {/* Adoption — the real 5-axis metric, distinct from safety (public repos only) */}
+      {!isPrivate && <AdoptionPanel owner={owner} repo={repo} />}
 
       {/* score history timeline (living record) */}
       <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} />
