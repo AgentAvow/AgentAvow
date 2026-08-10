@@ -115,9 +115,10 @@ function AddToolForm() {
   )
 }
 
-/** Claim a private repo that's reachable through a connected GitHub App install.
- * Shows the repos you can claim right where you add tools — one claim per repo. */
-function AppRepoPicker({ repos }: { repos: { full_name: string; private: boolean }[] }) {
+/** The full roster of repos the connected GitHub App can scan — claim any to
+ * track it. Each row reflects live state (Claim → scanning… → claimed ✓) so the
+ * App list mirrors the same transitions as "Your tools" below. */
+function AppRepoPicker({ repos, claimByName }: { repos: { full_name: string; private: boolean }[]; claimByName: Map<string, Claim> }) {
   const qc = useQueryClient()
   const reduce = useReducedMotion()
   const [celebrating, setCelebrating] = useState(false)
@@ -137,14 +138,21 @@ function AppRepoPicker({ repos }: { repos: { full_name: string; private: boolean
   return (
     <div className="relative mt-4">
       {celebrating && <ConfettiBurst />}
-      <div className="text-[12.5px] text-text-muted mb-2">Or claim a private repo you&apos;ve connected:</div>
+      <div className="text-[12.5px] text-text-muted mb-2">Repos your GitHub App can scan — claim any to track it:</div>
       <div className="glass rounded-xl divide-y divide-border/50">
         {repos.map((r) => {
+          const c = claimByName.get(r.full_name.toLowerCase())
           const busy = claim.isPending && claim.variables === r.full_name
           return (
             <div key={r.full_name} className="flex items-center justify-between gap-3 px-4 py-2.5">
               <span className="font-mono text-[12.5px] break-all min-w-0">{r.full_name} {r.private && <span className="text-text-muted">· private</span>}</span>
-              <button onClick={() => claim.mutate(r.full_name)} disabled={busy} className="shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{busy ? 'Claiming…' : 'Claim'}</button>
+              {!c ? (
+                <button onClick={() => claim.mutate(r.full_name)} disabled={busy} className="shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{busy ? 'Claiming…' : 'Claim'}</button>
+              ) : c.status === 'verified' && c.private && !c.scanned ? (
+                <span className="shrink-0 font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light">scanning…</span>
+              ) : (
+                <span className="shrink-0 inline-flex items-center gap-2 text-[12px] text-success">claimed ✓ <Link to={rp(`/rebrand/check/${c.owner}/${c.repo}`)} className="text-primary-light hover:text-primary font-semibold">Report →</Link></span>
+              )}
             </div>
           )
         })}
@@ -288,7 +296,15 @@ function ToolRow({ c }: { c: Claim }) {
   const [copied, setCopied] = useState(false)
   const [showVerify, setShowVerify] = useState(false)
   const [celebrating, setCelebrating] = useState(false)
-  const refetchAll = () => { qc.refetchQueries({ queryKey: CLAIMS_KEY }); qc.refetchQueries({ queryKey: APP_KEY }) }
+  const refetchAll = () => {
+    qc.refetchQueries({ queryKey: CLAIMS_KEY })
+    qc.refetchQueries({ queryKey: APP_KEY })
+    // Harden cross-page state: this repo's score page reads these — mark them stale
+    // so a publish/unpublish/remove reflects on the score card the next time it's
+    // viewed, without a manual refresh.
+    qc.invalidateQueries({ queryKey: ['rebrand-private-report', c.owner, c.repo] })
+    qc.invalidateQueries({ queryKey: ['rebrand-scan', c.owner, c.repo] })
+  }
   const verify = useMutation({
     mutationFn: async () => (await api.post<{ verified: boolean; detail?: string }>(`/account/claims/${c.id}/verify`, {})).data,
     onSuccess: (d) => {
@@ -400,13 +416,12 @@ export default function RebrandMyTools() {
 
   if (!user) return null
   const claims = data?.claims ?? []
-  const claimedNames = new Set(claims.map((c) => c.full_name.toLowerCase()))
-  // Repos the connected App can reach but that aren't claimed yet → claimable.
-  const unclaimedAppRepos = (appData?.installations ?? [])
+  const claimByName = new Map(claims.map((c) => [c.full_name.toLowerCase(), c]))
+  // Every repo the connected App can reach (deduped across installs). Claimed ones
+  // render their live state in the roster, so the App list mirrors "Your tools".
+  const appRepos = (appData?.installations ?? [])
     .filter((i) => !i.revoked)
     .flatMap((i) => i.repos ?? [])
-    .filter((r) => !claimedNames.has(r.full_name.toLowerCase()))
-    // de-dupe across installs
     .filter((r, idx, arr) => arr.findIndex((x) => x.full_name === r.full_name) === idx)
 
   // One list, most-recently-actionable first: pending, then scanning, then rest.
@@ -427,7 +442,7 @@ export default function RebrandMyTools() {
       <section className="mt-10">
         <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-3">Add a tool</h2>
         <AddToolForm />
-        <AppRepoPicker repos={unclaimedAppRepos} />
+        <AppRepoPicker repos={appRepos} claimByName={claimByName} />
       </section>
 
       <div className="mt-10 border-t border-border/60" />
