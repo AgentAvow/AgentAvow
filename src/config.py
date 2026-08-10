@@ -248,7 +248,7 @@ class Settings(BaseSettings):
     # _display_grade == _grade_from_score (score-only), so grades are unchanged.
     # The `certified` block is still computed + surfaced regardless of this flag,
     # so the score page can show certified status before the label gate is flipped.
-    scanner_certified_grade_gate: bool = False
+    scanner_certified_grade_gate: bool = True  # enabled 08-10 — A+ now = certified
 
     # Security re-scan job (Job 19 in src/jobs/scheduler.py) — periodic re-scan of
     # catalog entries so grades don't rot. Caps are CONFIGURABLE and sized to stay
