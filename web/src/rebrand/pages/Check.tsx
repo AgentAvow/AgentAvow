@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate, Link, useLocation } from 'react-router-dom'
+import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchPackageScan, badgeUrl, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchPackageScan, fetchMcpScan, badgeUrl, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trust/gradeSystem'
 import { useAuth } from '../../hooks/useAuth'
@@ -42,7 +42,7 @@ const VERDICT_STYLE = {
   risky: { ring: 'text-danger', chip: 'bg-danger/15 text-danger', label: 'RISKY' },
 }
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'npm:@scope/pkg', 'a GitHub repo or package']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'mcp:https://…', 'a repo, package, or MCP server']
 
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA. */
 function WatchCTA({ owner, repo }: { owner: string; repo: string }) {
@@ -370,6 +370,9 @@ function Hero() {
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const go = (raw?: string) => {
     const v = (raw ?? value).trim()
+    // Live MCP server: `mcp:https://…`.
+    const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
+    if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
     // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
     const pkg = v.match(/^(npm|pypi|python)\s*:\s*(.+)$/i)
     if (pkg) {
@@ -523,6 +526,84 @@ function AdoptionPanel({ owner, repo }: { owner: string; repo: string }) {
   )
 }
 
+/** Live MCP server score view — grades the SERVED tool surface (what the server
+ * actually advertises at runtime), not a repo. The agent-specific moat. */
+function McpResult({ endpoint }: { endpoint: string }) {
+  const { data: scan, isLoading, isError } = useQuery({
+    queryKey: ['rebrand-mcp-scan', endpoint],
+    queryFn: () => fetchMcpScan(endpoint),
+    retry: 0,
+  })
+  if (isLoading) return <ScanningLoader owner="MCP server" repo={endpoint} />
+  if (isError || !scan) {
+    return (
+      <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
+        <h1 className="text-2xl font-extrabold tracking-tight">Couldn&apos;t reach that MCP server</h1>
+        <p className="mt-3 text-text-muted text-[14px]">We couldn&apos;t handshake it — it needs to be a reachable <span className="text-text">Streamable-HTTP</span> MCP endpoint (stdio / SSE-only servers aren&apos;t supported yet).</p>
+        <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
+      </div>
+    )
+  }
+  const _VALID = ['A+', 'A', 'B', 'C', 'D', 'F']
+  const g = scan.grade && _VALID.includes(scan.grade) ? gradeInfo(scan.grade as LetterGrade) : getGradeInfo(scan.trust_score)
+  const f = scan.findings
+  const verdict = scan.trust_score >= 81 ? 'Safe to connect' : scan.trust_score >= 61 ? 'Generally safe'
+    : scan.trust_score >= 41 ? 'Connect with caution' : 'Significant risks'
+  return (
+    <div className="max-w-[760px] mx-auto px-6 py-14">
+      <Reveal>
+        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}>
+          <div className="relative px-7 pt-7">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">MCP server</span>
+              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">⚡ Live-graded</span>
+            </div>
+            <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all font-mono">{endpoint}</h1>
+            <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
+          </div>
+          <div className="relative px-7 py-6 flex justify-center">
+            <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
+              <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
+              <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Capability Trust</div>
+              <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
+            </div>
+          </div>
+        </div>
+      </Reveal>
+
+      <Reveal>
+        <div className="mt-4 glass rounded-2xl p-6">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we graded</h3>
+          <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We connected to the server and graded the <span className="text-text">tool surface it actually serves</span> — input-schema risk, hidden instructions in tool descriptions, dangerous capabilities, and the lethal trifecta across its tools. This is what a repo scan can&apos;t see.</p>
+        </div>
+      </Reveal>
+
+      {f?.items && f.items.length > 0 ? (
+        <>
+          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">The details ({f.items.length})</h3></Reveal>
+          <div className="flex flex-col gap-2 mt-3">
+            {f.items.slice(0, 15).map((it, i) => (
+              <div key={i} className="glass rounded-xl px-4 py-3 flex gap-3 items-start">
+                <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
+                <div className="min-w-0">
+                  <div className="text-[14px]">{it.name}</div>
+                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <Reveal><div className="mt-6 glass rounded-2xl p-6 text-[13.5px] text-success">✓ No capability-surface risks found — clean tool set.</div></Reveal>
+      )}
+
+      <div className="mt-8 flex justify-center">
+        <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} grade={g.grade} />
+      </div>
+    </div>
+  )
+}
+
 /** Native npm/PyPI package score view — the published artifact, graded by
  * coordinate (no repo). Leads with the artifact/provenance trust-chain + the
  * Certified panel (this is where A+ is actually earned), then the findings.
@@ -619,6 +700,13 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
 export default function RebrandCheck() {
   const params = useParams()
   const location = useLocation()
+  const [sp] = useSearchParams()
+  // Live MCP server route (/check/mcp?endpoint=…).
+  if (location.pathname.replace(/\/$/, '').endsWith('/check/mcp')) {
+    const ep = sp.get('endpoint')
+    if (!ep) return <Hero />
+    return <McpResult endpoint={ep} />
+  }
   // Package coordinate route (/check/pkg/:surface/*) → native npm/PyPI package scan.
   if (params.surface) {
     const name = params['*'] || ''

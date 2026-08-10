@@ -39,6 +39,14 @@ export async function fetchPackageScan(
   return data
 }
 
+/** Grade a LIVE MCP server by its Streamable-HTTP endpoint URL. */
+export async function fetchMcpScan(endpoint: string, force = false): Promise<PublicScanResponse> {
+  const { data } = await publicApi.get<PublicScanResponse>(
+    `/public/scan/mcp?endpoint=${encodeURIComponent(endpoint)}${force ? '&force=true' : ''}`,
+  )
+  return data
+}
+
 export async function fetchWalletScan(
   wallet: string,
   chain = 'ethereum',

@@ -10,7 +10,7 @@ import { Reveal, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { DualScore } from '../components/DualScore'
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'npm:@scope/pkg', 'a GitHub repo or package']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'mcp:https://…', 'a repo, package, or MCP server']
 
 /**
  * AgentAvow rebrand homepage.
@@ -78,6 +78,9 @@ export default function RebrandHome() {
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
     const v = input.trim()
+    // Live MCP server: `mcp:https://…`.
+    const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
+    if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
     // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
     const pkg = v.match(/^(npm|pypi|python)\s*:\s*(.+)$/i)
     if (pkg) {
