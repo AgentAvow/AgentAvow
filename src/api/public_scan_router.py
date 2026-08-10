@@ -637,8 +637,96 @@ def _compute_tool_drift(old: dict | None, new: dict) -> dict | None:
 
 # ── Endpoints ────────────────────────────────────────────────────────────
 
-# NOTE: wallet route MUST come before /{owner}/{repo} to avoid the catch-all
-# matching "wallet" as an owner name.
+# NOTE: the package + wallet routes MUST come before /{owner}/{repo} so the
+# 2-segment catch-all doesn't shadow them.
+
+
+def _package_response(full: str, data: dict, jws: str, cached: bool) -> PublicScanResponse:
+    """Build a PublicScanResponse from a native-package scan dict (mirrors the
+    repo path, minus entity_trust/envelope which are GitHub-repo concepts)."""
+    return PublicScanResponse(
+        repo=full,
+        trust_score=data["trust_score"],
+        security_score=data["trust_score"],
+        trust_tier=data["trust_tier"],
+        recommended_limits=RecommendedLimits(**data["recommended_limits"]),
+        scan_result=data["scan_result"],
+        findings=FindingsSummary(**data["findings"]),
+        grade=data.get("grade") or _grade_from_score(data["trust_score"]),
+        certified=data.get("certified") or {},
+        coverage=data.get("coverage", {}),
+        provenance=data.get("provenance", {}),
+        positive_signals=data.get("positive_signals", []),
+        category_scores=data.get("category_scores", {}),
+        metadata=ScanMetadata(**data["metadata"]),
+        scanned_at=data["scanned_at"],
+        cached=cached,
+        jws=jws,
+        tool_manifest_digest=data.get("tool_manifest_digest"),
+        tool_digests=data.get("tool_digests", {}),
+    )
+
+
+@router.get(
+    "/package/{surface}/{name:path}",
+    response_model=PublicScanResponse,
+    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+)
+async def scan_package_endpoint(
+    surface: str,
+    name: str,
+    request: Request = None,
+    force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    version: str | None = Query(None, description="Exact version; default = latest"),
+    db: AsyncSession = Depends(get_db),
+) -> PublicScanResponse:
+    """Grade a PUBLISHED **npm** or **PyPI** package directly by coordinate — no
+    GitHub repo required. The signed A+..F grade is computed over the real artifact
+    bytes (``scan_depth = artifact``) with the package's own build provenance
+    verified. E.g. ``/public/scan/package/npm/chalk`` or
+    ``/public/scan/package/pypi/requests?version=2.32.5``. Cached 1h."""
+    surface = (surface or "").strip().lower()
+    if surface == "python":
+        surface = "pypi"
+    if surface not in ("npm", "pypi"):
+        raise HTTPException(404, "surface must be 'npm' or 'pypi'")
+    name = (name or "").strip().strip("/")
+    if not name or len(name) > 214 or any(c in name for c in ("..", " ", "\t")):
+        raise HTTPException(400, "Invalid package name")
+
+    full = f"{surface}:{name}" + (f"@{version}" if version else "")
+    cache_owner = surface
+    cache_repo = f"{name}@{version}" if version else name
+
+    if not force:
+        cached = await _get_cached(cache_owner, cache_repo)
+        if cached:
+            jws = create_jws(canonicalize(_build_scan_payload(full, cached)))
+            return _package_response(full, cached, jws, cached=True)
+
+    if request is not None:
+        from src.api.rate_limit import enforce_fresh_scan_limit
+        await enforce_fresh_scan_limit(request)
+
+    from src.scanner.scan import scan_package
+
+    try:
+        result = await asyncio.wait_for(scan_package(surface, name, version), timeout=90)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            503, "Scan is taking longer than expected — please retry shortly.",
+            headers={"Retry-After": "30"},
+        )
+    if result.error:
+        low = result.error.lower()
+        code = 404 if ("not found" in low or "version not found" in low) else 502
+        raise HTTPException(code, f"Scan error: {result.error}")
+
+    data = _scan_result_to_dict(result)
+    await _set_cached(cache_owner, cache_repo, data)
+    jws = create_jws(canonicalize(_build_scan_payload(full, data)))
+    return _package_response(full, data, jws, cached=False)
+
 
 @router.get(
     "/wallet/{wallet_address}",

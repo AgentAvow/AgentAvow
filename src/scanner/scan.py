@@ -1485,9 +1485,14 @@ def _certified_status(result: ScanResult) -> dict:
         # 1. we scanned the published artifact, not just the repo
         "artifact_scanned": cov.get("scan_depth") in ("artifact", "artifact+live"),
         # 2. build provenance cryptographically binds artifact -> source
-        "provenance_verified": bool(prov.get("verified")) and bool(prov.get("source_matches_claim")),
-        # 3. the published artifact matches its source (no injected/added files, no install hook)
-        "no_drift": not (drift.get("added_files") or drift.get("modified_files") or drift.get("has_install_hook")),
+        "provenance_verified": (
+            bool(prov.get("verified")) and bool(prov.get("source_matches_claim"))
+        ),
+        # 3. the published artifact matches its source (no injected/added files, no hook)
+        "no_drift": not (
+            drift.get("added_files") or drift.get("modified_files")
+            or drift.get("has_install_hook")
+        ),
         # 4. zero critical/high across code + supply-chain, and no known-malicious dep
         "no_critical_or_high": (
             result.critical_count == 0 and result.high_count == 0
@@ -2009,11 +2014,7 @@ async def _maybe_verify_provenance(
     scan_depth = (result.coverage or {}).get("scan_depth", "repo-only")
 
     try:
-        from src.scanner.provenance import (
-            analyze_provenance,
-            coverage_binding_value,
-            provenance_score_delta,
-        )
+        from src.scanner.provenance import analyze_provenance
 
         res = await analyze_provenance(
             surface, name, version,
@@ -2029,6 +2030,16 @@ async def _maybe_verify_provenance(
         )
         return
 
+    _apply_provenance_result(result, res, claimed_repo)
+
+
+def _apply_provenance_result(result: ScanResult, res, claimed_repo: str | None) -> None:
+    """Fold a verified :class:`ProvenanceResult` into ``result.provenance`` + the
+    coverage block (score delta, binding, Rekor pin, evidence anchor, linked repo).
+    Shared by the repo path (``_maybe_verify_provenance``) and the native package
+    scan (``scan_package``) so both wire provenance identically."""
+    from src.scanner.provenance import coverage_binding_value, provenance_score_delta
+
     delta, reason = provenance_score_delta(res)
     summary = res.summary()
     summary["score_delta"] = delta
@@ -2038,8 +2049,7 @@ async def _maybe_verify_provenance(
     # Wire into the coverage block (recompute discipline).
     if not isinstance(result.coverage, dict):
         result.coverage = {}
-    binding = coverage_binding_value(res)
-    result.coverage["provenance_binding"] = binding
+    result.coverage["provenance_binding"] = coverage_binding_value(res)
     if res.snapshot:
         snaps = result.coverage.get("db_snapshots")
         if not isinstance(snaps, dict):
@@ -2059,12 +2069,129 @@ async def _maybe_verify_provenance(
         )
         linked = result.coverage.get("linked_repo")
         if not isinstance(linked, dict):
-            linked = {"url": claimed_repo}
+            linked = {"url": claimed_repo} if claimed_repo else {}
         prov_commit = res.binding.get("commit")
         if prov_commit:
             linked["commit"] = prov_commit
         linked["binding"] = "slsa-provenance"
         result.coverage["linked_repo"] = linked
+
+
+def _repo_from_manifest(manifest: dict | None) -> str | None:
+    """Extract the declared source repository from an npm package.json ``repository``
+    field (a string or a ``{"url": ...}`` object) — the claim provenance is checked
+    against for ``source_matches_claim``."""
+    if not isinstance(manifest, dict):
+        return None
+    repo = manifest.get("repository")
+    if isinstance(repo, str):
+        return repo
+    if isinstance(repo, dict):
+        url = repo.get("url")
+        return url if isinstance(url, str) else None
+    return None
+
+
+async def scan_package(surface: str, name: str, version: str | None = None) -> ScanResult:
+    """Grade a PUBLISHED npm / PyPI package directly by coordinate — no GitHub repo
+    required. Fetches + STATICALLY scans the real artifact tree (the same 12-category
+    engine + install-hook detectors, via ``scan_artifact_files``), verifies the
+    package's build provenance on the exact coordinate (the axis that can earn A+),
+    and returns a signed A+..F ``ScanResult`` with ``coverage.surface`` set and
+    ``scan_depth = "artifact"``.
+
+    Fail-open: any fetch/scan/verify error yields a ``ScanResult`` carrying
+    ``.error`` (or a benign partial result) — it never raises.
+    """
+    from src.config import settings
+    from src.scanner.artifact_fetch import (
+        ArtifactFetchError,
+        fetch_npm_artifact,
+        fetch_pypi_artifact,
+    )
+    from src.scanner.artifact_scan import _registry_snapshot, scan_artifact_files
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
+
+    eco = (surface or "").strip().lower()
+    if eco == "python":
+        eco = "pypi"
+    result = ScanResult(repo=f"{eco}:{name}", stars=0, description="", framework="")
+    if eco not in ("npm", "pypi"):
+        result.error = f"unsupported surface: {surface!r} (use npm or pypi)"
+        return result
+    if not getattr(settings, "scanner_scan_artifact", False):
+        result.error = "artifact scanning is disabled"
+        return result
+
+    try:
+        if eco == "npm":
+            fetched = await fetch_npm_artifact(name, version)
+        else:
+            fetched = await fetch_pypi_artifact(name, version)
+    except ArtifactFetchError as exc:
+        result.error = str(exc)
+        return result
+    except Exception as exc:  # noqa: BLE001 — fail-open is mandatory
+        result.error = f"artifact fetch failed: {exc}"
+        logger.warning("scan_package fetch failed for %s:%s", eco, name, exc_info=True)
+        return result
+    if not fetched.ok:
+        result.error = fetched.error or "artifact fetch failed"
+        return result
+
+    findings, files_scanned, has_hook = scan_artifact_files(fetched)
+    result.findings = findings
+    result.files_scanned = files_scanned
+    result.total_scannable_files = files_scanned
+    result.primary_language = "JavaScript/TypeScript" if eco == "npm" else "Python"
+    result.has_readme = any(
+        Path(p).name.lower().startswith("readme") for p in fetched.files
+    )
+    result.has_license = any(
+        Path(p).name.lower().startswith(("license", "licence", "copying"))
+        for p in fetched.files
+    )
+    result.artifact_scan = {
+        "ok": True, "ecosystem": fetched.ecosystem, "name": fetched.name,
+        "version": fetched.version, "kind": fetched.kind, "digest": fetched.digest,
+        "download_url": fetched.download_url, "file_count": fetched.file_count,
+        "unpacked_size": fetched.unpacked_size, "has_install_hook": has_hook,
+    }
+    result.coverage = build_coverage(
+        surface=eco,
+        artifact_digest=fetched.digest,
+        scan_depth=SCAN_DEPTH_ARTIFACT,
+        db_snapshots={"registry": _registry_snapshot()},
+    )
+
+    # Provenance verification on the exact coordinate — this is what makes A+
+    # reachable for a package that publishes Sigstore/PEP-740 provenance.
+    if getattr(settings, "scanner_verify_provenance", False):
+        try:
+            from src.scanner.provenance import analyze_provenance
+
+            claimed_repo = _repo_from_manifest(fetched.packaged_manifest)
+            filename = (
+                Path(str(fetched.download_url).split("?", 1)[0]).name
+                if (eco == "pypi" and fetched.download_url) else None
+            )
+            res = await analyze_provenance(
+                eco, fetched.name, fetched.version,
+                filename=filename,
+                claimed_repo=claimed_repo,
+                artifact_digest=fetched.digest,
+                scan_depth=SCAN_DEPTH_ARTIFACT,
+            )
+            _apply_provenance_result(result, res, claimed_repo)
+        except Exception:
+            logger.warning(
+                "scan_package provenance wiring failed for %s:%s", eco, name, exc_info=True
+            )
+
+    result.trust_score = _calculate_trust_score(result)
+    result.category_scores = _calculate_category_scores(result)
+    result.certified = _certified_status(result)
+    return result
 
 
 async def _maybe_maintainer_signals(
