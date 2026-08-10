@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
-import { getGradeInfo } from '../../components/trust/gradeSystem'
+import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trust/gradeSystem'
+
+const _VALID_GRADES = ['A+', 'A', 'B', 'C', 'D', 'F']
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 
 /**
@@ -74,7 +76,12 @@ function findingsLine(row: CatalogRow): string | null {
 function ToolCard({ row }: { row: CatalogRow }) {
   const [open, setOpen] = useState(false)
   const { display, repoPath } = rowIdentity(row)
-  const g = row.trust_score != null ? getGradeInfo(row.trust_score) : null
+  // Prefer the served letter grade (it applies the A+ certified gate); fall back
+  // to deriving from score. This is why Browse no longer shows A+ on a 96+ repo
+  // that isn't actually certified.
+  const g = row.grade && _VALID_GRADES.includes(row.grade)
+    ? gradeInfo(row.grade as LetterGrade)
+    : (row.trust_score != null ? getGradeInfo(row.trust_score) : null)
   const chip = statusChip(row)
   const fnd = findingsLine(row)
   return (

@@ -23,6 +23,7 @@ export interface CatalogRow {
   repository_url: string | null
   endpoint_url?: string | null
   trust_score: number | null
+  grade?: string | null  // letter grade WITH the A+ certified gate (roadmap §7)
   critical: number | null
   high: number | null
   findings_count: number | null

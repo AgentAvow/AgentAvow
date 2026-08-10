@@ -44,6 +44,7 @@ class CatalogRow(BaseModel):
     full_name: str | None = None  # owner/repo for repo-based surfaces
     endpoint_url: str | None = None  # for x402 surface
     trust_score: int | None = None
+    grade: str | None = None  # letter grade WITH the A+ certified gate (roadmap §7)
     critical: int | None = None
     high: int | None = None
     findings_count: int | None = None
@@ -77,6 +78,18 @@ class CatalogResponse(BaseModel):
     surfaces: list[str] = ["x402", "mcp", "npm", "pypi"]
 
 
+def _row_grade(score: int | None, stored: str | None = None) -> str | None:
+    """The letter grade to show in the catalog. Prefer a STORED gated grade; else
+    derive from score with the A+ certified gate applied (uncertified → capped at
+    A). This is what keeps Browse from showing A+ on a repo-only 96+ scan."""
+    if stored:
+        return stored
+    if score is None:
+        return None
+    from src.api.public_scan_router import _display_grade
+    return _display_grade(score, None)
+
+
 def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     """Convert a per-surface raw record into the unified row shape."""
     if surface == "x402":
@@ -99,6 +112,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
             full_name=full_name,
             repository_url=f"https://github.com/{full_name}" if full_name else None,
             trust_score=raw.get("trust_score"),
+            grade=_row_grade(raw.get("trust_score")),
             critical=raw.get("critical_count"),
             high=raw.get("high_count"),
             findings_count=raw.get("findings_count"),
@@ -112,6 +126,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
         repository_url=raw.get("repository_url"),
         full_name=raw.get("full_name"),
         trust_score=raw.get("trust_score"),
+        grade=_row_grade(raw.get("trust_score")),
         critical=raw.get("critical"),
         high=raw.get("high"),
         findings_count=raw.get("findings_count"),
@@ -205,6 +220,7 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
                     full_name=c.full_name,
                     repository_url=f"https://github.com/{c.full_name}",
                     trust_score=c.trust_score,
+                    grade=_row_grade(c.trust_score, c.grade),
                     critical=c.critical,
                     high=c.high,
                     findings_count=c.findings_count,

@@ -2477,6 +2477,10 @@ class CommunityScan(Base):
     repo = Column(String(255), nullable=False)
     full_name = Column(String(512), nullable=False, index=True)
     trust_score = Column(Integer, nullable=True)
+    # Letter grade WITH the A+ certified gate applied (roadmap §7) — stored so the
+    # browse catalog shows the accurate grade instead of deriving A+ from score
+    # alone. Null on rows scanned before this column (catalog caps those from score).
+    grade = Column(String(4), nullable=True)
     critical = Column(Integer, nullable=True)
     high = Column(Integer, nullable=True)
     findings_count = Column(Integer, nullable=True)

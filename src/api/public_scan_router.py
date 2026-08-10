@@ -334,11 +334,18 @@ async def _capture_community_scan(
     lang = (meta.get("primary_language") or None)
     if lang:
         lang = lang[:120]
+    # The gated letter grade (A+ only when certified) — stored so Browse is accurate.
+    _score = data.get("trust_score")
+    _grade = data.get("grade") or (
+        _display_grade(_score, (data.get("certified") or {}).get("eligible"))
+        if _score is not None else None
+    )
     values = dict(
         owner=owner,
         repo=repo,
         full_name=f"{owner}/{repo}",
-        trust_score=data.get("trust_score"),
+        trust_score=_score,
+        grade=_grade,
         critical=findings.get("critical"),
         high=findings.get("high"),
         findings_count=findings.get("total"),
@@ -349,6 +356,7 @@ async def _capture_community_scan(
         constraint="uq_community_scan_target",
         set_=dict(
             trust_score=values["trust_score"],
+            grade=values["grade"],
             critical=values["critical"],
             high=values["high"],
             findings_count=values["findings_count"],

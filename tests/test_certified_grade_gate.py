@@ -158,3 +158,21 @@ def test_serializer_grade_uncertified_capped(gate_on):
 def test_serializer_grade_unchanged_when_gate_off(gate_off):
     data = psr._scan_result_to_dict(_scannable(certified={"eligible": False, "checks": {}}))
     assert data["grade"] == "A+"  # score 98 → A+ regardless of certification
+
+
+# ── catalog grade (Browse accuracy) ──────────────────────────────────────────
+
+def test_catalog_row_grade_caps_uncertified(gate_on):
+    from src.api.scan_catalog_router import _row_grade
+    # No stored grade + gate on → derive with the gate → 100 caps to A (not A+).
+    assert _row_grade(100, None) == "A"
+    assert _row_grade(85, None) == "A"
+    assert _row_grade(70, None) == "B"
+    assert _row_grade(None, None) is None
+
+
+def test_catalog_row_grade_prefers_stored(gate_on):
+    from src.api.scan_catalog_router import _row_grade
+    # A stored gated grade (e.g. a genuinely certified A+) is shown verbatim.
+    assert _row_grade(98, "A+") == "A+"
+    assert _row_grade(50, "C") == "C"
