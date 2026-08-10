@@ -26,6 +26,19 @@ export async function fetchPublicScan(
   return data
 }
 
+/** Scan a PUBLISHED npm/PyPI package by coordinate (no GitHub repo). `name` may
+ * be a scoped package (@scope/pkg) — the slash is preserved in the path. */
+export async function fetchPackageScan(
+  surface: string,
+  name: string,
+  force = false,
+): Promise<PublicScanResponse> {
+  const { data } = await publicApi.get<PublicScanResponse>(
+    `/public/scan/package/${surface}/${name}${force ? '?force=true' : ''}`,
+  )
+  return data
+}
+
 export async function fetchWalletScan(
   wallet: string,
   chain = 'ethereum',

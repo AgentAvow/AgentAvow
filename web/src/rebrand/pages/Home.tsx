@@ -10,7 +10,7 @@ import { Reveal, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { DualScore } from '../components/DualScore'
 
-const CHECK_HINTS = ['github.com/owner/repo', 'an MCP server', 'an npm package', 'a Python package', 'an agent skill']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'npm:@scope/pkg', 'a GitHub repo or package']
 
 /**
  * AgentAvow rebrand homepage.
@@ -77,7 +77,15 @@ export default function RebrandHome() {
   const navigate = useNavigate()
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
-    const m = input.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
+    const v = input.trim()
+    // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
+    const pkg = v.match(/^(npm|pypi|python)\s*:\s*(.+)$/i)
+    if (pkg) {
+      const surface = pkg[1].toLowerCase() === 'python' ? 'pypi' : pkg[1].toLowerCase()
+      navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
+      return
+    }
+    const m = v.match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
     navigate(rp(m ? `/rebrand/check/${m[1]}/${m[2]}` : '/rebrand/check'))
   }
 

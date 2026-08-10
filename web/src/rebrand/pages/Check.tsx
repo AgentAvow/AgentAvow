@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, badgeUrl, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchPackageScan, badgeUrl, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trust/gradeSystem'
 import { useAuth } from '../../hooks/useAuth'
@@ -42,7 +42,7 @@ const VERDICT_STYLE = {
   risky: { ring: 'text-danger', chip: 'bg-danger/15 text-danger', label: 'RISKY' },
 }
 
-const CHECK_HINTS = ['github.com/owner/repo', 'an MCP server', 'an npm package', 'a Python package', 'an agent skill']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'npm:@scope/pkg', 'a GitHub repo or package']
 
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA. */
 function WatchCTA({ owner, repo }: { owner: string; repo: string }) {
@@ -369,7 +369,15 @@ function Hero() {
   const navigate = useNavigate()
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const go = () => {
-    const m = value.trim().match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
+    const v = value.trim()
+    // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
+    const pkg = v.match(/^(npm|pypi|python)\s*:\s*(.+)$/i)
+    if (pkg) {
+      const surface = pkg[1].toLowerCase() === 'python' ? 'pypi' : pkg[1].toLowerCase()
+      navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
+      return
+    }
+    const m = v.match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
     if (m) navigate(rp(`/rebrand/check/${m[1]}/${m[2]}`))
   }
   return (
@@ -442,9 +450,109 @@ function ScanningLoader({ owner, repo }: { owner: string; repo: string }) {
   )
 }
 
+/** Native npm/PyPI package score view — the published artifact, graded by
+ * coordinate (no repo). Leads with the artifact/provenance trust-chain + the
+ * Certified panel (this is where A+ is actually earned), then the findings.
+ * Skips the GitHub-only surfaces (stars, adoption, README badge). */
+function PackageResult({ surface, name }: { surface: string; name: string }) {
+  const { data: scan, isLoading, isError } = useQuery({
+    queryKey: ['rebrand-pkg-scan', surface, name],
+    queryFn: () => fetchPackageScan(surface, name),
+    retry: 0,
+  })
+  if (isLoading) return <ScanningLoader owner={surface} repo={name} />
+  if (isError || !scan) {
+    return (
+      <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
+        <h1 className="text-2xl font-extrabold tracking-tight">Couldn&apos;t scan {surface}:{name}</h1>
+        <p className="mt-3 text-text-muted text-[14px]">We couldn&apos;t fetch that from the {surface} registry — check the name{surface === 'npm' ? ' (scoped packages look like @scope/name)' : ''} and try again.</p>
+        <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Scan something else</Link>
+      </div>
+    )
+  }
+  const _VALID = ['A+', 'A', 'B', 'C', 'D', 'F']
+  const g = scan.grade && _VALID.includes(scan.grade) ? gradeInfo(scan.grade as LetterGrade) : getGradeInfo(scan.trust_score)
+  const f = scan.findings
+  const cov = (scan as { coverage?: { artifact_digest?: string } }).coverage || {}
+  const prov = (scan as { provenance?: { verified?: boolean; present?: boolean } }).provenance || {}
+  const certified = (scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified
+  const digest = (cov.artifact_digest || '').replace(/^sha256:/, '').slice(0, 16)
+  const verdict = scan.trust_score >= 81 ? 'Safe to use' : scan.trust_score >= 61 ? 'Generally safe'
+    : scan.trust_score >= 41 ? 'Use with caution' : 'Significant risks'
+  return (
+    <div className="max-w-[760px] mx-auto px-6 py-14">
+      <Reveal>
+        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}>
+          <div className="relative px-7 pt-7">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">{surface}</span>
+              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Artifact-scanned</span>
+              {prov.verified && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light">✓ Provenance verified</span>}
+            </div>
+            <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{name}</h1>
+            <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
+          </div>
+          <div className="relative px-7 py-6 flex justify-center">
+            <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
+              <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
+              <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Attestation Trust</div>
+              <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
+            </div>
+          </div>
+        </div>
+      </Reveal>
+
+      {/* Certified panel — the A+ story for packages */}
+      {(scan.trust_score >= 81 || certified?.eligible) && <CertifiedPanel certified={certified} />}
+
+      {/* The verified chain */}
+      <Reveal>
+        <div className="mt-4 glass rounded-2xl p-6">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">The chain we verified</h3>
+          <div className="mt-3 flex flex-col gap-2 text-[13px]">
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Coordinate</span><span className="font-mono break-all">{scan.repo}</span></div>
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Scan depth</span><span className="font-mono text-success">artifact (real published bytes)</span></div>
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Artifact digest</span><span className="font-mono break-all">{digest ? `sha256:${digest}…` : '—'}</span></div>
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Provenance</span><span className="font-mono">{prov.verified ? 'verified ✓' : prov.present ? 'present · unverified' : 'none published (N/A)'}</span></div>
+          </div>
+        </div>
+      </Reveal>
+
+      {/* findings detail */}
+      {f?.items && f.items.length > 0 && (
+        <>
+          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">The details ({f.items.length})</h3></Reveal>
+          <div className="flex flex-col gap-2 mt-3">
+            {f.items.slice(0, 12).map((it, i) => (
+              <div key={i} className="glass rounded-xl px-4 py-3 flex gap-3 items-start">
+                <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
+                <div className="min-w-0">
+                  <div className="text-[14px]">{it.name}</div>
+                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="mt-8 flex justify-center">
+        <ShareRow owner={surface} repo={name} score={scan.trust_score} grade={g.grade} />
+      </div>
+    </div>
+  )
+}
+
 export default function RebrandCheck() {
-  const { owner, repo } = useParams()
+  const params = useParams()
   const location = useLocation()
+  // Package coordinate route (/check/pkg/:surface/*) → native npm/PyPI package scan.
+  if (params.surface) {
+    const name = params['*'] || ''
+    if (!name) return <Hero />
+    return <PackageResult surface={params.surface.toLowerCase()} name={name} />
+  }
+  const { owner, repo } = params
   // A private scan hands its result here via router state so the owner gets the
   // full detailed report on the real score page (a private repo can't be
   // re-fetched publicly). The token rides along so the Publish CTA can work.
