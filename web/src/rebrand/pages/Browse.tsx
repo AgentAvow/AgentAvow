@@ -39,6 +39,14 @@ const SEVERITIES = [
   { key: 'skipped', label: 'Skipped / errored' },
 ]
 
+const GRADES = [
+  { key: '', label: 'Any grade' },
+  { key: 'certified', label: '✦ Certified (A+)' },
+  { key: 'A', label: 'A & up' },
+  { key: 'B', label: 'B & up' },
+  { key: 'C', label: 'C & up' },
+]
+
 const PAGE_SIZE = 30
 
 function whyLines(row: CatalogRow): string[] {
@@ -73,9 +81,28 @@ function findingsLine(row: CatalogRow): string | null {
   return parts.length ? parts.join(' · ') : null
 }
 
+// A listing links to its OWN surface page (with the install button), not always
+// the GitHub repo endpoint: npm/PyPI → the package page, OpenClaw → the skill page.
+const _SURFACE_BADGE: Record<string, string> = {
+  npm: 'npm', pypi: 'PyPI', mcp: 'MCP', openclaw: 'Skill', x402: 'x402', community: 'repo',
+}
+function listingHref(row: CatalogRow): string | null {
+  const fn = row.full_name
+  if ((row.surface === 'npm' || row.surface === 'pypi') && row.name) {
+    return rp(`/rebrand/check/pkg/${row.surface}/${row.name}`)
+  }
+  if (row.surface === 'openclaw' && fn && fn.includes('/')) {
+    return rp(`/rebrand/check/skill/${fn}`)
+  }
+  if (fn && fn.includes('/')) return rp(`/rebrand/check/${fn}`)
+  return null
+}
+
 function ToolCard({ row }: { row: CatalogRow }) {
   const [open, setOpen] = useState(false)
   const { display, repoPath } = rowIdentity(row)
+  const href = listingHref(row) ?? (repoPath ? rp(`/rebrand/check/${repoPath}`) : null)
+  const surfaceBadge = _SURFACE_BADGE[row.surface]
   // Prefer the served letter grade (it applies the A+ certified gate); fall back
   // to deriving from score. This is why Browse no longer shows A+ on a 96+ repo
   // that isn't actually certified.
@@ -87,7 +114,10 @@ function ToolCard({ row }: { row: CatalogRow }) {
   return (
     <div className="glass card-hover rounded-xl p-[18px]">
       <div className="flex items-center justify-between gap-2.5">
-        <span className="font-mono text-[13.5px] break-all">{display}</span>
+        <span className="min-w-0 flex items-center gap-2">
+          {surfaceBadge && <span className="font-mono text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/12 text-primary-light shrink-0">{surfaceBadge}</span>}
+          <span className="font-mono text-[13.5px] break-all">{display}</span>
+        </span>
         {g ? (
           <span className={`font-extrabold text-[13px] px-2.5 py-0.5 rounded-lg shrink-0 ${g.textClass} ${g.bgClass}`}>{g.grade}</span>
         ) : (
@@ -109,9 +139,10 @@ function ToolCard({ row }: { row: CatalogRow }) {
           {whyLines(row).map((w) => <li key={w}>{w}</li>)}
         </ul>
       )}
-      {repoPath && (
-        <div className="mt-3">
-          <Link to={rp(`/rebrand/check/${repoPath}`)} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">Full report →</Link>
+      {href && (
+        <div className="mt-3 flex items-center gap-4">
+          <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">Full report →</Link>
+          <Link to={href} className="text-[12.5px] text-text-muted hover:text-primary-light">Add to your agent ↗</Link>
         </div>
       )}
     </div>
@@ -151,6 +182,7 @@ export default function RebrandBrowse() {
   const [tab, setTab] = useState(0)
   const [sort, setSort] = useState('score-desc')
   const [severity, setSeverity] = useState('')
+  const [grade, setGrade] = useState('')
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(0)
@@ -159,8 +191,8 @@ export default function RebrandBrowse() {
   // A search should find things anywhere — when q is set we drop the surface
   // filter so search spans the whole catalog, not just the active tab.
   const { data, isLoading, isError, isFetching } = useQuery({
-    queryKey: ['rebrand-catalog', surface, sort, severity, q, page],
-    queryFn: () => fetchCatalog({ surface: q ? '' : surface, sort, severity, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    queryKey: ['rebrand-catalog', surface, sort, severity, grade, q, page],
+    queryFn: () => fetchCatalog({ surface: q ? '' : surface, sort, severity, grade, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     placeholderData: keepPreviousData,
   })
 
@@ -178,10 +210,9 @@ export default function RebrandBrowse() {
       <div className="max-w-[1080px] mx-auto px-6 pt-14">
         <div className="max-w-[62ch]">
           <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Browse</span>
-          <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">The trust catalog</h1>
+          <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">Find tools your agent can trust</h1>
           <p className="mt-3 text-text-muted">
-            Browse tools by their signed safety grade. Instead of star ratings, every grade is backed by scan
-            evidence anyone can recompute.{total != null && <> {total.toLocaleString()} scanned so far.</>}
+            Repos, npm &amp; PyPI packages, MCP servers, and skills — every listing carries a <span className="text-text">signed safety grade</span> you can recompute, and a one-click <span className="text-text">add to your agent</span>. Not star ratings; cryptographic evidence.{total != null && <> {total.toLocaleString()} graded so far.</>}
           </p>
           <p className="mt-2.5 text-[13.5px] text-text-muted">Own one of these? <Link to={rp("/rebrand/tools")} className="text-primary-light hover:text-primary font-medium">Claim it →</Link> to run private scans, get change alerts, and own how it appears.</p>
         </div>
@@ -220,6 +251,13 @@ export default function RebrandBrowse() {
             />
             <button type="submit" className="text-[12px] font-semibold px-3 py-1 rounded-full text-white bg-primary/80 hover:bg-primary">Go</button>
           </form>
+          <select
+            value={grade}
+            onChange={(e) => reset(() => setGrade(e.target.value))}
+            className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light"
+          >
+            {GRADES.map((gr) => <option key={gr.key} value={gr.key}>{gr.label}</option>)}
+          </select>
           <select
             value={severity}
             onChange={(e) => reset(() => setSeverity(e.target.value))}

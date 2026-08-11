@@ -553,7 +553,8 @@ function CopyRow({ cmd, label, multiline }: { cmd: string; label?: string; multi
 function AddToAgent(props:
   | { kind: 'mcp'; url: string }
   | { kind: 'package'; surface: string; name: string }
-  | { kind: 'skill'; owner: string; repo: string }) {
+  | { kind: 'skill'; owner: string; repo: string }
+  | { kind: 'repo'; owner: string; repo: string; pkg?: { surface: string; name: string } }) {
   const [more, setMore] = useState(false)
   const deeplinkBtn = 'inline-flex items-center gap-1.5 text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-primary-light/40 bg-primary/10 text-primary-light hover:bg-primary/20 transition-colors'
   return (
@@ -600,6 +601,22 @@ function AddToAgent(props:
             </div>
           </>
         )}
+        {props.kind === 'repo' && (props.pkg ? (
+          <>
+            <p className="text-text-muted text-[13px] mt-1">This repo publishes the <span className="font-mono text-text">{props.pkg.surface}</span> package <span className="font-mono text-text">{props.pkg.name}</span> — install it:</p>
+            <div className="mt-3 flex flex-col gap-2">
+              {packageInstallCommands(props.pkg.surface, props.pkg.name).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} />)}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-text-muted text-[13px] mt-1">Clone the source, or scan it as a package / MCP server / skill for a 1-click install:</p>
+            <div className="mt-3 flex flex-col gap-2">
+              <CopyRow label="git" cmd={`git clone https://github.com/${props.owner}/${props.repo}`} />
+            </div>
+            <p className="mt-2 text-[11.5px] text-text-muted">Is it on npm/PyPI, an MCP server, or a skill? Scan <span className="font-mono">npm:{props.repo}</span>, <span className="font-mono">mcp:https://…</span>, or <span className="font-mono">skill:{props.owner}/{props.repo}</span> for the full install button.</p>
+          </>
+        ))}
       </div>
     </Reveal>
   )
@@ -1081,6 +1098,15 @@ function Result({ owner, repo, privateResult }: {
 
       {/* Adoption — the real 5-axis metric, distinct from safety (public repos only) */}
       {!isPrivate && <AdoptionPanel owner={owner} repo={repo} />}
+
+      {/* Add to your agent — package install if the repo resolved to one, else clone */}
+      {!isPrivate && (() => {
+        const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
+        const sd = (scan as { surface_detail?: { name?: string } }).surface_detail || {}
+        const pkg = (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
+          ? { surface: cov.surface, name: sd.name } : undefined
+        return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} />
+      })()}
 
       {/* score history timeline (living record) */}
       <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} />

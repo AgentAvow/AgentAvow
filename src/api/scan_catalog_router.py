@@ -238,6 +238,7 @@ async def scan_catalog(
     surface: str | None = Query(None, pattern="^(x402|mcp|npm|pypi|openclaw|community)$"),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
+    grade: str | None = Query(None, pattern="^(certified|A|B|C)$"),
     sort: str = Query("default", pattern="^(default|score-asc|score-desc|name)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -287,6 +288,17 @@ async def scan_catalog(
         ]
     elif severity == "skipped":
         filtered = [r for r in filtered if r.skipped or r.scan_error]
+
+    # Grade filter (curation): "certified" = A+ only; A/B/C = that band and above.
+    if grade:
+        _min_ok = {
+            "certified": {"A+"},
+            "A": {"A+", "A"},
+            "B": {"A+", "A", "B"},
+            "C": {"A+", "A", "B", "C"},
+        }.get(grade)
+        if _min_ok:
+            filtered = [r for r in filtered if (r.grade or "") in _min_ok]
 
     if sort == "score-desc":
         filtered = sorted(filtered, key=lambda r: r.trust_score or -1, reverse=True)
