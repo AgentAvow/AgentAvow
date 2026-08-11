@@ -480,6 +480,13 @@ async def private_scan(
             detail=f"Scan error: {result.error}",
         )
     data = _scan_result_to_dict(result)
+    # Count one-time (ephemeral, token-based) private scans for the metrics
+    # dashboard — these aren't persisted, so the GitHub-App count can't see them.
+    try:
+        from src.api.metrics_dashboard_router import bump_metric
+        await bump_metric("private_scan_onetime")
+    except Exception:
+        pass
     return {"repo": full_name, "private": True, **data}
 
 

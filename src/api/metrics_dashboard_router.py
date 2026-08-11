@@ -39,6 +39,8 @@ from src.models import (
     CommunityScan,
     Entity,
     FormalAttestation,
+    GitHubAppInstallation,
+    PrivateScanResult,
     RepoClaim,
     ToolWatch,
     VerificationBadge,
@@ -176,6 +178,32 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     claims_verified_total = await db.scalar(
         select(func.count()).select_from(RepoClaim).where(RepoClaim.status == "verified")
     ) or 0
+    # Public vs private claims (is_private is authoritative, set at claim time).
+    claims_private = await db.scalar(
+        select(func.count()).select_from(RepoClaim).where(
+            RepoClaim.status == "verified", RepoClaim.is_private.is_(True)
+        )
+    ) or 0
+    claims_public = await db.scalar(
+        select(func.count()).select_from(RepoClaim).where(
+            RepoClaim.status == "verified", RepoClaim.is_private.is_(False)
+        )
+    ) or 0
+    # Private-repo scanning: GitHub-App path (stored, source="app") + published-to-
+    # search + active installs. One-time token scans are ephemeral → Redis counter.
+    private_scans_app = await db.scalar(
+        select(func.count()).select_from(PrivateScanResult).where(PrivateScanResult.source == "app")
+    ) or 0
+    private_published = await db.scalar(
+        select(func.count()).select_from(PrivateScanResult).where(PrivateScanResult.published.is_(True))
+    ) or 0
+    app_installs_active = await db.scalar(
+        select(func.count()).select_from(GitHubAppInstallation).where(
+            GitHubAppInstallation.revoked_at.is_(None)
+        )
+    ) or 0
+    onetime_by_day = await _read_daily_counter("private_scan_onetime", day_strs)
+    private_scans_onetime_window = sum(onetime_by_day.values())
 
     # --- Alert webhooks ---
     alert_webhooks_active = await db.scalar(
@@ -305,6 +333,14 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "claims": {
             "created_window": int(claims_created_window),
             "verified_total": int(claims_verified_total),
+            "public": int(claims_public),
+            "private": int(claims_private),
+        },
+        "private_repos": {
+            "app_scans": int(private_scans_app),
+            "published_to_search": int(private_published),
+            "app_installs_active": int(app_installs_active),
+            "onetime_scans_window": int(private_scans_onetime_window),
         },
         "alert_webhooks": {"active": int(alert_webhooks_active)},
         "badges": {"fetches_window": int(badge_fetches_window)},
@@ -522,6 +558,7 @@ function render(d){
   const apiKeys = d.api_keys || {};
   const catalog = d.catalog || {};
   const claims = d.claims || {};
+  const priv = d.private_repos || {};
   const webhooks = d.alert_webhooks || {};
   const s = d.series || {};
   const gen = d.generated_at ? new Date(d.generated_at).toLocaleString() : "—";
@@ -534,7 +571,9 @@ function render(d){
     + card("Attestations issued", attest.issued_window, fmt(attest.issued_total)+" total", null)
     + card("API keys active", apiKeys.active, fmt(apiKeys.calls_window)+" calls (win)", s.api_calls)
     + card("Catalog size", catalog.size_total, fmt(catalog.community_scans)+" community", null)
-    + card("Verified claims", claims.verified_total, "+"+fmt(claims.created_window)+" in window", null)
+    + card("Verified claims", claims.verified_total, fmt(claims.public)+" public · "+fmt(claims.private)+" private", null)
+    + card("Private repos (GitHub App)", priv.app_scans, fmt(priv.app_installs_active)+" installs · "+fmt(priv.published_to_search)+" published", null)
+    + card("One-time private scans", priv.onetime_scans_window, "token scans (window)", null)
     + card("Alert webhooks", webhooks.active, "active", null)
     + '</div>';
 
