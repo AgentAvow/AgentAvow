@@ -91,6 +91,11 @@ export default function RebrandHome() {
       navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
       return
     }
+    // A bare URL (no prefix) that isn't a GitHub/GitLab repo link → a live MCP
+    // endpoint. Users paste the endpoint URL directly, without the `mcp:` prefix.
+    if (/^https?:\/\/\S+$/i.test(v) && !/^https?:\/\/(www\.)?(github|gitlab)\.com\//i.test(v)) {
+      navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(v)); return
+    }
     const m = v.match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
     navigate(rp(m ? `/rebrand/check/${m[1]}/${m[2]}` : '/rebrand/check'))
   }
