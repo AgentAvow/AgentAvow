@@ -323,7 +323,10 @@ async def _fetch_repo_tree(
     if token:
         headers["Authorization"] = f"token {token}"
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    # follow_redirects: GitHub 301s a renamed/moved repo's API to its canonical
+    # location (this is why facebook/react 502'd). Follow it so a moved repo still
+    # scans instead of being mistaken for "not found".
+    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
         # Get default branch — this call also confirms the repo is real/public.
         try:
             resp = await client.get(
@@ -421,7 +424,7 @@ async def _fetch_file_content(
     """
     from src.config import settings
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
         # Unmetered fast path: raw.githubusercontent (public repos, no auth).
         if ref and getattr(settings, "scanner_use_raw_content", True):
             raw_url = (
@@ -1416,6 +1419,26 @@ def _composite_findings(
     file_read = _hits(FILE_READ_RE)
     if not (untrusted and outbound and (sensitive or file_read)):
         return []
+
+    # Precision: the read and the outbound send must be NEAR each other (a plausible
+    # flow), not just co-present somewhere in a big file. A 2000-line HTTP-client lib
+    # legitimately reads proxy env, parses responses, and makes requests in unrelated
+    # places — that whole-file co-occurrence is not a real exfil chain (the requests
+    # false-"high"). Require a read↔send pair within a small window.
+    _prox = 45
+
+    def _near(reads: list[int], sends: list[int]) -> int | None:
+        for r in reads:
+            for s in sends:
+                if abs(r - s) <= _prox:
+                    return min(r, s)
+        return None
+
+    if _near(sensitive, outbound) is None and _near(file_read, outbound) is None:
+        return []
+    # Prefer the sensitive-leg finding only if a sensitive read is actually near a send.
+    if sensitive and _near(sensitive, outbound) is None:
+        sensitive = []
 
     if sensitive:
         name = "Lethal trifecta: private-data read + untrusted input + outbound network"
