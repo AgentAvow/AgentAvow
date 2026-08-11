@@ -703,8 +703,10 @@ async def scan_package_endpoint(
     surface = (surface or "").strip().lower()
     if surface == "python":
         surface = "pypi"
-    if surface not in ("npm", "pypi"):
-        raise HTTPException(404, "surface must be 'npm' or 'pypi'")
+    elif surface in ("crate", "cargo", "rust"):
+        surface = "crates"
+    if surface not in ("npm", "pypi", "crates"):
+        raise HTTPException(404, "surface must be 'npm', 'pypi', or 'crates'")
     name = (name or "").strip().strip("/")
     if not name or len(name) > 214 or any(c in name for c in ("..", " ", "\t")):
         raise HTTPException(400, "Invalid package name")

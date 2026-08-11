@@ -67,6 +67,7 @@ export const SURFACE_LABEL: Record<string, string> = {
   mcp: 'MCP servers',
   npm: 'npm packages',
   pypi: 'Python packages',
+  crates: 'Rust crates',
   openclaw: 'Agent skills',
   x402: 'x402 endpoints',
 }

@@ -10,7 +10,7 @@ import { Reveal, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { DualScore } from '../components/DualScore'
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'mcp:https://…', 'a repo, package, or MCP server']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'mcp:https://…', 'a repo, package, or MCP server']
 
 /**
  * AgentAvow rebrand homepage.
@@ -85,9 +85,10 @@ export default function RebrandHome() {
     const sk = v.match(/^skill\s*:\s*(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)
     if (sk) { navigate(rp(`/rebrand/check/skill/${sk[1]}/${sk[2]}`)); return }
     // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
-    const pkg = v.match(/^(npm|pypi|python)\s*:\s*(.+)$/i)
+    const pkg = v.match(/^(npm|pypi|python|crates|cargo|rust)\s*:\s*(.+)$/i)
     if (pkg) {
-      const surface = pkg[1].toLowerCase() === 'python' ? 'pypi' : pkg[1].toLowerCase()
+      const k = pkg[1].toLowerCase()
+      const surface = k === 'python' ? 'pypi' : (k === 'cargo' || k === 'rust') ? 'crates' : k
       navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
       return
     }

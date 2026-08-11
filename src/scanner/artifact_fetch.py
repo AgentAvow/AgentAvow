@@ -41,6 +41,10 @@ logger = logging.getLogger(__name__)
 NPM_REGISTRY = "https://registry.npmjs.org"
 PYPI_JSON = "https://pypi.org/pypi/{name}/json"
 PYPI_VERSION_JSON = "https://pypi.org/pypi/{name}/{version}/json"
+CRATES_META = "https://crates.io/api/v1/crates/{name}"
+# Direct CDN URL — bypasses the crates.io 302 to static.crates.io (which _download
+# refuses, since it disallows redirects as an SSRF guard).
+CRATES_DL = "https://static.crates.io/crates/{name}/{name}-{version}.crate"
 
 # --- Host allowlist. A resolved download URL MUST match one of these hosts, in
 # addition to passing the generic SSRF guard. This is the anti-SSRF backbone:
@@ -49,6 +53,8 @@ _ALLOWED_HOSTS = frozenset({
     "registry.npmjs.org",
     "pypi.org",
     "files.pythonhosted.org",
+    "crates.io",
+    "static.crates.io",
 })
 
 # --- Size / zip-bomb guards ---------------------------------------------------
@@ -409,6 +415,50 @@ async def fetch_pypi_artifact(
             name=name,
             version=version,
             kind=kind,
+            ok=True,
+            digest=_digest(raw),
+            download_url=url,
+            files=files,
+            unpacked_size=sum(f.size for f in files.values()),
+            file_count=len(files),
+        )
+    finally:
+        if owns:
+            await client.aclose()
+
+
+async def fetch_crates_artifact(
+    name: str, version: str | None = None, *, client: httpx.AsyncClient | None = None,
+) -> ArtifactFetchResult:
+    """Resolve + download + unpack a crates.io ``.crate`` (a gzipped tar) by coordinate.
+    crates.io asks for a descriptive User-Agent with contact info in its crawl policy."""
+    owns = client is None
+    if owns:
+        client = httpx.AsyncClient(headers={
+            "User-Agent": "AgentAvow-ArtifactScanner (safety scanning; kenne@agentavow.com)",
+        })
+    try:
+        meta = await _get_json(CRATES_META.format(name=name), client)
+        crate = meta.get("crate") or {}
+        if not version:
+            version = (
+                crate.get("max_stable_version")
+                or crate.get("max_version")
+                or crate.get("newest_version")
+            )
+            if not version:
+                versions = meta.get("versions") or []
+                version = versions[0].get("num") if versions else None
+            if not version:
+                raise ArtifactFetchError(f"no version for crates:{name}")
+        url = CRATES_DL.format(name=name, version=version)
+        raw = await _download(url, client)
+        files = _build_file_map(_unpack_tar_gz(raw))  # a .crate is a gzipped tar
+        return ArtifactFetchResult(
+            ecosystem="crates",
+            name=name,
+            version=version,
+            kind="crate",
             ok=True,
             digest=_digest(raw),
             download_url=url,

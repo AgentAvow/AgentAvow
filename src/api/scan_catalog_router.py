@@ -298,7 +298,7 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
 
 @router.get("", response_model=CatalogResponse, dependencies=[Depends(rate_limit_reads)])
 async def scan_catalog(
-    surface: str | None = Query(None, pattern="^(x402|mcp|npm|pypi|openclaw|community)$"),
+    surface: str | None = Query(None, pattern="^(x402|mcp|npm|pypi|crates|openclaw|community)$"),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
     grade: str | None = Query(None, pattern="^(certified|A|B|C)$"),

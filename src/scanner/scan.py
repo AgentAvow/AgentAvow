@@ -2181,6 +2181,7 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     from src.config import settings
     from src.scanner.artifact_fetch import (
         ArtifactFetchError,
+        fetch_crates_artifact,
         fetch_npm_artifact,
         fetch_pypi_artifact,
     )
@@ -2190,9 +2191,11 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     eco = (surface or "").strip().lower()
     if eco == "python":
         eco = "pypi"
+    elif eco in ("crate", "cargo", "rust"):
+        eco = "crates"
     result = ScanResult(repo=f"{eco}:{name}", stars=0, description="", framework="")
-    if eco not in ("npm", "pypi"):
-        result.error = f"unsupported surface: {surface!r} (use npm or pypi)"
+    if eco not in ("npm", "pypi", "crates"):
+        result.error = f"unsupported surface: {surface!r} (use npm, pypi, or crates)"
         return result
     if not getattr(settings, "scanner_scan_artifact", False):
         result.error = "artifact scanning is disabled"
@@ -2201,6 +2204,8 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     try:
         if eco == "npm":
             fetched = await fetch_npm_artifact(name, version)
+        elif eco == "crates":
+            fetched = await fetch_crates_artifact(name, version)
         else:
             fetched = await fetch_pypi_artifact(name, version)
     except ArtifactFetchError as exc:
@@ -2218,7 +2223,11 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     result.findings = findings
     result.files_scanned = files_scanned
     result.total_scannable_files = files_scanned
-    result.primary_language = "JavaScript/TypeScript" if eco == "npm" else "Python"
+    result.primary_language = (
+        "JavaScript/TypeScript" if eco == "npm"
+        else "Rust" if eco == "crates"
+        else "Python"
+    )
     result.has_readme = any(
         Path(p).name.lower().startswith("readme") for p in fetched.files
     )

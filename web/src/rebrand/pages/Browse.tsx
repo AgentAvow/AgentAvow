@@ -21,6 +21,7 @@ const SURFACES = [
   { key: 'openclaw', label: 'OpenClaw skills' },
   { key: 'npm', label: 'npm packages' },
   { key: 'pypi', label: 'Python packages' },
+  { key: 'crates', label: 'Rust crates' },
   { key: 'x402', label: 'x402 endpoints' },
   { key: 'community', label: 'Community' },
 ]
@@ -92,11 +93,11 @@ function findingsLine(row: CatalogRow): string | null {
 // A listing links to its OWN surface page (with the install button), not always
 // the GitHub repo endpoint: npm/PyPI → the package page, OpenClaw → the skill page.
 const _SURFACE_BADGE: Record<string, string> = {
-  npm: 'npm', pypi: 'PyPI', mcp: 'MCP', openclaw: 'Skill', x402: 'x402', community: 'repo',
+  npm: 'npm', pypi: 'PyPI', crates: 'crates', mcp: 'MCP', openclaw: 'Skill', x402: 'x402', community: 'repo',
 }
 function listingHref(row: CatalogRow): string | null {
   const fn = row.full_name
-  if ((row.surface === 'npm' || row.surface === 'pypi') && row.name) {
+  if ((row.surface === 'npm' || row.surface === 'pypi' || row.surface === 'crates') && row.name) {
     return rp(`/rebrand/check/pkg/${row.surface}/${row.name}`)
   }
   if (row.surface === 'openclaw' && fn && fn.includes('/')) {
