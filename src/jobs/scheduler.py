@@ -1022,7 +1022,12 @@ def _curated_seed_targets() -> list[tuple[str, str, str]]:
 
     out: list[tuple[str, str, str]] = []
     try:
-        path = Path(__file__).resolve().parents[2] / "data" / "curated-seed.json"
+        # Lives under launch-scans/ because that's the data subdir mounted into the
+        # container (the rest of data/ is gitignored + not mounted).
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "data" / "launch-scans" / "curated-seed.json"
+        )
         doc = json.loads(path.read_text())
         for name in doc.get("npm", []) or []:
             out.append(("npm", "npm", str(name)))
