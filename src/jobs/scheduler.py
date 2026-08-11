@@ -1007,6 +1007,36 @@ async def _app_rescan_loop(interval: int = APP_RESCAN_INTERVAL) -> None:
 _CATALOG_RESCAN_DEFAULT_INTERVAL = 6 * 60 * 60
 _backfill_offset = 0          # progressive cursor over the backfill target list
 _openclaw_backfill_cache: list | None = None
+_curated_seed_cache: list | None = None
+
+
+def _curated_seed_targets() -> list[tuple[str, str, str]]:
+    """Curated, recognizable agent-ecosystem tools (data/curated-seed.json) — scanned
+    into community_scans each cycle so the browse catalog LEADS with tools people
+    actually use, not just the launch scrape. Returns [(surface, owner, repo), ...]."""
+    global _curated_seed_cache
+    if _curated_seed_cache is not None:
+        return _curated_seed_cache
+    import json
+    from pathlib import Path
+
+    out: list[tuple[str, str, str]] = []
+    try:
+        path = Path(__file__).resolve().parents[2] / "data" / "curated-seed.json"
+        doc = json.loads(path.read_text())
+        for name in doc.get("npm", []) or []:
+            out.append(("npm", "npm", str(name)))
+        for name in doc.get("pypi", []) or []:
+            out.append(("pypi", "pypi", str(name)))
+        for url in doc.get("mcp", []) or []:
+            out.append(("mcp", "mcp", str(url)))
+        for pair in doc.get("openclaw", []) or []:
+            if isinstance(pair, (list, tuple)) and len(pair) == 2:
+                out.append(("openclaw", str(pair[0]), str(pair[1])))
+    except Exception:
+        logger.debug("curated seed load failed", exc_info=True)
+    _curated_seed_cache = out
+    return out
 
 
 def _openclaw_backfill_targets() -> list[tuple[str, str, str]]:
@@ -1120,8 +1150,17 @@ async def _run_catalog_rescan() -> None:
                 refreshed += 1
         await asyncio.sleep(spacing)
 
-    # (b) Growth — backfill the OpenClaw launch-corpus error backlog into
-    # community_scans, advancing a cursor each cycle so it works through the list.
+    # (b) Growth — curated seed FIRST (recognizable flagships; keep them fresh every
+    # cycle), then work through the OpenClaw launch-corpus error backlog by cursor.
+    seeded = 0
+    for surface, owner, repo in _curated_seed_targets():
+        if surface in ("github", "openclaw") and not gh_ok:
+            continue  # only the openclaw seed needs GitHub; npm/pypi/mcp don't
+        async with async_session() as db:
+            if await _rescan_catalog_row(surface, owner, repo, db):
+                seeded += 1
+        await asyncio.sleep(spacing)
+
     back_n = getattr(settings, "catalog_backfill_limit", 40)
     targets = _openclaw_backfill_targets()
     added = 0
@@ -1135,10 +1174,10 @@ async def _run_catalog_rescan() -> None:
             await asyncio.sleep(spacing)
         _backfill_offset = (start + back_n) % len(targets)
 
-    if refreshed or added:
+    if refreshed or seeded or added:
         logger.info(
-            "Catalog re-scan: refreshed %d community rows, backfilled %d launch-corpus skills",
-            refreshed, added,
+            "Catalog re-scan: refreshed %d community rows, %d curated seed, "
+            "%d launch-corpus backfill", refreshed, seeded, added,
         )
 
 

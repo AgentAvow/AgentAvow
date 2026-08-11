@@ -49,6 +49,7 @@ class CatalogRow(BaseModel):
     high: int | None = None
     findings_count: int | None = None
     primary_language: str | None = None
+    category: str | None = None  # derived purpose facet for browse curation
     is_mcp_server: bool | None = None
     scan_error: str | None = None
     skipped: str | None = None
@@ -57,9 +58,51 @@ class CatalogRow(BaseModel):
     http_status: int | None = None
 
 
+# Purpose-category rules (first match wins) — a coarse, honest facet derived from the
+# name/surface/language we already have, so browse can be filtered by what a tool DOES
+# (not just its surface). Unmatched tools fall through to "Library".
+_CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("LLM provider SDK", ("openai", "anthropic", "gemini", "mistral", "cohere",
+                          "litellm", "bedrock", "vertexai", "together-ai")),
+    ("AI framework", ("langchain", "langgraph", "llama-index", "llama_index", "llamaindex",
+                      "crewai", "crew-ai", "autogen", "semantic-kernel", "semantic_kernel",
+                      "haystack", "dspy", "instructor", "agent", "pydantic-ai", "swarm")),
+    ("Data & ML", ("numpy", "pandas", "torch", "tensorflow", "scikit", "sklearn",
+                   "transformers", "datasets", "tiktoken", "scipy", "matplotlib", "spacy")),
+    ("Web & scraping", ("playwright", "puppeteer", "cheerio", "scrapy", "scrape", "crawl",
+                        "selenium", "beautifulsoup", "requests", "httpx", "aiohttp",
+                        "axios", "node-fetch", "undici", "urllib")),
+    ("Web framework", ("fastapi", "flask", "django", "express", "uvicorn", "starlette",
+                       "nestjs", "koa", "hono", "gin", "fiber")),
+    ("Security", ("sigstore", "crypto", "jwt", "oauth", "bcrypt", "vault", "secret", "auth")),
+    ("Dev tooling", ("cli", "commander", "dotenv", "chalk", "eslint", "prettier", "vite",
+                     "webpack", "rollup", "pytest", "typer", "click", "rich")),
+]
+
+
+def _categorize(row: CatalogRow) -> str:
+    """Coarse purpose facet from the name/surface/language we already have. Surface
+    buckets first (skill/MCP/x402), then keyword rules, else 'Library'."""
+    s = (row.surface or "").lower()
+    if s == "openclaw":
+        return "Agent skill"
+    if s == "mcp" or row.is_mcp_server:
+        return "MCP server"
+    if s == "x402":
+        return "x402 endpoint"
+    hay = f"{row.name or ''} {row.full_name or ''}".lower()
+    if "mcp" in hay or "modelcontextprotocol" in hay:
+        return "MCP server"
+    for cat, kws in _CATEGORY_RULES:
+        if any(k in hay for k in kws):
+            return cat
+    return "Library"
+
+
 class CatalogSummary(BaseModel):
     total_scans: int
     by_surface: dict[str, int]
+    by_category: dict[str, int] = {}
     by_surface_critical: dict[str, int] = {}
     by_surface_high: dict[str, int] = {}
     repo_scans_total: int
@@ -253,6 +296,7 @@ async def scan_catalog(
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
     grade: str | None = Query(None, pattern="^(certified|A|B|C)$"),
+    category: str | None = Query(None, max_length=40),
     sort: str = Query("default", pattern="^(default|score-asc|score-desc|name)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -276,11 +320,25 @@ async def scan_catalog(
     if community and surface != "community":
         rows = rows + community
 
+    # Derive the purpose category on every row (idempotent) + summarize the universe.
+    for _r in rows:
+        if _r.category is None:
+            _r.category = _categorize(_r)
+    for _r in community:
+        if _r.category is None:
+            _r.category = _categorize(_r)
+    cat_counts: dict[str, int] = {}
+    for _r in (catalog["rows"] + community):
+        cat_counts[_r.category or "Library"] = cat_counts.get(_r.category or "Library", 0) + 1
+    summary.by_category = dict(sorted(cat_counts.items(), key=lambda kv: -kv[1]))
+
     filtered = rows
     if surface == "community":
         filtered = community  # the 'community' tab = every on-demand scan, any surface
     elif surface:
         filtered = [r for r in filtered if r.surface == surface]
+    if category:
+        filtered = [r for r in filtered if r.category == category]
     if q:
         # Separator-insensitive match across name / full_name / owner so
         # "news digest", "news-digest", "news_digest" and "kenneives/news-digest"

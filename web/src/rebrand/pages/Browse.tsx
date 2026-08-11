@@ -192,20 +192,24 @@ export default function RebrandBrowse() {
   const [sort, setSort] = useState('score-desc')
   const [severity, setSeverity] = useState('')
   const [grade, setGrade] = useState('')
+  const [category, setCategory] = useState('')
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(0)
   const [sheetOpen, setSheetOpen] = useState(false)
-  const activeFilters = (grade ? 1 : 0) + (severity ? 1 : 0) + (sort !== 'score-desc' ? 1 : 0)
+  const activeFilters = (grade ? 1 : 0) + (severity ? 1 : 0) + (category ? 1 : 0) + (sort !== 'score-desc' ? 1 : 0)
   const surface = SURFACES[tab].key
 
   // A search should find things anywhere — when q is set we drop the surface
   // filter so search spans the whole catalog, not just the active tab.
   const { data, isLoading, isError, isFetching } = useQuery({
-    queryKey: ['rebrand-catalog', surface, sort, severity, grade, q, page],
-    queryFn: () => fetchCatalog({ surface: q ? '' : surface, sort, severity, grade, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    queryKey: ['rebrand-catalog', surface, sort, severity, grade, category, q, page],
+    queryFn: () => fetchCatalog({ surface: q ? '' : surface, sort, severity, grade, category, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     placeholderData: keepPreviousData,
   })
+  // Category options come from the catalog's own breakdown (stable across filters).
+  const CATEGORIES = [{ key: '', label: 'All categories' },
+    ...Object.entries(data?.summary?.by_category ?? {}).map(([c, n]) => ({ key: c, label: `${c} (${n})` }))]
 
   const rows = data?.rows ?? []
   const summary = data?.summary
@@ -255,9 +259,9 @@ export default function RebrandBrowse() {
             </form>
             {/* desktop: inline filter dropdowns */}
             <div className="hidden sm:flex items-center gap-2 ml-auto">
-              {[{ v: grade, set: setGrade, opts: GRADES }, { v: severity, set: setSeverity, opts: SEVERITIES }, { v: sort, set: setSort, opts: SORTS }].map((f, i) => (
+              {[{ v: category, set: setCategory, opts: CATEGORIES }, { v: grade, set: setGrade, opts: GRADES }, { v: severity, set: setSeverity, opts: SEVERITIES }, { v: sort, set: setSort, opts: SORTS }].map((f, i) => (
                 <select key={i} value={f.v} onChange={(e) => reset(() => f.set(e.target.value))}
-                  className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light">
+                  className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light max-w-[190px]">
                   {f.opts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
               ))}
@@ -291,7 +295,7 @@ export default function RebrandBrowse() {
               <h2 className="text-[16px] font-bold">Filters</h2>
               <button onClick={() => setSheetOpen(false)} aria-label="Close" className="text-text-muted text-[22px] leading-none">×</button>
             </div>
-            {[{ label: 'Grade', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
+            {[{ label: 'Category', v: category, set: setCategory, opts: CATEGORIES }, { label: 'Grade', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
               <div key={f.label} className="mb-5">
                 <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-2">{f.label}</div>
                 <div className="flex flex-wrap gap-2">
@@ -305,7 +309,7 @@ export default function RebrandBrowse() {
               </div>
             ))}
             <div className="flex gap-3 mt-2">
-              <button onClick={() => reset(() => { setGrade(''); setSeverity(''); setSort('score-desc') })} className="flex-1 py-2.5 rounded-xl border border-border text-text-muted font-semibold text-[14px]">Clear all</button>
+              <button onClick={() => reset(() => { setGrade(''); setSeverity(''); setCategory(''); setSort('score-desc') })} className="flex-1 py-2.5 rounded-xl border border-border text-text-muted font-semibold text-[14px]">Clear all</button>
               <button onClick={() => setSheetOpen(false)} className="flex-1 py-2.5 rounded-xl text-white font-semibold text-[14px] bg-gradient-to-r from-primary to-primary-dark">Show results</button>
             </div>
           </div>

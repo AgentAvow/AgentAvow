@@ -9,6 +9,7 @@ import { publicApi } from '../lib/scanApi'
 export interface CatalogSummary {
   total_scans: number
   by_surface: Record<string, number>
+  by_category?: Record<string, number>
   by_surface_critical?: Record<string, number>
   by_surface_high?: Record<string, number>
   repo_scans_total?: number
@@ -29,6 +30,7 @@ export interface CatalogRow {
   findings_count: number | null
   is_mcp_server?: boolean | null
   primary_language?: string | null
+  category?: string | null
   scan_error?: string | null
   skipped?: string | null
   has_x402_header?: boolean | null
