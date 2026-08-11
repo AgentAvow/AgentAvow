@@ -2267,27 +2267,32 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
             result.error = "No SKILL.md found — this repo isn't a recognizable Agent Skill."
             return result
 
-        # Fetch SKILL.md + scripts + hook manifests + referenced markdown (capped).
+        # A repo can hold MANY skills (a monorepo). Grade the PRIMARY one — the
+        # shallowest SKILL.md — and scope the scripts/hooks to its own directory,
+        # so a big skills-collection doesn't blur into one grade.
+        skill_md_path = min(skill_mds, key=lambda p: (p.count("/"), p.lower()))
+        skill_dir = skill_md_path.rsplit("/", 1)[0] if "/" in skill_md_path else ""
         script_ext = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
         hook_names = ("hooks.json", "plugin.json", ".mcp.json")
-        want = []
-        for p in blobs:
+
+        def _in_skill(p: str) -> bool:
+            if skill_dir and not (p == skill_md_path or p.startswith(skill_dir + "/")):
+                return False
             base = p.rsplit("/", 1)[-1].lower()
-            if (p.lower().endswith("skill.md") or p.lower().endswith((".md",) + script_ext)
-                    or base in hook_names):
-                want.append(p)
-        want = want[:40]  # cap the fetch
+            return (p.lower().endswith((".md",) + script_ext)) or base in hook_names
+
+        # SKILL.md first (never let the cap drop it), then the rest of its dir.
+        want = [skill_md_path] + [p for p in blobs if p != skill_md_path and _in_skill(p)][:39]
 
         files: dict[str, str] = {}
         for p in want:
             txt = await _fetch_file_content(owner, repo, p, token, ref)
             if txt is not None:
                 files[p] = txt
-        if not any(p.lower().endswith("skill.md") for p in files):
+        if skill_md_path not in files:
             result.error = "Could not read the skill's SKILL.md."
             return result
 
-        skill_md_path = next(p for p in files if p.lower().endswith("skill.md"))
         skill = analyze_skill(files, skill_md_path=skill_md_path)
 
         result.findings = skill.findings
