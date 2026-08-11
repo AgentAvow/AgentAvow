@@ -503,7 +503,11 @@ PROMPT_INJECTION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "Injected system/role directive",
         re.compile(
-            r"<\s*/?\s*(?:system|important|instructions?)\s*>"
+            # Tag names are case-SENSITIVE (lowercase) via the scoped (?-i:) flag:
+            # real injection tags are `<system>` / `</instructions>`, while PascalCase
+            # generic types in typed languages (Rust/TS `Vec<Instruction>`, `<System>`)
+            # are NOT injection and must not false-fire.
+            r"<\s*/?\s*(?-i:system|important|instructions?)\s*>"
             r"|(?:^|[\s\"'])system\s*prompt\s*:"
             r"|you\s+are\s+now\s+(?:a|an|the)?\s"
             r"|your\s+(?:new|real|actual)\s+(?:instructions?|task|role)\s+(?:is|are)",
