@@ -1000,6 +1000,163 @@ async def _app_rescan_loop(interval: int = APP_RESCAN_INTERVAL) -> None:
         await asyncio.sleep(interval)
 
 
+# Catalog re-scan + growth: keep the browse catalog fresh (re-scan the stalest
+# community_scans rows) and grow it (backfill the launch-corpus error backlog into
+# community_scans via the now-more-precise live scanners). Without this, only
+# watched/claimed/registered tools get routine re-scans and the catalog goes stale.
+_CATALOG_RESCAN_DEFAULT_INTERVAL = 6 * 60 * 60
+_backfill_offset = 0          # progressive cursor over the backfill target list
+_openclaw_backfill_cache: list | None = None
+
+
+def _openclaw_backfill_targets() -> list[tuple[str, str, str]]:
+    """Coordinates for launch-corpus OpenClaw skills that errored / never graded —
+    the biggest re-scan opportunity now that skill scanning is more precise. Cached;
+    the file is static in the image. Returns [(surface, owner, repo), ...]."""
+    global _openclaw_backfill_cache
+    if _openclaw_backfill_cache is not None:
+        return _openclaw_backfill_cache
+    import json
+    from pathlib import Path
+
+    out: list[tuple[str, str, str]] = []
+    try:
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "data" / "launch-scans" / "openclaw-results.json"
+        )
+        doc = json.loads(path.read_text())
+        for e in (doc.get("repos") or []):
+            if not isinstance(e, dict):
+                continue
+            # Only re-scan the ones that errored or never got a score.
+            if e.get("trust_score") is not None and not e.get("error"):
+                continue
+            full = str(e.get("repo") or "")
+            if "/" in full:
+                owner, repo = full.split("/", 1)
+                if owner and repo:
+                    out.append(("openclaw", owner.strip(), repo.strip()))
+    except Exception:
+        logger.debug("openclaw backfill target load failed", exc_info=True)
+    _openclaw_backfill_cache = out
+    return out
+
+
+async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
+    """Re-scan one catalog coordinate by surface and upsert the fresh grade into
+    community_scans. Returns True on a successful capture. Fail-open."""
+    surface = (surface or "github").lower()
+    try:
+        if surface == "github":
+            from src.api.public_scan_router import public_scan
+            # public_scan re-scans and captures into community_scans itself.
+            await public_scan(owner=owner, repo=repo, force=True, db=db)
+            return True
+        from src.api.public_scan_router import (
+            _capture_community_scan,
+            _scan_result_to_dict,
+        )
+        from src.scanner.scan import scan_mcp, scan_package, scan_skill
+
+        if surface in ("npm", "pypi"):
+            result = await scan_package(surface, repo)
+        elif surface == "mcp":
+            result = await scan_mcp(repo)
+        elif surface == "openclaw":
+            result = await scan_skill(owner, repo)
+        else:
+            return False
+        if getattr(result, "error", None):
+            return False
+        data = _scan_result_to_dict(result)
+        await _capture_community_scan(owner, repo, data, db, surface=surface)
+        return True
+    except Exception:
+        logger.debug("catalog re-scan failed for %s %s/%s", surface, owner, repo, exc_info=True)
+        return False
+
+
+async def _run_catalog_rescan() -> None:
+    global _backfill_offset
+    from src.config import settings
+
+    if not getattr(settings, "scheduler_catalog_rescan", True):
+        return
+    from sqlalchemy import select
+
+    from src.database import async_session
+    from src.models import CommunityScan
+
+    spacing = getattr(settings, "catalog_rescan_spacing_seconds", 1.5)
+
+    # GitHub budget gate: skip the GitHub-heavy work (repo/skill scans, backfill) when
+    # the token is dead or the budget is low, so this never starves live user scans.
+    # Registry surfaces (npm/pypi/mcp) don't touch GitHub, so they run regardless.
+    gh_ok = True
+    try:
+        from src.jobs.scan_health import check_and_alert_token
+        health = await check_and_alert_token()
+        min_budget = getattr(settings, "security_rescan_min_budget", 300)
+        gh_ok = not health.dead and (health.remaining is None or health.remaining >= min_budget)
+    except Exception:
+        gh_ok = True  # probe failure shouldn't block registry re-scans
+
+    # (a) Freshness — re-scan the stalest community_scans rows (surface-aware) so
+    # on-demand catalog grades stay current instead of frozen at first-scan time.
+    fresh_n = getattr(settings, "catalog_rescan_fresh_limit", 60)
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(CommunityScan.surface, CommunityScan.owner, CommunityScan.repo)
+            .order_by(CommunityScan.last_scanned_at.asc()).limit(fresh_n)
+        )).all()
+    refreshed = 0
+    for surface, owner, repo in rows:
+        surf = (surface or "github").lower()
+        if surf in ("github", "openclaw") and not gh_ok:
+            continue  # GitHub-backed; skip under low budget
+        async with async_session() as db:
+            if await _rescan_catalog_row(surf, owner, repo, db):
+                refreshed += 1
+        await asyncio.sleep(spacing)
+
+    # (b) Growth — backfill the OpenClaw launch-corpus error backlog into
+    # community_scans, advancing a cursor each cycle so it works through the list.
+    back_n = getattr(settings, "catalog_backfill_limit", 40)
+    targets = _openclaw_backfill_targets()
+    added = 0
+    if targets and back_n > 0 and gh_ok:
+        start = _backfill_offset % len(targets)
+        batch = targets[start:start + back_n]
+        for surface, owner, repo in batch:
+            async with async_session() as db:
+                if await _rescan_catalog_row(surface, owner, repo, db):
+                    added += 1
+            await asyncio.sleep(spacing)
+        _backfill_offset = (start + back_n) % len(targets)
+
+    if refreshed or added:
+        logger.info(
+            "Catalog re-scan: refreshed %d community rows, backfilled %d launch-corpus skills",
+            refreshed, added,
+        )
+
+
+async def _catalog_rescan_loop(interval: int | None = None) -> None:
+    from src.config import settings
+
+    interval = interval or getattr(
+        settings, "catalog_rescan_interval_sec", _CATALOG_RESCAN_DEFAULT_INTERVAL
+    )
+    logger.info("Catalog re-scan loop started (interval=%ds)", interval)
+    while True:
+        try:
+            await _run_catalog_rescan()
+        except Exception:
+            logger.exception("Catalog re-scan loop iteration failed")
+        await asyncio.sleep(interval)
+
+
 async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     """Start the background scheduler task.
 
@@ -1155,6 +1312,13 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
         _app_rescan_loop(),
         name="app-rescan",
     )
+
+    # Catalog re-scan + growth (keep community_scans fresh + backfill the launch-corpus)
+    if getattr(_sched_settings, "scheduler_catalog_rescan", True):
+        asyncio.create_task(
+            _catalog_rescan_loop(),
+            name="catalog-rescan",
+        )
 
     return _scheduler_task
 

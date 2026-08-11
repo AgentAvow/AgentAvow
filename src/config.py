@@ -270,6 +270,17 @@ class Settings(BaseSettings):
     security_rescan_spacing_seconds: float = 1.0  # sleep between scans to smooth bursts
     security_rescan_min_budget: int = 300     # abort the run if core-remaining drops below this
 
+    # --- Catalog re-scan + growth loop (keeps the browse catalog fresh + grows it) --
+    # The browse catalog otherwise goes stale: only watched/claimed/registered tools
+    # get routine background re-scans. This loop (a) re-scans the stalest community_scans
+    # rows so on-demand grades stay current, and (b) backfills the launch-corpus error
+    # backlog into community_scans via the (now more precise) live scanners.
+    scheduler_catalog_rescan: bool = True
+    catalog_rescan_interval_sec: int = 6 * 60 * 60   # cycle cadence (6h)
+    catalog_rescan_fresh_limit: int = 60             # stalest community rows re-scanned/cycle
+    catalog_backfill_limit: int = 40                 # launch-corpus rows backfilled/cycle
+    catalog_rescan_spacing_seconds: float = 1.5      # sleep between scans to smooth bursts
+
     # --- Real-time GitHub rate-limit protection for the PUBLIC scan path -------
     # The daily re-scan job (Job 19) only probes GitHub's budget once/24h. Under
     # live user traffic the public scan API can drain or 429 the 5000/hr GitHub
