@@ -6,7 +6,9 @@ transiently (never persisted). Both require a signed-in account.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 import secrets
 import uuid
 
@@ -66,17 +68,226 @@ def _valid_repo(owner: str, repo: str) -> bool:
     return bool(owner) and bool(repo) and all(c.lower() in _VALID for c in owner + repo)
 
 
+_SURFACES = ("github", "npm", "pypi", "mcp", "openclaw")
+
+
+def _claim_coord(surface: str, owner: str, repo: str) -> tuple[str, str, str] | None:
+    """Map a request to stored (owner, repo, full_name), mirroring ToolWatch coords:
+    github/openclaw → owner/repo · npm/pypi → owner=surface, repo=pkg · mcp →
+    owner='mcp', repo=url. Returns None if the coordinate is invalid for the surface."""
+    s = (surface or "github").lower()
+    owner = (owner or "").strip()
+    repo = (repo or "").strip()
+    if s in ("github", "openclaw"):
+        o, r = owner.strip("/"), repo.strip("/")
+        return (o, r, f"{o}/{r}") if _valid_repo(o, r) else None
+    if s in ("npm", "pypi"):
+        # package name incl. npm scoped @scope/name
+        if not repo or not re.fullmatch(r"@?[\w.-]+(?:/[\w.-]+)?", repo):
+            return None
+        return (s, repo, f"{s}:{repo}")
+    if s == "mcp":
+        try:
+            from src.ssrf import validate_url_https
+            validate_url_https(repo, field_name="endpoint")
+        except Exception:
+            return None
+        return ("mcp", repo, repo)
+    return None
+
+
+def _norm_github_repo(url: str | None) -> str | None:
+    """Normalize any GitHub URL/spec (git+https, ssh, or a bare 'owner/repo') to
+    lowercase 'owner/repo'. Returns None for non-GitHub hosts — we only cross-check
+    a package's source against GitHub/skill claims."""
+    if not url or not isinstance(url, str):
+        return None
+    m = re.search(r"github\.com[/:]+([\w.-]+)/([\w.-]+)", url, re.IGNORECASE)
+    if m:
+        owner, repo = m.group(1), m.group(2)
+    else:
+        s = url.strip().strip("/")
+        mm = re.fullmatch(r"([\w.-]+)/([\w.-]+)", s)
+        if not mm:
+            return None
+        owner, repo = mm.group(1), mm.group(2)
+    if repo.lower().endswith(".git"):
+        repo = repo[:-4]
+    return f"{owner}/{repo}".lower()
+
+
+async def _declared_repo(surface: str, name: str) -> str | None:
+    """The GitHub repo a package DECLARES as its source (npm package.json
+    `repository`; PyPI project_urls / home_page). Self-asserted, so only trusted
+    when the user independently owns that repo. Cheap registry-metadata fetch."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            if surface == "npm":
+                r = await client.get(f"https://registry.npmjs.org/{name}")
+                if r.status_code != 200:
+                    return None
+                doc = r.json()
+                repo = doc.get("repository")
+                url = repo.get("url") if isinstance(repo, dict) else repo
+                if not url:
+                    latest = (doc.get("dist-tags") or {}).get("latest")
+                    ver = (doc.get("versions") or {}).get(latest) or {}
+                    rr = ver.get("repository")
+                    url = rr.get("url") if isinstance(rr, dict) else rr
+                return _norm_github_repo(url)
+            if surface == "pypi":
+                r = await client.get(f"https://pypi.org/pypi/{name}/json")
+                if r.status_code != 200:
+                    return None
+                info = (r.json() or {}).get("info") or {}
+                urls = info.get("project_urls") or {}
+                for key in ("Source", "Source Code", "Repository", "Code",
+                            "GitHub", "Homepage", "Home"):
+                    n = _norm_github_repo(urls.get(key))
+                    if n:
+                        return n
+                return _norm_github_repo(info.get("home_page"))
+    except Exception:
+        return None
+    return None
+
+
+async def _provenance_repo(surface: str, name: str) -> str | None:
+    """The GitHub repo cryptographically BOUND to the published artifact via
+    Sigstore/PEP-740 provenance (the strongest link). Runs the canonical package
+    scan and reads the verified binding. None if no verified provenance."""
+    try:
+        from src.scanner.scan import scan_package
+
+        r = await scan_package(surface, name)
+        prov = getattr(r, "provenance", None)
+        if isinstance(prov, dict) and prov.get("verified"):
+            return _norm_github_repo((prov.get("binding") or {}).get("repo"))
+    except Exception:
+        return None
+    return None
+
+
+async def _user_owns_repo(db: AsyncSession, entity_id, full_name: str) -> bool:
+    """True if this user holds a VERIFIED github/openclaw claim for `owner/repo`."""
+    from sqlalchemy import func as safunc
+
+    row = (await db.execute(
+        select(RepoClaim.id).where(
+            RepoClaim.entity_id == entity_id,
+            RepoClaim.status == "verified",
+            RepoClaim.surface.in_(("github", "openclaw")),
+            safunc.lower(RepoClaim.full_name) == full_name.lower(),
+        ).limit(1)
+    )).first()
+    return row is not None
+
+
+async def _package_grant(
+    db: AsyncSession, entity_id, surface: str, name: str,
+) -> tuple[bool, str | None]:
+    """Auto-grant an npm/PyPI claim by linking back to a repo the user owns. Checks
+    the cheap declared-repo link first, then the (heavier) provenance binding.
+    Returns (granted, proof_method)."""
+    decl = await _declared_repo(surface, name)
+    if decl and await _user_owns_repo(db, entity_id, decl):
+        return True, "declared-repo"
+    prov = await _provenance_repo(surface, name)
+    if prov and await _user_owns_repo(db, entity_id, prov):
+        return True, "provenance"
+    return False, None
+
+
+async def _keyword_challenge_ok(surface: str, name: str, code: str) -> bool:
+    """Fallback proof for a repo-less package: the maintainer published a version
+    carrying keyword/classifier `agentavow-verify-<code>` (only a publisher can)."""
+    token = f"agentavow-verify-{code}"
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            if surface == "npm":
+                r = await client.get(f"https://registry.npmjs.org/{name}")
+                if r.status_code != 200:
+                    return False
+                doc = r.json()
+                kws: set[str] = set()
+                if isinstance(doc.get("keywords"), list):
+                    kws.update(str(k).lower() for k in doc["keywords"])
+                latest = (doc.get("dist-tags") or {}).get("latest")
+                ver = (doc.get("versions") or {}).get(latest) or {}
+                if isinstance(ver.get("keywords"), list):
+                    kws.update(str(k).lower() for k in ver["keywords"])
+                return token in kws
+            if surface == "pypi":
+                r = await client.get(f"https://pypi.org/pypi/{name}/json")
+                if r.status_code != 200:
+                    return False
+                info = (r.json() or {}).get("info") or {}
+                blob = " ".join([
+                    str(info.get("keywords") or ""),
+                    " ".join(info.get("classifiers") or []),
+                    " ".join(str(v) for v in (info.get("project_urls") or {}).values()),
+                ]).lower()
+                return token in blob
+    except Exception:
+        return False
+    return False
+
+
+async def _mcp_challenge_ok(url: str, code: str) -> bool:
+    """Proof of MCP-endpoint control: the server returns `agentavow-verify-<code>` —
+    as an `X-AgentAvow-Verify` response header or anywhere in its serverInfo — read
+    on a fresh initialize handshake. SSRF-guarded; fail-closed."""
+    token = f"agentavow-verify-{code}"
+    try:
+        import httpx
+
+        from src.ssrf import validate_url_https
+
+        safe = validate_url_https(url, field_name="endpoint")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "User-Agent": "AgentAvow-Claim-Verify",
+        }
+        body = {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "AgentAvow", "version": "1.0"},
+            },
+        }
+        async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
+            resp = await client.post(safe, headers=headers, json=body)
+        hv = resp.headers.get("x-agentavow-verify")
+        if hv and hv.strip() == token:
+            return True
+        from src.scanner.mcp_scan import _parse_jsonrpc_body
+
+        doc = _parse_jsonrpc_body(resp.text)
+        info = ((doc or {}).get("result") or {}).get("serverInfo") or {}
+        return token in json.dumps(info).lower() or token in (resp.text or "").lower()[:8000]
+    except Exception:
+        return False
+
+
 class ClaimRequest(BaseModel):
-    owner: str = Field(..., max_length=255)
-    repo: str = Field(..., max_length=255)
+    # Surface of the tool being claimed. github/openclaw send owner+repo; npm/pypi
+    # send the package name in `repo`; mcp sends the endpoint URL in `repo`.
+    surface: str = Field("github", max_length=16)
+    owner: str = Field("", max_length=255)
+    repo: str = Field(..., max_length=512)
     # Optional: a read token proving access. When present + valid the claim is
-    # verified immediately (the path for PRIVATE repos, which can't use a topic).
+    # verified immediately (the path for PRIVATE github repos, which can't use a topic).
     token: str | None = Field(None, max_length=255)
 
 
 class VerifyRequest(BaseModel):
-    # Optional read token — supply it to verify a PRIVATE repo (proves access).
-    # Omit it to verify a public repo via its GitHub topic.
+    # Optional read token — supply it to verify a PRIVATE github repo (proves access).
+    # Omit it to verify via the surface's native proof (topic/keyword/mcp-challenge).
     token: str | None = Field(None, max_length=255)
 
 
@@ -86,13 +297,28 @@ def _serialize(c: RepoClaim, meta: dict | None = None) -> dict:
     # `meta` maps full_name -> {scanned, published, grade, score} so the unified
     # "Your tools" list can show a grade + state without a per-row fetch.
     m = (meta or {}).get(c.full_name) or {}
+    surface = getattr(c, "surface", "github") or "github"
+    code = c.verify_code
+    verify_token = f"agentavow-verify-{code}"
+    # Per-surface proof instruction the UI renders (what the owner must do to verify).
+    if surface in ("github", "openclaw"):
+        proof = {"kind": "topic", "topic": verify_token}
+    elif surface in ("npm", "pypi"):
+        proof = {"kind": "keyword", "keyword": verify_token, "registry": surface}
+    elif surface == "mcp":
+        proof = {"kind": "mcp-challenge", "header": "X-AgentAvow-Verify", "value": verify_token}
+    else:
+        proof = {"kind": "topic", "topic": verify_token}
     return {
         "id": str(c.id),
+        "surface": surface,
         "owner": c.owner,
         "repo": c.repo,
         "full_name": c.full_name,
         "status": c.status,
-        "topic": f"agentavow-verify-{c.verify_code}",
+        "topic": verify_token,  # back-compat (github topic)
+        "proof": proof,
+        "proof_method": getattr(c, "proof_method", None),
         "verified_at": c.verified_at.isoformat() if c.verified_at else None,
         "private": bool(c.is_private),
         "scanned": bool(m.get("scanned", False)),
@@ -150,6 +376,33 @@ async def list_claims(
     return {"claims": [_serialize(c, meta) for c in claims]}
 
 
+@router.get("/claim-status")
+async def claim_status(
+    surface: str = "github",
+    owner: str = "",
+    repo: str = "",
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_reads),
+):
+    """PUBLIC: has this tool been claimed by a verified owner? Powers the
+    'maintainer-claimed' trust badge on the public report. Returns only a boolean —
+    never who claimed it. Coordinates match the claim/watch convention per surface."""
+    s = (surface or "github").strip().lower()
+    coord = _claim_coord(s, owner, repo)
+    if coord is None:
+        return {"claimed": False, "surface": s}
+    o, r, _fn = coord
+    row = (await db.execute(
+        select(RepoClaim.id).where(
+            RepoClaim.surface == s,
+            RepoClaim.owner == o,
+            RepoClaim.repo == r,
+            RepoClaim.status == "verified",
+        ).limit(1)
+    )).first()
+    return {"claimed": row is not None, "surface": s}
+
+
 @router.post("/claims", status_code=201)
 async def create_claim(
     body: ClaimRequest,
@@ -158,82 +411,92 @@ async def create_claim(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_writes),
 ):
-    """Start a claim — returns the GitHub topic to add to prove ownership. Also
-    kicks off a best-effort public scan so the claimed repo shows up in the
-    catalog + search (claiming ≠ scanning otherwise)."""
-    if not _valid_repo(body.owner, body.repo):
-        raise HTTPException(status_code=400, detail="Invalid owner/repo")
-
+    """Start a claim across any surface. Ownership proof is per-surface:
+      github/openclaw → add the topic (or supply a read token for a private repo)
+      npm/pypi        → auto-granted if it links back to a repo you own, else add
+                        the keyword and re-verify
+      mcp             → have the endpoint return the challenge, then re-verify."""
+    surface = (body.surface or "github").strip().lower()
+    if surface not in _SURFACES:
+        raise HTTPException(status_code=400, detail="unsupported surface")
+    coord = _claim_coord(surface, body.owner, body.repo)
+    if coord is None:
+        raise HTTPException(status_code=400, detail="Invalid coordinate for surface")
+    owner, repo, full_name = coord
     token = (body.token or "").strip()
 
-    # Public-claim path (no token): if we can't read the repo publicly it's private
-    # (or doesn't exist) — the topic method can't work, so steer the owner to the
-    # GitHub App flow instead of creating a claim that would sit pending forever.
-    if not token:
-        try:
-            import httpx
+    # --- GitHub / OpenClaw skill: a skill IS a repo, so the repo proof applies. ---
+    if surface in ("github", "openclaw"):
+        # Public-claim path (no token): if we can't read the repo publicly it's
+        # private (or missing) — the topic method can't work, so steer the owner to
+        # the GitHub App flow instead of a claim that sits pending forever.
+        if not token:
+            try:
+                import httpx
 
-            from src.github_auth import get_github_token
+                from src.github_auth import get_github_token
 
-            gh = await get_github_token()
-            headers = {"Accept": "application/vnd.github+json"}
-            if gh:
-                headers["Authorization"] = f"Bearer {gh}"
-            async with httpx.AsyncClient(timeout=8) as client:
-                resp = await client.get(
-                    f"https://api.github.com/repos/{body.owner}/{body.repo}",
-                    headers=headers,
-                )
-            if resp.status_code != 200:
-                return {
-                    "needs_private_flow": True,
-                    "detail": (
-                        "We can't read this repo publicly. If it's private, connect the "
-                        "GitHub App below to claim + scan it. If it's public, double-check "
-                        "the owner / repo."
-                    ),
-                }
-        except Exception:
-            pass  # transient network issue — fall through and create as usual
-
-    # Make the claimed repo discoverable — scan it into the catalog in the
-    # background (public repos only; private repos use the App / private-scan).
-    background.add_task(_scan_into_catalog, body.owner, body.repo)
-
-    # A token proving repo access verifies the claim immediately — the ONLY way
-    # to verify a private repo (topics aren't readable there). Used transiently.
-    token_verified = bool(token) and await _repo_accessible_with_token(
-        body.owner, body.repo, token,
-    )
+                gh = await get_github_token()
+                headers = {"Accept": "application/vnd.github+json"}
+                if gh:
+                    headers["Authorization"] = f"Bearer {gh}"
+                async with httpx.AsyncClient(timeout=8) as client:
+                    resp = await client.get(
+                        f"https://api.github.com/repos/{owner}/{repo}", headers=headers,
+                    )
+                if resp.status_code != 200:
+                    return {
+                        "needs_private_flow": True,
+                        "detail": (
+                            "We can't read this repo publicly. If it's private, connect "
+                            "the GitHub App below to claim + scan it. If it's public, "
+                            "double-check the owner / repo."
+                        ),
+                    }
+            except Exception:
+                pass  # transient network issue — fall through and create as usual
+        # Make a claimed GitHub repo discoverable (skills aren't in the catalog yet).
+        if surface == "github":
+            background.add_task(_scan_into_catalog, owner, repo)
+        verified = bool(token) and await _repo_accessible_with_token(owner, repo, token)
+        proof_method = "token" if verified else None
+    # --- npm / PyPI: try to auto-grant by linking to a repo you own. ---
+    elif surface in ("npm", "pypi"):
+        verified, proof_method = await _package_grant(db, entity.id, surface, repo)
+    # --- MCP: always starts pending — the endpoint must return the challenge. ---
+    else:  # mcp
+        verified, proof_method = False, None
 
     existing = (await db.execute(
         select(RepoClaim).where(
             RepoClaim.entity_id == entity.id,
-            RepoClaim.owner == body.owner,
-            RepoClaim.repo == body.repo,
+            RepoClaim.surface == surface,
+            RepoClaim.owner == owner,
+            RepoClaim.repo == repo,
         )
     )).scalar_one_or_none()
     if existing is not None:
-        if token_verified and existing.status != "verified":
+        if verified and existing.status != "verified":
             from sqlalchemy import func as safunc
             existing.status = "verified"
             existing.verified_at = safunc.now()
+            existing.proof_method = proof_method
             await db.flush()
             await db.refresh(existing)
-        # Commit before the background scan runs (see claim-repo note) so the row
-        # lock releases immediately instead of being held for the whole scan.
         payload = _serialize(existing)
         await db.commit()
         return payload
     claim = RepoClaim(
         entity_id=entity.id,
-        owner=body.owner,
-        repo=body.repo,
-        full_name=f"{body.owner}/{body.repo}",
-        status="verified" if token_verified else "pending",
+        surface=surface,
+        owner=owner,
+        repo=repo,
+        full_name=full_name,
+        status="verified" if verified else "pending",
         verify_code=secrets.token_hex(8),
+        proof_method=proof_method,
     )
-    if token_verified:
+    if verified:
         from sqlalchemy import func as safunc
         claim.verified_at = safunc.now()
     db.add(claim)
@@ -252,22 +515,59 @@ async def verify_claim(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_writes),
 ):
-    """Verify a claim. Public repos: check the GitHub topic. Private repos: pass a
-    read token (proves access — topics aren't readable there). Token is transient."""
+    """Verify a claim via its surface's proof:
+      github/openclaw → GitHub topic (or a read token for a private repo)
+      npm/pypi        → repo-link (provenance/declared) or the published keyword
+      mcp             → the endpoint returns the challenge (header / serverInfo)."""
     claim = await db.get(RepoClaim, claim_id)
     if claim is None or claim.entity_id != entity.id:
         raise HTTPException(status_code=404, detail="Claim not found")
+    surface = getattr(claim, "surface", "github") or "github"
 
-    # Token path — the private-repo route.
+    async def _mark_verified(proof_method: str) -> dict:
+        from sqlalchemy import func as safunc
+        claim.status = "verified"
+        claim.verified_at = safunc.now()
+        claim.proof_method = proof_method
+        await db.flush()
+        await db.refresh(claim)
+        return {"verified": True, **_serialize(claim)}
+
+    # --- npm / PyPI: re-check the repo-link auto-grant, then the keyword challenge.
+    if surface in ("npm", "pypi"):
+        granted, pm = await _package_grant(db, entity.id, surface, claim.repo)
+        if granted:
+            return await _mark_verified(pm)
+        if await _keyword_challenge_ok(surface, claim.repo, claim.verify_code):
+            return await _mark_verified("keyword")
+        return {
+            "verified": False,
+            "keyword": f"agentavow-verify-{claim.verify_code}",
+            "detail": (
+                "Not verified yet. Either claim the package's source repo first "
+                "(we auto-link it), or add the keyword above and publish a new version."
+            ),
+        }
+
+    # --- MCP: the endpoint must return the challenge.
+    if surface == "mcp":
+        if await _mcp_challenge_ok(claim.repo, claim.verify_code):
+            return await _mark_verified("mcp-challenge")
+        return {
+            "verified": False,
+            "header": "X-AgentAvow-Verify",
+            "value": f"agentavow-verify-{claim.verify_code}",
+            "detail": (
+                "Challenge not seen yet — have the server return the value above as an "
+                "X-AgentAvow-Verify response header (or in its serverInfo), then retry."
+            ),
+        }
+
+    # --- GitHub / OpenClaw skill: token path (private) then topic path.
     token = (body.token.strip() if body and body.token else "")
     if token:
         if await _repo_accessible_with_token(claim.owner, claim.repo, token):
-            from sqlalchemy import func as safunc
-            claim.status = "verified"
-            claim.verified_at = safunc.now()
-            await db.flush()
-            await db.refresh(claim)
-            return {"verified": True, **_serialize(claim)}
+            return await _mark_verified("token")
         return {
             "verified": False,
             "detail": "That token can't read this repo — check it has read access to it.",
@@ -280,9 +580,9 @@ async def verify_claim(
         from src.github_auth import get_github_token
 
         headers = {"Accept": "application/vnd.github+json"}
-        token = await get_github_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        gh = await get_github_token()
+        if gh:
+            headers["Authorization"] = f"Bearer {gh}"
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.get(
                 f"https://api.github.com/repos/{claim.owner}/{claim.repo}/topics", headers=headers
@@ -291,13 +591,7 @@ async def verify_claim(
     except Exception:
         topics = []
     if expected in topics:
-        from sqlalchemy import func as safunc
-
-        claim.status = "verified"
-        claim.verified_at = safunc.now()
-        await db.flush()
-        await db.refresh(claim)
-        return {"verified": True, **_serialize(claim)}
+        return await _mark_verified("topic")
     return {
         "verified": False,
         "topic": expected,

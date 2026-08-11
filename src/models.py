@@ -2392,9 +2392,13 @@ class ToolWatch(Base):
 
 
 class RepoClaim(Base):
-    """A user's claim of ownership of a repo, verified via a GitHub repo topic. A
-    verified claim unlocks the fix-it report, responding to findings, and private
-    scans. Public-repo ownership proof — no token stored."""
+    """A user's claim of ownership of a tool, across every graded surface. A verified
+    claim unlocks the fix-it report, responding to findings, and (GitHub) private
+    scans. Proof is out-of-band per surface — no token stored:
+      github/openclaw → GitHub topic or App install (a skill IS a repo)
+      npm/pypi        → link back to a claimed repo (provenance/declared) or a
+                        published keyword challenge
+      mcp             → a challenge returned by the endpoint (header / serverInfo)."""
 
     __tablename__ = "repo_claims"
 
@@ -2405,21 +2409,29 @@ class RepoClaim(Base):
         nullable=False,
         index=True,
     )
+    # Multi-surface coordinate (mirrors ToolWatch): github/openclaw → owner/repo ·
+    # npm/pypi → owner=surface, repo=package · mcp → owner='mcp', repo=endpoint URL.
+    surface = Column(String(16), nullable=False, default="github", server_default="github")
     owner = Column(String(255), nullable=False)
-    repo = Column(String(255), nullable=False)
+    repo = Column(String(512), nullable=False)  # 512 so an MCP endpoint URL fits
     full_name = Column(String(512), nullable=False)
     status = Column(String(20), default="pending", nullable=False)  # pending | verified
     verify_code = Column(String(64), nullable=False)
+    # How ownership was proven — for display/audit. topic|token|app (github/openclaw)
+    # · provenance|declared-repo|keyword (npm/pypi) · mcp-challenge (mcp).
+    proof_method = Column(String(24), nullable=True)
     # Whether the claimed repo is PRIVATE (via GitHub App / token). Authoritative,
     # set at claim time — public (topic-proof) claims are always False. Drives the
     # "publish to search" affordance (public repos are auto-listed; private ones
-    # are listed only on explicit publish).
+    # are listed only on explicit publish). Registry/MCP surfaces are always public.
     is_private = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     verified_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("entity_id", "owner", "repo", name="uq_repo_claim_target"),
+        # surface is part of the key: a github repo and an openclaw skill can share
+        # owner/repo coordinates without colliding (same lesson as ToolWatch/t16).
+        UniqueConstraint("entity_id", "surface", "owner", "repo", name="uq_repo_claim_target"),
     )
 
 

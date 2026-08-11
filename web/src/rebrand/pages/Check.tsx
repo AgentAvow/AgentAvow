@@ -80,6 +80,24 @@ function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner
   )
 }
 
+/** "✓ Maintainer-claimed" — a public trust signal shown when a verified owner has
+ * claimed this exact tool. Coordinates follow the claim/watch convention per
+ * surface (github/openclaw → owner/repo · npm/pypi → repo=pkg · mcp → repo=url). */
+function ClaimedBadge({ surface, owner = '', repo }: { surface: string; owner?: string; repo: string }) {
+  const { data } = useQuery({
+    queryKey: ['claim-status', surface, owner, repo],
+    queryFn: async () => (await api.get<{ claimed: boolean }>(
+      `/account/claim-status?surface=${encodeURIComponent(surface)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+    )).data,
+    staleTime: 60_000,
+    retry: 0,
+  })
+  if (!data?.claimed) return null
+  return (
+    <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success" title="A verified owner has claimed this tool">✓ Maintainer-claimed</span>
+  )
+}
+
 /** Co-equal score ring — used for BOTH Attestation Trust and Adoption so the two
  * scores read as peers. Draws to `fill` (0–1) when given, a full ring otherwise;
  * dashed + muted when there's no data (e.g. a just-launched tool with no adoption). */
@@ -686,6 +704,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">Agent Skill</span>
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Capability-graded</span>
+              <ClaimedBadge surface="openclaw" owner={owner} repo={repo} />
             </div>
             <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}</h1>
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
@@ -780,6 +799,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">MCP server</span>
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">⚡ Live-graded</span>
+              <ClaimedBadge surface="mcp" repo={endpoint} />
             </div>
             <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all font-mono">{endpoint}</h1>
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
@@ -869,6 +889,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">{surface}</span>
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Artifact-scanned</span>
               {prov.verified && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light">✓ Provenance verified</span>}
+              <ClaimedBadge surface={surface} repo={name} />
             </div>
             <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{name}</h1>
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
@@ -1057,6 +1078,7 @@ function Result({ owner, repo, privateResult }: {
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
             {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">{storedPrivate ? '🔒 Private · via GitHub App' : '🔒 Private scan · not public'}</span>}
+            {!isPrivate && <ClaimedBadge surface="github" owner={owner} repo={repo} />}
           </div>
           <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
           <div className="mt-1 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>

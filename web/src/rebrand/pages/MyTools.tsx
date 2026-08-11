@@ -38,11 +38,39 @@ function ConfettiBurst() {
   )
 }
 
+interface ClaimProof {
+  kind: 'topic' | 'keyword' | 'mcp-challenge'
+  topic?: string; keyword?: string; registry?: string; header?: string; value?: string
+}
 interface Claim {
-  id: string; owner: string; repo: string; full_name: string; status: string; topic: string
+  id: string; surface?: string; owner: string; repo: string; full_name: string; status: string; topic: string
+  proof?: ClaimProof; proof_method?: string | null
   private?: boolean; scanned?: boolean; published?: boolean; grade?: string | null; score?: number | null
 }
 interface Installation { id: string; installation_id: string; account_login: string | null; revoked: boolean; repos?: { full_name: string; private: boolean }[] }
+
+/** Parse a free-form coordinate the way the Check page does →
+ * { surface, owner, repo } for POST /account/claims. */
+function parseClaimCoord(raw: string): { surface: string; owner: string; repo: string } | null {
+  const s = raw.trim()
+  if (!s) return null
+  let m
+  if ((m = s.match(/^(npm|pypi):(.+)$/i))) return { surface: m[1].toLowerCase(), owner: '', repo: m[2].trim() }
+  if ((m = s.match(/^mcp:(.+)$/i))) return { surface: 'mcp', owner: '', repo: m[1].trim() }
+  if ((m = s.match(/^skill:([\w.-]+)\/([\w.-]+)$/i))) return { surface: 'openclaw', owner: m[1], repo: m[2] }
+  if (/^https?:\/\//i.test(s)) return { surface: 'mcp', owner: '', repo: s } // bare URL → MCP endpoint
+  if ((m = s.match(/^([\w.-]+)\/([\w.-]+)$/))) return { surface: 'github', owner: m[1], repo: m[2] }
+  return null
+}
+
+/** Route a claim to its correct public report page per surface. */
+function claimReportHref(c: Claim): string {
+  const s = (c.surface || 'github').toLowerCase()
+  if (s === 'npm' || s === 'pypi') return rp(`/rebrand/check/pkg/${s}/${c.repo}`)
+  if (s === 'mcp') return rp(`/rebrand/check/mcp?endpoint=${encodeURIComponent(c.repo)}`)
+  if (s === 'openclaw') return rp(`/rebrand/check/skill/${c.owner}/${c.repo}`)
+  return rp(`/rebrand/check/${c.owner}/${c.repo}`)
+}
 
 // ── shared query hooks (react-query dedupes by key across components) ─────────
 const CLAIMS_KEY = ['rebrand-claims']
@@ -86,30 +114,35 @@ function GradeBadge({ score, grade }: { score?: number | null; grade?: string | 
 
 // ── ZONE 1 — Add a tool ──────────────────────────────────────────────────────
 
-/** The single entry point for adding a repo. Public repos verify by topic; a
- * private/unreadable repo nudges the owner to the GitHub App in Connections. */
+/** The single entry point for claiming ANY tool — a repo, npm/PyPI package, MCP
+ * server, or skill. One smart input detects the surface (npm:, pypi:, mcp:,
+ * skill:, a URL, or owner/repo). Each surface has its own proof, shown on the row. */
 function AddToolForm() {
   const qc = useQueryClient()
-  const [owner, setOwner] = useState('')
-  const [repo, setRepo] = useState('')
+  const [coord, setCoord] = useState('')
   const [privateHint, setPrivateHint] = useState<string | null>(null)
+  const [parseErr, setParseErr] = useState(false)
   const create = useMutation({
-    mutationFn: async () => (await api.post<{ needs_private_flow?: boolean; detail?: string }>('/account/claims', { owner: owner.trim(), repo: repo.trim() })).data,
+    mutationFn: async () => {
+      const parsed = parseClaimCoord(coord)
+      if (!parsed) { setParseErr(true); throw new Error('unparseable') }
+      setParseErr(false)
+      return (await api.post<{ needs_private_flow?: boolean; detail?: string }>('/account/claims', parsed)).data
+    },
     onSuccess: async (data) => {
       if (data?.needs_private_flow) { setPrivateHint(data.detail || 'This looks like a private repo — connect the GitHub App in Connections below.'); return }
-      setPrivateHint(null); setOwner(''); setRepo(''); await qc.refetchQueries({ queryKey: CLAIMS_KEY })
+      setPrivateHint(null); setCoord(''); await qc.refetchQueries({ queryKey: CLAIMS_KEY })
     },
   })
   return (
     <div>
       <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="flex gap-2">
-        <input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="owner" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
-        <span className="self-center text-text-muted">/</span>
-        <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light" />
-        <button type="submit" disabled={create.isPending || !owner.trim() || !repo.trim()} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">{create.isPending ? 'Claiming…' : 'Claim'}</button>
+        <input value={coord} onChange={(e) => setCoord(e.target.value)} placeholder="owner/repo · npm:chalk · pypi:requests · mcp:https://… · skill:owner/repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light font-mono" />
+        <button type="submit" disabled={create.isPending || !coord.trim()} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">{create.isPending ? 'Claiming…' : 'Claim'}</button>
       </form>
-      <p className="mt-2 text-[12.5px] text-text-muted">Public repo? We verify with a GitHub topic. Private repo? Connect the GitHub App in <span className="text-text">Connections</span> — then claim it below.</p>
-      {create.isError && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t claim — check the owner / repo and try again.</div>}
+      <p className="mt-2 text-[12.5px] text-text-muted">Claim any tool you own. <span className="text-text">Repos/skills</span> verify by GitHub topic (private repos: connect the App in <span className="text-text">Connections</span>). <span className="text-text">npm/PyPI</span> auto-link to a repo you&apos;ve claimed. <span className="text-text">MCP servers</span> verify by a challenge your endpoint returns.</p>
+      {parseErr && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t read that — try <span className="font-mono">owner/repo</span>, <span className="font-mono">npm:name</span>, <span className="font-mono">mcp:https://…</span>, or <span className="font-mono">skill:owner/repo</span>.</div>}
+      {create.isError && !parseErr && <div className="mt-2 text-[12.5px] text-danger">Couldn&apos;t claim — check the coordinate and try again.</div>}
       {privateHint && <div className="mt-2 text-[12.5px] text-warning">🔒 {privateHint}</div>}
     </div>
   )
@@ -286,9 +319,60 @@ function OneTimeScanExpander() {
 
 // ── ZONE 3 — Your tools ──────────────────────────────────────────────────────
 
-/** One claimed repo — a single consistent row for every state: pending public
- * (verify in-row), verified public, private scanning, private publishable, and
- * private listed. Grade + state on the left, one actions cluster on the right. */
+/** A copy-able verification code chip. */
+function CodeChip({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
+      <code className="inline-block font-mono text-[12px] bg-surface border border-border rounded px-2 py-1 break-all select-all">{value}</code>
+      <button type="button" onClick={() => { navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="text-[11.5px] font-medium px-2 py-1 rounded-md border border-border text-text-muted hover:text-text hover:border-primary-light">{copied ? 'Copied ✓' : 'Copy'}</button>
+    </div>
+  )
+}
+
+/** npm/PyPI proof panel — two ways to verify: link the source repo (auto), or
+ * publish a keyword challenge. */
+function ClaimPkgProof({ c, onVerify, pending, msg }: { c: Claim; onVerify: () => void; pending: boolean; msg: string | null }) {
+  const kw = c.proof?.keyword || c.topic
+  const reg = c.surface === 'pypi' ? 'PyPI' : 'npm'
+  const field = c.surface === 'pypi' ? 'keywords (or a classifier) in pyproject.toml / setup.cfg' : 'the "keywords" array in package.json'
+  const btn = 'text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60'
+  return (
+    <div>
+      <div className="font-semibold text-text">Prove you publish this {reg} package — two ways:</div>
+      <ol className="mt-2 flex flex-col gap-1.5 list-decimal pl-4 marker:text-primary-light marker:font-semibold">
+        <li><span className="text-text font-medium">Claim its source repo first (easiest).</span> If this package links to a GitHub repo — by build provenance or its declared <span className="font-mono">repository</span> — and you&apos;ve claimed that repo above, we verify this automatically. Just hit Verify.</li>
+        <li><span className="text-text font-medium">Or publish a keyword challenge.</span> Add this keyword to {field}, publish a new version, then Verify:</li>
+      </ol>
+      <CodeChip value={kw} />
+      <button onClick={onVerify} disabled={pending} className={btn + ' mt-2.5'}>{pending ? 'Checking…' : 'Verify'}</button>
+      {msg && <div className="mt-2 text-warning">{msg}</div>}
+    </div>
+  )
+}
+
+/** MCP proof panel — the endpoint must echo the challenge. */
+function ClaimMcpProof({ c, onVerify, pending, msg }: { c: Claim; onVerify: () => void; pending: boolean; msg: string | null }) {
+  const header = c.proof?.header || 'X-AgentAvow-Verify'
+  const value = c.proof?.value || c.topic
+  const btn = 'text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60'
+  return (
+    <div>
+      <div className="font-semibold text-text">Prove you control this MCP server — return the challenge:</div>
+      <ol className="mt-2 flex flex-col gap-1.5 list-decimal pl-4 marker:text-primary-light marker:font-semibold">
+        <li>Have your server return this response header on the endpoint (or include the value anywhere in its <span className="font-mono">serverInfo</span>):</li>
+      </ol>
+      <CodeChip value={`${header}: ${value}`} />
+      <p className="mt-2">We read it on a live MCP <span className="font-mono">initialize</span> handshake — the same connection we grade. Then click Verify.</p>
+      <button onClick={onVerify} disabled={pending} className={btn + ' mt-2.5'}>{pending ? 'Checking…' : 'Verify'}</button>
+      {msg && <div className="mt-2 text-warning">{msg}</div>}
+    </div>
+  )
+}
+
+/** One claimed tool — a single consistent row for every state: pending
+ * (verify in-row, per surface), verified, private scanning, publishable, and
+ * listed. Grade/state on the left, one actions cluster on the right. */
 function ToolRow({ c }: { c: Claim }) {
   const qc = useQueryClient()
   const reduce = useReducedMotion()
@@ -324,6 +408,8 @@ function ToolRow({ c }: { c: Claim }) {
     onSuccess: refetchAll,
   })
 
+  const surface = (c.surface || 'github').toLowerCase()
+  const isRepoLike = surface === 'github' || surface === 'openclaw'
   const verified = c.status === 'verified' || celebrating
   const btn = 'text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60'
   const link = 'text-[12.5px] font-semibold text-primary-light hover:text-primary'
@@ -333,17 +419,20 @@ function ToolRow({ c }: { c: Claim }) {
   let leftChip: React.ReactNode = null
   if (verified && c.scanned) leftChip = <GradeBadge score={c.score} grade={c.grade} />
   else if (verified && c.private && !c.scanned) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light shrink-0">scanning…</span>
-  else if (!verified) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-warning/15 text-warning shrink-0">unverified</span>
+  else if (verified) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-success/15 text-success shrink-0">✓ owned</span>
+  else leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-warning/15 text-warning shrink-0">unverified</span>
 
   // Right-side actions cluster, consistent order: [state] [primary] [report] [remove]
   const actions: React.ReactNode[] = []
   if (!verified) {
-    actions.push(<button key="v" onClick={() => setShowVerify((s) => !s)} className={link}>Verify topic {showVerify ? '▾' : '▸'}</button>)
+    actions.push(<button key="v" onClick={() => setShowVerify((s) => !s)} className={link}>Verify {showVerify ? '▾' : '▸'}</button>)
   } else {
     if (c.private && c.scanned && !c.published) actions.push(<button key="pub" onClick={() => publish.mutate()} disabled={publish.isPending} className={btn}>{publish.isPending ? 'Publishing…' : '🌐 Publish'}</button>)
     if (c.private && c.published) actions.push(<span key="listed" className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light">🌐 Listed</span>)
     if (c.private && c.published) actions.push(<button key="unpub" onClick={() => unpublish.mutate()} disabled={unpublish.isPending} className={muted + ' hover:text-text'}>{unpublish.isPending ? 'Unlisting…' : 'Unlist'}</button>)
-    if (c.scanned) actions.push(<Link key="rep" to={rp(`/rebrand/check/${c.owner}/${c.repo}`)} className={link}>Report →</Link>)
+    // Repo claims gate Report on a completed catalog scan; surface claims scan the
+    // report live, so always offer it.
+    if (c.scanned || !isRepoLike) actions.push(<Link key="rep" to={claimReportHref(c)} className={link}>Report →</Link>)
   }
   actions.push(<button key="rm" onClick={() => remove.mutate()} className={muted}>Remove</button>)
 
@@ -353,16 +442,25 @@ function ToolRow({ c }: { c: Claim }) {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2.5 min-w-0">
           {leftChip}
+          {!isRepoLike && <span className="font-mono text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/12 text-primary-light shrink-0">{surface}</span>}
           <span className="font-mono text-[13.5px] break-all min-w-0">{c.full_name}</span>
           {c.private && <span className="text-[11px] text-text-muted shrink-0">🔒 private</span>}
+          {verified && c.proof_method && <span className="text-[10.5px] text-text-muted shrink-0" title="How ownership was proven">· {c.proof_method}</span>}
         </div>
         <div className="flex items-center gap-3 shrink-0">{actions}</div>
       </div>
 
-      {/* pending public repo → topic verification expands in-row (the one expander) */}
+      {/* pending claim → per-surface proof expands in-row (the one expander) */}
       {!verified && showVerify && (
         <div className="mt-3 rounded-lg border border-border/70 p-3 text-[12.5px] text-text-muted">
-          <div className="font-semibold text-text">Prove you own this public repo — add a GitHub topic:</div>
+          {!isRepoLike && (surface === 'npm' || surface === 'pypi') && (
+            <ClaimPkgProof c={c} onVerify={() => verify.mutate()} pending={verify.isPending} msg={msg} />
+          )}
+          {!isRepoLike && surface === 'mcp' && (
+            <ClaimMcpProof c={c} onVerify={() => verify.mutate()} pending={verify.isPending} msg={msg} />
+          )}
+          {isRepoLike && (<>
+          <div className="font-semibold text-text">Prove you own this {surface === 'openclaw' ? 'skill' : 'public repo'} — add a GitHub topic:</div>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <code className="inline-block font-mono text-[12px] bg-surface border border-border rounded px-2 py-1 break-all select-all">{c.topic}</code>
             <button type="button" onClick={() => { navigator.clipboard?.writeText(c.topic); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="text-[11.5px] font-medium px-2 py-1 rounded-md border border-border text-text-muted hover:text-text hover:border-primary-light">{copied ? 'Copied ✓' : 'Copy'}</button>
@@ -378,6 +476,7 @@ function ToolRow({ c }: { c: Claim }) {
           </details>
           <button onClick={() => verify.mutate()} disabled={verify.isPending} className={btn + ' mt-2.5'}>{verify.isPending ? 'Checking…' : 'Verify topic'}</button>
           {msg && <div className="mt-2 text-warning">{msg}</div>}
+          </>)}
         </div>
       )}
       {celebrating && (
