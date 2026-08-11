@@ -729,6 +729,58 @@ async def scan_package_endpoint(
 
 
 @router.get(
+    "/skill/{owner}/{repo}",
+    response_model=PublicScanResponse,
+    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+)
+async def scan_skill_endpoint(
+    owner: str,
+    repo: str,
+    request: Request = None,
+    force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    db: AsyncSession = Depends(get_db),
+) -> PublicScanResponse:
+    """Grade an **OpenClaw / Agent Skill** in a GitHub repo — the capability surface
+    a repo scan misses: the auto-exec `allowed-tools` grant, always-loaded-
+    description injection, lifecycle-hook escalation, and env-exfil in bundled
+    scripts. `coverage.surface = openclaw`. E.g. `/public/scan/skill/owner/repo`."""
+    if not all(c.isalnum() or c in "-_." for c in owner):
+        raise HTTPException(400, "Invalid owner")
+    if not repo.replace("-", "").replace("_", "").replace(".", "").isalnum():
+        raise HTTPException(400, "Invalid repo name")
+    full = f"skill:{owner}/{repo}"
+
+    if not force:
+        cached = await _get_cached("skill", f"{owner}/{repo}")
+        if cached:
+            jws = create_jws(canonicalize(_build_scan_payload(full, cached)))
+            return _package_response(full, cached, jws, cached=True)
+
+    if request is not None:
+        from src.api.rate_limit import enforce_fresh_scan_limit
+        await enforce_fresh_scan_limit(request)
+
+    from src.scanner.scan import scan_skill
+
+    try:
+        result = await asyncio.wait_for(scan_skill(owner, repo), timeout=60)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            503, "Scan is taking longer than expected — please retry shortly.",
+            headers={"Retry-After": "30"},
+        )
+    if result.error:
+        low = result.error.lower()
+        code = 404 if ("not found" in low or "no skill.md" in low) else 502
+        raise HTTPException(code, f"Scan error: {result.error}")
+
+    data = _scan_result_to_dict(result)
+    await _set_cached("skill", f"{owner}/{repo}", data)
+    jws = create_jws(canonicalize(_build_scan_payload(full, data)))
+    return _package_response(full, data, jws, cached=False)
+
+
+@router.get(
     "/mcp",
     response_model=PublicScanResponse,
     dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],

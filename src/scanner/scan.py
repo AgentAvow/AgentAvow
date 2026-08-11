@@ -2244,6 +2244,75 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     return result
 
 
+async def scan_skill(owner: str, repo: str) -> ScanResult:
+    """Grade an OpenClaw / Agent SKILL living in a GitHub repo (roadmap §2.D). Finds
+    the SKILL.md, fetches the manifest + bundled scripts + lifecycle-hook files, and
+    STATICALLY grades the capability surface — the auto-exec `allowed-tools` grant,
+    always-loaded-description injection, lifecycle-hook escalation, and env-exfil in
+    scripts. ``coverage.surface = openclaw``, scan_depth = artifact. Fail-open."""
+    from src.github_auth import get_github_token
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
+    from src.scanner.skill_scan import analyze_skill
+
+    result = ScanResult(repo=f"skill:{owner}/{repo}", stars=0, description="", framework="")
+    try:
+        token = await get_github_token()
+        tree, _trunc, repo_ok, ref = await _fetch_repo_tree(owner, repo, token)
+        if not repo_ok:
+            result.error = "Repository not found or unreadable"
+            return result
+        blobs = [it["path"] for it in tree if it.get("type") == "blob"]
+        skill_mds = [p for p in blobs if p.lower().endswith("skill.md")]
+        if not skill_mds:
+            result.error = "No SKILL.md found — this repo isn't a recognizable Agent Skill."
+            return result
+
+        # Fetch SKILL.md + scripts + hook manifests + referenced markdown (capped).
+        script_ext = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
+        hook_names = ("hooks.json", "plugin.json", ".mcp.json")
+        want = []
+        for p in blobs:
+            base = p.rsplit("/", 1)[-1].lower()
+            if (p.lower().endswith("skill.md") or p.lower().endswith((".md",) + script_ext)
+                    or base in hook_names):
+                want.append(p)
+        want = want[:40]  # cap the fetch
+
+        files: dict[str, str] = {}
+        for p in want:
+            txt = await _fetch_file_content(owner, repo, p, token, ref)
+            if txt is not None:
+                files[p] = txt
+        if not any(p.lower().endswith("skill.md") for p in files):
+            result.error = "Could not read the skill's SKILL.md."
+            return result
+
+        skill_md_path = next(p for p in files if p.lower().endswith("skill.md"))
+        skill = analyze_skill(files, skill_md_path=skill_md_path)
+
+        result.findings = skill.findings
+        result.files_scanned = len(files)
+        result.total_scannable_files = len(files)
+        result.primary_language = "Agent Skill"
+        result.tool_manifest_digest = skill.tree_digest
+        result.artifact_scan = {
+            "surface": "openclaw", "skill_name": skill.skill_name,
+            "allowed_tools": skill.allowed_tools, "auto_exec_risk": skill.auto_exec_risk,
+            "has_lifecycle_hooks": skill.has_lifecycle_hooks, "script_count": skill.script_count,
+            "tree_digest": skill.tree_digest,
+        }
+        if skill.script_count == 0 and not skill.has_lifecycle_hooks and result.critical_count == 0:
+            result.positive_signals.append("No bundled scripts or lifecycle hooks")
+        result.coverage = build_coverage(surface="openclaw", scan_depth=SCAN_DEPTH_ARTIFACT)
+        result.trust_score = _calculate_trust_score(result)
+        result.category_scores = _calculate_category_scores(result)
+        result.certified = _certified_status(result)
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        result.error = f"skill scan failed: {exc}"
+        logger.warning("scan_skill failed for %s/%s", owner, repo, exc_info=True)
+    return result
+
+
 async def _maybe_maintainer_signals(
     result: ScanResult,
     owner: str,
