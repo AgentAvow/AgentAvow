@@ -98,6 +98,32 @@ function ClaimedBadge({ surface, owner = '', repo }: { surface: string; owner?: 
   )
 }
 
+/** A compact adoption signal for the non-GitHub surfaces the score pages otherwise
+ * show as "New" — real registry downloads (npm/PyPI) or GitHub stars (skills). Only
+ * renders when there's a real number, so it never fabricates adoption. */
+function AdoptionLine({ surface, owner = '', repo }: { surface: string; owner?: string; repo: string }) {
+  const { data } = useQuery({
+    queryKey: ['surface-adoption', surface, owner, repo],
+    queryFn: async () => (await api.get<{ headline?: { count: number; unit: string } | null }>(
+      `/public/scan/adoption?surface=${encodeURIComponent(surface)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+    )).data,
+    staleTime: 300_000,
+    retry: 0,
+  })
+  const h = data?.headline
+  if (!h || !h.count || h.count <= 0) return null
+  const compact = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n))
+  const icon = h.unit === 'stars' ? '★' : h.unit === 'dependents' ? '🔗' : '📈'
+  return (
+    <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border/60 bg-surface/40 px-3 py-1.5">
+      <span className="text-[15px]" style={{ color: '#F59E0B' }}>{icon}</span>
+      <span className="font-mono text-[14px] font-bold" style={{ color: '#F59E0B' }}>{compact(h.count)}</span>
+      <span className="text-[12px] text-text-muted">{h.unit}</span>
+      <span className="text-[11px] text-text-muted/70 ml-0.5">· adoption</span>
+    </div>
+  )
+}
+
 /** Co-equal score ring — used for BOTH Attestation Trust and Adoption so the two
  * scores read as peers. Draws to `fill` (0–1) when given, a full ring otherwise;
  * dashed + muted when there's no data (e.g. a just-launched tool with no adoption). */
@@ -722,6 +748,9 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
           </div>
+          <div className="relative px-7 pb-6 -mt-2 flex justify-center">
+            <AdoptionLine surface="openclaw" owner={owner} repo={repo} />
+          </div>
         </div>
       </Reveal>
 
@@ -906,6 +935,9 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Attestation Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
+          </div>
+          <div className="relative px-7 pb-6 -mt-2 flex justify-center">
+            <AdoptionLine surface={surface} repo={name} />
           </div>
         </div>
       </Reveal>

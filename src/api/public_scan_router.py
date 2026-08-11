@@ -1670,6 +1670,74 @@ async def scan_adoption(
     return result.to_public_dict()
 
 
+@router.get("/adoption", dependencies=[Depends(rate_limit_reads)])
+async def scan_adoption_surface(
+    surface: str = "github",
+    owner: str = "",
+    repo: str = "",
+) -> dict:
+    """Surface-aware adoption — 'do real, independent parties rely on this?' — for the
+    non-GitHub surfaces the repo `/adoption` endpoint can't serve: npm/PyPI (real
+    registry downloads + reverse-dependents) and skills (GitHub stars — a skill IS a
+    repo). Distinct from the trust grade; fail-open. Returns the published axis
+    breakdown plus a `headline` {count, unit} for the adoption ring. Coordinates follow
+    the claim/watch convention (npm/pypi → repo=package · openclaw → owner/repo)."""
+    from src.scanner.adoption import (
+        build_axis_dependents,
+        build_axis_downloads,
+        build_axis_stars,
+        compute_adoption,
+    )
+    from src.scanner.adoption_sources import (
+        fetch_ecosystems_dependents,
+        fetch_npm_downloads,
+        fetch_pypi_downloads,
+    )
+
+    s = (surface or "github").lower()
+    axes: list = []
+    headline: dict | None = None
+
+    if s in ("npm", "pypi"):
+        pkg = repo.strip()
+        dl = await (fetch_npm_downloads(pkg) if s == "npm" else fetch_pypi_downloads(pkg))
+        dep = await fetch_ecosystems_dependents(
+            "npmjs.org" if s == "npm" else "pypi.org", pkg,
+        )
+        dep_pkgs = (dep or {}).get("dependent_packages")
+        dep_repos = (dep or {}).get("dependent_repos")
+        if dl:
+            series = dl.get("series") or []
+            weekly = int(sum(series[-7:])) if series else None
+            headline = {
+                "count": weekly if weekly is not None else dl.get("total"),
+                "unit": "downloads/wk" if weekly is not None else "downloads/yr",
+            }
+            axes.append(build_axis_downloads(
+                total_downloads=dl.get("total"), series=series,
+                dependents_for_ratio=int(dep_pkgs or 0) + int(dep_repos or 0),
+            ))
+        if dep:
+            if headline is None and (dep_pkgs or dep_repos):
+                headline = {"count": int(dep_pkgs or 0) + int(dep_repos or 0), "unit": "dependents"}
+            axes.append(build_axis_dependents(
+                dependent_packages=dep_pkgs, dependent_repos=dep_repos,
+            ))
+    elif s in ("github", "openclaw"):
+        # A skill is a GitHub repo — stars are the honest adoption signal.
+        stars = await _github_stars(owner.strip(), repo.strip())
+        if stars is not None:
+            headline = {"count": stars, "unit": "stars"}
+            axes.append(build_axis_stars(stars=stars))
+    # MCP: a bare live endpoint has no reliable registry-usage signal → adoption
+    # stays absent (honest) rather than fabricated.
+
+    result = compute_adoption(axes)
+    out = result.to_public_dict()
+    out["headline"] = headline
+    return out
+
+
 def _verdict_text(grade: str) -> str:
     """Return a consumer-friendly safety verdict for a letter grade."""
     if grade in ("A+", "A"):
