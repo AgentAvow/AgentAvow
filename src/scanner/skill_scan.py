@@ -28,6 +28,26 @@ _TOOL_RISK: dict[str, int] = {
 }
 _DANGEROUS_TOOLS = {"bash", "shell", "execute", "run", "write", "edit", "multiedit"}
 
+# Declared-vs-actual capability DRIFT: which declared tools GRANT each capability
+# class, and high-precision patterns for what a bundled script ACTUALLY does. If a
+# script exercises a capability the always-loaded `allowed-tools` never declared, the
+# user approved a narrower grant than the shipped code uses (the "says Read, opens
+# sockets" deception). Patterns are deliberately tight to avoid false positives.
+_NET_TOOLS = {"webfetch", "websearch", "fetch", "mcp", "task", "agent"}
+_EXEC_TOOLS = {"bash", "shell", "execute", "run"}
+_CAP_NETWORK_RE = re.compile(
+    r"(?i)(?:\b(?:curl|wget|ncat)\b|\bnc\s+-\w"
+    r"|/dev/tcp/|socket\.socket|socket\.create_connection|create_connection\s*\("
+    r"|requests\.(?:get|post|put|patch|request|head)\s*\(|urllib\.request|http\.client"
+    r"|httpx\.(?:get|post|request|Client|AsyncClient)"
+    r"|\bfetch\s*\(|\baxios\b|XMLHttpRequest|new\s+WebSocket)"
+)
+_CAP_EXEC_RE = re.compile(
+    r"(?i)(subprocess\.\w+\s*\(|os\.system\s*\(|os\.popen\s*\(|child_process"
+    r"|\bexecSync\b|\bspawnSync\b|\bspawn\s*\(|(?<![.\w])exec\s*\(|(?<![.\w])eval\s*\("
+    r"|\bsh\s+-c\b|\bbash\s+-c\b|\bos/exec\b|exec\.Command)"
+)
+
 _HOOK_FILES = ("hooks.json", "plugin.json", ".mcp.json")
 _HOOK_KEYS_RE = re.compile(
     r"\b(SessionStart|PreToolUse|PostToolUse|UserPromptSubmit|UserPromptExpansion|Notification)\b"
@@ -212,7 +232,10 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
                 "code the user never explicitly invokes. Review every command string.",
             ))
 
-    # 4 + 5. scripts — env-exfil / sandbox-probe + the 12-category engine
+    # 4 + 5. scripts — env-exfil / sandbox-probe + the 12-category engine, and
+    # collect ACTUAL capabilities for the declared-vs-actual drift check (§6).
+    net_scripts: list[str] = []
+    exec_scripts: list[str] = []
     for path, text in files.items():
         if not text or not path.lower().endswith(_SCRIPT_EXT):
             continue
@@ -225,7 +248,36 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
                 "Reading ~/.aws, ~/.ssh, .env, *_KEY/*_TOKEN, or 169.254.169.254 from a skill "
                 "script is a near-unambiguous exfiltration pattern.",
             ))
+        if _CAP_NETWORK_RE.search(text):
+            net_scripts.append(path)
+        if _CAP_EXEC_RE.search(text):
+            exec_scripts.append(path)
         result.findings.extend(_scan_text(text, path))
+
+    # 6. Declared-vs-actual capability DRIFT — a bundled script exercises a capability
+    # the always-loaded `allowed-tools` never declared. The user approves a narrow
+    # grant (e.g. Read-only); the shipped code does more. This is what a manifest scan
+    # alone misses: the deception is in the gap between what's DECLARED and what RUNS.
+    declared = set(result.allowed_tools)
+    if net_scripts and not (declared & _NET_TOOLS):
+        result.findings.append(_finding(
+            "skill_capability",
+            "Declared-vs-actual DRIFT: bundled script(s) make network calls but "
+            f"allowed-tools grants no network capability ({', '.join(sorted(net_scripts)[:3])})",
+            "high", sorted(net_scripts)[0],
+            "The skill's declared capabilities don't include network access, yet its "
+            "shipped scripts open connections — undeclared egress the user never approved "
+            "(an exfiltration path). Declare the capability honestly or remove the calls.",
+        ))
+    if exec_scripts and not (declared & _EXEC_TOOLS):
+        result.findings.append(_finding(
+            "skill_capability",
+            "Declared-vs-actual DRIFT: bundled script(s) execute processes/shell but "
+            f"allowed-tools grants no Bash/Shell/Run ({', '.join(sorted(exec_scripts)[:3])})",
+            "high", sorted(exec_scripts)[0],
+            "The skill ships scripts that spawn processes or shell out, but its declared "
+            "allowed-tools never grants execution — capability the user didn't approve.",
+        ))
 
     return result
 
