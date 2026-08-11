@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import Markdown from 'react-markdown'
 import howGradingWorks from '../docs/how-grading-works.md?raw'
+import gateOnTheGrade from '../docs/gate-on-the-grade.md?raw'
 import checkGuide from '../docs/check-guide.md?raw'
 import trustBadges from '../docs/trust-badges.md?raw'
 import verifyAttestations from '../docs/verify-attestations.md?raw'
@@ -15,6 +16,7 @@ import verifyAttestations from '../docs/verify-attestations.md?raw'
 
 const DOCS = [
   { slug: 'how-grading-works', title: 'How grading works', body: howGradingWorks },
+  { slug: 'gate-on-the-grade', title: 'Gate on the grade', body: gateOnTheGrade },
   { slug: 'check-guide', title: 'Reading your scan grade', body: checkGuide },
   { slug: 'trust-badges', title: 'Add a trust badge', body: trustBadges },
   { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations },

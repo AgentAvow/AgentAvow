@@ -415,6 +415,24 @@ async def _clean_db_once():
             "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS "
             "organization_id UUID"
         ))
+        # Multi-surface columns (migrations t15–t18) — the test DB is patched via
+        # raw DDL, not alembic, so add the newer columns here to avoid schema drift.
+        # `ALTER TABLE IF EXISTS` patches pre-existing tables and no-ops on tables
+        # not yet created (create_all builds those fresh from current metadata).
+        for _ddl in [
+            "ALTER TABLE IF EXISTS community_scans ADD COLUMN IF NOT EXISTS grade VARCHAR(4)",
+            "ALTER TABLE IF EXISTS community_scans ADD COLUMN IF NOT EXISTS surface "
+            "VARCHAR(16) NOT NULL DEFAULT 'github'",
+            "ALTER TABLE IF EXISTS community_scans ALTER COLUMN repo TYPE VARCHAR(512)",
+            "ALTER TABLE IF EXISTS repo_claims ADD COLUMN IF NOT EXISTS surface "
+            "VARCHAR(16) NOT NULL DEFAULT 'github'",
+            "ALTER TABLE IF EXISTS repo_claims ADD COLUMN IF NOT EXISTS proof_method VARCHAR(24)",
+            "ALTER TABLE IF EXISTS repo_claims ALTER COLUMN repo TYPE VARCHAR(512)",
+            "ALTER TABLE IF EXISTS tool_watches ADD COLUMN IF NOT EXISTS surface "
+            "VARCHAR(16) NOT NULL DEFAULT 'github'",
+            "ALTER TABLE IF EXISTS tool_watches ALTER COLUMN repo TYPE VARCHAR(512)",
+        ]:
+            await conn.execute(text(_ddl))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_webhooks_active "
             "ON webhook_subscriptions (is_active)"

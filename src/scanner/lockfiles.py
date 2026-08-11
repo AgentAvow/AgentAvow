@@ -152,9 +152,18 @@ def parse_yarn_lock(text: str) -> list[Dep]:
 
 
 def parse_pnpm_lock(text: str) -> list[Dep]:
-    """pnpm ``pnpm-lock.yaml`` — keys like ``/name/1.2.3`` or ``/name@1.2.3``."""
+    """pnpm ``pnpm-lock.yaml`` — keys like ``/name/1.2.3`` or ``/name@1.2.3``.
+
+    Dev-only deps (a ``dev: true`` sub-field, pnpm v5/6/8) are marked so the
+    supply-chain pass can exclude them, matching the npm/Pipfile behaviour. (pnpm v9
+    moves dev-ness into the ``importers`` section — not yet parsed; those deps stay
+    prod-classified, which is the safe/conservative default.)
+    """
+    from dataclasses import replace
+
     out: list[Dep] = []
     in_packages = False
+    cur = -1  # index in `out` of the package whose sub-fields we're reading
     for line in text.splitlines():
         if re.match(r"^packages:\s*$", line):
             in_packages = True
@@ -162,6 +171,11 @@ def parse_pnpm_lock(text: str) -> list[Dep]:
         if in_packages and line and not line[0].isspace():
             break  # left the packages: block
         if not in_packages:
+            continue
+        # A ``dev: true`` sub-field marks the current package dev-only. Sub-fields
+        # have a value after the colon, so they never match the key regex below.
+        if cur >= 0 and re.match(r"\s+dev:\s*true\s*$", line):
+            out[cur] = replace(out[cur], dev=True)
             continue
         m = re.match(r"\s+(['\"]?)(/?[^:'\"]+)\1:\s*$", line)
         if not m:
@@ -181,11 +195,14 @@ def parse_pnpm_lock(text: str) -> list[Dep]:
             # v5/6 form: name/version or @scope/name/version, version last segment.
             parts = key.rsplit("/", 1)
             if len(parts) != 2:
+                # A sub-block header (dependencies:/optionalDependencies:) — keep the
+                # current package so its later ``dev: true`` still attaches.
                 continue
             name, ver = parts
         name, ver = name.strip(), _clean_version(ver)
         if name and ver and _SEMVERISH.match(ver):
             out.append(Dep(ECO_NPM, name, ver))
+            cur = len(out) - 1
     return out
 
 

@@ -38,75 +38,96 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import NotFound from './pages/NotFound'
 
+// Deploy-safe lazy loading. When we redeploy, route chunks get new hashes and the
+// old files are removed — a tab opened before the deploy then 404s the old chunk on
+// navigation ("Browse/scan broke"). Wrap every lazy import so a chunk-load failure
+// reloads the page ONCE (sessionStorage-guarded against loops) to pull fresh chunks;
+// a second failure falls through to the ErrorBoundary instead of looping.
+const CHUNK_RELOAD_KEY = 'ag:chunk-reload'
+function lazyWithReload<T extends { default: React.ComponentType<unknown> }>(
+  factory: () => Promise<T>,
+) {
+  return lazy(() =>
+    factory().catch((err) => {
+      if (!sessionStorage.getItem(CHUNK_RELOAD_KEY)) {
+        sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()))
+        window.location.reload()
+        return new Promise<T>(() => {}) // never resolves; the reload takes over
+      }
+      throw err // already retried once — let the ErrorBoundary handle it
+    }),
+  )
+}
+
 // Lazy loaded pages
-const AuthCallback = lazy(() => import('./pages/AuthCallback'))
-const Feed = lazy(() => import('./pages/Feed'))
-const Profile = lazy(() => import('./pages/Profile'))
-const Search = lazy(() => import('./pages/Search'))
-const PostDetail = lazy(() => import('./pages/PostDetail'))
-const Graph = lazy(() => import('./pages/Graph'))
-const Marketplace = lazy(() => import('./pages/Marketplace'))
-const Notifications = lazy(() => import('./pages/Notifications'))
-const Messages = lazy(() => import('./pages/Messages'))
-const Settings = lazy(() => import('./pages/Settings'))
-const Submolts = lazy(() => import('./pages/Submolts'))
-const SubmoltDetail = lazy(() => import('./pages/SubmoltDetail'))
-const Agents = lazy(() => import('./pages/Agents'))
-const CreateListing = lazy(() => import('./pages/CreateListing'))
-const ListingDetail = lazy(() => import('./pages/ListingDetail'))
-const Bookmarks = lazy(() => import('./pages/Bookmarks'))
-const Admin = lazy(() => import('./pages/Admin'))
-const Webhooks = lazy(() => import('./pages/Webhooks'))
-const VerifyEmail = lazy(() => import('./pages/VerifyEmail'))
-const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
-const ResetPassword = lazy(() => import('./pages/ResetPassword'))
-const TransactionHistory = lazy(() => import('./pages/TransactionHistory'))
-const MyListings = lazy(() => import('./pages/MyListings'))
-const Leaderboard = lazy(() => import('./pages/Leaderboard'))
-const TrustDetail = lazy(() => import('./pages/TrustDetail'))
-const Evolution = lazy(() => import('./pages/Evolution'))
-const McpTools = lazy(() => import('./pages/McpTools'))
-const Discover = lazy(() => import('./pages/Discover'))
+const AuthCallback = lazyWithReload(() => import('./pages/AuthCallback'))
+const Feed = lazyWithReload(() => import('./pages/Feed'))
+const Profile = lazyWithReload(() => import('./pages/Profile'))
+const Search = lazyWithReload(() => import('./pages/Search'))
+const PostDetail = lazyWithReload(() => import('./pages/PostDetail'))
+const Graph = lazyWithReload(() => import('./pages/Graph'))
+const Marketplace = lazyWithReload(() => import('./pages/Marketplace'))
+const Notifications = lazyWithReload(() => import('./pages/Notifications'))
+const Messages = lazyWithReload(() => import('./pages/Messages'))
+const Settings = lazyWithReload(() => import('./pages/Settings'))
+const Submolts = lazyWithReload(() => import('./pages/Submolts'))
+const SubmoltDetail = lazyWithReload(() => import('./pages/SubmoltDetail'))
+const Agents = lazyWithReload(() => import('./pages/Agents'))
+const CreateListing = lazyWithReload(() => import('./pages/CreateListing'))
+const ListingDetail = lazyWithReload(() => import('./pages/ListingDetail'))
+const Bookmarks = lazyWithReload(() => import('./pages/Bookmarks'))
+const Admin = lazyWithReload(() => import('./pages/Admin'))
+const Webhooks = lazyWithReload(() => import('./pages/Webhooks'))
+const VerifyEmail = lazyWithReload(() => import('./pages/VerifyEmail'))
+const ForgotPassword = lazyWithReload(() => import('./pages/ForgotPassword'))
+const ResetPassword = lazyWithReload(() => import('./pages/ResetPassword'))
+const TransactionHistory = lazyWithReload(() => import('./pages/TransactionHistory'))
+const MyListings = lazyWithReload(() => import('./pages/MyListings'))
+const Leaderboard = lazyWithReload(() => import('./pages/Leaderboard'))
+const TrustDetail = lazyWithReload(() => import('./pages/TrustDetail'))
+const Evolution = lazyWithReload(() => import('./pages/Evolution'))
+const McpTools = lazyWithReload(() => import('./pages/McpTools'))
+const Discover = lazyWithReload(() => import('./pages/Discover'))
 // AgentDeepDive merged into Profile — redirect old route
 function AgentRedirect() {
   const { entityId } = useParams<{ entityId: string }>()
   return <Navigate to={`/profile/${entityId}`} replace />
 }
-const Dashboard = lazy(() => import('./pages/Dashboard'))
-const Disputes = lazy(() => import('./pages/Disputes'))
-const Legal = lazy(() => import('./pages/Legal'))
-const Badges = lazy(() => import('./pages/Badges'))
-const BotOnboarding = lazy(() => import('./pages/BotOnboarding'))
-const Developers = lazy(() => import('./pages/Developers'))
-const Onboarding = lazy(() => import('./pages/Onboarding'))
-const AvatarPicker = lazy(() => import('./pages/AvatarPicker'))
-const DocsHub = lazy(() => import('./pages/Docs'))
-const FAQ = lazy(() => import('./pages/FAQ'))
-const Sandbox = lazy(() => import('./pages/Sandbox'))
-const Check = lazy(() => import('./pages/Check'))
-const X402Explorer = lazy(() => import('./pages/X402Explorer'))
-const Scans = lazy(() => import('./pages/Scans'))
-const StateOfAgentSecurity2026 = lazy(() => import('./pages/StateOfAgentSecurity2026'))
-const Research = lazy(() => import('./pages/Research'))
+const Dashboard = lazyWithReload(() => import('./pages/Dashboard'))
+const Disputes = lazyWithReload(() => import('./pages/Disputes'))
+const Legal = lazyWithReload(() => import('./pages/Legal'))
+const Badges = lazyWithReload(() => import('./pages/Badges'))
+const BotOnboarding = lazyWithReload(() => import('./pages/BotOnboarding'))
+const Developers = lazyWithReload(() => import('./pages/Developers'))
+const Onboarding = lazyWithReload(() => import('./pages/Onboarding'))
+const AvatarPicker = lazyWithReload(() => import('./pages/AvatarPicker'))
+const DocsHub = lazyWithReload(() => import('./pages/Docs'))
+const FAQ = lazyWithReload(() => import('./pages/FAQ'))
+const Sandbox = lazyWithReload(() => import('./pages/Sandbox'))
+const Check = lazyWithReload(() => import('./pages/Check'))
+const X402Explorer = lazyWithReload(() => import('./pages/X402Explorer'))
+const Scans = lazyWithReload(() => import('./pages/Scans'))
+const StateOfAgentSecurity2026 = lazyWithReload(() => import('./pages/StateOfAgentSecurity2026'))
+const Research = lazyWithReload(() => import('./pages/Research'))
 
 // AgentAvow rebrand sandbox — isolated /rebrand/* tree (see docs/internal/rebrand-build-spec-and-loose-ends.md)
-const RebrandLayout = lazy(() => import('./rebrand/RebrandLayout'))
-const RebrandHome = lazy(() => import('./rebrand/pages/Home'))
-const RebrandBrowse = lazy(() => import('./rebrand/pages/Browse'))
-const RebrandBadge = lazy(() => import('./rebrand/pages/Badge'))
-const RebrandDocs = lazy(() => import('./rebrand/pages/Docs'))
-const RebrandCheck = lazy(() => import('./rebrand/pages/Check'))
-const RebrandLogin = lazy(() => import('./rebrand/pages/Login'))
-const RebrandLegal = lazy(() => import('./rebrand/pages/Legal'))
-const RebrandAccount = lazy(() => import('./rebrand/pages/Account'))
-const RebrandMyTools = lazy(() => import('./rebrand/pages/MyTools'))
-const RebrandHowItWorks = lazy(() => import('./rebrand/pages/HowItWorks'))
-const RebrandResearch = lazy(() => import('./rebrand/pages/Research'))
-const RebrandClaim = lazy(() => import('./rebrand/pages/Claim'))
-const RebrandFAQ = lazy(() => import('./rebrand/pages/FAQ'))
-const RebrandSettings = lazy(() => import('./rebrand/pages/Settings'))
-const RebrandAvatar = lazy(() => import('./rebrand/pages/Avatar'))
-const RebrandSandbox = lazy(() => import('./rebrand/pages/Sandbox'))
+const RebrandLayout = lazyWithReload(() => import('./rebrand/RebrandLayout'))
+const RebrandHome = lazyWithReload(() => import('./rebrand/pages/Home'))
+const RebrandBrowse = lazyWithReload(() => import('./rebrand/pages/Browse'))
+const RebrandBadge = lazyWithReload(() => import('./rebrand/pages/Badge'))
+const RebrandDocs = lazyWithReload(() => import('./rebrand/pages/Docs'))
+const RebrandCheck = lazyWithReload(() => import('./rebrand/pages/Check'))
+const RebrandLogin = lazyWithReload(() => import('./rebrand/pages/Login'))
+const RebrandLegal = lazyWithReload(() => import('./rebrand/pages/Legal'))
+const RebrandAccount = lazyWithReload(() => import('./rebrand/pages/Account'))
+const RebrandMyTools = lazyWithReload(() => import('./rebrand/pages/MyTools'))
+const RebrandHowItWorks = lazyWithReload(() => import('./rebrand/pages/HowItWorks'))
+const RebrandResearch = lazyWithReload(() => import('./rebrand/pages/Research'))
+const RebrandClaim = lazyWithReload(() => import('./rebrand/pages/Claim'))
+const RebrandFAQ = lazyWithReload(() => import('./rebrand/pages/FAQ'))
+const RebrandSettings = lazyWithReload(() => import('./rebrand/pages/Settings'))
+const RebrandAvatar = lazyWithReload(() => import('./rebrand/pages/Avatar'))
+const RebrandSandbox = lazyWithReload(() => import('./rebrand/pages/Sandbox'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -248,6 +269,9 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // A route chunk loaded successfully → clear the one-shot reload guard so the NEXT
+  // deploy can self-heal this tab too (otherwise the first reload would be the only one).
+  useEffect(() => { sessionStorage.removeItem(CHUNK_RELOAD_KEY) }, [])
   return (
     <HelmetProvider>
     <ThemeProvider>

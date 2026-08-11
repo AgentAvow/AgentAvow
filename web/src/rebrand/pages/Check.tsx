@@ -416,6 +416,7 @@ function Hero() {
     ['GitHub repo', 'github.com/vercel/next.js'],
     ['npm package', 'npm:sigstore'],
     ['PyPI package', 'pypi:requests'],
+    ['MCP server', 'mcp:https://mcp.deepwiki.com/mcp'],
   ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">

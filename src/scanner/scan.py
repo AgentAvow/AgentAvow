@@ -203,6 +203,25 @@ def _is_production_lockfile(path: str) -> bool:
     return not any(p in _NON_PROD_DIR_MARKERS for p in parts)
 
 
+# A finding in non-shipped code (tests, fixtures, examples, benchmarks, docs,
+# scripts) is not the surface an agent connects to — it counts at a fraction of a
+# shipped finding, so a large monorepo's test/fixture noise can't collapse the grade
+# of what it actually ships. (This is why react-scale repos previously graded D.)
+_NONSHIPPED_FINDING_WEIGHT = 0.15
+
+
+def _is_nonshipped_path(path: str) -> bool:
+    """True if the file lives under a non-shipped directory (test/fixture/example/
+    benchmark/docs/scripts/…) — reuses the lockfile non-prod dir taxonomy."""
+    parts = [p.lower() for p in Path(path).parts[:-1]]  # dirs only
+    return any(p in _NON_PROD_DIR_MARKERS for p in parts)
+
+
+def _finding_grade_weight(f) -> float:
+    """Score weight for one finding: 1.0 for shipped code, a fraction for non-shipped."""
+    return _NONSHIPPED_FINDING_WEIGHT if _is_nonshipped_path(f.file_path) else 1.0
+
+
 def _is_source_file(path: str) -> bool:
     """Check if a file should be scanned for source patterns."""
     ext = Path(path).suffix.lower()
@@ -1542,13 +1561,16 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # Dependency vulns are scored separately (bounded); the general severity
     # model applies only to first-party CODE findings.
     code_findings = [f for f in result.findings if f.category not in _DEP_CATEGORIES]
-    code_critical = sum(1 for f in code_findings if f.severity == "critical")
-    code_high = sum(1 for f in code_findings if f.severity == "high")
-    code_medium = sum(1 for f in code_findings if f.severity == "medium")
+    # Weight by shipped-vs-non-shipped: a finding in tests/fixtures/examples counts at
+    # a fraction, so a big monorepo's test noise can't tank the grade of what it ships.
+    code_critical = sum(_finding_grade_weight(f) for f in code_findings if f.severity == "critical")
+    code_high = sum(_finding_grade_weight(f) for f in code_findings if f.severity == "high")
+    code_medium = sum(_finding_grade_weight(f) for f in code_findings if f.severity == "medium")
 
-    # Clean repos start higher — no findings means the code passed review
+    # Clean repos start higher — no findings means the code passed review. The <0.5
+    # threshold keeps a repo whose only issues are a few test-file findings at 80.
     total_findings = code_critical + code_high + code_medium
-    score = 80 if total_findings == 0 else 70
+    score = 80 if total_findings < 0.5 else 70
 
     # For MCP servers and media/audio tools, discount expected patterns
     # These are intentional capabilities, not vulnerabilities
@@ -1638,7 +1660,7 @@ def _calculate_trust_score(result: ScanResult) -> int:
         excess = result.suppressed_count - 3
         score -= excess * 3
 
-    return max(0, min(100, score))
+    return max(0, min(100, int(round(score))))
 
 
 def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
@@ -1687,17 +1709,20 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
             continue
         score_cat = category_map.get(finding.category)
         if score_cat:
-            deduction = severity_weights.get(finding.severity, 3)
+            deduction: float = severity_weights.get(finding.severity, 3)
             # Discount expected MCP patterns to 10% of normal penalty
             if finding.category in expected_mcp_categories and finding.severity != "critical":
-                deduction = max(1, deduction // 10)
-            scores[score_cat] = max(0, scores[score_cat] - deduction)
+                deduction = max(1, int(deduction) // 10)
+            # Non-shipped code (tests/fixtures/examples) counts at a fraction, so a
+            # monorepo's test noise doesn't tank the category axes either.
+            deduction *= _finding_grade_weight(finding)
+            scores[score_cat] = max(0.0, scores[score_cat] - deduction)
 
     # dependency_health mirrors the bounded overall dependency penalty so the
     # category card and the grade tell the same story.
     scores["dependency_health"] = max(0, 100 - _dependency_penalty(result.findings))
 
-    return scores
+    return {k: int(round(v)) for k, v in scores.items()}
 
 
 def _dedupe_regex_vs_osv(result: ScanResult, osv_findings: list[Finding]) -> None:

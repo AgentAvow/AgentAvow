@@ -842,7 +842,9 @@ async def scan_mcp_endpoint(
             headers={"Retry-After": "20"},
         )
     if result.error:
-        raise HTTPException(502, f"Scan error: {result.error}")
+        # An unreachable / non-Streamable-HTTP endpoint is a bad USER input, not a
+        # server fault — return 422 (client error) so it doesn't page us as a 5xx.
+        raise HTTPException(422, f"Scan error: {result.error}")
 
     data = _scan_result_to_dict(result)
     await _set_cached("mcp", key, data)
