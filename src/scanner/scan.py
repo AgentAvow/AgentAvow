@@ -2269,8 +2269,13 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
 
         # A repo can hold MANY skills (a monorepo). Grade the PRIMARY one — the
         # shallowest SKILL.md — and scope the scripts/hooks to its own directory,
-        # so a big skills-collection doesn't blur into one grade.
-        skill_md_path = min(skill_mds, key=lambda p: (p.count("/"), p.lower()))
+        # so a big skills-collection doesn't blur into one grade. Skip template/
+        # example/test skeletons so we grade a REAL skill (keep them only if that's
+        # all there is).
+        import re as _re
+        _skel = _re.compile(r"(?:^|/)(template|example|sample|demo|starter|_?tests?)s?/", _re.I)
+        _real = [p for p in skill_mds if not _skel.search(p)]
+        skill_md_path = min(_real or skill_mds, key=lambda p: (p.count("/"), p.lower()))
         skill_dir = skill_md_path.rsplit("/", 1)[0] if "/" in skill_md_path else ""
         script_ext = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
         hook_names = ("hooks.json", "plugin.json", ".mcp.json")

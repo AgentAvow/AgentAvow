@@ -159,6 +159,7 @@ class PublicScanResponse(BaseModel):
     certified: dict = {}  # A+ certified-tier eligibility {eligible, checks} (roadmap §7)
     coverage: dict = {}  # scan_depth / provenance_binding / db_snapshots (recompute discipline)
     provenance: dict = {}  # verified build-provenance summary (Phase 3), if any
+    surface_detail: dict = {}  # per-surface detail (skill allowed_tools, MCP capabilities, …)
     category_scores: dict[str, int] = {}  # per-category 0-100 sub-scores
     metadata: ScanMetadata
     scanned_at: str
@@ -578,6 +579,9 @@ def _scan_result_to_dict(result: object) -> dict:
         },
         "certified": _certified,
         "provenance": getattr(result, "provenance", {}) or {},
+        # Per-surface detail (npm/pypi digest; MCP tool_count/capabilities; skill
+        # allowed_tools/hooks) so a surface view can show what it actually graded.
+        "surface_detail": getattr(result, "artifact_scan", {}) or {},
         "positive_signals": list(set(result.positive_signals)),
         "metadata": {
             "files_scanned": result.files_scanned,
@@ -656,6 +660,7 @@ def _package_response(full: str, data: dict, jws: str, cached: bool) -> PublicSc
         certified=data.get("certified") or {},
         coverage=data.get("coverage", {}),
         provenance=data.get("provenance", {}),
+        surface_detail=data.get("surface_detail", {}),
         positive_signals=data.get("positive_signals", []),
         category_scores=data.get("category_scores", {}),
         metadata=ScanMetadata(**data["metadata"]),

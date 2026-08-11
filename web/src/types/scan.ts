@@ -73,6 +73,9 @@ export interface PublicScanResponse {
   // Recompute-discipline coverage: scan_depth / provenance_binding / db_snapshots.
   coverage?: { scan_depth?: string; provenance_binding?: string; [k: string]: unknown }
   provenance?: { verified?: boolean; source_matches_claim?: boolean; [k: string]: unknown }
+  // Per-surface detail: skill { skill_name, allowed_tools[], has_lifecycle_hooks },
+  // MCP { tool_count, capabilities }, package { digest }.
+  surface_detail?: { skill_name?: string; allowed_tools?: string[]; has_lifecycle_hooks?: boolean; tool_count?: number; capabilities?: Record<string, number>; [k: string]: unknown }
   category_scores: Partial<CategoryScores>
   metadata: ScanMetadata
   scanned_at: string

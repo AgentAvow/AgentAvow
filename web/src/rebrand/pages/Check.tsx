@@ -579,6 +579,18 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
         <div className="mt-4 glass rounded-2xl p-6">
           <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we graded</h3>
           <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">A skill&apos;s <span className="text-text">SKILL.md is injected into your model every session</span>, and its <span className="text-text font-mono">allowed-tools</span> pre-approves tools to run <span className="text-text">without asking</span>. We graded that auto-exec grant, hidden instructions in the always-loaded description, lifecycle-hook escalation, and credential-exfil in the bundled scripts.</p>
+          {(() => {
+            const sd = (scan as { surface_detail?: { skill_name?: string; allowed_tools?: string[]; has_lifecycle_hooks?: boolean } }).surface_detail
+            const tools = sd?.allowed_tools ?? []
+            if (!sd?.skill_name && tools.length === 0) return null
+            return (
+              <div className="mt-3 flex flex-col gap-2 text-[12.5px]">
+                {sd?.skill_name && <div className="flex justify-between gap-3"><span className="text-text-muted">Skill</span><span className="font-mono">{sd.skill_name}</span></div>}
+                <div className="flex justify-between gap-3 items-start"><span className="text-text-muted shrink-0">Auto-approved tools</span><span className="font-mono text-right">{tools.length ? tools.join(', ') : 'none'}</span></div>
+                {sd?.has_lifecycle_hooks && <div className="flex justify-between gap-3"><span className="text-text-muted">Lifecycle hooks</span><span className="font-mono text-warning">present</span></div>}
+              </div>
+            )
+          })()}
         </div>
       </Reveal>
 
