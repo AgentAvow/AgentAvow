@@ -9,6 +9,7 @@ import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trus
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
+  packageStdioTarget, cursorStdio, vscodeStdio, claudeCodeStdio, stdioServersConfig,
 } from '../lib/installLinks'
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
@@ -546,17 +547,55 @@ function CopyRow({ cmd, label, multiline }: { cmd: string; label?: string; multi
   )
 }
 
+const DEEPLINK_BTN = 'inline-flex items-center gap-1.5 text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-primary-light/40 bg-primary/10 text-primary-light hover:bg-primary/20 transition-colors'
+
+/** Package install block — an MCP-server package gets 1-click stdio deeplinks
+ * (Cursor/VS Code + Claude Code/config), library install collapsed under it;
+ * a plain library gets the install one-liners. */
+function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; isMcp?: boolean }) {
+  const t = isMcp ? packageStdioTarget(surface, name) : null
+  if (t) {
+    return (
+      <>
+        <p className="text-text-muted text-[13px] mt-1">This package is an <span className="text-text">MCP server</span> — one click, or copy the config:</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a href={cursorStdio(t)} target="_blank" rel="noopener noreferrer" className={DEEPLINK_BTN}>▸ Add to Cursor</a>
+          <a href={vscodeStdio(t)} className={DEEPLINK_BTN}>▸ Add to VS Code</a>
+        </div>
+        <div className="mt-3 flex flex-col gap-2">
+          <CopyRow label="Claude Code" cmd={claudeCodeStdio(t)} />
+          <CopyRow label="Config" cmd={stdioServersConfig(t)} multiline />
+        </div>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-[12px] text-text-muted hover:text-text">Or install as a library</summary>
+          <div className="mt-2 flex flex-col gap-2">
+            {packageInstallCommands(surface, name).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} />)}
+          </div>
+        </details>
+      </>
+    )
+  }
+  return (
+    <>
+      <p className="text-text-muted text-[13px] mt-1">Copy the install command for your package manager:</p>
+      <div className="mt-3 flex flex-col gap-2">
+        {packageInstallCommands(surface, name).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} />)}
+      </div>
+    </>
+  )
+}
+
 /** "Add to your agent" — the install-with-the-grade affordance. MCP servers get
  * true 1-click deeplinks (Cursor/VS Code/Goose) + copy commands; packages get the
  * install one-liners; skills get the clone command. The grade travels because
  * this lives on the signed score page. */
 function AddToAgent(props:
   | { kind: 'mcp'; url: string }
-  | { kind: 'package'; surface: string; name: string }
+  | { kind: 'package'; surface: string; name: string; isMcp?: boolean }
   | { kind: 'skill'; owner: string; repo: string }
-  | { kind: 'repo'; owner: string; repo: string; pkg?: { surface: string; name: string } }) {
+  | { kind: 'repo'; owner: string; repo: string; pkg?: { surface: string; name: string; isMcp?: boolean } }) {
   const [more, setMore] = useState(false)
-  const deeplinkBtn = 'inline-flex items-center gap-1.5 text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-primary-light/40 bg-primary/10 text-primary-light hover:bg-primary/20 transition-colors'
+  const deeplinkBtn = DEEPLINK_BTN
   return (
     <Reveal>
       <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
@@ -585,14 +624,7 @@ function AddToAgent(props:
             </>
           )
         })()}
-        {props.kind === 'package' && (
-          <>
-            <p className="text-text-muted text-[13px] mt-1">Copy the install command for your package manager:</p>
-            <div className="mt-3 flex flex-col gap-2">
-              {packageInstallCommands(props.surface, props.name).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} />)}
-            </div>
-          </>
-        )}
+        {props.kind === 'package' && <PkgInstall surface={props.surface} name={props.name} isMcp={props.isMcp} />}
         {props.kind === 'skill' && (
           <>
             <p className="text-text-muted text-[13px] mt-1">Install the skill by cloning it into your skills directory:</p>
@@ -603,18 +635,15 @@ function AddToAgent(props:
         )}
         {props.kind === 'repo' && (props.pkg ? (
           <>
-            <p className="text-text-muted text-[13px] mt-1">This repo publishes the <span className="font-mono text-text">{props.pkg.surface}</span> package <span className="font-mono text-text">{props.pkg.name}</span> — install it:</p>
-            <div className="mt-3 flex flex-col gap-2">
-              {packageInstallCommands(props.pkg.surface, props.pkg.name).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} />)}
-            </div>
+            <p className="text-text-muted text-[13px] mt-1">This repo publishes the <span className="font-mono text-text">{props.pkg.surface}</span> package <span className="font-mono text-text">{props.pkg.name}</span>.</p>
+            <div className="mt-2"><PkgInstall surface={props.pkg.surface} name={props.pkg.name} isMcp={props.pkg.isMcp} /></div>
           </>
         ) : (
           <>
-            <p className="text-text-muted text-[13px] mt-1">Clone the source, or scan it as a package / MCP server / skill for a 1-click install:</p>
+            <p className="text-text-muted text-[13px] mt-1">A source repo — clone it to work with the code:</p>
             <div className="mt-3 flex flex-col gap-2">
               <CopyRow label="git" cmd={`git clone https://github.com/${props.owner}/${props.repo}`} />
             </div>
-            <p className="mt-2 text-[11.5px] text-text-muted">Is it on npm/PyPI, an MCP server, or a skill? Scan <span className="font-mono">npm:{props.repo}</span>, <span className="font-mono">mcp:https://…</span>, or <span className="font-mono">skill:{props.owner}/{props.repo}</span> for the full install button.</p>
           </>
         ))}
       </div>
@@ -863,7 +892,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
         </div>
       </Reveal>
 
-      <AddToAgent kind="package" surface={surface} name={name} />
+      <AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (
@@ -1102,9 +1131,9 @@ function Result({ owner, repo, privateResult }: {
       {/* Add to your agent — package install if the repo resolved to one, else clone */}
       {!isPrivate && (() => {
         const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
-        const sd = (scan as { surface_detail?: { name?: string } }).surface_detail || {}
+        const sd = (scan as { surface_detail?: { name?: string; is_mcp_server?: boolean } }).surface_detail || {}
         const pkg = (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
-          ? { surface: cov.surface, name: sd.name } : undefined
+          ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server } : undefined
         return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} />
       })()}
 

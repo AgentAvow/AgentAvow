@@ -140,9 +140,10 @@ function ToolCard({ row }: { row: CatalogRow }) {
         </ul>
       )}
       {href && (
-        <div className="mt-3 flex items-center gap-4">
-          <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">Full report →</Link>
-          <Link to={href} className="text-[12.5px] text-text-muted hover:text-primary-light">Add to your agent ↗</Link>
+        <div className="mt-3">
+          <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">
+            {row.trust_score != null ? 'Report & install →' : 'View →'}
+          </Link>
         </div>
       )}
     </div>
@@ -186,6 +187,8 @@ export default function RebrandBrowse() {
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(0)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const activeFilters = (grade ? 1 : 0) + (severity ? 1 : 0) + (sort !== 'score-desc' ? 1 : 0)
   const surface = SURFACES[tab].key
 
   // A search should find things anywhere — when q is set we drop the surface
@@ -219,61 +222,87 @@ export default function RebrandBrowse() {
         {summary && <SummaryStrip s={summary} />}
       </div>
 
-      {/* sticky controls — mirrors the agentgraph pinned-bar blend: translucent bg + a
-          soft gradient fade below (no hard bar), so content scrolls under it cleanly. */}
-      <div className="sticky top-[62px] z-10 mt-6 bg-background/80 relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
-        <div className="max-w-[1080px] mx-auto px-6 py-3 flex flex-wrap items-center gap-2">
-          {SURFACES.map((sf, i) => (
-            <button
-              key={sf.key}
-              onClick={() => reset(() => setTab(i))}
-              className={`text-[13.5px] px-4 py-1.5 rounded-full border transition-colors ${
-                tab === i
-                  ? 'text-white border-transparent bg-gradient-to-r from-primary to-primary-dark'
-                  : 'text-text-muted border-border bg-surface hover:border-primary-light'
-              }`}
+      {/* sticky controls — search-first, scrollable surface chips, and a filter
+          set that's inline dropdowns on desktop but a bottom sheet on mobile. */}
+      <div className="sticky top-[62px] z-20 mt-6 bg-background/85 backdrop-blur-sm relative after:absolute after:left-0 after:right-0 after:bottom-0 after:translate-y-full after:h-4 after:bg-gradient-to-b after:from-background/50 after:to-transparent after:pointer-events-none">
+        <div className="max-w-[1080px] mx-auto px-4 sm:px-6 py-3 flex flex-col gap-2.5">
+          {/* row 1 — search (full-width on mobile) + inline filters on desktop */}
+          <div className="flex items-center gap-2">
+            <form
+              onSubmit={(e) => { e.preventDefault(); reset(() => setQ(qInput.trim())) }}
+              className="flex-1 sm:flex-none sm:w-[280px] flex items-center gap-2 rounded-full border border-border bg-surface pl-3.5 pr-1.5 py-1.5"
             >
-              {sf.label}
+              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-text-muted shrink-0">
+                <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              <input
+                value={qInput}
+                onChange={(e) => setQInput(e.target.value)}
+                placeholder="Search tools…"
+                aria-label="Search the catalog"
+                className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-text placeholder:text-text-muted"
+              />
+              {qInput && <button type="button" onClick={() => { setQInput(''); reset(() => setQ('')) }} aria-label="Clear search" className="text-text-muted hover:text-text px-1 text-[15px] leading-none">×</button>}
+              <button type="submit" className="text-[12px] font-semibold px-3 py-1 rounded-full text-white bg-primary/80 hover:bg-primary shrink-0">Go</button>
+            </form>
+            {/* desktop: inline filter dropdowns */}
+            <div className="hidden sm:flex items-center gap-2 ml-auto">
+              {[{ v: grade, set: setGrade, opts: GRADES }, { v: severity, set: setSeverity, opts: SEVERITIES }, { v: sort, set: setSort, opts: SORTS }].map((f, i) => (
+                <select key={i} value={f.v} onChange={(e) => reset(() => f.set(e.target.value))}
+                  className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light">
+                  {f.opts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              ))}
+            </div>
+            {/* mobile: one Filters button → bottom sheet */}
+            <button onClick={() => setSheetOpen(true)} className="sm:hidden shrink-0 flex items-center gap-1.5 text-[13px] font-medium rounded-full border border-border bg-surface text-text px-3.5 py-2">
+              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              Filters{activeFilters > 0 && <span className="grid place-items-center min-w-[18px] h-[18px] text-[10px] font-bold rounded-full bg-primary text-white">{activeFilters}</span>}
             </button>
-          ))}
-          <form
-            onSubmit={(e) => { e.preventDefault(); reset(() => setQ(qInput.trim())) }}
-            className="ml-auto flex items-center gap-2 rounded-full border border-border bg-surface pl-3 pr-1 py-1"
-          >
-            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-text-muted shrink-0">
-              <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-            <input
-              value={qInput}
-              onChange={(e) => setQInput(e.target.value)}
-              placeholder="Search…"
-              className="w-[130px] bg-transparent outline-none text-[13px] text-text placeholder:text-text-muted"
-            />
-            <button type="submit" className="text-[12px] font-semibold px-3 py-1 rounded-full text-white bg-primary/80 hover:bg-primary">Go</button>
-          </form>
-          <select
-            value={grade}
-            onChange={(e) => reset(() => setGrade(e.target.value))}
-            className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light"
-          >
-            {GRADES.map((gr) => <option key={gr.key} value={gr.key}>{gr.label}</option>)}
-          </select>
-          <select
-            value={severity}
-            onChange={(e) => reset(() => setSeverity(e.target.value))}
-            className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light"
-          >
-            {SEVERITIES.map((sv) => <option key={sv.key} value={sv.key}>{sv.label}</option>)}
-          </select>
-          <select
-            value={sort}
-            onChange={(e) => reset(() => setSort(e.target.value))}
-            className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light"
-          >
-            {SORTS.map((so) => <option key={so.key} value={so.key}>{so.label}</option>)}
-          </select>
+          </div>
+          {/* row 2 — surface chips: one scrollable row, never wraps */}
+          <div className="flex gap-2 overflow-x-auto pb-0.5 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x">
+            {SURFACES.map((sf, i) => (
+              <button key={sf.key} onClick={() => reset(() => setTab(i))}
+                className={`snap-start shrink-0 whitespace-nowrap text-[13px] px-3.5 py-1.5 rounded-full border transition-colors ${
+                  tab === i ? 'text-white border-transparent bg-gradient-to-r from-primary to-primary-dark' : 'text-text-muted border-border bg-surface hover:border-primary-light'
+                }`}>
+                {sf.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* mobile filter bottom sheet */}
+      {sheetOpen && (
+        <div className="sm:hidden fixed inset-0 z-40" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setSheetOpen(false)} />
+          <div className="absolute left-0 right-0 bottom-0 bg-background border-t border-border rounded-t-2xl p-5 pb-8 max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[16px] font-bold">Filters</h2>
+              <button onClick={() => setSheetOpen(false)} aria-label="Close" className="text-text-muted text-[22px] leading-none">×</button>
+            </div>
+            {[{ label: 'Grade', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
+              <div key={f.label} className="mb-5">
+                <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-2">{f.label}</div>
+                <div className="flex flex-wrap gap-2">
+                  {f.opts.map((o) => (
+                    <button key={o.key} onClick={() => reset(() => f.set(o.key))}
+                      className={`text-[13.5px] px-3.5 py-2 rounded-lg border transition-colors ${f.v === o.key ? 'border-primary-light bg-primary/15 text-primary-light font-semibold' : 'border-border bg-surface text-text-muted'}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="flex gap-3 mt-2">
+              <button onClick={() => reset(() => { setGrade(''); setSeverity(''); setSort('score-desc') })} className="flex-1 py-2.5 rounded-xl border border-border text-text-muted font-semibold text-[14px]">Clear all</button>
+              <button onClick={() => setSheetOpen(false)} className="flex-1 py-2.5 rounded-xl text-white font-semibold text-[14px] bg-gradient-to-r from-primary to-primary-dark">Show results</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* results */}
       <div className="max-w-[1080px] mx-auto px-6 py-8">

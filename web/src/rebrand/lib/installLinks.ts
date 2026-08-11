@@ -79,6 +79,36 @@ export function mcpServersConfig(t: McpTarget): string {
   return JSON.stringify({ mcpServers: { [t.name]: { type: 'http', url: t.url } } }, null, 2)
 }
 
+// ── stdio MCP servers shipped as a package (the common case) ──────────────────
+// Most MCP servers are run with `npx -y <pkg>` (npm) or `uvx <pkg>` (PyPI). Those
+// get REAL 1-click deeplinks too — the client spawns the command locally.
+
+export interface StdioTarget { name: string; command: string; args: string[] }
+
+function pkgShortName(name: string): string {
+  return name.replace(/^@[^/]+\//, '').replace(/[^a-zA-Z0-9_-]/g, '') || 'mcp-server'
+}
+
+export function packageStdioTarget(surface: string, name: string): StdioTarget {
+  if (surface === 'pypi') return { name: pkgShortName(name), command: 'uvx', args: [name] }
+  return { name: pkgShortName(name), command: 'npx', args: ['-y', name] }
+}
+
+export function cursorStdio(t: StdioTarget): string {
+  const b64 = btoa(JSON.stringify({ command: t.command, args: t.args }))
+  return `https://cursor.com/install-mcp?name=${encodeURIComponent(t.name)}&config=${encodeURIComponent(b64)}`
+}
+export function vscodeStdio(t: StdioTarget): string {
+  const obj = { name: t.name, command: t.command, args: t.args }
+  return `vscode:mcp/install?${encodeURIComponent(JSON.stringify(obj))}`
+}
+export function claudeCodeStdio(t: StdioTarget): string {
+  return `claude mcp add ${t.name} -- ${t.command} ${t.args.join(' ')}`
+}
+export function stdioServersConfig(t: StdioTarget): string {
+  return JSON.stringify({ mcpServers: { [t.name]: { command: t.command, args: t.args } } }, null, 2)
+}
+
 // ── package + skill install one-liners ────────────────────────────────────────
 
 export function packageInstallCommands(surface: string, name: string): Array<{ label: string; cmd: string }> {

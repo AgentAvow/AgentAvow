@@ -2115,6 +2115,33 @@ def _repo_from_manifest(manifest: dict | None) -> str | None:
     return None
 
 
+def _looks_like_mcp_server(eco: str, name: str, manifest: dict | None) -> bool:
+    """Heuristic: is this published package a runnable MCP server? Checks the npm
+    manifest (MCP SDK dep, `mcp`/`modelcontextprotocol` keyword, a `bin` entry) and
+    the package name. Used only to pick the install affordance — never the grade."""
+    n = (name or "").lower()
+    if "mcp" in n or "model-context-protocol" in n or "modelcontextprotocol" in n:
+        return True
+    if isinstance(manifest, dict):
+        deps = {}
+        for k in ("dependencies", "peerDependencies", "devDependencies"):
+            d = manifest.get(k)
+            if isinstance(d, dict):
+                deps.update(d)
+        if any("modelcontextprotocol" in str(dk).lower() or dk.lower() == "fastmcp" for dk in deps):
+            return True
+        kws = manifest.get("keywords")
+        if isinstance(kws, list) and any(
+            "mcp" == str(kw).lower() or "modelcontextprotocol" in str(kw).lower() for kw in kws
+        ):
+            return True
+        if manifest.get("bin"):
+            desc = str(manifest.get("description", "")).lower()
+            if "mcp" in desc or "model context protocol" in desc:
+                return True
+    return False
+
+
 async def scan_package(surface: str, name: str, version: str | None = None) -> ScanResult:
     """Grade a PUBLISHED npm / PyPI package directly by coordinate — no GitHub repo
     required. Fetches + STATICALLY scans the real artifact tree (the same 12-category
@@ -2179,6 +2206,9 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         "version": fetched.version, "kind": fetched.kind, "digest": fetched.digest,
         "download_url": fetched.download_url, "file_count": fetched.file_count,
         "unpacked_size": fetched.unpacked_size, "has_install_hook": has_hook,
+        # Is this package a runnable MCP server? (→ the UI offers stdio 1-click
+        # deeplinks with `npx -y <pkg>` / `uvx <pkg>`, not just an install command.)
+        "is_mcp_server": _looks_like_mcp_server(eco, fetched.name, fetched.packaged_manifest),
     }
     result.coverage = build_coverage(
         surface=eco,
