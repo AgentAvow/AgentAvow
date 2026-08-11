@@ -12,6 +12,7 @@ import {
   packageStdioTarget, cursorStdio, vscodeStdio, claudeCodeStdio, stdioServersConfig,
 } from '../lib/installLinks'
 import { useAuth } from '../../hooks/useAuth'
+import SEOHead from '../../components/SEOHead'
 import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
@@ -78,6 +79,17 @@ function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner
       {star} {mutation.isPending ? 'Adding…' : 'Watch this tool'}
     </button>
   )
+}
+
+/** schema.org Review JSON-LD so a scan result is a rich, indexable object. */
+function scanReviewJsonLd(name: string, grade: string, score: number): Record<string, unknown> {
+  return {
+    '@context': 'https://schema.org', '@type': 'Review',
+    itemReviewed: { '@type': 'SoftwareApplication', name, applicationCategory: 'DeveloperApplication' },
+    reviewRating: { '@type': 'Rating', ratingValue: score, bestRating: 100, worstRating: 0 },
+    author: { '@type': 'Organization', name: 'AgentAvow' },
+    reviewBody: `Signed, offline-verifiable safety grade ${grade} (${score}/100).`,
+  }
 }
 
 /** "✓ Maintainer-claimed" — a public trust signal shown when a verified owner has
@@ -730,6 +742,13 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
     : scan.trust_score >= 41 ? 'Install with caution' : 'Significant risks'
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
+      <SEOHead
+        title={`${owner}/${repo} skill — safety grade ${g.grade}`}
+        description={`${verdict}. AgentAvow's signed capability grade for the ${owner}/${repo} Agent Skill: ${g.grade} (${scan.trust_score}/100), verifiable offline.`}
+        path={`/check/skill/${owner}/${repo}`}
+        image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
+        jsonLd={scanReviewJsonLd(`${owner}/${repo}`, g.grade, scan.trust_score)}
+      />
       <Reveal>
         <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}>
           <div className="relative px-7 pt-7">
@@ -828,6 +847,12 @@ function McpResult({ endpoint }: { endpoint: string }) {
     : scan.trust_score >= 41 ? 'Connect with caution' : 'Significant risks'
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
+      <SEOHead
+        title={`MCP server — safety grade ${g.grade}`}
+        description={`${verdict}. AgentAvow live-graded this MCP server's served tool surface: ${g.grade} (${scan.trust_score}/100).`}
+        path={`/check/mcp?endpoint=${encodeURIComponent(endpoint)}`}
+        jsonLd={scanReviewJsonLd(endpoint, g.grade, scan.trust_score)}
+      />
       <Reveal>
         <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}>
           <div className="relative px-7 pt-7">
@@ -917,6 +942,12 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
     : scan.trust_score >= 41 ? 'Use with caution' : 'Significant risks'
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
+      <SEOHead
+        title={`${name} (${surface}) — safety grade ${g.grade}`}
+        description={`${verdict}. AgentAvow's signed grade for ${surface}:${name}: ${g.grade} (${scan.trust_score}/100) — scanned on the published artifact, verifiable offline.`}
+        path={`/check/pkg/${surface}/${name}`}
+        jsonLd={scanReviewJsonLd(`${surface}:${name}`, g.grade, scan.trust_score)}
+      />
       <Reveal>
         <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}>
           <div className="relative px-7 pt-7">
@@ -1105,6 +1136,14 @@ function Result({ owner, repo, privateResult }: {
 
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
+      <SEOHead
+        title={`Is ${owner}/${repo} safe? Grade ${g.grade} (${scan.trust_score}/100)`}
+        description={`${sum.headline} AgentAvow's signed, offline-verifiable safety grade for ${owner}/${repo}: ${g.grade} (${scan.trust_score}/100).`}
+        path={`/check/${owner}/${repo}`}
+        image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
+        noindex={isPrivate}
+        jsonLd={isPrivate ? undefined : scanReviewJsonLd(`${owner}/${repo}`, g.grade, scan.trust_score)}
+      />
       {/* BRANDED HERO — two co-equal scores + primary Watch CTA */}
       <motion.div className="rounded-2xl overflow-hidden relative border border-border/60"
         style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}
