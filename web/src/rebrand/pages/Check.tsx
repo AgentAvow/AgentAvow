@@ -6,6 +6,10 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, badgeUrl, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trust/gradeSystem'
+import {
+  mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
+  geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
+} from '../lib/installLinks'
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
@@ -529,6 +533,78 @@ function AdoptionPanel({ owner, repo }: { owner: string; repo: string }) {
   )
 }
 
+/** One copyable command/config row. */
+function CopyRow({ cmd, label, multiline }: { cmd: string; label?: string; multiline?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => { navigator.clipboard?.writeText(cmd); setCopied(true); setTimeout(() => setCopied(false), 1400) }
+  return (
+    <div className={`flex ${multiline ? 'items-start' : 'items-center'} gap-2 bg-surface border border-border rounded-lg px-3 py-2`}>
+      {label && <span className="font-mono text-[10px] text-text-muted uppercase tracking-wide shrink-0 w-[92px] pt-0.5">{label}</span>}
+      <code className={`font-mono text-[12px] text-text flex-1 min-w-0 ${multiline ? 'whitespace-pre-wrap break-all' : 'break-all'}`}>{cmd}</code>
+      <button onClick={copy} className="shrink-0 text-[11px] font-semibold px-2 py-1 rounded-md border border-border text-text-muted hover:text-primary-light hover:border-primary-light transition-colors">{copied ? '✓' : 'Copy'}</button>
+    </div>
+  )
+}
+
+/** "Add to your agent" — the install-with-the-grade affordance. MCP servers get
+ * true 1-click deeplinks (Cursor/VS Code/Goose) + copy commands; packages get the
+ * install one-liners; skills get the clone command. The grade travels because
+ * this lives on the signed score page. */
+function AddToAgent(props:
+  | { kind: 'mcp'; url: string }
+  | { kind: 'package'; surface: string; name: string }
+  | { kind: 'skill'; owner: string; repo: string }) {
+  const [more, setMore] = useState(false)
+  const deeplinkBtn = 'inline-flex items-center gap-1.5 text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-primary-light/40 bg-primary/10 text-primary-light hover:bg-primary/20 transition-colors'
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
+        <h3 className="text-[15px] font-bold">Add to your agent</h3>
+        {props.kind === 'mcp' && (() => {
+          const t = { name: mcpNameFromUrl(props.url), url: props.url }
+          return (
+            <>
+              <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">One click for Cursor, VS Code, or Goose — the graded server, ready to connect.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <a href={cursorInstall(t)} target="_blank" rel="noopener noreferrer" className={deeplinkBtn}>▸ Add to Cursor</a>
+                <a href={vscodeInstall(t)} className={deeplinkBtn}>▸ Add to VS Code</a>
+                <a href={gooseInstall(t)} className={deeplinkBtn}>▸ Add to Goose</a>
+              </div>
+              <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">{more ? 'Fewer ways ▾' : 'Claude, Gemini, Codex & more ▸'}</button>
+              {more && (
+                <div className="mt-3 flex flex-col gap-2">
+                  <CopyRow label="Claude Code" cmd={claudeCodeCmd(t)} />
+                  <CopyRow label="Gemini CLI" cmd={geminiCmd(t)} />
+                  <CopyRow label="Codex CLI" cmd={codexCmd(t)} />
+                  <CopyRow label="claude.ai" cmd={props.url} />
+                  <div className="text-[11px] text-text-muted mt-1">↑ paste the URL in Claude&apos;s <span className="text-text">Settings → Connectors → Add custom connector</span>.</div>
+                  <CopyRow label="Desktop" cmd={claudeDesktopConfig(t)} multiline />
+                </div>
+              )}
+            </>
+          )
+        })()}
+        {props.kind === 'package' && (
+          <>
+            <p className="text-text-muted text-[13px] mt-1">Copy the install command for your package manager:</p>
+            <div className="mt-3 flex flex-col gap-2">
+              {packageInstallCommands(props.surface, props.name).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} />)}
+            </div>
+          </>
+        )}
+        {props.kind === 'skill' && (
+          <>
+            <p className="text-text-muted text-[13px] mt-1">Install the skill by cloning it into your skills directory:</p>
+            <div className="mt-3 flex flex-col gap-2">
+              {skillInstallCommands(props.owner, props.repo).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} />)}
+            </div>
+          </>
+        )}
+      </div>
+    </Reveal>
+  )
+}
+
 /** OpenClaw / Agent Skill score view — grades the capability surface a repo scan
  * misses (auto-exec allowed-tools grant, always-loaded-description injection,
  * lifecycle hooks, script exfil). */
@@ -593,6 +669,8 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
           })()}
         </div>
       </Reveal>
+
+      <AddToAgent kind="skill" owner={owner} repo={repo} />
 
       {f?.items && f.items.length > 0 ? (
         <>
@@ -671,6 +749,8 @@ function McpResult({ endpoint }: { endpoint: string }) {
           <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We connected to the server and graded the <span className="text-text">tool surface it actually serves</span> — input-schema risk, hidden instructions in tool descriptions, dangerous capabilities, and the lethal trifecta across its tools. This is what a repo scan can&apos;t see.</p>
         </div>
       </Reveal>
+
+      <AddToAgent kind="mcp" url={endpoint} />
 
       {f?.items && f.items.length > 0 ? (
         <>
@@ -765,6 +845,8 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
           </div>
         </div>
       </Reveal>
+
+      <AddToAgent kind="package" surface={surface} name={name} />
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (
