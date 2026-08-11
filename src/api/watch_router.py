@@ -19,6 +19,9 @@ router = APIRouter(tags=["watches"])
 
 
 class WatchCreate(BaseModel):
+    # 'github' (owner/repo) · 'npm'/'pypi' (owner=surface, repo=pkg) · 'mcp'
+    # (owner='mcp', repo=url) · 'openclaw' (owner/repo skill). Default github.
+    surface: str = "github"
     owner: str
     repo: str
 
@@ -26,11 +29,39 @@ class WatchCreate(BaseModel):
 def _serialize(w: ToolWatch) -> dict:
     return {
         "id": str(w.id),
+        "surface": getattr(w, "surface", "github") or "github",
         "owner": w.owner,
         "repo": w.repo,
         "last_score": w.last_score,
         "active": w.active,
     }
+
+
+async def scan_watch_target(
+    surface: str, owner: str, repo: str, db: AsyncSession,
+) -> tuple[int | None, str | None]:
+    """Scan a watch target by surface → (trust_score, tool_manifest_digest).
+    Fail-open (returns (None, None) on error); the loop retries next cycle."""
+    surface = (surface or "github").lower()
+    try:
+        if surface in ("npm", "pypi"):
+            from src.scanner.scan import scan_package
+            r = await scan_package(surface, repo)
+            return (None if r.error else r.trust_score), None
+        if surface == "mcp":
+            from src.scanner.scan import scan_mcp
+            r = await scan_mcp(repo)
+            return (None if r.error else r.trust_score), None
+        if surface == "openclaw":
+            from src.scanner.scan import scan_skill
+            r = await scan_skill(owner, repo)
+            return (None if r.error else r.trust_score), (r.tool_manifest_digest or None)
+        # default: github repo
+        from src.api.public_scan_router import public_scan
+        res = await public_scan(owner=owner, repo=repo, force=False, db=db)
+        return res.trust_score, res.tool_manifest_digest
+    except Exception:
+        return None, None
 
 
 @router.post("/watches", status_code=status.HTTP_201_CREATED)
@@ -40,8 +71,11 @@ async def add_watch(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     watcher_id = current.id  # snapshot before any awaits that may shift the session
+    surface = (body.surface or "github").strip().lower()
+    if surface not in ("github", "npm", "pypi", "mcp", "openclaw"):
+        raise HTTPException(status_code=400, detail="unsupported surface")
     owner = body.owner.strip().strip("/")
-    repo = body.repo.strip().strip("/")
+    repo = body.repo.strip().strip("/") if surface != "mcp" else body.repo.strip()
     if not owner or not repo:
         raise HTTPException(status_code=400, detail="owner and repo are required")
 
@@ -49,6 +83,7 @@ async def add_watch(
         await db.execute(
             select(ToolWatch).where(
                 ToolWatch.watcher_id == watcher_id,
+                ToolWatch.surface == surface,
                 ToolWatch.owner == owner,
                 ToolWatch.repo == repo,
             )
@@ -61,19 +96,11 @@ async def add_watch(
         return _serialize(existing)
 
     # Best-effort baseline scan so the first change is measured against a known score.
-    last_score = None
-    last_digest = None
-    try:
-        from src.api.public_scan_router import public_scan
-
-        res = await public_scan(owner=owner, repo=repo, force=False, db=db)
-        last_score = res.trust_score
-        last_digest = res.tool_manifest_digest
-    except Exception:
-        pass  # loop will populate the baseline on its first run
+    last_score, last_digest = await scan_watch_target(surface, owner, repo, db)
 
     watch = ToolWatch(
         watcher_id=watcher_id,
+        surface=surface,
         owner=owner,
         repo=repo,
         last_score=last_score,

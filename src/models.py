@@ -2372,8 +2372,12 @@ class ToolWatch(Base):
         nullable=False,
         index=True,
     )
+    # Multi-surface: 'github' (owner/repo) · 'npm'/'pypi' (repo = package name) ·
+    # 'mcp' (repo = endpoint URL) · 'openclaw' (owner/repo skill). Default github
+    # so existing rows are unchanged.
+    surface = Column(String(16), nullable=False, default="github", server_default="github")
     owner = Column(String(255), nullable=False)
-    repo = Column(String(255), nullable=False)
+    repo = Column(String(512), nullable=False)
     last_score = Column(Integer, nullable=True)
     last_manifest_digest = Column(String(128), nullable=True)
     active = Column(Boolean, default=True, nullable=False)
@@ -2381,7 +2385,9 @@ class ToolWatch(Base):
     last_checked_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("watcher_id", "owner", "repo", name="uq_tool_watch_target"),
+        # surface is part of the key: the same owner/repo can be watched both as a
+        # github repo and as an openclaw skill (they share coordinates).
+        UniqueConstraint("watcher_id", "surface", "owner", "repo", name="uq_tool_watch_target"),
     )
 
 

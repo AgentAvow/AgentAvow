@@ -49,22 +49,25 @@ const VERDICT_STYLE = {
 
 const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'mcp:https://…', 'a repo, package, or MCP server']
 
-/** "Watch this tool" — the PRIMARY action. Full-width gradient CTA. */
-function WatchCTA({ owner, repo }: { owner: string; repo: string }) {
+/** "Watch this tool" — the PRIMARY action. Full-width gradient CTA.
+ * Works across every surface: pass the coordinate as stored server-side
+ * (github → owner/repo · npm/pypi → surface/pkg · mcp → mcp/url · openclaw → owner/repo). */
+function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner: string; repo: string }) {
   const { user } = useAuth()
   const [clicked, setClicked] = useState(false)
   // Reflect whether this tool is already watched — the CTA must not offer "Watch"
   // when the user already watches it. Only queried when signed in.
   const { data: watches } = useQuery({
     queryKey: ['rebrand-watches'],
-    queryFn: async () => (await api.get<{ owner: string; repo: string }[]>('/watches')).data,
+    queryFn: async () => (await api.get<{ surface?: string; owner: string; repo: string }[]>('/watches')).data,
     enabled: !!user,
   })
   const alreadyWatching = !!user && (watches ?? []).some(
-    (w) => w.owner.toLowerCase() === owner.toLowerCase() && w.repo.toLowerCase() === repo.toLowerCase(),
+    (w) => (w.surface ?? 'github') === surface
+      && w.owner.toLowerCase() === owner.toLowerCase() && w.repo.toLowerCase() === repo.toLowerCase(),
   )
   const watching = alreadyWatching || clicked
-  const mutation = useMutation({ mutationFn: () => api.post('/watches', { owner, repo }), onSuccess: () => setClicked(true) })
+  const mutation = useMutation({ mutationFn: () => api.post('/watches', { surface, owner, repo }), onSuccess: () => setClicked(true) })
   const base = 'w-full flex items-center justify-center gap-2.5 text-[15px] font-bold px-5 py-3.5 rounded-xl transition-all'
   const grad = 'text-white bg-gradient-to-r from-primary to-accent shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5'
   const star = <svg viewBox="0 0 24 24" fill="currentColor" className="w-[17px] h-[17px] shrink-0"><path d="M12 2.5l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 18.6 6.1 21.3l1.2-6.6L2.5 9.5l6.6-.9z"/></svg>
@@ -718,6 +721,8 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
 
       <AddToAgent kind="skill" owner={owner} repo={repo} />
 
+      <div className="mt-4"><WatchCTA surface="openclaw" owner={owner} repo={repo} /></div>
+
       {f?.items && f.items.length > 0 ? (
         <>
           <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">The details ({f.items.length})</h3></Reveal>
@@ -797,6 +802,8 @@ function McpResult({ endpoint }: { endpoint: string }) {
       </Reveal>
 
       <AddToAgent kind="mcp" url={endpoint} />
+
+      <div className="mt-4"><WatchCTA surface="mcp" owner="mcp" repo={endpoint} /></div>
 
       {f?.items && f.items.length > 0 ? (
         <>
@@ -893,6 +900,8 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
       </Reveal>
 
       <AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />
+
+      <div className="mt-4"><WatchCTA surface={surface} owner={surface} repo={name} /></div>
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (

@@ -829,7 +829,6 @@ async def _run_watch_rescan(limit: int = 200) -> None:
     from sqlalchemy import select
 
     from src.api.notification_router import create_notification
-    from src.api.public_scan_router import public_scan
     from src.database import async_session
     from src.models import Entity, ToolWatch
 
@@ -841,11 +840,14 @@ async def _run_watch_rescan(limit: int = 200) -> None:
     for w in watches:
         async with async_session() as db:
             try:
-                res = await public_scan(owner=w.owner, repo=w.repo, force=False, db=db)
+                from src.api.watch_router import scan_watch_target
+                new_score, new_digest = await scan_watch_target(
+                    getattr(w, "surface", "github") or "github", w.owner, w.repo, db,
+                )
             except Exception:
                 continue
-            new_score = res.trust_score
-            new_digest = res.tool_manifest_digest
+            if new_score is None:
+                continue  # scan failed this cycle — retry next time, don't false-alert
             dropped = (
                 w.last_score is not None and new_score is not None and new_score < w.last_score - 5
             )

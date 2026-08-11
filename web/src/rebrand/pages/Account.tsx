@@ -16,10 +16,25 @@ import { Reveal, RevealStagger } from '../components/motion'
 
 interface Watch {
   id: string
+  surface?: string
   owner: string
   repo: string
   last_score: number | null
   active: boolean
+}
+
+/** A watch is stored by coordinate (github → owner/repo · npm/pypi → surface/pkg ·
+ * mcp → mcp/url · openclaw → owner/repo). Render a readable label + the right
+ * report route per surface so surface watches don't 404 on the github route. */
+function watchLabel(w: Watch): { label: string; badge: string; href: string } {
+  const s = (w.surface ?? 'github').toLowerCase()
+  if (s === 'npm' || s === 'pypi')
+    return { label: w.repo, badge: s, href: rp(`/rebrand/check/pkg/${s}/${w.repo}`) }
+  if (s === 'mcp')
+    return { label: w.repo, badge: 'mcp', href: rp(`/rebrand/check/mcp?endpoint=${encodeURIComponent(w.repo)}`) }
+  if (s === 'openclaw')
+    return { label: `${w.owner}/${w.repo}`, badge: 'skill', href: rp(`/rebrand/check/skill/${w.owner}/${w.repo}`) }
+  return { label: `${w.owner}/${w.repo}`, badge: 'github', href: rp(`/rebrand/check/${w.owner}/${w.repo}`) }
 }
 
 interface Notif {
@@ -139,6 +154,7 @@ function ApiKeys() {
 
 function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; removing: boolean }) {
   const g = w.last_score != null ? getGradeInfo(w.last_score) : null
+  const { label, badge, href } = watchLabel(w)
   return (
     <div className="glass rounded-xl p-4 flex items-center gap-4">
       {g ? (
@@ -147,11 +163,14 @@ function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; r
         <div className="w-11 h-11 rounded-xl grid place-items-center font-mono text-[10px] text-text-muted bg-surface-hover shrink-0">n/a</div>
       )}
       <div className="min-w-0 flex-1">
-        <div className="font-mono text-[14px] break-all">{w.owner}/{w.repo}</div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/12 text-primary-light shrink-0">{badge}</span>
+          <span className="font-mono text-[14px] break-all">{label}</span>
+        </div>
         <div className="font-mono text-[11.5px] text-text-muted mt-0.5">{w.last_score != null ? `${w.last_score}/100 at last check` : 'awaiting first check'}</div>
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        <Link to={rp(`/rebrand/check/${w.owner}/${w.repo}`)} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">View report →</Link>
+        <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">View report →</Link>
         <button onClick={onRemove} disabled={removing} className="text-[12px] text-text-muted hover:text-danger transition-colors disabled:opacity-50">
           {removing ? '…' : 'Unwatch'}
         </button>
