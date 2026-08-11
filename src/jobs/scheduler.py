@@ -1080,13 +1080,15 @@ def _openclaw_backfill_targets() -> list[tuple[str, str, str]]:
 
 async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
     """Re-scan one catalog coordinate by surface and upsert the fresh grade into
-    community_scans. Returns True on a successful capture. Fail-open."""
+    community_scans, then computes + persists adoption (the loop is where adoption is
+    populated — kept off the live scan path to keep user scans fast). Fail-open."""
     surface = (surface or "github").lower()
     try:
         if surface == "github":
             from src.api.public_scan_router import public_scan
             # public_scan re-scans and captures into community_scans itself.
             await public_scan(owner=owner, repo=repo, force=True, db=db)
+            await _store_catalog_adoption(surface, owner, repo, db)
             return True
         from src.api.public_scan_router import (
             _capture_community_scan,
@@ -1106,10 +1108,37 @@ async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
             return False
         data = _scan_result_to_dict(result)
         await _capture_community_scan(owner, repo, data, db, surface=surface)
+        await _store_catalog_adoption(surface, owner, repo, db)
         return True
     except Exception:
         logger.debug("catalog re-scan failed for %s %s/%s", surface, owner, repo, exc_info=True)
         return False
+
+
+async def _store_catalog_adoption(surface: str, owner: str, repo: str, db) -> None:
+    """Compute adoption for a coordinate and persist it on its community_scans row so
+    Browse can filter/sort by 'widely relied upon'. Best-effort; never blocks a scan."""
+    try:
+        from sqlalchemy import update
+
+        from src.api.public_scan_router import surface_adoption_summary
+        from src.models import CommunityScan
+
+        score, count, unit = await surface_adoption_summary(surface, owner, repo)
+        if score is None and count is None:
+            return
+        await db.execute(
+            update(CommunityScan)
+            .where(
+                CommunityScan.surface == surface,
+                CommunityScan.owner == owner,
+                CommunityScan.repo == repo,
+            )
+            .values(adoption_score=score, adoption_count=count, adoption_unit=unit)
+        )
+        await db.commit()
+    except Exception:
+        logger.debug("adoption persist failed for %s %s/%s", surface, owner, repo, exc_info=True)
 
 
 async def _run_catalog_rescan() -> None:

@@ -27,9 +27,17 @@ const SURFACES = [
 
 const SORTS = [
   { key: 'score-desc', label: 'Highest trust' },
+  { key: 'adoption', label: 'Widely relied upon' },
   { key: 'score-asc', label: 'Lowest trust' },
   { key: 'name', label: 'Name (A–Z)' },
 ]
+
+/** Compact a big count for cards: 1.2M / 12.3k / 940. */
+function compactNum(n: number): string {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
+  return String(n)
+}
 
 const SEVERITIES = [
   { key: '', label: 'All findings' },
@@ -132,8 +140,17 @@ function ToolCard({ row }: { row: CatalogRow }) {
           <span className="font-mono text-[11px] px-2 py-0.5 rounded-lg shrink-0 text-text-muted bg-surface-hover">unscored</span>
         )}
       </div>
+      {/* category + adoption — the curation/at-a-glance row */}
+      <div className="mt-2 flex items-center gap-2 flex-wrap">
+        {row.category && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-surface-hover text-text-muted">{row.category}</span>}
+        {row.adoption_count != null && row.adoption_count > 0 && (
+          <span className="font-mono text-[11px] tabular-nums" style={{ color: '#F59E0B' }} title="Adoption — how widely relied upon">
+            📈 {compactNum(row.adoption_count)} {row.adoption_unit || ''}
+          </span>
+        )}
+      </div>
       {/* status + findings + language — the at-a-glance row Scans had */}
-      <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+      <div className="mt-2 flex items-center gap-2 flex-wrap">
         <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded ${chip.cls}`}>{chip.label}</span>
         {fnd && <span className="font-mono text-[11px] text-text-muted tabular-nums">{fnd}</span>}
         {row.primary_language && <span className="font-mono text-[11px] text-text-muted">· {row.primary_language}</span>}

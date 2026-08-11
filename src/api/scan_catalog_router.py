@@ -50,6 +50,9 @@ class CatalogRow(BaseModel):
     findings_count: int | None = None
     primary_language: str | None = None
     category: str | None = None  # derived purpose facet for browse curation
+    adoption_score: int | None = None   # 0-100 (community_scans only, loop-populated)
+    adoption_count: int | None = None   # headline number (downloads/wk, stars)
+    adoption_unit: str | None = None
     is_mcp_server: bool | None = None
     scan_error: str | None = None
     skipped: str | None = None
@@ -282,6 +285,9 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
                     high=c.high,
                     findings_count=c.findings_count,
                     primary_language=c.primary_language,
+                    adoption_score=getattr(c, "adoption_score", None),
+                    adoption_count=getattr(c, "adoption_count", None),
+                    adoption_unit=getattr(c, "adoption_unit", None),
                 )
             )
         return out
@@ -297,7 +303,7 @@ async def scan_catalog(
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
     grade: str | None = Query(None, pattern="^(certified|A|B|C)$"),
     category: str | None = Query(None, max_length=40),
-    sort: str = Query("default", pattern="^(default|score-asc|score-desc|name)$"),
+    sort: str = Query("default", pattern="^(default|score-asc|score-desc|name|adoption)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -386,6 +392,10 @@ async def scan_catalog(
         )
     elif sort == "name":
         filtered = sorted(filtered, key=lambda r: (r.name or "").lower())
+    elif sort == "adoption":
+        # "Widely relied upon" — most-adopted first (only community rows carry adoption
+        # today; unknown adoption sorts last).
+        filtered = sorted(filtered, key=lambda r: (r.adoption_count or -1), reverse=True)
 
     total = len(filtered)
     page = filtered[offset:offset + limit]

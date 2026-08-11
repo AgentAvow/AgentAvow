@@ -1670,23 +1670,15 @@ async def scan_adoption(
     return result.to_public_dict()
 
 
-@router.get("/adoption", dependencies=[Depends(rate_limit_reads)])
-async def scan_adoption_surface(
-    surface: str = "github",
-    owner: str = "",
-    repo: str = "",
-) -> dict:
-    """Surface-aware adoption — 'do real, independent parties rely on this?' — for the
-    non-GitHub surfaces the repo `/adoption` endpoint can't serve: npm/PyPI (real
-    registry downloads + reverse-dependents) and skills (GitHub stars — a skill IS a
-    repo). Distinct from the trust grade; fail-open. Returns the published axis
-    breakdown plus a `headline` {count, unit} for the adoption ring. Coordinates follow
-    the claim/watch convention (npm/pypi → repo=package · openclaw → owner/repo)."""
+async def _surface_adoption_axes(surface: str, owner: str, repo: str):
+    """(axes, headline) for a surface coordinate — the shared adoption builder used by
+    the /adoption endpoint AND the catalog loop's persistence. npm/PyPI = registry
+    downloads + reverse-dependents; github/openclaw (a skill IS a repo) = GitHub stars.
+    MCP (bare endpoint) has no reliable registry signal → absent, not fabricated."""
     from src.scanner.adoption import (
         build_axis_dependents,
         build_axis_downloads,
         build_axis_stars,
-        compute_adoption,
     )
     from src.scanner.adoption_sources import (
         fetch_ecosystems_dependents,
@@ -1724,16 +1716,47 @@ async def scan_adoption_surface(
                 dependent_packages=dep_pkgs, dependent_repos=dep_repos,
             ))
     elif s in ("github", "openclaw"):
-        # A skill is a GitHub repo — stars are the honest adoption signal.
         stars = await _github_stars(owner.strip(), repo.strip())
         if stars is not None:
             headline = {"count": stars, "unit": "stars"}
             axes.append(build_axis_stars(stars=stars))
-    # MCP: a bare live endpoint has no reliable registry-usage signal → adoption
-    # stays absent (honest) rather than fabricated.
+    return axes, headline
 
-    result = compute_adoption(axes)
-    out = result.to_public_dict()
+
+async def surface_adoption_summary(
+    surface: str, owner: str, repo: str,
+) -> tuple[int | None, int | None, str | None]:
+    """(adoption_score_100, headline_count, unit) for community_scans persistence.
+    Fail-open → (None, None, None) so a fetch hiccup never blocks a catalog re-scan."""
+    try:
+        from src.scanner.adoption import compute_adoption
+
+        axes, headline = await _surface_adoption_axes(surface, owner, repo)
+        if not axes and not headline:
+            return None, None, None
+        score = compute_adoption(axes).to_public_dict().get("adoption_score_100")
+        return (
+            score,
+            (headline or {}).get("count"),
+            (headline or {}).get("unit"),
+        )
+    except Exception:
+        return None, None, None
+
+
+@router.get("/adoption", dependencies=[Depends(rate_limit_reads)])
+async def scan_adoption_surface(
+    surface: str = "github",
+    owner: str = "",
+    repo: str = "",
+) -> dict:
+    """Surface-aware adoption — 'do real, independent parties rely on this?' — for the
+    non-GitHub surfaces the repo `/adoption` endpoint can't serve. Returns the published
+    axis breakdown plus a `headline` {count, unit} for the adoption ring."""
+    from src.scanner.adoption import compute_adoption
+
+    axes, headline = await _surface_adoption_axes(surface, owner, repo)
+    out = compute_adoption(axes).to_public_dict()
     out["headline"] = headline
     return out
 

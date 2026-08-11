@@ -4,6 +4,7 @@ import enum
 import uuid
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -2507,6 +2508,13 @@ class CommunityScan(Base):
     findings_count = Column(Integer, nullable=True)
     primary_language = Column(String(120), nullable=True)
     scan_count = Column(Integer, default=1, nullable=False)
+    # Adoption ("do real, independent parties rely on this?") — DISTINCT from the trust
+    # grade. Populated by the catalog re-scan loop (not every live capture, to keep
+    # scans fast). Powers the "Widely relied upon" browse filter/sort. Nullable =
+    # not yet computed. adoption_count is the headline number (downloads/wk or stars).
+    adoption_score = Column(Integer, nullable=True)          # 0-100 adoption tier score
+    adoption_count = Column(BigInteger, nullable=True)       # headline count (dl/wk, stars)
+    adoption_unit = Column(String(24), nullable=True)        # 'downloads/wk' | 'stars' | …
     first_scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

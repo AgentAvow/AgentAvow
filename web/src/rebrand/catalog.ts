@@ -31,6 +31,9 @@ export interface CatalogRow {
   is_mcp_server?: boolean | null
   primary_language?: string | null
   category?: string | null
+  adoption_score?: number | null
+  adoption_count?: number | null
+  adoption_unit?: string | null
   scan_error?: string | null
   skipped?: string | null
   has_x402_header?: boolean | null
