@@ -321,10 +321,12 @@ async def _cached_scan_response(
 
 
 async def _capture_community_scan(
-    owner: str, repo: str, data: dict, db: AsyncSession
+    owner: str, repo: str, data: dict, db: AsyncSession, surface: str = "github",
 ) -> None:
     """Persist an on-demand scan so the browsable catalog grows beyond the static
-    launch corpus. Upsert one row per owner/repo (latest scan wins, scan_count++)."""
+    launch corpus. Upsert one row per (surface, owner, repo) — latest scan wins,
+    scan_count++. `surface` defaults to github so existing repo callers are
+    unchanged; npm/pypi/mcp/openclaw claims publish under their real surface."""
     from sqlalchemy import func as safunc
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -341,10 +343,18 @@ async def _capture_community_scan(
         _display_grade(_score, (data.get("certified") or {}).get("eligible"))
         if _score is not None else None
     )
+    surface = (surface or "github").lower()
+    if surface in ("npm", "pypi"):
+        _full = f"{surface}:{repo}"
+    elif surface == "mcp":
+        _full = repo
+    else:  # github / openclaw
+        _full = f"{owner}/{repo}"
     values = dict(
+        surface=surface,
         owner=owner,
         repo=repo,
-        full_name=f"{owner}/{repo}",
+        full_name=_full,
         trust_score=_score,
         grade=_grade,
         critical=findings.get("critical"),

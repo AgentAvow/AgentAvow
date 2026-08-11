@@ -97,6 +97,15 @@ async def test_grant_via_provenance_when_no_declared_match(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ensure_watch_skips_private_without_touching_db():
+    # is_private=True returns immediately — passing db=None proves the DB is untouched
+    # (a private GitHub repo already gets continuous App re-scans; no watch needed).
+    await cr._ensure_watch(
+        db=None, entity_id="e", surface="github", owner="o", repo="r", is_private=True,
+    )
+
+
+@pytest.mark.asyncio
 async def test_no_grant_when_repo_not_owned(monkeypatch):
     async def fake_declared(surface, name):
         return "facebook/react"

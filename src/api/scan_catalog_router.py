@@ -213,12 +213,26 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
         )
         out: list[CatalogRow] = []
         for c in result.scalars().all():
+            # Route each community row by its real surface (default github for
+            # pre-t18 rows): npm/pypi → package name, mcp → endpoint URL, else repo.
+            surf = (getattr(c, "surface", None) or "github").lower()
+            name = c.full_name
+            repository_url = None
+            endpoint_url = None
+            if surf in ("npm", "pypi"):
+                name = c.repo
+            elif surf == "mcp":
+                name = c.repo
+                endpoint_url = c.repo
+            else:  # github / openclaw
+                repository_url = f"https://github.com/{c.full_name}"
             out.append(
                 CatalogRow(
-                    surface="community",
-                    name=c.full_name,
+                    surface=surf,
+                    name=name,
                     full_name=c.full_name,
-                    repository_url=f"https://github.com/{c.full_name}",
+                    repository_url=repository_url,
+                    endpoint_url=endpoint_url,
                     trust_score=c.trust_score,
                     grade=_row_grade(c.trust_score, c.grade),
                     critical=c.critical,
@@ -256,11 +270,16 @@ async def scan_catalog(
     summary = summary.model_copy(deep=True)
     summary.by_surface = {**summary.by_surface, "community": len(community)}
     summary.total_scans += len(community)
-    if community and (surface in (None, "community") or q):
+    # Community rows now carry their REAL surface (npm/pypi/mcp/github/openclaw), so
+    # a published package appears in its own surface tab too. Add them everywhere
+    # except the dedicated 'community' tab (which shows them all, below).
+    if community and surface != "community":
         rows = rows + community
 
     filtered = rows
-    if surface:
+    if surface == "community":
+        filtered = community  # the 'community' tab = every on-demand scan, any surface
+    elif surface:
         filtered = [r for r in filtered if r.surface == surface]
     if q:
         # Separator-insensitive match across name / full_name / owner so

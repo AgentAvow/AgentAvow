@@ -2491,8 +2491,11 @@ class CommunityScan(Base):
     __tablename__ = "community_scans"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Multi-surface (mirrors ToolWatch/RepoClaim): github/openclaw → owner/repo ·
+    # npm/pypi → owner=surface, repo=package · mcp → owner='mcp', repo=endpoint URL.
+    surface = Column(String(16), nullable=False, default="github", server_default="github")
     owner = Column(String(255), nullable=False)
-    repo = Column(String(255), nullable=False)
+    repo = Column(String(512), nullable=False)  # 512 so an MCP endpoint URL fits
     full_name = Column(String(512), nullable=False, index=True)
     trust_score = Column(Integer, nullable=True)
     # Letter grade WITH the A+ certified gate applied (roadmap §7) — stored so the
@@ -2508,7 +2511,9 @@ class CommunityScan(Base):
     last_scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("owner", "repo", name="uq_community_scan_target"),
+        # surface in the key so a github repo and an openclaw skill sharing
+        # owner/repo don't collide (same lesson as t16/t17).
+        UniqueConstraint("surface", "owner", "repo", name="uq_community_scan_target"),
     )
 
 

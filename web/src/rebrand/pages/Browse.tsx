@@ -94,6 +94,10 @@ function listingHref(row: CatalogRow): string | null {
   if (row.surface === 'openclaw' && fn && fn.includes('/')) {
     return rp(`/rebrand/check/skill/${fn}`)
   }
+  if (row.surface === 'mcp') {
+    const ep = row.endpoint_url || row.name
+    if (ep) return rp(`/rebrand/check/mcp?endpoint=${encodeURIComponent(ep)}`)
+  }
   if (fn && fn.includes('/')) return rp(`/rebrand/check/${fn}`)
   return null
 }

@@ -185,6 +185,37 @@ async def _user_owns_repo(db: AsyncSession, entity_id, full_name: str) -> bool:
     return row is not None
 
 
+async def _ensure_watch(
+    db: AsyncSession, entity_id, surface: str, owner: str, repo: str, is_private: bool,
+) -> None:
+    """A verified owner of a PUBLIC tool auto-watches it — rug-pull early warning on
+    their own tool, delivered by the existing per-surface re-scan loop (which already
+    dispatches via scan_watch_target). Private GitHub repos already get continuous
+    App re-scans, so skip them. Best-effort: never fails the claim."""
+    if is_private:
+        return
+    try:
+        from src.models import ToolWatch
+
+        existing = (await db.execute(
+            select(ToolWatch).where(
+                ToolWatch.watcher_id == entity_id,
+                ToolWatch.surface == surface,
+                ToolWatch.owner == owner,
+                ToolWatch.repo == repo,
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            if not existing.active:
+                existing.active = True
+            return
+        # last_score left None → the first re-scan populates the baseline and can't
+        # false-alert (a "dropped" alert needs a prior score).
+        db.add(ToolWatch(watcher_id=entity_id, surface=surface, owner=owner, repo=repo))
+    except Exception:
+        logger.debug("auto-watch on claim failed for %s %s/%s", surface, owner, repo, exc_info=True)
+
+
 async def _package_grant(
     db: AsyncSession, entity_id, surface: str, name: str,
 ) -> tuple[bool, str | None]:
@@ -481,6 +512,7 @@ async def create_claim(
             existing.status = "verified"
             existing.verified_at = safunc.now()
             existing.proof_method = proof_method
+            await _ensure_watch(db, entity.id, surface, owner, repo, existing.is_private)
             await db.flush()
             await db.refresh(existing)
         payload = _serialize(existing)
@@ -499,6 +531,7 @@ async def create_claim(
     if verified:
         from sqlalchemy import func as safunc
         claim.verified_at = safunc.now()
+        await _ensure_watch(db, entity.id, surface, owner, repo, claim.is_private)
     db.add(claim)
     await db.flush()
     await db.refresh(claim)
@@ -529,6 +562,8 @@ async def verify_claim(
         claim.status = "verified"
         claim.verified_at = safunc.now()
         claim.proof_method = proof_method
+        # Owning a public tool auto-watches it (rug-pull alerts on your own tool).
+        await _ensure_watch(db, entity.id, surface, claim.owner, claim.repo, claim.is_private)
         await db.flush()
         await db.refresh(claim)
         return {"verified": True, **_serialize(claim)}
@@ -599,6 +634,77 @@ async def verify_claim(
     }
 
 
+async def _scan_surface_for_publish(surface: str, owner: str, repo: str):
+    """Scan a non-GitHub surface and return its catalog-ready dict (findings, grade,
+    trust_score) via the shared _scan_result_to_dict. Raises HTTPException on error."""
+    from src.api.public_scan_router import _scan_result_to_dict
+    from src.scanner.scan import scan_mcp, scan_package, scan_skill
+
+    if surface in ("npm", "pypi"):
+        result = await scan_package(surface, repo)
+    elif surface == "mcp":
+        result = await scan_mcp(repo)
+    elif surface == "openclaw":
+        result = await scan_skill(owner, repo)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported surface for publish")
+    if getattr(result, "error", None):
+        raise HTTPException(status_code=502, detail=f"Scan failed: {result.error}")
+    return _scan_result_to_dict(result)
+
+
+@router.post("/claims/{claim_id}/publish")
+async def publish_claim(
+    claim_id: uuid.UUID,
+    entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_scans),
+):
+    """Publish a verified NON-GitHub claim (npm/pypi/mcp/skill) into the public
+    browse catalog under its real surface. GitHub public repos are auto-listed on
+    claim; private GitHub repos use /private-report/.../publish."""
+    claim = await db.get(RepoClaim, claim_id)
+    if claim is None or claim.entity_id != entity.id:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if claim.status != "verified":
+        raise HTTPException(status_code=400, detail="Verify ownership first")
+    surface = getattr(claim, "surface", "github") or "github"
+    if surface == "github":
+        raise HTTPException(status_code=400, detail="GitHub repos are listed automatically")
+    from src.api.public_scan_router import _capture_community_scan
+
+    data = await _scan_surface_for_publish(surface, claim.owner, claim.repo)
+    await _capture_community_scan(claim.owner, claim.repo, data, db, surface=surface)
+    return {
+        "published": True, "surface": surface, "full_name": claim.full_name,
+        "grade": data.get("grade"), "trust_score": data.get("trust_score"),
+    }
+
+
+@router.post("/claims/{claim_id}/unpublish")
+async def unpublish_claim(
+    claim_id: uuid.UUID,
+    entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(rate_limit_writes),
+):
+    """Withdraw a claimed non-GitHub tool from the public catalog (delete its
+    community_scans row). Idempotent. The claim + its watch stay."""
+    claim = await db.get(RepoClaim, claim_id)
+    if claim is None or claim.entity_id != entity.id:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    from sqlalchemy import delete as sa_delete
+
+    from src.models import CommunityScan
+    surface = getattr(claim, "surface", "github") or "github"
+    await db.execute(sa_delete(CommunityScan).where(
+        CommunityScan.surface == surface,
+        CommunityScan.owner == claim.owner,
+        CommunityScan.repo == claim.repo,
+    ))
+    return {"published": False}
+
+
 @router.delete("/claims/{claim_id}", status_code=204)
 async def delete_claim(
     claim_id: uuid.UUID,
@@ -609,14 +715,23 @@ async def delete_claim(
     claim = await db.get(RepoClaim, claim_id)
     if claim is None or claim.entity_id != entity.id:
         raise HTTPException(status_code=404, detail="Claim not found")
+    from sqlalchemy import delete as sa_delete
+
+    from src.models import CommunityScan
+    # A non-GitHub claim's catalog listing is tied to the claim (unlike a public
+    # GitHub repo, which is public regardless of claimant) — withdraw it on remove.
+    surface = getattr(claim, "surface", "github") or "github"
+    if surface != "github":
+        await db.execute(sa_delete(CommunityScan).where(
+            CommunityScan.surface == surface,
+            CommunityScan.owner == claim.owner,
+            CommunityScan.repo == claim.repo,
+        ))
     # Removing a PRIVATE claim also withdraws it from public search (delete the
     # CommunityScan row) and drops the owner-scoped stored report — otherwise an
     # unclaimed private repo would linger in Browse/search. Public repos stay in
     # the catalog (they're public regardless of who claims them).
     if claim.is_private:
-        from sqlalchemy import delete as sa_delete
-
-        from src.models import CommunityScan
         await db.execute(sa_delete(CommunityScan).where(
             CommunityScan.owner == claim.owner, CommunityScan.repo == claim.repo,
         ))
