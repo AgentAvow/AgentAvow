@@ -779,6 +779,10 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
         </div>
       </Reveal>
 
+      {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
+      <div className="mt-4"><WatchCTA surface="openclaw" owner={owner} repo={repo} /></div>
+      <AddToAgent kind="skill" owner={owner} repo={repo} />
+
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">
           <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we graded</h3>
@@ -797,10 +801,6 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
           })()}
         </div>
       </Reveal>
-
-      <AddToAgent kind="skill" owner={owner} repo={repo} />
-
-      <div className="mt-4"><WatchCTA surface="openclaw" owner={owner} repo={repo} /></div>
 
       {f?.items && f.items.length > 0 ? (
         <>
@@ -881,16 +881,16 @@ function McpResult({ endpoint }: { endpoint: string }) {
         </div>
       </Reveal>
 
+      {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
+      <div className="mt-4"><WatchCTA surface="mcp" owner="mcp" repo={endpoint} /></div>
+      <AddToAgent kind="mcp" url={endpoint} />
+
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">
           <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we graded</h3>
           <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We connected to the server and graded the <span className="text-text">tool surface it actually serves</span> — input-schema risk, hidden instructions in tool descriptions, dangerous capabilities, and the lethal trifecta across its tools. This is what a repo scan can&apos;t see.</p>
         </div>
       </Reveal>
-
-      <AddToAgent kind="mcp" url={endpoint} />
-
-      <div className="mt-4"><WatchCTA surface="mcp" owner="mcp" repo={endpoint} /></div>
 
       {f?.items && f.items.length > 0 ? (
         <>
@@ -978,6 +978,10 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
         </div>
       </Reveal>
 
+      {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
+      <div className="mt-4"><WatchCTA surface={surface} owner={surface} repo={name} /></div>
+      <AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />
+
       {/* Certified panel — the A+ story for packages */}
       {(scan.trust_score >= 81 || certified?.eligible) && <CertifiedPanel certified={certified} />}
 
@@ -993,10 +997,6 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
           </div>
         </div>
       </Reveal>
-
-      <AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />
-
-      <div className="mt-4"><WatchCTA surface={surface} owner={surface} repo={name} /></div>
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (
@@ -1210,6 +1210,16 @@ function Result({ owner, repo, privateResult }: {
         </div>
       </motion.div>
 
+      {/* PRIMARY ACTIONS — install right below watch (watch is in the hero), so the two
+          primary actions lead, consistent with every other score page. */}
+      {!isPrivate && (() => {
+        const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
+        const sd = (scan as { surface_detail?: { name?: string; is_mcp_server?: boolean } }).surface_detail || {}
+        const pkg = (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
+          ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server } : undefined
+        return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} />
+      })()}
+
       {/* PLAIN-ENGLISH VERDICT — for any user */}
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">
@@ -1240,15 +1250,6 @@ function Result({ owner, repo, privateResult }: {
 
       {/* Adoption — the real 5-axis metric, distinct from safety (public repos only) */}
       {!isPrivate && <AdoptionPanel owner={owner} repo={repo} />}
-
-      {/* Add to your agent — package install if the repo resolved to one, else clone */}
-      {!isPrivate && (() => {
-        const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
-        const sd = (scan as { surface_detail?: { name?: string; is_mcp_server?: boolean } }).surface_detail || {}
-        const pkg = (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
-          ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server } : undefined
-        return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} />
-      })()}
 
       {/* score history timeline (living record) */}
       <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} />
