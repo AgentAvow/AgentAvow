@@ -228,11 +228,15 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         )
     ) or 0
 
-    # --- Redis-backed counters (badge fetches, API-key calls) ---
+    # --- Redis-backed counters (badge fetches, API-key calls, + v2 signals) ---
     badge_by_day = await _read_daily_counter("badge_fetch", day_strs)
     api_call_by_day = await _read_daily_counter("api_call", day_strs)
+    adoption_by_day = await _read_daily_counter("adoption_hit", day_strs)
+    rescan_by_day = await _read_daily_counter("force_rescan", day_strs)
     badge_fetches_window = sum(badge_by_day.values())
     api_calls_window = sum(api_call_by_day.values())
+    adoption_hits_window = sum(adoption_by_day.values())
+    force_rescans_window = sum(rescan_by_day.values())
 
     # --- Daily time-series (grouped queries, then aligned to day_strs) ---
     async def _series_by_date(date_col) -> dict[str, int]:
@@ -263,6 +267,8 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "watches_created": _align(watches_by_day),
         "badge_fetches": _align(badge_by_day),
         "api_calls": _align(api_call_by_day),
+        "adoption_hits": _align(adoption_by_day),
+        "force_rescans": _align(rescan_by_day),
     }
 
     # --- Surface breakdown: static launch corpus + live community scans ---
@@ -307,6 +313,8 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "badge_fetches": int(badge_fetches_window),
             "attestations_issued": int(attestations_window),
             "api_calls": int(api_calls_window),
+            "adoption_hits": int(adoption_hits_window),
+            "force_rescans": int(force_rescans_window),
         },
         "scans": {
             "repos_scanned_window": int(repos_scanned_window),

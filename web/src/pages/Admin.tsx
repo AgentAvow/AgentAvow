@@ -6,6 +6,7 @@ import { InlineSkeleton } from '../components/Skeleton'
 import type { Tab, TabSection, PlatformStats, MarketingDashboard } from './admin/types'
 
 const OverviewTab = lazy(() => import('./admin/OverviewTab'))
+const MetricsTab = lazy(() => import('./admin/MetricsTab'))
 const UsersTab = lazy(() => import('./admin/UsersTab'))
 const ModerationTab = lazy(() => import('./admin/ModerationTab'))
 const AppealsTab = lazy(() => import('./admin/AppealsTab'))
@@ -32,6 +33,7 @@ const TAB_SECTIONS: TabSection[] = [
     icon: '\u{1F4CA}',
     tabs: [
       { value: 'overview', label: 'Overview' },
+      { value: 'metrics', label: 'Metrics' },
       { value: 'growth', label: 'Growth' },
       { value: 'conversion', label: 'Conversion' },
       { value: 'attribution', label: 'Attribution' },
@@ -135,6 +137,7 @@ export default function Admin() {
 
   const tabContent: Record<Tab, React.ReactNode> = {
     overview: <OverviewTab />,
+    metrics: <MetricsTab />,
     users: <UsersTab />,
     moderation: <ModerationTab />,
     appeals: <AppealsTab />,

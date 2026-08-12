@@ -303,6 +303,14 @@ async def enforce_fresh_scan_limit(request: Request) -> None:
     stops a single client from monopolizing it. Raises a clean 429 with
     ``Retry-After`` when exceeded.
     """
+    # Count fresh (GitHub-hitting) scans for the analytics dashboard — this is the
+    # exact choke point, so it measures real re-scan volume (never cache hits).
+    try:
+        from src.api.metrics_dashboard_router import bump_metric
+        await bump_metric("force_rescan")
+    except Exception:
+        pass
+
     ip = _get_client_ip(request)
     per_ip_limit = settings.rate_limit_fresh_scans_per_minute
     entity_id = _get_entity_id(request)

@@ -311,7 +311,7 @@ export interface RecruitmentStatsData {
   declined: number
 }
 
-export type Tab = 'overview' | 'users' | 'moderation' | 'appeals' | 'audit' | 'growth' | 'conversion' | 'attribution' | 'waitlist' | 'trust' | 'safety' | 'infra' | 'issues' | 'claims' | 'marketing' | 'engagement' | 'recruitment' | 'scout'
+export type Tab = 'overview' | 'metrics' | 'users' | 'moderation' | 'appeals' | 'audit' | 'growth' | 'conversion' | 'attribution' | 'waitlist' | 'trust' | 'safety' | 'infra' | 'issues' | 'claims' | 'marketing' | 'engagement' | 'recruitment' | 'scout'
 
 export interface TabSection {
   name: string

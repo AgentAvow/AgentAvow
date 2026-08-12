@@ -1589,6 +1589,11 @@ async def scan_adoption(
     "established" badge. First-party raw counts are kept internal; the published
     formula and per-axis breakdown are returned. Fail-open across every source.
     """
+    try:
+        from src.api.metrics_dashboard_router import bump_metric
+        await bump_metric("adoption_hit")
+    except Exception:
+        pass
     from src.scanner.adoption import (
         build_axis_dependents,
         build_axis_downloads,
@@ -1757,6 +1762,11 @@ async def scan_adoption_surface(
     axis breakdown plus a `headline` {count, unit} for the adoption ring."""
     from src.scanner.adoption import compute_adoption
 
+    try:
+        from src.api.metrics_dashboard_router import bump_metric
+        await bump_metric("adoption_hit")
+    except Exception:
+        pass
     axes, headline = await _surface_adoption_axes(surface, owner, repo)
     out = compute_adoption(axes).to_public_dict()
     out["headline"] = headline
