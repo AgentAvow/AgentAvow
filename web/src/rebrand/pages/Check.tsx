@@ -443,12 +443,13 @@ function Hero() {
     const sk = v.match(/^skill\s*:\s*(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)
     if (sk) { navigate(rp(`/rebrand/check/skill/${sk[1]}/${sk[2]}`)); return }
     // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
-    const pkg = v.match(/^(npm|pypi|python|crates|cargo|rust|hf|huggingface)\s*:\s*(.+)$/i)
+    const pkg = v.match(/^(npm|pypi|python|crates|cargo|rust|hf|huggingface|docker|container|oci)\s*:\s*(.+)$/i)
     if (pkg) {
       const k = pkg[1].toLowerCase()
       const surface = k === 'python' ? 'pypi'
         : (k === 'cargo' || k === 'rust') ? 'crates'
-        : k === 'hf' ? 'huggingface' : k
+        : k === 'hf' ? 'huggingface'
+        : (k === 'container' || k === 'oci') ? 'docker' : k
       navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
       return
     }
@@ -460,6 +461,10 @@ function Hero() {
         !/^(datasets|spaces|models|organizations|settings)\//i.test(ru[1])) {
       navigate(rp(`/rebrand/check/pkg/huggingface/${ru[1]}`)); return
     }
+    // Docker Hub: hub.docker.com/_/nginx (official) or /r/ns/name; and ghcr.io/owner/img.
+    if ((ru = v.match(/^https?:\/\/hub\.docker\.com\/_\/([\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/docker/${ru[1]}`)); return }
+    if ((ru = v.match(/^https?:\/\/hub\.docker\.com\/r\/([\w.-]+\/[\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/docker/${ru[1]}`)); return }
+    if ((ru = v.match(/^https?:\/\/ghcr\.io\/([\w.-]+\/[\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/docker/ghcr.io/${ru[1]}`)); return }
     if ((ru = v.match(/^https?:\/\/(?:www\.)?npmjs\.com\/package\/((?:@[\w.-]+\/)?[\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/npm/${ru[1]}`)); return }
     if ((ru = v.match(/^https?:\/\/pypi\.org\/project\/([\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/pypi/${ru[1]}`)); return }
     // A bare URL (no prefix) that isn't a GitHub/GitLab repo link → a live MCP
@@ -475,6 +480,7 @@ function Hero() {
     ['npm package', 'npm:sigstore'],
     ['PyPI package', 'pypi:requests'],
     ['HF model', 'hf:openai-community/gpt2'],
+    ['Container', 'docker:nginx'],
     ['MCP server', 'mcp:https://mcp.deepwiki.com/mcp'],
   ]
   return (
@@ -681,7 +687,7 @@ function AddToAgent(props:
   | { kind: 'mcp'; url: string }
   | { kind: 'package'; surface: string; name: string; isMcp?: boolean }
   | { kind: 'skill'; owner: string; repo: string }
-  | { kind: 'repo'; owner: string; repo: string; pkg?: { surface: string; name: string; isMcp?: boolean } }) {
+  | { kind: 'repo'; owner: string; repo: string; isMcpServer?: boolean; pkg?: { surface: string; name: string; isMcp?: boolean } }) {
   const [more, setMore] = useState(false)
   const deeplinkBtn = DEEPLINK_BTN
   return (
@@ -723,8 +729,16 @@ function AddToAgent(props:
         )}
         {props.kind === 'repo' && (props.pkg ? (
           <>
-            <p className="text-text-muted text-[13px] mt-1">This repo publishes the <span className="font-mono text-text">{props.pkg.surface}</span> package <span className="font-mono text-text">{props.pkg.name}</span>.</p>
-            <div className="mt-2"><PkgInstall surface={props.pkg.surface} name={props.pkg.name} isMcp={props.pkg.isMcp} /></div>
+            <p className="text-text-muted text-[13px] mt-1">This repo publishes the <span className="font-mono text-text">{props.pkg.surface}</span> package <span className="font-mono text-text">{props.pkg.name}</span>{props.isMcpServer ? ' — an MCP server' : ''}.</p>
+            <div className="mt-2"><PkgInstall surface={props.pkg.surface} name={props.pkg.name} isMcp={props.pkg.isMcp || props.isMcpServer} /></div>
+          </>
+        ) : props.isMcpServer ? (
+          <>
+            <p className="text-text-muted text-[13px] mt-1">This repo <span className="text-text">is an MCP server</span>. Install it as a package, or — for one-click add + a live grade of the tools it actually serves — scan its running endpoint.</p>
+            <div className="mt-3 flex flex-col gap-2">
+              <CopyRow label="git" cmd={`git clone https://github.com/${props.owner}/${props.repo}`} />
+            </div>
+            <Link to={rp('/rebrand/check')} className="mt-3 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">Scan its live endpoint for 1-click install →</Link>
           </>
         ) : (
           <>
@@ -906,6 +920,77 @@ function McpResult({ endpoint }: { endpoint: string }) {
           <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We connected to the server and graded the <span className="text-text">tool surface it actually serves</span> — input-schema risk, hidden instructions in tool descriptions, dangerous capabilities, and the lethal trifecta across its tools. This is what a repo scan can&apos;t see.</p>
         </div>
       </Reveal>
+
+      {/* WHAT WE CONNECTED TO — the live server facts (tools/resources/prompts/caps) */}
+      {(() => {
+        const sd = (scan as { surface_detail?: {
+          server_name?: string; tool_count?: number; resource_count?: number;
+          prompt_count?: number; capabilities?: Record<string, number>;
+          lethal_trifecta?: boolean } }).surface_detail || {}
+        const caps = sd.capabilities && Object.keys(sd.capabilities).length
+          ? Object.keys(sd.capabilities) : []
+        const facts: string[] = []
+        if (sd.tool_count != null) facts.push(`${sd.tool_count} tool${sd.tool_count === 1 ? '' : 's'} graded`)
+        if (sd.resource_count) facts.push(`${sd.resource_count} resource${sd.resource_count === 1 ? '' : 's'}`)
+        if (sd.prompt_count) facts.push(`${sd.prompt_count} prompt${sd.prompt_count === 1 ? '' : 's'}`)
+        return (
+          <Reveal>
+            <div className="mt-4 glass rounded-2xl p-6">
+              <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we connected to</h3>
+              <div className="mt-3 flex flex-col gap-2 text-[13px]">
+                <div className="flex justify-between gap-3"><span className="text-text-muted">Server</span><span className="font-mono break-all">{sd.server_name || 'unnamed'}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-text-muted">Endpoint</span><span className="font-mono text-success">live · streamable-HTTP</span></div>
+                <div className="flex justify-between gap-3"><span className="text-text-muted">Point-in-time</span><span className="font-mono">served surface, graded now</span></div>
+                {sd.lethal_trifecta != null && (
+                  <div className="flex justify-between gap-3"><span className="text-text-muted">Lethal trifecta</span><span className={`font-mono ${sd.lethal_trifecta ? 'text-danger' : 'text-success'}`}>{sd.lethal_trifecta ? 'present ⚠' : 'not present ✓'}</span></div>
+                )}
+              </div>
+              {facts.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {facts.map((fct) => <span key={fct} className="text-[12.5px] text-text-muted bg-surface border border-border rounded-full px-3 py-1">{fct}</span>)}
+                </div>
+              )}
+              {caps.length > 0 && (
+                <div className="mt-3">
+                  <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-1.5">Capabilities detected</div>
+                  <div className="flex flex-wrap gap-2">
+                    {caps.map((c) => <span key={c} className="font-mono text-[12px] text-warning bg-warning/10 border border-warning/25 rounded-full px-3 py-1">{c}</span>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </Reveal>
+        )
+      })()}
+
+      {/* CATEGORY SCORES — the per-axis breakdown, same as every other score page */}
+      {scan.category_scores && Object.keys(scan.category_scores).length > 0 && (
+        <>
+          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">Category scores</h3></Reveal>
+          <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-3" stagger={0.04}>
+            {Object.entries(CAT_LABELS).filter(([key]) => (scan.category_scores as Record<string, number>)[key] != null).map(([key, label]) => {
+              const sc = (scan.category_scores as Record<string, number>)[key]
+              const cg = getGradeInfo(sc)
+              return (
+                <div key={key} className="glass rounded-xl px-4 py-3 flex items-center justify-between">
+                  <span className="text-[14px]">{label}</span>
+                  <span className={`font-bold text-[13px] px-2 py-0.5 rounded ${cg.textClass} ${cg.bgClass}`}>{cg.grade} · {sc}</span>
+                </div>
+              )
+            })}
+          </RevealStagger>
+        </>
+      )}
+
+      {/* findings summary — critical/high/total, consistent with repo/package pages */}
+      <RevealStagger className="grid grid-cols-3 gap-3 mt-6" stagger={0.06}>
+        {[['critical', f?.critical ?? 0, 'text-danger'], ['high', f?.high ?? 0, 'text-warning'], ['total', f?.total ?? 0, 'text-text']].map(([lab, n, cls]) => (
+          <div key={lab as string} className="glass rounded-xl p-4 text-center">
+            <CountUp value={n as number} className={`block text-2xl font-bold tabular-nums ${cls}`} />
+            <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">{lab as string}</div>
+          </div>
+        ))}
+      </RevealStagger>
 
       {f?.items && f.items.length > 0 ? (
         <>
@@ -1224,9 +1309,10 @@ function Result({ owner, repo, privateResult }: {
       {!isPrivate && (() => {
         const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
         const sd = (scan as { surface_detail?: { name?: string; is_mcp_server?: boolean } }).surface_detail || {}
+        const isMcpServer = !!(scan as { metadata?: { is_mcp_server?: boolean } }).metadata?.is_mcp_server
         const pkg = (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
           ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server } : undefined
-        return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} />
+        return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} isMcpServer={isMcpServer} />
       })()}
 
       {/* PLAIN-ENGLISH VERDICT — for any user */}

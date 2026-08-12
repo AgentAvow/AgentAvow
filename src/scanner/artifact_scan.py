@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -342,6 +343,127 @@ def huggingface_weight_findings(fetched: ArtifactFetchResult) -> list:
                 "Prefer .safetensors; load pickle weights only from trusted publishers "
                 "or with a restricted unpickler.",
             ),
+        ))
+    return findings
+
+
+_DOCKER_SECRET_KEY_RE = re.compile(
+    r"(?:^|_)(?:PASS(?:WORD)?|SECRET|TOKEN|APIKEY|API_KEY|ACCESS_KEY|PRIVATE_KEY|"
+    r"CLIENT_SECRET|AUTH|CREDENTIAL|PWD)(?:$|_)",
+    re.IGNORECASE,
+)
+# Placeholder-ish values that aren't real leaked secrets (build args / templates).
+_DOCKER_ENV_PLACEHOLDER = re.compile(
+    r"^(?:|\$\{.*\}|<.*>|changeme|example|your[_-].*|xxx+|none|null|true|false|\d{1,4})$",
+    re.IGNORECASE,
+)
+
+
+def _docker_stale_months(created: str | None) -> int | None:
+    """Whole months since the image was built, from the config's ISO ``created``.
+    Best-effort — returns None if unparseable."""
+    if not created or not isinstance(created, str):
+        return None
+    try:
+        from datetime import datetime, timezone
+        ts = created.replace("Z", "+00:00")
+        # Trim over-precise fractional seconds (docker emits 9 digits; fromisoformat wants ≤6).
+        if "." in ts:
+            head, _, tail = ts.partition(".")
+            frac = "".join(ch for ch in tail if ch.isdigit())[:6]
+            off = tail[len(frac):] if len(tail) > len(frac) else ""
+            # keep any timezone offset that followed the fraction
+            import re as _re
+            moff = _re.search(r"[+-]\d\d:\d\d$", tail)
+            ts = f"{head}.{frac}{moff.group(0) if moff else off}"
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - dt
+        return max(0, int(delta.days / 30))
+    except (ValueError, TypeError):
+        return None
+
+
+def docker_config_findings(fetched: ArtifactFetchResult) -> list:
+    """Config-level container grade (no layer scan): the OCI image config carries
+    the highest-density security signal without pulling layers.
+
+    Detects: runs-as-root (no/root ``USER``), secrets baked into ``Env``/``Labels``,
+    a stale base (not rebuilt in a long time → unpatched CVEs), and SSH exposed. Fails
+    open on a missing manifest."""
+    from src.scanner.scan import _REMEDIATION_HINTS, Finding
+
+    manifest = fetched.packaged_manifest or {}
+    d = manifest.get("docker") if isinstance(manifest, dict) else None
+    if not isinstance(d, dict):
+        return []
+    cfg = d.get("config") or {}
+    findings: list = []
+
+    # 1) Runs as root — no USER, or an explicit root/0. The default, and a real
+    #    privilege-escalation surface if the container is breached.
+    user = str(cfg.get("User") or "").strip()
+    if user in ("", "root", "0", "0:0", "root:root"):
+        findings.append(Finding(
+            category="fs_access",
+            name="Container runs as root (no non-root USER set)",
+            severity="medium",
+            file_path="image config",
+            line_number=1,
+            snippet="config.User is unset/root — a breach runs with full container-root privileges",
+            remediation="Add a non-root USER in the Dockerfile and drop Linux capabilities.",
+        ))
+
+    # 2) Secrets baked into ENV / Labels — the config ships to every puller.
+    env_list = cfg.get("Env") or []
+    labels = cfg.get("Labels") or {}
+    pairs = [(e.split("=", 1)[0], e.split("=", 1)[1] if "=" in e else "")
+             for e in env_list if isinstance(e, str)]
+    pairs += [(str(k), str(v)) for k, v in (labels.items() if isinstance(labels, dict) else [])]
+    for key, val in pairs:
+        if (_DOCKER_SECRET_KEY_RE.search(key) and val
+                and not _DOCKER_ENV_PLACEHOLDER.match(val.strip())
+                and len(val.strip()) >= 6):
+            findings.append(Finding(
+                category="secret",
+                name=f"Credential baked into image config ({key})",
+                severity="high",
+                file_path="image config",
+                line_number=1,
+                snippet=f"{key}=<redacted> ships in the image ENV/labels to everyone who pulls it",
+                remediation=_REMEDIATION_HINTS.get(
+                    "secret", "Never bake secrets into an image; inject at runtime."),
+            ))
+            break  # one finding is enough to fail the axis; avoid leaking every key
+
+    # 3) SSH exposed — a container is not a VM; an sshd surface is an anti-pattern.
+    ports = cfg.get("ExposedPorts") or {}
+    if isinstance(ports, dict) and any(str(p).startswith(("22/", "2222/")) for p in ports):
+        findings.append(Finding(
+            category="fs_access",
+            name="Image exposes an SSH port (22)",
+            severity="low",
+            file_path="image config",
+            line_number=1,
+            snippet="ExposedPorts includes SSH — containers should not run sshd",
+            remediation="Remove sshd from the image; use `docker exec` / a sidecar for access.",
+        ))
+
+    # 4) Stale base — not rebuilt in a long time means unpatched OS/base CVEs.
+    months = _docker_stale_months(d.get("created"))
+    if months is not None and months >= 18:
+        findings.append(Finding(
+            category="dependency",
+            name=f"Image not rebuilt in ~{months} months (stale base — unpatched CVEs)",
+            severity="low" if months < 36 else "medium",
+            file_path="image config",
+            line_number=1,
+            snippet=(
+                f"config.created is ~{months} months old; "
+                "the base layer likely ships known CVEs"
+            ),
+            remediation="Rebuild on a current base image on a regular cadence.",
         ))
     return findings
 

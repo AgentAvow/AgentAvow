@@ -518,3 +518,97 @@ async def test_fetch_huggingface_artifact_happy_path():
     assert hf["unsafe_weights"] == ["pytorch_model.bin"]
     assert hf["safe_weights"] == ["model.safetensors"]
     assert hf["downloads"] == 1234
+
+
+# ── Container (Docker) config surface ─────────────────────────────────────────
+
+from src.scanner.artifact_fetch import (  # noqa: E402
+    fetch_docker_artifact,
+    parse_docker_coordinate,
+)
+from src.scanner.artifact_scan import docker_config_findings  # noqa: E402
+
+
+def _docker_result(config, created=None):
+    return ArtifactFetchResult(
+        ecosystem="docker", name="x", version="latest", kind="image", ok=True,
+        packaged_manifest={"docker": {"config": config, "created": created}},
+    )
+
+
+def test_docker_coordinate_official_and_ghcr():
+    assert parse_docker_coordinate("nginx", None) == (
+        "https://registry-1.docker.io", "library/nginx", "latest", "nginx")
+    assert parse_docker_coordinate("bitnami/redis", "7") == (
+        "https://registry-1.docker.io", "bitnami/redis", "7", "bitnami/redis")
+    reg, repo, tag, disp = parse_docker_coordinate("ghcr.io/owner/app:1.2", None)
+    assert reg == "https://ghcr.io" and repo == "owner/app" and tag == "1.2"
+
+
+def test_docker_root_user_is_flagged():
+    f = docker_config_findings(_docker_result({"User": ""}))
+    assert any(x.category == "fs_access" and "root" in x.name.lower() for x in f)
+
+
+def test_docker_nonroot_user_is_clean():
+    f = docker_config_findings(_docker_result({"User": "1001"}))
+    assert not any("root" in x.name.lower() for x in f)
+
+
+def test_docker_secret_in_env_is_high():
+    f = docker_config_findings(_docker_result(
+        {"User": "app", "Env": ["PATH=/usr/bin", "AWS_SECRET_ACCESS_KEY=AKIAsecretvalue123"]}
+    ))
+    secret = [x for x in f if x.category == "secret"]
+    assert secret and secret[0].severity == "high"
+
+
+def test_docker_secret_placeholder_is_ignored():
+    f = docker_config_findings(_docker_result(
+        {"User": "app", "Env": ["DB_PASSWORD=${DB_PASSWORD}", "API_TOKEN=changeme"]}
+    ))
+    assert not any(x.category == "secret" for x in f)
+
+
+def test_docker_findings_tolerates_missing_manifest():
+    r = ArtifactFetchResult(ecosystem="docker", name="x", version="1", kind="image", ok=True)
+    assert docker_config_findings(r) == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_docker_artifact_happy_path():
+    import hashlib as _h
+    config_blob = json.dumps({
+        "created": "2020-01-01T00:00:00Z",
+        "os": "linux", "architecture": "amd64",
+        "config": {"User": "", "Env": ["PATH=/usr/bin"], "ExposedPorts": {"80/tcp": {}}},
+        "history": [{}, {}],
+    }).encode()
+    cfg_digest = "sha256:" + _h.sha256(config_blob).hexdigest()
+    manifest = json.dumps({
+        "schemaVersion": 2, "config": {"digest": cfg_digest},
+        "layers": [{"digest": "sha256:aa"}, {"digest": "sha256:bb"}],
+    }).encode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        p = request.url.path
+        if p == "/token":
+            return httpx.Response(200, json={"token": "tok"})
+        if p == "/v2/library/nginx/manifests/latest":
+            return httpx.Response(200, content=manifest)
+        if p == f"/v2/library/nginx/blobs/{cfg_digest}":
+            return httpx.Response(200, content=config_blob)
+        return httpx.Response(404)
+
+    async with _mock_client(handler) as client:
+        res = await fetch_docker_artifact("nginx", client=client)
+    assert res.ok is True
+    assert res.ecosystem == "docker"
+    assert res.digest == cfg_digest
+    d = res.packaged_manifest["docker"]
+    assert d["layer_count"] == 2
+    assert d["config"]["User"] == ""
+    # config-level detector fires on the root user + stale base
+    findings = docker_config_findings(res)
+    assert any(x.category == "fs_access" for x in findings)
+    assert any("months" in x.name for x in findings)

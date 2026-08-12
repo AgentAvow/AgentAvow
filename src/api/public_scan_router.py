@@ -344,7 +344,7 @@ async def _capture_community_scan(
         if _score is not None else None
     )
     surface = (surface or "github").lower()
-    if surface in ("npm", "pypi", "crates", "huggingface"):
+    if surface in ("npm", "pypi", "crates", "huggingface", "docker"):
         _full = f"{surface}:{repo}"
     elif surface == "mcp":
         _full = repo
@@ -707,8 +707,11 @@ async def scan_package_endpoint(
         surface = "crates"
     elif surface in ("hf", "hugging_face", "hugging-face"):
         surface = "huggingface"
-    if surface not in ("npm", "pypi", "crates", "huggingface"):
-        raise HTTPException(404, "surface must be 'npm', 'pypi', 'crates', or 'huggingface'")
+    elif surface in ("container", "oci", "image", "dockerhub"):
+        surface = "docker"
+    if surface not in ("npm", "pypi", "crates", "huggingface", "docker"):
+        raise HTTPException(
+            404, "surface must be 'npm', 'pypi', 'crates', 'huggingface', or 'docker'")
     name = (name or "").strip().strip("/")
     if not name or len(name) > 214 or any(c in name for c in ("..", " ", "\t")):
         raise HTTPException(400, "Invalid package name")
@@ -1742,6 +1745,20 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
             elif likes:
                 headline = {"count": int(likes), "unit": "likes"}
                 axes.append(build_axis_stars(stars=int(likes)))
+    elif s == "docker":
+        from src.scanner.adoption_sources import fetch_docker_pulls
+        stats = await fetch_docker_pulls(repo.strip() if "/" in repo else f"library/{repo}")
+        if stats:
+            pulls, stars = stats.get("pulls"), stats.get("stars")
+            if pulls:
+                headline = {"count": int(pulls), "unit": "pulls"}
+                axes.append(build_axis_downloads(
+                    total_downloads=int(pulls), series=[],
+                    dependents_for_ratio=int(stars or 0),
+                ))
+            elif stars:
+                headline = {"count": int(stars), "unit": "stars"}
+                axes.append(build_axis_stars(stars=int(stars)))
     elif s in ("github", "openclaw"):
         stars = await _github_stars(owner.strip(), repo.strip())
         if stars is not None:

@@ -151,6 +151,14 @@ export function packageInstallCommands(surface: string, name: string): Array<{ l
       { label: 'git', cmd: `git clone https://huggingface.co/${name}` },
     ]
   }
+  if (surface === 'docker') {
+    // Docker Hub official images (library/foo) pull by the short name.
+    const ref = name.startsWith('library/') ? name.slice('library/'.length) : name
+    return [
+      { label: 'docker', cmd: `docker pull ${ref}` },
+      { label: 'run', cmd: `docker run --rm ${ref}` },
+    ]
+  }
   // pypi
   return [
     { label: 'pip', cmd: `pip install ${name}` },

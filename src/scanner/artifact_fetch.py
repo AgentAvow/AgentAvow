@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import logging
 import tarfile
 import zipfile
@@ -53,6 +54,21 @@ CRATES_DL = "https://static.crates.io/crates/{name}/{name}-{version}.crate"
 HF_META = "https://huggingface.co/api/models/{name}"
 HF_TREE = "https://huggingface.co/api/models/{name}/tree/main?recursive=true"
 HF_RESOLVE = "https://huggingface.co/{name}/resolve/main/{path}"
+# --- Container images. Graded at CONFIG level (not a full layer scan): the OCI
+# image config carries the highest-density security signal without pulling layers —
+# runs-as-root, secrets baked into ENV/labels, stale base, exposed ports. The token
+# dance is anonymous pull scope; the config blob is content-addressed so we verify
+# its digest even when the registry redirects it to a CDN.
+DOCKER_REGISTRY = "https://registry-1.docker.io"
+DOCKER_AUTH = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull"
+GHCR_REGISTRY = "https://ghcr.io"
+GHCR_AUTH = "https://ghcr.io/token?service=ghcr.io&scope=repository:{repo}:pull"
+_OCI_MANIFEST_ACCEPT = ", ".join([
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+])
 
 # --- Host allowlist. A resolved download URL MUST match one of these hosts, in
 # addition to passing the generic SSRF guard. This is the anti-SSRF backbone:
@@ -64,6 +80,9 @@ _ALLOWED_HOSTS = frozenset({
     "crates.io",
     "static.crates.io",
     "huggingface.co",
+    "registry-1.docker.io",
+    "auth.docker.io",
+    "ghcr.io",
 })
 
 # Hugging Face weight-file formats. Pickle-backed formats deserialize arbitrary
@@ -649,6 +668,174 @@ async def fetch_huggingface_artifact(
                 "safe_weights": safe_weights[:50],
                 "unsafe_weights": unsafe_weights[:50],
                 "custom_code": custom_code[:50],
+            }},
+        )
+    finally:
+        if owns:
+            await client.aclose()
+
+
+def parse_docker_coordinate(name: str, tag: str | None) -> tuple[str, str, str, str]:
+    """(registry_host, repo, tag, display) from a user image coordinate.
+
+    Docker Hub official ``nginx`` → repo ``library/nginx``; ``bitnami/redis`` stays;
+    ``ghcr.io/owner/app`` routes to GHCR. An embedded ``:tag`` in ``name`` wins over
+    the ``tag`` arg; default ``latest``."""
+    name = name.strip().strip("/")
+    if ":" in name.rsplit("/", 1)[-1]:  # tag embedded in the last path segment
+        name, _, embedded = name.rpartition(":")
+        tag = embedded or tag
+    tag = (tag or "latest").strip()
+    if name.startswith("ghcr.io/"):
+        repo = name[len("ghcr.io/"):]
+        return GHCR_REGISTRY, repo, tag, f"ghcr.io/{repo}"
+    repo = name if "/" in name else f"library/{name}"
+    display = repo[len("library/"):] if repo.startswith("library/") else repo
+    return DOCKER_REGISTRY, repo, tag, display
+
+
+async def _docker_token(auth_tmpl: str, repo: str, client: httpx.AsyncClient) -> str | None:
+    url = auth_tmpl.format(repo=repo)
+    validate_url_https(url, field_name="docker_auth")
+    resp = await client.get(url, timeout=_HTTP_TIMEOUT, follow_redirects=False)
+    if resp.status_code != 200:
+        return None
+    return (resp.json() or {}).get("token")
+
+
+async def _docker_get(
+    url: str, client: httpx.AsyncClient, *, token: str | None, accept: str | None = None,
+    verify_digest: str | None = None,
+) -> bytes | None:
+    """GET a registry URL following redirects to public https hosts only. When
+    ``verify_digest`` is set, the returned bytes must hash to it (content-addressed
+    blobs), which is what makes following a CDN redirect safe."""
+    cur = url
+    headers = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if accept:
+        headers["Accept"] = accept
+    for _hop in range(5):
+        validate_url_https(cur, field_name="docker_url")  # https + private-IP/rebind guard
+        # Auth header is only sent to the registry host, never to a redirected CDN.
+        send = dict(headers)
+        if urlparse(cur).hostname not in _ALLOWED_HOSTS:
+            send.pop("Authorization", None)
+        resp = await client.get(
+            cur, headers=send, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=False)
+        if resp.status_code in _REDIRECT_CODES:
+            loc = resp.headers.get("location")
+            if not loc:
+                return None
+            cur = str(httpx.URL(cur).join(loc))
+            continue
+        if resp.status_code != 200:
+            return None
+        raw = resp.content
+        if len(raw) > _METADATA_MAX_BYTES:
+            return None
+        if verify_digest:
+            algo, _, hexd = verify_digest.partition(":")
+            if algo == "sha256" and hashlib.sha256(raw).hexdigest() != hexd:
+                return None
+        return raw
+    return None
+
+
+def _pick_platform_manifest(index: dict) -> str | None:
+    """From a manifest list / OCI index, pick linux/amd64 (fallback: first non-attestation)."""
+    manifests = index.get("manifests") or []
+    for m in manifests:
+        plat = m.get("platform") or {}
+        if plat.get("os") == "linux" and plat.get("architecture") == "amd64":
+            return m.get("digest")
+    for m in manifests:
+        plat = m.get("platform") or {}
+        if plat.get("os") not in (None, "unknown"):
+            return m.get("digest")
+    return manifests[0].get("digest") if manifests else None
+
+
+async def fetch_docker_artifact(
+    name: str, version: str | None = None, *, client: httpx.AsyncClient | None = None,
+) -> ArtifactFetchResult:
+    """Resolve a container image and fetch its **OCI config** (not its layers).
+
+    The config JSON is where the highest-density security signal lives without a
+    layer pull: ``User`` (runs-as-root), ``Env``/``Labels`` (baked secrets),
+    ``ExposedPorts``, ``Entrypoint``, and ``created`` (staleness). The config blob
+    is content-addressed, so its digest is a perfect offline-recompute anchor.
+
+    Fail-open: raises ``ArtifactFetchError`` on a hard failure."""
+    owns = client is None
+    if owns:
+        client = httpx.AsyncClient(headers={
+            "User-Agent": "AgentAvow-ArtifactScanner (safety scanning; kenne@agentavow.com)",
+        })
+    try:
+        registry, repo, tag, display = parse_docker_coordinate(name, version)
+        auth = GHCR_AUTH if registry == GHCR_REGISTRY else DOCKER_AUTH
+        token = await _docker_token(auth, repo, client)
+
+        man_url = f"{registry}/v2/{repo}/manifests/{tag}"
+        man_raw = await _docker_get(man_url, client, token=token, accept=_OCI_MANIFEST_ACCEPT)
+        if man_raw is None:
+            raise ArtifactFetchError(f"image not found or unauthorized: {display}:{tag}")
+        try:
+            manifest = json.loads(man_raw)
+        except ValueError as exc:
+            raise ArtifactFetchError(f"invalid manifest for {display}:{tag}") from exc
+
+        # Multi-arch index → resolve the linux/amd64 child manifest.
+        if manifest.get("manifests"):
+            child = _pick_platform_manifest(manifest)
+            if not child:
+                raise ArtifactFetchError(f"no platform manifest for {display}:{tag}")
+            man_raw = await _docker_get(
+                f"{registry}/v2/{repo}/manifests/{child}", client,
+                token=token, accept=_OCI_MANIFEST_ACCEPT, verify_digest=child,
+            )
+            if man_raw is None:
+                raise ArtifactFetchError(f"platform manifest fetch failed: {display}:{tag}")
+            manifest = json.loads(man_raw)
+
+        cfg_digest = ((manifest.get("config") or {}).get("digest"))
+        if not cfg_digest:
+            raise ArtifactFetchError(f"manifest has no config digest: {display}:{tag}")
+        cfg_raw = await _docker_get(
+            f"{registry}/v2/{repo}/blobs/{cfg_digest}", client,
+            token=token, verify_digest=cfg_digest,
+        )
+        if cfg_raw is None:
+            raise ArtifactFetchError(f"config blob fetch failed: {display}:{tag}")
+        config = json.loads(cfg_raw)
+
+        layer_count = len(manifest.get("layers") or [])
+        return ArtifactFetchResult(
+            ecosystem="docker",
+            name=display,
+            version=tag,
+            kind="image",
+            ok=True,
+            digest=cfg_digest if cfg_digest.startswith("sha256:") else None,
+            download_url=(
+                f"https://hub.docker.com/r/{repo}" if registry == DOCKER_REGISTRY
+                and not repo.startswith("library/")
+                else f"https://hub.docker.com/_/{display}" if registry == DOCKER_REGISTRY
+                else f"https://{repo}"
+            ),
+            file_count=layer_count,
+            packaged_manifest={"docker": {
+                "registry": "ghcr" if registry == GHCR_REGISTRY else "dockerhub",
+                "repo": repo,
+                "tag": tag,
+                "config": config.get("config") or {},
+                "created": config.get("created"),
+                "os": config.get("os"),
+                "architecture": config.get("architecture"),
+                "layer_count": layer_count,
+                "history_len": len(config.get("history") or []),
             }},
         )
     finally:

@@ -23,6 +23,7 @@ const SURFACES = [
   { key: 'pypi', label: 'Python packages' },
   { key: 'crates', label: 'Rust crates' },
   { key: 'huggingface', label: 'Hugging Face models' },
+  { key: 'docker', label: 'Container images' },
   { key: 'x402', label: 'x402 endpoints' },
   { key: 'community', label: 'Community' },
 ]
@@ -100,7 +101,7 @@ function listingHref(row: CatalogRow): string | null {
   const fn = row.full_name
   if (
     (row.surface === 'npm' || row.surface === 'pypi' || row.surface === 'crates' ||
-      row.surface === 'huggingface') && row.name
+      row.surface === 'huggingface' || row.surface === 'docker') && row.name
   ) {
     return rp(`/rebrand/check/pkg/${row.surface}/${row.name}`)
   }

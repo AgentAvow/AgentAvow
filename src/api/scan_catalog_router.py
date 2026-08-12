@@ -91,6 +91,8 @@ def _categorize(row: CatalogRow) -> str:
         return "Agent skill"
     if s == "huggingface":
         return "AI model"
+    if s == "docker":
+        return "Container image"
     if s == "mcp" or row.is_mcp_server:
         return "MCP server"
     if s == "x402":
@@ -275,7 +277,7 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
             name = c.full_name
             repository_url = None
             endpoint_url = None
-            if surf in ("npm", "pypi", "crates", "huggingface"):
+            if surf in ("npm", "pypi", "crates", "huggingface", "docker"):
                 name = c.repo
             elif surf == "mcp":
                 name = c.repo
@@ -309,7 +311,7 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
 @router.get("", response_model=CatalogResponse, dependencies=[Depends(rate_limit_reads)])
 async def scan_catalog(
     surface: str | None = Query(
-        None, pattern="^(x402|mcp|npm|pypi|crates|huggingface|openclaw|community)$",
+        None, pattern="^(x402|mcp|npm|pypi|crates|huggingface|docker|openclaw|community)$",
     ),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),

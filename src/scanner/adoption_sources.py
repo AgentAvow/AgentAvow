@@ -473,6 +473,31 @@ async def fetch_pypi_downloads(package: str) -> dict | None:
         return None
 
 
+async def fetch_docker_pulls(repo: str) -> dict | None:
+    """Docker Hub image adoption — total ``pull_count`` + ``star_count`` (no auth).
+    ``repo`` is ``namespace/name`` (official = ``library/name``). Fail-open → None."""
+    try:
+        import httpx
+
+        ns, _, name = repo.partition("/")
+        if not name:
+            ns, name = "library", ns
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(f"https://hub.docker.com/v2/repositories/{ns}/{name}")
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+        return {
+            "source": "dockerhub:repositories",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "pulls": int(data.get("pull_count") or 0),
+            "stars": int(data.get("star_count") or 0),
+        }
+    except Exception:
+        logger.debug("docker pulls fetch failed for %s", repo, exc_info=True)
+        return None
+
+
 async def fetch_hf_stats(model_id: str) -> dict | None:
     """Hugging Face model adoption — monthly ``downloads`` + ``likes`` (no auth).
     ``model_id`` is ``org/model``. Fail-open → None."""

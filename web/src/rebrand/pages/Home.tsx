@@ -85,12 +85,13 @@ export default function RebrandHome() {
     const sk = v.match(/^skill\s*:\s*(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)
     if (sk) { navigate(rp(`/rebrand/check/skill/${sk[1]}/${sk[2]}`)); return }
     // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
-    const pkg = v.match(/^(npm|pypi|python|crates|cargo|rust|hf|huggingface)\s*:\s*(.+)$/i)
+    const pkg = v.match(/^(npm|pypi|python|crates|cargo|rust|hf|huggingface|docker|container|oci)\s*:\s*(.+)$/i)
     if (pkg) {
       const k = pkg[1].toLowerCase()
       const surface = k === 'python' ? 'pypi'
         : (k === 'cargo' || k === 'rust') ? 'crates'
-        : k === 'hf' ? 'huggingface' : k
+        : k === 'hf' ? 'huggingface'
+        : (k === 'container' || k === 'oci') ? 'docker' : k
       navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
       return
     }
@@ -101,6 +102,9 @@ export default function RebrandHome() {
         !/^(datasets|spaces|models|organizations|settings)\//i.test(ru[1])) {
       navigate(rp(`/rebrand/check/pkg/huggingface/${ru[1]}`)); return
     }
+    if ((ru = v.match(/^https?:\/\/hub\.docker\.com\/_\/([\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/docker/${ru[1]}`)); return }
+    if ((ru = v.match(/^https?:\/\/hub\.docker\.com\/r\/([\w.-]+\/[\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/docker/${ru[1]}`)); return }
+    if ((ru = v.match(/^https?:\/\/ghcr\.io\/([\w.-]+\/[\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/docker/ghcr.io/${ru[1]}`)); return }
     if ((ru = v.match(/^https?:\/\/(?:www\.)?npmjs\.com\/package\/((?:@[\w.-]+\/)?[\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/npm/${ru[1]}`)); return }
     if ((ru = v.match(/^https?:\/\/pypi\.org\/project\/([\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/pypi/${ru[1]}`)); return }
     // A bare URL (no prefix) that isn't a GitHub/GitLab repo link → a live MCP
