@@ -624,7 +624,7 @@ const DEEPLINK_BTN = 'inline-flex items-center gap-1.5 text-[12.5px] font-semibo
 
 /** Fire-and-forget install/badge-click beacon for the admin metrics dashboard. */
 function beacon(event: string) {
-  try { navigator.sendBeacon?.(`/api/v1/public/beacon/${event}`) } catch { /* ignore */ }
+  try { navigator.sendBeacon?.(`/api/v1/public/scan/beacon/${event}`) } catch { /* ignore */ }
 }
 
 /** Package install block — an MCP-server package gets 1-click stdio deeplinks
