@@ -100,6 +100,11 @@ class Finding:
     line_number: int
     snippet: str  # surrounding context (redacted for secrets)
     remediation: str = ""  # actionable fix suggestion
+    # For dependency (OSV) findings only: "direct" = a manifest-declared production
+    # dependency (full weight); "transitive" = pulled in by another dep (sub-weighted
+    # in _dependency_penalty, since it's less reachable). Defaults "direct" so any
+    # finding that can't determine reachability keeps FULL weight (never hides a CVE).
+    reachability: str = "direct"
 
 
 @dataclass
@@ -1490,6 +1495,10 @@ _DEP_CATEGORIES = frozenset({"dependency", "install_hook"})
 # package is the exception: malicious code in the dep tree is disqualifying.
 _DEP_VULN_CAP = 18       # max points a repo can lose to CVE-class dep findings
 _DEP_MAL_PENALTY = 70    # a MAL match forces the grade down hard
+# Reachability weight: a CVE in a TRANSITIVE prod dep (buried behind another dep) is
+# less reachable than one in a directly-declared dep, so it counts for less. Direct
+# (and unknown-directness) findings keep full weight — this only softens transitives.
+_TRANSITIVE_VULN_WEIGHT = 0.5
 
 
 def _dependency_penalty(findings: list[Finding]) -> int:
@@ -1497,18 +1506,25 @@ def _dependency_penalty(findings: list[Finding]) -> int:
 
     Diminishing returns per severity (the 1st vuln hurts most), capped at
     ``_DEP_VULN_CAP`` for CVE-class findings so a monorepo's transitive vulns
-    can't false-flip a healthy package to F. A known-malicious package short-
-    circuits to ``_DEP_MAL_PENALTY``."""
+    can't false-flip a healthy package to F. A CVE in a directly-declared prod dep
+    weighs full; a transitive one is sub-weighted (reachability). A known-malicious
+    package short-circuits to ``_DEP_MAL_PENALTY`` regardless of depth."""
     deps = [f for f in findings if f.category in _DEP_CATEGORIES]
     if not deps:
         return 0
     if any(f.name.startswith("Known-malicious") for f in deps):
         return _DEP_MAL_PENALTY
-    crit = sum(1 for f in deps if f.severity == "critical")
-    high = sum(1 for f in deps if f.severity == "high")
-    med = sum(1 for f in deps if f.severity == "medium")
 
-    def _sat(n: int, cap: float) -> float:
+    def _w(f: Finding) -> float:
+        # Only OSV findings carry reachability; repo-level dep findings default direct.
+        transitive = getattr(f, "reachability", "direct") == "transitive"
+        return _TRANSITIVE_VULN_WEIGHT if transitive else 1.0
+
+    crit = sum(_w(f) for f in deps if f.severity == "critical")
+    high = sum(_w(f) for f in deps if f.severity == "high")
+    med = sum(_w(f) for f in deps if f.severity == "medium")
+
+    def _sat(n: float, cap: float) -> float:
         return cap * (1 - 0.5 ** n) if n > 0 else 0.0
 
     penalty = _sat(crit, 12) + _sat(high, 8) + _sat(med, 4)

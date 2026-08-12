@@ -308,11 +308,11 @@ async def test_analyze_supply_chain_no_lockfiles_uses_depth_only():
 
 # --- Bounded dependency-penalty aggregation (advisory flip gate) -------------
 from src.scanner.scan import (  # noqa: E402
-    _dependency_penalty,
-    Finding as _F,
-    _DEP_VULN_CAP,
     _DEP_MAL_PENALTY,
+    _DEP_VULN_CAP,
+    _dependency_penalty,
 )
+from src.scanner.scan import Finding as _F  # noqa: E402,N814
 
 
 def _deps(n, sev, name="Vulnerable dependency: pkg@1.0 (CVE-x)"):
@@ -399,3 +399,51 @@ async def test_analyze_excludes_dev_deps_from_osv():
     assert result.deps_total == 0
     assert result.deps_dev_excluded == 2
     assert result.findings == []
+
+
+# --- Reachability tuning: direct-prod CVEs weigh full, transitive sub-weighted ---
+
+def _dep_finding(severity, reachability="direct"):
+    return _F(category="dependency", name=f"Vulnerable dependency: x@1 (CVE-{severity})",
+                   severity=severity, file_path="package-lock.json", line_number=1,
+                   snippet="", remediation="", reachability=reachability)
+
+
+def test_transitive_cve_weighs_less_than_direct():
+    from src.scanner.scan import _dependency_penalty
+    direct = _dependency_penalty([_dep_finding("high", "direct")])
+    transitive = _dependency_penalty([_dep_finding("high", "transitive")])
+    assert transitive < direct  # a buried transitive CVE hurts less
+    assert direct > 0 and transitive > 0  # but still counts
+
+
+def test_malicious_disqualifying_regardless_of_reachability():
+    from src.scanner.scan import _DEP_MAL_PENALTY, Finding, _dependency_penalty
+    f = Finding(category="dependency", name="Known-malicious package: evil@1 (MAL-1)",
+                severity="critical", file_path="p", line_number=1, snippet="", remediation="",
+                reachability="transitive")
+    assert _dependency_penalty([f]) == _DEP_MAL_PENALTY  # depth never softens malicious
+
+
+def test_direct_finding_unchanged_from_legacy():
+    # A finding with no explicit reachability defaults to "direct" = full weight, so
+    # legacy behavior (a lone direct critical in the 4–10 band) is preserved.
+    from src.scanner.scan import _dependency_penalty
+    p = _dependency_penalty([_dep_finding("critical")])
+    assert 4 <= p <= 10
+
+
+def test_package_lock_marks_direct_vs_transitive():
+    import json
+
+    from src.scanner.lockfiles import parse_package_lock
+    lock = json.dumps({
+        "packages": {
+            "": {"dependencies": {"express": "^4.0.0"}},
+            "node_modules/express": {"version": "4.18.2"},
+            "node_modules/body-parser": {"version": "1.20.0"},  # transitive (not declared)
+        }
+    })
+    deps = {d.name: d for d in parse_package_lock(lock)}
+    assert deps["express"].direct is True
+    assert deps["body-parser"].direct is False

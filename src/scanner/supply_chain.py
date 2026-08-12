@@ -254,6 +254,9 @@ def summarize_osv(
                 "line_number": 1,
                 "snippet": summary,
                 "remediation": remediation,
+                # Reachability: a CVE in a directly-declared prod dep weighs more than
+                # one buried transitively. Unknown-directness deps default direct=True.
+                "reachability": "direct" if getattr(dep, "direct", True) else "transitive",
             })
     return findings, counts, malicious
 

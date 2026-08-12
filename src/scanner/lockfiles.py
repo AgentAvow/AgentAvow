@@ -58,6 +58,10 @@ class Dep:
     name: str
     version: str
     dev: bool = field(default=False, compare=False)
+    # ``direct`` marks a manifest-declared (top-level) dependency vs a transitive one
+    # pulled in by another dep. Defaults True everywhere it can't be determined, so
+    # unknowns keep FULL grade weight — the fail-safe side (never under-count a CVE).
+    direct: bool = field(default=True, compare=False)
 
     def as_osv_query(self) -> dict:
         return {
@@ -90,6 +94,11 @@ def parse_package_lock(text: str) -> list[Dep]:
     # trailing package after the last node_modules/ segment).
     packages = data.get("packages") if isinstance(data, dict) else None
     if isinstance(packages, dict):
+        # The root ("") entry lists the manifest's declared deps — those are DIRECT.
+        # If it's absent we can't tell, so we fall back to full weight (all direct).
+        root = packages.get("") if isinstance(packages.get(""), dict) else {}
+        root_direct = set(root.get("dependencies") or {}) | set(root.get("peerDependencies") or {})
+        have_root = bool(root_direct)
         for path, meta in packages.items():
             if not path or not isinstance(meta, dict):
                 continue  # "" is the root project
@@ -101,10 +110,15 @@ def parse_package_lock(text: str) -> list[Dep]:
                 # npm marks devDependencies (and their dev-only transitives) with
                 # `dev: true`; `devOptional` is dev-or-optional. Either → dev.
                 is_dev = bool(meta.get("dev") or meta.get("devOptional"))
-                out.append(Dep(ECO_NPM, name, _clean_version(ver), dev=is_dev))
+                # A NESTED node_modules path is never hoisted → definitely transitive.
+                # A top-level entry is direct iff the manifest declared it (else, when
+                # we have no root info, default direct = full weight).
+                nested = path.count("node_modules/") > 1
+                is_direct = False if nested else (name in root_direct if have_root else True)
+                out.append(Dep(ECO_NPM, name, _clean_version(ver), dev=is_dev, direct=is_direct))
 
-    # v1: recursive "dependencies" tree.
-    def _walk(node: dict) -> None:
+    # v1: recursive "dependencies" tree — depth 0 is direct, anything deeper transitive.
+    def _walk(node: dict, depth: int = 0) -> None:
         deps = node.get("dependencies")
         if not isinstance(deps, dict):
             return
@@ -113,8 +127,11 @@ def parse_package_lock(text: str) -> list[Dep]:
                 continue
             ver = meta.get("version")
             if isinstance(ver, str) and isinstance(name, str):
-                out.append(Dep(ECO_NPM, name, _clean_version(ver), dev=bool(meta.get("dev"))))
-            _walk(meta)
+                out.append(Dep(
+                    ECO_NPM, name, _clean_version(ver),
+                    dev=bool(meta.get("dev")), direct=(depth == 0),
+                ))
+            _walk(meta, depth + 1)
 
     if isinstance(data, dict) and not packages:
         _walk(data)
