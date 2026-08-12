@@ -620,7 +620,9 @@ function CopyRow({ cmd, label, multiline }: { cmd: string; label?: string; multi
   )
 }
 
-const DEEPLINK_BTN = 'inline-flex items-center gap-1.5 text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-primary-light/40 bg-primary/10 text-primary-light hover:bg-primary/20 transition-colors'
+// Prominent, filled 1-click install buttons — the primary "install" action, given
+// the same visual weight as the Watch CTA (they were easy to miss as subtle outlines).
+const DEEPLINK_BTN = 'inline-flex items-center gap-2 text-[14px] font-bold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-md shadow-primary/25 hover:shadow-primary/45 hover:-translate-y-0.5 transition-all'
 
 /** Fire-and-forget install/badge-click beacon for the admin metrics dashboard. */
 function beacon(event: string) {
@@ -1308,12 +1310,15 @@ function Result({ owner, repo, privateResult }: {
       <Reveal>
         <div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div>
         {!isPrivate && (
-          <button
-            onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
-            className="mt-3 text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
-          >
-            ↓ Download score card (PNG)
-          </button>
+          <div className="mt-3">
+            <button
+              onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
+              className="text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
+            >
+              ↓ Download score card (SVG)
+            </button>
+            <p className="mt-1.5 text-[11.5px] text-text-muted/70">A scalable card to promote your grade on your site or deck.</p>
+          </div>
         )}
       </Reveal>
 
