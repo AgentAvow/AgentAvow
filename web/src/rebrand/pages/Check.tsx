@@ -110,32 +110,6 @@ function ClaimedBadge({ surface, owner = '', repo }: { surface: string; owner?: 
   )
 }
 
-/** A compact adoption signal for the non-GitHub surfaces the score pages otherwise
- * show as "New" — real registry downloads (npm/PyPI) or GitHub stars (skills). Only
- * renders when there's a real number, so it never fabricates adoption. */
-function AdoptionLine({ surface, owner = '', repo }: { surface: string; owner?: string; repo: string }) {
-  const { data } = useQuery({
-    queryKey: ['surface-adoption', surface, owner, repo],
-    queryFn: async () => (await api.get<{ headline?: { count: number; unit: string } | null }>(
-      `/public/scan/adoption?surface=${encodeURIComponent(surface)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
-    )).data,
-    staleTime: 300_000,
-    retry: 0,
-  })
-  const h = data?.headline
-  if (!h || !h.count || h.count <= 0) return null
-  const compact = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n))
-  const icon = h.unit === 'stars' ? '★' : h.unit === 'dependents' ? '🔗' : '📈'
-  return (
-    <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border/60 bg-surface/40 px-3 py-1.5">
-      <span className="text-[15px]" style={{ color: '#F59E0B' }}>{icon}</span>
-      <span className="font-mono text-[14px] font-bold" style={{ color: '#F59E0B' }}>{compact(h.count)}</span>
-      <span className="text-[12px] text-text-muted">{h.unit}</span>
-      <span className="text-[11px] text-text-muted/70 ml-0.5">· adoption</span>
-    </div>
-  )
-}
-
 /** Co-equal score ring — used for BOTH Attestation Trust and Adoption so the two
  * scores read as peers. Draws to `fill` (0–1) when given, a full ring otherwise;
  * dashed + muted when there's no data (e.g. a just-launched tool with no adoption). */
@@ -159,6 +133,34 @@ function ScoreRing({ center, sub, hex, fill, dashed }: { center: string; sub?: s
           {sub && <div className="mt-1 text-[12px] font-mono text-text-muted">{sub}</div>}
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Adoption as a co-equal RING for the non-GitHub views (was only a small pill). Big
+ * number + unit; a dashed muted ring when there's no adoption signal (e.g. a live MCP
+ * endpoint, or a brand-new package) so it never fabricates reliance. */
+function AdoptionRing({ surface, owner = '', repo }: { surface: string; owner?: string; repo: string }) {
+  const { data } = useQuery({
+    queryKey: ['surface-adoption', surface, owner, repo],
+    queryFn: async () => (await api.get<{ headline?: { count: number; unit: string } | null; adoption_score_100?: number }>(
+      `/public/scan/adoption?surface=${encodeURIComponent(surface)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+    )).data,
+    staleTime: 300_000,
+    retry: 0,
+  })
+  const h = data?.headline
+  const has = !!(h && h.count && h.count > 0)
+  const compact = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n))
+  const AD = '#F59E0B'
+  return (
+    <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
+      <ScoreRing
+        center={has ? compact(h!.count) : 'New'} sub={has ? h!.unit : undefined} hex={AD}
+        fill={has ? Math.max((data?.adoption_score_100 ?? 50) / 100, 0.15) : undefined} dashed={!has}
+      />
+      <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: has ? AD : 'var(--color-text-muted)' }}>Adoption</div>
+      <div className="mt-0.5 text-[12px] text-text-muted">{has ? 'independent reliance' : 'no adoption signal yet'}</div>
     </div>
   )
 }
@@ -761,15 +763,13 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
             <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}</h1>
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <div className="relative px-7 py-6 flex justify-center">
+          <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
               <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Capability Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
-          </div>
-          <div className="relative px-7 pb-6 -mt-2 flex justify-center">
-            <AdoptionLine surface="openclaw" owner={owner} repo={repo} />
+            <AdoptionRing surface="openclaw" owner={owner} repo={repo} />
           </div>
         </div>
       </Reveal>
@@ -865,12 +865,13 @@ function McpResult({ endpoint }: { endpoint: string }) {
             <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all font-mono">{endpoint}</h1>
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <div className="relative px-7 py-6 flex justify-center">
+          <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
               <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Capability Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
+            <AdoptionRing surface="mcp" owner="mcp" repo={endpoint} />
           </div>
         </div>
       </Reveal>
@@ -961,15 +962,13 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
             <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{name}</h1>
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <div className="relative px-7 py-6 flex justify-center">
+          <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
               <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Attestation Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
-          </div>
-          <div className="relative px-7 pb-6 -mt-2 flex justify-center">
-            <AdoptionLine surface={surface} repo={name} />
+            <AdoptionRing surface={surface} repo={name} />
           </div>
         </div>
       </Reveal>
