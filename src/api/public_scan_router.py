@@ -1773,6 +1773,25 @@ async def scan_adoption_surface(
     return out
 
 
+_BEACON_EVENTS = {
+    "install_click", "install_cursor", "install_vscode", "install_goose",
+    "install_copy", "badge_copy",
+}
+
+
+@router.post("/beacon/{event}")
+async def metric_beacon(event: str) -> dict:
+    """Lightweight client-side event counter for the admin dashboard — install-button
+    clicks, badge copies. Allowlisted event names only; fire-and-forget, best-effort."""
+    if event in _BEACON_EVENTS:
+        try:
+            from src.api.metrics_dashboard_router import bump_metric
+            await bump_metric(event)
+        except Exception:
+            pass
+    return {"ok": True}
+
+
 def _verdict_text(grade: str) -> str:
     """Return a consumer-friendly safety verdict for a letter grade."""
     if grade in ("A+", "A"):

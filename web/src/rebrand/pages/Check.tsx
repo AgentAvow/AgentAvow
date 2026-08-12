@@ -622,6 +622,11 @@ function CopyRow({ cmd, label, multiline }: { cmd: string; label?: string; multi
 
 const DEEPLINK_BTN = 'inline-flex items-center gap-1.5 text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-primary-light/40 bg-primary/10 text-primary-light hover:bg-primary/20 transition-colors'
 
+/** Fire-and-forget install/badge-click beacon for the admin metrics dashboard. */
+function beacon(event: string) {
+  try { navigator.sendBeacon?.(`/api/v1/public/beacon/${event}`) } catch { /* ignore */ }
+}
+
 /** Package install block — an MCP-server package gets 1-click stdio deeplinks
  * (Cursor/VS Code + Claude Code/config), library install collapsed under it;
  * a plain library gets the install one-liners. */
@@ -632,8 +637,8 @@ function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; i
       <>
         <p className="text-text-muted text-[13px] mt-1">This package is an <span className="text-text">MCP server</span> — one click, or copy the config:</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <a href={cursorStdio(t)} target="_blank" rel="noopener noreferrer" className={DEEPLINK_BTN}>▸ Add to Cursor</a>
-          <a href={vscodeStdio(t)} className={DEEPLINK_BTN}>▸ Add to VS Code</a>
+          <a href={cursorStdio(t)} onClick={() => beacon('install_click')} target="_blank" rel="noopener noreferrer" className={DEEPLINK_BTN}>▸ Add to Cursor</a>
+          <a href={vscodeStdio(t)} onClick={() => beacon('install_click')} className={DEEPLINK_BTN}>▸ Add to VS Code</a>
         </div>
         <div className="mt-3 flex flex-col gap-2">
           <CopyRow label="Claude Code" cmd={claudeCodeStdio(t)} />
@@ -679,9 +684,9 @@ function AddToAgent(props:
             <>
               <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">One click for Cursor, VS Code, or Goose — the graded server, ready to connect.</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <a href={cursorInstall(t)} target="_blank" rel="noopener noreferrer" className={deeplinkBtn}>▸ Add to Cursor</a>
-                <a href={vscodeInstall(t)} className={deeplinkBtn}>▸ Add to VS Code</a>
-                <a href={gooseInstall(t)} className={deeplinkBtn}>▸ Add to Goose</a>
+                <a href={cursorInstall(t)} onClick={() => beacon('install_click')} target="_blank" rel="noopener noreferrer" className={deeplinkBtn}>▸ Add to Cursor</a>
+                <a href={vscodeInstall(t)} onClick={() => beacon('install_click')} className={deeplinkBtn}>▸ Add to VS Code</a>
+                <a href={gooseInstall(t)} onClick={() => beacon('install_click')} className={deeplinkBtn}>▸ Add to Goose</a>
               </div>
               <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">{more ? 'Fewer ways ▾' : 'Claude, Gemini, Codex & more ▸'}</button>
               {more && (

@@ -8,7 +8,8 @@ type Metrics = {
   window: string
   headline: Record<string, number>
   scans?: { grade_distribution?: Record<string, number> }
-  catalog?: { by_surface?: Record<string, number> }
+  catalog?: { by_surface?: Record<string, number>; by_category?: Record<string, number> }
+  funnel?: { scanned: number; watched: number; claimed: number; installs: number }
   series?: Record<string, number[]>
   generated_at?: string
 }
@@ -31,10 +32,42 @@ const HEADLINE: [string, string][] = [
   ['watches_created', 'Watches created'],
   ['attestations_issued', 'Attestations issued'],
   ['adoption_hits', 'Adoption lookups'],
+  ['install_clicks', '1-click installs'],
   ['force_rescans', 'Fresh re-scans'],
   ['badge_fetches', 'Badge fetches'],
   ['api_calls', 'API calls'],
 ]
+
+/** Scan → watch → claim → install funnel with drop-off %. */
+function Funnel({ f }: { f: NonNullable<Metrics['funnel']> }) {
+  const steps: [string, number][] = [
+    ['Scanned', f.scanned], ['Watched', f.watched], ['Claimed', f.claimed], ['Installed', f.installs],
+  ]
+  const max = Math.max(f.scanned, 1)
+  return (
+    <div>
+      <div className="text-sm font-semibold mb-2">Engagement funnel (this window)</div>
+      <div className="space-y-2">
+        {steps.map(([label, n], i) => {
+          const pct = Math.round((n / max) * 100)
+          const prev = i > 0 ? steps[i - 1][1] : n
+          const conv = prev > 0 ? Math.round((n / prev) * 100) : 0
+          return (
+            <div key={label} className="flex items-center gap-3">
+              <div className="w-20 text-xs text-text-muted shrink-0">{label}</div>
+              <div className="flex-1 h-6 bg-surface rounded overflow-hidden border border-border">
+                <div className="h-full bg-primary/40" style={{ width: `${Math.max(pct, 2)}%` }} />
+              </div>
+              <div className="w-28 text-xs tabular-nums text-right shrink-0">
+                {n.toLocaleString()}{i > 0 && <span className="text-text-muted/60"> · {conv}%</span>}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 const WINDOWS = ['today', '7d', '30d']
 
@@ -73,6 +106,19 @@ export default function MetricsTab() {
               </div>
             ))}
           </div>
+
+          {data.funnel && <Funnel f={data.funnel} />}
+
+          {data.catalog?.by_category && Object.keys(data.catalog.by_category).length > 0 && (
+            <div>
+              <div className="text-sm font-semibold mb-2">Tools by type</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {Object.entries(data.catalog.by_category)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([c, n]) => <StatCard key={c} label={c} value={n} />)}
+              </div>
+            </div>
+          )}
 
           {data.scans?.grade_distribution && (
             <div>

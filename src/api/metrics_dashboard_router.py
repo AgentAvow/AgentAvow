@@ -233,10 +233,12 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     api_call_by_day = await _read_daily_counter("api_call", day_strs)
     adoption_by_day = await _read_daily_counter("adoption_hit", day_strs)
     rescan_by_day = await _read_daily_counter("force_rescan", day_strs)
+    install_by_day = await _read_daily_counter("install_click", day_strs)
     badge_fetches_window = sum(badge_by_day.values())
     api_calls_window = sum(api_call_by_day.values())
     adoption_hits_window = sum(adoption_by_day.values())
     force_rescans_window = sum(rescan_by_day.values())
+    install_clicks_window = sum(install_by_day.values())
 
     # --- Daily time-series (grouped queries, then aligned to day_strs) ---
     async def _series_by_date(date_col) -> dict[str, int]:
@@ -269,10 +271,12 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "api_calls": _align(api_call_by_day),
         "adoption_hits": _align(adoption_by_day),
         "force_rescans": _align(rescan_by_day),
+        "install_clicks": _align(install_by_day),
     }
 
     # --- Surface breakdown: static launch corpus + live community scans ---
     surface_breakdown: dict[str, int] = {}
+    category_breakdown: dict[str, int] = {}
     catalog_static_total = 0
     try:
         from src.api.scan_catalog_router import _get_catalog
@@ -280,8 +284,9 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         cat = _get_catalog()
         surface_breakdown = dict(cat["summary"].by_surface)
         catalog_static_total = int(cat["summary"].total_scans)
+        category_breakdown = dict(cat.get("static_cats") or {})
     except Exception:
-        pass
+        category_breakdown = {}
     surface_breakdown["community"] = int(unique_repos_total)
     catalog_size_total = catalog_static_total + int(unique_repos_total)
 
@@ -315,6 +320,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "api_calls": int(api_calls_window),
             "adoption_hits": int(adoption_hits_window),
             "force_rescans": int(force_rescans_window),
+            "install_clicks": int(install_clicks_window),
         },
         "scans": {
             "repos_scanned_window": int(repos_scanned_window),
@@ -357,6 +363,14 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "community_scans": int(unique_repos_total),
             "static_corpus": int(catalog_static_total),
             "by_surface": surface_breakdown,
+            "by_category": category_breakdown,
+        },
+        # Adoption funnel — how far users travel: scan → watch → claim (the drop-off).
+        "funnel": {
+            "scanned": int(repos_scanned_window),
+            "watched": int(watches_created_window),
+            "claimed": int(claims_created_window),
+            "installs": int(install_clicks_window),
         },
         "series": series,
         "notes": notes,
