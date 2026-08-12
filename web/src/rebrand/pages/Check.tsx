@@ -48,7 +48,7 @@ const VERDICT_STYLE = {
   risky: { ring: 'text-danger', chip: 'bg-danger/15 text-danger', label: 'RISKY' },
 }
 
-const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'mcp:https://…', 'a repo, package, or MCP server']
+const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
 
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA.
  * Works across every surface: pass the coordinate as stored server-side
@@ -443,16 +443,23 @@ function Hero() {
     const sk = v.match(/^skill\s*:\s*(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)
     if (sk) { navigate(rp(`/rebrand/check/skill/${sk[1]}/${sk[2]}`)); return }
     // Package coordinate: `npm:chalk`, `pypi:requests`, `npm:@scope/pkg`.
-    const pkg = v.match(/^(npm|pypi|python|crates|cargo|rust)\s*:\s*(.+)$/i)
+    const pkg = v.match(/^(npm|pypi|python|crates|cargo|rust|hf|huggingface)\s*:\s*(.+)$/i)
     if (pkg) {
       const k = pkg[1].toLowerCase()
-      const surface = k === 'python' ? 'pypi' : (k === 'cargo' || k === 'rust') ? 'crates' : k
+      const surface = k === 'python' ? 'pypi'
+        : (k === 'cargo' || k === 'rust') ? 'crates'
+        : k === 'hf' ? 'huggingface' : k
       navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
       return
     }
     // A pasted registry URL → the right package scan (before the bare-URL→MCP rule).
     let ru
     if ((ru = v.match(/^https?:\/\/(?:www\.)?crates\.io\/crates\/([\w-]+)/i))) { navigate(rp(`/rebrand/check/pkg/crates/${ru[1]}`)); return }
+    // huggingface.co/org/model (skip /datasets, /spaces, and reserved single-segment paths).
+    if ((ru = v.match(/^https?:\/\/huggingface\.co\/([\w.-]+\/[\w.-]+)(?:$|[/?#])/i)) &&
+        !/^(datasets|spaces|models|organizations|settings)\//i.test(ru[1])) {
+      navigate(rp(`/rebrand/check/pkg/huggingface/${ru[1]}`)); return
+    }
     if ((ru = v.match(/^https?:\/\/(?:www\.)?npmjs\.com\/package\/((?:@[\w.-]+\/)?[\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/npm/${ru[1]}`)); return }
     if ((ru = v.match(/^https?:\/\/pypi\.org\/project\/([\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/pypi/${ru[1]}`)); return }
     // A bare URL (no prefix) that isn't a GitHub/GitLab repo link → a live MCP
@@ -467,6 +474,7 @@ function Hero() {
     ['GitHub repo', 'github.com/vercel/next.js'],
     ['npm package', 'npm:sigstore'],
     ['PyPI package', 'pypi:requests'],
+    ['HF model', 'hf:openai-community/gpt2'],
     ['MCP server', 'mcp:https://mcp.deepwiki.com/mcp'],
   ]
   return (

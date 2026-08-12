@@ -1035,6 +1035,9 @@ def _curated_seed_targets() -> list[tuple[str, str, str]]:
             out.append(("pypi", "pypi", str(name)))
         for name in doc.get("crates", []) or []:
             out.append(("crates", "crates", str(name)))
+        for name in doc.get("huggingface", []) or []:
+            # HF coordinate is org/model — carried whole in `repo`.
+            out.append(("huggingface", "huggingface", str(name)))
         for url in doc.get("mcp", []) or []:
             out.append(("mcp", "mcp", str(url)))
         for pair in doc.get("openclaw", []) or []:
@@ -1098,7 +1101,7 @@ async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
         )
         from src.scanner.scan import scan_mcp, scan_package, scan_skill
 
-        if surface in ("npm", "pypi", "crates"):
+        if surface in ("npm", "pypi", "crates", "huggingface"):
             result = await scan_package(surface, repo)
         elif surface == "mcp":
             result = await scan_mcp(repo)

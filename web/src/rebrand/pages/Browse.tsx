@@ -22,6 +22,7 @@ const SURFACES = [
   { key: 'npm', label: 'npm packages' },
   { key: 'pypi', label: 'Python packages' },
   { key: 'crates', label: 'Rust crates' },
+  { key: 'huggingface', label: 'Hugging Face models' },
   { key: 'x402', label: 'x402 endpoints' },
   { key: 'community', label: 'Community' },
 ]
@@ -97,7 +98,10 @@ const _SURFACE_BADGE: Record<string, string> = {
 }
 function listingHref(row: CatalogRow): string | null {
   const fn = row.full_name
-  if ((row.surface === 'npm' || row.surface === 'pypi' || row.surface === 'crates') && row.name) {
+  if (
+    (row.surface === 'npm' || row.surface === 'pypi' || row.surface === 'crates' ||
+      row.surface === 'huggingface') && row.name
+  ) {
     return rp(`/rebrand/check/pkg/${row.surface}/${row.name}`)
   }
   if (row.surface === 'openclaw' && fn && fn.includes('/')) {

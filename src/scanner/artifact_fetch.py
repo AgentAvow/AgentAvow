@@ -45,6 +45,14 @@ CRATES_META = "https://crates.io/api/v1/crates/{name}"
 # Direct CDN URL — bypasses the crates.io 302 to static.crates.io (which _download
 # refuses, since it disallows redirects as an SSRF guard).
 CRATES_DL = "https://static.crates.io/crates/{name}/{name}-{version}.crate"
+# --- Hugging Face model repo (git-backed, but graded like a package by coordinate).
+# Metadata + a recursive file tree (path/size/type), and small text files served
+# directly by the hub (NOT via the LFS CDN, which large binary weights redirect to —
+# and which _download refuses). We never download the weight blobs; their FORMAT is
+# the signal (pickle-backed formats execute arbitrary code on load).
+HF_META = "https://huggingface.co/api/models/{name}"
+HF_TREE = "https://huggingface.co/api/models/{name}/tree/main?recursive=true"
+HF_RESOLVE = "https://huggingface.co/{name}/resolve/main/{path}"
 
 # --- Host allowlist. A resolved download URL MUST match one of these hosts, in
 # addition to passing the generic SSRF guard. This is the anti-SSRF backbone:
@@ -55,7 +63,26 @@ _ALLOWED_HOSTS = frozenset({
     "files.pythonhosted.org",
     "crates.io",
     "static.crates.io",
+    "huggingface.co",
 })
+
+# Hugging Face weight-file formats. Pickle-backed formats deserialize arbitrary
+# Python on load (``torch.load`` / ``pickle.load``) — the model IS executable code.
+# ``.safetensors`` (and friends) are pure tensor containers with no code path.
+_HF_UNSAFE_WEIGHT_EXT = frozenset({
+    ".bin", ".pt", ".pth", ".ckpt", ".pkl", ".pickle", ".h5", ".joblib", ".npy", ".npz",
+})
+_HF_SAFE_WEIGHT_EXT = frozenset({
+    ".safetensors", ".gguf", ".onnx", ".tflite", ".mlmodel",
+})
+# Text files worth downloading for the 12-category engine (model card, configs,
+# custom modeling code). Weight blobs are never fetched.
+_HF_TEXT_EXT = frozenset({
+    ".md", ".txt", ".py", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
+    ".gitattributes", ".sh", ".jinja", ".template",
+})
+_HF_MAX_TEXT_FILES = 40
+_HF_MAX_TEXT_BYTES = 512 * 1024
 
 # --- Size / zip-bomb guards ---------------------------------------------------
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024      # 50MB compressed download ceiling
@@ -136,6 +163,25 @@ async def _get_json(url: str, client: httpx.AsyncClient) -> dict:
         return resp.json()
     except ValueError as exc:
         raise ArtifactFetchError(f"invalid JSON from {url}") from exc
+
+
+async def _get_json_list(url: str, client: httpx.AsyncClient) -> list:
+    """Like :func:`_get_json` but for endpoints returning a JSON array (HF tree)."""
+    _validate_registry_url(url)
+    resp = await client.get(url, timeout=_HTTP_TIMEOUT, follow_redirects=False)
+    if resp.status_code in _REDIRECT_CODES:
+        raise ArtifactFetchError(f"unexpected redirect from registry: {url}")
+    if resp.status_code == 404:
+        raise ArtifactFetchError(f"not found: {url}")
+    if resp.status_code != 200:
+        raise ArtifactFetchError(f"registry status {resp.status_code} for {url}")
+    if len(resp.content) > _METADATA_MAX_BYTES:
+        raise ArtifactFetchError("registry metadata exceeds size cap")
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise ArtifactFetchError(f"invalid JSON from {url}") from exc
+    return data if isinstance(data, list) else []
 
 
 async def _download(url: str, client: httpx.AsyncClient) -> bytes:
@@ -465,6 +511,145 @@ async def fetch_crates_artifact(
             files=files,
             unpacked_size=sum(f.size for f in files.values()),
             file_count=len(files),
+        )
+    finally:
+        if owns:
+            await client.aclose()
+
+
+# HF ``/resolve/`` 307-redirects even small git files to an on-host cache path, and
+# LFS blobs to the HF CDN. We follow redirects for HF text files ONLY, re-validating
+# every hop's host against this set (SSRF stays closed — an off-HF Location is refused).
+_HF_DOWNLOAD_HOSTS = frozenset({
+    "huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs-us-1.huggingface.co",
+    "cdn-lfs-eu-1.huggingface.co",
+})
+
+
+async def _download_hf_text(url: str, client: httpx.AsyncClient) -> bytes | None:
+    """Best-effort download of one small HF text file, following redirects but only
+    to HF hosts (each hop re-validated). Returns None on any failure (skipped)."""
+    try:
+        cur = url
+        for _hop in range(4):
+            validate_url_https(cur, field_name="hf_file_url")
+            host = (urlparse(cur).hostname or "").lower()
+            if host not in _HF_DOWNLOAD_HOSTS:
+                return None
+            resp = await client.get(cur, timeout=_HTTP_TIMEOUT, follow_redirects=False)
+            if resp.status_code in _REDIRECT_CODES:
+                loc = resp.headers.get("location")
+                if not loc:
+                    return None
+                cur = str(httpx.URL(cur).join(loc))  # resolves relative → absolute
+                continue
+            if resp.status_code != 200:
+                return None
+            if len(resp.content) > _HF_MAX_TEXT_BYTES:
+                return None
+            return resp.content
+        return None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+async def fetch_huggingface_artifact(
+    name: str, version: str | None = None, *, client: httpx.AsyncClient | None = None,
+) -> ArtifactFetchResult:
+    """Resolve + statically fetch a Hugging Face **model repo** by ``org/model``.
+
+    Unlike npm/PyPI/crates there is no single downloadable tarball — the repo is
+    git+LFS-backed. We pull the recursive file tree, download only the small text
+    files (model card, configs, custom ``modeling_*.py`` code) for the 12-category
+    engine, and record the FORMAT of every weight file without downloading it: a
+    model shipping pickle-backed weights (``.bin``/``.pt``/``.ckpt``…) executes
+    arbitrary code on load, which is the load-time analogue of an install hook.
+
+    ``packaged_manifest['hf']`` carries the metadata + weight-format census the
+    HF-specific detector consumes. Fail-open: raises ``ArtifactFetchError`` on a
+    hard failure; per-file download failures are tolerated (skipped)."""
+    owns = client is None
+    if owns:
+        client = httpx.AsyncClient(headers={
+            "User-Agent": "AgentAvow-ArtifactScanner (safety scanning; kenne@agentavow.com)",
+        })
+    try:
+        meta = await _get_json(HF_META.format(name=name), client)
+        try:
+            tree = await _get_json_list(HF_TREE.format(name=name), client)
+        except ArtifactFetchError:
+            tree = []
+
+        safe_weights: list[str] = []
+        unsafe_weights: list[str] = []
+        custom_code: list[str] = []
+        text_targets: list[tuple[str, int]] = []
+        for entry in tree:
+            if not isinstance(entry, dict) or entry.get("type") != "file":
+                continue
+            path = str(entry.get("path") or "")
+            if not path or _is_unsafe_member_name(path):
+                continue
+            size = int(entry.get("size") or 0)
+            ext = ("." + path.rsplit(".", 1)[1].lower()) if "." in path else ""
+            if ext in _HF_UNSAFE_WEIGHT_EXT:
+                unsafe_weights.append(path)
+            elif ext in _HF_SAFE_WEIGHT_EXT:
+                safe_weights.append(path)
+            if ext == ".py":
+                custom_code.append(path)
+            if ext in _HF_TEXT_EXT and size <= _HF_MAX_TEXT_BYTES:
+                text_targets.append((path, size))
+
+        # Deterministic order (drift-stable), configs/code first, capped.
+        text_targets.sort(key=lambda t: (t[0].count("/"), t[0]))
+        files: dict[str, ArtifactFile] = {}
+        total = 0
+        for path, _size in text_targets[:_HF_MAX_TEXT_FILES]:
+            raw = await _download_hf_text(
+                HF_RESOLVE.format(name=name, path=path), client,
+            )
+            if raw is None:
+                continue
+            total += len(raw)
+            if total > MAX_UNPACKED_BYTES:
+                break
+            files[path] = _make_file(path, raw)
+
+        sha = meta.get("sha")
+        # HF's `sha` is a 40-hex git commit id (sha1), not a content sha256. Derive a
+        # deterministic, offline-recomputable content digest over the file census +
+        # every weight-file PATH (their format is the graded signal) so the coverage
+        # block gets a stable artifact anchor.
+        manifest_lines = [f"{p}:{files[p].sha256}" for p in sorted(files)]
+        manifest_lines += [f"weight:{p}" for p in sorted(safe_weights + unsafe_weights)]
+        if sha:
+            manifest_lines.append(f"commit:{sha}")
+        digest = _digest("\n".join(manifest_lines).encode())
+        return ArtifactFetchResult(
+            ecosystem="huggingface",
+            name=name,
+            version=version or sha or "main",
+            kind="model",
+            ok=True,
+            digest=digest,
+            download_url=f"https://huggingface.co/{name}",
+            files=files,
+            unpacked_size=sum(f.size for f in files.values()),
+            file_count=len(safe_weights) + len(unsafe_weights) + len(files),
+            packaged_manifest={"hf": {
+                "downloads": meta.get("downloads", 0),
+                "likes": meta.get("likes", 0),
+                "pipeline_tag": meta.get("pipeline_tag"),
+                "library_name": meta.get("library_name"),
+                "tags": (meta.get("tags") or [])[:20],
+                "sha": sha,
+                "gated": meta.get("gated", False),
+                "last_modified": meta.get("lastModified"),
+                "safe_weights": safe_weights[:50],
+                "unsafe_weights": unsafe_weights[:50],
+                "custom_code": custom_code[:50],
+            }},
         )
     finally:
         if owns:

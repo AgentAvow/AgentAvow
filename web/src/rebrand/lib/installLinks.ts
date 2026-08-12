@@ -136,6 +136,21 @@ export function packageInstallCommands(surface: string, name: string): Array<{ l
       { label: 'run (no install)', cmd: `npx -y ${name}` },
     ]
   }
+  if (surface === 'crates') {
+    return [
+      { label: 'cargo', cmd: `cargo add ${name}` },
+      { label: 'Cargo.toml', cmd: `${name} = "*"` },
+    ]
+  }
+  if (surface === 'huggingface') {
+    // A HF model is loaded, not package-installed — the graded coordinate goes
+    // straight into from_pretrained / the hub CLI.
+    return [
+      { label: 'transformers', cmd: `AutoModel.from_pretrained("${name}")` },
+      { label: 'hub CLI', cmd: `huggingface-cli download ${name}` },
+      { label: 'git', cmd: `git clone https://huggingface.co/${name}` },
+    ]
+  }
   // pypi
   return [
     { label: 'pip', cmd: `pip install ${name}` },

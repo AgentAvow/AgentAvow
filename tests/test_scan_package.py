@@ -90,7 +90,7 @@ async def test_scan_package_flags_malicious_code(monkeypatch):
 @pytest.mark.asyncio
 async def test_scan_package_unsupported_surface():
     from src.scanner.scan import scan_package
-    res = await scan_package("crates", "serde")
+    res = await scan_package("rubygems", "rails")
     assert res.error and "unsupported" in res.error.lower()
 
 

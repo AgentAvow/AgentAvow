@@ -68,6 +68,7 @@ export const SURFACE_LABEL: Record<string, string> = {
   npm: 'npm packages',
   pypi: 'Python packages',
   crates: 'Rust crates',
+  huggingface: 'Hugging Face models',
   openclaw: 'Agent skills',
   x402: 'x402 endpoints',
 }

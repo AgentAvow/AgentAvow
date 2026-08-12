@@ -473,6 +473,28 @@ async def fetch_pypi_downloads(package: str) -> dict | None:
         return None
 
 
+async def fetch_hf_stats(model_id: str) -> dict | None:
+    """Hugging Face model adoption — monthly ``downloads`` + ``likes`` (no auth).
+    ``model_id`` is ``org/model``. Fail-open → None."""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(f"https://huggingface.co/api/models/{model_id}")
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+        return {
+            "source": "huggingface:models",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "downloads": int(data.get("downloads") or 0),
+            "likes": int(data.get("likes") or 0),
+        }
+    except Exception:
+        logger.debug("hf stats fetch failed for %s", model_id, exc_info=True)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # (B) Reverse-dependents — ecosyste.ms (no auth)
 # ---------------------------------------------------------------------------

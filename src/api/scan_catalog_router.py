@@ -89,6 +89,8 @@ def _categorize(row: CatalogRow) -> str:
     s = (row.surface or "").lower()
     if s == "openclaw":
         return "Agent skill"
+    if s == "huggingface":
+        return "AI model"
     if s == "mcp" or row.is_mcp_server:
         return "MCP server"
     if s == "x402":
@@ -273,7 +275,7 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
             name = c.full_name
             repository_url = None
             endpoint_url = None
-            if surf in ("npm", "pypi", "crates"):
+            if surf in ("npm", "pypi", "crates", "huggingface"):
                 name = c.repo
             elif surf == "mcp":
                 name = c.repo
@@ -306,7 +308,9 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
 
 @router.get("", response_model=CatalogResponse, dependencies=[Depends(rate_limit_reads)])
 async def scan_catalog(
-    surface: str | None = Query(None, pattern="^(x402|mcp|npm|pypi|crates|openclaw|community)$"),
+    surface: str | None = Query(
+        None, pattern="^(x402|mcp|npm|pypi|crates|huggingface|openclaw|community)$",
+    ),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
     grade: str | None = Query(None, pattern="^(certified|A|B|C)$"),
@@ -326,7 +330,15 @@ async def scan_catalog(
     # 'community' tab see them; other single-surface tabs stay the launch corpus.
     community = await _community_rows(db)
     summary = summary.model_copy(deep=True)
-    summary.by_surface = {**summary.by_surface, "community": len(community)}
+    by_surface = dict(summary.by_surface)
+    by_surface["community"] = len(community)
+    # Community rows carry their real surface — count them into their own tab so
+    # surfaces with no static launch corpus (crates, huggingface) show a live count.
+    for _r in community:
+        _s = (_r.surface or "").lower()
+        if _s and _s != "community":
+            by_surface[_s] = by_surface.get(_s, 0) + 1
+    summary.by_surface = by_surface
     summary.total_scans += len(community)
     # Community rows now carry their REAL surface (npm/pypi/mcp/github/openclaw), so
     # a published package appears in its own surface tab too. Add them everywhere

@@ -298,6 +298,54 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     return findings, files_scanned, has_install_hook
 
 
+def huggingface_weight_findings(fetched: ArtifactFetchResult) -> list:
+    """HF-specific detector: grade the LOAD-TIME code surface a repo scan can't see.
+
+    A model whose weights are pickle-backed (``.bin``/``.pt``/``.ckpt``…) runs
+    arbitrary Python the moment it's loaded (``torch.load`` unpickles). That is the
+    load-time analogue of an npm install hook — invisible to any source scan of the
+    ``.py`` files. ``.safetensors`` (and friends) have no code path, so a repo that
+    ALSO ships a safe copy earns a lighter finding (the caller can opt into it)."""
+    from src.scanner.scan import _REMEDIATION_HINTS, Finding
+
+    manifest = fetched.packaged_manifest or {}
+    hf = manifest.get("hf") if isinstance(manifest, dict) else None
+    if not isinstance(hf, dict):
+        return []
+
+    findings: list = []
+    unsafe = hf.get("unsafe_weights") or []
+    safe = hf.get("safe_weights") or []
+    if unsafe:
+        has_safe_alt = bool(safe)
+        severity = "medium" if has_safe_alt else "high"
+        detail = (
+            "a safetensors copy is also published, so this can be loaded safely"
+            if has_safe_alt
+            else "no safetensors alternative is published"
+        )
+        findings.append(Finding(
+            category="insecure_deserialization",
+            name=(
+                f"Model ships pickle-format weights ({unsafe[0]}) — "
+                "arbitrary code executes on load"
+            ),
+            severity=severity,
+            file_path=unsafe[0],
+            line_number=1,
+            snippet=(
+                f"{len(unsafe)} pickle-backed weight file(s); loading with "
+                f"torch.load / pickle.load deserializes arbitrary code — {detail}"
+            ),
+            remediation=_REMEDIATION_HINTS.get(
+                "insecure_deserialization",
+                "Prefer .safetensors; load pickle weights only from trusted publishers "
+                "or with a restricted unpickler.",
+            ),
+        ))
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # Repo ↔ artifact drift
 # ---------------------------------------------------------------------------

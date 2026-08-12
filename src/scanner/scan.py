@@ -2198,10 +2198,15 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     from src.scanner.artifact_fetch import (
         ArtifactFetchError,
         fetch_crates_artifact,
+        fetch_huggingface_artifact,
         fetch_npm_artifact,
         fetch_pypi_artifact,
     )
-    from src.scanner.artifact_scan import _registry_snapshot, scan_artifact_files
+    from src.scanner.artifact_scan import (
+        _registry_snapshot,
+        huggingface_weight_findings,
+        scan_artifact_files,
+    )
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
 
     eco = (surface or "").strip().lower()
@@ -2209,9 +2214,13 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         eco = "pypi"
     elif eco in ("crate", "cargo", "rust"):
         eco = "crates"
+    elif eco in ("hf", "hugging_face", "hugging-face"):
+        eco = "huggingface"
     result = ScanResult(repo=f"{eco}:{name}", stars=0, description="", framework="")
-    if eco not in ("npm", "pypi", "crates"):
-        result.error = f"unsupported surface: {surface!r} (use npm, pypi, or crates)"
+    if eco not in ("npm", "pypi", "crates", "huggingface"):
+        result.error = (
+            f"unsupported surface: {surface!r} (use npm, pypi, crates, or huggingface)"
+        )
         return result
     if not getattr(settings, "scanner_scan_artifact", False):
         result.error = "artifact scanning is disabled"
@@ -2222,6 +2231,8 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
             fetched = await fetch_npm_artifact(name, version)
         elif eco == "crates":
             fetched = await fetch_crates_artifact(name, version)
+        elif eco == "huggingface":
+            fetched = await fetch_huggingface_artifact(name, version)
         else:
             fetched = await fetch_pypi_artifact(name, version)
     except ArtifactFetchError as exc:
@@ -2236,12 +2247,15 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         return result
 
     findings, files_scanned, has_hook = scan_artifact_files(fetched)
+    if eco == "huggingface":
+        findings = findings + huggingface_weight_findings(fetched)
     result.findings = findings
     result.files_scanned = files_scanned
     result.total_scannable_files = files_scanned
     result.primary_language = (
         "JavaScript/TypeScript" if eco == "npm"
         else "Rust" if eco == "crates"
+        else "ML Model" if eco == "huggingface"
         else "Python"
     )
     result.has_readme = any(

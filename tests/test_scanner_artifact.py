@@ -447,3 +447,74 @@ def test_drift_no_hook_finding_when_uncompared():
     drift, findings = compute_drift(fetched, None, None, has_install_hook=True)
     assert drift["compared"] is False
     assert findings == []
+
+
+# ── Hugging Face model surface ────────────────────────────────────────────────
+
+from src.scanner.artifact_fetch import fetch_huggingface_artifact  # noqa: E402
+from src.scanner.artifact_scan import huggingface_weight_findings  # noqa: E402
+
+
+def _hf_result(unsafe, safe):
+    return ArtifactFetchResult(
+        ecosystem="huggingface", name="org/m", version="main", kind="model", ok=True,
+        packaged_manifest={"hf": {"unsafe_weights": unsafe, "safe_weights": safe}},
+    )
+
+
+def test_hf_pickle_only_is_high():
+    f = huggingface_weight_findings(_hf_result(["pytorch_model.bin"], []))
+    assert len(f) == 1
+    assert f[0].category == "insecure_deserialization"
+    assert f[0].severity == "high"  # no safetensors alternative
+
+
+def test_hf_pickle_with_safetensors_is_medium():
+    f = huggingface_weight_findings(
+        _hf_result(["pytorch_model.bin"], ["model.safetensors"])
+    )
+    assert len(f) == 1
+    assert f[0].severity == "medium"  # a safe copy exists
+
+
+def test_hf_safetensors_only_is_clean():
+    assert huggingface_weight_findings(_hf_result([], ["model.safetensors"])) == []
+
+
+def test_hf_findings_tolerates_missing_manifest():
+    r = ArtifactFetchResult(ecosystem="huggingface", name="x", version="1", kind="model", ok=True)
+    assert huggingface_weight_findings(r) == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_huggingface_artifact_happy_path():
+    def handler(request: httpx.Request) -> httpx.Response:
+        p = request.url.path
+        if p == "/api/models/org/m":
+            return httpx.Response(200, json={
+                "sha": "a" * 40, "downloads": 1234, "likes": 7,
+                "pipeline_tag": "text-generation", "tags": ["pytorch"],
+            })
+        if p == "/api/models/org/m/tree/main":
+            return httpx.Response(200, json=[
+                {"type": "file", "path": "config.json", "size": 40},
+                {"type": "file", "path": "README.md", "size": 20},
+                {"type": "file", "path": "pytorch_model.bin", "size": 5_000_000},
+                {"type": "file", "path": "model.safetensors", "size": 5_000_000},
+            ])
+        if p == "/org/m/resolve/main/config.json":
+            return httpx.Response(200, content=b'{"model_type": "gpt2"}')
+        if p == "/org/m/resolve/main/README.md":
+            return httpx.Response(200, content=b"# demo model")
+        return httpx.Response(404)
+
+    async with _mock_client(handler) as client:
+        res = await fetch_huggingface_artifact("org/m", client=client)
+    assert res.ok is True
+    assert res.ecosystem == "huggingface"
+    assert res.digest.startswith("sha256:")  # content digest, not the git sha1
+    assert "config.json" in res.files
+    hf = res.packaged_manifest["hf"]
+    assert hf["unsafe_weights"] == ["pytorch_model.bin"]
+    assert hf["safe_weights"] == ["model.safetensors"]
+    assert hf["downloads"] == 1234

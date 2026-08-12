@@ -344,7 +344,7 @@ async def _capture_community_scan(
         if _score is not None else None
     )
     surface = (surface or "github").lower()
-    if surface in ("npm", "pypi", "crates"):
+    if surface in ("npm", "pypi", "crates", "huggingface"):
         _full = f"{surface}:{repo}"
     elif surface == "mcp":
         _full = repo
@@ -705,11 +705,16 @@ async def scan_package_endpoint(
         surface = "pypi"
     elif surface in ("crate", "cargo", "rust"):
         surface = "crates"
-    if surface not in ("npm", "pypi", "crates"):
-        raise HTTPException(404, "surface must be 'npm', 'pypi', or 'crates'")
+    elif surface in ("hf", "hugging_face", "hugging-face"):
+        surface = "huggingface"
+    if surface not in ("npm", "pypi", "crates", "huggingface"):
+        raise HTTPException(404, "surface must be 'npm', 'pypi', 'crates', or 'huggingface'")
     name = (name or "").strip().strip("/")
     if not name or len(name) > 214 or any(c in name for c in ("..", " ", "\t")):
         raise HTTPException(400, "Invalid package name")
+    # A HF coordinate is org/model — exactly one slash; npm scopes (@x/y) also allow one.
+    if surface == "huggingface" and name.count("/") != 1:
+        raise HTTPException(400, "Hugging Face coordinate must be 'org/model'")
 
     full = f"{surface}:{name}" + (f"@{version}" if version else "")
     cache_owner = surface
@@ -1722,6 +1727,21 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
             axes.append(build_axis_dependents(
                 dependent_packages=dep_pkgs, dependent_repos=dep_repos,
             ))
+    elif s == "huggingface":
+        from src.scanner.adoption_sources import fetch_hf_stats
+        # repo carries the full org/model coordinate for HF.
+        stats = await fetch_hf_stats(repo.strip() if "/" in repo else f"{owner}/{repo}")
+        if stats:
+            dloads, likes = stats.get("downloads"), stats.get("likes")
+            if dloads:
+                headline = {"count": int(dloads), "unit": "downloads/mo"}
+                axes.append(build_axis_downloads(
+                    total_downloads=int(dloads), series=[],
+                    dependents_for_ratio=int(likes or 0),
+                ))
+            elif likes:
+                headline = {"count": int(likes), "unit": "likes"}
+                axes.append(build_axis_stars(stars=int(likes)))
     elif s in ("github", "openclaw"):
         stars = await _github_stars(owner.strip(), repo.strip())
         if stars is not None:
