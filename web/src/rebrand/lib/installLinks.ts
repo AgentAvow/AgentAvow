@@ -16,12 +16,21 @@ export interface McpTarget {
   url: string
 }
 
-/** Derive a short, safe server name from an endpoint URL (host's first label). */
+// Generic labels that make a useless server name (a leading `mcp.` subdomain, an
+// `@scope/mcp` package). We skip/qualify them so the install names the server
+// something meaningful — "deepwiki", "playwright-mcp" — not "mcp".
+const _GENERIC_NAMES = new Set(['mcp', 'server', 'mcp-server', 'api', 'www', 'app', 'cli', 'io', 'sh'])
+
+/** Derive a short, safe, MEANINGFUL server name from an endpoint URL — the first
+ * non-generic host label (so `mcp.deepwiki.com` → "deepwiki", not "mcp"). */
 export function mcpNameFromUrl(url: string): string {
   try {
     const h = new URL(url).hostname.replace(/^www\./, '')
-    const label = h.split('.')[0] || 'mcp-server'
-    return label.replace(/[^a-zA-Z0-9_-]/g, '') || 'mcp-server'
+    const labels = h.split('.').filter(Boolean)
+    // drop the public suffix (last label, usually the TLD) before picking
+    const meaningful = labels.slice(0, Math.max(1, labels.length - 1))
+    const pick = meaningful.find((l) => !_GENERIC_NAMES.has(l.toLowerCase())) || meaningful[0] || 'mcp-server'
+    return pick.replace(/[^a-zA-Z0-9_-]/g, '') || 'mcp-server'
   } catch {
     return 'mcp-server'
   }
@@ -86,7 +95,14 @@ export function mcpServersConfig(t: McpTarget): string {
 export interface StdioTarget { name: string; command: string; args: string[] }
 
 function pkgShortName(name: string): string {
-  return name.replace(/^@[^/]+\//, '').replace(/[^a-zA-Z0-9_-]/g, '') || 'mcp-server'
+  const scope = (name.match(/^@([^/]+)\//) || [])[1] || ''
+  const base = name.replace(/^@[^/]+\//, '').replace(/[^a-zA-Z0-9_-]/g, '')
+  // A generic base ("@playwright/mcp" → "mcp") gets qualified with its scope so the
+  // server is named "playwright-mcp", not a colliding "mcp".
+  if (scope && _GENERIC_NAMES.has(base.toLowerCase())) {
+    return `${scope}-${base}`.replace(/[^a-zA-Z0-9_-]/g, '') || 'mcp-server'
+  }
+  return base || (scope ? scope.replace(/[^a-zA-Z0-9_-]/g, '') : 'mcp-server')
 }
 
 export function packageStdioTarget(surface: string, name: string): StdioTarget {

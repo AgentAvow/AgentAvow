@@ -1196,18 +1196,12 @@ function Result({ owner, repo, privateResult }: {
           <p className="mt-2 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this grade drops.</p>
         </div>
 
-        {/* secondary actions — public repos share; a stored private repo publishes
-            to search here (then animates into share). One-time scans show neither. */}
-        <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
-          {!isPrivate && <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />}
-          {storedPrivate && <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} published={published} />}
-          <button
-            onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
-            className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
-          >
-            ↓ Download score card
-          </button>
-        </div>
+        {/* a stored private repo publishes to search here (then animates into share) */}
+        {storedPrivate && (
+          <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
+            <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} published={published} />
+          </div>
+        )}
       </motion.div>
 
       {/* PRIMARY ACTIONS — install right below watch (watch is in the hero), so the two
@@ -1305,8 +1299,18 @@ function Result({ owner, repo, privateResult }: {
         </div>
       </Reveal>
 
-      {/* badge promotion */}
-      <Reveal><div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div></Reveal>
+      {/* badge promotion + download score card — the "share your grade" assets together */}
+      <Reveal>
+        <div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div>
+        {!isPrivate && (
+          <button
+            onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
+            className="mt-3 text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
+          >
+            ↓ Download score card (PNG)
+          </button>
+        )}
+      </Reveal>
 
       {/* claim / ownership CTA — a one-time scan is ephemeral (report only, nothing stored) */}
       {oneTimePrivate ? (
@@ -1337,6 +1341,13 @@ function Result({ owner, repo, privateResult }: {
             ))}
           </RevealStagger>
         </>
+      )}
+
+      {/* share — floats at the bottom, consistent with every other score page */}
+      {!isPrivate && (
+        <div className="mt-8 flex justify-center">
+          <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />
+        </div>
       )}
     </div>
   )
