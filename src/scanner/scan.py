@@ -2331,6 +2331,33 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     return result
 
 
+def _extract_skill_refs(text: str, skill_dir: str, blobs: list[str]) -> list[str]:
+    """Blob paths a SKILL.md references — markdown links + inline file paths — resolved
+    against the skill dir then the repo root. Powers reference-graph closure so an
+    injection in a deep progressive-disclosure file the SKILL.md points to still gets
+    scanned. Skips URLs; only returns paths that actually exist in the tree."""
+    import posixpath
+    import re as _re
+
+    blobset = set(blobs)
+    exts = "md|markdown|sh|bash|zsh|py|js|ts|rb|pl|ps1|json|txt|yaml|yml"
+    refs: list[str] = []
+    for m in _re.finditer(rf"""[(\s"'`]((?:\./|\.\./|/)?[\w./-]+\.(?:{exts}))""", text):
+        raw = m.group(1)
+        if raw.startswith(("http", "//")) or "://" in raw:
+            continue
+        raw = raw.lstrip("/")
+        candidates = []
+        if skill_dir:
+            candidates.append(posixpath.normpath(f"{skill_dir}/{raw}"))
+        candidates.append(posixpath.normpath(raw))
+        for c in candidates:
+            if c in blobset and c not in refs:
+                refs.append(c)
+                break
+    return refs
+
+
 async def scan_skill(owner: str, repo: str) -> ScanResult:
     """Grade an OpenClaw / Agent SKILL living in a GitHub repo (roadmap §2.D). Finds
     the SKILL.md, fetches the manifest + bundled scripts + lifecycle-hook files, and
@@ -2373,17 +2400,25 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
             base = p.rsplit("/", 1)[-1].lower()
             return (p.lower().endswith((".md",) + script_ext)) or base in hook_names
 
-        # SKILL.md first (never let the cap drop it), then the rest of its dir.
-        want = [skill_md_path] + [p for p in blobs if p != skill_md_path and _in_skill(p)][:39]
+        # Fetch SKILL.md FIRST so we can follow its references (progressive
+        # disclosure): a deep referenced file is exactly where injection hides.
+        skill_md_text = await _fetch_file_content(owner, repo, skill_md_path, token, ref)
+        if skill_md_text is None:
+            result.error = "Could not read the skill's SKILL.md."
+            return result
 
-        files: dict[str, str] = {}
-        for p in want:
+        # Reference-graph closure — files SKILL.md points at get PRIORITY over the
+        # generic in-dir sweep, so a referenced file (even in a subdir / past the cap)
+        # is always scanned.
+        referenced = _extract_skill_refs(skill_md_text, skill_dir, blobs)
+        in_dir = [p for p in blobs if p != skill_md_path and _in_skill(p)]
+        ordered = list(dict.fromkeys(referenced + in_dir))[:39]  # dedup, referenced first
+
+        files: dict[str, str] = {skill_md_path: skill_md_text}
+        for p in ordered:
             txt = await _fetch_file_content(owner, repo, p, token, ref)
             if txt is not None:
                 files[p] = txt
-        if skill_md_path not in files:
-            result.error = "Could not read the skill's SKILL.md."
-            return result
 
         skill = analyze_skill(files, skill_md_path=skill_md_path)
 
