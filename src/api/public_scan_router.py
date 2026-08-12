@@ -344,7 +344,7 @@ async def _capture_community_scan(
         if _score is not None else None
     )
     surface = (surface or "github").lower()
-    if surface in ("npm", "pypi"):
+    if surface in ("npm", "pypi", "crates"):
         _full = f"{surface}:{repo}"
     elif surface == "mcp":
         _full = repo

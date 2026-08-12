@@ -1224,6 +1224,9 @@ async def _catalog_rescan_loop(interval: int | None = None) -> None:
         settings, "catalog_rescan_interval_sec", _CATALOG_RESCAN_DEFAULT_INTERVAL
     )
     logger.info("Catalog re-scan loop started (interval=%ds)", interval)
+    # Delay the first run so it doesn't scan-storm (CPU/memory) during the post-deploy
+    # cold-start window when live traffic is also warming up.
+    await asyncio.sleep(getattr(settings, "catalog_rescan_startup_delay_sec", 300))
     while True:
         try:
             await _run_catalog_rescan()

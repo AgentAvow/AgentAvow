@@ -277,6 +277,7 @@ class Settings(BaseSettings):
     # backlog into community_scans via the (now more precise) live scanners.
     scheduler_catalog_rescan: bool = True
     catalog_rescan_interval_sec: int = 6 * 60 * 60   # cycle cadence (6h)
+    catalog_rescan_startup_delay_sec: int = 300      # don't scan-storm right after deploy
     catalog_rescan_fresh_limit: int = 60             # stalest community rows re-scanned/cycle
     catalog_backfill_limit: int = 40                 # launch-corpus rows backfilled/cycle
     catalog_rescan_spacing_seconds: float = 1.5      # sleep between scans to smooth bursts

@@ -450,6 +450,11 @@ function Hero() {
       navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
       return
     }
+    // A pasted registry URL → the right package scan (before the bare-URL→MCP rule).
+    let ru
+    if ((ru = v.match(/^https?:\/\/(?:www\.)?crates\.io\/crates\/([\w-]+)/i))) { navigate(rp(`/rebrand/check/pkg/crates/${ru[1]}`)); return }
+    if ((ru = v.match(/^https?:\/\/(?:www\.)?npmjs\.com\/package\/((?:@[\w.-]+\/)?[\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/npm/${ru[1]}`)); return }
+    if ((ru = v.match(/^https?:\/\/pypi\.org\/project\/([\w.-]+)/i))) { navigate(rp(`/rebrand/check/pkg/pypi/${ru[1]}`)); return }
     // A bare URL (no prefix) that isn't a GitHub/GitLab repo link → a live MCP
     // endpoint. Users paste the endpoint URL directly, without the `mcp:` prefix.
     if (/^https?:\/\/\S+$/i.test(v) && !/^https?:\/\/(www\.)?(github|gitlab)\.com\//i.test(v)) {

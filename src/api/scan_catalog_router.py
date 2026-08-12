@@ -210,6 +210,14 @@ def _build_catalog() -> dict[str, Any]:
         "openclaw", _DATA_DIR / "openclaw-results.json", results_key="repos"
     )
 
+    # Categorize the static corpus ONCE at build time (cached) — doing it per request
+    # over ~37k rows was a real CPU cost. Community rows (small, fresh) categorize per
+    # request in the handler.
+    static_cats: dict[str, int] = {}
+    for r in rows:
+        r.category = _categorize(r)
+        static_cats[r.category] = static_cats.get(r.category, 0) + 1
+
     surfaces = ("x402", "mcp", "npm", "pypi", "openclaw")
     by_surface = {s: 0 for s in surfaces}
     by_surface_critical = {s: 0 for s in surfaces}
@@ -238,7 +246,7 @@ def _build_catalog() -> dict[str, Any]:
         x402_endpoints_total=len(x402_rows),
         x402_compliant=x402_compliant,
     )
-    return {"rows": rows, "summary": summary}
+    return {"rows": rows, "summary": summary, "static_cats": static_cats}
 
 
 def _get_catalog() -> dict[str, Any]:
@@ -265,7 +273,7 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
             name = c.full_name
             repository_url = None
             endpoint_url = None
-            if surf in ("npm", "pypi"):
+            if surf in ("npm", "pypi", "crates"):
                 name = c.repo
             elif surf == "mcp":
                 name = c.repo
@@ -326,15 +334,12 @@ async def scan_catalog(
     if community and surface != "community":
         rows = rows + community
 
-    # Derive the purpose category on every row (idempotent) + summarize the universe.
-    for _r in rows:
-        if _r.category is None:
-            _r.category = _categorize(_r)
+    # Static rows are already categorized at build time (cached). Only categorize the
+    # small community set here, and merge its counts onto the cached static counts.
+    cat_counts = dict(catalog.get("static_cats") or {})
     for _r in community:
         if _r.category is None:
             _r.category = _categorize(_r)
-    cat_counts: dict[str, int] = {}
-    for _r in (catalog["rows"] + community):
         cat_counts[_r.category or "Library"] = cat_counts.get(_r.category or "Library", 0) + 1
     summary.by_category = dict(sorted(cat_counts.items(), key=lambda kv: -kv[1]))
 
