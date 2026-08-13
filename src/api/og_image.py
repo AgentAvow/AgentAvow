@@ -32,6 +32,16 @@ def _font(size: int):
         return ImageFont.load_default()
 
 
+def _clip(draw, s: str, font, max_w: int) -> str:
+    """Ellipsize a single token/line that's wider than ``max_w`` (URLs, long names —
+    they have no spaces to wrap on, so they'd otherwise overflow the card)."""
+    if draw.textlength(s, font=font) <= max_w:
+        return s
+    while s and draw.textlength(s + "…", font=font) > max_w:
+        s = s[:-1]
+    return s + "…"
+
+
 def _wrap(draw, text: str, font, max_w: int, max_lines: int) -> list[str]:
     words = (text or "").split()
     lines: list[str] = []
@@ -40,21 +50,23 @@ def _wrap(draw, text: str, font, max_w: int, max_lines: int) -> list[str]:
         trial = f"{cur} {w}".strip()
         if draw.textlength(trial, font=font) <= max_w:
             cur = trial
-        else:
-            if cur:
-                lines.append(cur)
+        elif cur:
+            lines.append(cur)
             cur = w
-        if len(lines) == max_lines:
+        else:
+            # A single word wider than the line (a URL/long name) — hard-clip it so it
+            # never bleeds off the card.
+            lines.append(_clip(draw, w, font, max_w))
+            cur = ""
+        if len(lines) >= max_lines:
+            cur = ""
             break
     if cur and len(lines) < max_lines:
         lines.append(cur)
-    if lines and draw.textlength(text, font=font) > max_w and len(lines) == max_lines:
-        # ellipsize the last line if we truncated
-        last = lines[-1]
-        while last and draw.textlength(last + "…", font=font) > max_w:
-            last = last[:-1]
-        lines[-1] = last + "…"
-    return lines or [""]
+    # If we ran out of lines with text remaining, ellipsize the final line.
+    if len(lines) == max_lines and draw.textlength(text, font=font) > max_w * max_lines:
+        lines[-1] = _clip(draw, lines[-1] + "…", font, max_w)
+    return [_clip(draw, ln, font, max_w) for ln in lines] or [""]
 
 
 def render_og_png(
@@ -83,10 +95,12 @@ def render_og_png(
         sw = d.textlength(st, font=sf)
         d.text(((tile[0] + tile[2]) / 2 - sw / 2, 375), st, font=sf, fill=_BG)
 
-    # Right column — eyebrow, title, subtitle.
+    # Right column — eyebrow, title, subtitle. Shrink the title face for long names/URLs
+    # so more fits before we have to clip.
     x = 430
     d.text((x, 150), "SAFETY GRADE", font=_font(28), fill=_TEAL)
-    tf = _font(66)
+    _tl = len(title or "")
+    tf = _font(66 if _tl <= 22 else 52 if _tl <= 34 else 42)
     ty = 200
     for line in _wrap(d, title, tf, _W - x - 70, 2):
         d.text((x, ty), line, font=tf, fill=_FG)

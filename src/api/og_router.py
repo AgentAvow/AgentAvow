@@ -337,8 +337,14 @@ async def og_mcp(endpoint: str = "") -> HTMLResponse:
 
     ep = (endpoint or "").strip()
     canonical_url = f"{BASE_URL}/check/mcp?endpoint={quote(ep, safe='')}"
+    # A clean card title: the host (+ short path), not the full scheme+query URL.
+    from urllib.parse import urlparse
+    _p = urlparse(ep)
+    card_title = (_p.hostname or ep or "MCP server")
+    if _p.path and _p.path != "/":
+        card_title += _p.path
     title = "MCP server — safety grade"
     subtitle = "Live-graded MCP server · " + _og_verdict(None)
     description = f"AgentAvow live-graded this MCP server's served tool surface. {ep}".strip()
-    image_url = _og_image_url(ep or "MCP server", "", None, subtitle)
+    image_url = _og_image_url(card_title, "", None, subtitle)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
