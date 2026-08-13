@@ -186,3 +186,30 @@ def test_readme_summary_returns_none_when_only_a_title():
     from src.scanner.scan import _readme_summary
     assert _readme_summary("# my-repo\n") is None
     assert _readme_summary("") is None
+
+
+def test_readme_summary_long_grabs_two_sentences():
+    from src.scanner.scan import _readme_summary
+    md = (
+        "# Next.js\n\n![b](x)\n\n"
+        "Next.js is a React framework for building full-stack web apps. "
+        "You use React Components to build UIs, and Next.js for optimizations.\n\n"
+        "## Getting Started\n"
+    )
+    out = _readme_summary(md, long=True)
+    assert out.startswith("Next.js is a React framework")
+    assert "optimizations" in out  # includes the 2nd sentence
+
+
+def test_is_distinct_desc_dedupes_near_duplicates():
+    from src.scanner.scan import _is_distinct_desc
+    # Maintainer copied the README line into About (reworded) -> not distinct.
+    assert not _is_distinct_desc(
+        "Requests is an elegant and simple HTTP library for Python.",
+        "Requests: an elegant and simple HTTP library for Python",
+    )
+    # A terse tagline + a fuller sentence -> distinct (adds real detail).
+    assert _is_distinct_desc(
+        "Next.js is a React framework for building full-stack web apps.",
+        "The React Framework",
+    )

@@ -117,6 +117,9 @@ class ScanResult:
     framework: str
     findings: list[Finding] = field(default_factory=list)
     positive_signals: list[str] = field(default_factory=list)
+    # A fuller "what it does" second line (mined from the README) shown beneath a terse
+    # maintainer tagline; empty when there's no distinct extra detail to add.
+    long_description: str = ""
     files_scanned: int = 0
     # Coverage disclosure (#4): total scannable files BEFORE the _MAX_FILES_PER_REPO cap,
     # and whether the signed grade is only a sample of the repo. Surfaced in the attestation
@@ -2691,30 +2694,71 @@ _MD_INLINE = re.compile(r"[*_`]+")                          # strip * _ ` emphas
 _HTML_TAG = re.compile(r"<[^>]+>")
 
 
-def _readme_summary(text: str) -> str | None:
-    """Best-effort one-liner describing what a project does, mined from its README's
-    first real prose sentence. Skips the title, badges, images, and HTML preamble that
-    open most READMEs. Returns None if nothing usable is found (caller falls back)."""
+def _is_distinct_desc(long: str, headline: str) -> bool:
+    """True when the mined second line adds information beyond the maintainer tagline —
+    i.e. they're not near-duplicates (maintainer copied the README's first line into the
+    GitHub 'About'). Compares on normalized alphanumerics so punctuation/case don't fool it."""
+    def norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+    a, b = norm(long), norm(headline)
+    if not a or not b:
+        return bool(a)
+    if a == b or a.startswith(b) or b.startswith(a) or a in b or b in a:
+        return False
+    # Reworded near-duplicate: if the shorter line's words are almost all contained in
+    # the longer one (Jaccard over the shorter), it adds nothing new.
+    wa, wb = set(a.split()), set(b.split())
+    short = wa if len(wa) <= len(wb) else wb
+    if short and len(wa & wb) / len(short) >= 0.8:
+        return False
+    return True
+
+
+def _clean_md_line(line: str) -> str:
+    line = _MD_LINK.sub(r"\1", line)
+    line = _HTML_TAG.sub("", line)
+    return _MD_INLINE.sub("", line).strip()
+
+
+def _readme_summary(text: str, *, long: bool = False) -> str | None:
+    """Best-effort description of what a project does, mined from its README's opening
+    prose. Skips the title, badges, images, and HTML preamble that open most READMEs.
+    ``long=False`` returns a single first sentence (the headline "what it does" line);
+    ``long=True`` returns up to ~2 sentences of the first real paragraph (the fuller
+    second line shown beneath a terse maintainer tagline). None if nothing usable."""
     if not text:
         return None
     # Drop an HTML comment block or front-matter that some READMEs open with.
     body = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
-    for raw in body.splitlines():
-        line = raw.strip()
-        if not line or _README_SKIP.match(line):
+    lines = body.splitlines()
+    for i, raw in enumerate(lines):
+        line = _clean_md_line(raw.strip())
+        # Skip noise (headings/badges/images/HTML/rules/lists) and non-prose leftovers.
+        if not line or _README_SKIP.match(raw.strip()):
             continue
-        line = _MD_LINK.sub(r"\1", line)
-        line = _HTML_TAG.sub("", line)
-        line = _MD_INLINE.sub("", line).strip()
-        # A real sentence has some letters and isn't just a leftover shield/URL.
         if len(line) < 12 or not re.search(r"[A-Za-z]{3}", line):
             continue
         if line.lower().startswith(("http://", "https://", "www.")):
             continue
-        # Prefer the first sentence if the paragraph runs long.
-        m = re.match(r"(.+?[.!?])(?:\s|$)", line)
-        summary = (m.group(1) if m and len(m.group(1)) >= 24 else line).strip()
-        return summary[:180]
+        if not long:
+            m = re.match(r"(.+?[.!?])(?:\s|$)", line)
+            summary = (m.group(1) if m and len(m.group(1)) >= 24 else line).strip()
+            return summary[:180]
+        # long: gather the rest of this paragraph (until a blank line / heading), then
+        # keep up to two sentences, capped so it stays a tight second line.
+        para = [line]
+        for nxt in lines[i + 1:]:
+            s = nxt.strip()
+            if not s or _README_SKIP.match(s):
+                break
+            para.append(_clean_md_line(s))
+            if sum(len(p) for p in para) > 300:
+                break
+        blob = " ".join(p for p in para if p).strip()
+        sents = re.findall(r".+?[.!?](?:\s|$)", blob)
+        summary = ("".join(sents[:2]).strip() if sents else blob).strip()
+        return summary[:240]
     return None
 
 
@@ -2795,15 +2839,25 @@ async def scan_repo(
             if "test" in path_lower or "spec" in path_lower:
                 result.has_tests = True
 
-        # No GitHub "About" blurb? Mine the README's first real sentence so the score
-        # page's "what it does" line is genuinely useful instead of "A source repository".
-        if not result.description and _readme_path:
+        # Enrich the score-page "what it does" line(s) from the README:
+        #  • no GitHub "About" → mine the first sentence as the headline (beats
+        #    "A source repository").
+        #  • has an "About" → add a fuller second line ONLY when it says something the
+        #    tagline doesn't (so a terse "The React Framework" gains real detail, but a
+        #    maintainer who copied the README's first line into About isn't duplicated).
+        if _readme_path:
             _readme_text = await _fetch_file_content(
                 owner, repo, _readme_path, token, ref=ref,
             )
-            _mined = _readme_summary(_readme_text or "")
-            if _mined:
-                result.description = _mined
+            if _readme_text:
+                if not result.description:
+                    _short = _readme_summary(_readme_text)
+                    if _short:
+                        result.description = _short
+                else:
+                    _long = _readme_summary(_readme_text, long=True)
+                    if _long and _is_distinct_desc(_long, result.description):
+                        result.long_description = _long
 
         # Detect MCP server context — MCP servers have expected tool patterns
         # (fs_access, subprocess) that shouldn't be penalized as heavily

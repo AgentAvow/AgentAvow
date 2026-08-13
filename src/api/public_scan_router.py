@@ -163,6 +163,7 @@ class PublicScanResponse(BaseModel):
     surface_detail: dict = {}  # per-surface detail (skill allowed_tools, MCP capabilities, …)
     package_coordinate: dict = {}  # {surface, name} the repo maps to (for 1-click install)
     tool_description: str = ""  # one-line "what this tool does" from registry/repo metadata
+    long_description: str = ""  # optional fuller second line (README-mined), when distinct
     category_scores: dict[str, int] = {}  # per-category 0-100 sub-scores
     metadata: ScanMetadata
     scanned_at: str
@@ -313,6 +314,7 @@ async def _cached_scan_response(
         positive_signals=cached.get("positive_signals", []),
         package_coordinate=cached.get("package_coordinate", {}),
         tool_description=cached.get("tool_description", ""),
+        long_description=cached.get("long_description", ""),
         category_scores=cached.get("category_scores", {}),
         metadata=ScanMetadata(**cached["metadata"]),
         scanned_at=cached["scanned_at"],
@@ -672,6 +674,9 @@ def _scan_result_to_dict(result: object) -> dict:
         # A one-line "what this tool does" — registry/repo metadata, else a useful
         # derived fallback so EVERY item says something.
         "tool_description": _tool_description(result),
+        # A fuller second "what it does" line (README-mined) beneath the tagline; only
+        # set when it adds detail the tagline doesn't. Empty for most items.
+        "long_description": getattr(result, "long_description", "") or "",
         "positive_signals": list(set(result.positive_signals)),
         "metadata": {
             "files_scanned": result.files_scanned,
@@ -755,6 +760,7 @@ def _package_response(full: str, data: dict, jws: str, cached: bool) -> PublicSc
         positive_signals=data.get("positive_signals", []),
         package_coordinate=data.get("package_coordinate", {}),
         tool_description=data.get("tool_description", ""),
+        long_description=data.get("long_description", ""),
         category_scores=data.get("category_scores", {}),
         metadata=ScanMetadata(**data["metadata"]),
         scanned_at=data["scanned_at"],
@@ -1171,6 +1177,7 @@ async def public_scan(
                 provenance=cached.get("provenance", {}),
                 package_coordinate=cached.get("package_coordinate", {}),
                 tool_description=cached.get("tool_description", ""),
+                long_description=cached.get("long_description", ""),
                 category_scores=cached.get("category_scores", {}),
                 metadata=ScanMetadata(**cached["metadata"]),
                 scanned_at=cached["scanned_at"],
@@ -1266,6 +1273,7 @@ async def public_scan(
                 provenance=stale.get("provenance", {}),
                 package_coordinate=stale.get("package_coordinate", {}),
                 tool_description=stale.get("tool_description", ""),
+                long_description=stale.get("long_description", ""),
                 category_scores=stale.get("category_scores", {}),
                 metadata=ScanMetadata(**stale["metadata"]),
                 scanned_at=stale["scanned_at"],
@@ -1346,6 +1354,7 @@ async def public_scan(
         positive_signals=data["positive_signals"],
         package_coordinate=data.get("package_coordinate", {}),
         tool_description=data.get("tool_description", ""),
+        long_description=data.get("long_description", ""),
         category_scores=data.get("category_scores", {}),
         metadata=ScanMetadata(**data["metadata"]),
         scanned_at=data["scanned_at"],

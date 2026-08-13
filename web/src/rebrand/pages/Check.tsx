@@ -804,6 +804,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
             </div>
             <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}</h1>
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
+            {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
@@ -947,6 +948,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
             </div>
             <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all font-mono">{endpoint}</h1>
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
+            {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
@@ -1118,6 +1120,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
             </div>
             <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{name}</h1>
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
+            {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
@@ -1318,6 +1321,7 @@ function Result({ owner, repo, privateResult }: {
           <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
           <div className="mt-1 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
           {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
+          {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           <div className="mt-0.5 text-[13px] font-semibold gradient-text">{scan.trust_tier}</div>
         </div>
 
