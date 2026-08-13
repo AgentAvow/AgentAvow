@@ -596,13 +596,20 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
 
 def _scan_result_to_dict(result: object) -> dict:
     """Convert a ScanResult dataclass to a cacheable dict."""
-    # Determine scan result label
-    if result.critical_count > 0:
-        scan_result = "critical"
-    elif result.high_count > 0:
-        scan_result = "warnings"
-    else:
+    # Top-line label — derived from the FINAL grade (which already reflects the
+    # certified gate, the critical cap, and the calibrated deductions), NOT raw finding
+    # counts. Otherwise a big library capped to A/B still read "critical" from a single
+    # count, contradicting its own grade.
+    _elig = (getattr(result, "certified", None) or {}).get("eligible")
+    _grade = _display_grade(
+        result.trust_score, _elig, getattr(result, "critical_count", 0),
+    )
+    if _grade in ("A+", "A"):
         scan_result = "clean"
+    elif _grade in ("B", "C"):
+        scan_result = "warnings"
+    else:  # D, F
+        scan_result = "critical"
 
     # Category counts
     categories: dict[str, int] = {}

@@ -871,6 +871,16 @@ def _is_safe_exec_context(
     # subprocess with hardcoded args → safe (but NOT if shell=True is present)
     if "subprocess" in finding_name.lower():
         has_shell_true = "shell=True" in stripped or "shell = True" in stripped
+        # Shell-completion / shell-detection helpers spawn a shell binary in list form
+        # over MULTIPLE lines (so the single-line safe-subprocess regex misses them) —
+        # e.g. click/typer/shellingham installing tab-completion. No shell=True, no
+        # tainted input; a ubiquitous, safe internal pattern that shouldn't read high.
+        if not has_shell_true and (
+            "completion" in filename
+            or filename in ("shellingham.py", "_bashcomplete.py", "bashcomplete.py")
+            or "shell_completion" in (file_path or "").lower()
+        ):
+            return True
         if not has_shell_true and _SAFE_SUBPROCESS_RE.search(stripped):
             return True
         # subprocess with well-known safe commands (git, pip, npm, etc.)
@@ -2602,6 +2612,7 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
             "surface": "openclaw", "skill_name": skill.skill_name,
             "allowed_tools": skill.allowed_tools, "auto_exec_risk": skill.auto_exec_risk,
             "has_lifecycle_hooks": skill.has_lifecycle_hooks, "script_count": skill.script_count,
+            "blast_radius": skill.blast_radius,
             "tree_digest": skill.tree_digest,
         }
         if skill.script_count == 0 and not skill.has_lifecycle_hooks and result.critical_count == 0:

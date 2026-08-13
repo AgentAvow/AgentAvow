@@ -821,6 +821,8 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
       <div className="mt-4"><WatchCTA surface="openclaw" owner={owner} repo={repo} /></div>
       <AddToAgent kind="skill" owner={owner} repo={repo} />
 
+      <BlastRadius scan={scan} />
+
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">
           <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we graded</h3>
@@ -868,6 +870,44 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
 
 /** Live MCP server score view — grades the SERVED tool surface (what the server
  * actually advertises at runtime), not a repo. The agent-specific moat. */
+/** Capability blast radius — what a tool could DO if misused / its input is poisoned,
+ * distinct from its code grade. Reads surface_detail.blast_radius (MCP + skills). */
+function BlastRadius({ scan }: { scan: unknown }) {
+  const br = (scan as { surface_detail?: { blast_radius?: {
+    level?: string; why?: string; lethal_trifecta?: boolean;
+    capabilities?: { key: string; label: string; count: number }[] } } }).surface_detail?.blast_radius
+  if (!br?.level) return null
+  const STY: Record<string, { ring: string; text: string; bg: string; dot: string; label: string }> = {
+    low: { ring: 'border-success/40', text: 'text-success', bg: 'bg-success/10', dot: 'bg-success', label: 'Low' },
+    moderate: { ring: 'border-primary-light/40', text: 'text-primary-light', bg: 'bg-primary/10', dot: 'bg-primary-light', label: 'Moderate' },
+    high: { ring: 'border-warning/50', text: 'text-warning', bg: 'bg-warning/10', dot: 'bg-warning', label: 'High' },
+    critical: { ring: 'border-danger/50', text: 'text-danger', bg: 'bg-danger/12', dot: 'bg-danger', label: 'Critical' },
+  }
+  const s = STY[br.level] || STY.moderate
+  return (
+    <Reveal>
+      <div className={`mt-4 glass rounded-2xl p-6 border-l-4 ${s.ring}`}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Capability blast radius</h3>
+          <span className={`inline-flex items-center gap-1.5 font-bold text-[13px] px-3 py-1 rounded-full ${s.text} ${s.bg}`}>
+            <span className={`w-2 h-2 rounded-full ${s.dot}`} />{s.label}
+          </span>
+        </div>
+        <p className="mt-2 text-[13.5px] text-text-muted max-w-[64ch]">{br.why}</p>
+        {br.capabilities && br.capabilities.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {br.capabilities.map((c) => (
+              <span key={c.key} className="font-mono text-[12px] text-text-muted bg-surface border border-border rounded-full px-3 py-1">{c.label}{c.count > 1 ? ` ·${c.count}` : ''}</span>
+            ))}
+            {br.lethal_trifecta && <span className="font-mono text-[12px] text-danger bg-danger/10 border border-danger/25 rounded-full px-3 py-1">⚠ lethal trifecta</span>}
+          </div>
+        )}
+        <p className="mt-3 text-[11.5px] text-text-muted/70">Blast radius is what the tool <span className="text-text-muted">could do</span> if it's misused or its input is poisoned — separate from its grade. A clean tool can still have a wide blast radius.</p>
+      </div>
+    </Reveal>
+  )
+}
+
 function McpResult({ endpoint }: { endpoint: string }) {
   const { data: scan, isLoading, isError } = useQuery({
     queryKey: ['rebrand-mcp-scan', endpoint],
@@ -924,43 +964,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
       <div className="mt-4"><WatchCTA surface="mcp" owner="mcp" repo={endpoint} /></div>
       <AddToAgent kind="mcp" url={endpoint} />
 
-      {/* CAPABILITY BLAST RADIUS — what this tool could DO if misused, distinct from
-          its code grade. The signal behind the autonomous-exploit stories. */}
-      {(() => {
-        const br = (scan as { surface_detail?: { blast_radius?: {
-          level?: string; why?: string; lethal_trifecta?: boolean;
-          capabilities?: { key: string; label: string; count: number }[] } } }).surface_detail?.blast_radius
-        if (!br?.level) return null
-        const STY: Record<string, { ring: string; text: string; bg: string; dot: string; label: string }> = {
-          low: { ring: 'border-success/40', text: 'text-success', bg: 'bg-success/10', dot: 'bg-success', label: 'Low' },
-          moderate: { ring: 'border-primary-light/40', text: 'text-primary-light', bg: 'bg-primary/10', dot: 'bg-primary-light', label: 'Moderate' },
-          high: { ring: 'border-warning/50', text: 'text-warning', bg: 'bg-warning/10', dot: 'bg-warning', label: 'High' },
-          critical: { ring: 'border-danger/50', text: 'text-danger', bg: 'bg-danger/12', dot: 'bg-danger', label: 'Critical' },
-        }
-        const s = STY[br.level] || STY.moderate
-        return (
-          <Reveal>
-            <div className={`mt-4 glass rounded-2xl p-6 border-l-4 ${s.ring}`}>
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Capability blast radius</h3>
-                <span className={`inline-flex items-center gap-1.5 font-bold text-[13px] px-3 py-1 rounded-full ${s.text} ${s.bg}`}>
-                  <span className={`w-2 h-2 rounded-full ${s.dot}`} />{s.label}
-                </span>
-              </div>
-              <p className="mt-2 text-[13.5px] text-text-muted max-w-[64ch]">{br.why}</p>
-              {br.capabilities && br.capabilities.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {br.capabilities.map((c) => (
-                    <span key={c.key} className="font-mono text-[12px] text-text-muted bg-surface border border-border rounded-full px-3 py-1">{c.label}{c.count > 1 ? ` ·${c.count}` : ''}</span>
-                  ))}
-                  {br.lethal_trifecta && <span className="font-mono text-[12px] text-danger bg-danger/10 border border-danger/25 rounded-full px-3 py-1">⚠ lethal trifecta</span>}
-                </div>
-              )}
-              <p className="mt-3 text-[11.5px] text-text-muted/70">Blast radius is what the tool <span className="text-text-muted">could do</span> if it's misused or its input is poisoned — separate from its grade. A clean tool can still have a wide blast radius.</p>
-            </div>
-          </Reveal>
-        )
-      })()}
+      <BlastRadius scan={scan} />
 
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">

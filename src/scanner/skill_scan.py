@@ -77,6 +77,37 @@ class SkillScanResult:
         self.has_lifecycle_hooks: bool = False
         self.tree_digest: str | None = None
         self.script_count: int = 0
+        self.blast_radius: dict = {}        # {level, capabilities, why} — see below
+
+
+# Map an OpenClaw / Claude skill `allowed-tools` grant to the shared capability
+# taxonomy (same buckets as the MCP scanner), so a skill gets the same blast-radius
+# read. Matched as case-insensitive substrings of the tool name (handles `Bash(*)`).
+_SKILL_CAP_MAP = (
+    ("exec", ("bash", "shell", "execute", "python", "node", "subprocess",
+              "command", "run(", "task", "agent")),
+    ("net", ("webfetch", "websearch", "fetch", "http", "browser", "url",
+             "request", "curl", "download", "webhook")),
+    ("fs_read", ("read", "glob", "grep", "cat", "view", "ls", "list", "open")),
+    ("fs_write", ("write", "edit", "create", "delete", "remove", "mkdir", "save")),
+    ("secrets", ("env", "secret", "credential", "token", "apikey", "api_key")),
+)
+
+
+def skill_capabilities(
+    allowed_tools: list, has_lifecycle_hooks: bool = False, script_count: int = 0,
+) -> dict:
+    """Capability-taxonomy counts for a skill, from its `allowed-tools` grant plus its
+    auto-run surface (lifecycle hooks / bundled scripts execute code)."""
+    caps: dict[str, int] = {}
+    for tool in allowed_tools or []:
+        t = str(tool).lower()
+        for cap, kws in _SKILL_CAP_MAP:
+            if any(k in t for k in kws):
+                caps[cap] = caps.get(cap, 0) + 1
+    if has_lifecycle_hooks or script_count:
+        caps["exec"] = caps.get("exec", 0) + max(1, script_count)
+    return caps
 
 
 def _finding(category: str, name: str, severity: str, where: str, remediation: str = ""):
@@ -278,6 +309,18 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
             "The skill ships scripts that spawn processes or shell out, but its declared "
             "allowed-tools never grants execution — capability the user didn't approve.",
         ))
+
+    # Capability blast radius — what this skill could DO if misused / its input is
+    # poisoned, from its allowed-tools grant + auto-run surface (same read as MCP).
+    from src.scanner.mcp_scan import compute_blast_radius
+    _caps = skill_capabilities(
+        result.allowed_tools, result.has_lifecycle_hooks, result.script_count,
+    )
+    _private = bool(set(_caps) & {"secrets", "fs_read"})
+    _external = "net" in _caps
+    _mutate = bool(set(_caps) & {"fs_write", "exec"})
+    _trifecta = _private and _external and _mutate
+    result.blast_radius = compute_blast_radius(_caps, _trifecta)
 
     return result
 
