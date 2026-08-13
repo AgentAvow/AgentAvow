@@ -2741,10 +2741,14 @@ def _readme_summary(text: str, *, long: bool = False) -> str | None:
             continue
         if line.lower().startswith(("http://", "https://", "www.")):
             continue
+        # Real prose has several words — rejects a bare path/token like
+        # "packages/next/README.md" that a pointer-only root README opens with.
+        if len(line.split()) < 3:
+            continue
         if not long:
             m = re.match(r"(.+?[.!?])(?:\s|$)", line)
             summary = (m.group(1) if m and len(m.group(1)) >= 24 else line).strip()
-            return summary[:180]
+            return _tidy_desc(summary[:180])
         # long: gather the rest of this paragraph (until a blank line / heading), then
         # keep up to two sentences, capped so it stays a tight second line.
         para = [line]
@@ -2758,8 +2762,14 @@ def _readme_summary(text: str, *, long: bool = False) -> str | None:
         blob = " ".join(p for p in para if p).strip()
         sents = re.findall(r".+?[.!?](?:\s|$)", blob)
         summary = ("".join(sents[:2]).strip() if sents else blob).strip()
-        return summary[:240]
+        return _tidy_desc(summary[:240])
     return None
+
+
+def _tidy_desc(s: str) -> str:
+    """Trim trailing separators/dangling punctuation left by stripped markdown links
+    (e.g. a leftover ' —' where '[text](url) —' was cut)."""
+    return re.sub(r"[\s–—\-·|:;,]+$", "", s or "").strip()
 
 
 async def scan_repo(
