@@ -45,16 +45,17 @@ Framework bridges ship in `sdk/bridges/` (MCP, LangChain, CrewAI, AutoGen) so th
 
 ## Gate anything (the API)
 
-Every surface is one authenticated-free GET, returning the grade, tier, findings, coverage, and the JWS attestation:
+Every surface is one auth-free GET, returning the grade, tier, findings, the signed `coverage{}` block, and the JWS attestation:
 
 ```
-GET /api/v1/public/scan/{owner}/{repo}
-GET /api/v1/public/scan/package/{npm|pypi}/{name}
-GET /api/v1/public/scan/mcp?endpoint=https://…
-GET /api/v1/public/scan/skill/{owner}/{repo}
+GET /api/v1/public/scan/{owner}/{repo}                       # GitHub repo
+GET /api/v1/public/scan/package/{npm|pypi|crates|huggingface|docker}/{name}
+GET /api/v1/public/scan/mcp?endpoint=https://…               # live MCP server
+GET /api/v1/public/scan/skill/{owner}/{repo}                 # OpenClaw skill
+GET /api/v1/public/scan/{owner}/{repo}/adoption              # the second score
 ```
 
-Read `grade` / `trust_tier` to decide, and `attestation` to prove the decision later. Results cache for an hour; add `?force=true` to re-scan. Don't trust our word for it — **recompute the verdict** from the signed `coverage{}` block and check the signature against our public JWKS (see **Verify an attestation**).
+Read `grade` / `trust_tier` to decide, and `attestation` to prove the decision later. The scan response also carries `tool_description` (what the tool is), `package_coordinate` (the registry name a repo maps to), and `coverage{}` (surface, scan depth, artifact digest, DB snapshots). The **adoption** endpoint returns the independent-reliance headline separately — it never moves the trust letter. Results cache for an hour; add `?force=true` to re-scan. Don't trust our word for it — **recompute the verdict** from `coverage{}` and check the signature against our public JWKS (see **Verify an attestation**).
 
 ## Catch the rug-pull after you've shipped
 

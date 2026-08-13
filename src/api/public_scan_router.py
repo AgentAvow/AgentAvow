@@ -1432,20 +1432,29 @@ def _grade_color(grade: str) -> str:
 async def scan_badge(
     owner: str,
     repo: str,
+    metric: str = Query("trust", pattern="^(trust|adoption)$"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Return an SVG trust-tier badge for README embedding.
+    """Return an SVG badge for README embedding.
 
-    Shows the composite trust score when the repo has been imported to
-    AgentGraph (label: "Trust: A 92"). Falls back to the security scan
-    score otherwise (label: "Scan: B 74").
+    ``metric=trust`` (default) shows the signed grade — the composite trust score
+    when the repo is imported ("Trust: A 92"), else the security scan ("Scan: B 74").
+    ``metric=adoption`` shows the real adoption headline ("Adopted: 22.6k ★"), or
+    "new" when there's no independent-reliance signal yet.
 
     Usage in markdown:
     ```
-    ![Trust Score](https://agentgraph.co/api/v1/public/scan/owner/repo/badge)
+    ![Trust](https://agentgraph.co/api/v1/public/scan/owner/repo/badge)
+    ![Adoption](https://agentgraph.co/api/v1/public/scan/owner/repo/badge?metric=adoption)
     ```
     """
     full_name = f"{owner}/{repo}"
+
+    if metric == "adoption":
+        _score, count, unit = await surface_adoption_summary("github", owner, repo)
+        color = "#8b5cf6" if count else "#6b7280"
+        label = f"Adopted: {_compact_int(count)} {unit or ''}".strip() if count else "Adoption: new"
+        return _simple_badge_response(label, color)
 
     # Check if this repo is imported as an AgentGraph entity
     entity_trust = await _get_entity_trust(full_name, db)
@@ -1492,10 +1501,25 @@ async def scan_badge(
     else:
         color = "#6b7280"
         label = "not scanned"
+    return _simple_badge_response(label, color)
 
+
+def _compact_int(n: int | None) -> str:
+    """1234567 → '1.2M'. Empty string for None/0."""
+    if not n:
+        return ""
+    n = int(n)
+    for div, suf in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "k")):
+        if n >= div:
+            v = n / div
+            return f"{v:.1f}".rstrip("0").rstrip(".") + suf
+    return str(n)
+
+
+def _simple_badge_response(label: str, color: str) -> Response:
+    """A two-segment [brand | label] shields-style SVG badge Response (open CORS)."""
     label_width = len(label) * 7 + 10
     total_width = 80 + label_width
-
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
   <rect width="80" height="20" fill="#555" rx="3"/>
   <rect x="80" width="{label_width}" height="20" fill="{color}" rx="3"/>
@@ -1505,7 +1529,6 @@ async def scan_badge(
   <text x="{80 + label_width // 2}" y="14" fill="#fff" font-family="Verdana,sans-serif"
         font-size="11" text-anchor="middle">{label}</text>
 </svg>'''
-
     return Response(
         content=svg,
         media_type="image/svg+xml",

@@ -28,6 +28,19 @@ GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}/badge
 - Shows the composite trust grade if the repo is imported, else the security-scan grade.
 - Regenerates on request — it will not decay to "not scanned" in a stranger's README.
 
+## Two badges: trust and adoption
+
+The grade answers *is it safe?* Add `?metric=adoption` for the second, separate signal — *do independent
+parties rely on it?* (downloads / dependents / stars, never a fabricated number):
+
+```markdown
+[![Trust](https://agentavow.com/api/v1/public/scan/owner/repo/badge)](https://agentavow.com/check/owner/repo)
+[![Adoption](https://agentavow.com/api/v1/public/scan/owner/repo/badge?metric=adoption)](https://agentavow.com/check/owner/repo)
+```
+
+The adoption badge reads "Adopted: 22.6k ★" (or "Adoption: new" when there's no signal yet). Adoption and
+trust are deliberately two badges — popular is not the same as safe, and one never inflates the other.
+
 ## Other formats
 
 Prefer HTML or reStructuredText? Generate any style from the badge builder at

@@ -327,6 +327,7 @@ async def _note_github(resp: httpx.Response, context: str) -> None:
 
 async def _fetch_repo_tree(
     owner: str, repo: str, token: str | None = None,
+    meta_out: dict | None = None,
 ) -> tuple[list[dict], bool, bool, str | None]:
     """Fetch the file tree of a repo via GitHub API.
 
@@ -375,7 +376,13 @@ async def _fetch_repo_tree(
                 "yes" if token else "no",
             )
             return [], False, False, None
-        default_branch = resp.json().get("default_branch", "main")
+        _repo_json = resp.json()
+        default_branch = _repo_json.get("default_branch", "main")
+        # Surface the repo's own metadata (description + stars) so the caller can show
+        # "what this tool does" and populate adoption without a second API call.
+        if meta_out is not None:
+            meta_out["description"] = _repo_json.get("description")
+            meta_out["stars"] = _repo_json.get("stargazers_count")
 
         tree_url = (
             f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}"
@@ -2637,11 +2644,20 @@ async def scan_repo(
         # Fetch file tree. A very large monorepo may come back truncated (or its
         # recursive tree fetch may error) — that's a partial/sampled tree, not a
         # failure, so we still return a real score rather than a 502.
-        tree, tree_truncated, repo_ok, ref = await _fetch_repo_tree(owner, repo, token)
+        _repo_meta: dict = {}
+        tree, tree_truncated, repo_ok, ref = await _fetch_repo_tree(
+            owner, repo, token, meta_out=_repo_meta,
+        )
         if not repo_ok:
             # Repo genuinely missing / private / unreachable — a real error.
             result.error = "Could not fetch repo tree (may be empty or private)"
             return result
+        # Adopt the repo's own description (for the "what it does" line) + stars, unless
+        # the caller already supplied them (a stored agent record wins).
+        if not result.description and _repo_meta.get("description"):
+            result.description = str(_repo_meta["description"]).strip()[:180]
+        if not result.stars and _repo_meta.get("stars"):
+            result.stars = int(_repo_meta["stars"])
         if tree_truncated:
             # The tree is only a sample of a large repo — never present the grade
             # as an authoritative whole-repo verdict.
