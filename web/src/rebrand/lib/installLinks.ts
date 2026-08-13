@@ -118,8 +118,25 @@ export function vscodeStdio(t: StdioTarget): string {
   const obj = { name: t.name, command: t.command, args: t.args }
   return `vscode:mcp/install?${encodeURIComponent(JSON.stringify(obj))}`
 }
+export function gooseStdio(t: StdioTarget): string {
+  // Goose command-line (stdio) extension deeplink: cmd + repeated arg params.
+  const p = new URLSearchParams()
+  p.set('cmd', t.command)
+  for (const a of t.args) p.append('arg', a)
+  p.set('id', t.name)
+  p.set('name', t.name)
+  p.set('description', `${t.name} — safety-graded by AgentAvow`)
+  p.set('type', 'stdio')
+  return `goose://extension?${p.toString()}`
+}
 export function claudeCodeStdio(t: StdioTarget): string {
   return `claude mcp add ${t.name} -- ${t.command} ${t.args.join(' ')}`
+}
+export function geminiStdio(t: StdioTarget): string {
+  return `gemini mcp add ${t.name} ${t.command} ${t.args.join(' ')}`
+}
+export function codexStdio(t: StdioTarget): string {
+  return `codex mcp add ${t.name} -- ${t.command} ${t.args.join(' ')}`
 }
 export function stdioServersConfig(t: StdioTarget): string {
   return JSON.stringify({ mcpServers: { [t.name]: { command: t.command, args: t.args } } }, null, 2)

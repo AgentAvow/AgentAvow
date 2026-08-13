@@ -9,7 +9,8 @@ import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trus
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
-  packageStdioTarget, cursorStdio, vscodeStdio, claudeCodeStdio, stdioServersConfig,
+  packageStdioTarget, cursorStdio, vscodeStdio, gooseStdio, claudeCodeStdio,
+  geminiStdio, codexStdio, stdioServersConfig,
 } from '../lib/installLinks'
 import { useAuth } from '../../hooks/useAuth'
 import SEOHead from '../../components/SEOHead'
@@ -647,19 +648,26 @@ function beacon(event: string) {
  * (Cursor/VS Code + Claude Code/config), library install collapsed under it;
  * a plain library gets the install one-liners. */
 function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; isMcp?: boolean }) {
+  const [more, setMore] = useState(false)
   const t = isMcp ? packageStdioTarget(surface, name) : null
   if (t) {
     return (
       <>
-        <p className="text-text-muted text-[13px] mt-1">This package is an <span className="text-text">MCP server</span> — one click, or copy the config:</p>
+        <p className="text-text-muted text-[13px] mt-1">This package is an <span className="text-text">MCP server</span> — one click for Cursor, VS Code, or Goose (runs <span className="font-mono text-text">{t.command} {t.args.join(' ')}</span>):</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <a href={cursorStdio(t)} onClick={() => beacon('install_click')} target="_blank" rel="noopener noreferrer" className={DEEPLINK_BTN}>▸ Add to Cursor</a>
           <a href={vscodeStdio(t)} onClick={() => beacon('install_click')} className={DEEPLINK_BTN}>▸ Add to VS Code</a>
+          <a href={gooseStdio(t)} onClick={() => beacon('install_click')} className={DEEPLINK_BTN}>▸ Add to Goose</a>
         </div>
-        <div className="mt-3 flex flex-col gap-2">
-          <CopyRow label="Claude Code" cmd={claudeCodeStdio(t)} />
-          <CopyRow label="Config" cmd={stdioServersConfig(t)} multiline />
-        </div>
+        <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">{more ? 'Fewer ways ▾' : 'Claude Code, Gemini, Codex & config ▸'}</button>
+        {more && (
+          <div className="mt-3 flex flex-col gap-2">
+            <CopyRow label="Claude Code" cmd={claudeCodeStdio(t)} />
+            <CopyRow label="Gemini CLI" cmd={geminiStdio(t)} />
+            <CopyRow label="Codex CLI" cmd={codexStdio(t)} />
+            <CopyRow label="Config" cmd={stdioServersConfig(t)} multiline />
+          </div>
+        )}
         <details className="mt-3">
           <summary className="cursor-pointer text-[12px] text-text-muted hover:text-text">Or install as a library</summary>
           <div className="mt-2 flex flex-col gap-2">
@@ -734,11 +742,11 @@ function AddToAgent(props:
           </>
         ) : props.isMcpServer ? (
           <>
-            <p className="text-text-muted text-[13px] mt-1">This repo <span className="text-text">is an MCP server</span>. Install it as a package, or — for one-click add + a live grade of the tools it actually serves — scan its running endpoint.</p>
+            <p className="text-text-muted text-[13px] mt-1">This repo <span className="text-text">is an MCP server</span>, but it doesn&apos;t publish to a package registry we can resolve — so there&apos;s no 1-click. Clone it and follow its README to run it, then point your client at the command or URL it prints.</p>
             <div className="mt-3 flex flex-col gap-2">
               <CopyRow label="git" cmd={`git clone https://github.com/${props.owner}/${props.repo}`} />
             </div>
-            <Link to={rp('/rebrand/check')} className="mt-3 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">Scan its live endpoint for 1-click install →</Link>
+            <p className="mt-2 text-[12px] text-text-muted">If you already run it as a Streamable-HTTP endpoint, paste that URL on the <Link to={rp('/rebrand/check')} className="text-primary-light hover:text-primary font-semibold">Check</Link> page for a live grade + 1-click.</p>
           </>
         ) : (
           <>

@@ -109,12 +109,13 @@ function listingHref(row: CatalogRow): string | null {
     return rp(`/rebrand/check/skill/${fn}`)
   }
   if (row.surface === 'mcp') {
-    // Only route to a LIVE MCP scan when we actually have an https endpoint. Most
-    // registry rows have none (endpoint_url is null) — they were graded as their
-    // source repo, so fall through to the repo link below instead of handshaking
+    // Route to the LIVE MCP scan whenever we have an https endpoint — from
+    // endpoint_url OR a name/full_name that IS the endpoint URL (community scans
+    // store the endpoint there). Registry rows with no URL fall through to their
+    // source repo (which now resolves the package 1-click) rather than handshaking
     // a non-URL registry name (which just errors "couldn't reach the server").
-    const ep = row.endpoint_url
-    if (ep && /^https?:\/\//i.test(ep)) return rp(`/rebrand/check/mcp?endpoint=${encodeURIComponent(ep)}`)
+    const ep = [row.endpoint_url, row.name, fn].find((v) => v && /^https?:\/\//i.test(v))
+    if (ep) return rp(`/rebrand/check/mcp?endpoint=${encodeURIComponent(ep)}`)
   }
   if (fn && fn.includes('/')) return rp(`/rebrand/check/${fn}`)
   return null
