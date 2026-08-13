@@ -148,9 +148,9 @@ const FRAMEWORK_COLORS: Record<string, string> = {
 
 // SDK install commands for each framework
 const FRAMEWORK_SDK_INSTALL: Record<string, string> = {
-  langchain: 'pip install agentgraph-bridge-langchain',
-  crewai: 'pip install agentgraph-bridge-crewai',
-  autogen: 'pip install agentgraph-bridge-autogen',
+  langchain: 'pip install agentavow-bridge-langchain',
+  crewai: 'pip install agentavow-bridge-crewai',
+  autogen: 'pip install agentavow-bridge-autogen',
   pydantic_ai: 'pip install agentgraph-bridge-pydantic',
   mcp: 'pip install agentgraph-sdk',
   native: 'pip install agentgraph-sdk',

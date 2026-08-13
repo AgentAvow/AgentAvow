@@ -2681,6 +2681,43 @@ async def _maybe_maintainer_signals(
     result.maintainer = summary
 
 
+# Markdown noise we skip when mining a README for a one-line "what it does":
+# badge/image lines, headings, HTML, block-quotes, list bullets, rule dividers.
+_README_SKIP = re.compile(
+    r"^\s*(?:#{1,6}\s|>|[-*+]\s|\d+\.\s|<|!\[|\[!\[|=+\s*$|-{3,}\s*$|\|)"
+)
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")            # [text](url) -> text
+_MD_INLINE = re.compile(r"[*_`]+")                          # strip * _ ` emphasis
+_HTML_TAG = re.compile(r"<[^>]+>")
+
+
+def _readme_summary(text: str) -> str | None:
+    """Best-effort one-liner describing what a project does, mined from its README's
+    first real prose sentence. Skips the title, badges, images, and HTML preamble that
+    open most READMEs. Returns None if nothing usable is found (caller falls back)."""
+    if not text:
+        return None
+    # Drop an HTML comment block or front-matter that some READMEs open with.
+    body = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or _README_SKIP.match(line):
+            continue
+        line = _MD_LINK.sub(r"\1", line)
+        line = _HTML_TAG.sub("", line)
+        line = _MD_INLINE.sub("", line).strip()
+        # A real sentence has some letters and isn't just a leftover shield/URL.
+        if len(line) < 12 or not re.search(r"[A-Za-z]{3}", line):
+            continue
+        if line.lower().startswith(("http://", "https://", "www.")):
+            continue
+        # Prefer the first sentence if the paragraph runs long.
+        m = re.match(r"(.+?[.!?])(?:\s|$)", line)
+        summary = (m.group(1) if m and len(m.group(1)) >= 24 else line).strip()
+        return summary[:180]
+    return None
+
+
 async def scan_repo(
     full_name: str,
     stars: int = 0,
@@ -2745,14 +2782,28 @@ async def scan_repo(
         result.primary_language = _detect_language(tree)
 
         # Check for README, LICENSE, tests
+        _readme_path: str | None = None
         for item in tree:
             path_lower = item["path"].lower()
             if path_lower.startswith("readme"):
                 result.has_readme = True
+                # Prefer a top-level README over a nested docs/ one.
+                if _readme_path is None or "/" not in item["path"]:
+                    _readme_path = item["path"]
             if path_lower.startswith("license") or path_lower.startswith("licence"):
                 result.has_license = True
             if "test" in path_lower or "spec" in path_lower:
                 result.has_tests = True
+
+        # No GitHub "About" blurb? Mine the README's first real sentence so the score
+        # page's "what it does" line is genuinely useful instead of "A source repository".
+        if not result.description and _readme_path:
+            _readme_text = await _fetch_file_content(
+                owner, repo, _readme_path, token, ref=ref,
+            )
+            _mined = _readme_summary(_readme_text or "")
+            if _mined:
+                result.description = _mined
 
         # Detect MCP server context — MCP servers have expected tool patterns
         # (fs_access, subprocess) that shouldn't be penalized as heavily

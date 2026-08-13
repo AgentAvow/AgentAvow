@@ -168,15 +168,81 @@ def parse_yarn_lock(text: str) -> list[Dep]:
     return out
 
 
+def _pnpm_v9_dev_only_names(text: str) -> set[str]:
+    """pnpm v9 dev-only DIRECT dep names, from the ``importers:`` section.
+
+    v9 dropped the inline ``dev: true`` marker from ``packages:`` and derives
+    dev-ness from ``importers:`` — each importer (workspace root or member) carries
+    separate ``dependencies`` / ``devDependencies`` (and ``optionalDependencies``)
+    maps. We treat ``optionalDependencies`` as PRODUCTION (matches the package-lock
+    ``devOptional`` handling — optional runtime deps still ship to consumers).
+
+    Returns names present under some importer's ``devDependencies`` and under NO
+    importer's production map. Per the module's fail-safe philosophy, a name in ANY
+    production map is never returned, so a real prod CVE is never hidden.
+
+    SAFE first increment: only DIRECT importer deps are considered. A devDependency
+    that is *transitively* pulled in by a production dep is still returned here; full
+    prod-reachability across the ``packages`` graph is a FOLLOW-UP. This stays safe
+    because callers apply the result only to DIRECT deps (a transitive package whose
+    name isn't a direct importer key is never in this set), so transitives keep full
+    production weight.
+    """
+    prod: set[str] = set()
+    dev: set[str] = set()
+    in_importers = False
+    section: str | None = None  # "prod" or "dev" — the group we're collecting under
+    section_indent = -1
+    for line in text.splitlines():
+        if re.match(r"^importers:\s*$", line):
+            in_importers = True
+            continue
+        if not in_importers:
+            continue
+        if line and not line[0].isspace():
+            break  # left the importers: block (e.g. reached packages:)
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        stripped = line.strip()
+        m = re.match(r"(dependencies|devDependencies|optionalDependencies):\s*$", stripped)
+        if m:
+            section = "dev" if m.group(1) == "devDependencies" else "prod"
+            section_indent = indent
+            continue
+        # A dep name sits exactly one indent level under its group header, ends ":".
+        if section is not None and indent == section_indent + 2:
+            dm = re.match(r"(['\"]?)([^:'\"]+)\1:\s*$", stripped)
+            if dm:
+                name = dm.group(2).strip()
+                if name:
+                    (dev if section == "dev" else prod).add(name)
+                continue
+        # A line at/above the group-header indent (new importer, new section header
+        # handled above) ends the current group; deeper lines are the dep's fields.
+        if indent <= section_indent:
+            section = None
+    return dev - prod
+
+
 def parse_pnpm_lock(text: str) -> list[Dep]:
     """pnpm ``pnpm-lock.yaml`` — keys like ``/name/1.2.3`` or ``/name@1.2.3``.
 
-    Dev-only deps (a ``dev: true`` sub-field, pnpm v5/6/8) are marked so the
-    supply-chain pass can exclude them, matching the npm/Pipfile behaviour. (pnpm v9
-    moves dev-ness into the ``importers`` section — not yet parsed; those deps stay
-    prod-classified, which is the safe/conservative default.)
+    Dev-only deps are marked so the supply-chain pass can exclude them, matching the
+    npm/Pipfile behaviour:
+
+    - **v5/6/8:** a per-package ``dev: true`` sub-field under ``packages:``.
+    - **v9:** the inline marker is gone; dev-ness is derived from the ``importers:``
+      section (see ``_pnpm_v9_dev_only_names``). A DIRECT dep is marked dev-only iff
+      it is in some importer's ``devDependencies`` and in NO importer's production
+      map. When uncertain, deps stay production (full grade weight).
     """
     from dataclasses import replace
+
+    # v9 detection: presence of a top-level ``importers:`` block (v5/6/8 have none).
+    v9_dev_only = (
+        _pnpm_v9_dev_only_names(text) if re.search(r"^importers:\s*$", text, re.M) else set()
+    )
 
     out: list[Dep] = []
     in_packages = False
@@ -220,6 +286,11 @@ def parse_pnpm_lock(text: str) -> list[Dep]:
         if name and ver and _SEMVERISH.match(ver):
             out.append(Dep(ECO_NPM, name, ver))
             cur = len(out) - 1
+    # v9: apply importer-derived dev-only marking. Only DIRECT names absent from every
+    # production map are flagged (transitive prod-reachability is a follow-up), so a
+    # real prod CVE is never mis-marked dev.
+    if v9_dev_only:
+        out = [replace(d, dev=True) if (d.name in v9_dev_only and not d.dev) else d for d in out]
     return out
 
 

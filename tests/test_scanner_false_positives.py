@@ -80,12 +80,12 @@ class TestContextAwareExec:
     def test_ast_literal_eval_safe(self):
         code = 'result = ast.literal_eval(data)\n'
         findings, _, _ = _scan_content(code, "parser.py")
-        assert not any(f.name == "eval() call" for f in findings)
+        assert not any(f.name.startswith("eval() call") for f in findings)
 
     def test_plain_eval_still_flagged(self):
         code = 'result = eval(user_data)\n'
         findings, _, _ = _scan_content(code, "handler.py")
-        assert any(f.name == "eval() call" for f in findings)
+        assert any(f.name == "eval() call (Python)" for f in findings)
 
 
 class TestContextAwareFs:
@@ -155,3 +155,34 @@ class TestRegexExecNotUnsafeExec:
         code = "exec(untrusted_code)\n"
         findings, _, _ = _scan_content(code, "tool.py")
         assert any(f.category == "unsafe_exec" for f in findings)
+
+
+# --- README-mined description fallback (score-page "what it does" line) ---
+
+def test_readme_summary_skips_title_and_badges():
+    from src.scanner.scan import _readme_summary
+    md = (
+        "# awesome-tool\n\n"
+        "![badge](https://img.shields.io/x)\n[![ci](a)](b)\n\n"
+        "Awesome Tool is a fast, typed HTTP client for Python with retries.\n\n"
+        "## Install\n"
+    )
+    assert _readme_summary(md) == (
+        "Awesome Tool is a fast, typed HTTP client for Python with retries."
+    )
+
+
+def test_readme_summary_skips_html_and_blockquote_preamble():
+    from src.scanner.scan import _readme_summary
+    md = (
+        "<p align=\"center\"><img src='logo.png'></p>\n\n<h1>Cool Lib</h1>\n\n"
+        "> a tagline blockquote\n\n"
+        "Cool Lib renders 3D scenes in the browser using WebGPU."
+    )
+    assert _readme_summary(md) == "Cool Lib renders 3D scenes in the browser using WebGPU."
+
+
+def test_readme_summary_returns_none_when_only_a_title():
+    from src.scanner.scan import _readme_summary
+    assert _readme_summary("# my-repo\n") is None
+    assert _readme_summary("") is None

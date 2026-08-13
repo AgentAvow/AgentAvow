@@ -370,6 +370,35 @@ def test_package_lock_captures_dev_flag():
     assert by_name["eslint"].dev is True
 
 
+def test_pnpm_lock_v9_importers_dev_only():
+    """pnpm v9 dropped inline ``dev: true``; dev-ness comes from ``importers:``.
+    A devDependencies-only package is flagged dev; a production dep is NOT."""
+    text = (
+        "lockfileVersion: '9.0'\n"
+        "\n"
+        "importers:\n"
+        "  .:\n"
+        "    dependencies:\n"
+        "      react:\n"
+        "        specifier: ^18.0.0\n"
+        "        version: 18.0.0\n"
+        "    devDependencies:\n"
+        "      eslint:\n"
+        "        specifier: ^8.0.0\n"
+        "        version: 8.0.0\n"
+        "\n"
+        "packages:\n"
+        "  react@18.0.0:\n"
+        "    resolution: {}\n"
+        "  eslint@8.0.0:\n"
+        "    resolution: {}\n"
+    )
+    deps = lf.parse_pnpm_lock(text)
+    by_name = {d.name: d for d in deps}
+    assert by_name["react"].dev is False  # production dependency stays full weight
+    assert by_name["eslint"].dev is True  # devDependencies-only → dev-only
+
+
 def test_pipfile_lock_develop_is_dev():
     text = """
     {"default": {"requests": {"version": "==2.0.0"}},

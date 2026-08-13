@@ -9,7 +9,10 @@ import { publicApi } from '../../lib/scanApi'
  * verification fail — that's the whole point: you can check the math yourself.
  */
 
-const DEFAULT = 'agenttrust/mcp-server'
+// A real, third-party, high-scoring repo — sigstore/cosign is the signature-
+// verification tool itself, so it's thematically apt for a verify-the-signature
+// demo (and avoids any self-referential "agenttrust" example).
+const DEFAULT = 'sigstore/cosign'
 
 function b64urlToBytes(s: string): Uint8Array {
   s = s.replace(/-/g, '+').replace(/_/g, '/')
