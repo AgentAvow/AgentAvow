@@ -1,6 +1,6 @@
 # How grading works
 
-AgentAvow answers one question: **is this tool safe for your agent to connect to?** We point a scanner at a tool — a GitHub repo, an npm or PyPI package, a live MCP server, or an Agent Skill — and return a **signed, offline-verifiable A+→F grade** with the findings behind it.
+AgentAvow answers one question: **is this tool safe for your agent to connect to?** We point a scanner at a tool — a GitHub repo, a package (npm, PyPI, crates), a Hugging Face model, a container image, a live MCP server, or an Agent Skill — and return a **signed, offline-verifiable A+→F grade** with the findings behind it.
 
 The grade is the product. **The signature under it is the proof.** Anyone can recompute the verdict byte-for-byte and check it against our public keys, without trusting us.
 
@@ -40,13 +40,25 @@ Dependencies are checked against a real vulnerability database (OSV) across the 
 
 ## The surfaces we grade
 
-| Surface | What we grade |
-|---|---|
-| **GitHub repo** | The 12-category static scan of the source. |
-| **npm / PyPI package** | The **published artifact** by coordinate (`npm:chalk`, `pypi:requests`) — real bytes, drift vs source, and its build provenance. This is where **A+** is earned. |
-| **MCP server** | The **live tool surface** it actually serves — schema risk, hidden instructions in tool descriptions, dangerous-capability taxonomy + the lethal trifecta, annotation truthfulness. |
-| **Agent Skill (OpenClaw)** | The capability manifest — the `allowed-tools` **auto-exec grant**, always-loaded-description injection, lifecycle-hook escalation, and credential-exfil in bundled scripts. |
+Point AgentAvow at anything your agent connects to — a repo, a package on four registries, a model, a container, a live server, or a skill:
+
+| Surface | Coordinate | What we grade |
+|---|---|---|
+| **GitHub repo** | `github.com/owner/repo` | The 12-category static scan of the source. Large monorepos are graded on a **shipped-code-first sample** (test/vendored files ranked last), disclosed as `sampled`. |
+| **npm package** | `npm:chalk` | The **published artifact** — real bytes, drift vs source, install-hook detection, and its build provenance. |
+| **PyPI package** | `pypi:requests` | The published sdist/wheel — real bytes, `setup.py` install-exec, drift, and provenance. |
+| **crates (Rust)** | `crates:serde` | The published `.crate` — the real extracted tree through the same engine. |
+| **Hugging Face model** | `hf:org/model` | The model card, configs, and any custom `modeling_*.py` — **plus a census of the weight format**: pickle-backed weights (`.bin`/`.pt`/`.ckpt`) execute arbitrary code on load, so they raise an `insecure_deserialization` finding (a safetensors copy lowers it). |
+| **Container image** | `docker:nginx`, `ghcr.io/org/img` | The **OCI image config** (no layer pull): runs-as-root, secrets baked into `ENV`/labels, exposed SSH, and a stale (unpatched) base. |
+| **MCP server** | `mcp:https://…` | The **live tool surface** it actually serves — schema risk, hidden instructions in tool descriptions, dangerous-capability taxonomy + the lethal trifecta, annotation truthfulness. |
+| **Agent Skill (OpenClaw)** | `owner/repo` | The capability manifest — the `allowed-tools` **auto-exec grant**, always-loaded-description injection, lifecycle-hook escalation, and credential-exfil in bundled scripts. |
+
+Every published surface is scanned on the **real artifact bytes** (`scan_depth = artifact`), so its grade recomputes offline against the exact digest. Today **A+ (verified provenance) is reachable for npm & PyPI** — the ecosystems that publish Sigstore / PEP-740 provenance we can cryptographically bind to source. crates, Hugging Face, and containers are artifact-graded and can reach **A**; they cap below A+ only because there's no provenance to verify yet, not because of any finding.
 
 ## Add it to your agent
 
-Every score page has an **"Add to your agent"** button — the graded tool, ready to connect. One click for Cursor, VS Code, or Goose (MCP servers); copy commands for Claude Code, Gemini, and Codex; the install one-liner for packages; the clone command for skills. The grade travels with the install.
+Every score page has an **"Add to your agent"** button — the graded tool, ready to connect. **One click for Cursor, VS Code, or Goose** for any MCP server, whether it's a live endpoint or a package that runs one (`npx`/`uvx`) — plus copy commands for Claude Code, Gemini, and Codex. Other surfaces get the right install for what they are: `npm`/`pip`/`cargo add` for packages, `from_pretrained` / the hub CLI for models, `docker pull` for images, a clone for skills. The grade travels with the install.
+
+## Adoption, per surface
+
+The second score is real and surface-specific — never a fabricated number. npm/PyPI use registry downloads + reverse-dependents; crates and Hugging Face use downloads (and HF likes); containers use Docker Hub pulls; repos and skills use GitHub stars. A live MCP endpoint with no registry behind it shows **no adoption signal** rather than a guess. Adoption sorts the catalog ("widely relied upon") and weights finding gravity — it never moves the trust letter.

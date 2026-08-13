@@ -95,6 +95,46 @@ async def get_unique_checkers(owner: str, repo: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Global (site-wide) unique-checker reach — a daily HLL per day, unioned over a
+# window with a single PFCOUNT. Distinct-people/agents reach, no raw IPs stored.
+# ---------------------------------------------------------------------------
+_GLOBAL_UNIQ_PREFIX = "metrics:uniq_checkers:"
+
+
+async def record_global_checker(identity: str) -> None:
+    """Add a checker identity to TODAY's site-wide unique-checker HLL. Best-effort."""
+    if not identity:
+        return
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"{_GLOBAL_UNIQ_PREFIX}{day}"
+        await r.pfadd(key, identity)
+        await r.expire(key, _UNIQ_TTL)
+    except Exception:
+        pass
+
+
+async def get_global_unique_checkers(days: int) -> int:
+    """Distinct site-wide checkers over the last ``days`` — the union cardinality of
+    the daily HLLs (PFCOUNT accepts multiple keys and ignores missing ones). 0 on error."""
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        now = datetime.now(timezone.utc)
+        keys = [
+            f"{_GLOBAL_UNIQ_PREFIX}" + (now - timedelta(days=i)).strftime("%Y-%m-%d")
+            for i in range(max(1, days))
+        ]
+        return int(await r.pfcount(*keys))
+    except Exception:
+        return 0
+
+
+# ---------------------------------------------------------------------------
 # (D) First-party — badge-embed domain diversity
 # ---------------------------------------------------------------------------
 
@@ -518,6 +558,45 @@ async def fetch_hf_stats(model_id: str) -> dict | None:
     except Exception:
         logger.debug("hf stats fetch failed for %s", model_id, exc_info=True)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Bulk discovery — the most-depended-upon packages per registry (ecosyste.ms).
+# These are the tools agents actually pull, so they're the highest-value catalog
+# additions. No auth; bounded + paged by the caller.
+# ---------------------------------------------------------------------------
+
+async def discover_top_packages(
+    ecosystem: str, *, per_page: int = 50, page: int = 1,
+) -> list[str]:
+    """Names of the most-depended-upon packages on a registry, most-relied-on first.
+
+    ``ecosystem`` is the ecosyste.ms registry host key (``npmjs.org`` / ``pypi.org`` /
+    ``crates.io``). Fail-open → ``[]``."""
+    try:
+        import httpx
+
+        url = (
+            f"https://packages.ecosyste.ms/api/v1/registries/{ecosystem}/packages"
+            f"?sort=dependent_packages_count&order=desc"
+            f"&per_page={int(per_page)}&page={int(page)}"
+        )
+        async with httpx.AsyncClient(timeout=12) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+        if not isinstance(data, list):
+            return []
+        out: list[str] = []
+        for row in data:
+            name = row.get("name") if isinstance(row, dict) else None
+            if name and isinstance(name, str):
+                out.append(name)
+        return out
+    except Exception:
+        logger.debug("ecosyste.ms top-packages fetch failed for %s", ecosystem, exc_info=True)
+        return []
 
 
 # ---------------------------------------------------------------------------

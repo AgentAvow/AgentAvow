@@ -118,6 +118,12 @@ _GRADE_ORDER = ["A+", "A", "B", "C", "D", "F"]
 
 async def _aggregate(db: AsyncSession, window: str) -> dict:
     n_days = _WINDOW_DAYS[window]
+    # Site-wide distinct checkers over the window (HLL union) — real reach, no raw IPs.
+    try:
+        from src.scanner.adoption_sources import get_global_unique_checkers
+        unique_checkers_window = await get_global_unique_checkers(n_days)
+    except Exception:
+        unique_checkers_window = 0
     today = datetime.now(timezone.utc).date()
     days = [today - timedelta(days=i) for i in range(n_days - 1, -1, -1)]  # ascending
     day_strs = [d.isoformat() for d in days]
@@ -321,6 +327,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "adoption_hits": int(adoption_hits_window),
             "force_rescans": int(force_rescans_window),
             "install_clicks": int(install_clicks_window),
+            "unique_checkers": int(unique_checkers_window),
         },
         "scans": {
             "repos_scanned_window": int(repos_scanned_window),

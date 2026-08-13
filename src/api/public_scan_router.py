@@ -322,6 +322,25 @@ async def _cached_scan_response(
     )
 
 
+async def _track_checker(request) -> None:
+    """Add this request's privacy-preserving identity to the site-wide unique-checker
+    HLL (global reach metric). Best-effort — never raises, never blocks the scan."""
+    if request is None:
+        return
+    try:
+        from src.api.rate_limit import _get_client_ip, _get_entity_id
+        from src.scanner.adoption_sources import checker_identity, record_global_checker
+
+        identity = checker_identity(
+            _get_entity_id(request),
+            _get_client_ip(request),
+            request.headers.get("user-agent", ""),
+        )
+        await record_global_checker(identity)
+    except Exception:
+        pass
+
+
 async def _capture_community_scan(
     owner: str, repo: str, data: dict, db: AsyncSession, surface: str = "github",
 ) -> None:
@@ -738,6 +757,7 @@ async def scan_package_endpoint(
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
         await enforce_fresh_scan_limit(request)
+        await _track_checker(request)
 
     from src.scanner.scan import scan_package
 
@@ -790,6 +810,7 @@ async def scan_skill_endpoint(
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
         await enforce_fresh_scan_limit(request)
+        await _track_checker(request)
 
     from src.scanner.scan import scan_skill
 
@@ -847,6 +868,7 @@ async def scan_mcp_endpoint(
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
         await enforce_fresh_scan_limit(request)
+        await _track_checker(request)
 
     from src.scanner.scan import scan_mcp
 
@@ -1057,6 +1079,7 @@ async def public_scan(
         from src.api.rate_limit import enforce_fresh_scan_limit
 
         await enforce_fresh_scan_limit(request)
+        await _track_checker(request)
 
     # Run scan
     from src.github_auth import get_github_token

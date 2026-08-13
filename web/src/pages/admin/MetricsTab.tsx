@@ -28,6 +28,7 @@ function Spark({ data }: { data: number[] }) {
 
 const HEADLINE: [string, string][] = [
   ['repos_scanned', 'Repos scanned'],
+  ['unique_checkers', 'Unique checkers'],
   ['new_repos', 'New repos'],
   ['watches_created', 'Watches created'],
   ['attestations_issued', 'Attestations issued'],

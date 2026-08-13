@@ -1006,6 +1006,7 @@ async def _app_rescan_loop(interval: int = APP_RESCAN_INTERVAL) -> None:
 # watched/claimed/registered tools get routine re-scans and the catalog goes stale.
 _CATALOG_RESCAN_DEFAULT_INTERVAL = 6 * 60 * 60
 _backfill_offset = 0          # progressive cursor over the backfill target list
+_discovery_cursor = 0         # rotates (surface, registry-page) across discovery cycles
 _openclaw_backfill_cache: list | None = None
 _curated_seed_cache: list | None = None
 
@@ -1150,7 +1151,7 @@ async def _store_catalog_adoption(surface: str, owner: str, repo: str, db) -> No
 
 
 async def _run_catalog_rescan() -> None:
-    global _backfill_offset
+    global _backfill_offset, _discovery_cursor
     from src.config import settings
 
     if not getattr(settings, "scheduler_catalog_rescan", True):
@@ -1216,10 +1217,41 @@ async def _run_catalog_rescan() -> None:
             await asyncio.sleep(spacing)
         _backfill_offset = (start + back_n) % len(targets)
 
-    if refreshed or seeded or added:
+    # (c) Discovery — pull the most-depended-upon packages per registry (ecosyste.ms)
+    # and scan the ones we haven't graded yet, capped per cycle. These are the tools
+    # agents actually pull, so they're the highest-value catalog additions. Page-rotated
+    # so it works down the long tail instead of re-scanning the head forever.
+    disc_n = getattr(settings, "catalog_discovery_limit", 12)
+    discovered = 0
+    if disc_n > 0:
+        from sqlalchemy import func, select
+
+        from src.models import CommunityScan
+        from src.scanner.adoption_sources import discover_top_packages
+        disc_surfaces = (("npm", "npmjs.org"), ("pypi", "pypi.org"), ("crates", "crates.io"))
+        surf, registry = disc_surfaces[_discovery_cursor % len(disc_surfaces)]
+        page = (_discovery_cursor // len(disc_surfaces)) % 40 + 1  # walk pages 1..40 of the tail
+        names = await discover_top_packages(registry, per_page=50, page=page)
+        for name in names:
+            if discovered >= disc_n:
+                break
+            async with async_session() as db:
+                seen = await db.scalar(
+                    select(func.count()).select_from(CommunityScan).where(
+                        CommunityScan.surface == surf, CommunityScan.repo == name,
+                    )
+                )
+                if seen:
+                    continue
+                if await _rescan_catalog_row(surf, surf, name, db):
+                    discovered += 1
+            await asyncio.sleep(spacing)
+        _discovery_cursor += 1
+
+    if refreshed or seeded or added or discovered:
         logger.info(
             "Catalog re-scan: refreshed %d community rows, %d curated seed, "
-            "%d launch-corpus backfill", refreshed, seeded, added,
+            "%d launch-corpus backfill, %d discovered", refreshed, seeded, added, discovered,
         )
 
 
