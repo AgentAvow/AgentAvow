@@ -273,8 +273,6 @@ export default function RebrandBrowse() {
   const matching = data?.total
   const totalPages = matching != null ? Math.ceil(matching / PAGE_SIZE) : 0
 
-  const reset = (fn: () => void) => { fn(); setPage(0) }
-
   return (
     <div>
       {/* header block */}
