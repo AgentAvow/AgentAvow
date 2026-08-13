@@ -147,6 +147,11 @@ class ScanResult:
     # feature is flag-gated), so existing behaviour is unchanged.
     drift: dict = field(default_factory=dict)
     artifact_scan: dict = field(default_factory=dict)
+    # The published-package coordinate this repo maps to (surface + registry name),
+    # resolved from the root manifest — independent of whether the (flag-gated,
+    # sometimes-flaky) artifact fetch succeeds. Lets the UI offer package / stdio
+    # 1-click install for a repo that IS a package (e.g. an MCP server on PyPI).
+    package_coordinate: dict = field(default_factory=dict)
     # Phase 3 provenance verification summary (empty for scans without a verified
     # coordinate; flag-gated). Declared here so trust-score/service reads are safe
     # even when the provenance pass never runs.
@@ -2023,6 +2028,48 @@ def _discover_artifact_coord(
     return None
 
 
+async def _resolve_repo_package(
+    owner: str, repo: str, tree: list[dict], token: str | None, ref: str | None,
+) -> dict:
+    """Resolve the published (surface, registry-name) a repo maps to by READING its
+    root manifest — the accurate name, not the repo-name guess ``_discover_artifact_coord``
+    uses for the fetch. Returns ``{}`` when the repo publishes no recognizable package.
+
+    Best-effort + fail-open: any fetch/parse error falls back to the repo name (which
+    npm/PyPI normalization usually accepts) or ``{}``."""
+    root_names = {Path(it["path"]).name.lower(): it["path"]
+                  for it in tree if "/" not in it["path"]}
+
+    async def _read(path: str) -> str | None:
+        try:
+            return await _fetch_file_content(owner, repo, path, token, ref)
+        except Exception:  # noqa: BLE001 — fail-open
+            return None
+
+    if "package.json" in root_names:
+        txt = await _read(root_names["package.json"])
+        if txt:
+            try:
+                name = (json.loads(txt) or {}).get("name")
+                if name and isinstance(name, str):
+                    return {"surface": "npm", "name": name}
+            except (ValueError, TypeError):
+                pass
+        return {"surface": "npm", "name": repo}
+
+    for mf in ("pyproject.toml", "setup.py", "setup.cfg"):
+        if mf in root_names:
+            txt = await _read(root_names[mf])
+            if txt:
+                # [project] name = "x" / [tool.poetry] name = "x" / setup(name="x").
+                m = re.search(r'(?mi)^\s*name\s*=\s*["\']([A-Za-z0-9][A-Za-z0-9._-]*)["\']', txt)
+                if m:
+                    return {"surface": "pypi", "name": m.group(1)}
+            return {"surface": "pypi", "name": repo}
+
+    return {}
+
+
 async def _maybe_verify_provenance(
     result: ScanResult,
     owner: str,
@@ -2810,6 +2857,25 @@ async def scan_repo(
         await _maybe_verify_provenance(
             result, owner, repo, tree, token, ref, artifact,
         )
+
+        # --- Published-package coordinate (surface + registry name) ------------
+        # So the UI can offer package / stdio-MCP 1-click install for a repo that
+        # IS a package. Prefer the canonical name from a successful artifact scan;
+        # else read the root manifest directly (independent of the flag-gated,
+        # sometimes-flaky artifact fetch). Fail-open — never blocks the grade.
+        try:
+            art = result.artifact_scan if isinstance(result.artifact_scan, dict) else {}
+            if art.get("ok") and art.get("name") and art.get("ecosystem") in ("npm", "pypi"):
+                result.package_coordinate = {
+                    "surface": art["ecosystem"], "name": art["name"],
+                }
+            else:
+                result.package_coordinate = await _resolve_repo_package(
+                    owner, repo, tree, token, ref,
+                )
+        except Exception:  # noqa: BLE001 — fail-open
+            logger.debug("package-coordinate resolve failed for %s/%s", owner, repo,
+                         exc_info=True)
 
         # --- Phase 5: maintainer / behavioral signals --------------------------
         # Feature-flagged (default OFF) and FAIL-OPEN. GitHub-METADATA only (no

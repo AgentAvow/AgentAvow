@@ -1310,8 +1310,15 @@ function Result({ owner, repo, privateResult }: {
         const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
         const sd = (scan as { surface_detail?: { name?: string; is_mcp_server?: boolean } }).surface_detail || {}
         const isMcpServer = !!(scan as { metadata?: { is_mcp_server?: boolean } }).metadata?.is_mcp_server
-        const pkg = (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
-          ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server } : undefined
+        // Prefer the resolved package coordinate (accurate registry name from the
+        // manifest, always set for a package-backed repo) over surface_detail, which
+        // is only populated when the flag-gated artifact fetch actually ran.
+        const pc = (scan as { package_coordinate?: { surface?: string; name?: string } }).package_coordinate || {}
+        const pkg = (pc.surface === 'npm' || pc.surface === 'pypi') && pc.name
+          ? { surface: pc.surface, name: pc.name, isMcp: isMcpServer }
+          : (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
+            ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server || isMcpServer }
+            : undefined
         return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} isMcpServer={isMcpServer} />
       })()}
 
