@@ -2491,6 +2491,7 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         "tool_count": mcp.tool_count, "resource_count": mcp.resource_count,
         "prompt_count": mcp.prompt_count, "capabilities": mcp.capabilities,
         "lethal_trifecta": mcp.lethal_trifecta,
+        "blast_radius": mcp.blast_radius,
     }
     result.coverage = build_coverage(
         surface="mcp", scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=True,

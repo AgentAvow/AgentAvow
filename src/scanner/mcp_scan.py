@@ -54,6 +54,53 @@ class McpScanResult:
     capabilities: dict[str, int] = field(default_factory=dict)  # cap -> tool count
     server_name: str | None = None
     lethal_trifecta: bool = False
+    blast_radius: dict = field(default_factory=dict)  # {level, capabilities, why}
+
+
+# Human labels for the capability taxonomy, for the blast-radius UI.
+_CAP_LABEL = {
+    "exec": "run code / shell", "net": "reach the network", "fs_write": "write files",
+    "fs_read": "read files", "secrets": "read secrets / env", "db_write": "write to a database",
+}
+
+
+def compute_blast_radius(capabilities: dict, lethal_trifecta: bool) -> dict:
+    """How much damage this tool could do to an agent if it's misused or exploited —
+    derived from the capability taxonomy, not the code grade. A clean-code tool can
+    still have a huge blast radius (the gym-booking agent had exactly this: unconstrained
+    network reach + a goal). ``level`` ∈ low | moderate | high | critical."""
+    caps = {c for c, n in (capabilities or {}).items() if n}
+    can_exec = "exec" in caps
+    can_net = "net" in caps
+    can_write = bool(caps & {"fs_write", "db_write"})
+    can_read_sensitive = bool(caps & {"secrets", "fs_read"})
+
+    if lethal_trifecta or (can_exec and can_net):
+        level, why = "critical", (
+            "Can run code AND reach the network — a compromise or a misread goal can "
+            "execute and exfiltrate. This is the class behind the autonomous-exploit stories."
+        )
+    elif can_exec or (can_net and (can_read_sensitive or can_write)):
+        level, why = "high", (
+            "Can execute, or can both read sensitive data and send it out / change state — "
+            "enough to act well beyond a read-only lookup."
+        )
+    elif can_net or can_write:
+        level, why = "moderate", (
+            "Can reach the network or modify state, but not the full read-sensitive + "
+            "exfiltrate combination."
+        )
+    else:
+        level, why = "low", "Read-only / local — no network, code execution, or writes."
+    return {
+        "level": level,
+        "capabilities": [
+            {"key": c, "label": _CAP_LABEL.get(c, c), "count": (capabilities or {}).get(c, 0)}
+            for c in sorted(caps)
+        ],
+        "lethal_trifecta": bool(lethal_trifecta),
+        "why": why,
+    }
 
 
 def _classify_tool(name: str, desc: str) -> set[str]:
@@ -193,6 +240,7 @@ def analyze_mcp(
         ))
 
     result.capabilities = cap_counts
+    result.blast_radius = compute_blast_radius(cap_counts, result.lethal_trifecta)
     return result
 
 
