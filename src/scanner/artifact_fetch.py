@@ -742,7 +742,7 @@ async def _docker_token(auth_tmpl: str, repo: str, client: httpx.AsyncClient) ->
 
 async def _docker_get(
     url: str, client: httpx.AsyncClient, *, token: str | None, accept: str | None = None,
-    verify_digest: str | None = None,
+    verify_digest: str | None = None, max_bytes: int = _METADATA_MAX_BYTES,
 ) -> bytes | None:
     """GET a registry URL following redirects to public https hosts only. When
     ``verify_digest`` is set, the returned bytes must hash to it (content-addressed
@@ -773,12 +773,12 @@ async def _docker_get(
             if resp.status_code != 200:
                 return None
             clen = resp.headers.get("content-length")
-            if clen and clen.isdigit() and int(clen) > _METADATA_MAX_BYTES:
+            if clen and clen.isdigit() and int(clen) > max_bytes:
                 return None  # reject on the advertised size before reading a byte
             buf = bytearray()
             async for chunk in resp.aiter_bytes():
                 buf.extend(chunk)
-                if len(buf) > _METADATA_MAX_BYTES:
+                if len(buf) > max_bytes:
                     return None  # runaway / lying Content-Length → bail mid-stream
             raw = bytes(buf)
         if verify_digest:
@@ -878,7 +878,7 @@ async def fetch_docker_artifact(
                 continue  # skip zstd / oversized / malformed
             raw = await _docker_get(
                 f"{registry}/v2/{repo}/blobs/{dig}", client,
-                token=token, verify_digest=dig,
+                token=token, verify_digest=dig, max_bytes=_DOCKER_MAX_ONE_LAYER,
             )
             if raw is None:
                 continue

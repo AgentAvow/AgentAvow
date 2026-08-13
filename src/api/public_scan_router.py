@@ -158,6 +158,7 @@ class PublicScanResponse(BaseModel):
     grade: str = ""  # letter grade with the A+ certified gate applied (roadmap §7)
     certified: dict = {}  # A+ certified-tier eligibility {eligible, checks} (roadmap §7)
     coverage: dict = {}  # scan_depth / provenance_binding / db_snapshots (recompute discipline)
+    supply_chain: dict = {}  # OSV/deps.dev summary (signed into the JWS; mirrored here for readers)
     provenance: dict = {}  # verified build-provenance summary (Phase 3), if any
     surface_detail: dict = {}  # per-surface detail (skill allowed_tools, MCP capabilities, …)
     package_coordinate: dict = {}  # {surface, name} the repo maps to (for 1-click install)
@@ -748,6 +749,7 @@ def _package_response(full: str, data: dict, jws: str, cached: bool) -> PublicSc
         grade=data.get("grade") or _grade_from_score(data["trust_score"]),
         certified=data.get("certified") or {},
         coverage=data.get("coverage", {}),
+        supply_chain=data.get("supply_chain", {}),
         provenance=data.get("provenance", {}),
         surface_detail=data.get("surface_detail", {}),
         positive_signals=data.get("positive_signals", []),
@@ -1339,6 +1341,7 @@ async def public_scan(
         grade=data.get("grade") or _grade_from_score(data["trust_score"]),
         certified=data.get("certified") or {},
         coverage=data.get("coverage", {}),
+        supply_chain=data.get("supply_chain", {}),
         provenance=data.get("provenance", {}),
         positive_signals=data["positive_signals"],
         package_coordinate=data.get("package_coordinate", {}),
@@ -1595,7 +1598,13 @@ async def scan_badge(
     full_name = f"{owner}/{repo}"
 
     if metric == "adoption":
-        _score, count, unit = await surface_adoption_summary("github", owner, repo)
+        # Surface-aware: /npm/left-pad/badge etc. carry the surface as `owner`, so
+        # resolve adoption on that surface (was hardcoded github → "new" for a package
+        # with 90M downloads). huggingface/docker use `repo` for the coordinate.
+        surface = owner.lower() if owner.lower() in (
+            "npm", "pypi", "crates", "huggingface", "docker",
+        ) else "github"
+        _score, count, unit = await surface_adoption_summary(surface, owner, repo)
         color = "#8b5cf6" if count else "#6b7280"
         label = f"Adopted: {_compact_int(count)} {unit or ''}".strip() if count else "Adoption: new"
         return _simple_badge_response(label, color)
@@ -1656,10 +1665,10 @@ async def scan_badge(
     include_in_schema=False,
 )
 async def og_image(
-    title: str = Query("", max_length=200),
+    title: str = Query("", max_length=400),
     grade: str = Query("", max_length=3),
     score: str = Query("", max_length=4),
-    subtitle: str = Query("", max_length=200),
+    subtitle: str = Query("", max_length=400),
 ) -> Response:
     """Dynamic Open Graph card (1200×630 PNG) for a score page — the grade + name +
     one-liner, so a shared link unfurls into a rich card everywhere. Query-driven so

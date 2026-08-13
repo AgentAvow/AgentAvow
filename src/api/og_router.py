@@ -269,7 +269,9 @@ async def og_profile(
 def _og_image_url(title: str, grade: str, score, subtitle: str) -> str:
     from urllib.parse import urlencode
     q = urlencode({
-        "title": title, "grade": grade or "",
+        # Clip the title like the subtitle — a long HF/docker coordinate would otherwise
+        # push it past the handler's length limit and 422 the whole image.
+        "title": (title or "")[:180], "grade": grade or "",
         "score": "" if score is None else int(score), "subtitle": (subtitle or "")[:180],
     })
     return f"{BASE_URL}/api/v1/public/scan/og.png?{q}"

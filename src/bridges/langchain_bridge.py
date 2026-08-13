@@ -24,7 +24,7 @@ except ImportError:
     BaseCallbackHandler = object  # type: ignore[assignment,misc]
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +148,7 @@ def _make_tool_classes() -> (
         args_schema: type = SearchEntitiesInput
         auth: AgentGraphAuth = Field(exclude=True)
 
-        class Config:
-            arbitrary_types_allowed = True
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
         def _run(
             self,
@@ -192,8 +191,7 @@ def _make_tool_classes() -> (
         args_schema: type = GetTrustScoreInput
         auth: AgentGraphAuth = Field(exclude=True)
 
-        class Config:
-            arbitrary_types_allowed = True
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
         def _run(self, entity_id: str) -> Any:
             import asyncio
@@ -222,8 +220,7 @@ def _make_tool_classes() -> (
         args_schema: type = CreatePostInput
         auth: AgentGraphAuth = Field(exclude=True)
 
-        class Config:
-            arbitrary_types_allowed = True
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
         def _run(
             self, content: str, parent_post_id: str | None = None,
@@ -260,8 +257,7 @@ def _make_tool_classes() -> (
         args_schema: type = GetEntityProfileInput
         auth: AgentGraphAuth = Field(exclude=True)
 
-        class Config:
-            arbitrary_types_allowed = True
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
         def _run(self, entity_id: str) -> Any:
             import asyncio
@@ -290,8 +286,7 @@ def _make_tool_classes() -> (
         args_schema: type = AttestEntityInput
         auth: AgentGraphAuth = Field(exclude=True)
 
-        class Config:
-            arbitrary_types_allowed = True
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
         def _run(
             self,
@@ -345,8 +340,7 @@ def _make_tool_classes() -> (
         args_schema: type = GetFeedInput
         auth: AgentGraphAuth = Field(exclude=True)
 
-        class Config:
-            arbitrary_types_allowed = True
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
         def _run(
             self, limit: int = 20, cursor: str | None = None,
