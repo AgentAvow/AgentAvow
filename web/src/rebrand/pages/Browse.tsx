@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
@@ -211,18 +211,50 @@ function SummaryStrip({ s }: { s: CatalogSummary }) {
   )
 }
 
+const DEFAULT_SURFACE = SURFACES[0].key
+const DEFAULT_SORT = 'score-desc'
+
 export default function RebrandBrowse() {
-  const [tab, setTab] = useState(0)
-  const [sort, setSort] = useState('score-desc')
-  const [severity, setSeverity] = useState('')
-  const [grade, setGrade] = useState('')
-  const [category, setCategory] = useState('')
-  const [qInput, setQInput] = useState('')
-  const [q, setQ] = useState('')
-  const [page, setPage] = useState(0)
+  // URL is the source of truth for every filter — so navigating into a tool and
+  // hitting back restores the exact view, and any filtered view is shareable.
+  const [sp, setSp] = useSearchParams()
+  const surface = sp.get('surface') || DEFAULT_SURFACE
+  const sort = sp.get('sort') || DEFAULT_SORT
+  const severity = sp.get('sev') || ''
+  const grade = sp.get('grade') || ''
+  const category = sp.get('cat') || ''
+  const q = sp.get('q') || ''
+  const page = Math.max(0, parseInt(sp.get('page') || '0', 10) || 0)
+  const tab = Math.max(0, SURFACES.findIndex((s) => s.key === surface))
+
+  const [qInput, setQInput] = useState(q)
   const [sheetOpen, setSheetOpen] = useState(false)
-  const activeFilters = (grade ? 1 : 0) + (severity ? 1 : 0) + (category ? 1 : 0) + (sort !== 'score-desc' ? 1 : 0)
-  const surface = SURFACES[tab].key
+  // Keep the search box in sync when q changes from outside (back/forward, clear).
+  useEffect(() => { setQInput(q) }, [q])
+
+  // Merge changes into the URL. `replace` (default) so filter tweaks don't stack up
+  // history entries — one Back from a tool returns to the last filtered Browse view.
+  // Any change other than `page` resets to page 0.
+  const patch = (changes: Record<string, string>, opts?: { push?: boolean }) => {
+    const next = new URLSearchParams(sp)
+    if (!('page' in changes)) next.delete('page')
+    for (const [k, v] of Object.entries(changes)) {
+      if (!v) next.delete(k)
+      else next.set(k, v)
+    }
+    setSp(next, { replace: !opts?.push })
+  }
+  const setTab = (i: number) => patch({ surface: SURFACES[i].key === DEFAULT_SURFACE ? '' : SURFACES[i].key })
+  const setSort = (v: string) => patch({ sort: v === DEFAULT_SORT ? '' : v })
+  const setSeverity = (v: string) => patch({ sev: v })
+  const setGrade = (v: string) => patch({ grade: v })
+  const setCategory = (v: string) => patch({ cat: v })
+  const setPage = (updater: (p: number) => number) => patch({ page: String(updater(page)) })
+  const applySearch = () => patch({ q: qInput.trim() })
+  const clearSearch = () => { setQInput(''); patch({ q: '' }) }
+  const clearAll = () => setSp(new URLSearchParams(surface !== DEFAULT_SURFACE ? { surface } : {}), { replace: true })
+
+  const activeFilters = (grade ? 1 : 0) + (severity ? 1 : 0) + (category ? 1 : 0) + (sort !== DEFAULT_SORT ? 1 : 0)
 
   // A search should find things anywhere — when q is set we drop the surface
   // filter so search spans the whole catalog, not just the active tab.
@@ -265,7 +297,7 @@ export default function RebrandBrowse() {
           {/* row 1 — search (full-width on mobile) + inline filters on desktop */}
           <div className="flex items-center gap-2">
             <form
-              onSubmit={(e) => { e.preventDefault(); reset(() => setQ(qInput.trim())) }}
+              onSubmit={(e) => { e.preventDefault(); applySearch() }}
               className="flex-1 sm:flex-none sm:w-[280px] flex items-center gap-2 rounded-full border border-border bg-surface pl-3.5 pr-1.5 py-1.5"
             >
               <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-text-muted shrink-0">
@@ -278,13 +310,13 @@ export default function RebrandBrowse() {
                 aria-label="Search the catalog"
                 className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-text placeholder:text-text-muted"
               />
-              {qInput && <button type="button" onClick={() => { setQInput(''); reset(() => setQ('')) }} aria-label="Clear search" className="text-text-muted hover:text-text px-1 text-[15px] leading-none">×</button>}
+              {qInput && <button type="button" onClick={clearSearch} aria-label="Clear search" className="text-text-muted hover:text-text px-1 text-[15px] leading-none">×</button>}
               <button type="submit" className="text-[12px] font-semibold px-3 py-1 rounded-full text-white bg-primary/80 hover:bg-primary shrink-0">Go</button>
             </form>
             {/* desktop: inline filter dropdowns */}
             <div className="hidden sm:flex items-center gap-2 ml-auto">
               {[{ v: category, set: setCategory, opts: CATEGORIES }, { v: grade, set: setGrade, opts: GRADES }, { v: severity, set: setSeverity, opts: SEVERITIES }, { v: sort, set: setSort, opts: SORTS }].map((f, i) => (
-                <select key={i} value={f.v} onChange={(e) => reset(() => f.set(e.target.value))}
+                <select key={i} value={f.v} onChange={(e) => f.set(e.target.value)}
                   className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light max-w-[190px]">
                   {f.opts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
@@ -299,7 +331,7 @@ export default function RebrandBrowse() {
           {/* row 2 — surface chips: one scrollable row, never wraps */}
           <div className="flex gap-2 overflow-x-auto pb-0.5 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x">
             {SURFACES.map((sf, i) => (
-              <button key={sf.key} onClick={() => reset(() => setTab(i))}
+              <button key={sf.key} onClick={() => setTab(i)}
                 className={`snap-start shrink-0 whitespace-nowrap text-[13px] px-3.5 py-1.5 rounded-full border transition-colors ${
                   tab === i ? 'text-white border-transparent bg-gradient-to-r from-primary to-primary-dark' : 'text-text-muted border-border bg-surface hover:border-primary-light'
                 }`}>
@@ -324,7 +356,7 @@ export default function RebrandBrowse() {
                 <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-2">{f.label}</div>
                 <div className="flex flex-wrap gap-2">
                   {f.opts.map((o) => (
-                    <button key={o.key} onClick={() => reset(() => f.set(o.key))}
+                    <button key={o.key} onClick={() => f.set(o.key)}
                       className={`text-[13.5px] px-3.5 py-2 rounded-lg border transition-colors ${f.v === o.key ? 'border-primary-light bg-primary/15 text-primary-light font-semibold' : 'border-border bg-surface text-text-muted'}`}>
                       {o.label}
                     </button>
@@ -333,7 +365,7 @@ export default function RebrandBrowse() {
               </div>
             ))}
             <div className="flex gap-3 mt-2">
-              <button onClick={() => reset(() => { setGrade(''); setSeverity(''); setCategory(''); setSort('score-desc') })} className="flex-1 py-2.5 rounded-xl border border-border text-text-muted font-semibold text-[14px]">Clear all</button>
+              <button onClick={clearAll} className="flex-1 py-2.5 rounded-xl border border-border text-text-muted font-semibold text-[14px]">Clear all</button>
               <button onClick={() => setSheetOpen(false)} className="flex-1 py-2.5 rounded-xl text-white font-semibold text-[14px] bg-gradient-to-r from-primary to-primary-dark">Show results</button>
             </div>
           </div>
