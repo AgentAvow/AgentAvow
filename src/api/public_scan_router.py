@@ -1627,6 +1627,41 @@ async def scan_badge(
     return _simple_badge_response(label, color)
 
 
+@router.get(
+    "/og.png",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+    include_in_schema=False,
+)
+async def og_image(
+    title: str = Query("", max_length=200),
+    grade: str = Query("", max_length=3),
+    score: int | None = Query(None, ge=0, le=100),
+    subtitle: str = Query("", max_length=200),
+) -> Response:
+    """Dynamic Open Graph card (1200×630 PNG) for a score page — the grade + name +
+    one-liner, so a shared link unfurls into a rich card everywhere. Query-driven so
+    the same endpoint serves every surface. Fail-open → the static brand image."""
+    try:
+        from src.api.og_image import render_og_png
+        png = render_og_png(
+            title=title.strip() or "Is this tool safe?",
+            grade=grade.strip(), score=score, subtitle=subtitle.strip(),
+        )
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=3600, s-maxage=86400",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+    except Exception:
+        logger.warning("og image render failed", exc_info=True)
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/og-image.png", status_code=302)
+
+
 def _compact_int(n: int | None) -> str:
     """1234567 → '1.2M'. Empty string for None/0."""
     if not n:
@@ -2172,17 +2207,32 @@ async def scan_og_image(
 
     verdict = _verdict_text(grade) if grade != "?" else "Not Yet Scanned"
 
-    svg = _render_og_svg(
-        owner=owner,
-        repo=repo,
-        grade=grade,
-        score=score,
-        critical=critical,
-        high=high,
-        medium=medium,
-        verdict=verdict,
-    )
+    # Prefer a real PNG card (SVG og:image is not rendered by Twitter/Facebook). A
+    # cached scan carries the tool's description; fall back to the SVG on any failure.
+    subtitle = ""
+    _cached = await _get_cached(owner, repo)
+    if _cached:
+        subtitle = (_cached.get("tool_description") or "").strip()
+    if not subtitle:
+        subtitle = verdict
+    try:
+        from src.api.og_image import render_og_png
+        png = render_og_png(
+            title=full_name, grade=grade,
+            score=int(score) if score is not None else None, subtitle=subtitle,
+        )
+        return Response(
+            content=png, media_type="image/png",
+            headers={"Cache-Control": "public, max-age=3600, s-maxage=86400",
+                     "Access-Control-Allow-Origin": "*"},
+        )
+    except Exception:
+        logger.warning("og PNG render failed for %s — SVG fallback", full_name, exc_info=True)
 
+    svg = _render_og_svg(
+        owner=owner, repo=repo, grade=grade, score=score,
+        critical=critical, high=high, medium=medium, verdict=verdict,
+    )
     return Response(
         content=svg,
         media_type="image/svg+xml",

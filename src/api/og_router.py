@@ -260,3 +260,85 @@ async def og_profile(
         content=_render_og_html(title, description, image_url, canonical_url),
         status_code=200,
     )
+
+
+# ── Package / model / container / MCP / skill OG endpoints ─────────────────
+# The newer score surfaces. nginx routes a social crawler on /check/pkg/*,
+# /check/mcp, /check/skill/* here; real users still get the SPA.
+
+def _og_image_url(title: str, grade: str, score, subtitle: str) -> str:
+    from urllib.parse import urlencode
+    q = urlencode({
+        "title": title, "grade": grade or "",
+        "score": "" if score is None else int(score), "subtitle": (subtitle or "")[:180],
+    })
+    return f"{BASE_URL}/api/v1/public/scan/og.png?{q}"
+
+
+def _og_verdict(score: int | None) -> str:
+    if score is None:
+        return "A signed safety grade — verify it offline."
+    if score >= 81:
+        return "Safe to use · signed, verifiable offline."
+    if score >= 61:
+        return "Generally safe · signed, verifiable offline."
+    if score >= 41:
+        return "Use with caution · signed, verifiable offline."
+    return "Significant risks · signed, verifiable offline."
+
+
+@router.get("/pkg/{surface}/{name:path}", response_class=HTMLResponse)
+async def og_package(surface: str, name: str) -> HTMLResponse:
+    """OG tags for a package/model/container score page (/check/pkg/:surface/*)."""
+    from src.api.public_scan_router import _display_grade, _get_cached
+
+    surface = (surface or "").strip().lower()
+    name = (name or "").strip().strip("/")
+    full = f"{surface}:{name}"
+    canonical_url = f"{BASE_URL}/check/pkg/{surface}/{name}"
+    grade, score, subtitle = "", None, ""
+    cached = await _get_cached(surface, name)
+    if cached:
+        score = cached.get("trust_score")
+        _elig = (cached.get("certified") or {}).get("eligible")
+        grade = cached.get("grade") or _display_grade(score or 0, _elig)
+        subtitle = (cached.get("tool_description") or "").strip()
+    if not subtitle:
+        subtitle = _og_verdict(score)
+    title = f"{name} ({surface})"
+    description = f"{name} scored {grade or '—'} on AgentAvow — {_og_verdict(score)}"
+    image_url = _og_image_url(full, grade, score, subtitle)
+    return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
+
+
+@router.get("/skill/{owner}/{repo}", response_class=HTMLResponse)
+async def og_skill(owner: str, repo: str, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
+    """OG tags for an OpenClaw skill score page (/check/skill/:owner/:repo)."""
+    from src.api.public_scan_router import _get_cached
+
+    full_name = f"{owner}/{repo}"
+    canonical_url = f"{BASE_URL}/check/skill/{owner}/{repo}"
+    grade, score = "", None
+    cached = await _get_cached(owner, repo)
+    if cached:
+        score = cached.get("trust_score")
+        grade = cached.get("grade") or _grade_from_score(score or 0)
+    subtitle = "OpenClaw agent skill · " + _og_verdict(score)
+    title = f"{full_name} — Agent Skill"
+    description = f"{full_name} scored {grade or '—'} on AgentAvow — {_og_verdict(score)}"
+    image_url = _og_image_url(full_name, grade, score, subtitle)
+    return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
+
+
+@router.get("/mcp", response_class=HTMLResponse)
+async def og_mcp(endpoint: str = "") -> HTMLResponse:
+    """OG tags for a live MCP server score page (/check/mcp?endpoint=…)."""
+    from urllib.parse import quote
+
+    ep = (endpoint or "").strip()
+    canonical_url = f"{BASE_URL}/check/mcp?endpoint={quote(ep, safe='')}"
+    title = "MCP server — safety grade"
+    subtitle = "Live-graded MCP server · " + _og_verdict(None)
+    description = f"AgentAvow live-graded this MCP server's served tool surface. {ep}".strip()
+    image_url = _og_image_url(ep or "MCP server", "", None, subtitle)
+    return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
