@@ -49,7 +49,7 @@ Point AgentAvow at anything your agent connects to — a repo, a package on four
 | **PyPI package** | `pypi:requests` | The published sdist/wheel — real bytes, `setup.py` install-exec, drift, and provenance. |
 | **crates (Rust)** | `crates:serde` | The published `.crate` — the real extracted tree through the same engine. |
 | **Hugging Face model** | `hf:org/model` | The model card, configs, and any custom `modeling_*.py` — **plus a census of the weight format**: pickle-backed weights (`.bin`/`.pt`/`.ckpt`) execute arbitrary code on load, so they raise an `insecure_deserialization` finding (a safetensors copy lowers it). |
-| **Container image** | `docker:nginx`, `ghcr.io/org/img` | The **OCI image config** (no layer pull): runs-as-root, secrets baked into `ENV`/labels, exposed SSH, and a stale (unpatched) base. |
+| **Container image** | `docker:nginx`, `ghcr.io/org/img` | The **image config** — runs-as-root, secrets baked into `ENV`/labels, exposed SSH, a stale (unpatched) base — **plus a bounded scan of the actual layer filesystem** (the 12-category engine over the scripts and code baked into the image, newest layers first). |
 | **MCP server** | `mcp:https://…` | The **live tool surface** it actually serves — schema risk, hidden instructions in tool descriptions, dangerous-capability taxonomy + the lethal trifecta, annotation truthfulness. |
 | **Agent Skill (OpenClaw)** | `owner/repo` | The capability manifest — the `allowed-tools` **auto-exec grant**, always-loaded-description injection, lifecycle-hook escalation, and credential-exfil in bundled scripts. |
 

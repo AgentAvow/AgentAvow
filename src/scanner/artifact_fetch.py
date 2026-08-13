@@ -69,6 +69,14 @@ _OCI_MANIFEST_ACCEPT = ", ".join([
     "application/vnd.docker.distribution.manifest.list.v2+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 ])
+# Bounded full-layer scan: pull the image's (gzip) layers up to a total cap, extract
+# the filesystem, and run the 12-category engine over it — baked file secrets,
+# world-readable keys, install/entry scripts. NOT a config-only grade. Skips zstd
+# layers (can't gunzip) and any single layer over the per-layer cap; newest layers
+# (the app's own, most interesting) are pulled first.
+_DOCKER_MAX_LAYER_TOTAL = 45 * 1024 * 1024   # total compressed bytes pulled across layers
+_DOCKER_MAX_ONE_LAYER = 30 * 1024 * 1024     # skip any single layer bigger than this
+_DOCKER_MAX_LAYER_FILES = 800                # cap extracted files scanned
 
 # --- Host allowlist. A resolved download URL MUST match one of these hosts, in
 # addition to passing the generic SSRF guard. This is the anti-SSRF backbone:
@@ -840,13 +848,52 @@ async def fetch_docker_artifact(
             raise ArtifactFetchError(f"config blob fetch failed: {display}:{tag}")
         config = json.loads(cfg_raw)
 
-        layer_count = len(manifest.get("layers") or [])
+        layers = manifest.get("layers") or []
+        layer_count = len(layers)
+
+        # Bounded full-layer scan: pull + extract the actual filesystem so the engine
+        # sees baked secrets/keys and install/entry scripts a config grade can't. Newest
+        # layers first (the app's own). Fail-soft: a bad layer is skipped, never fatal.
+        files: dict[str, ArtifactFile] = {}
+        pulled = 0
+        layers_scanned = 0
+        for layer in reversed(layers):
+            if pulled >= _DOCKER_MAX_LAYER_TOTAL or len(files) >= _DOCKER_MAX_LAYER_FILES:
+                break
+            if not isinstance(layer, dict):
+                continue
+            mt = str(layer.get("mediaType") or "")
+            dig = layer.get("digest")
+            sz = int(layer.get("size") or 0)
+            if "gzip" not in mt or not dig or sz > _DOCKER_MAX_ONE_LAYER:
+                continue  # skip zstd / oversized / malformed
+            raw = await _docker_get(
+                f"{registry}/v2/{repo}/blobs/{dig}", client,
+                token=token, verify_digest=dig,
+            )
+            if raw is None:
+                continue
+            pulled += len(raw)
+            try:
+                for path, af in _build_file_map(_unpack_tar_gz(raw)).items():
+                    # A layer's whiteout markers (deleted files) aren't a real surface.
+                    if path.rsplit("/", 1)[-1].startswith(".wh."):
+                        continue
+                    files.setdefault(path, af)
+                    if len(files) >= _DOCKER_MAX_LAYER_FILES:
+                        break
+                layers_scanned += 1
+            except ArtifactFetchError:
+                continue
+
         return ArtifactFetchResult(
             ecosystem="docker",
             name=display,
             version=tag,
             kind="image",
             ok=True,
+            files=files,
+            unpacked_size=sum(f.size for f in files.values()),
             digest=cfg_digest if cfg_digest.startswith("sha256:") else None,
             download_url=(
                 f"https://hub.docker.com/r/{repo}" if registry == DOCKER_REGISTRY
@@ -854,7 +901,7 @@ async def fetch_docker_artifact(
                 else f"https://hub.docker.com/_/{display}" if registry == DOCKER_REGISTRY
                 else f"https://{repo}"
             ),
-            file_count=layer_count,
+            file_count=len(files) or layer_count,
             packaged_manifest={"docker": {
                 "registry": "ghcr" if registry == GHCR_REGISTRY else "dockerhub",
                 "repo": repo,
@@ -864,6 +911,7 @@ async def fetch_docker_artifact(
                 "os": config.get("os"),
                 "architecture": config.get("architecture"),
                 "layer_count": layer_count,
+                "layers_scanned": layers_scanned,
                 "history_len": len(config.get("history") or []),
             }},
             description=_first_label(
