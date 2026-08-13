@@ -659,7 +659,7 @@ function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; i
           <a href={vscodeStdio(t)} onClick={() => beacon('install_click')} className={DEEPLINK_BTN}>▸ Add to VS Code</a>
           <a href={gooseStdio(t)} onClick={() => beacon('install_click')} className={DEEPLINK_BTN}>▸ Add to Goose</a>
         </div>
-        <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">{more ? 'Fewer ways ▾' : 'Claude Code, Gemini, Codex & config ▸'}</button>
+        <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">Claude Code, Gemini, Codex &amp; config {more ? '▾' : '▸'}</button>
         {more && (
           <div className="mt-3 flex flex-col gap-2">
             <CopyRow label="Claude Code" cmd={claudeCodeStdio(t)} />
@@ -712,7 +712,7 @@ function AddToAgent(props:
                 <a href={vscodeInstall(t)} onClick={() => beacon('install_click')} className={deeplinkBtn}>▸ Add to VS Code</a>
                 <a href={gooseInstall(t)} onClick={() => beacon('install_click')} className={deeplinkBtn}>▸ Add to Goose</a>
               </div>
-              <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">{more ? 'Fewer ways ▾' : 'Claude, Gemini, Codex & more ▸'}</button>
+              <button onClick={() => setMore((m) => !m)} className="mt-3 text-[12px] text-text-muted hover:text-text">Claude, Gemini, Codex &amp; more {more ? '▾' : '▸'}</button>
               {more && (
                 <div className="mt-3 flex flex-col gap-2">
                   <CopyRow label="Claude Code" cmd={claudeCodeCmd(t)} />
@@ -803,6 +803,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
               <ClaimedBadge surface="openclaw" owner={owner} repo={repo} />
             </div>
             <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}</h1>
+            {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
@@ -905,6 +906,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
               <ClaimedBadge surface="mcp" repo={endpoint} />
             </div>
             <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all font-mono">{endpoint}</h1>
+            {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
@@ -1073,6 +1075,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
               <ClaimedBadge surface={surface} repo={name} />
             </div>
             <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{name}</h1>
+            {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
@@ -1272,6 +1275,7 @@ function Result({ owner, repo, privateResult }: {
           </div>
           <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
           <div className="mt-1 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
+          {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
           <div className="mt-0.5 text-[13px] font-semibold gradient-text">{scan.trust_tier}</div>
         </div>
 

@@ -147,6 +147,7 @@ class ArtifactFetchResult:
     unpacked_size: int = 0
     file_count: int = 0
     packaged_manifest: dict | None = None  # parsed package.json (npm), None otherwise
+    description: str | None = None          # one-line "what it is" from registry metadata
     error: str | None = None
 
 
@@ -411,6 +412,7 @@ async def fetch_npm_artifact(
             unpacked_size=sum(f.size for f in files.values()),
             file_count=len(files),
             packaged_manifest=packaged_manifest,
+            description=(packaged_manifest or {}).get("description"),
         )
     finally:
         if owns:
@@ -486,6 +488,7 @@ async def fetch_pypi_artifact(
             files=files,
             unpacked_size=sum(f.size for f in files.values()),
             file_count=len(files),
+            description=(meta.get("info") or {}).get("summary"),
         )
     finally:
         if owns:
@@ -530,6 +533,7 @@ async def fetch_crates_artifact(
             files=files,
             unpacked_size=sum(f.size for f in files.values()),
             file_count=len(files),
+            description=crate.get("description"),
         )
     finally:
         if owns:
@@ -669,10 +673,35 @@ async def fetch_huggingface_artifact(
                 "unsafe_weights": unsafe_weights[:50],
                 "custom_code": custom_code[:50],
             }},
+            description=_hf_description(
+                meta.get("pipeline_tag"), meta.get("library_name"),
+            ),
         )
     finally:
         if owns:
             await client.aclose()
+
+
+def _first_label(labels: dict, *keys: str) -> str | None:
+    """First non-empty value among ``keys`` in an OCI image's label map."""
+    for k in keys:
+        v = labels.get(k)
+        if v and isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _hf_description(pipeline_tag: str | None, library: str | None) -> str | None:
+    """A short 'what it is' for a HF model from its pipeline tag + library."""
+    if not pipeline_tag and not library:
+        return None
+    tag = (pipeline_tag or "").replace("-", " ").strip()
+    lib = (library or "").strip()
+    if tag and lib:
+        return f"{tag.capitalize()} model ({lib})"
+    if tag:
+        return f"{tag.capitalize()} model"
+    return f"Model ({lib})"
 
 
 def parse_docker_coordinate(name: str, tag: str | None) -> tuple[str, str, str, str]:
@@ -837,6 +866,12 @@ async def fetch_docker_artifact(
                 "layer_count": layer_count,
                 "history_len": len(config.get("history") or []),
             }},
+            description=_first_label(
+                (config.get("config") or {}).get("Labels") or {},
+                "org.opencontainers.image.description",
+                "org.label-schema.description",
+                "org.opencontainers.image.title",
+            ),
         )
     finally:
         if owns:

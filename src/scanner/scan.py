@@ -2316,6 +2316,8 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         else "Container image" if eco == "docker"
         else "Python"
     )
+    if fetched.description:
+        result.description = fetched.description.strip()[:180]
     result.has_readme = any(
         Path(p).name.lower().startswith("readme") for p in fetched.files
     )
@@ -2402,6 +2404,12 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     result.files_scanned = mcp.tool_count
     result.total_scannable_files = mcp.tool_count
     result.primary_language = "MCP"
+    _server = (mcp.server_name or "").strip()
+    _n = mcp.tool_count or 0
+    result.description = (
+        f"{_server} — MCP server · {_n} tool{'' if _n == 1 else 's'}"
+        if _server else f"MCP server · {_n} tool{'' if _n == 1 else 's'}"
+    )
     if mcp.tool_count and not mcp.lethal_trifecta and result.critical_count == 0:
         result.positive_signals.append(f"{mcp.tool_count} tools enumerated · no lethal trifecta")
     result.artifact_scan = {
