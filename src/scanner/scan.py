@@ -1859,11 +1859,27 @@ async def _run_supply_chain(
                 if p.startswith(".github/workflows/") and c
             ]
 
+            # Reachability root: the repo's own published package, so deps.dev can
+            # classify its lockfile's deps direct-vs-transitive (cross-ecosystem — npm
+            # gets this from package-lock nesting; this covers pypi/crates). OSV
+            # ecosystem ids, fail-open.
+            root_coord = None
+            try:
+                _pc = await _resolve_repo_package(owner, repo, tree, token, ref)
+                _eco = {"pypi": "PyPI", "crates": "crates.io", "npm": "npm"}.get(
+                    _pc.get("surface", ""),
+                )
+                if _eco and _pc.get("name"):
+                    root_coord = (_eco, _pc["name"], "")
+            except Exception:
+                root_coord = None
+
             sc = await analyze_supply_chain(
                 lockfiles,
                 owner=owner,
                 repo=repo,
                 workflow_texts=workflow_texts,
+                root_coord=root_coord,
                 use_depsdev=getattr(settings, "scanner_use_depsdev", True),
                 use_scorecard=getattr(settings, "scanner_use_scorecard", True),
             )
@@ -2073,6 +2089,18 @@ async def _resolve_repo_package(
                 if m:
                     return {"surface": "pypi", "name": m.group(1)}
             return {"surface": "pypi", "name": repo}
+
+    if "cargo.toml" in root_names:
+        txt = await _read(root_names["cargo.toml"])
+        if txt:
+            # The [package] name — take the first name= after a [package] header.
+            m = re.search(
+                r'(?is)\[package\].*?^\s*name\s*=\s*["\']([A-Za-z0-9][A-Za-z0-9._-]*)["\']',
+                txt, re.MULTILINE,
+            )
+            if m:
+                return {"surface": "crates", "name": m.group(1)}
+        return {"surface": "crates", "name": repo}
 
     return {}
 

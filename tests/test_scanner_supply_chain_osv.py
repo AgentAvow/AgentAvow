@@ -447,3 +447,46 @@ def test_package_lock_marks_direct_vs_transitive():
     deps = {d.name: d for d in parse_package_lock(lock)}
     assert deps["express"].direct is True
     assert deps["body-parser"].direct is False
+
+
+# ── deps.dev reachability (cross-ecosystem direct/transitive classification) ──
+
+@pytest.mark.asyncio
+async def test_depsdev_indirect_keys_parses_relations():
+    from src.scanner.supply_chain import fetch_depsdev_indirect_keys
+
+    def handler(request):
+        return httpx.Response(200, json={"nodes": [
+            {"versionKey": {"name": "root", "version": "1.0"}, "relation": "SELF"},
+            {"versionKey": {"name": "direct-dep", "version": "2.0"}, "relation": "DIRECT"},
+            {"versionKey": {"name": "Buried-Dep", "version": "3.1"}, "relation": "INDIRECT"},
+        ]})
+
+    async with _mock_client(handler) as client:
+        keys = await fetch_depsdev_indirect_keys("crates.io", "root", "1.0", client)
+    assert keys == {"buried-dep@3.1"}  # lowercased name, only INDIRECT
+
+
+@pytest.mark.asyncio
+async def test_depsdev_default_version():
+    from src.scanner.supply_chain import fetch_depsdev_default_version
+
+    def handler(request):
+        return httpx.Response(200, json={"versions": [
+            {"versionKey": {"version": "0.9"}, "isDefault": False},
+            {"versionKey": {"version": "1.2.3"}, "isDefault": True},
+        ]})
+
+    async with _mock_client(handler) as client:
+        assert await fetch_depsdev_default_version("PyPI", "x", client) == "1.2.3"
+
+
+@pytest.mark.asyncio
+async def test_depsdev_unknown_ecosystem_is_none():
+    from src.scanner.supply_chain import fetch_depsdev_indirect_keys
+
+    def handler(request):
+        return httpx.Response(200, json={"nodes": []})
+
+    async with _mock_client(handler) as client:
+        assert await fetch_depsdev_indirect_keys("rubygems", "x", "1", client) is None

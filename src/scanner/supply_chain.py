@@ -44,6 +44,10 @@ OSV_VULN_URL = "https://api.osv.dev/v1/vulns/{vuln_id}"
 DEPSDEV_VERSION_URL = (
     "https://api.deps.dev/v3/systems/{system}/packages/{name}/versions/{version}"
 )
+DEPSDEV_DEPS_URL = (
+    "https://api.deps.dev/v3/systems/{system}/packages/{name}/versions/{version}"
+    ":dependencies"
+)
 SCORECARD_URL = "https://api.scorecard.dev/projects/github.com/{owner}/{repo}"
 
 # deps.dev "system" ids differ from OSV ecosystem ids.
@@ -423,6 +427,63 @@ async def _fetch_scorecard(
     return None
 
 
+async def fetch_depsdev_default_version(
+    ecosystem: str, name: str, client: httpx.AsyncClient,
+) -> str | None:
+    """The default (latest stable) version of a package per deps.dev, so the graph can
+    be queried by exact coordinate. ``None`` fail-open."""
+    system = _DEPSDEV_SYSTEM.get(ecosystem)
+    if not system or not name:
+        return None
+    try:
+        resp = await client.get(
+            f"https://api.deps.dev/v3/systems/{system}/packages/{name}",
+            timeout=_HTTP_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return None
+        for v in (resp.json().get("versions") or []):
+            if v.get("isDefault"):
+                return (v.get("versionKey") or {}).get("version")
+    except (httpx.HTTPError, ValueError):
+        return None
+    return None
+
+
+async def fetch_depsdev_indirect_keys(
+    ecosystem: str, name: str, version: str, client: httpx.AsyncClient,
+) -> set[str] | None:
+    """The resolved dependency graph's INDIRECT (transitive) nodes for a root package,
+    as a set of lowercased ``name@version`` keys, via deps.dev. ``None`` when deps.dev
+    has no graph for the coordinate (unknown ecosystem, 404, or error) — fail-open, so
+    the caller keeps its lockfile-derived directness.
+
+    This is the cross-ecosystem source of REACHABILITY: a lockfile like ``Cargo.lock``
+    or ``poetry.lock`` lists every transitive dep but not which are transitive, so
+    without this a buried CVE weighs the same as a directly-declared one."""
+    system = _DEPSDEV_SYSTEM.get(ecosystem)
+    if not system or not name or not version:
+        return None
+    try:
+        resp = await client.get(
+            DEPSDEV_DEPS_URL.format(system=system, name=name, version=version),
+            timeout=_HTTP_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    indirect: set[str] = set()
+    for node in (data.get("nodes") or []):
+        if node.get("relation") == "INDIRECT":
+            vk = node.get("versionKey") or {}
+            n, v = vk.get("name"), vk.get("version")
+            if n and v:
+                indirect.add(f"{n.lower()}@{v}")
+    return indirect
+
+
 async def _fetch_depsdev(
     dep: Dep, client: httpx.AsyncClient,
 ) -> dict | None:
@@ -456,6 +517,7 @@ async def analyze_supply_chain(
     workflow_texts: list[str] | None = None,
     repo_meta: dict | None = None,
     commits: list[dict] | None = None,
+    root_coord: tuple[str, str, str] | None = None,
     use_depsdev: bool = True,
     use_scorecard: bool = True,
     client: httpx.AsyncClient | None = None,
@@ -503,6 +565,30 @@ async def analyze_supply_chain(
     if owns_client:
         client = httpx.AsyncClient(headers={"User-Agent": "AgentAvow-Scanner"})
     try:
+        # REACHABILITY (cross-ecosystem): a lockfile like Cargo.lock/poetry.lock lists
+        # every transitive dep but not which are transitive. deps.dev's resolved graph
+        # for the root package tells us, so a buried CVE gets the transitive ×0.5 weight
+        # instead of counting like a directly-declared one. npm already gets this from
+        # package-lock nesting; this covers cargo/pypi/go. Fail-open.
+        if use_depsdev and root_coord and _DEPSDEV_SYSTEM.get(root_coord[0]):
+            r_eco, r_name, r_ver = root_coord
+            if not r_ver:  # a repo scan has no pinned version → use the default
+                r_ver = await fetch_depsdev_default_version(r_eco, r_name, client)
+            indirect = (
+                await fetch_depsdev_indirect_keys(r_eco, r_name, r_ver, client)
+                if r_ver else None
+            )
+            if indirect:
+                marked = 0
+                for d in deps:
+                    if getattr(d, "direct", True) and f"{d.name.lower()}@{d.version}" in indirect:
+                        d.direct = False
+                        marked += 1
+                if marked:
+                    result.db_snapshots["depsdev_graph"] = f"{r_eco}:{r_name}@{r_ver}"
+                    logger.debug("deps.dev reachability: %d/%d deps marked transitive for %s",
+                                 marked, len(deps), r_name)
+
         batch = await _osv_querybatch(deps, client)
         # Collect unique vuln ids to hydrate.
         vuln_ids: list[str] = []
