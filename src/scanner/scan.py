@@ -2806,16 +2806,20 @@ async def scan_repo(
         tasks = [asyncio.ensure_future(_scan_one(item)) for item in scan_files]
         # Bound the phase: collect whatever finished within the budget, cancel the rest
         # and disclose the partial coverage (sampled) instead of failing the whole scan.
-        done, pending = await asyncio.wait(tasks, timeout=scan_phase_budget)
-        if pending:
-            for t in pending:
-                t.cancel()
-            result.sampled = True
-            logger.warning(
-                "scan_repo file phase hit the %.0fs budget for %s/%s — %d/%d files (sampled)",
-                scan_phase_budget, owner, repo, len(done), len(tasks),
-            )
-        scan_results = [t.result() for t in tasks if t in done and not t.cancelled()]
+        # (asyncio.wait raises on an empty set, so guard the no-scannable-files case.)
+        if not tasks:
+            scan_results = []
+        else:
+            done, pending = await asyncio.wait(tasks, timeout=scan_phase_budget)
+            if pending:
+                for t in pending:
+                    t.cancel()
+                result.sampled = True
+                logger.warning(
+                    "scan_repo file phase hit the %.0fs budget for %s/%s — %d/%d files (sampled)",
+                    scan_phase_budget, owner, repo, len(done), len(tasks),
+                )
+            scan_results = [t.result() for t in tasks if t in done and not t.cancelled()]
 
         for findings_list, positives_list, suppressed, digest, text_hash, scanned in scan_results:
             # Only count files that were actually scanned (#7) — signed filesScanned
