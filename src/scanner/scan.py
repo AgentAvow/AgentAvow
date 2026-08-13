@@ -2744,16 +2744,32 @@ async def scan_repo(
         result.sampled = (
             result.sampled or result.total_scannable_files > _MAX_FILES_PER_REPO
         )
+        # When we can only sample (big monorepo), grade the SHIPPED surface, not its
+        # test/example/vendored tree: rank shipped source + shallow paths first so the
+        # 200-file sample is representative of what an agent actually runs. (Fixes the
+        # react-style D/30 where the sample was dominated by test/build files.)
+        if len(scannable_files) > _MAX_FILES_PER_REPO:
+            scannable_files.sort(key=lambda it: (
+                _is_nonshipped_path(it["path"]) or _is_test_or_doc_file(it["path"]),
+                it["path"].count("/"),
+                it["path"],
+            ))
         scan_files = scannable_files[:_MAX_FILES_PER_REPO]
 
         # Load allowlist once for the whole scan
         allowlist = _load_allowlist()
 
-        # Scan files in parallel batches (10 concurrent fetches)
+        # Scan files in parallel. Fetches go through the UNMETERED raw host, so we run
+        # wide (20 concurrent) with a tight per-file timeout — a huge monorepo (200-file
+        # cap) must finish well inside the endpoint's overall deadline.
         import asyncio
 
-        scan_concurrency = 10
-        per_file_timeout = 15.0  # seconds per file fetch
+        scan_concurrency = 20
+        per_file_timeout = 8.0  # seconds per file fetch
+        # Hard budget for the whole file-scan phase. If a pathologically slow repo blows
+        # past it, we grade what completed and mark the result sampled — a partial signed
+        # grade beats a 503 (the large-monorepo timeout Sentry was firing on).
+        scan_phase_budget = 55.0
         sem = asyncio.Semaphore(scan_concurrency)
 
         # Phase 2: repo file content hashes (path -> sha256 of text), used to detect
@@ -2787,8 +2803,19 @@ async def scan_repo(
             except (asyncio.TimeoutError, Exception):
                 return [], [], 0, None, None, False
 
-        tasks = [_scan_one(item) for item in scan_files]
-        scan_results = await asyncio.gather(*tasks)
+        tasks = [asyncio.ensure_future(_scan_one(item)) for item in scan_files]
+        # Bound the phase: collect whatever finished within the budget, cancel the rest
+        # and disclose the partial coverage (sampled) instead of failing the whole scan.
+        done, pending = await asyncio.wait(tasks, timeout=scan_phase_budget)
+        if pending:
+            for t in pending:
+                t.cancel()
+            result.sampled = True
+            logger.warning(
+                "scan_repo file phase hit the %.0fs budget for %s/%s — %d/%d files (sampled)",
+                scan_phase_budget, owner, repo, len(done), len(tasks),
+            )
+        scan_results = [t.result() for t in tasks if t in done and not t.cancelled()]
 
         for findings_list, positives_list, suppressed, digest, text_hash, scanned in scan_results:
             # Only count files that were actually scanned (#7) — signed filesScanned
