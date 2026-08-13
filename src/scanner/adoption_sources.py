@@ -584,6 +584,65 @@ async def fetch_hf_stats(model_id: str) -> dict | None:
         return None
 
 
+async def fetch_clawhub_stats(owner: str, repo: str) -> dict | None:
+    """OpenClaw skill adoption from ClawHub (the skill registry, no auth) — unique
+    ``installs``, raw ``downloads``, ``stars``, and a 60-day install ``trend``. A skill
+    is scanned as a GitHub ``owner/repo``; ClawHub keys skills by ``ownerHandle`` +
+    ``slug``, so we search by the repo/skill name and keep only the row whose owner
+    matches — never a different owner's identically-named skill. Fail-open → None.
+
+    This is a strict upgrade over the GitHub-star proxy: it measures the SKILL's real
+    adoption, not the repo's, and one repo can hold several skills. When a skill isn't
+    on ClawHub, the caller falls back to repo stars."""
+    owner = (owner or "").strip()
+    repo = (repo or "").strip()
+    if not owner or not repo:
+        return None
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=8, headers={
+            "User-Agent": "AgentAvow-Adoption (safety scanning; kenne@agentavow.com)",
+        }) as client:
+            resp = await client.get(
+                "https://clawhub.ai/api/v1/search",
+                params={"q": repo, "limit": 20},
+            )
+            if resp.status_code != 200:
+                return None
+            results = (resp.json() or {}).get("results") or []
+
+        def _owner_of(row: dict) -> str:
+            return str(
+                row.get("ownerHandle")
+                or (row.get("sourceIdentity") or {}).get("owner")
+                or ""
+            ).lower()
+
+        match = next((r for r in results if _owner_of(r) == owner.lower()), None)
+        if match is None:
+            return None
+        stats = match.get("stats") or {}
+        metrics = match.get("metrics") or {}
+        installs = int(stats.get("installs") or 0)
+        downloads = int(stats.get("downloads") or match.get("downloads") or 0)
+        stars = int(stats.get("stars") or 0)
+        trend = int(metrics.get("rolling60DayInstalls") or 0)
+        if not (installs or downloads or stars or trend):
+            return None
+        return {
+            "source": "clawhub",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "installs": installs,
+            "downloads": downloads,
+            "stars": stars,
+            "trend_60d_installs": trend,
+        }
+    except Exception:
+        logger.debug("clawhub stats fetch failed for %s/%s", owner, repo, exc_info=True)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Bulk discovery — the most-depended-upon packages per registry (ecosyste.ms).
 # These are the tools agents actually pull, so they're the highest-value catalog

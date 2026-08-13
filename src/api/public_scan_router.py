@@ -2043,7 +2043,28 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
             elif stars:
                 headline = {"count": int(stars), "unit": "stars"}
                 axes.append(build_axis_stars(stars=int(stars)))
-    elif s in ("github", "openclaw"):
+    elif s == "openclaw":
+        # A skill's real adoption lives in the OpenClaw registry (installs), which is a
+        # strict upgrade over the repo's stars. Fall back to stars if it's not listed.
+        from src.scanner.adoption_sources import fetch_clawhub_stats
+        ch = await fetch_clawhub_stats(owner.strip(), repo.strip())
+        if ch and (ch.get("installs") or ch.get("downloads")):
+            installs = int(ch.get("installs") or 0)
+            downloads = int(ch.get("downloads") or 0)
+            if installs:
+                headline = {"count": installs, "unit": "installs"}
+            elif downloads:
+                headline = {"count": downloads, "unit": "downloads"}
+            axes.append(build_axis_downloads(
+                total_downloads=downloads or installs, series=[],
+                dependents_for_ratio=int(ch.get("stars") or 0),
+            ))
+        else:
+            stars = await _github_stars(owner.strip(), repo.strip())
+            if stars is not None:
+                headline = {"count": stars, "unit": "stars"}
+                axes.append(build_axis_stars(stars=stars))
+    elif s == "github":
         stars = await _github_stars(owner.strip(), repo.strip())
         if stars is not None:
             headline = {"count": stars, "unit": "stars"}
