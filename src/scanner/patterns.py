@@ -80,8 +80,13 @@ UNSAFE_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "high",
     ),
     (
-        "eval() call",
-        re.compile(r"\beval\s*\("),
+        "eval() call (Python)",
+        # Python's eval() builtin is called BARE (eval("...")). The negative
+        # lookbehind + (Python) tag stop it matching method calls like `df.eval(...)`
+        # / `pd.eval(...)` (pandas) or PyO3 `py.eval(...)` (Rust) — none of which are
+        # the code-exec builtin. Untagged, it ran on every language and zeroed
+        # pydantic/pandas to F.
+        re.compile(r"(?<![.\w])eval\s*\("),
         "high",
     ),
     (

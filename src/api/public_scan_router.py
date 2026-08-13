@@ -402,7 +402,10 @@ async def _capture_community_scan(
     # The gated letter grade (A+ only when certified) — stored so Browse is accurate.
     _score = data.get("trust_score")
     _grade = data.get("grade") or (
-        _display_grade(_score, (data.get("certified") or {}).get("eligible"))
+        _display_grade(
+            _score, (data.get("certified") or {}).get("eligible"),
+            (data.get("findings") or {}).get("critical") or 0,
+        )
         if _score is not None else None
     )
     surface = (surface or "github").lower()
@@ -636,7 +639,8 @@ def _scan_result_to_dict(result: object) -> dict:
         "trust_score": result.trust_score,
         # Letter grade with the A+ certified gate applied (flag-gated; == score-only
         # grade when the gate is off). Stored so every consumer reads one grade.
-        "grade": _display_grade(result.trust_score, _certified.get("eligible")),
+        "grade": _display_grade(
+            result.trust_score, _certified.get("eligible"), result.critical_count),
         "trust_tier": tier_info["tier"],
         "recommended_limits": tier_info["recommended_limits"],
         "scan_result": scan_result,
@@ -1515,7 +1519,9 @@ def _grade_from_score(score: int) -> str:
     return "F"
 
 
-def _display_grade(score: int, certified_eligible: bool | None) -> str:
+def _display_grade(
+    score: int, certified_eligible: bool | None, critical_count: int = 0,
+) -> str:
     """The LETTER grade, with the A+ 'Certified' gate applied (roadmap §7).
 
     A+ is not "a high score" — it's a distinct, earned certification (artifact-
@@ -1524,15 +1530,23 @@ def _display_grade(score: int, certified_eligible: bool | None) -> str:
       - a certified scan in the A band (score >= 81) earns **A+**;
       - a NON-certified scan, however clean (score >= 96), is capped at **A** —
         a repo-only scan can never be A+.
-    This adjusts only the LABEL, never the 0-100 score or the trust tier. With the
-    flag OFF (default), this is exactly ``_grade_from_score`` — no behavior change.
+
+    Calibration: an UNRESOLVED CRITICAL caps the letter at **B**. The bounded
+    supply-chain model deliberately keeps a monorepo from flooring on transitive
+    noise, but that also let a repo with a *critical* CVE dependency still read A —
+    a top-line "A / verified" must not sit over an open critical. Caps the label
+    only, never the 0-100 score or the trust tier.
     """
-    if not getattr(settings, "scanner_certified_grade_gate", False):
-        return _grade_from_score(score)
-    if certified_eligible and score >= 81:
-        return "A+"
-    base = _grade_from_score(score)
-    return "A" if base == "A+" else base  # 96+ but uncertified → A, not A+
+    gate = getattr(settings, "scanner_certified_grade_gate", False)
+    if gate and certified_eligible and score >= 81 and not critical_count:
+        base = "A+"
+    else:
+        base = _grade_from_score(score)
+        if gate and base == "A+":
+            base = "A"  # 96+ but uncertified → A, not A+
+    if critical_count and base in ("A+", "A"):
+        return "B"
+    return base
 
 
 def _grade_color(grade: str) -> str:
@@ -1598,7 +1612,8 @@ async def scan_badge(
         if cached:
             score = cached["trust_score"]
             _elig = (cached.get("certified") or {}).get("eligible")
-            grade = cached.get("grade") or _display_grade(score, _elig)
+            grade = cached.get("grade") or _display_grade(
+                score, _elig, (cached.get("findings") or {}).get("critical") or 0)
             score_type = "Scan"
         else:
             # Cache miss: regenerate on demand rather than decaying to a grey
@@ -1636,17 +1651,25 @@ async def scan_badge(
 async def og_image(
     title: str = Query("", max_length=200),
     grade: str = Query("", max_length=3),
-    score: int | None = Query(None, ge=0, le=100),
+    score: str = Query("", max_length=4),
     subtitle: str = Query("", max_length=200),
 ) -> Response:
     """Dynamic Open Graph card (1200×630 PNG) for a score page — the grade + name +
     one-liner, so a shared link unfurls into a rich card everywhere. Query-driven so
-    the same endpoint serves every surface. Fail-open → the static brand image."""
+    the same endpoint serves every surface. Fail-open → the static brand image.
+
+    ``score`` is a lenient string (a card for a never-scanned/live coordinate has no
+    score, so callers send an empty ``score=``) — a strict int Query would 422 the
+    whole request before the fail-open path, blanking the image."""
+    score_val: int | None = None
+    s = (score or "").strip()
+    if s.isdigit():
+        score_val = max(0, min(100, int(s)))
     try:
         from src.api.og_image import render_og_png
         png = render_og_png(
             title=title.strip() or "Is this tool safe?",
-            grade=grade.strip(), score=score, subtitle=subtitle.strip(),
+            grade=grade.strip(), score=score_val, subtitle=subtitle.strip(),
         )
         return Response(
             content=png,
@@ -2192,7 +2215,8 @@ async def scan_og_image(
         if cached:
             score = cached["trust_score"]
             _elig = (cached.get("certified") or {}).get("eligible")
-            grade = cached.get("grade") or _display_grade(score, _elig)
+            grade = cached.get("grade") or _display_grade(
+                score, _elig, (cached.get("findings") or {}).get("critical") or 0)
             findings = cached.get("findings", {})
             critical = findings.get("critical", 0)
             high = findings.get("high", 0)

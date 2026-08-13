@@ -128,16 +128,19 @@ class CatalogResponse(BaseModel):
     surfaces: list[str] = ["x402", "mcp", "npm", "pypi"]
 
 
-def _row_grade(score: int | None, stored: str | None = None) -> str | None:
+def _row_grade(
+    score: int | None, stored: str | None = None, critical: int | None = None,
+) -> str | None:
     """The letter grade to show in the catalog. Prefer a STORED gated grade; else
     derive from score with the A+ certified gate applied (uncertified → capped at
-    A). This is what keeps Browse from showing A+ on a repo-only 96+ scan."""
+    A) and the critical cap (an open critical → capped at B). This is what keeps
+    Browse from showing A+ on a repo-only 96+ scan, or A over an open critical."""
     if stored:
         return stored
     if score is None:
         return None
     from src.api.public_scan_router import _display_grade
-    return _display_grade(score, None)
+    return _display_grade(score, None, critical or 0)
 
 
 def _normalize_row(surface: str, raw: dict) -> CatalogRow:
@@ -162,7 +165,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
             full_name=full_name,
             repository_url=f"https://github.com/{full_name}" if full_name else None,
             trust_score=raw.get("trust_score"),
-            grade=_row_grade(raw.get("trust_score")),
+            grade=_row_grade(raw.get("trust_score"), critical=raw.get("critical_count")),
             critical=raw.get("critical_count"),
             high=raw.get("high_count"),
             findings_count=raw.get("findings_count"),
@@ -176,7 +179,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
         repository_url=raw.get("repository_url"),
         full_name=raw.get("full_name"),
         trust_score=raw.get("trust_score"),
-        grade=_row_grade(raw.get("trust_score")),
+        grade=_row_grade(raw.get("trust_score"), critical=raw.get("critical")),
         critical=raw.get("critical"),
         high=raw.get("high"),
         findings_count=raw.get("findings_count"),

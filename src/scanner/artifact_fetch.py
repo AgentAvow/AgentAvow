@@ -759,19 +759,28 @@ async def _docker_get(
         send = dict(headers)
         if urlparse(cur).hostname not in _ALLOWED_HOSTS:
             send.pop("Authorization", None)
-        resp = await client.get(
-            cur, headers=send, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=False)
-        if resp.status_code in _REDIRECT_CODES:
-            loc = resp.headers.get("location")
-            if not loc:
+        # STREAM with a hard incremental cap — never materialize an attacker-sized
+        # manifest/config blob in memory before checking its length (OOM DoS guard).
+        async with client.stream(
+            "GET", cur, headers=send, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=False,
+        ) as resp:
+            if resp.status_code in _REDIRECT_CODES:
+                loc = resp.headers.get("location")
+                if not loc:
+                    return None
+                cur = str(httpx.URL(cur).join(loc))
+                continue
+            if resp.status_code != 200:
                 return None
-            cur = str(httpx.URL(cur).join(loc))
-            continue
-        if resp.status_code != 200:
-            return None
-        raw = resp.content
-        if len(raw) > _METADATA_MAX_BYTES:
-            return None
+            clen = resp.headers.get("content-length")
+            if clen and clen.isdigit() and int(clen) > _METADATA_MAX_BYTES:
+                return None  # reject on the advertised size before reading a byte
+            buf = bytearray()
+            async for chunk in resp.aiter_bytes():
+                buf.extend(chunk)
+                if len(buf) > _METADATA_MAX_BYTES:
+                    return None  # runaway / lying Content-Length → bail mid-stream
+            raw = bytes(buf)
         if verify_digest:
             algo, _, hexd = verify_digest.partition(":")
             if algo == "sha256" and hashlib.sha256(raw).hexdigest() != hexd:

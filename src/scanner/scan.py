@@ -201,8 +201,8 @@ def _should_skip_path(path: str) -> bool:
 _NON_PROD_DIR_MARKERS = frozenset({
     "example", "examples", "demo", "demos", "sample", "samples",
     "test", "tests", "__tests__", "e2e", "integration", "fixture", "fixtures",
-    "benchmark", "benchmarks", "bench", "docs", "doc", "website", "site",
-    "playground", "sandbox", "scripts", "tooling",
+    "benchmark", "benchmarks", "bench", "benches", "docs", "doc", "website", "site",
+    "playground", "sandbox", "scripts", "tooling", "release",
 })
 
 
@@ -584,7 +584,12 @@ _SAFE_DB_EXEC_RE = re.compile(
 # Known vulnerable dependency patterns (major CVEs / critical issues)
 # Each: (package_name_pattern, vulnerable_version_pattern, severity, description)
 # ---------------------------------------------------------------------------
-_VER = r"\s*[=<>~!]=?\s*['\"]?"  # version operator shorthand
+# Version-operator shorthand for the vuln rules. Matches only CEILING/EXACT
+# constraints (`==` `=` `<` `<=` `~=`) that actually pin a package INTO a vulnerable
+# range — never a FLOOR (`>=` `>`), which permits a patched higher version and so is
+# not, by itself, evidence of a vulnerable install. (`pyyaml>=5.3.1` allows safe 6.x —
+# it was wrongly flagged as the `<6.0` critical on typer/fastapi.)
+_VER = r"\s*(?:==|<=?|~=|=)\s*['\"]?"
 
 _VULN_DEPS: list[tuple[str, re.Pattern[str], str, str]] = [
     # -- Python packages --
@@ -1574,6 +1579,28 @@ def _certified_status(result: ScanResult) -> dict:
         "full_coverage": not getattr(result, "sampled", False),
     }
     return {"eligible": all(checks.values()), "checks": checks}
+
+
+def _dedupe_findings(findings: list) -> list:
+    """Collapse identical findings to one per detection site, preserving order. A
+    repo scan grades the repo tree AND the published artifact (same source), so the
+    same detection would otherwise be scored twice. Key: (category, file, line, name).
+    Dependency/lockfile findings key on name alone (file_path is always 'lockfile')."""
+    seen: set = set()
+    out: list = []
+    for f in findings:
+        cat = getattr(f, "category", None)
+        key = (
+            (cat, getattr(f, "name", None))
+            if cat in _DEP_CATEGORIES
+            else (cat, getattr(f, "file_path", None),
+                  getattr(f, "line_number", None), getattr(f, "name", None))
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
 
 
 def _calculate_trust_score(result: ScanResult) -> int:
@@ -2968,6 +2995,12 @@ async def scan_repo(
         # negatives apply a small BOUNDED penalty (never a false-F). Capped at ~5
         # extra API calls, reusing the token.
         await _maybe_maintainer_signals(result, owner, repo, token)
+
+        # Dedupe before scoring: a repo scan grades BOTH the repo tree and the (same)
+        # published artifact source, so an identical detection at the same site was
+        # counted — and penalized — twice (e.g. typer's 8 completion lines → 16
+        # unsafe_exec, doubling the deduction). Collapse to one per detection site.
+        result.findings = _dedupe_findings(result.findings)
 
         # Calculate trust score and per-category sub-scores
         result.trust_score = _calculate_trust_score(result)
