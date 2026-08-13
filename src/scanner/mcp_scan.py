@@ -232,7 +232,6 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
     Fail-open: any SSRF-guard/transport/protocol error returns None so the caller
     can surface a clean error instead of a wrong grade. Never raises.
     """
-    import httpx
 
     from src.ssrf import validate_url_https
 
@@ -256,7 +255,12 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
         return body
 
     try:
-        async with httpx.AsyncClient(timeout=_MCP_TIMEOUT, follow_redirects=False) as client:
+        # Rebind-safe client: pre-flight validation (validate_url_https above) and the
+        # connect-time DNS lookup are otherwise two separate resolutions — a rebinding
+        # host can pass the check then connect to an internal IP. The pinned transport
+        # connects to the exact validated IP. (This endpoint is USER-supplied.)
+        from src.ssrf import ssrf_safe_async_client
+        async with ssrf_safe_async_client(timeout=_MCP_TIMEOUT, follow_redirects=False) as client:
             init = await client.post(url, headers=headers, json=_rpc(
                 "initialize",
                 {

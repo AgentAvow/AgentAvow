@@ -1974,6 +1974,30 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
             axes.append(build_axis_dependents(
                 dependent_packages=dep_pkgs, dependent_repos=dep_repos,
             ))
+    elif s == "crates":
+        from src.scanner.adoption_sources import fetch_crates_stats
+        pkg = repo.strip()
+        stats = await fetch_crates_stats(pkg)
+        dep = await fetch_ecosystems_dependents("crates.io", pkg)
+        dep_pkgs = (dep or {}).get("dependent_packages")
+        dep_repos = (dep or {}).get("dependent_repos")
+        if stats:
+            recent, total = stats.get("recent_downloads"), stats.get("downloads")
+            if recent:
+                headline = {"count": int(recent), "unit": "downloads/90d"}
+            elif total:
+                headline = {"count": int(total), "unit": "downloads"}
+            if total:
+                axes.append(build_axis_downloads(
+                    total_downloads=int(total), series=[],
+                    dependents_for_ratio=int(dep_pkgs or 0) + int(dep_repos or 0),
+                ))
+        if dep:
+            if headline is None and (dep_pkgs or dep_repos):
+                headline = {"count": int(dep_pkgs or 0) + int(dep_repos or 0), "unit": "dependents"}
+            axes.append(build_axis_dependents(
+                dependent_packages=dep_pkgs, dependent_repos=dep_repos,
+            ))
     elif s == "huggingface":
         from src.scanner.adoption_sources import fetch_hf_stats
         # repo carries the full org/model coordinate for HF.

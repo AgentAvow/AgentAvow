@@ -143,6 +143,79 @@ def validate_url_https(url: str, *, field_name: str = "url") -> str:
     return url
 
 
+def _ip_is_blocked(ip_str: str) -> bool:
+    """True if a resolved IP string is in a blocked range (or unparseable)."""
+    try:
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # can't parse → refuse
+    return (
+        addr.is_private or addr.is_loopback or addr.is_link_local
+        or addr.is_multicast or addr.is_reserved or addr.is_unspecified
+        or _in_cgnat(addr)
+    )
+
+
+def resolve_and_validate(hostname: str, *, field_name: str = "url") -> list[str]:
+    """Resolve a hostname and return its SAFE public IPs (raising if ANY is blocked).
+    Returns ``[]`` if resolution fails, so the caller can let the HTTP client surface
+    the DNS error naturally. Powers the pinned transport below."""
+    try:
+        results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return []
+    ips: list[str] = []
+    for _family, _type, _proto, _canon, sockaddr in results:
+        ip_str = sockaddr[0]
+        if _ip_is_blocked(ip_str):
+            raise ValueError(f"{field_name} resolves to a blocked internal address")
+        if ip_str not in ips:
+            ips.append(ip_str)
+    return ips
+
+
+def build_ssrf_safe_transport(**transport_kwargs):
+    """An httpx AsyncHTTPTransport that closes the DNS-rebind TOCTOU: it resolves +
+    validates the host ONCE and connects to that exact validated IP, preserving the
+    Host header and TLS SNI (cert still verified against the original hostname). Without
+    this, the guard's pre-flight IP check and httpx's own connect-time resolution are
+    two separate lookups — an attacker's DNS can pass the check then rebind to
+    127.0.0.1/169.254.169.254 for the real connection."""
+    import httpx
+
+    class _SsrfSafeTransport(httpx.AsyncHTTPTransport):
+        async def handle_async_request(self, request):
+            host = request.url.host or ""
+            # IP-literal host: validate directly, no resolution/rebind possible.
+            try:
+                ipaddress.ip_address(host.strip("[]"))
+                if _ip_is_blocked(host.strip("[]")):
+                    raise ValueError(f"blocked internal address: {host}")
+                return await super().handle_async_request(request)
+            except ValueError as exc:
+                if "blocked" in str(exc):
+                    raise
+                # not an IP literal → resolve, validate, and PIN to the safe IP.
+            ips = resolve_and_validate(host, field_name="url")
+            if not ips:
+                return await super().handle_async_request(request)  # DNS failed; let httpx error
+            # Connect to the validated IP; keep the original Host header (set at Request
+            # creation) and force TLS SNI + cert verification against the real hostname.
+            request.url = request.url.copy_with(host=ips[0])
+            request.extensions = {**request.extensions, "sni_hostname": host}
+            return await super().handle_async_request(request)
+
+    return _SsrfSafeTransport(**transport_kwargs)
+
+
+def ssrf_safe_async_client(**client_kwargs):
+    """``httpx.AsyncClient`` wired with the rebind-safe transport (see above). Use for
+    any fetch to a USER-SUPPLIED URL (e.g. a live MCP endpoint)."""
+    import httpx
+
+    return httpx.AsyncClient(transport=build_ssrf_safe_transport(), **client_kwargs)
+
+
 def validate_url_optional(
     url: str | None, *, field_name: str = "url",
 ) -> str | None:

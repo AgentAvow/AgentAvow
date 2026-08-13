@@ -1603,6 +1603,12 @@ def _dedupe_findings(findings: list) -> list:
     return out
 
 
+# Max points the HIGH+MEDIUM code findings can subtract (before file-ratio scaling).
+# Criticals are NOT capped by this. Tuned so a big trusted lib with legitimate repeated
+# exec (pandas ≈17 highs) lands mid-grade, not F, while a handful of highs is unaffected.
+_CODE_HM_DEDUCTION_CAP = 42
+
+
 def _calculate_trust_score(result: ScanResult) -> int:
     """Calculate a trust score (0-100) based on findings and signals.
 
@@ -1648,20 +1654,26 @@ def _calculate_trust_score(result: ScanResult) -> int:
         # Count expected patterns at 10% weight (not zero — they still matter)
         expected_medium = code_medium - actual_medium
         expected_high = code_high - actual_high
-        raw_deduction = (
-            actual_critical * 15
-            + actual_high * 8
+        crit_ded = actual_critical * 15
+        hm_ded = (
+            actual_high * 8
             + actual_medium * 3
             + int(expected_high * 0.8)  # 10% of normal penalty
             + int(expected_medium * 0.3)
         )
     else:
         # Standard deductions for non-MCP repos (code findings only)
-        raw_deduction = (
-            code_critical * 15
-            + code_high * 8
-            + code_medium * 3
-        )
+        crit_ded = code_critical * 15
+        hm_ded = code_high * 8 + code_medium * 3
+
+    # Saturating cap on the HIGH+MEDIUM code deduction (criticals stay UNCAPPED, so a
+    # genuinely malicious repo — many criticals or a MAL dep — still floors to F). A
+    # large, trusted library legitimately repeats the same pattern (pandas' expression
+    # engine calls `eval`, its clipboard I/O calls `subprocess`) dozens of times; the
+    # 30th instance is not 30× the risk of the first, and pure VOLUME of high findings
+    # must not floor a whole library to 0. The cap only bites past ~5 highs, so small
+    # repos are unaffected. File-ratio scaling still applies on top.
+    raw_deduction = crit_ded + min(int(hm_ded), _CODE_HM_DEDUCTION_CAP)
 
     # File-ratio scaling: if only a small percentage of files have issues,
     # reduce the deduction. A repo with 200 files and 5 findings in 3 files

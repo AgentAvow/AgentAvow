@@ -538,6 +538,30 @@ async def fetch_docker_pulls(repo: str) -> dict | None:
         return None
 
 
+async def fetch_crates_stats(name: str) -> dict | None:
+    """crates.io adoption — total + recent (90d) downloads (no auth). Fail-open → None.
+    crates.io's crawl policy asks for a descriptive User-Agent with contact info."""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=8, headers={
+            "User-Agent": "AgentAvow-Adoption (safety scanning; kenne@agentavow.com)",
+        }) as client:
+            resp = await client.get(f"https://crates.io/api/v1/crates/{name}")
+            if resp.status_code != 200:
+                return None
+            crate = (resp.json() or {}).get("crate") or {}
+        return {
+            "source": "crates.io",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "downloads": int(crate.get("downloads") or 0),
+            "recent_downloads": int(crate.get("recent_downloads") or 0),
+        }
+    except Exception:
+        logger.debug("crates stats fetch failed for %s", name, exc_info=True)
+        return None
+
+
 async def fetch_hf_stats(model_id: str) -> dict | None:
     """Hugging Face model adoption — monthly ``downloads`` + ``likes`` (no auth).
     ``model_id`` is ``org/model``. Fail-open → None."""
