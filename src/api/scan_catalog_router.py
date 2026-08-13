@@ -415,6 +415,19 @@ async def scan_catalog(
         # "Widely relied upon" — most-adopted first (only community rows carry adoption
         # today; unknown adoption sorts last).
         filtered = sorted(filtered, key=lambda r: (r.adoption_count or -1), reverse=True)
+    else:
+        # DEFAULT rank (no explicit sort): actionable, trustworthy rows first. Skipped/
+        # errored scrapes (e.g. thousands of unscannable MCP-registry entries) sink to
+        # the bottom; among the rest, live-routable MCP endpoints and higher grades lead.
+        # This is what stops a junk-heavy tab from burying its few real tools.
+        def _rank(r: CatalogRow):
+            junk = bool(r.skipped or r.scan_error)
+            live_mcp = r.surface == "mcp" and bool(
+                (r.endpoint_url or "").startswith("http")
+                or (r.name or "").startswith("http")
+            )
+            return (junk, not live_mcp, -(r.trust_score if r.trust_score is not None else -1))
+        filtered = sorted(filtered, key=_rank)
 
     total = len(filtered)
     page = filtered[offset:offset + limit]
