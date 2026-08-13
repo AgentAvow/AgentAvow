@@ -117,6 +117,7 @@ const RebrandBrowse = lazyWithReload(() => import('./rebrand/pages/Browse'))
 const RebrandBadge = lazyWithReload(() => import('./rebrand/pages/Badge'))
 const RebrandDocs = lazyWithReload(() => import('./rebrand/pages/Docs'))
 const RebrandCheck = lazyWithReload(() => import('./rebrand/pages/Check'))
+const RebrandSubmit = lazyWithReload(() => import('./rebrand/pages/Submit'))
 const RebrandLogin = lazyWithReload(() => import('./rebrand/pages/Login'))
 const RebrandLegal = lazyWithReload(() => import('./rebrand/pages/Legal'))
 const RebrandAccount = lazyWithReload(() => import('./rebrand/pages/Account'))
@@ -242,6 +243,7 @@ function AppRoutes() {
         <Route path={REBRAND_BASE || '/'} element={<RebrandLayout />}>
           <Route index element={<RebrandHome />} />
           <Route path="browse" element={<RebrandBrowse />} />
+          <Route path="submit" element={<RebrandSubmit />} />
           <Route path="badge" element={<RebrandBadge />} />
           <Route path="docs" element={<RebrandDocs />} />
           <Route path="check" element={<RebrandCheck />} />

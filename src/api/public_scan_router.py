@@ -324,6 +324,45 @@ async def _cached_scan_response(
     )
 
 
+_SURFACE_NOUN = {
+    "npm": "npm package", "pypi": "PyPI package", "crates": "Rust crate",
+    "huggingface": "Hugging Face model", "docker": "container image",
+    "mcp": "MCP server", "openclaw": "agent skill", "github": "repository",
+}
+
+
+def _tool_description(result) -> str:
+    """One-line 'what this tool is'. Prefer the real registry/repo description; else
+    derive something useful from what we know (surface, language, MCP-ness, the package
+    it maps to) so a score page never shows a blank where the description should be."""
+    desc = (getattr(result, "description", "") or "").strip()
+    if desc:
+        return desc[:180]
+    surface = ((getattr(result, "coverage", {}) or {}).get("surface") or "").lower()
+    lang = (getattr(result, "primary_language", "") or "").strip()
+    is_mcp = getattr(result, "is_mcp_server", False)
+    pkg = getattr(result, "package_coordinate", {}) or {}
+    if surface in ("npm", "pypi", "crates"):
+        noun = _SURFACE_NOUN[surface]
+        return f"A {lang} {noun}" if lang and "/" not in lang else f"A {noun}"
+    if surface == "huggingface":
+        return "A model published on Hugging Face"
+    if surface == "docker":
+        return "A container image"
+    if surface == "mcp":
+        return "A live MCP server"
+    if surface == "openclaw":
+        return "An OpenClaw agent skill"
+    # GitHub repo (surface github or unset)
+    if is_mcp:
+        return f"An MCP server ({lang})" if lang else "An MCP server"
+    if pkg.get("surface") and pkg.get("name"):
+        return f"Source for the {_SURFACE_NOUN.get(pkg['surface'], 'package')} {pkg['name']}"
+    if lang:
+        return f"A {lang} project"
+    return "A source repository"
+
+
 async def _track_checker(request) -> None:
     """Add this request's privacy-preserving identity to the site-wide unique-checker
     HLL (global reach metric). Best-effort — never raises, never blocks the scan."""
@@ -618,8 +657,9 @@ def _scan_result_to_dict(result: object) -> dict:
         # The published-package coordinate this repo maps to ({surface, name}) — lets
         # the UI offer package / stdio-MCP 1-click install for a repo that IS a package.
         "package_coordinate": getattr(result, "package_coordinate", {}) or {},
-        # A one-line "what this tool does" from registry/repo metadata (for the score page).
-        "tool_description": (getattr(result, "description", "") or "").strip()[:180],
+        # A one-line "what this tool does" — registry/repo metadata, else a useful
+        # derived fallback so EVERY item says something.
+        "tool_description": _tool_description(result),
         "positive_signals": list(set(result.positive_signals)),
         "metadata": {
             "files_scanned": result.files_scanned,
@@ -893,6 +933,89 @@ async def scan_mcp_endpoint(
     await _set_cached("mcp", key, data)
     jws = create_jws(canonicalize(_build_scan_payload(full, data)))
     return _package_response(full, data, jws, cached=False)
+
+
+class SubmitRequest(BaseModel):
+    """Author front-door: list a tool in the public catalog by coordinate."""
+    surface: str
+    identifier: str  # owner/repo · package name · org/model · image · endpoint URL
+
+
+_SUBMIT_ALIASES = {
+    "python": "pypi", "hf": "huggingface", "hugging_face": "huggingface",
+    "container": "docker", "oci": "docker", "image": "docker",
+    "cargo": "crates", "rust": "crates", "crate": "crates", "skill": "openclaw",
+}
+
+
+@router.post(
+    "/submit",
+    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+)
+async def submit_tool(
+    body: SubmitRequest,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Scan a tool AND list it in the public catalog (so it appears in Browse) — the
+    author's front door. Returns the grade + the coordinate the UI routes to. The
+    author can then claim it to get change-alerts + own how it appears."""
+    surface = (body.surface or "").strip().lower()
+    surface = _SUBMIT_ALIASES.get(surface, surface)
+    ident = (body.identifier or "").strip().strip("/")
+    if surface not in (
+        "github", "npm", "pypi", "crates", "huggingface", "docker", "mcp", "openclaw",
+    ):
+        raise HTTPException(400, "unknown surface")
+    if not ident or len(ident) > 300:
+        raise HTTPException(400, "invalid identifier")
+    if request is not None:
+        from src.api.rate_limit import enforce_fresh_scan_limit
+        await enforce_fresh_scan_limit(request)
+        await _track_checker(request)
+
+    from src.scanner.scan import scan_mcp, scan_package, scan_skill
+    try:
+        # GitHub repos already capture-on-scan inside public_scan.
+        if surface == "github":
+            if "/" not in ident:
+                raise HTTPException(400, "GitHub coordinate must be owner/repo")
+            owner, repo = ident.split("/", 1)
+            resp = await asyncio.wait_for(
+                public_scan(owner=owner, repo=repo, force=True, db=db), timeout=90,
+            )
+            return {"listed": True, "surface": "github", "identifier": f"{owner}/{repo}",
+                    "grade": resp.grade, "trust_score": resp.trust_score}
+
+        if surface == "openclaw":
+            if "/" not in ident:
+                raise HTTPException(400, "skill coordinate must be owner/repo")
+            owner, repo = ident.split("/", 1)
+            result = await asyncio.wait_for(scan_skill(owner, repo), timeout=90)
+            cap_owner, cap_repo = owner, repo
+        elif surface == "mcp":
+            result = await asyncio.wait_for(scan_mcp(ident), timeout=90)
+            cap_owner, cap_repo = "mcp", ident
+        else:  # npm / pypi / crates / huggingface / docker
+            result = await asyncio.wait_for(scan_package(surface, ident), timeout=90)
+            cap_owner, cap_repo = surface, ident
+
+        if getattr(result, "error", None):
+            low = result.error.lower()
+            code = 404 if "not found" in low else 422
+            raise HTTPException(code, f"Couldn't scan {surface}:{ident} — {result.error}")
+
+        data = _scan_result_to_dict(result)
+        await _capture_community_scan(cap_owner, cap_repo, data, db, surface=surface)
+        return {"listed": True, "surface": surface, "identifier": ident,
+                "grade": data.get("grade"), "trust_score": data.get("trust_score")}
+    except asyncio.TimeoutError:
+        raise HTTPException(503, "Scan is taking longer than expected — please retry shortly.")
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("submit failed for %s:%s", surface, ident, exc_info=True)
+        raise HTTPException(502, f"Couldn't list that tool: {exc}")
 
 
 @router.get(
