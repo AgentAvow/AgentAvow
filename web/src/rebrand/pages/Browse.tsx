@@ -372,6 +372,29 @@ export default function RebrandBrowse() {
 
       {/* results */}
       <div className="max-w-[1080px] mx-auto px-6 py-8">
+        {/* active-filter chips — see exactly what's applied, remove any one, or clear all */}
+        {(() => {
+          const chips: { key: string; label: string; onClear: () => void }[] = []
+          if (q) chips.push({ key: 'q', label: `“${q}”`, onClear: clearSearch })
+          if (category) chips.push({ key: 'cat', label: category, onClear: () => setCategory('') })
+          if (grade) chips.push({ key: 'grade', label: GRADES.find((x) => x.key === grade)?.label ?? grade, onClear: () => setGrade('') })
+          if (severity) chips.push({ key: 'sev', label: SEVERITIES.find((x) => x.key === severity)?.label ?? severity, onClear: () => setSeverity('') })
+          if (sort !== DEFAULT_SORT) chips.push({ key: 'sort', label: SORTS.find((x) => x.key === sort)?.label ?? sort, onClear: () => setSort(DEFAULT_SORT) })
+          if (!chips.length) return null
+          return (
+            <div className="flex items-center gap-2 flex-wrap mb-4">
+              <span className="text-[12px] text-text-muted">Filters:</span>
+              {chips.map((c) => (
+                <button key={c.key} onClick={c.onClear}
+                  className="group flex items-center gap-1.5 text-[12.5px] pl-3 pr-2 py-1 rounded-full border border-primary-light/40 bg-primary/10 text-primary-light hover:border-primary-light transition-colors">
+                  {c.label}
+                  <span className="grid place-items-center w-4 h-4 rounded-full bg-primary-light/20 group-hover:bg-primary-light/40 text-[11px] leading-none">×</span>
+                </button>
+              ))}
+              <button onClick={clearAll} className="text-[12px] text-text-muted hover:text-text underline underline-offset-2">Clear all</button>
+            </div>
+          )
+        })()}
         {/* result count + refreshing indicator (from Scans) */}
         {!isError && matching != null && (
           <div className="text-[13px] text-text-muted mb-4">
