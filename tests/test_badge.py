@@ -79,8 +79,8 @@ async def test_trust_badge_svg_valid_entity(client, db):
 
     body = resp.text
     assert "<svg" in body
-    assert "AgentGraph Trust" in body
-    assert "85" in body  # 0.85 displayed as 85 (0-100 scale)
+    assert "AgentAvow Trust" in body
+    assert "85/100" in body  # numbers-only: 0.85 → "85/100" (dual-mark pivot)
 
 
 @pytest.mark.asyncio
@@ -99,8 +99,8 @@ async def test_trust_badge_svg_no_trust_score(client, db):
     resp = await client.get(f"/api/v1/badges/trust/{entity_id}.svg")
     assert resp.status_code == 200
     body = resp.text
-    # Score 0 with letter grade: badge value text is now "F 0"
-    assert ">F 0<" in body
+    # Numbers-only: score 0 renders the value text "0/100" (no letter grade)
+    assert ">0/100<" in body
 
 
 @pytest.mark.asyncio
@@ -128,34 +128,34 @@ async def test_trust_badge_color_amber(client, db):
 
 @pytest.mark.asyncio
 async def test_trust_badge_color_teal(client, db):
-    """Trust score in B-grade range produces a green badge."""
+    """Trust score 70 is the 'Standard' tier (60–79) → lighter green."""
     _, entity_id = await _setup_user(client)
     await _set_trust_score(db, entity_id, 0.70)
 
     resp = await client.get(f"/api/v1/badges/trust/{entity_id}.svg")
     assert resp.status_code == 200
-    # B-grade (61-80) is green-500 in unified system; primary teal still appears in label bg
-    assert "#22C55E" in resp.text
+    # Dual-mark thresholds: 60–79 = Standard = #5BBF3A
+    assert "#5BBF3A" in resp.text
 
 
 @pytest.mark.asyncio
 async def test_trust_badge_color_bright_teal(client, db):
-    """Trust score >= 0.8 produces a bright teal badge (tier-3)."""
+    """Trust score 90 is the 'Trusted' tier (>=80) → green."""
     _, entity_id = await _setup_user(client)
     await _set_trust_score(db, entity_id, 0.90)
 
     resp = await client.get(f"/api/v1/badges/trust/{entity_id}.svg")
     assert resp.status_code == 200
-    assert "#2DD4BF" in resp.text  # bright teal — highly trusted
+    assert "#22C55E" in resp.text  # Trusted — green (>=80)
 
 
 @pytest.mark.asyncio
-async def test_trust_badge_unverified_text(client, db):
-    """Score 0.50 renders the C letter grade in the badge value text."""
+async def test_trust_badge_value_text(client, db):
+    """Score 0.50 renders the numeric value '50/100' in the badge (no letter)."""
     _, entity_id = await _setup_user(client)
     await _set_trust_score(db, entity_id, 0.50)
 
     resp = await client.get(f"/api/v1/badges/trust/{entity_id}.svg")
     assert resp.status_code == 200
-    # Badge no longer renders "unverified" copy — letter grade replaced status text
-    assert ">C 50<" in resp.text
+    # Numbers-only badge: value text is "50/100"
+    assert ">50/100<" in resp.text

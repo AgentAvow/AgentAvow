@@ -1569,7 +1569,8 @@ def _display_grade(
 
 
 def _grade_color(grade: str) -> str:
-    """Return badge color for a letter grade."""
+    """Return badge color for a letter grade. Legacy — the badge now colours by
+    score via _trust_score_color (dual-mark pivot 2026-08)."""
     return {
         "A+": "#14B8A6",
         "A": "#2DD4BF",
@@ -1578,6 +1579,19 @@ def _grade_color(grade: str) -> str:
         "D": "#F97316",
         "F": "#EF4444",
     }.get(grade, "#6b7280")
+
+
+def _trust_score_color(score: int) -> str:
+    """0-100 Trust mark colour — green->red at 80/60/40/20 (mark spec)."""
+    if score >= 80:
+        return "#22C55E"  # Trusted
+    if score >= 60:
+        return "#5BBF3A"  # Standard
+    if score >= 40:
+        return "#F59E0B"  # Caution
+    if score >= 20:
+        return "#F97316"  # Restricted
+    return "#EF4444"  # Blocked
 
 
 @router.get(
@@ -1629,16 +1643,12 @@ async def scan_badge(
     ):
         # Entity exists on AgentGraph — show composite trust score
         score = entity_trust["composite_score"]
-        grade = entity_trust["grade"]
         score_type = "Trust"
     else:
         # No entity — fall back to security scan score
         cached = await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
-            _elig = (cached.get("certified") or {}).get("eligible")
-            grade = cached.get("grade") or _display_grade(
-                score, _elig, (cached.get("findings") or {}).get("critical") or 0)
             score_type = "Scan"
         else:
             # Cache miss: regenerate on demand rather than decaying to a grey
@@ -1649,18 +1659,16 @@ async def scan_badge(
             try:
                 fresh = await public_scan(owner=owner, repo=repo, force=False, db=db)
                 score = fresh.security_score
-                grade = fresh.grade or _grade_from_score(score)
                 score_type = "Scan"
             except Exception:
                 logger.warning("badge regenerate failed for %s/%s", owner, repo, exc_info=True)
                 score = None
-                grade = None
                 score_type = None
 
-    # Build badge
+    # Build badge — numbers, not letters (dual-mark pivot 2026-08)
     if score is not None:
-        color = _grade_color(grade)
-        label = f"{score_type}: {grade} {score}"
+        color = _trust_score_color(int(score))
+        label = f"{score_type}: {score}/100"
     else:
         color = "#6b7280"
         label = "not scanned"

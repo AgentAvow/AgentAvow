@@ -15,11 +15,15 @@ export interface ScoreCardData {
   adoptionPct?: number    // 0–100 log-scaled traction bar fill
 }
 
+import { getTrustTier } from '../../components/trust/gradeSystem'
+
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-const ADOPTION_HEX = '#F59E0B'
+// Adoption is brand teal, NEVER a trust/safety colour (fixes the old amber
+// #F59E0B collision with the trust "Caution" hue). Trust owns green→red.
+const ADOPTION_HEX = '#2DD4BF'
 
 export function scoreCardSvg(d: ScoreCardData): string {
   const R = 100
@@ -27,6 +31,9 @@ export function scoreCardSvg(d: ScoreCardData): string {
   const dash = (Math.max(d.score, 0) / 100) * circ
   const hasAdoption = d.adoption.toLowerCase() !== 'new'
   const aHex = hasAdoption ? ADOPTION_HEX : '#5c6370'
+  // Trust mark: 0–100 number + tier word, coloured green→red by the new thresholds.
+  const t = getTrustTier(d.score)
+  const tHex = t.color
   const barW = 300
   const barFill = hasAdoption ? Math.max((d.adoptionPct ?? 0) / 100, 0.05) * barW : 0
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="Geist, system-ui, -apple-system, sans-serif">
@@ -56,12 +63,13 @@ export function scoreCardSvg(d: ScoreCardData): string {
   <!-- Attestation Trust -->
   <g transform="translate(415,360)">
     <circle r="${R}" fill="none" stroke="#1b2b2b" stroke-width="20"/>
-    <circle r="${R}" fill="none" stroke="${d.gradeHex}" stroke-width="20" stroke-linecap="round"
+    <circle r="${R}" fill="none" stroke="${tHex}" stroke-width="20" stroke-linecap="round"
       stroke-dasharray="${dash.toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90)"/>
-    <text x="0" y="18" text-anchor="middle" fill="${d.gradeHex}" font-size="86" font-weight="800">${esc(d.grade)}</text>
-    <text x="0" y="52" text-anchor="middle" fill="#94A3B8" font-size="24" font-family="monospace">${d.score}/100</text>
+    <text x="0" y="8" text-anchor="middle" fill="${tHex}" font-size="86" font-weight="800">${d.score}</text>
+    <text x="0" y="40" text-anchor="middle" fill="#94A3B8" font-size="20" font-family="monospace">/100</text>
+    <text x="0" y="66" text-anchor="middle" fill="${tHex}" font-size="22" font-weight="700">${esc(t.name)}</text>
   </g>
-  <text x="415" y="500" text-anchor="middle" fill="${d.gradeHex}" font-size="18" font-weight="700" font-family="monospace" letter-spacing="1">ATTESTATION TRUST</text>
+  <text x="415" y="500" text-anchor="middle" fill="${tHex}" font-size="18" font-weight="700" font-family="monospace" letter-spacing="1">ATTESTATION TRUST</text>
   <text x="415" y="528" text-anchor="middle" fill="#94A3B8" font-size="18">signed · verifiable now</text>
 
   <!-- Adoption (progress bar — reads distinct from the trust gauge) -->

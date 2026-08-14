@@ -93,6 +93,35 @@ export function gradeInfo(grade: LetterGrade): GradeInfo {
   return { grade, ...GRADE_MAP[grade] }
 }
 
+// ─── 0–100 Trust mark (dual-mark pivot 2026-08) ─────────────────────────────
+// The product now displays a 0–100 number + tier word, not an A–F letter.
+// Trust owns the semantic green→red scale; thresholds 80/60/40/20 per the locked
+// mark spec. The A–F helpers above are retained for legacy logic (e.g. verdict
+// keying, SEO strings) during the flip — display surfaces use getTrustTier().
+
+export type TrustTierName = 'Trusted' | 'Standard' | 'Caution' | 'Restricted' | 'Blocked'
+
+export interface TrustTier {
+  name: TrustTierName
+  min: number
+  color: string       // vivid — for bars/rings/needles on dark
+  colorText: string   // darkened — for the number/word on light surfaces
+  posture: string     // recommended execution posture
+}
+
+const TRUST_TIERS: TrustTier[] = [
+  { name: 'Trusted',    min: 80, color: '#22C55E', colorText: '#15803D', posture: 'Auto-approve within budget' },
+  { name: 'Standard',   min: 60, color: '#5BBF3A', colorText: '#3F7D1F', posture: 'Standard rate + token limits' },
+  { name: 'Caution',    min: 40, color: '#F59E0B', colorText: '#B45309', posture: 'Confirm on sensitive calls' },
+  { name: 'Restricted', min: 20, color: '#F97316', colorText: '#C2410C', posture: 'Gated · manual approval' },
+  { name: 'Blocked',    min: 0,  color: '#EF4444', colorText: '#B91C1C', posture: 'Do not connect' },
+]
+
+/** Map a 0–100 score to its Trust tier (word, colour, posture). */
+export function getTrustTier(score: number): TrustTier {
+  return TRUST_TIERS.find((t) => score >= t.min) ?? TRUST_TIERS[TRUST_TIERS.length - 1]
+}
+
 // ─── Dimension Scores ───
 
 export interface DimensionScores {

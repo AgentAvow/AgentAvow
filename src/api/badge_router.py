@@ -64,27 +64,41 @@ _BRAND_TEAL_BRIGHT = "#2DD4BF"
 
 
 def _trust_tier_color(score: float) -> str:
-    """Return a hex color based on unified A-F grade system.
+    """Return a hex color for the 0-100 Trust mark (dual-mark system).
 
-    Matches the frontend gradeSystem.ts and TrustProfile component.
-    Score is 0.0-1.0, mapped to the same thresholds as 0-100.
+    Trust owns the semantic green->red scale; thresholds 80/60/40/20 match the
+    locked mark spec (Trusted / Standard / Caution / Restricted / Blocked).
+    Score is 0.0-1.0. See gradeSystem.ts getTrustTier() for the frontend twin.
     """
     s = score * 100
-    if s >= 96:
-        return "#14B8A6"  # A+ — teal-500 (Exceptional)
-    if s >= 81:
-        return _BRAND_TEAL_BRIGHT  # A — teal-400 (Trusted)
-    if s >= 61:
-        return "#22C55E"  # B — green-500 (Good)
-    if s >= 41:
-        return "#F59E0B"  # C — amber-500 (Fair)
-    if s >= 21:
-        return "#F97316"  # D — orange-500 (Caution)
-    return "#EF4444"  # F — red-500 (Fail)
+    if s >= 80:
+        return "#22C55E"  # Trusted   — green-500
+    if s >= 60:
+        return "#5BBF3A"  # Standard  — lighter green
+    if s >= 40:
+        return "#F59E0B"  # Caution   — amber-500
+    if s >= 20:
+        return "#F97316"  # Restricted— orange-500
+    return "#EF4444"  # Blocked   — red-500
+
+
+def _trust_tier_word(score: float) -> str:
+    """Return the 0-100 tier word for the Trust mark."""
+    s = score * 100
+    if s >= 80:
+        return "Trusted"
+    if s >= 60:
+        return "Standard"
+    if s >= 40:
+        return "Caution"
+    if s >= 20:
+        return "Restricted"
+    return "Blocked"
 
 
 def _trust_tier_label(score: float) -> str:
-    """Return a letter grade + label matching the unified grade system."""
+    """Legacy A-F letter map. Retained for scoring compat/tests only — the badge
+    display now shows the 0-100 number, not a letter (dual-mark pivot 2026-08)."""
     s = score * 100
     if s >= 96:
         return "A+"
@@ -109,7 +123,7 @@ def _status_text(has_operator: bool, is_provisional: bool) -> str:
 
 
 def _grade_label(score: float) -> str:
-    """Return the letter grade for badge display."""
+    """Legacy alias — retained so older call sites resolve. Not shown on the badge."""
     return _trust_tier_label(score)
 
 
@@ -181,13 +195,12 @@ def _render_compact_svg(
 ) -> str:
     tc = _theme_colors(theme)
     color = _trust_tier_color(score)
-    grade = _grade_label(score)
     score_pct = round(score * 100)
-    value_label = f"{grade} {score_pct}"
+    value_label = f"{score_pct}/100"
 
     # Icon (shield) occupies 14px (10 icon + 4 pad)
     icon_width = 14
-    label_text = "AgentGraph"
+    label_text = "AgentAvow Trust"
     label_text_w = _text_width(label_text)
     label_width = math.ceil(icon_width + label_text_w + 10)
 
@@ -224,8 +237,8 @@ def _render_compact_svg(
             f'width="{scan_width}" height="{height}" fill="{scan_color}"/>'
         )
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="{height}" role="img" aria-label="AgentGraph Trust: {score_pct}/100">
-  <title>AgentGraph Trust: {score_pct}/100 ({grade}){' scan: ' + (scan_status or '') if scan_status else ''}</title>
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="{height}" role="img" aria-label="AgentAvow Trust: {score_pct}/100">
+  <title>AgentAvow Trust: {score_pct}/100 ({_trust_tier_word(score)}){' scan: ' + (scan_status or '') if scan_status else ''}</title>
   <linearGradient id="s" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -271,9 +284,9 @@ def _render_detailed_svg(
     if len(entity_name) > 20:
         entity_name = entity_name[:19] + "\u2026"
 
-    # Left: shield icon + "AgentGraph"
+    # Left: shield icon + "AgentAvow"
     icon_width = 14
-    left_label = "AgentGraph"
+    left_label = "AgentAvow"
     left_text_w = _text_width(left_label)
     left_width = math.ceil(icon_width + left_text_w + 10)
     left_text_x = icon_width + 3 + left_text_w / 2
@@ -324,8 +337,8 @@ def _render_detailed_svg(
     <text x="{scan_text_x}" y="14">{scan_label}</text>
   </g>"""
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="{height}" role="img" aria-label="AgentGraph: {entity_name} {score_pct}/100">
-  <title>AgentGraph: {entity_name} — {score_pct}/100{' scan: ' + (scan_status or '') if scan_status else ''}</title>
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="{height}" role="img" aria-label="AgentAvow: {entity_name} {score_pct}/100">
+  <title>AgentAvow: {entity_name} — {score_pct}/100{' scan: ' + (scan_status or '') if scan_status else ''}</title>
   <linearGradient id="s" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -413,7 +426,7 @@ def _render_minimal_svg(
   </g>"""
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="{height}" role="img" aria-label="Trust: {score_pct}/100">
-  <title>AgentGraph Trust: {score_pct}/100{' scan: ' + (scan_status or '') if scan_status else ''}</title>
+  <title>AgentAvow Trust: {score_pct}/100{' scan: ' + (scan_status or '') if scan_status else ''}</title>
   <linearGradient id="s" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -448,12 +461,11 @@ def _render_flat_square_svg(
 ) -> str:
     tc = _theme_colors(theme)
     color = _trust_tier_color(score)
-    grade = _grade_label(score)
     score_pct = round(score * 100)
-    value_label = f"{grade} {score_pct}"
+    value_label = f"{score_pct}/100"
 
     icon_width = 14
-    label_text = "AgentGraph"
+    label_text = "AgentAvow Trust"
     label_text_w = _text_width(label_text)
     label_width = math.ceil(icon_width + label_text_w + 10)
 
@@ -489,8 +501,8 @@ def _render_flat_square_svg(
   </g>"""
 
     # Flat-square: no gradient, no rounded corners, no shadow
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="{height}" role="img" aria-label="AgentGraph Trust: {score_pct}/100">
-  <title>AgentGraph Trust: {score_pct}/100 ({grade}){' scan: ' + (scan_status or '') if scan_status else ''}</title>
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="{height}" role="img" aria-label="AgentAvow Trust: {score_pct}/100">
+  <title>AgentAvow Trust: {score_pct}/100 ({_trust_tier_word(score)}){' scan: ' + (scan_status or '') if scan_status else ''}</title>
   <g>
     <rect width="{label_width}" height="{height}" fill="{tc['label_bg']}"/>
     <rect x="{label_width}" width="{value_width}" height="{height}" fill="{color}"/>
@@ -604,11 +616,11 @@ async def get_readme_badge(
     badge_url += "?" + "&".join(params)
 
     profile_url = f"https://agentgraph.co/profile/{entity_id}"
-    alt = "AgentGraph Trust Score"
+    alt = "AgentAvow Trust Score"
 
     blurb = (
-        '<sub>Verified on <a href="https://agentgraph.co">'
-        "AgentGraph</a>"
+        '<sub>Verified on <a href="https://agentavow.com">'
+        "AgentAvow</a>"
         " \u2014 trust infrastructure for AI agents."
         f' <a href="{profile_url}">View profile</a></sub>'
     )
