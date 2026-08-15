@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, TrustMini, AdoptionMini } from '../components/TrustMark'
+import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 
@@ -269,6 +269,19 @@ export default function RebrandHome() {
           ) : (
             <div className="glass rounded-2xl max-w-[620px] mx-auto mt-8 h-[260px] animate-pulse" />
           )}
+
+          {/* CELEBRATE THE TOP TIER — Certified, the earned & gated pinnacle */}
+          <div className="mt-4 max-w-[620px] mx-auto rounded-2xl overflow-hidden relative border border-accent/25" style={{ background: 'linear-gradient(135deg, rgba(45,212,191,0.08), rgba(232,121,249,0.06) 60%), var(--color-surface)' }}>
+            <div className="absolute -right-16 -top-24 w-56 h-56 rounded-full blur-3xl pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(232,121,249,0.16), transparent 70%)' }} />
+            <div className="relative p-7 flex items-center gap-8 flex-wrap justify-center sm:justify-start">
+              <CertifiedMark />
+              <div className="min-w-0 flex-1 text-center sm:text-left">
+                <div className="font-mono text-[11px] uppercase tracking-[0.16em] gradient-text font-semibold">The top tier</div>
+                <h3 className="mt-1.5 text-xl font-bold">Certified — the earned pinnacle.</h3>
+                <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[44ch] mx-auto sm:mx-0">Score 96+ <em>and</em> verified provenance, no manifest drift, full category coverage — revocable the moment any of it slips. Not a sticker you buy; a bar you clear.</p>
+              </div>
+            </div>
+          </div>
         </Reveal>
       </section>
 

@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
-import { badgeUrl } from '../../lib/scanApi'
 import { useRotatingPlaceholder } from '../lib/hooks'
 
 const REPO_HINTS = ['owner/repo', 'your-org/mcp-server', 'your-agent-toolkit', 'your-python-package']
@@ -24,13 +23,21 @@ const DEV_RESOURCES: [string, string, string][] = [
 export default function RebrandBadge() {
   const [repo, setRepo] = useState('')
   const [copied, setCopied] = useState(false)
+  const [variant, setVariant] = useState<'trust' | 'adoption'>('trust')
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const navigate = useNavigate()
   const slug = repo.trim() || 'you/your-repo'
   const [owner, name] = slug.includes('/') ? slug.split('/') : ['', '']
   // Dynamic origin so the copied badge resolves NOW (agentgraph.co) and after
   // cutover (agentavow.com) — never a dead hardcoded agentavow.com link pre-DNS.
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  const markdown = `[![AgentAvow Trust](${origin}/api/v1/public/scan/${slug}/badge)](${origin}/check/${slug})`
+  const _p = new URLSearchParams()
+  if (variant === 'adoption') _p.set('metric', 'adoption')
+  if (theme === 'light') _p.set('theme', 'light')
+  const _qs = _p.toString() ? `?${_p.toString()}` : ''
+  const badgeSrc = `${origin}/api/v1/public/scan/${slug}/badge${_qs}`
+  const badgeAlt = variant === 'trust' ? 'AgentAvow Trust' : 'AgentAvow Adoption'
+  const markdown = `[![${badgeAlt}](${badgeSrc})](${origin}/check/${slug})`
 
   const copy = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(markdown)
@@ -49,12 +56,12 @@ export default function RebrandBadge() {
           Ship a <span className="gradient-text-bio">signed</span> trust badge.
         </h1>
         <p className="mt-3 text-text-muted">
-          Check your repo, copy one line of Markdown, and every README reader sees a live, verifiable safety
-          grade. Clicking it re-checks your tool — the whole loop is public and needs no account.
+          Check your repo, choose a badge, copy one line of Markdown, and every README reader sees a live,
+          verifiable safety score. Clicking it re-checks your tool — the whole loop is public and needs no account.
         </p>
       </div>
 
-      {/* repo input → badge preview */}
+      {/* repo input → badge chooser → live preview */}
       <div className="glass rounded-2xl p-6 mt-8 max-w-[720px]">
         <div className="flex gap-2.5 rounded-xl border border-border bg-surface p-2 pl-4">
           <span className="self-center font-mono text-[14px] text-text-muted shrink-0">github.com/</span>
@@ -72,20 +79,42 @@ export default function RebrandBadge() {
           </button>
         </div>
 
-        <div className="mt-5 flex items-center gap-3 flex-wrap">
+        {/* choose: badge + theme */}
+        <div className="mt-5 flex items-center gap-5 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Badge</span>
+            <div className="inline-flex rounded-lg border border-border overflow-hidden">
+              {(['trust', 'adoption'] as const).map((v) => (
+                <button key={v} onClick={() => setVariant(v)} className={`px-3 py-1 font-mono text-[12px] capitalize transition-colors ${variant === v ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{v}</button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Theme</span>
+            <div className="inline-flex rounded-lg border border-border overflow-hidden">
+              {(['dark', 'light'] as const).map((th) => (
+                <button key={th} onClick={() => setTheme(th)} className={`px-3 py-1 font-mono text-[12px] capitalize transition-colors ${theme === th ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{th}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3 flex-wrap">
           <span className="font-mono text-[11.5px] text-text-muted">{owner && name ? 'Live badge:' : 'Preview:'}</span>
-          {owner && name ? (
-            <img src={badgeUrl(owner, name)} alt={`${slug} trust badge`} className="h-[26px] rounded shadow-md" />
-          ) : (
-            <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-              <span className="bg-surface-hover text-text px-2.5 py-1.5">🛡 AgentAvow</span>
-              <span className="px-2.5 py-1.5 font-bold text-white bg-gradient-to-r from-primary to-primary-dark">Trust: A 94</span>
-            </span>
-          )}
+          <span className={`inline-flex p-3 rounded-lg ${theme === 'light' ? 'bg-white' : 'bg-surface-hover'}`}>
+            {owner && name ? (
+              <img src={badgeSrc} alt={`${slug} ${badgeAlt}`} className="h-[24px] rounded shadow-md" />
+            ) : (
+              <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
+                <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow {variant === 'trust' ? 'Trust' : 'Adoption'}</span>
+                <span className="px-2.5 py-1.5 font-bold text-[#04140f]" style={{ background: variant === 'trust' ? '#22C55E' : '#233047' }}>{variant === 'trust' ? '94/100' : '★ 12.4k'}</span>
+              </span>
+            )}
+          </span>
         </div>
 
         <div className="relative mt-4">
-          <pre className="font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text overflow-x-auto whitespace-pre-wrap break-all">{markdown}</pre>
+          <pre className="font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto whitespace-pre-wrap break-all">{markdown}</pre>
           <button onClick={copy} className="absolute top-2 right-2 font-mono text-[11px] px-2 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">
             {copied ? 'copied ✓' : 'copy'}
           </button>

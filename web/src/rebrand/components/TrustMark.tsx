@@ -102,6 +102,25 @@ export function AdoptionNeedle({ count, unit }: { count?: number | null; unit?: 
   )
 }
 
+/** Certified — the earned, gated top tier: a full green→magenta gradient bar + a
+ * solid gradient pill (branded ring-check + number) with CERTIFIED beneath. */
+export function CertifiedMark({ score = 98 }: { score?: number }) {
+  return (
+    <div className="flex flex-col items-center">
+      <div className="flex flex-col-reverse gap-[3px]">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <div key={i} className="w-[16px] h-[7px] rounded-[1px]" style={{ background: 'linear-gradient(90deg,#2dd4bf,#e879f9)' }} />
+        ))}
+      </div>
+      <div className="mt-3 inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 shadow-lg" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', boxShadow: '0 6px 20px -6px rgba(45,212,191,0.5)' }}>
+        <svg width="17" height="17" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="16.5" stroke="#06231f" strokeWidth="3.2" /><path d="M12 21l6 6 12-13" stroke="#06231f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        <span className="text-[22px] font-extrabold leading-none" style={{ color: '#06231f' }}>{score}</span>
+      </div>
+      <div className="mt-1.5 font-mono text-[10px] font-extrabold tracking-[0.18em]" style={GRAD_TEXT}>CERTIFIED</div>
+    </div>
+  )
+}
+
 // ── LIST SCALE ────────────────────────────────────────────────────────────────
 
 /** Trust — mini horizontal bar + number, for list rows. */

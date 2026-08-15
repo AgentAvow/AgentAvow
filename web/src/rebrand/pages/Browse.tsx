@@ -132,7 +132,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
           <span className="font-mono text-[13.5px] truncate min-w-0" title={display}>{display}</span>
         </span>
         {row.trust_score != null ? (
-          <div className="flex items-center gap-3.5 shrink-0">
+          <div className="flex flex-col items-end gap-1.5 shrink-0">
             <TrustMini score={row.trust_score} />
             {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} />}
           </div>

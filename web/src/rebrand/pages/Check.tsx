@@ -1306,10 +1306,10 @@ function Result({ owner, repo, privateResult }: {
       <motion.div className="rounded-2xl overflow-hidden relative border border-border/60"
         style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}
         initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: 'easeOut' }}>
-        <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: `inset 0 0 60px -22px ${t.color}55` }} />
+        <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: `inset 0 0 70px -30px ${t.color}2e` }} />
 
         {/* header: verdict + plain-English headline */}
-        <div className="relative px-7 pt-7">
+        <div className="relative px-7 pt-6">
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
             {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">{storedPrivate ? '🔒 Private · via GitHub App' : '🔒 Private scan · not public'}</span>}
@@ -1326,13 +1326,13 @@ function Result({ owner, repo, privateResult }: {
         <div className="relative px-7 py-6">
           <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
             <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
-            <div className="relative grid grid-cols-2">
+            <div className="relative grid grid-cols-1 sm:grid-cols-2">
               <div className="p-6 pb-5 text-center flex flex-col items-center">
                 <div className="min-h-[132px] flex items-center justify-center"><TrustBar score={scan.trust_score} /></div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
               </div>
-              <div className="p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
+              <div className="p-6 pb-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
                 <div className="min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} /></div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption ? adoption.sub : 'no adoption signal yet'}</div>
@@ -1342,9 +1342,9 @@ function Result({ owner, repo, privateResult }: {
         </div>
 
         {/* PRIMARY action — watch */}
-        <div className="relative px-7">
+        <div className={`relative px-7 ${storedPrivate ? '' : 'pb-7'}`}>
           <WatchCTA owner={owner} repo={repo} />
-          <p className="mt-2 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this score drops.</p>
+          <p className="mt-2.5 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this score drops.</p>
         </div>
 
         {/* a stored private repo publishes to search here (then animates into share) */}
