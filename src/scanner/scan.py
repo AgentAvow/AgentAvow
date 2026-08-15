@@ -1621,6 +1621,11 @@ def _dedupe_findings(findings: list) -> list:
 # exec (pandas ≈17 highs) lands mid-grade, not F, while a handful of highs is unaffected.
 _CODE_HM_DEDUCTION_CAP = 42
 
+# Per-critical deduction (uncapped, never file-ratio-scaled). At 22, one critical drops a
+# findings-baseline repo (68) into Caution (≤46 before highs), so a critical can never sit
+# in the Trusted band — the property the old ×15 + MCP exemption violated.
+_CRIT_DEDUCTION = 22
+
 
 def _calculate_trust_score(result: ScanResult) -> int:
     """Calculate a trust score (0-100) based on findings and signals.
@@ -1641,42 +1646,39 @@ def _calculate_trust_score(result: ScanResult) -> int:
     code_high = sum(_finding_grade_weight(f) for f in code_findings if f.severity == "high")
     code_medium = sum(_finding_grade_weight(f) for f in code_findings if f.severity == "medium")
 
-    # Clean repos start higher — no findings means the code passed review. The <0.5
-    # threshold keeps a repo whose only issues are a few test-file findings at 80.
+    # Clean code starts high but NOT at a guaranteed 100 — hygiene bonuses below are
+    # deliberately small so documentation can't float an unsafe tool to the top. A repo
+    # with any real code findings starts lower and has to earn its way back.
     total_findings = code_critical + code_high + code_medium
-    score = 80 if total_findings < 0.5 else 70
+    score = 84 if total_findings < 0.5 else 68
 
-    # For MCP servers and media/audio tools, discount expected patterns
-    # These are intentional capabilities, not vulnerabilities
+    # For MCP servers and media/audio tools, high/medium findings in their EXPECTED
+    # capability categories (fs access, subprocess exec) are discounted — those are the
+    # tool's job. But a CRITICAL is a critical: it always deducts in full, MCP or not.
+    # (Previously criticals in expected categories deducted 0, which let MCP servers with
+    # critical findings score 100 — the calibration bug this replaces.)
     if result.is_mcp_server or result.is_media_tool:
         expected_categories = (
             {"fs_access", "unsafe_exec"} if result.is_mcp_server else {"fs_access"}
         )
-        actual_critical = sum(
-            1 for f in code_findings
-            if f.severity == "critical" and f.category not in expected_categories
+        exp_high = sum(
+            _finding_grade_weight(f) for f in code_findings
+            if f.severity == "high" and f.category in expected_categories
         )
-        actual_high = sum(
-            1 for f in code_findings
-            if f.severity == "high" and f.category not in expected_categories
+        exp_medium = sum(
+            _finding_grade_weight(f) for f in code_findings
+            if f.severity == "medium" and f.category in expected_categories
         )
-        actual_medium = sum(
-            1 for f in code_findings
-            if f.severity == "medium" and f.category not in expected_categories
-        )
-        # Count expected patterns at 10% weight (not zero — they still matter)
-        expected_medium = code_medium - actual_medium
-        expected_high = code_high - actual_high
-        crit_ded = actual_critical * 15
+        oth_high = code_high - exp_high
+        oth_medium = code_medium - exp_medium
+        crit_ded = code_critical * _CRIT_DEDUCTION  # ALL criticals, full weight
         hm_ded = (
-            actual_high * 8
-            + actual_medium * 3
-            + int(expected_high * 0.8)  # 10% of normal penalty
-            + int(expected_medium * 0.3)
+            oth_high * 8 + oth_medium * 3
+            + exp_high * 4 + exp_medium * 1.5  # expected fs/exec at ~50%
         )
     else:
         # Standard deductions for non-MCP repos (code findings only)
-        crit_ded = code_critical * 15
+        crit_ded = code_critical * _CRIT_DEDUCTION
         hm_ded = code_high * 8 + code_medium * 3
 
     # Saturating cap on the HIGH+MEDIUM code deduction (criticals stay UNCAPPED, so a
@@ -1685,20 +1687,21 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # engine calls `eval`, its clipboard I/O calls `subprocess`) dozens of times; the
     # 30th instance is not 30× the risk of the first, and pure VOLUME of high findings
     # must not floor a whole library to 0. The cap only bites past ~5 highs, so small
-    # repos are unaffected. File-ratio scaling still applies on top.
-    raw_deduction = crit_ded + min(int(hm_ded), _CODE_HM_DEDUCTION_CAP)
+    # repos are unaffected.
+    capped_hm = min(int(hm_ded), _CODE_HM_DEDUCTION_CAP)
 
-    # File-ratio scaling: if only a small percentage of files have issues,
-    # reduce the deduction. A repo with 200 files and 5 findings in 3 files
-    # should not be penalized as harshly as one with findings in 50% of files.
+    # File-ratio scaling: if only a small percentage of files have issues, soften the
+    # HIGH/MEDIUM deduction (a repo with 200 files and 5 findings in 3 files shouldn't be
+    # hit as hard as one with issues in half its files). Criticals are NOT scaled — a
+    # single critical must always bite, however large the repo.
     if result.files_scanned > 0 and total_findings > 0:
         affected_files = len({f.file_path for f in code_findings})
         ratio = affected_files / result.files_scanned
         # Scale factor: 0.4 at 1% affected, 1.0 at 25%+ affected
         scale = min(1.0, 0.4 + ratio * 2.4)
-        raw_deduction = int(raw_deduction * scale)
+        capped_hm = int(capped_hm * scale)
 
-    score -= raw_deduction
+    score -= crit_ded + capped_hm
 
     # Dependency/supply-chain vulns — separate bounded penalty (see helper).
     score -= _dependency_penalty(result.findings)
@@ -1719,17 +1722,19 @@ def _calculate_trust_score(result: ScanResult) -> int:
     if isinstance(result.maintainer, dict):
         score += int(result.maintainer.get("score_delta", 0) or 0)
 
-    # Bonuses for positive signals (capped at +35)
+    # Bonuses for positive signals — small (capped +9). These are tie-breakers between
+    # already-safe tools, NOT enough to lift a findings-laden repo to the top.
     unique_positives = set(result.positive_signals)
-    score += min(len(unique_positives) * 5, 35)
+    score += min(len(unique_positives) * 3, 9)
 
-    # Bonuses for good practices
+    # Bonuses for good practices — hygiene is table stakes, worth a couple of points
+    # each, not the 15 that used to floor every documented repo at ~95.
     if result.has_readme:
-        score += 5
+        score += 2
     if result.has_license:
-        score += 5
+        score += 2
     if result.has_tests:
-        score += 5
+        score += 2
 
     # Penalty for inline suppression (gaming deterrent)
     # First 3 are free (legitimate false-positive suppression).
@@ -1790,9 +1795,11 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         score_cat = category_map.get(finding.category)
         if score_cat:
             deduction: float = severity_weights.get(finding.severity, 3)
-            # Discount expected MCP patterns to 10% of normal penalty
+            # Discount expected MCP patterns to 50% of normal penalty (fs/exec are the
+            # tool's job) — but never discount a critical, and no longer the old 10% that
+            # made the category axes read near-perfect for risky MCP servers.
             if finding.category in expected_mcp_categories and finding.severity != "critical":
-                deduction = max(1, int(deduction) // 10)
+                deduction = max(1.0, deduction * 0.5)
             # Non-shipped code (tests/fixtures/examples) counts at a fraction, so a
             # monorepo's test noise doesn't tank the category axes either.
             deduction *= _finding_grade_weight(finding)
