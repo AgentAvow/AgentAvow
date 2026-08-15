@@ -17,7 +17,7 @@ import { useAuth } from '../../hooks/useAuth'
 import SEOHead from '../../components/SEOHead'
 import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
-import { useRotatingPlaceholder } from '../lib/hooks'
+import { useRotatingPlaceholder , useIsDesktop } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
 
 /**
@@ -130,19 +130,20 @@ function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified
   })
   const h = data?.headline
   const has = !!(h && h.count && h.count > 0)
+  const big = useIsDesktop() ? 1.5 : 1  // scale the marks up on desktop; spec size on mobile
   return (
     <div className="relative px-4 sm:px-7 py-6">
       <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
         <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
         <div className="relative grid grid-cols-2">
           <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-            <div className="min-h-[132px] flex items-center justify-center">{certified ? <CertifiedMark score={trustScore} /> : <TrustBar score={trustScore} />}</div>
+            <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{certified ? <CertifiedMark score={trustScore} scale={big} /> : <TrustBar score={trustScore} scale={big} />}</div>
             <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: certified ? undefined : t.color }}>{trustLabel}</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
           </div>
           <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
-            <div className="min-h-[132px] flex items-center justify-center">
-              <AdoptionNeedle count={has ? h!.count : 0} unit={has ? h!.unit : undefined} scorePct={data?.adoption_score_100} />
+            <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">
+              <AdoptionNeedle count={has ? h!.count : 0} unit={has ? h!.unit : undefined} scorePct={data?.adoption_score_100} scale={big} />
             </div>
             <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">{has ? 'independent reliance' : 'no adoption signal yet'}</div>
@@ -878,6 +879,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
                 <div className="min-w-0">
                   <div className="text-[14px]">{it.name}</div>
                   <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}</div>
+                  {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
                 </div>
               </div>
             ))}
@@ -1072,6 +1074,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
                 <div className="min-w-0">
                   <div className="text-[14px]">{it.name}</div>
                   <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}</div>
+                  {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
                 </div>
               </div>
             ))}
@@ -1173,6 +1176,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
                 <div className="min-w-0">
                   <div className="text-[14px]">{it.name}</div>
                   <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}</div>
+                  {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
                 </div>
               </div>
             ))}
@@ -1310,6 +1314,7 @@ function Result({ owner, repo, privateResult }: {
   const adChecks = adoptionData?.checks ?? 0
   const adCount = adStars || adChecks
   const adUnit = adStars ? 'stars' : 'checks'
+  const heroBig = useIsDesktop() ? 1.5 : 1  // scale marks up on desktop; spec size on mobile
 
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
@@ -1346,12 +1351,12 @@ function Result({ owner, repo, privateResult }: {
             <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
             <div className="relative grid grid-cols-2">
               <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-                <div className="min-h-[132px] flex items-center justify-center">{(scan as { certified?: { eligible?: boolean } }).certified?.eligible ? <CertifiedMark score={scan.trust_score} /> : <TrustBar score={scan.trust_score} />}</div>
+                <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{(scan as { certified?: { eligible?: boolean } }).certified?.eligible ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
               </div>
               <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
-                <div className="min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} /></div>
+                <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} scale={heroBig} /></div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption ? adoption.sub : 'no adoption signal yet'}</div>
               </div>
@@ -1504,6 +1509,7 @@ function Result({ owner, repo, privateResult }: {
                 <div className="min-w-0">
                   <div className="text-[14px]">{it.name}</div>
                   <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}</div>
+                  {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
                 </div>
               </div>
             ))}

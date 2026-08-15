@@ -29,7 +29,7 @@ const MORE: [string, string][] = [
   ['How it works', '/rebrand/how-it-works'],
   ['Standards & research', '/rebrand/research'],
   ['SDK & CLI', 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk'],
-  ['GitHub Action', 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk/github-action'],
+  ['GitHub Action', 'https://github.com/AgentAvow/trust-scan-action'],
   ['API reference', '/api/v1/redoc'],
 ]
 

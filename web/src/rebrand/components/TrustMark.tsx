@@ -110,19 +110,19 @@ export function AdoptionNeedle({ count, unit, scorePct, tier, scale = 1 }: { cou
 
 /** Certified — the earned, gated top tier: a full green→magenta gradient bar + a
  * solid gradient pill (branded ring-check + number) with CERTIFIED beneath. */
-export function CertifiedMark({ score = 98 }: { score?: number }) {
+export function CertifiedMark({ score = 98, scale = 1 }: { score?: number; scale?: number }) {
   return (
     <div className="flex flex-col items-center">
-      <div className="flex flex-col-reverse gap-[3px]">
+      <div className="flex flex-col-reverse" style={{ gap: 2.5 * scale }}>
         {Array.from({ length: 10 }).map((_, i) => (
-          <div key={i} className="w-[16px] h-[7px] rounded-[1px]" style={{ background: 'linear-gradient(90deg,#2dd4bf,#e879f9)' }} />
+          <div key={i} style={{ width: 12 * scale, height: 5 * scale, borderRadius: 1, background: 'linear-gradient(90deg,#2dd4bf,#e879f9)' }} />
         ))}
       </div>
-      <div className="mt-3 inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 shadow-lg" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', boxShadow: '0 6px 20px -6px rgba(45,212,191,0.5)' }}>
-        <svg width="17" height="17" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="16.5" stroke="#06231f" strokeWidth="3.2" /><path d="M12 21l6 6 12-13" stroke="#06231f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        <span className="text-[22px] font-extrabold leading-none" style={{ color: '#06231f' }}>{score}</span>
+      <div className="inline-flex items-center rounded-full shadow-lg" style={{ marginTop: 12 * scale, gap: 6 * scale, paddingLeft: 16 * scale, paddingRight: 16 * scale, paddingTop: 6 * scale, paddingBottom: 6 * scale, background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', boxShadow: '0 6px 20px -6px rgba(45,212,191,0.5)' }}>
+        <svg width={17 * scale} height={17 * scale} viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="16.5" stroke="#06231f" strokeWidth="3.2" /><path d="M12 21l6 6 12-13" stroke="#06231f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        <span className="font-extrabold leading-none" style={{ fontSize: 22 * scale, color: '#06231f' }}>{score}</span>
       </div>
-      <div className="mt-1.5 font-mono text-[10px] font-extrabold tracking-[0.18em]" style={GRAD_TEXT}>CERTIFIED</div>
+      <div className="font-mono font-extrabold tracking-[0.18em]" style={{ ...GRAD_TEXT, fontSize: 10 * scale, marginTop: 6 * scale }}>CERTIFIED</div>
     </div>
   )
 }

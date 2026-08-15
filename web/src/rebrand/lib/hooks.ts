@@ -16,3 +16,19 @@ export function useRotatingPlaceholder(items: string[], intervalMs = 2400): stri
   }, [items.length, intervalMs, reduce])
   return items[i]
 }
+
+/** True on desktop-width viewports (>= md). Client-only; false during first paint on
+ * narrow screens. Used to scale the score-page marks up on desktop while mobile stays
+ * at spec size. */
+export function useIsDesktop(minWidth = 768): boolean {
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(`(min-width:${minWidth}px)`).matches : false)
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width:${minWidth}px)`)
+    const on = () => setIsDesktop(mq.matches)
+    on()
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [minWidth])
+  return isDesktop
+}

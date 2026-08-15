@@ -25,8 +25,28 @@ function useBoard(params: Parameters<typeof fetchCatalog>[0], key: string) {
   })
 }
 
-function Row({ row, rank }: { row: CatalogRow; rank: number }) {
+const PKG_SURFACES = ['npm', 'pypi', 'crates', 'huggingface', 'docker']
+
+/** Route a catalog row to its correct score page by surface (mirrors Browse). */
+function linkFor(row: CatalogRow): string | null {
+  const fn = row.full_name || ''
+  if (PKG_SURFACES.includes(row.surface)) {
+    // package coordinate; strip any leading "surface:" prefix from the name
+    const nm = (row.name || '').includes(':') ? (row.name || '').split(':').slice(1).join(':') : row.name
+    return nm ? rp(`/rebrand/check/pkg/${row.surface}/${nm}`) : null
+  }
+  if (row.surface === 'openclaw' && fn.includes('/')) return rp(`/rebrand/check/skill/${fn}`)
+  if (row.surface === 'mcp') {
+    const ep = row.endpoint_url
+    if (ep && /^https?:/.test(ep)) return rp(`/rebrand/check/mcp?endpoint=${encodeURIComponent(ep)}`)
+  }
+  if (fn.includes('/')) return rp(`/rebrand/check/${fn}`)
+  return null
+}
+
+function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; certified?: boolean }) {
   const id = rowIdentity(row)
+  const href = linkFor(row)
   const inner = (
     <div className="flex items-center gap-3 py-2.5 px-3 rounded-xl hover:bg-surface-hover/60 transition-colors">
       <span className="w-6 text-right font-mono text-[12px] text-text-muted tabular-nums shrink-0">{rank}</span>
@@ -35,15 +55,17 @@ function Row({ row, rank }: { row: CatalogRow; rank: number }) {
         <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted/70">{SURFACE_LABEL[row.surface] || row.surface}</div>
       </div>
       {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} />}
-      {row.trust_score != null && <TrustMini score={row.trust_score} />}
+      {certified
+        ? <span className="inline-flex items-center gap-1 font-mono text-[10.5px] font-extrabold tracking-[0.12em] px-2 py-1 rounded-full shrink-0" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ {row.trust_score}</span>
+        : row.trust_score != null && <TrustMini score={row.trust_score} />}
     </div>
   )
-  return id.repoPath
-    ? <Link to={rp(`/rebrand/check/${id.repoPath}`)} className="block">{inner}</Link>
+  return href
+    ? <Link to={href} className="block">{inner}</Link>
     : <div>{inner}</div>
 }
 
-function Board({ title, note, rows, isLoading }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean }) {
+function Board({ title, note, rows, isLoading, certified = false }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean }) {
   return (
     <div className="glass rounded-2xl p-5">
       <div className="flex items-baseline justify-between gap-3">
@@ -53,7 +75,7 @@ function Board({ title, note, rows, isLoading }: { title: string; note: string; 
       <div className="mt-3 flex flex-col divide-y divide-border/40">
         {isLoading && <div className="py-8 text-center text-text-muted text-[13px]">loading…</div>}
         {!isLoading && (!rows || !rows.length) && <div className="py-8 text-center text-text-muted text-[13px]">no tools yet</div>}
-        {rows?.map((r, i) => <Row key={rowIdentity(r).display + i} row={r} rank={i + 1} />)}
+        {rows?.map((r, i) => <Row key={rowIdentity(r).display + i} row={r} rank={i + 1} certified={certified} />)}
       </div>
     </div>
   )
@@ -136,21 +158,18 @@ export default function RebrandTrustIndex() {
 
       {certified.data?.rows && certified.data.rows.length > 0 && (
         <div className="mt-4">
-          <Board title="AgentAvow Certified" note="the top tier · gated" rows={certified.data.rows} isLoading={certified.isLoading} />
+          <Board title="AgentAvow Certified" note="the top tier · gated" rows={certified.data.rows} isLoading={certified.isLoading} certified />
         </div>
       )}
 
-      {/* CTA */}
+      {/* CTA — frameless, sits on the page */}
       <Reveal>
-        <div className="mt-14 glass rounded-2xl p-8 text-center relative overflow-hidden">
-          <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(500px 180px at 50% -30%, rgba(45,212,191,0.14), transparent 70%)' }} />
-          <div className="relative">
-            <h2 className="text-2xl font-extrabold">Check the tool you're about to connect.</h2>
-            <p className="mt-2 text-text-muted text-[14.5px] max-w-[52ch] mx-auto">Paste any repo, package, or MCP server — get a signed, offline-verifiable grade in seconds. Free, no account.</p>
-            <div className="mt-5 flex gap-3 justify-center flex-wrap">
-              <Link to={rp('/rebrand/check')} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Check a tool →</Link>
-              <Link to={rp('/rebrand/browse')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Browse the full catalog</Link>
-            </div>
+        <div className="mt-16 text-center">
+          <h2 className="text-2xl font-extrabold">Check the tool you're about to connect.</h2>
+          <p className="mt-2 text-text-muted text-[14.5px] max-w-[52ch] mx-auto">Paste any repo, package, or MCP server — get a signed, offline-verifiable grade in seconds. Free, no account.</p>
+          <div className="mt-5 flex gap-3 justify-center flex-wrap">
+            <Link to={rp('/rebrand/check')} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Check a tool →</Link>
+            <Link to={rp('/rebrand/browse')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Browse the full catalog</Link>
           </div>
         </div>
       </Reveal>
