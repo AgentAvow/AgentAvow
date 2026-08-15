@@ -1272,6 +1272,7 @@ function Result({ owner, repo, privateResult }: {
     retry: 0,
     enabled: !!scan && !isPrivate,
   })
+  const heroBig = useIsDesktop() ? 1.5 : 1  // scale marks up on desktop; MUST be before any early return (hooks order)
 
   if (!oneTimePrivate && isLoading) return <ScanningLoader owner={owner} repo={repo} />
   // Public scan came back empty — we may still be checking the owner's private report.
@@ -1314,7 +1315,6 @@ function Result({ owner, repo, privateResult }: {
   const adChecks = adoptionData?.checks ?? 0
   const adCount = adStars || adChecks
   const adUnit = adStars ? 'stars' : 'checks'
-  const heroBig = useIsDesktop() ? 1.5 : 1  // scale marks up on desktop; spec size on mobile
 
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
