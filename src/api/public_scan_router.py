@@ -162,6 +162,8 @@ class PublicScanResponse(BaseModel):
     supply_chain: dict = {}  # OSV/deps.dev summary (signed into the JWS; mirrored here for readers)
     provenance: dict = {}  # verified build-provenance summary (Phase 3), if any
     surface_detail: dict = {}  # per-surface detail (skill allowed_tools, MCP capabilities, …)
+    # the tool's .agentavow.yml declaration ({present, egress, capabilities, note})
+    declared_scope: dict = {}
     package_coordinate: dict = {}  # {surface, name} the repo maps to (for 1-click install)
     tool_description: str = ""  # one-line "what this tool does" from registry/repo metadata
     long_description: str = ""  # optional fuller second line (README-mined), when distinct
@@ -665,6 +667,7 @@ def _scan_result_to_dict(result: object) -> dict:
             "items": finding_items,
         },
         "certified": _certified,
+        "declared_scope": getattr(result, "declared_scope", {}) or {},
         "provenance": getattr(result, "provenance", {}) or {},
         # Per-surface detail (npm/pypi digest; MCP tool_count/capabilities; skill
         # allowed_tools/hooks) so a surface view can show what it actually graded.
@@ -758,6 +761,7 @@ def _package_response(full: str, data: dict, jws: str, cached: bool) -> PublicSc
         supply_chain=data.get("supply_chain", {}),
         provenance=data.get("provenance", {}),
         surface_detail=data.get("surface_detail", {}),
+        declared_scope=data.get("declared_scope", {}),
         positive_signals=data.get("positive_signals", []),
         package_coordinate=data.get("package_coordinate", {}),
         tool_description=data.get("tool_description", ""),

@@ -167,6 +167,9 @@ class ScanResult:
     # (eligible=False) until artifact-scan + provenance are enabled — that's the
     # design (A+ requires the cryptographic signals). Never lowers a grade.
     certified: dict = field(default_factory=dict)
+    # Declared-scope manifest (.agentavow.yml): the tool's own declaration of intended
+    # egress/capabilities. Surfaced on the score page; the behavioral tier verifies it.
+    declared_scope: dict = field(default_factory=dict)
     error: str | None = None
 
     @property
@@ -2841,6 +2844,26 @@ async def scan_repo(
             result.sampled = True
 
         result.primary_language = _detect_language(tree)
+
+        # Declared-scope manifest (.agentavow.yml at the repo root) — the tool's own
+        # declaration of intended egress + capabilities. Fail-open: a bad/absent manifest
+        # is simply no declaration, never an error.
+        _mpath = next(
+            (it["path"] for it in tree
+             if it.get("path", "").lower() in (".agentavow.yml", ".agentavow.yaml")),
+            None,
+        )
+        if _mpath:
+            try:
+                from src.scanner.behavioral.manifest import parse_manifest
+                _scope = parse_manifest(await _fetch_file_content(owner, repo, _mpath, token, ref))
+                if _scope.present:
+                    result.declared_scope = {
+                        "present": True, "egress": _scope.egress,
+                        "capabilities": _scope.capabilities, "note": _scope.note,
+                    }
+            except Exception:
+                pass
 
         # Check for README, LICENSE, tests
         _readme_path: str | None = None

@@ -1,0 +1,20 @@
+# AgentAvow's own declared scope — a live example of the .agentavow.yml manifest.
+# Spec: docs/standards/agentavow-manifest-v0.md
+version: agentavow-manifest-v0
+
+# Hosts this tool legitimately contacts (public source + registry/advisory metadata).
+egress:
+  - api.github.com
+  - .githubusercontent.com
+  - registry.npmjs.org
+  - pypi.org
+  - files.pythonhosted.org
+  - api.ecosyste.ms
+  - api.osv.dev
+
+# Capabilities used.
+capabilities:
+  - network:egress
+  - filesystem:read
+
+note: "Reads public source and registry/advisory metadata to compute signed safety scores. Nothing leaves beyond these registries and public APIs."

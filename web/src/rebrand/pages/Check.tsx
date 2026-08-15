@@ -133,6 +133,44 @@ function Percentile({ score }: { score: number }) {
   )
 }
 
+/** Declared scope — a tool's own `.agentavow.yml`: the hosts it says it contacts + the
+ * capabilities it uses. Transparency now; the behavioral tier verifies observed-vs-declared. */
+function DeclaredScopePanel({ scope }: { scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string } }) {
+  if (!scope?.present) return null
+  const egress = scope.egress || []
+  const caps = scope.capabilities || []
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
+        <div className="flex items-center gap-2">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Declared scope</h3>
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">.agentavow.yml</span>
+        </div>
+        <p className="mt-1.5 text-text-muted text-[13px] max-w-[64ch]">What this tool says it does. The sandbox holds it to its own declaration — any egress it didn't declare is a finding.</p>
+        {scope.note && <p className="mt-2 text-[13.5px] text-text">{scope.note}</p>}
+        <div className="mt-3 grid sm:grid-cols-2 gap-4">
+          <div>
+            <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Declared egress ({egress.length})</div>
+            <div className="flex flex-wrap gap-1.5">
+              {egress.length ? egress.map((h) => (
+                <span key={h} className="font-mono text-[11.5px] px-2 py-1 rounded-md bg-surface border border-border text-text">{h}</span>
+              )) : <span className="text-text-muted text-[12.5px]">none declared</span>}
+            </div>
+          </div>
+          <div>
+            <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Capabilities ({caps.length})</div>
+            <div className="flex flex-wrap gap-1.5">
+              {caps.length ? caps.map((c) => (
+                <span key={c} className="font-mono text-[11.5px] px-2 py-1 rounded-md bg-surface border border-border text-text-muted">{c}</span>
+              )) : <span className="text-text-muted text-[12.5px]">none declared</span>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Reveal>
+  )
+}
+
 function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified = false }: {
   trustScore: number; trustLabel: string; surface: string; owner?: string; repo: string; certified?: boolean
 }) {
@@ -1450,6 +1488,9 @@ function Result({ owner, repo, privateResult }: {
       {(scan.trust_score >= 81 || (scan as { certified?: { eligible?: boolean } }).certified?.eligible) && (
         <CertifiedPanel certified={(scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified} />
       )}
+
+      {/* Declared scope — the tool's own .agentavow.yml, if present */}
+      <DeclaredScopePanel scope={(scan as { declared_scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string } }).declared_scope} />
 
       {/* Adoption — the real 5-axis metric, distinct from safety (public repos only) */}
       {!isPrivate && <AdoptionPanel owner={owner} repo={repo} />}
