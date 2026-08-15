@@ -132,7 +132,7 @@ export default function Submit() {
         <div className="glass mt-8 rounded-2xl p-8 text-center border-l-4 border-success/60">
           <div className="text-success font-mono text-[12px] uppercase tracking-wide">✓ Listed in the catalog</div>
           <h2 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{listed.identifier}</h2>
-          <div className="mt-2 text-[15px] text-text-muted">Grade <span className="font-bold text-text">{listed.grade}</span> · {listed.trust_score}/100 — now in Browse.</div>
+          <div className="mt-2 text-[15px] text-text-muted">Scored <span className="font-bold text-text">{listed.trust_score}/100</span> — now in Browse.</div>
           <div className="mt-6 flex gap-3 justify-center flex-wrap">
             <button onClick={() => navigate(scorePath(listed.surface, listed.identifier))} className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">View your listing →</button>
             <Link to={rp('/rebrand/tools')} className="font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claim it</Link>

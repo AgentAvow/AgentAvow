@@ -17,11 +17,19 @@ _FG = (233, 238, 245)       # near-white text
 _MUTED = (148, 163, 184)    # slate-400
 _TEAL = (34, 211, 238)
 
-# Grade → accent RGB (matches the frontend grade system).
-_GRADE_RGB = {
-    "A+": (16, 185, 129), "A": (34, 197, 94), "B": (34, 211, 238),
-    "C": (245, 158, 11), "D": (249, 115, 22), "F": (239, 68, 68),
-}
+# 0-100 Trust tier → accent RGB + word (green->red at 80/60/40/20, dual-mark).
+def _score_tier(score: int | None) -> tuple[tuple[int, int, int], str]:
+    if score is None:
+        return _MUTED, ""
+    if score >= 80:
+        return (34, 197, 94), "Trusted"      # #22C55E
+    if score >= 60:
+        return (91, 191, 58), "Standard"     # #5BBF3A
+    if score >= 40:
+        return (245, 158, 11), "Caution"     # #F59E0B
+    if score >= 20:
+        return (249, 115, 22), "Restricted"  # #F97316
+    return (239, 68, 68), "Blocked"          # #EF4444
 
 
 def _font(size: int):
@@ -75,30 +83,31 @@ def render_og_png(
     """Compose the OG card PNG bytes. Raises on a hard Pillow failure (caller falls back)."""
     from PIL import Image, ImageDraw
 
-    grade = (grade or "?").upper()
-    accent = _GRADE_RGB.get(grade, _MUTED)
+    _ = grade  # legacy param — the card now shows the 0-100 number, not a letter
+    accent, tier_word = _score_tier(score)
     img = Image.new("RGB", (_W, _H), _BG)
     d = ImageDraw.Draw(img)
 
     # Top accent stripe.
     d.rectangle([0, 0, _W, 10], fill=accent)
 
-    # Grade tile (left) — a rounded square in the grade color with the letter + score.
+    # Trust tile (left) — a rounded square in the tier colour with the 0-100 number.
     tile = (80, 150, 380, 450)
+    cx = (tile[0] + tile[2]) / 2
     d.rounded_rectangle(tile, radius=28, fill=accent)
-    gf = _font(150 if len(grade) == 1 else 110)
-    gw = d.textlength(grade, font=gf)
-    d.text(((tile[0] + tile[2]) / 2 - gw / 2, 190), grade, font=gf, fill=_BG)
-    if score is not None:
-        sf = _font(40)
-        st = f"{score}/100"
-        sw = d.textlength(st, font=sf)
-        d.text(((tile[0] + tile[2]) / 2 - sw / 2, 375), st, font=sf, fill=_BG)
+    num = str(score) if score is not None else "?"
+    gf = _font(140 if len(num) <= 2 else 108)
+    gw = d.textlength(num, font=gf)
+    d.text((cx - gw / 2, 195), num, font=gf, fill=_BG)
+    label = tier_word or "/100"
+    sf = _font(34)
+    sw = d.textlength(label, font=sf)
+    d.text((cx - sw / 2, 372), label, font=sf, fill=_BG)
 
     # Right column — eyebrow, title, subtitle. Shrink the title face for long names/URLs
     # so more fits before we have to clip.
     x = 430
-    d.text((x, 150), "SAFETY GRADE", font=_font(28), fill=_TEAL)
+    d.text((x, 150), "SAFETY SCORE", font=_font(28), fill=_TEAL)
     _tl = len(title or "")
     tf = _font(66 if _tl <= 22 else 52 if _tl <= 34 else 42)
     ty = 200
@@ -113,7 +122,7 @@ def render_og_png(
 
     # Footer — brand + the promise.
     d.text((80, 545), "AgentAvow", font=_font(38), fill=_FG)
-    d.text((80, 590), "A signed safety grade you can verify offline",
+    d.text((80, 590), "A signed safety score you can verify offline",
            font=_font(26), fill=_MUTED)
 
     buf = io.BytesIO()

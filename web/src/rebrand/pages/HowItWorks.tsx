@@ -66,7 +66,7 @@ export default function RebrandHowItWorks() {
         {[
           ['01', 'You paste a URL', 'A repo, MCP server, npm/PyPI package, or skill. No signup, no install.'],
           ['02', 'We read the actual code', 'Not metadata or self-claims — the real source, across the categories below.'],
-          ['03', 'You get a signed grade', 'A letter grade plus a cryptographic attestation you can verify offline.'],
+          ['03', 'You get a signed score', 'A 0–100 trust score plus a cryptographic attestation you can verify offline.'],
         ].map(([n, h, p]) => (
           <div key={n} className="glass rounded-xl p-5">
             <div className="font-mono text-[12px] text-primary-light">{n}</div>

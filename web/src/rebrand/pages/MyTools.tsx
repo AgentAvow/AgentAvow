@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
-import { getGradeInfo } from '../../components/trust/gradeSystem'
+import { getTrustTier } from '../../components/trust/gradeSystem'
 import { Reveal } from '../components/motion'
 
 // Confetti pieces — fixed trajectories so the burst is stable across renders.
@@ -97,18 +97,16 @@ function useAppStatus() {
   })
 }
 
-/** A small grade pill — same color scale as the score pages. */
-function GradeBadge({ score, grade }: { score?: number | null; grade?: string | null }) {
-  if (score == null && !grade) return null
-  const info = score != null ? getGradeInfo(score) : null
-  const label = grade || info?.grade || '—'
-  const color = info?.color || 'var(--color-text-muted)'
+/** A small Trust pill — the 0–100 number, coloured by tier (dual-mark system). */
+function GradeBadge({ score }: { score?: number | null; grade?: string | null }) {
+  if (score == null) return null
+  const t = getTrustTier(score)
   return (
     <span
       className="grid place-items-center min-w-[30px] h-[24px] px-1.5 rounded-md font-mono text-[12px] font-bold shrink-0"
-      style={{ background: `${color}1f`, color }}
-      title={score != null ? `${label} · ${score}/100` : label}
-    >{label}</span>
+      style={{ background: `${t.color}1f`, color: t.color }}
+      title={`${score}/100 · ${t.name}`}
+    >{score}</span>
   )
 }
 

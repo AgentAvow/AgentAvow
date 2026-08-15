@@ -5,7 +5,8 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
-import { getGradeInfo } from '../../components/trust/gradeSystem'
+import { getTrustTier } from '../../components/trust/gradeSystem'
+import { TrustPill } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { DualScore } from '../components/DualScore'
@@ -128,7 +129,7 @@ export default function RebrandHome() {
     const row = teaser[0]
     if (!row) return null
     const { display, repoPath } = rowIdentity(row)
-    return { row, display, repoPath, g: getGradeInfo(row.trust_score as number) }
+    return { row, display, repoPath, t: getTrustTier(row.trust_score as number) }
   })()
   // Real adoption for the example card (stars/checks/watchers) — no "coming soon".
   const { data: exAdopt } = useQuery({
@@ -237,7 +238,7 @@ export default function RebrandHome() {
           {example ? (
             <div className="glass rounded-2xl overflow-hidden max-w-[620px] mx-auto mt-8">
               <div className="flex items-center gap-4 p-5 border-b border-border/60">
-                <div className={`w-14 h-14 rounded-2xl grid place-items-center text-2xl font-extrabold ${example.g.textClass} ${example.g.bgClass}`}>{example.g.grade}</div>
+                <div className="w-14 h-14 rounded-2xl grid place-items-center text-xl font-extrabold" style={{ color: example.t.color, background: `${example.t.color}1f` }}>{example.row.trust_score as number}</div>
                 <div className="min-w-0">
                   <div className="font-mono text-[13px] text-text-muted break-all">{example.display}</div>
                   <div className="mt-1 text-[12px] font-semibold gradient-text">a real scan · {example.row.trust_score}/100</div>
@@ -382,12 +383,11 @@ export default function RebrandHome() {
             {teaser.length > 0
               ? teaser.map((row) => {
                   const { display, repoPath } = rowIdentity(row)
-                  const g = getGradeInfo(row.trust_score as number)
                   return (
                     <Link key={display} to={rp(repoPath ? `/rebrand/check/${repoPath}` : '/rebrand/browse')} className="glass card-hover rounded-xl p-[18px] block">
                       <div className="flex items-center justify-between gap-2.5">
                         <span className="font-mono text-[13.5px] break-all">{display}</span>
-                        <span className={`font-extrabold text-[13px] px-2.5 py-0.5 rounded-lg ${g.textClass} ${g.bgClass}`}>{g.grade}</span>
+                        <TrustPill score={row.trust_score as number} />
                       </div>
                       <div className="mt-3 text-[12.5px] text-primary-light">Why this grade →</div>
                     </Link>

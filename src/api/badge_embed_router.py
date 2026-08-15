@@ -32,19 +32,18 @@ BADGE_PADDING = 10
 
 
 def _trust_tier_color(score: float) -> tuple[str, str]:
-    """Return (hex_color, grade_label) matching unified A-F grade system."""
+    """Return (hex_color, tier_word) for the 0-100 Trust mark (green->red at
+    80/60/40/20 — dual-mark pivot 2026-08)."""
     s = score * 100
-    if s >= 96:
-        return "#14B8A6", "A+"
-    if s >= 81:
-        return "#2DD4BF", "A"
-    if s >= 61:
-        return "#22C55E", "B"
-    if s >= 41:
-        return "#F59E0B", "C"
-    if s >= 21:
-        return "#F97316", "D"
-    return "#EF4444", "F"
+    if s >= 80:
+        return "#22C55E", "Trusted"
+    if s >= 60:
+        return "#5BBF3A", "Standard"
+    if s >= 40:
+        return "#F59E0B", "Caution"
+    if s >= 20:
+        return "#F97316", "Restricted"
+    return "#EF4444", "Blocked"
 
 
 def _render_embed_badge_svg(
@@ -55,14 +54,14 @@ def _render_embed_badge_svg(
 ) -> str:
     """Render a shields.io-style three-segment badge as SVG.
 
-    Format: [AgentGraph | entity_name | score ✓/✗]
+    Format: [AgentAvow | entity_name | score ✓/✗]
     Includes scan status in title if available.
     """
     score_pct = str(round(score * 100))
     status_char = "\\u2713" if is_verified else "\\u2717"
     value_text = f"{score_pct} {status_char}"
 
-    label = "AgentGraph"
+    label = "AgentAvow"
     label_width = len(label) * BADGE_CHAR_WIDTH + BADGE_PADDING
     name_width = len(entity_name) * BADGE_CHAR_WIDTH + BADGE_PADDING
     value_width = len(value_text) * BADGE_CHAR_WIDTH + BADGE_PADDING

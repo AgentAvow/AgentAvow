@@ -3,9 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
-import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trust/gradeSystem'
+import { TrustPill } from '../components/TrustMark'
 
-const _VALID_GRADES = ['A+', 'A', 'B', 'C', 'D', 'F']
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 
 /**
@@ -129,9 +128,6 @@ function ToolCard({ row }: { row: CatalogRow }) {
   // Prefer the served letter grade (it applies the A+ certified gate); fall back
   // to deriving from score. This is why Browse no longer shows A+ on a 96+ repo
   // that isn't actually certified.
-  const g = row.grade && _VALID_GRADES.includes(row.grade)
-    ? gradeInfo(row.grade as LetterGrade)
-    : (row.trust_score != null ? getGradeInfo(row.trust_score) : null)
   const chip = statusChip(row)
   const fnd = findingsLine(row)
   return (
@@ -141,8 +137,8 @@ function ToolCard({ row }: { row: CatalogRow }) {
           {surfaceBadge && <span className="font-mono text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/12 text-primary-light shrink-0">{surfaceBadge}</span>}
           <span className="font-mono text-[13.5px] break-all">{display}</span>
         </span>
-        {g ? (
-          <span className={`font-extrabold text-[13px] px-2.5 py-0.5 rounded-lg shrink-0 ${g.textClass} ${g.bgClass}`}>{g.grade}</span>
+        {row.trust_score != null ? (
+          <TrustPill score={row.trust_score} />
         ) : (
           <span className="font-mono text-[11px] px-2 py-0.5 rounded-lg shrink-0 text-text-muted bg-surface-hover">unscored</span>
         )}

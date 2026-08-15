@@ -5,7 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, badgeUrl, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
-import { getGradeInfo, gradeInfo, type LetterGrade } from '../../components/trust/gradeSystem'
+import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
+import { TrustPill } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
@@ -114,24 +115,32 @@ function ClaimedBadge({ surface, owner = '', repo }: { surface: string; owner?: 
 /** Co-equal score ring — used for BOTH Attestation Trust and Adoption so the two
  * scores read as peers. Draws to `fill` (0–1) when given, a full ring otherwise;
  * dashed + muted when there's no data (e.g. a just-launched tool with no adoption). */
-function ScoreRing({ center, sub, hex, fill, dashed }: { center: string; sub?: string; hex: string; fill?: number; dashed?: boolean }) {
+// Pass `score` for the Trust hero — it derives the number, tier word, colour and
+// fill from the dual-mark system. Or pass explicit center/sub/hex for other axes
+// (e.g. the adoption ring, which is not a 0–100 trust score).
+function ScoreRing({ score, center, sub, hex, fill, dashed }: { score?: number; center?: string; sub?: string; hex?: string; fill?: number; dashed?: boolean }) {
   const reduce = useReducedMotion()
+  const t = score != null ? getTrustTier(score) : null
+  const _center = center ?? (score != null ? String(score) : '')
+  const _sub = sub ?? t?.name
+  const _hex = hex ?? t?.color ?? '#94a3b8'
+  const _fill = fill ?? (score != null ? score / 100 : undefined)
   return (
-    <div className="relative w-[128px] h-[128px] shrink-0 mx-auto" style={{ color: hex }}>
+    <div className="relative w-[128px] h-[128px] shrink-0 mx-auto" style={{ color: _hex }}>
       <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
         <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" opacity="0.14" />
         {dashed ? (
           <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" strokeLinecap="round" strokeDasharray="2 12" opacity="0.55" />
         ) : (
           <motion.circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" strokeLinecap="round"
-            pathLength={1} initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: fill == null ? 1 : Math.max(fill, 0.02) }}
+            pathLength={1} initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: _fill == null ? 1 : Math.max(_fill, 0.02) }}
             transition={{ duration: 1.2, ease: 'easeOut', delay: 0.15 }} />
         )}
       </svg>
       <div className="absolute inset-0 grid place-items-center">
         <div className="text-center leading-none">
-          <div className="text-[38px] font-extrabold" style={{ color: hex }}>{center}</div>
-          {sub && <div className="mt-1 text-[12px] font-mono text-text-muted">{sub}</div>}
+          <div className="text-[38px] font-extrabold" style={{ color: _hex }}>{_center}</div>
+          {_sub && <div className="mt-1 text-[12px] font-mono text-text-muted">{_sub}</div>}
         </div>
       </div>
     </div>
@@ -153,7 +162,7 @@ function AdoptionRing({ surface, owner = '', repo }: { surface: string; owner?: 
   const h = data?.headline
   const has = !!(h && h.count && h.count > 0)
   const compact = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n))
-  const AD = '#F59E0B'
+  const AD = '#2DD4BF'  // adoption = brand teal, never a trust/safety colour
   return (
     <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
       <ScoreRing
@@ -780,22 +789,21 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
       </div>
     )
   }
-  const _VALID = ['A+', 'A', 'B', 'C', 'D', 'F']
-  const g = scan.grade && _VALID.includes(scan.grade) ? gradeInfo(scan.grade as LetterGrade) : getGradeInfo(scan.trust_score)
+  const t = getTrustTier(scan.trust_score)
   const f = scan.findings
   const verdict = scan.trust_score >= 81 ? 'Safe to install' : scan.trust_score >= 61 ? 'Generally safe'
     : scan.trust_score >= 41 ? 'Install with caution' : 'Significant risks'
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
-        title={`${owner}/${repo} skill — safety grade ${g.grade}`}
-        description={`${verdict}. AgentAvow's signed capability grade for the ${owner}/${repo} Agent Skill: ${g.grade} (${scan.trust_score}/100), verifiable offline.`}
+        title={`${owner}/${repo} skill — safety score ${scan.trust_score}/100`}
+        description={`${verdict}. AgentAvow's signed capability grade for the ${owner}/${repo} Agent Skill: ${scan.trust_score}/100 (${t.name}), verifiable offline.`}
         path={`/check/skill/${owner}/${repo}`}
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
-        jsonLd={scanReviewJsonLd(`${owner}/${repo}`, g.grade, scan.trust_score)}
+        jsonLd={scanReviewJsonLd(`${owner}/${repo}`, t.name, scan.trust_score)}
       />
       <Reveal>
-        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}>
+        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
           <div className="relative px-7 pt-7">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">Agent Skill</span>
@@ -809,8 +817,8 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
-              <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
-              <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Capability Trust</div>
+              <ScoreRing score={scan.trust_score} />
+              <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Capability Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
             <AdoptionRing surface="openclaw" owner={owner} repo={repo} />
@@ -863,7 +871,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
       )}
 
       <div className="mt-8 flex justify-center">
-        <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />
+        <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={t.name} />
       </div>
     </div>
   )
@@ -925,21 +933,20 @@ function McpResult({ endpoint }: { endpoint: string }) {
       </div>
     )
   }
-  const _VALID = ['A+', 'A', 'B', 'C', 'D', 'F']
-  const g = scan.grade && _VALID.includes(scan.grade) ? gradeInfo(scan.grade as LetterGrade) : getGradeInfo(scan.trust_score)
+  const t = getTrustTier(scan.trust_score)
   const f = scan.findings
   const verdict = scan.trust_score >= 81 ? 'Safe to connect' : scan.trust_score >= 61 ? 'Generally safe'
     : scan.trust_score >= 41 ? 'Connect with caution' : 'Significant risks'
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
-        title={`MCP server — safety grade ${g.grade}`}
-        description={`${verdict}. AgentAvow live-graded this MCP server's served tool surface: ${g.grade} (${scan.trust_score}/100).`}
+        title={`MCP server — safety score ${scan.trust_score}/100`}
+        description={`${verdict}. AgentAvow live-graded this MCP server's served tool surface: ${scan.trust_score}/100 (${t.name}).`}
         path={`/check/mcp?endpoint=${encodeURIComponent(endpoint)}`}
-        jsonLd={scanReviewJsonLd(endpoint, g.grade, scan.trust_score)}
+        jsonLd={scanReviewJsonLd(endpoint, t.name, scan.trust_score)}
       />
       <Reveal>
-        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}>
+        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
           <div className="relative px-7 pt-7">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">MCP server</span>
@@ -953,8 +960,8 @@ function McpResult({ endpoint }: { endpoint: string }) {
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
-              <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
-              <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Capability Trust</div>
+              <ScoreRing score={scan.trust_score} />
+              <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Capability Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
             <AdoptionRing surface="mcp" owner="mcp" repo={endpoint} />
@@ -1024,11 +1031,10 @@ function McpResult({ endpoint }: { endpoint: string }) {
           <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-3" stagger={0.04}>
             {Object.entries(CAT_LABELS).filter(([key]) => (scan.category_scores as Record<string, number>)[key] != null).map(([key, label]) => {
               const sc = (scan.category_scores as Record<string, number>)[key]
-              const cg = getGradeInfo(sc)
               return (
                 <div key={key} className="glass rounded-xl px-4 py-3 flex items-center justify-between">
                   <span className="text-[14px]">{label}</span>
-                  <span className={`font-bold text-[13px] px-2 py-0.5 rounded ${cg.textClass} ${cg.bgClass}`}>{cg.grade} · {sc}</span>
+                  <TrustPill score={sc} />
                 </div>
               )
             })}
@@ -1066,7 +1072,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
       )}
 
       <div className="mt-8 flex justify-center">
-        <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} grade={g.grade} />
+        <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} grade={t.name} />
       </div>
     </div>
   )
@@ -1092,8 +1098,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
       </div>
     )
   }
-  const _VALID = ['A+', 'A', 'B', 'C', 'D', 'F']
-  const g = scan.grade && _VALID.includes(scan.grade) ? gradeInfo(scan.grade as LetterGrade) : getGradeInfo(scan.trust_score)
+  const t = getTrustTier(scan.trust_score)
   const f = scan.findings
   const cov = (scan as { coverage?: { artifact_digest?: string } }).coverage || {}
   const prov = (scan as { provenance?: { verified?: boolean; present?: boolean } }).provenance || {}
@@ -1104,13 +1109,13 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
-        title={`${name} (${surface}) — safety grade ${g.grade}`}
-        description={`${verdict}. AgentAvow's signed grade for ${surface}:${name}: ${g.grade} (${scan.trust_score}/100) — scanned on the published artifact, verifiable offline.`}
+        title={`${name} (${surface}) — safety score ${scan.trust_score}/100`}
+        description={`${verdict}. AgentAvow's signed grade for ${surface}:${name}: ${scan.trust_score}/100 (${t.name}) — scanned on the published artifact, verifiable offline.`}
         path={`/check/pkg/${surface}/${name}`}
-        jsonLd={scanReviewJsonLd(`${surface}:${name}`, g.grade, scan.trust_score)}
+        jsonLd={scanReviewJsonLd(`${surface}:${name}`, t.name, scan.trust_score)}
       />
       <Reveal>
-        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}>
+        <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
           <div className="relative px-7 pt-7">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">{surface}</span>
@@ -1125,8 +1130,8 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
-              <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
-              <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Attestation Trust</div>
+              <ScoreRing score={scan.trust_score} />
+              <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Attestation Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
             <AdoptionRing surface={surface} repo={name} />
@@ -1173,7 +1178,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
       )}
 
       <div className="mt-8 flex justify-center">
-        <ShareRow owner={surface} repo={name} score={scan.trust_score} grade={g.grade} />
+        <ShareRow owner={surface} repo={name} score={scan.trust_score} grade={t.name} />
       </div>
     </div>
   )
@@ -1267,11 +1272,7 @@ function Result({ owner, repo, privateResult }: {
   // Prefer the backend's letter grade (it applies the A+ "Certified" gate); fall
   // back to deriving from the score for older responses that omit it. Identical to
   // score-derived while the gate is off, so the display is unchanged until it flips.
-  const _VALID_GRADES = ['A+', 'A', 'B', 'C', 'D', 'F']
-  const _backendGrade = (scan as { grade?: string }).grade
-  const g = _backendGrade && _VALID_GRADES.includes(_backendGrade)
-    ? gradeInfo(_backendGrade as LetterGrade)
-    : getGradeInfo(scan.trust_score)
+  const t = getTrustTier(scan.trust_score)
   const f = scan.findings
   const cats = scan.category_scores || {}
   const sum = summarize(scan, scan.repo)
@@ -1298,18 +1299,18 @@ function Result({ owner, repo, privateResult }: {
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
       <SEOHead
-        title={`Is ${owner}/${repo} safe? Grade ${g.grade} (${scan.trust_score}/100)`}
-        description={`${sum.headline} AgentAvow's signed, offline-verifiable safety grade for ${owner}/${repo}: ${g.grade} (${scan.trust_score}/100).`}
+        title={`Is ${owner}/${repo} safe? Grade ${scan.trust_score}/100 (${t.name})`}
+        description={`${sum.headline} AgentAvow's signed, offline-verifiable safety grade for ${owner}/${repo}: ${scan.trust_score}/100 (${t.name}).`}
         path={`/check/${owner}/${repo}`}
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
         noindex={isPrivate}
-        jsonLd={isPrivate ? undefined : scanReviewJsonLd(`${owner}/${repo}`, g.grade, scan.trust_score)}
+        jsonLd={isPrivate ? undefined : scanReviewJsonLd(`${owner}/${repo}`, t.name, scan.trust_score)}
       />
       {/* BRANDED HERO — two co-equal scores + primary Watch CTA */}
       <motion.div className="rounded-2xl overflow-hidden relative border border-border/60"
-        style={{ background: `linear-gradient(135deg, ${g.color}12, transparent 55%), var(--color-surface)` }}
+        style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}
         initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: 'easeOut' }}>
-        <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: `inset 0 0 60px -22px ${g.color}55` }} />
+        <div className="absolute inset-0 rounded-2xl pointer-events-none" style={{ boxShadow: `inset 0 0 60px -22px ${t.color}55` }} />
 
         {/* header: verdict + plain-English headline */}
         <div className="relative px-7 pt-7">
@@ -1328,8 +1329,8 @@ function Result({ owner, repo, privateResult }: {
         {/* two co-equal scores — Attestation Trust + Adoption */}
         <div className="relative px-7 py-6 grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center">
-            <ScoreRing center={g.grade} sub={`${scan.trust_score}/100`} hex={g.color} fill={scan.trust_score / 100} />
-            <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: g.color }}>Attestation Trust</div>
+            <ScoreRing score={scan.trust_score} />
+            <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Attestation Trust</div>
             <div className="mt-0.5 text-[12px] text-text-muted">Signed scanner grade · verifiable now</div>
           </div>
           <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center flex flex-col">
@@ -1357,7 +1358,7 @@ function Result({ owner, repo, privateResult }: {
         {/* a stored private repo publishes to search here (then animates into share) */}
         {storedPrivate && (
           <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
-            <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} published={published} />
+            <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} grade={t.name} published={published} />
           </div>
         )}
       </motion.div>
@@ -1429,11 +1430,10 @@ function Result({ owner, repo, privateResult }: {
       <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-3" stagger={0.04}>
         {Object.entries(CAT_LABELS).filter(([key]) => (cats as Record<string, number>)[key] != null).map(([key, label]) => {
           const sc = (cats as Record<string, number>)[key]
-          const cg = getGradeInfo(sc)
           return (
             <div key={key} className="glass rounded-xl px-4 py-3 flex items-center justify-between">
               <span className="text-[14px]">{label}</span>
-              <span className={`font-bold text-[13px] px-2 py-0.5 rounded ${cg.textClass} ${cg.bgClass}`}>{cg.grade} · {sc}</span>
+              <TrustPill score={sc} />
             </div>
           )
         })}
@@ -1471,7 +1471,7 @@ function Result({ owner, repo, privateResult }: {
         {!isPrivate && (
           <div className="mt-3">
             <button
-              onClick={() => downloadScoreCard({ repo: scan.repo, grade: g.grade, score: scan.trust_score, tier: scan.trust_tier, gradeHex: g.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
+              onClick={() => downloadScoreCard({ repo: scan.repo, grade: t.name, score: scan.trust_score, tier: scan.trust_tier, gradeHex: t.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
               className="text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
             >
               ↓ Download score card (SVG)
@@ -1515,7 +1515,7 @@ function Result({ owner, repo, privateResult }: {
       {/* share — floats at the bottom, consistent with every other score page */}
       {!isPrivate && (
         <div className="mt-8 flex justify-center">
-          <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={g.grade} />
+          <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={t.name} />
         </div>
       )}
     </div>

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
-import { getGradeInfo } from '../../components/trust/gradeSystem'
+import { TrustPill } from '../components/TrustMark'
 import { Reveal, RevealStagger } from '../components/motion'
 
 /**
@@ -153,12 +153,11 @@ function ApiKeys() {
 }
 
 function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; removing: boolean }) {
-  const g = w.last_score != null ? getGradeInfo(w.last_score) : null
   const { label, badge, href } = watchLabel(w)
   return (
     <div className="glass rounded-xl p-4 flex items-center gap-4">
-      {g ? (
-        <div className={`w-11 h-11 rounded-xl grid place-items-center font-extrabold text-[15px] shrink-0 ${g.textClass} ${g.bgClass}`}>{g.grade}</div>
+      {w.last_score != null ? (
+        <TrustPill score={w.last_score} />
       ) : (
         <div className="w-11 h-11 rounded-xl grid place-items-center font-mono text-[10px] text-text-muted bg-surface-hover shrink-0">n/a</div>
       )}

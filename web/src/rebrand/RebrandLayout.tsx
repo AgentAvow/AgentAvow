@@ -281,6 +281,7 @@ export default function RebrandLayout() {
             <Wordmark id="ftr" />
             <div className="flex flex-wrap gap-5 text-[14px] text-text-muted">
               <Link to={rp("/rebrand/docs")} className="hover:text-text">Docs</Link>
+              <Link to={rp("/rebrand/badge")} className="hover:text-text">Badges</Link>
               <Link to={rp("/rebrand/faq")} className="hover:text-text">FAQ</Link>
               <Link to={rp("/rebrand/research")} className="hover:text-text">Research</Link>
               <a href="/api/v1/redoc" target="_blank" rel="noopener noreferrer" className="hover:text-text">API</a>
