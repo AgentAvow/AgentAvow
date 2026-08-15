@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 import { TrustMini, AdoptionMini } from '../components/TrustMark'
-import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
+import { fetchCatalog, fetchFlaggedStat, rowIdentity, type CatalogRow } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 
 interface RecentItem { surface: string; name: string; full_name: string | null; trust_score: number | null; at: string | null }
@@ -126,16 +126,6 @@ function Board({ title, note, rows, isLoading, certified = false }: { title: str
   )
 }
 
-function statFromSummary(s?: CatalogSummary): { flagged: number; scanned: number; pct: number } | null {
-  if (!s) return null
-  const crit = Object.values(s.by_surface_critical || {}).reduce((a, b) => a + b, 0)
-  const high = Object.values(s.by_surface_high || {}).reduce((a, b) => a + b, 0)
-  const scanned = s.repo_scans_total || Object.values(s.by_surface || {}).reduce((a, b) => a + b, 0)
-  const flagged = crit + high
-  if (!scanned) return null
-  return { flagged, scanned, pct: Math.round((flagged / scanned) * 100) }
-}
-
 export default function RebrandTrustIndex() {
   // Top-scored per surface + most-adopted + certified, from the live catalog.
   // `severity: 'clean'` keeps the "Safest" boards honest — only tools with no critical
@@ -148,7 +138,7 @@ export default function RebrandTrustIndex() {
   const certified = useBoard({ grade: 'certified', sort: 'score-desc', limit: 10 }, 'certified')
 
   const summary = mcp.data?.summary || npm.data?.summary
-  const stat = statFromSummary(summary)
+  const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
   const totalScanned = summary ? (summary.total_scans || 0).toLocaleString() : '—'
 
   return (

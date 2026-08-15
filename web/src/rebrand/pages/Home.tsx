@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
-import { fetchCatalog, rowIdentity } from '../catalog'
+import { fetchCatalog, fetchFlaggedStat, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini } from '../components/TrustMark'
@@ -122,13 +122,10 @@ export default function RebrandHome() {
     staleTime: 5 * 60_000,
   })
   const s = cat?.summary
-  // Live headline stat: % of scanned tools with a high/critical finding (matches the Index).
-  const flaggedPct = (() => {
-    const crit = Object.values(s?.by_surface_critical || {}).reduce((a, b) => a + b, 0)
-    const high = Object.values(s?.by_surface_high || {}).reduce((a, b) => a + b, 0)
-    const scanned = s?.repo_scans_total || Object.values(s?.by_surface || {}).reduce((a, b) => a + b, 0)
-    return scanned ? Math.round(((crit + high) / scanned) * 100) : null
-  })()
+  // Live headline stat from ONE server-computed source, shared with the Index (same query
+  // key) so the two pages always show the identical number.
+  const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
+  const flaggedPct = stat?.pct ?? null
   const teaser = (cat?.rows ?? []).filter((r) => r.trust_score != null).slice(0, 3)
   // A real scored tool for the signed-result example (no mock/fabricated data).
   const example = (() => {

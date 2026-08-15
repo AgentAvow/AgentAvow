@@ -472,6 +472,26 @@ async def refresh_catalog() -> dict[str, Any]:
     return {"status": "rebuilt", "total_scans": catalog["summary"].total_scans}
 
 
+@router.get("/flagged-stat", dependencies=[Depends(rate_limit_reads)])
+async def flagged_stat(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Single source of truth for the headline stat: % of scanned tools with a high/critical
+    finding. Both the homepage and the Index read THIS so they always show the same number
+    (computed server-side over the same merged catalog + community rows)."""
+    catalog = _get_catalog()
+    summary = catalog["summary"]
+    community = await _community_rows(db)
+    by_c = dict(summary.by_surface_critical or {})
+    by_h = dict(summary.by_surface_high or {})
+    crit = sum(by_c.values()) + sum(1 for r in community if (r.critical or 0) > 0)
+    high = sum(by_h.values()) + sum(1 for r in community if (r.high or 0) > 0)
+    scanned = (summary.repo_scans_total or 0) + sum(
+        1 for r in community if r.surface != "x402" and r.trust_score is not None
+    )
+    flagged = crit + high
+    pct = round((flagged / scanned) * 100) if scanned else None
+    return {"pct": pct, "flagged": flagged, "scanned": scanned}
+
+
 @router.get("/percentile", dependencies=[Depends(rate_limit_reads)])
 async def score_percentile(score: int = Query(..., ge=0, le=100)) -> dict[str, Any]:
     """"Safer than X% of scanned tools." Returns the percentile of `score` against the

@@ -80,3 +80,11 @@ export function rowIdentity(row: CatalogRow): { display: string; repoPath: strin
   const repoPath = row.full_name && row.full_name.includes('/') ? row.full_name : null
   return { display, repoPath }
 }
+
+/** The headline stat (% of scanned tools with a high/critical finding), server-computed so
+ * the homepage and the Index always show the same number. */
+export async function fetchFlaggedStat(): Promise<{ pct: number | null; flagged: number; scanned: number }> {
+  const { data } = await publicApi.get<{ pct: number | null; flagged: number; scanned: number }>(
+    '/public/scan-catalog/flagged-stat')
+  return data
+}
