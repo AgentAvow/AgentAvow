@@ -1602,7 +1602,7 @@ def _trust_score_color(score: int) -> str:
 async def scan_badge(
     owner: str,
     repo: str,
-    metric: str = Query("trust", pattern="^(trust|adoption)$"),
+    metric: str = Query("trust", pattern="^(trust|adoption|combined)$"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Return an SVG badge for README embedding.
@@ -1664,6 +1664,14 @@ async def scan_badge(
                 logger.warning("badge regenerate failed for %s/%s", owner, repo, exc_info=True)
                 score = None
                 score_type = None
+
+    # Combined = trust + adoption in one badge (adoption never travels alone)
+    if metric == "combined":
+        a_surface = owner.lower() if owner.lower() in (
+            "npm", "pypi", "crates", "huggingface", "docker",
+        ) else "github"
+        _as, a_count, _au = await surface_adoption_summary(a_surface, owner, repo)
+        return _combined_badge_response(score, a_count)
 
     # Build badge — numbers, not letters (dual-mark pivot 2026-08)
     if score is not None:
@@ -1728,6 +1736,39 @@ def _compact_int(n: int | None) -> str:
             v = n / div
             return f"{v:.1f}".rstrip("0").rstrip(".") + suf
     return str(n)
+
+
+def _combined_badge_response(score: int | None, count: int | None) -> Response:
+    """Three-segment [AgentAvow | NN/100 | ★count] badge — trust + adoption in one.
+    The adoption box is neutral slate + teal (never a safety colour); adoption never
+    travels alone (dual-mark rule)."""
+    trust_label = f"{score}/100" if score is not None else "not scanned"
+    tcolor = _trust_score_color(int(score)) if score is not None else "#6b7280"
+    adopt_label = f"★ {_compact_int(count)}" if count else "New"
+    bw = 80
+    tw = len(trust_label) * 7 + 12
+    aw = len(adopt_label) * 7 + 14
+    total = bw + tw + aw
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total}" height="20">
+  <rect width="{bw}" height="20" fill="#38445f" rx="3"/>
+  <rect x="{bw}" width="{tw}" height="20" fill="{tcolor}"/>
+  <rect x="{bw + tw}" width="{aw}" height="20" fill="#233047" rx="3"/>
+  <rect x="{bw + tw}" width="4" height="20" fill="#233047"/>
+  <text x="{bw // 2}" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
+        text-anchor="middle">{settings.badge_brand}</text>
+  <text x="{bw + tw // 2}" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
+        font-weight="bold" text-anchor="middle">{trust_label}</text>
+  <text x="{bw + tw + aw // 2}" y="14" fill="#7fe9d9" font-family="Verdana,sans-serif"
+        font-size="11" text-anchor="middle">{adopt_label}</text>
+</svg>'''
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=3600, s-maxage=86400",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 def _simple_badge_response(label: str, color: str) -> Response:
@@ -1966,7 +2007,8 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
     """(axes, headline) for a surface coordinate — the shared adoption builder used by
     the /adoption endpoint AND the catalog loop's persistence. npm/PyPI = registry
     downloads + reverse-dependents; github/openclaw (a skill IS a repo) = GitHub stars.
-    MCP (bare endpoint) has no reliable registry signal → absent, not fabricated."""
+    MCP servers use GitHub stars when backed by a repo; a bare-endpoint MCP (repo is a
+    URL) has no registry signal → absent, not fabricated."""
     from src.scanner.adoption import (
         build_axis_dependents,
         build_axis_downloads,
@@ -2078,6 +2120,16 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
             ))
         else:
             stars = await _github_stars(owner.strip(), repo.strip())
+            if stars is not None:
+                headline = {"count": stars, "unit": "stars"}
+                axes.append(build_axis_stars(stars=stars))
+    elif s == "mcp":
+        # An MCP server is usually a GitHub repo — use its stars when owner/repo
+        # resolve to a github coordinate. Bare-endpoint MCPs (repo is a URL, or no
+        # owner) have no registry signal → absent, not fabricated.
+        r = repo.strip()
+        if owner.strip() and r and not r.lower().startswith("http"):
+            stars = await _github_stars(owner.strip(), r)
             if stars is not None:
                 headline = {"count": stars, "unit": "stars"}
                 axes.append(build_axis_stars(stars=stars))

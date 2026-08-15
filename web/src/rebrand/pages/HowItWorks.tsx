@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal, RevealStagger } from '../components/motion'
-import { DualScore } from '../components/DualScore'
+import { TrustBar, AdoptionNeedle } from '../components/TrustMark'
 import { VerifyDemo } from '../components/VerifyDemo'
 
 /**
@@ -43,7 +43,7 @@ export default function RebrandHowItWorks() {
           <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">A trust score you don't have to trust.</h1>
           <p className="mt-3 text-text-muted text-[15.5px] leading-relaxed">
             Most "trust scores" are a black box — you take the number on faith. Ours is different: it's an
-            <strong className="text-text"> aggregate over signed evidence</strong>. The grade is one recognizable, portable
+            <strong className="text-text"> aggregate over signed evidence</strong>. The score is one recognizable, portable
             number, but underneath sits a cryptographic receipt anyone can recompute and verify.
           </p>
         </div>
@@ -54,7 +54,17 @@ export default function RebrandHowItWorks() {
         <div className="mt-10 glass rounded-2xl p-7">
           <h2 className="text-xl font-bold">Two axes, one signed record.</h2>
           <p className="mt-2 text-text-muted text-[14px] max-w-[62ch]"><strong className="text-text">Attestation Trust</strong> is the signed safety score from our scanner — live and verifiable now. <strong className="text-text">Adoption</strong> reflects how much the ecosystem actually uses a tool. Together they tell you both "is it safe?" and "is it real?"</p>
-          <div className="mt-5"><DualScore score={94} /></div>
+          <div className="mt-5 grid grid-cols-2 rounded-xl border border-border/60 bg-surface/30 overflow-hidden relative">
+            <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(340px 130px at 25% -10%, rgba(34,197,94,0.12), transparent 70%), radial-gradient(340px 130px at 78% -10%, rgba(45,212,191,0.12), transparent 70%)' }} />
+            <div className="relative p-6 text-center flex flex-col items-center border-r border-border/50">
+              <div className="min-h-[132px] flex items-center justify-center"><TrustBar score={94} /></div>
+              <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-success">Attestation Trust</div>
+            </div>
+            <div className="relative p-6 text-center flex flex-col items-center">
+              <div className="min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={12400} unit="stars" /></div>
+              <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
+            </div>
+          </div>
         </div>
       </Reveal>
 

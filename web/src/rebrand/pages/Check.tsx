@@ -201,59 +201,62 @@ function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; 
 }
 
 /** Prominent badge promotion — dynamic origin so copied embeds always resolve. */
-/** "Show it off" — the distribution showcase: README badges (trust + adoption,
- * live & signed), the downloadable share card, and the featured live widget.
- * Every format regenerates from the current signed verdict, so it can't go stale. */
+/** "Show it off" — the two signed distribution assets: the README badge (Trust or
+ * Trust+Adoption) and the downloadable share card. Both regenerate from the current
+ * signed verdict, so they can't go stale or be faked. */
 function BadgePromo({ owner, repo, cardData }: { owner: string; repo: string; cardData?: ScoreCardData }) {
-  const [tab, setTab] = useState<'trust' | 'adoption'>('trust')
+  const [tab, setTab] = useState<'trust' | 'combined'>('trust')
   const [copied, setCopied] = useState(false)
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
   const link = `${origin}/check/${owner}/${repo}`
   const badgeBase = `${origin}/api/v1/public/scan/${owner}/${repo}/badge`
   const badge = tab === 'trust'
     ? { url: badgeBase, alt: 'AgentAvow Trust' }
-    : { url: `${badgeBase}?metric=adoption`, alt: 'AgentAvow Adoption' }
+    : { url: `${badgeBase}?metric=combined`, alt: 'AgentAvow' }
   const md = `[![${badge.alt}](${badge.url})](${link})`
   const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1400) }
   const cardSrc = cardData ? `data:image/svg+xml;utf8,${encodeURIComponent(scoreCardSvg(cardData))}` : null
   return (
     <div className="glass rounded-2xl p-6 relative overflow-hidden">
-      <div className="absolute -right-16 -top-16 w-44 h-44 rounded-full bg-accent/10 blur-3xl pointer-events-none" />
+      <div className="absolute -right-20 -top-20 w-48 h-48 rounded-full bg-accent/10 blur-3xl pointer-events-none" />
       <div className="relative">
         <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Show it off</div>
         <h3 className="mt-1 text-lg font-bold">Put your signed mark anywhere.</h3>
-        <p className="mt-1 text-text-muted text-[13.5px] max-w-[54ch]">Every format regenerates from the live signed verdict — it can&apos;t go stale or be faked. Free, no account.</p>
+        <p className="mt-1 text-text-muted text-[13.5px] max-w-[56ch]">Both regenerate from the live signed verdict — they can&apos;t go stale or be faked. Free, no account.</p>
 
-        <div className="mt-5 grid md:grid-cols-5 gap-3">
-          {/* README badge — trust + adoption, live previews + one-line embed */}
-          <div className="md:col-span-3 rounded-xl border border-border bg-surface/40 p-4 flex flex-col">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <div className="font-semibold text-[13.5px]">README badge</div>
-              <div className="flex gap-1 font-mono text-[11px]">
-                {(['trust', 'adoption'] as const).map((k) => (
-                  <button key={k} onClick={() => setTab(k)} className={`px-2.5 py-0.5 rounded-md capitalize transition-colors ${tab === k ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{k}</button>
+        <div className="mt-5 grid md:grid-cols-2 gap-4 items-stretch">
+          {/* README badge — Trust or Trust+Adoption */}
+          <div className="rounded-xl border border-border bg-surface/40 p-5 flex flex-col">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-semibold text-[14px]">README badge</div>
+              <div className="inline-flex rounded-lg border border-border overflow-hidden font-mono text-[11px]">
+                {([['trust', 'Trust'], ['combined', '+ Adoption']] as const).map(([k, lbl]) => (
+                  <button key={k} onClick={() => setTab(k)} className={`px-2.5 py-1 transition-colors ${tab === k ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{lbl}</button>
                 ))}
               </div>
             </div>
-            <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex"><img src={badge.url} alt={badge.alt} className="h-[24px] rounded shadow-md" /></a>
+            <a href={link} target="_blank" rel="noopener noreferrer" className="mt-4 flex items-center justify-center rounded-lg border border-border/60 bg-surface py-7">
+              <img src={badge.url} alt={badge.alt} className="h-[26px] rounded shadow-md" />
+            </a>
             <div className="relative mt-3">
               <pre className="font-mono text-[11.5px] bg-surface border border-border rounded-lg px-3 py-2.5 pr-14 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">{md}</pre>
               <button onClick={copy} className="absolute top-1.5 right-1.5 font-mono text-[10.5px] px-2 py-0.5 rounded bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied ? 'copied ✓' : 'copy'}</button>
             </div>
+            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">regenerates on every view · links to this report</p>
           </div>
-          {/* share card + widget */}
-          <div className="md:col-span-2 flex flex-col gap-3">
-            <div className="rounded-xl border border-border bg-surface/40 p-4">
-              <div className="font-semibold text-[13.5px] mb-2">Share card</div>
-              {cardSrc && <img src={cardSrc} alt="AgentAvow share card" className="rounded-md border border-border/60 w-full" />}
-              {cardData && <button onClick={() => downloadScoreCard(cardData)} className="mt-2 text-[12px] font-semibold text-primary-light hover:text-primary">↓ Download SVG</button>}
+          {/* Share card — dated snapshot */}
+          <div className="rounded-xl border border-border bg-surface/40 p-5 flex flex-col">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-semibold text-[14px]">Share card</div>
+              {cardData && <button onClick={() => downloadScoreCard(cardData)} className="font-mono text-[11px] px-2.5 py-1 rounded-lg border border-border text-primary-light hover:border-primary-light transition-colors">↓ SVG</button>}
             </div>
-            <Link to={rp('/rebrand/badge')} className="rounded-xl border border-accent/30 bg-accent/[0.06] hover:bg-accent/[0.11] p-4 transition-colors block">
-              <div className="flex items-center gap-2"><span className="font-semibold text-[13.5px]">Live widget</span><span className="font-mono text-[8.5px] uppercase tracking-[0.12em] px-1.5 py-0.5 rounded bg-accent/15 text-accent">Featured</span></div>
-              <p className="mt-1 text-[12px] text-text-muted">A verifiable widget that recomputes the signature in-browser. All formats →</p>
-            </Link>
+            {cardSrc
+              ? <img src={cardSrc} alt="AgentAvow share card" className="mt-4 rounded-lg border border-border/60 w-full" />
+              : <div className="mt-4 flex-1 min-h-[132px] rounded-lg border border-border/60 grid place-items-center text-text-muted text-[12px]">Public repos only</div>}
+            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">a dated snapshot for slides &amp; social</p>
           </div>
         </div>
+        <Link to={rp('/rebrand/badge')} className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-light hover:text-primary">Badge builder — pick a badge, theme, and format →</Link>
       </div>
     </div>
   )
@@ -1315,11 +1318,10 @@ function Result({ owner, repo, privateResult }: {
             {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">{storedPrivate ? '🔒 Private · via GitHub App' : '🔒 Private scan · not public'}</span>}
             {!isPrivate && <ClaimedBadge surface="github" owner={owner} repo={repo} />}
           </div>
-          <h1 className="mt-2 text-2xl font-extrabold tracking-tight">{sum.headline}</h1>
-          <div className="mt-1 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
-          {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
-          {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
-          <div className="mt-0.5 text-[13px] font-semibold gradient-text">{scan.trust_tier}</div>
+          <h1 className="mt-3 text-[26px] font-extrabold tracking-tight leading-tight">{sum.headline}</h1>
+          <div className="mt-1.5 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
+          {(scan as { tool_description?: string }).tool_description && <div className="mt-2.5 text-[13.5px] text-text-muted max-w-[64ch]">{(scan as { tool_description?: string }).tool_description}</div>}
+          {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/70 max-w-[64ch]">{(scan as { long_description?: string }).long_description}</div>}
         </div>
 
         {/* the dual mark — one cohesive instrument: trust (green→red) | adoption (teal→magenta) */}
@@ -1457,7 +1459,7 @@ function Result({ owner, repo, privateResult }: {
         </div>
       </Reveal>
 
-      {/* the distribution showcase — README badges, share card, widget, all signed */}
+      {/* the distribution showcase — README badge (trust / trust+adoption) + share card */}
       <Reveal>
         <div className="mt-6"><BadgePromo owner={owner} repo={repo} cardData={isPrivate ? undefined : { repo: scan.repo, grade: t.name, score: scan.trust_score, tier: scan.trust_tier, gradeHex: t.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct }} /></div>
       </Reveal>

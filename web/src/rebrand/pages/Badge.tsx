@@ -23,7 +23,8 @@ const DEV_RESOURCES: [string, string, string][] = [
 export default function RebrandBadge() {
   const [repo, setRepo] = useState('')
   const [copied, setCopied] = useState(false)
-  const [variant, setVariant] = useState<'trust' | 'adoption'>('trust')
+  // Trust, or Trust + Adoption (combined) — adoption never travels alone.
+  const [variant, setVariant] = useState<'trust' | 'combined'>('trust')
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const navigate = useNavigate()
   const slug = repo.trim() || 'you/your-repo'
@@ -32,11 +33,11 @@ export default function RebrandBadge() {
   // cutover (agentavow.com) — never a dead hardcoded agentavow.com link pre-DNS.
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
   const _p = new URLSearchParams()
-  if (variant === 'adoption') _p.set('metric', 'adoption')
+  if (variant === 'combined') _p.set('metric', 'combined')
   if (theme === 'light') _p.set('theme', 'light')
   const _qs = _p.toString() ? `?${_p.toString()}` : ''
   const badgeSrc = `${origin}/api/v1/public/scan/${slug}/badge${_qs}`
-  const badgeAlt = variant === 'trust' ? 'AgentAvow Trust' : 'AgentAvow Adoption'
+  const badgeAlt = variant === 'trust' ? 'AgentAvow Trust' : 'AgentAvow'
   const markdown = `[![${badgeAlt}](${badgeSrc})](${origin}/check/${slug})`
 
   const copy = () => {
@@ -84,8 +85,8 @@ export default function RebrandBadge() {
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Badge</span>
             <div className="inline-flex rounded-lg border border-border overflow-hidden">
-              {(['trust', 'adoption'] as const).map((v) => (
-                <button key={v} onClick={() => setVariant(v)} className={`px-3 py-1 font-mono text-[12px] capitalize transition-colors ${variant === v ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{v}</button>
+              {([['trust', 'Trust'], ['combined', 'Trust + Adoption']] as const).map(([v, lbl]) => (
+                <button key={v} onClick={() => setVariant(v)} className={`px-3 py-1 font-mono text-[12px] transition-colors ${variant === v ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{lbl}</button>
               ))}
             </div>
           </div>
@@ -104,10 +105,16 @@ export default function RebrandBadge() {
           <span className={`inline-flex p-3 rounded-lg ${theme === 'light' ? 'bg-white' : 'bg-surface-hover'}`}>
             {owner && name ? (
               <img src={badgeSrc} alt={`${slug} ${badgeAlt}`} className="h-[24px] rounded shadow-md" />
+            ) : variant === 'trust' ? (
+              <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
+                <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow Trust</span>
+                <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
+              </span>
             ) : (
               <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-                <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow {variant === 'trust' ? 'Trust' : 'Adoption'}</span>
-                <span className="px-2.5 py-1.5 font-bold text-[#04140f]" style={{ background: variant === 'trust' ? '#22C55E' : '#233047' }}>{variant === 'trust' ? '94/100' : '★ 12.4k'}</span>
+                <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow</span>
+                <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
+                <span className="px-2.5 py-1.5 font-bold text-[#7fe9d9] bg-[#233047]">★ 490M</span>
               </span>
             )}
           </span>

@@ -432,11 +432,19 @@ export default function RebrandHome() {
           </div>
           <div className="grid md:grid-cols-2 gap-6 items-center mt-6">
             <div className="min-w-0">
-              <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-                <span className="bg-surface-hover text-text px-2.5 py-1.5">🛡 AgentAvow</span>
-                <span className="px-2.5 py-1.5 font-bold text-white bg-gradient-to-r from-primary to-primary-dark">Trust: A 94</span>
-              </span>
-              <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text overflow-x-auto">
+              {/* real badge styles: Trust, and Trust + Adoption */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
+                  <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow Trust</span>
+                  <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
+                </span>
+                <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
+                  <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow</span>
+                  <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
+                  <span className="px-2.5 py-1.5 font-bold text-[#7fe9d9] bg-[#233047]">★ 490M</span>
+                </span>
+              </div>
+              <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text-muted overflow-x-auto">
                 [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)
               </div>
             </div>
