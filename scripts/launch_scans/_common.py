@@ -121,8 +121,11 @@ def extract_owner_repo(url: str | None) -> str | None:
 
 def summarize_scan_result(result: Any) -> dict:
     """Convert a ScanResult to a JSON-serializable summary."""
+    _err = getattr(result, "error", None)
     return {
-        "trust_score": getattr(result, "trust_score", 0),
+        # A fetch failure is UNSCANNABLE, not a 0 — null the score so the catalog
+        # reads "fetch error", never "Blocked". (Previously defaulted to 0 on error.)
+        "trust_score": None if _err else getattr(result, "trust_score", 0),
         "findings_count": len(getattr(result, "findings", []) or []),
         "critical": getattr(result, "critical_count", 0),
         "high": getattr(result, "high_count", 0),

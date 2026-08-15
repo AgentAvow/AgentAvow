@@ -25,22 +25,28 @@ log() { printf '[%s] %s\n' "$(LOG_TS)" "$*"; }
 
 log "weekly_rescan: start"
 
-# Each scan is independent; failure of one shouldn't kill the others.
-# Rate-limit pacing is per-script.
-for SCRIPT in scan_x402.py scan_mcp_registry.py scan_npm_agents.py scan_pypi_agents.py; do
-  log "running $SCRIPT"
-  if python3 "scripts/launch_scans/$SCRIPT"; then
-    log "$SCRIPT OK"
-  else
-    log "$SCRIPT FAILED (exit $?), continuing with next surface"
-  fi
-done
+# RE-SCORE existing corpus entries in place — non-destructive. The old flow re-ran the
+# discover+scan launch scripts, which (a) default to dry-run without --run and (b) via
+# their progress skip-set could OVERWRITE a results file with a shrunken subset. This
+# instead re-scans the coordinates already in the corpus and updates scores in place,
+# never dropping a row. Uses the project venv (system python3 on the host lacks deps).
+# Bounded + resumable per run; a larger --limit here since this is the weekly full-ish pass.
+PY="./.venv/bin/python3"
+[ -x "$PY" ] || PY="python3"
+# GITHUB_TOKEN from .env.secrets (do NOT `source .env` — it breaks pydantic cors parse).
+GITHUB_TOKEN="$(grep -E '^GITHUB_TOKEN=' .env.secrets 2>/dev/null | cut -d= -f2- | sed 's/^["'\'']//; s/["'\'']$//')"
+export GITHUB_TOKEN
+log "re-scoring corpus (venv=$PY, token=$([ -n "$GITHUB_TOKEN" ] && echo yes || echo no))"
+if "$PY" scripts/launch_scans/rescore_corpus.py --limit 400; then
+  log "rescore OK"
+else
+  log "rescore FAILED (exit $?)"
+fi
 
-# Invalidate the /scans catalog in-memory cache so next request rebuilds.
-# Localhost-only endpoint; ignore failure (catalog will eventually rebuild
-# on the 1-hour TTL anyway).
+# Invalidate the /scans catalog cache. Backend runs in Docker, so localhost:8000 is not
+# reachable from the host — go through nginx on the public URL instead.
 log "refreshing catalog cache"
-curl -fsS -X POST "http://localhost:8000/api/v1/public/scan-catalog/refresh" \
+curl -fsS -X POST "https://agentavow.com/api/v1/public/scan-catalog/refresh" \
   -H "Content-Type: application/json" --max-time 30 \
   || log "catalog refresh failed (cache will rebuild on next request)"
 

@@ -159,33 +159,41 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
         # `critical_count` / `high_count` instead of `critical` / `high`,
         # `error` instead of `scan_error`.
         full_name = raw.get("repo", "")
+        oc_err = raw.get("error")
+        # A fetch failure (empty/private/unreachable repo) is UNSCANNABLE — it is not
+        # a 0/Blocked grade. Null the score so it reads "fetch error", not "Blocked".
+        oc_score = None if oc_err else raw.get("trust_score")
         return CatalogRow(
             surface="openclaw",
             name=full_name,
             full_name=full_name,
             repository_url=f"https://github.com/{full_name}" if full_name else None,
-            trust_score=raw.get("trust_score"),
-            grade=_row_grade(raw.get("trust_score"), critical=raw.get("critical_count")),
+            trust_score=oc_score,
+            grade=_row_grade(oc_score, critical=raw.get("critical_count")),
             critical=raw.get("critical_count"),
             high=raw.get("high_count"),
             findings_count=raw.get("findings_count"),
             primary_language=raw.get("primary_language"),
-            scan_error=raw.get("error"),
+            scan_error=oc_err,
         )
     # mcp / npm / pypi all share repo-scan shape
+    err = raw.get("scan_error")
+    # Same rule: a scan that couldn't fetch the repo is unscannable, not a 0. Failed
+    # fetches were stored as trust_score=0 and rendered as Blocked — null them here.
+    score = None if err else raw.get("trust_score")
     return CatalogRow(
         surface=surface,
         name=raw.get("name", "") or raw.get("full_name", ""),
         repository_url=raw.get("repository_url"),
         full_name=raw.get("full_name"),
-        trust_score=raw.get("trust_score"),
-        grade=_row_grade(raw.get("trust_score"), critical=raw.get("critical")),
+        trust_score=score,
+        grade=_row_grade(score, critical=raw.get("critical")),
         critical=raw.get("critical"),
         high=raw.get("high"),
         findings_count=raw.get("findings_count"),
         primary_language=raw.get("primary_language"),
         is_mcp_server=raw.get("is_mcp_server"),
-        scan_error=raw.get("scan_error"),
+        scan_error=err,
         skipped=raw.get("skipped"),
     )
 
