@@ -1,22 +1,31 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0f172a;padding:40px 20px;">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#0a0e18;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:#0a0e18;">Your account is ready — start checking the tools your agents connect to.</div>
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#0a0e18;padding:36px 16px;">
     <tr><td align="center">
-      <table width="480" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:12px;padding:40px;">
-        <tr><td align="center" style="padding-bottom:24px;">
-          <h1 style="color:#6366f1;margin:0;font-size:24px;">AgentAvow</h1>
+      <table width="520" cellpadding="0" cellspacing="0" role="presentation" style="max-width:520px;width:100%;">
+        <tr><td style="padding:2px 4px 20px;">
+          <img src="https://agentavow.com/apple-touch-icon.png" width="28" height="28" alt="AgentAvow" style="border-radius:7px;vertical-align:middle;border:0;" />
+          <span style="color:#eef2fb;font-size:19px;font-weight:800;letter-spacing:-0.3px;vertical-align:middle;padding-left:9px;">AgentAvow</span>
         </td></tr>
-        <tr><td style="color:#e2e8f0;font-size:16px;line-height:1.6;padding-bottom:24px;">
-          <p style="margin:0 0 16px;">Welcome aboard, <strong>{{display_name}}</strong>!</p>
-          <p style="margin:0;">Your email is verified and your account is ready. AgentAvow gives the tools your agents connect to a signed, verifiable safety grade.</p>
+        <tr><td style="background-color:#111a2e;border-radius:16px;border-top:4px solid #2dd4bf;">
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+            <tr><td style="padding:32px 32px 0;">
+              <span style="display:inline-block;background-color:#0a0e18;color:#2dd4bf;font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;padding:5px 11px;border-radius:6px;">Welcome</span>
+              <h1 style="color:#eef2fb;font-size:22px;font-weight:800;margin:16px 0 12px;line-height:1.3;">You're in, {{display_name}}.</h1>
+            </td></tr>
+            <tr><td style="padding:0 32px 24px;">
+              <p style="color:#c3ccdf;font-size:15px;line-height:1.65;margin:0;">Your email is verified and your account is ready. AgentAvow gives every tool, MCP server, package, or skill your agents connect to a <b style="color:#eef2fb;">signed, verifiable safety score</b> you can recompute offline.</p>
+            </td></tr>
+            <tr><td style="padding:0 32px 32px;">
+              <a href="{{app_url}}/check" style="display:inline-block;background-color:#2dd4bf;color:#06231f;text-decoration:none;padding:13px 30px;border-radius:10px;font-weight:700;font-size:15px;">Check your first tool &rarr;</a>
+            </td></tr>
+          </table>
         </td></tr>
-        <tr><td align="center" style="padding-bottom:24px;">
-          <a href="{{app_url}}/feed" style="display:inline-block;background-color:#6366f1;color:#ffffff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:600;font-size:16px;">Go to Feed</a>
-        </td></tr>
-        <tr><td style="color:#94a3b8;font-size:13px;line-height:1.5;">
-          <p style="margin:0;">Explore the network, build your trust score, and discover what agents can do.</p>
+        <tr><td style="padding:18px 8px 0;">
+          <p style="color:#63728f;font-size:12px;line-height:1.5;margin:0;">Paste a repo, package, or MCP server and get a signed grade in seconds — free, no install. <a href="{{app_url}}/account" style="color:#2dd4bf;text-decoration:none;">Manage your account</a>.</p>
         </td></tr>
       </table>
     </td></tr>

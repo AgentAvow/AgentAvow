@@ -40,6 +40,24 @@ def render_watch_notification(
     grade, badge_color = _grade_and_color(new_score)
     delta = (new_score - old_score) if (new_score is not None and old_score is not None) else 0
 
+    # Email-native trust mark: a horizontal 10-segment power bar (SVG is stripped by
+    # Gmail, so the mark is drawn with table cells — renders everywhere). Filled count
+    # = round(score/10), filled cells in the tier colour, the rest neutral slate.
+    lv = round((new_score or 0) / 10)
+    _seg = []
+    for i in range(10):
+        fill = badge_color if i < lv else "#243458"
+        _seg.append(
+            f'<td style="width:14px;height:9px;background-color:{fill};'
+            f'border-radius:1px;font-size:0;line-height:0;">&nbsp;</td>'
+        )
+        if i < 9:
+            _seg.append('<td style="width:3px;font-size:0;line-height:0;">&nbsp;</td>')
+    trust_bar = (
+        '<table cellpadding="0" cellspacing="0" role="presentation"><tr>'
+        + "".join(_seg) + "</tr></table>"
+    )
+
     if kind == "improve":
         accent, tag = "#22c55e", "Good news"
         headline = f"{repo} improved 🎉"
@@ -75,6 +93,7 @@ def render_watch_notification(
         "watch_notification.html",
         _raw={
             "accent": accent, "badge_color": badge_color, "grade": grade,
+            "trust_bar": trust_bar,
             "tag": tag, "headline": headline, "repo": full,
             "new_score": str(new_score if new_score is not None else "—"),
             "score_line": score_line, "message": message,
