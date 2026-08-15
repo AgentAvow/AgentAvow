@@ -127,6 +127,7 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
 
 const NAV = [
   ['/rebrand/browse', 'Browse'],
+  ['/rebrand/index', 'The Index'],
   ['/rebrand/submit', 'List your tool'],
   ['/rebrand/badge', 'For developers'],
   ['/rebrand/how-it-works', 'How it works'],

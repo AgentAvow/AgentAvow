@@ -1207,6 +1207,14 @@ export default function RebrandCheck() {
     if (!name) return <Hero />
     return <PackageResult surface={params.surface.toLowerCase()} name={name} />
   }
+  // A /check/{surface}/{name} URL where the "owner" is actually a package registry
+  // (npm/pypi/…) is a package coordinate, not a GitHub repo — render the native package
+  // scan so it artifact-scans and shows registry downloads (not github checks/watchers).
+  // Scoped names (@scope/pkg) keep using /check/pkg/:surface/*.
+  const PKG_SURFACES = ['npm', 'pypi', 'crates', 'huggingface', 'docker']
+  if (params.owner && params.repo && PKG_SURFACES.includes(params.owner.toLowerCase())) {
+    return <PackageResult surface={params.owner.toLowerCase()} name={params.repo} />
+  }
   const { owner, repo } = params
   // A private scan hands its result here via router state so the owner gets the
   // full detailed report on the real score page (a private repo can't be
