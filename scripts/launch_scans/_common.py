@@ -135,5 +135,9 @@ def summarize_scan_result(result: Any) -> dict:
         "has_license": getattr(result, "has_license", False),
         "has_tests": getattr(result, "has_tests", False),
         "is_mcp_server": getattr(result, "is_mcp_server", False),
+        # Repo stars — the scanner already fetches these; persist so the catalog has an
+        # adoption signal for the static corpus (otherwise adoption only shows for
+        # community scans and is blank across most of Browse).
+        "stars": getattr(result, "stars", None),
         "scan_error": getattr(result, "error", None),
     }

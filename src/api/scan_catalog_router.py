@@ -175,6 +175,9 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
             findings_count=raw.get("findings_count"),
             primary_language=raw.get("primary_language"),
             scan_error=oc_err,
+            adoption_count=raw.get("adoption_count") or raw.get("stars"),
+            adoption_unit=raw.get("adoption_unit") or ("stars" if raw.get("stars") else None),
+            adoption_score=raw.get("adoption_score"),
         )
     # mcp / npm / pypi all share repo-scan shape
     err = raw.get("scan_error")
@@ -195,6 +198,12 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
         is_mcp_server=raw.get("is_mcp_server"),
         scan_error=err,
         skipped=raw.get("skipped"),
+        # Adoption signal: prefer a stored adoption_count (community rows), else fall
+        # back to repo stars the scanner captured, so Browse shows adoption for the
+        # static corpus too (was blank for everything but community scans).
+        adoption_count=raw.get("adoption_count") or raw.get("stars"),
+        adoption_unit=raw.get("adoption_unit") or ("stars" if raw.get("stars") else None),
+        adoption_score=raw.get("adoption_score"),
     )
 
 

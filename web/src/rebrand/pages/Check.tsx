@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, TrustPill } from '../components/TrustMark'
+import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
@@ -116,8 +116,8 @@ function ClaimedBadge({ surface, owner = '', repo }: { surface: string; owner?: 
 /** Adoption as a co-equal RING for the non-GitHub views (was only a small pill). Big
  * number + unit; a dashed muted ring when there's no adoption signal (e.g. a live MCP
  * endpoint, or a brand-new package) so it never fabricates reliance. */
-function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo }: {
-  trustScore: number; trustLabel: string; surface: string; owner?: string; repo: string
+function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified = false }: {
+  trustScore: number; trustLabel: string; surface: string; owner?: string; repo: string; certified?: boolean
 }) {
   const t = getTrustTier(trustScore)
   const { data } = useQuery({
@@ -136,8 +136,8 @@ function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo }: {
         <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
         <div className="relative grid grid-cols-2">
           <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-            <div className="min-h-[132px] flex items-center justify-center"><TrustBar score={trustScore} /></div>
-            <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>{trustLabel}</div>
+            <div className="min-h-[132px] flex items-center justify-center">{certified ? <CertifiedMark score={trustScore} /> : <TrustBar score={trustScore} />}</div>
+            <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: certified ? undefined : t.color }}>{trustLabel}</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
           </div>
           <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
@@ -839,7 +839,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="openclaw" owner={owner} repo={repo} />
+          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="openclaw" owner={owner} repo={repo} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
 
@@ -975,7 +975,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="mcp" owner="mcp" repo={endpoint} />
+          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="mcp" owner="mcp" repo={endpoint} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
 
@@ -1138,7 +1138,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Attestation Trust" surface={surface} repo={name} />
+          <ScoreDuo trustScore={scan.trust_score} trustLabel="Attestation Trust" surface={surface} repo={name} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
 
@@ -1338,7 +1338,7 @@ function Result({ owner, repo, privateResult }: {
             <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
             <div className="relative grid grid-cols-2">
               <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-                <div className="min-h-[132px] flex items-center justify-center"><TrustBar score={scan.trust_score} /></div>
+                <div className="min-h-[132px] flex items-center justify-center">{(scan as { certified?: { eligible?: boolean } }).certified?.eligible ? <CertifiedMark score={scan.trust_score} /> : <TrustBar score={scan.trust_score} />}</div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
               </div>
