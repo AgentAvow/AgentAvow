@@ -208,7 +208,7 @@ export default function RebrandBadge() {
       <div className="grid md:grid-cols-3 gap-3.5 mt-4">
         {([
           ['GitHub Action', 'Gate PRs on a minimum score. Posts the report as a check comment.', 'min_score: 60', 'https://github.com/AgentAvow/trust-scan-action'],
-          ['Python SDK / CLI', 'Programmatic scans + attestation verification in your pipeline.', 'agentavow scan owner/repo', '/rebrand/docs'],
+          ['Python SDK / CLI', 'Programmatic scans + attestation verification in your pipeline.', 'agentavow scan owner/repo', 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk'],
           ['REST API', 'The same signed verdicts, offline-verifiable against our JWKS.', 'GET /public/scan/{owner}/{repo}', '/api/v1/redoc'],
         ] as [string, string, string, string][]).map(([h, p, code, href]) => (
           <a key={h} href={rp(href)} target={href.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" className="glass card-hover rounded-xl p-5 block">

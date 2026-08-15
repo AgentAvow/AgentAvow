@@ -74,7 +74,7 @@ the proof under it.
 ## Standards
 
 The attestation format is on the record as conformance work in `draft-etcheverry-action-ref` (IETF) and the
-CTEF envelope. See the [standards docs](./ctef-v0.3.3.md) for the canonical spec.
+CTEF envelope. See the [standards docs](https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards) for the canonical spec.
 
 ## Next
 

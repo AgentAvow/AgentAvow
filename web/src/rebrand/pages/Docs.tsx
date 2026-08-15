@@ -80,7 +80,22 @@ export default function RebrandDocs() {
       </aside>
 
       <article className={`min-w-0 ${PROSE}`}>
-        <Markdown>{doc.body}</Markdown>
+        <Markdown components={{
+          a: ({ href, children }) => {
+            const h = href || ''
+            // In-doc cross-link (./slug.md): switch the active doc client-side instead of
+            // navigating to a .md URL that would hit the SPA catch-all and land on Home.
+            const m = h.match(/\.\/([\w-]+)\.md(?:#.*)?$/)
+            if (m && DOCS.some((d) => d.slug === m[1])) {
+              return (
+                <a href={`#${m[1]}`} className="text-primary-light hover:underline cursor-pointer"
+                  onClick={(e) => { e.preventDefault(); setActive(m[1]); window.scrollTo({ top: 0 }) }}>{children}</a>
+              )
+            }
+            const external = /^https?:/.test(h)
+            return <a href={h} className="text-primary-light hover:underline" {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{children}</a>
+          },
+        }}>{doc.body}</Markdown>
       </article>
     </div>
   )

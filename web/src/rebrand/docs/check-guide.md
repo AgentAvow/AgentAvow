@@ -61,7 +61,7 @@ Each finding lists a **severity** (critical / high / medium / low), the category
 A finding is evidence, not an opinion — it points at the exact line or manifest entry. This is the "review"
 of a tool: recomputable scan evidence, not a star rating.
 
-False positive? See [Scan false positives & suppression](./security-scan-false-positives.md).
+False positive? See [how scoring works](./how-grading-works.md).
 
 ## Shareable results & the signature
 
