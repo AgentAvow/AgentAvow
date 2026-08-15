@@ -824,7 +824,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
+          <div className="relative px-7 py-6 grid grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
               <TrustBar score={scan.trust_score} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Capability Trust</div>
@@ -967,7 +967,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
+          <div className="relative px-7 py-6 grid grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
               <TrustBar score={scan.trust_score} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Capability Trust</div>
@@ -1137,7 +1137,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
             <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
-          <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
+          <div className="relative px-7 py-6 grid grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
               <TrustBar score={scan.trust_score} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Attestation Trust</div>
@@ -1342,13 +1342,13 @@ function Result({ owner, repo, privateResult }: {
         <div className="relative px-7 py-6">
           <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
             <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
-            <div className="relative grid grid-cols-1 sm:grid-cols-2">
+            <div className="relative grid grid-cols-2">
               <div className="p-6 pb-5 text-center flex flex-col items-center">
                 <div className="min-h-[132px] flex items-center justify-center"><TrustBar score={scan.trust_score} /></div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
               </div>
-              <div className="p-6 pb-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
+              <div className="p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
                 <div className="min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} /></div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption ? adoption.sub : 'no adoption signal yet'}</div>

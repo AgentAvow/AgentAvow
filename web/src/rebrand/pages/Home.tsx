@@ -444,7 +444,7 @@ export default function RebrandHome() {
                   <span className="px-2.5 py-1.5 font-bold text-[#7fe9d9] bg-[#233047]">★ 490M</span>
                 </span>
               </div>
-              <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text-muted overflow-x-auto">
+              <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">
                 [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)
               </div>
             </div>

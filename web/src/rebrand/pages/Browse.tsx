@@ -285,7 +285,7 @@ export default function RebrandBrowse() {
           <div className="flex items-center gap-2">
             <form
               onSubmit={(e) => { e.preventDefault(); applySearch() }}
-              className="flex-1 sm:flex-none sm:w-[280px] flex items-center gap-2 rounded-full border border-border bg-surface pl-3.5 pr-1.5 py-1.5"
+              className="flex-1 min-w-0 sm:flex-none sm:w-[280px] flex items-center gap-2 rounded-full border border-border bg-surface pl-3.5 pr-1.5 py-1.5"
             >
               <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-text-muted shrink-0">
                 <path d="M11 19a8 8 0 1 1 5.7-2.3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -395,11 +395,11 @@ export default function RebrandBrowse() {
         {isError ? (
           <div className="glass rounded-xl p-8 text-center text-text-muted text-[14px]">Couldn't load the catalog right now. Try again in a moment.</div>
         ) : isLoading && rows.length === 0 ? (
-          <div className="grid md:grid-cols-3 gap-3.5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
             {Array.from({ length: 9 }).map((_, i) => <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[128px]" />)}
           </div>
         ) : (
-          <RevealStagger key={`${surface}-${page}`} className="grid md:grid-cols-3 gap-3.5" stagger={0.035}>
+          <RevealStagger key={`${surface}-${page}`} className="grid grid-cols-1 md:grid-cols-3 gap-3.5" stagger={0.035}>
             {rows.map((row) => <ToolCard key={row.full_name || row.name} row={row} />)}
           </RevealStagger>
         )}
