@@ -71,10 +71,10 @@ def render_card_svg(
     tword = _trust_word(s) if has_score else "—"
 
     # ── trust segmented bar (left) ───────────────────────────────────────────
-    total, seg_w, seg_h, gap = 10, 13, 4, 2
+    total, seg_w, seg_h, gap = 10, 15, 4.5, 2.5
     lv = round(s / 10) if has_score else 0
     bar_x = 90
-    bottom = 120
+    bottom = 122
     cells = ""
     for i in range(total):
         y = bottom - i * (seg_h + gap) - seg_h
@@ -83,7 +83,7 @@ def render_card_svg(
 
     # ── adoption VU needle (right) ───────────────────────────────────────────
     has_ad = adoption_display is not None and adoption_pct > 0
-    ncx, ncy, nr = 268, 120, 46
+    ncx, ncy, nr = 268, 122, 50
     a0, a1 = 180, 360
     ang = a0 + (adoption_pct / 100) * 180
     ndl = c["ndl"]
@@ -117,7 +117,7 @@ def render_card_svg(
     <text x="24" y="13" fill="{c['text']}" font-size="13" font-weight="700">AgentAvow</text>
     <circle cx="106" cy="9" r="3" fill="#2dd4bf"/>
   </g>
-  <text x="{card_w - 20}" y="28" text-anchor="end" fill="{c['muted']}" font-size="11" font-family="ui-monospace,SF Mono,Menlo,monospace">{coordinate}</text>
+  <text x="{card_w - 20}" y="28" text-anchor="end" fill="{c['muted']}" font-size="12" font-family="ui-monospace,SF Mono,Menlo,monospace">{coordinate}</text>
   <!-- trust -->
   <text x="{bar_x}" y="52" text-anchor="middle" fill="{c['faint']}" font-size="8.5" font-weight="700" letter-spacing="1.4" font-family="ui-monospace,monospace">TRUST</text>
   {cells}
@@ -128,6 +128,6 @@ def render_card_svg(
   <!-- adoption -->
   <text x="{ncx}" y="52" text-anchor="middle" fill="{c['faint']}" font-size="8.5" font-weight="700" letter-spacing="1.4" font-family="ui-monospace,monospace">ADOPTION · REACH</text>
   {fill_arc}{rest_arc}{ticks}{needle}
-  <text x="{ncx}" y="138" text-anchor="middle" fill="{ndl}" font-size="18" font-weight="800">{ad_num}</text>
+  <text x="{ncx}" y="138" text-anchor="middle" fill="{c['text'] if has_ad else c['faint']}" font-size="21" font-weight="800">{ad_num}</text>
   <text x="{ncx}" y="150" text-anchor="middle" fill="{c['g2'] if has_ad else c['faint']}" font-size="9.5" font-weight="700">{ad_word}</text>
 </svg>'''

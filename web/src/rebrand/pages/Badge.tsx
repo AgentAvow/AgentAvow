@@ -1,7 +1,39 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useRotatingPlaceholder } from '../lib/hooks'
+
+declare global {
+  interface Window { AgentAvow?: { render: (root?: Element | Document) => void } }
+}
+
+/**
+ * Live preview that dogfoods the real hosted widget.js — loads the script once,
+ * then re-renders a [data-agentavow-tool] target whenever the slug/theme changes.
+ */
+function WidgetPreview({ slug, theme }: { slug: string; theme: 'dark' | 'light' }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    const existing = document.querySelector<HTMLScriptElement>('script[data-agentavow-widget]')
+    if (!existing) {
+      const s = document.createElement('script')
+      s.src = `${origin}/widget.js`
+      s.async = true
+      s.setAttribute('data-agentavow-widget', '1')
+      s.onload = () => window.AgentAvow?.render(ref.current || undefined)
+      document.body.appendChild(s)
+    } else if (window.AgentAvow) {
+      window.AgentAvow.render(ref.current || undefined)
+    }
+  }, [slug, theme])
+  // key forces a fresh, unmounted target element whenever slug/theme changes
+  return (
+    <div ref={ref}>
+      <div key={`${slug}:${theme}`} data-agentavow-tool={slug} data-theme={theme} />
+    </div>
+  )
+}
 
 const REPO_HINTS = ['owner/repo', 'your-org/mcp-server', 'your-agent-toolkit', 'your-python-package']
 
@@ -23,6 +55,7 @@ const DEV_RESOURCES: [string, string, string][] = [
 export default function RebrandBadge() {
   const [repo, setRepo] = useState('')
   const [copied, setCopied] = useState(false)
+  const [copiedW, setCopiedW] = useState(false)
   // Trust, or Trust + Adoption (combined) — adoption never travels alone.
   const [variant, setVariant] = useState<'trust' | 'combined'>('trust')
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -48,6 +81,13 @@ export default function RebrandBadge() {
 
   const scan = () => navigate(owner && name ? rp(`/rebrand/check/${owner}/${name}`) : rp('/rebrand/check'))
   const hint = useRotatingPlaceholder(REPO_HINTS)
+
+  const widgetSnippet = `<script src="${origin}/widget.js"\n        data-tool="${slug}"${theme === 'light' ? '\n        data-theme="light"' : ''}></script>`
+  const copyWidget = () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(widgetSnippet)
+    setCopiedW(true)
+    setTimeout(() => setCopiedW(false), 1400)
+  }
 
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-14">
@@ -129,6 +169,38 @@ export default function RebrandBadge() {
         <p className="mt-3 font-mono text-[11.5px] text-text-muted/70">
           regenerates on every view — never goes stale in your README
         </p>
+      </div>
+
+      {/* live interactive widget — the card + in-browser verify, one <script> tag */}
+      <div className="glass rounded-2xl p-6 mt-6 max-w-[720px]">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <h2 className="text-lg font-bold">Or embed the live widget</h2>
+          <span className="font-mono text-[11px] text-text-muted">card + offline verify · one script tag</span>
+        </div>
+        <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[58ch]">
+          The full dual-mark card, linked to the report — plus a <strong className="text-text">Verify offline</strong> button
+          that recomputes the Ed25519 signature in your reader's own browser. For docs sites, landing pages, and dashboards.
+        </p>
+        <div className="mt-4 grid sm:grid-cols-2 gap-5 items-start">
+          <div>
+            <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Live preview</div>
+            {owner && name
+              ? <WidgetPreview slug={slug} theme={theme} />
+              : <p className="text-text-muted text-[13px] italic">Enter a repo above to preview the live widget.</p>}
+          </div>
+          <div>
+            <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Embed</div>
+            <div className="relative">
+              <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto whitespace-pre-wrap break-all">{widgetSnippet}</pre>
+              <button onClick={copyWidget} className="absolute top-2 right-2 font-mono text-[11px] px-2 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">
+                {copiedW ? 'copied ✓' : 'copy'}
+              </button>
+            </div>
+            <p className="mt-3 font-mono text-[11px] text-text-muted/70">
+              no framework · no tracking · CORS-open endpoints only
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* CI + SDK — each links to its home */}

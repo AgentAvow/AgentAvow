@@ -94,8 +94,8 @@ export function AdoptionNeedle({ count, unit, scorePct, tier }: { count?: number
           <circle cx={cx} cy={cy} r={5.5} fill="currentColor" opacity={0.3} />
         )}
       </svg>
-      <div className="-mt-1 text-[30px] font-extrabold leading-none tabular-nums">
-        {has ? <span style={GRAD_TEXT}>{compactNum(c)}</span> : <span className="text-text-muted/70">New</span>}
+      <div className="-mt-1 text-[30px] font-extrabold leading-none tabular-nums text-text">
+        {has ? compactNum(c) : <span className="text-text-muted/70">New</span>}
         {has && unit && <span className="ml-1.5 text-[13px] font-mono text-text-muted align-baseline">{unit}</span>}
       </div>
       <div className="mt-0.5 text-[12px] font-bold">

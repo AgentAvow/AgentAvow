@@ -12,6 +12,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 from datetime import datetime, timedelta, timezone
@@ -1732,6 +1733,43 @@ async def scan_card(
     return Response(
         content=svg,
         media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=300, s-maxage=3600",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.get(
+    "/{owner}/{repo}/verdict.json",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+)
+async def scan_verdict(
+    owner: str,
+    repo: str,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """The minimal CORS-open verdict for the embeddable widget's offline verify:
+    the signed JWS attestation + coordinate + score + report link. The widget fetches
+    this cross-origin, then recomputes the Ed25519 signature in-browser against the
+    public JWKS — so the check runs on the visitor's machine, not ours."""
+    full_name = f"{owner}/{repo}"
+    try:
+        scan = await public_scan(owner=owner, repo=repo, force=False, db=db)
+        body = {
+            "coordinate": full_name,
+            "score": scan.security_score,
+            "grade": scan.grade,
+            "jws": scan.jws,
+            "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
+            "link": f"https://agentavow.com/check/{full_name}",
+        }
+    except Exception:
+        body = {"coordinate": full_name, "jws": None, "error": "not_scanned"}
+    return Response(
+        content=json.dumps(body),
+        media_type="application/json",
         headers={
             "Cache-Control": "public, max-age=300, s-maxage=3600",
             "Access-Control-Allow-Origin": "*",
