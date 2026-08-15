@@ -1190,6 +1190,7 @@ async def public_scan(
                 jws=jws,
                 tool_manifest_digest=cached.get("tool_manifest_digest"),
                 tool_digests=cached.get("tool_digests", {}),
+                declared_scope=cached.get("declared_scope", {}),
                 entity_trust=entity_trust,
                 trust_envelope=trust_envelope,
             )
@@ -1286,6 +1287,7 @@ async def public_scan(
                 jws=jws,
                 tool_manifest_digest=stale.get("tool_manifest_digest"),
                 tool_digests=stale.get("tool_digests", {}),
+                declared_scope=stale.get("declared_scope", {}),
                 entity_trust=entity_trust,
                 trust_envelope=trust_envelope,
             )
@@ -1368,6 +1370,7 @@ async def public_scan(
         tool_manifest_digest=data.get("tool_manifest_digest"),
         tool_digests=data.get("tool_digests", {}),
         tool_drift=drift,
+        declared_scope=data.get("declared_scope", {}),
         entity_trust=entity_trust,
         trust_envelope=trust_envelope,
     )
