@@ -71,9 +71,12 @@ function statFromSummary(s?: CatalogSummary): { flagged: number; scanned: number
 
 export default function RebrandTrustIndex() {
   // Top-scored per surface + most-adopted + certified, from the live catalog.
-  const mcp = useBoard({ surface: 'mcp', sort: 'score-desc', limit: 10 }, 'mcp')
-  const npm = useBoard({ surface: 'npm', sort: 'score-desc', limit: 10 }, 'npm')
-  const pypi = useBoard({ surface: 'pypi', sort: 'score-desc', limit: 10 }, 'pypi')
+  // `severity: 'clean'` keeps the "Safest" boards honest — only tools with no critical
+  // or high finding rank here, regardless of any stale pre-recalibration score still in
+  // the corpus (the re-score is working through it in the background).
+  const mcp = useBoard({ surface: 'mcp', sort: 'score-desc', severity: 'clean', limit: 10 }, 'mcp')
+  const npm = useBoard({ surface: 'npm', sort: 'score-desc', severity: 'clean', limit: 10 }, 'npm')
+  const pypi = useBoard({ surface: 'pypi', sort: 'score-desc', severity: 'clean', limit: 10 }, 'pypi')
   const relied = useBoard({ sort: 'adoption', limit: 10 }, 'adoption')
   const certified = useBoard({ grade: 'certified', sort: 'score-desc', limit: 10 }, 'certified')
 
