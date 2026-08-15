@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, badgeUrl, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustPill } from '../components/TrustMark'
+import { TrustBar, AdoptionNeedle, TrustPill } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
@@ -112,41 +112,6 @@ function ClaimedBadge({ surface, owner = '', repo }: { surface: string; owner?: 
   )
 }
 
-/** Co-equal score ring — used for BOTH Attestation Trust and Adoption so the two
- * scores read as peers. Draws to `fill` (0–1) when given, a full ring otherwise;
- * dashed + muted when there's no data (e.g. a just-launched tool with no adoption). */
-// Pass `score` for the Trust hero — it derives the number, tier word, colour and
-// fill from the dual-mark system. Or pass explicit center/sub/hex for other axes
-// (e.g. the adoption ring, which is not a 0–100 trust score).
-function ScoreRing({ score, center, sub, hex, fill, dashed }: { score?: number; center?: string; sub?: string; hex?: string; fill?: number; dashed?: boolean }) {
-  const reduce = useReducedMotion()
-  const t = score != null ? getTrustTier(score) : null
-  const _center = center ?? (score != null ? String(score) : '')
-  const _sub = sub ?? t?.name
-  const _hex = hex ?? t?.color ?? '#94a3b8'
-  const _fill = fill ?? (score != null ? score / 100 : undefined)
-  return (
-    <div className="relative w-[128px] h-[128px] shrink-0 mx-auto" style={{ color: _hex }}>
-      <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-        <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" opacity="0.14" />
-        {dashed ? (
-          <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" strokeLinecap="round" strokeDasharray="2 12" opacity="0.55" />
-        ) : (
-          <motion.circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" strokeWidth="9" strokeLinecap="round"
-            pathLength={1} initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: _fill == null ? 1 : Math.max(_fill, 0.02) }}
-            transition={{ duration: 1.2, ease: 'easeOut', delay: 0.15 }} />
-        )}
-      </svg>
-      <div className="absolute inset-0 grid place-items-center">
-        <div className="text-center leading-none">
-          <div className="text-[38px] font-extrabold" style={{ color: _hex }}>{_center}</div>
-          {_sub && <div className="mt-1 text-[12px] font-mono text-text-muted">{_sub}</div>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /** Adoption as a co-equal RING for the non-GitHub views (was only a small pill). Big
  * number + unit; a dashed muted ring when there's no adoption signal (e.g. a live MCP
  * endpoint, or a brand-new package) so it never fabricates reliance. */
@@ -161,15 +126,12 @@ function AdoptionRing({ surface, owner = '', repo }: { surface: string; owner?: 
   })
   const h = data?.headline
   const has = !!(h && h.count && h.count > 0)
-  const compact = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n))
-  const AD = '#2DD4BF'  // adoption = brand teal, never a trust/safety colour
   return (
     <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
-      <ScoreRing
-        center={has ? compact(h!.count) : 'New'} sub={has ? h!.unit : undefined} hex={AD}
-        fill={has ? Math.max((data?.adoption_score_100 ?? 50) / 100, 0.15) : undefined} dashed={!has}
-      />
-      <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: has ? AD : 'var(--color-text-muted)' }}>Adoption</div>
+      <div className="min-h-[128px] flex items-center justify-center">
+        <AdoptionNeedle count={has ? h!.count : 0} unit={has ? h!.unit : undefined} />
+      </div>
+      <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide gradient-text">Adoption</div>
       <div className="mt-0.5 text-[12px] text-text-muted">{has ? 'independent reliance' : 'no adoption signal yet'}</div>
     </div>
   )
@@ -817,7 +779,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
-              <ScoreRing score={scan.trust_score} />
+              <TrustBar score={scan.trust_score} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Capability Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
@@ -960,7 +922,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
-              <ScoreRing score={scan.trust_score} />
+              <TrustBar score={scan.trust_score} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Capability Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
@@ -1130,7 +1092,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
           </div>
           <div className="relative px-7 py-6 grid grid-cols-1 sm:grid-cols-2 gap-3 place-items-center">
             <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
-              <ScoreRing score={scan.trust_score} />
+              <TrustBar score={scan.trust_score} />
               <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Attestation Trust</div>
               <div className="mt-0.5 text-[12px] text-text-muted">Signed · verifiable offline</div>
             </div>
@@ -1292,7 +1254,6 @@ function Result({ owner, repo, privateResult }: {
   const adCount = adStars || adChecks
   const adUnit = adStars ? 'stars' : 'checks'
   const compact = (n: number) => (n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n))
-  const ADOPTION_HEX = '#F59E0B'
   // Log-scaled traction bar (1 → 100k maps 0 → 100%); a visual, the real count is shown above it.
   const adoptionPct = adCount ? Math.min(100, Math.round((Math.log10(adCount + 1) / 5) * 100)) : 0
 
@@ -1329,22 +1290,15 @@ function Result({ owner, repo, privateResult }: {
         {/* two co-equal scores — Attestation Trust + Adoption */}
         <div className="relative px-7 py-6 grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center">
-            <ScoreRing score={scan.trust_score} />
+            <TrustBar score={scan.trust_score} />
             <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Attestation Trust</div>
             <div className="mt-0.5 text-[12px] text-text-muted">Signed scanner grade · verifiable now</div>
           </div>
           <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center flex flex-col">
-            <div className="min-h-[128px] flex flex-col items-center justify-center gap-4 w-full">
-              <div className="leading-none">
-                <span className="text-[44px] font-extrabold" style={{ color: adCount ? ADOPTION_HEX : 'var(--color-text-muted)' }}>{adCount ? compact(adCount) : 'New'}</span>
-                {adCount ? <span className="ml-1.5 text-[15px] font-mono text-text-muted">{adUnit}</span> : null}
-              </div>
-              <div className="w-full max-w-[190px] h-2.5 rounded-full bg-surface-hover overflow-hidden" role="progressbar" aria-valuenow={adoptionPct} aria-valuemin={0} aria-valuemax={100}>
-                <motion.div className="h-full rounded-full" style={{ background: `linear-gradient(90deg, ${ADOPTION_HEX}, #FBBF24)` }}
-                  initial={{ width: 0 }} animate={{ width: `${adoptionPct}%` }} transition={{ duration: 1.1, ease: 'easeOut', delay: 0.2 }} />
-              </div>
+            <div className="min-h-[128px] flex items-center justify-center w-full">
+              <AdoptionNeedle count={adCount} unit={adUnit} />
             </div>
-            <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: adCount ? ADOPTION_HEX : 'var(--color-text-muted)' }}>Adoption</div>
+            <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide gradient-text">Adoption</div>
             <div className="mt-0.5 text-[12px] text-text-muted">{adoption ? adoption.sub : 'Just launched — no adoption signal yet'}</div>
           </div>
         </div>

@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustPill } from '../components/TrustMark'
+import { TrustMini, AdoptionMini } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { DualScore } from '../components/DualScore'
@@ -387,9 +387,12 @@ export default function RebrandHome() {
                     <Link key={display} to={rp(repoPath ? `/rebrand/check/${repoPath}` : '/rebrand/browse')} className="glass card-hover rounded-xl p-[18px] block">
                       <div className="flex items-center justify-between gap-2.5">
                         <span className="font-mono text-[13.5px] break-all">{display}</span>
-                        <TrustPill score={row.trust_score as number} />
+                        <div className="flex items-center gap-3 shrink-0">
+                          <TrustMini score={row.trust_score as number} />
+                          {(row as { adoption_count?: number }).adoption_count ? <AdoptionMini count={(row as { adoption_count?: number }).adoption_count} /> : null}
+                        </div>
                       </div>
-                      <div className="mt-3 text-[12.5px] text-primary-light">Why this grade →</div>
+                      <div className="mt-3 text-[12.5px] text-primary-light">Why this score →</div>
                     </Link>
                   )
                 })

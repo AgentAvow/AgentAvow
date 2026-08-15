@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
-import { TrustPill } from '../components/TrustMark'
+import { TrustMini, AdoptionMini } from '../components/TrustMark'
 
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 
@@ -34,12 +34,6 @@ const SORTS = [
   { key: 'name', label: 'Name (A–Z)' },
 ]
 
-/** Compact a big count for cards: 1.2M / 12.3k / 940. */
-function compactNum(n: number): string {
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
-  return String(n)
-}
 
 const SEVERITIES = [
   { key: '', label: 'All findings' },
@@ -138,29 +132,28 @@ function ToolCard({ row }: { row: CatalogRow }) {
           <span className="font-mono text-[13.5px] break-all">{display}</span>
         </span>
         {row.trust_score != null ? (
-          <TrustPill score={row.trust_score} />
+          <div className="flex items-center gap-3.5 shrink-0">
+            <TrustMini score={row.trust_score} />
+            {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} />}
+          </div>
         ) : (
           <span className="font-mono text-[11px] px-2 py-0.5 rounded-lg shrink-0 text-text-muted bg-surface-hover">unscored</span>
         )}
       </div>
-      {/* category + adoption — the curation/at-a-glance row */}
-      <div className="mt-2 flex items-center gap-2 flex-wrap">
-        {row.category && <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-surface-hover text-text-muted">{row.category}</span>}
-        {row.adoption_count != null && row.adoption_count > 0 && (
-          <span className="font-mono text-[11px] tabular-nums" style={{ color: '#F59E0B' }} title="Adoption — how widely relied upon">
-            📈 {compactNum(row.adoption_count)} {row.adoption_unit || ''}
-          </span>
-        )}
-      </div>
+      {/* category — the curation row */}
+      {row.category && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-surface-hover text-text-muted">{row.category}</span>
+        </div>
+      )}
       {/* status + findings + language — the at-a-glance row Scans had */}
       <div className="mt-2 flex items-center gap-2 flex-wrap">
         <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded ${chip.cls}`}>{chip.label}</span>
         {fnd && <span className="font-mono text-[11px] text-text-muted tabular-nums">{fnd}</span>}
         {row.primary_language && <span className="font-mono text-[11px] text-text-muted">· {row.primary_language}</span>}
-        {row.trust_score != null && <span className="font-mono text-[11px] text-text-muted tabular-nums ml-auto">{row.trust_score}/100</span>}
       </div>
       <button onClick={() => setOpen(!open)} className="mt-3 text-[12.5px] text-primary-light hover:text-primary">
-        {open ? 'Hide' : 'Why this grade'} {open ? '▴' : '▾'}
+        {open ? 'Hide' : 'Why this score'} {open ? '▴' : '▾'}
       </button>
       {open && (
         <ul className="mt-2 pl-4 list-disc text-[12.5px] text-text-muted space-y-1">
