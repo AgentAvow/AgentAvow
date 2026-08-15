@@ -16,8 +16,8 @@ import verifyAttestations from '../docs/verify-attestations.md?raw'
 
 const DOCS = [
   { slug: 'how-grading-works', title: 'How grading works', body: howGradingWorks },
-  { slug: 'gate-on-the-grade', title: 'Gate on the grade', body: gateOnTheGrade },
-  { slug: 'check-guide', title: 'Reading your scan grade', body: checkGuide },
+  { slug: 'gate-on-the-grade', title: 'Gate on the score', body: gateOnTheGrade },
+  { slug: 'check-guide', title: 'Reading your scan score', body: checkGuide },
   { slug: 'trust-badges', title: 'Add a trust badge', body: trustBadges },
   { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations },
 ]

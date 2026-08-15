@@ -10,7 +10,7 @@ import { Reveal, RevealStagger, CountUp } from '../components/motion'
 /**
  * The "Yelp" browse catalog — LIVE from /public/scan-catalog.
  * Sticky category tabs, search, sort, severity. Grades from the shared getGradeInfo.
- * The expander is "Why this grade" (signed evidence), not star reviews.
+ * The expander is "Why this score" (signed evidence), not star reviews.
  * Mines the old /scans page for parity: summary strip, per-card findings/status,
  * result count, and pagination.
  */
@@ -44,11 +44,11 @@ const SEVERITIES = [
 ]
 
 const GRADES = [
-  { key: '', label: 'Any grade' },
-  { key: 'certified', label: '✦ Certified (A+)' },
-  { key: 'A', label: 'A & up' },
-  { key: 'B', label: 'B & up' },
-  { key: 'C', label: 'C & up' },
+  { key: '', label: 'Any score' },
+  { key: 'certified', label: '✦ Certified' },
+  { key: 'A', label: '80+ · Trusted' },
+  { key: 'B', label: '60+ · Standard' },
+  { key: 'C', label: '40+ · Caution' },
 ]
 
 const PAGE_SIZE = 30
@@ -129,7 +129,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
       <div className="flex items-center justify-between gap-2.5">
         <span className="min-w-0 flex items-center gap-2">
           {surfaceBadge && <span className="font-mono text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/12 text-primary-light shrink-0">{surfaceBadge}</span>}
-          <span className="font-mono text-[13.5px] break-all">{display}</span>
+          <span className="font-mono text-[13.5px] truncate min-w-0" title={display}>{display}</span>
         </span>
         {row.trust_score != null ? (
           <div className="flex items-center gap-3.5 shrink-0">
@@ -270,7 +270,7 @@ export default function RebrandBrowse() {
           <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Browse</span>
           <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">Find tools your agent can trust</h1>
           <p className="mt-3 text-text-muted">
-            Repos, npm &amp; PyPI packages, MCP servers, and skills — every listing carries a <span className="text-text">signed safety grade</span> you can recompute, and a one-click <span className="text-text">add to your agent</span>. Not star ratings; cryptographic evidence.{total != null && <> {total.toLocaleString()} graded so far.</>}
+            Repos, npm &amp; PyPI packages, MCP servers, and skills — every listing carries a <span className="text-text">signed safety score</span> you can recompute, and a one-click <span className="text-text">add to your agent</span>. Not star ratings; cryptographic evidence.{total != null && <> {total.toLocaleString()} scored so far.</>}
           </p>
           <p className="mt-2.5 text-[13.5px] text-text-muted">Own one of these? <Link to={rp("/rebrand/tools")} className="text-primary-light hover:text-primary font-medium">Claim it →</Link> to run private scans, get change alerts, and own how it appears.</p>
         </div>
@@ -338,7 +338,7 @@ export default function RebrandBrowse() {
               <h2 className="text-[16px] font-bold">Filters</h2>
               <button onClick={() => setSheetOpen(false)} aria-label="Close" className="text-text-muted text-[22px] leading-none">×</button>
             </div>
-            {[{ label: 'Category', v: category, set: setCategory, opts: CATEGORIES }, { label: 'Grade', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
+            {[{ label: 'Category', v: category, set: setCategory, opts: CATEGORIES }, { label: 'Trust', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
               <div key={f.label} className="mb-5">
                 <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-2">{f.label}</div>
                 <div className="flex flex-wrap gap-2">

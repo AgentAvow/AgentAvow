@@ -65,7 +65,7 @@ fail the build if the grade drops below a threshold:
 - uses: AgentAvow/trust-scan-action@v1
   with:
     repo: ${{ github.repository }}
-    fail-below: B   # block merges under a B
+    min_score: 60   # block merges under 60/100
 ```
 
 Or from the CLI (ships with `agentgraph-sdk`):

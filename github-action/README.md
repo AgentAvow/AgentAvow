@@ -1,6 +1,6 @@
-# AgentGraph Trust Scan - GitHub Action
+# AgentAvow Trust Scan - GitHub Action
 
-Check the security posture of any public repository using the [AgentGraph](https://agentgraph.co) trust infrastructure. Every pull request gets an automated trust scan comment with a letter grade, category breakdown, and actionable findings.
+Check the security posture of any public repository using the [AgentAvow](https://agentavow.com) trust infrastructure. Every pull request gets an automated trust scan comment with a 0–100 trust score, category breakdown, and actionable findings.
 
 No API key required. Works on any public repository.
 
@@ -9,7 +9,7 @@ No API key required. Works on any public repository.
 Add this to `.github/workflows/trust-scan.yml` in your repository:
 
 ```yaml
-name: AgentGraph Trust Scan
+name: AgentAvow Trust Scan
 
 on:
   pull_request:
@@ -62,7 +62,7 @@ Every scanned PR receives a comment like this:
 
 ---
 
-## AgentGraph Trust Scan
+## AgentAvow Trust Scan
 
 **Grade: B (67/100)** -- Use with Caution
 
@@ -75,7 +75,7 @@ Every scanned PR receives a comment like this:
 
 **Findings:** 0 critical, 2 high, 5 medium, 3 low
 
-[View full report](https://agentgraph.co/check/owner/repo) | [Add badge to README](https://agentgraph.co/api/v1/public/scan/owner/repo/badge)
+[View full report](https://agentavow.com/check/owner/repo) | [Add badge to README](https://agentavow.com/api/v1/public/scan/owner/repo/badge)
 
 ---
 
@@ -86,14 +86,14 @@ The comment is updated on each push to the PR (previous comments are replaced, n
 Include a live trust badge in your README:
 
 ```markdown
-[![AgentGraph Trust Score](https://agentgraph.co/api/v1/public/scan/OWNER/REPO/badge)](https://agentgraph.co/check/OWNER/REPO)
+[![AgentAvow Trust Score](https://agentavow.com/api/v1/public/scan/OWNER/REPO/badge)](https://agentavow.com/check/OWNER/REPO)
 ```
 
 Replace `OWNER` and `REPO` with your GitHub org/user and repository name.
 
 ## Full report
 
-Click "View full report" in the PR comment (or visit `https://agentgraph.co/check/OWNER/REPO` directly) to see:
+Click "View full report" in the PR comment (or visit `https://agentavow.com/check/OWNER/REPO` directly) to see:
 
 - Detailed category-by-category breakdown
 - Individual findings with file paths and remediation guidance
@@ -102,8 +102,8 @@ Click "View full report" in the PR comment (or visit `https://agentgraph.co/chec
 
 ## How it works
 
-1. The action calls the AgentGraph public scan API (`GET /api/v1/public/scan/{owner}/{repo}`)
-2. AgentGraph analyzes the repository for security and trust signals across multiple categories
+1. The action calls the AgentAvow public scan API (`GET /api/v1/public/scan/{owner}/{repo}`)
+2. AgentAvow analyzes the repository for security and trust signals across multiple categories
 3. Results are posted as a PR comment and written to the GitHub Actions job summary
 4. Optionally, the workflow fails if the score is below your configured threshold
 
@@ -117,6 +117,6 @@ No source code is uploaded. The scan uses publicly available repository metadata
 
 ## Links
 
-- [AgentGraph](https://agentgraph.co) -- Trust infrastructure for AI agents and humans
-- [Check any repo](https://agentgraph.co/check) -- Free security posture check
-- [AgentGraph MCP Server](https://github.com/agentgraph-co/agentgraph/tree/main/sdk/mcp-server) -- Use trust data in your AI workflows
+- [AgentAvow](https://agentavow.com) -- Trust infrastructure for AI agents and humans
+- [Check any repo](https://agentavow.com/check) -- Free security posture check
+- [AgentAvow MCP Server](https://github.com/agentgraph-co/agentgraph/tree/main/sdk/mcp-server) -- Use trust data in your AI workflows

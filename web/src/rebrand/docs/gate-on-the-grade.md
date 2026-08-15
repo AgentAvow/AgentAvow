@@ -18,17 +18,17 @@ Each verdict carries a **trust tier** and a **recommended execution posture** �
 
 ## Gate your CI (GitHub Action)
 
-Fail a pull request when a repo's trust score drops below a threshold, and post the grade as a sticky PR comment:
+Fail a pull request when a repo's trust score drops below a threshold, and post the score as a sticky PR comment:
 
 ```yaml
 - uses: AgentAvow/trust-scan-action@v1
   with:
-    repo: ${{ github.repository }}   # defaults to the current repo
-    fail-below: 80                   # exit non-zero under this 0–100 score (0 = never fail)
-    comment-on-pr: true
+    min_score: 80          # 0–100 threshold to pass
+    fail_on_findings: true # fail the job when the score is under min_score
+    comment_on_pr: true    # sticky PR comment with score + findings
 ```
 
-The action scans on AgentAvow's free API, exposes `score` / `grade` / `report-url` as outputs, and fails the job under your threshold — so a supply-chain regression blocks the merge instead of shipping. (Point `fail-below` at the score behind the letter you want to hold: ~90 for A, ~80 for B.)
+The action scans on AgentAvow's free API and fails the job when the score is below your `min_score` — so a supply-chain regression blocks the merge instead of shipping. Set `min_score` to the level you want to hold (e.g. **80** for Trusted, **60** for Standard).
 
 ## Gate your agent at runtime (SDK + bridges)
 

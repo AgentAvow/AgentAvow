@@ -81,7 +81,7 @@ function useClaims(enabled: boolean) {
     queryFn: async () => (await api.get<{ claims: Claim[] }>('/account/claims')).data,
     enabled,
     // While a just-verified repo is still being scanned (private via the App, or
-    // public into the catalog), poll so its grade + actions appear on their own —
+    // public into the catalog), poll so its score + actions appear on their own —
     // no manual refresh needed.
     refetchInterval: (query) => {
       const cs = (query.state.data as { claims: Claim[] } | undefined)?.claims ?? []
@@ -118,7 +118,7 @@ function claimNextStep(c: Claim): { verified: boolean; text: React.ReactNode } {
   if (c.status === 'verified') {
     const how = c.proof_method === 'provenance' ? ' (matched by build provenance)'
       : c.proof_method === 'declared-repo' ? ' (matched to a repo you own)' : ''
-    return { verified: true, text: <>Verified{how} — you own this. It&apos;s in <span className="text-text font-medium">Your tools</span> below, and we&apos;ll re-scan it and alert you if its grade drops.</> }
+    return { verified: true, text: <>Verified{how} — you own this. It&apos;s in <span className="text-text font-medium">Your tools</span> below, and we&apos;ll re-scan it and alert you if its score drops.</> }
   }
   const s = (c.surface || 'github').toLowerCase()
   if (s === 'npm' || s === 'pypi') return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below as <span className="font-mono">{c.full_name}</span>. To verify: either <span className="text-text">claim its source repo</span> (we auto-link it) or <span className="text-text">add the keyword</span> shown on the row — then press <span className="text-text font-medium">Verify</span>.</> }

@@ -99,7 +99,7 @@ export default function RebrandBadge() {
       <h2 className="mt-12 text-xl font-bold">Wire it into your workflow</h2>
       <div className="grid md:grid-cols-3 gap-3.5 mt-4">
         {([
-          ['GitHub Action', 'Gate PRs on a minimum grade. Posts the report as a check comment.', 'fail-below: B', 'https://github.com/AgentAvow/AgentAvow'],
+          ['GitHub Action', 'Gate PRs on a minimum score. Posts the report as a check comment.', 'min_score: 60', 'https://github.com/AgentAvow/AgentAvow'],
           ['Python SDK / CLI', 'Programmatic scans + attestation verification in your pipeline.', 'agentavow scan owner/repo', '/rebrand/docs'],
           ['REST API', 'The same signed verdicts, offline-verifiable against our JWKS.', 'GET /public/scan/{owner}/{repo}', '/api/v1/redoc'],
         ] as [string, string, string, string][]).map(([h, p, code, href]) => (

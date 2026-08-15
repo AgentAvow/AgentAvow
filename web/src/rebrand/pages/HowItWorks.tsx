@@ -53,7 +53,7 @@ export default function RebrandHowItWorks() {
       <Reveal>
         <div className="mt-10 glass rounded-2xl p-7">
           <h2 className="text-xl font-bold">Two axes, one signed record.</h2>
-          <p className="mt-2 text-text-muted text-[14px] max-w-[62ch]"><strong className="text-text">Attestation Trust</strong> is the signed safety grade from our scanner — live and verifiable now. <strong className="text-text">Adoption</strong> reflects how much the ecosystem actually uses a tool. Together they tell you both "is it safe?" and "is it real?"</p>
+          <p className="mt-2 text-text-muted text-[14px] max-w-[62ch]"><strong className="text-text">Attestation Trust</strong> is the signed safety score from our scanner — live and verifiable now. <strong className="text-text">Adoption</strong> reflects how much the ecosystem actually uses a tool. Together they tell you both "is it safe?" and "is it real?"</p>
           <div className="mt-5"><DualScore score={94} /></div>
         </div>
       </Reveal>
@@ -94,7 +94,7 @@ export default function RebrandHowItWorks() {
           <h2 className="mt-2 text-xl font-bold">Every grade is signed. Verify it offline.</h2>
           <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
             Each result is signed with Ed25519 (JWS). You can verify any attestation against our public keys — no call
-            back to us required. If a single byte of the grade is altered, verification fails. That's what makes this a
+            back to us required. If a single byte of the score is altered, verification fails. That's what makes this a
             <strong className="text-text"> signature, not just a badge</strong>: you don't have to trust AgentAvow, you can check the math.
           </p>
           <div className="mt-4 flex gap-4 flex-wrap">

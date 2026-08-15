@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'reac
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, badgeUrl, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill } from '../components/TrustMark'
@@ -19,7 +19,7 @@ import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
-import { downloadScoreCard } from '../lib/scoreCard'
+import { downloadScoreCard, scoreCardSvg, type ScoreCardData } from '../lib/scoreCard'
 
 /**
  * Rebrand-native check / trust-score page — built for ANY user, not just devs.
@@ -71,13 +71,14 @@ function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner
   )
   const watching = alreadyWatching || clicked
   const mutation = useMutation({ mutationFn: () => api.post('/watches', { surface, owner, repo }), onSuccess: () => setClicked(true) })
-  const base = 'w-full flex items-center justify-center gap-2.5 text-[15px] font-bold px-5 py-3.5 rounded-xl transition-all'
-  const grad = 'text-white bg-gradient-to-r from-primary to-accent shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5'
-  const star = <svg viewBox="0 0 24 24" fill="currentColor" className="w-[17px] h-[17px] shrink-0"><path d="M12 2.5l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 18.6 6.1 21.3l1.2-6.6L2.5 9.5l6.6-.9z"/></svg>
-  if (!user) return <Link to={rp('/rebrand/login')} className={`${base} ${grad}`}>{star} Watch this tool</Link>
-  if (watching) return <div className={`${base} bg-success/15 text-success border border-success/40`}>✓ Watching — we'll alert you if the grade drops</div>
+  // Quiet outline treatment — the marks are the hero; the CTA supports, not competes.
+  const base = 'w-full flex items-center justify-center gap-2.5 text-[15px] font-semibold px-5 py-3 rounded-xl transition-all'
+  const cta = 'text-primary-light border border-primary/45 bg-primary/[0.06] hover:bg-primary/[0.12] hover:border-primary/70'
+  const star = <svg viewBox="0 0 24 24" fill="currentColor" className="w-[16px] h-[16px] shrink-0"><path d="M12 2.5l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 18.6 6.1 21.3l1.2-6.6L2.5 9.5l6.6-.9z"/></svg>
+  if (!user) return <Link to={rp('/rebrand/login')} className={`${base} ${cta}`}>{star} Watch this tool</Link>
+  if (watching) return <div className={`${base} bg-success/10 text-success border border-success/40`}>✓ Watching — we'll alert you if the score drops</div>
   return (
-    <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className={`${base} ${grad} disabled:opacity-70`}>
+    <button onClick={() => mutation.mutate()} disabled={mutation.isPending} className={`${base} ${cta} disabled:opacity-70`}>
       {star} {mutation.isPending ? 'Adding…' : 'Watch this tool'}
     </button>
   )
@@ -90,7 +91,7 @@ function scanReviewJsonLd(name: string, grade: string, score: number): Record<st
     itemReviewed: { '@type': 'SoftwareApplication', name, applicationCategory: 'DeveloperApplication' },
     reviewRating: { '@type': 'Rating', ratingValue: score, bestRating: 100, worstRating: 0 },
     author: { '@type': 'Organization', name: 'AgentAvow' },
-    reviewBody: `Signed, offline-verifiable safety grade ${grade} (${score}/100).`,
+    reviewBody: `Signed, offline-verifiable safety score ${grade} (${score}/100).`,
   }
 }
 
@@ -183,7 +184,7 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
 function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; score: number; grade: string }) {
   const [copied, setCopied] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href : ''
-  const text = `${owner}/${repo} scored ${grade} (${score}/100) on AgentAvow — a signed, verifiable trust grade.`
+  const text = `${owner}/${repo} scored ${grade} (${score}/100) on AgentAvow — a signed, verifiable trust score.`
   const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) }
   const icon = 'grid place-items-center w-8 h-8 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors'
   return (
@@ -200,25 +201,59 @@ function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; 
 }
 
 /** Prominent badge promotion — dynamic origin so copied embeds always resolve. */
-function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
+/** "Show it off" — the distribution showcase: README badges (trust + adoption,
+ * live & signed), the downloadable share card, and the featured live widget.
+ * Every format regenerates from the current signed verdict, so it can't go stale. */
+function BadgePromo({ owner, repo, cardData }: { owner: string; repo: string; cardData?: ScoreCardData }) {
+  const [tab, setTab] = useState<'trust' | 'adoption'>('trust')
   const [copied, setCopied] = useState(false)
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  const md = `[![AgentAvow Trust](${origin}/api/v1/public/scan/${owner}/${repo}/badge)](${origin}/check/${owner}/${repo})`
+  const link = `${origin}/check/${owner}/${repo}`
+  const badgeBase = `${origin}/api/v1/public/scan/${owner}/${repo}/badge`
+  const badge = tab === 'trust'
+    ? { url: badgeBase, alt: 'AgentAvow Trust' }
+    : { url: `${badgeBase}?metric=adoption`, alt: 'AgentAvow Adoption' }
+  const md = `[![${badge.alt}](${badge.url})](${link})`
   const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1400) }
+  const cardSrc = cardData ? `data:image/svg+xml;utf8,${encodeURIComponent(scoreCardSvg(cardData))}` : null
   return (
-    <div className="glass rounded-2xl p-6 border-l-4 border-accent/60 relative overflow-hidden">
-      <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-accent/10 blur-3xl" />
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Show it off</div>
-          <h3 className="mt-1 text-lg font-bold">Put a signed trust badge in your README.</h3>
-          <p className="mt-1 text-text-muted text-[13.5px] max-w-[46ch]">Regenerates on every view, links back to this verifiable report. One line, no account.</p>
+    <div className="glass rounded-2xl p-6 relative overflow-hidden">
+      <div className="absolute -right-16 -top-16 w-44 h-44 rounded-full bg-accent/10 blur-3xl pointer-events-none" />
+      <div className="relative">
+        <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Show it off</div>
+        <h3 className="mt-1 text-lg font-bold">Put your signed mark anywhere.</h3>
+        <p className="mt-1 text-text-muted text-[13.5px] max-w-[54ch]">Every format regenerates from the live signed verdict — it can&apos;t go stale or be faked. Free, no account.</p>
+
+        <div className="mt-5 grid md:grid-cols-5 gap-3">
+          {/* README badge — trust + adoption, live previews + one-line embed */}
+          <div className="md:col-span-3 rounded-xl border border-border bg-surface/40 p-4 flex flex-col">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="font-semibold text-[13.5px]">README badge</div>
+              <div className="flex gap-1 font-mono text-[11px]">
+                {(['trust', 'adoption'] as const).map((k) => (
+                  <button key={k} onClick={() => setTab(k)} className={`px-2.5 py-0.5 rounded-md capitalize transition-colors ${tab === k ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{k}</button>
+                ))}
+              </div>
+            </div>
+            <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex"><img src={badge.url} alt={badge.alt} className="h-[24px] rounded shadow-md" /></a>
+            <div className="relative mt-3">
+              <pre className="font-mono text-[11.5px] bg-surface border border-border rounded-lg px-3 py-2.5 pr-14 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">{md}</pre>
+              <button onClick={copy} className="absolute top-1.5 right-1.5 font-mono text-[10.5px] px-2 py-0.5 rounded bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied ? 'copied ✓' : 'copy'}</button>
+            </div>
+          </div>
+          {/* share card + widget */}
+          <div className="md:col-span-2 flex flex-col gap-3">
+            <div className="rounded-xl border border-border bg-surface/40 p-4">
+              <div className="font-semibold text-[13.5px] mb-2">Share card</div>
+              {cardSrc && <img src={cardSrc} alt="AgentAvow share card" className="rounded-md border border-border/60 w-full" />}
+              {cardData && <button onClick={() => downloadScoreCard(cardData)} className="mt-2 text-[12px] font-semibold text-primary-light hover:text-primary">↓ Download SVG</button>}
+            </div>
+            <Link to={rp('/rebrand/badge')} className="rounded-xl border border-accent/30 bg-accent/[0.06] hover:bg-accent/[0.11] p-4 transition-colors block">
+              <div className="flex items-center gap-2"><span className="font-semibold text-[13.5px]">Live widget</span><span className="font-mono text-[8.5px] uppercase tracking-[0.12em] px-1.5 py-0.5 rounded bg-accent/15 text-accent">Featured</span></div>
+              <p className="mt-1 text-[12px] text-text-muted">A verifiable widget that recomputes the signature in-browser. All formats →</p>
+            </Link>
+          </div>
         </div>
-        <img src={badgeUrl(owner, repo)} alt="trust badge" className="h-[28px] rounded shadow-md shrink-0" />
-      </div>
-      <div className="relative mt-4">
-        <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text overflow-x-auto whitespace-pre-wrap break-all">{md}</pre>
-        <button onClick={copy} className="absolute top-2 right-2 font-mono text-[11px] px-2.5 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied ? 'copied ✓' : 'copy'}</button>
       </div>
     </div>
   )
@@ -318,7 +353,7 @@ function PrivateSearchSlot({ owner, repo, score, grade, published }: { owner: st
       <button onClick={() => publish.mutate()} disabled={publish.isPending}
         className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">
         {publish.isPending ? 'Publishing…' : '🌐 Publish to search'}</button>
-      <p className="text-[11.5px] text-text-muted text-center max-w-[42ch]">List the grade in search — your code stays private.</p>
+      <p className="text-[11.5px] text-text-muted text-center max-w-[42ch]">List the score in search — your code stays private.</p>
       {publish.isError && <div className="text-[11.5px] text-danger">Couldn&apos;t publish — try again.</div>}
     </div>
   )
@@ -388,7 +423,7 @@ function PublishStoredCTA({ owner, repo, published }: { owner: string; repo: str
     <Reveal>
       <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
         <h3 className="text-[15px] font-bold">Publish to search</h3>
-        <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Private repos aren&apos;t listed in AgentAvow search. Publishing makes this grade public and findable — your choice as the owner.</p>
+        <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">Private repos aren&apos;t listed in AgentAvow search. Publishing makes this score public and findable — your choice as the owner.</p>
         {done ? (
           <div className="mt-3 text-[13px] text-success">✓ Published — anyone can now find {owner}/{repo} in search.</div>
         ) : (
@@ -458,7 +493,7 @@ function Hero() {
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
       <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this tool <span className="gradient-text-bio">safe</span>?</h1>
-      <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed grade.</p>
+      <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed score.</p>
       <form onSubmit={(e) => { e.preventDefault(); go() }} className="glass mt-7 mx-auto max-w-[560px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10">
         <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={value ? '' : hint}
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px] text-text placeholder:text-text-muted" />
@@ -873,7 +908,7 @@ function BlastRadius({ scan }: { scan: unknown }) {
             {br.lethal_trifecta && <span className="font-mono text-[12px] text-danger bg-danger/10 border border-danger/25 rounded-full px-3 py-1">⚠ lethal trifecta</span>}
           </div>
         )}
-        <p className="mt-3 text-[11.5px] text-text-muted/70">Blast radius is what the tool <span className="text-text-muted">could do</span> if it's misused or its input is poisoned — separate from its grade. A clean tool can still have a wide blast radius.</p>
+        <p className="mt-3 text-[11.5px] text-text-muted/70">Blast radius is what the tool <span className="text-text-muted">could do</span> if it's misused or its input is poisoned — separate from its score. A clean tool can still have a wide blast radius.</p>
       </div>
     </Reveal>
   )
@@ -1072,7 +1107,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
         title={`${name} (${surface}) — safety score ${scan.trust_score}/100`}
-        description={`${verdict}. AgentAvow's signed grade for ${surface}:${name}: ${scan.trust_score}/100 (${t.name}) — scanned on the published artifact, verifiable offline.`}
+        description={`${verdict}. AgentAvow's signed score for ${surface}:${name}: ${scan.trust_score}/100 (${t.name}) — scanned on the published artifact, verifiable offline.`}
         path={`/check/pkg/${surface}/${name}`}
         jsonLd={scanReviewJsonLd(`${surface}:${name}`, t.name, scan.trust_score)}
       />
@@ -1261,7 +1296,7 @@ function Result({ owner, repo, privateResult }: {
     <div className="max-w-[860px] mx-auto px-6 py-14">
       <SEOHead
         title={`Is ${owner}/${repo} safe? Grade ${scan.trust_score}/100 (${t.name})`}
-        description={`${sum.headline} AgentAvow's signed, offline-verifiable safety grade for ${owner}/${repo}: ${scan.trust_score}/100 (${t.name}).`}
+        description={`${sum.headline} AgentAvow's signed, offline-verifiable safety score for ${owner}/${repo}: ${scan.trust_score}/100 (${t.name}).`}
         path={`/check/${owner}/${repo}`}
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
         noindex={isPrivate}
@@ -1287,26 +1322,29 @@ function Result({ owner, repo, privateResult }: {
           <div className="mt-0.5 text-[13px] font-semibold gradient-text">{scan.trust_tier}</div>
         </div>
 
-        {/* two co-equal scores — Attestation Trust + Adoption */}
-        <div className="relative px-7 py-6 grid grid-cols-2 gap-3">
-          <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center">
-            <TrustBar score={scan.trust_score} />
-            <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide" style={{ color: t.color }}>Attestation Trust</div>
-            <div className="mt-0.5 text-[12px] text-text-muted">Signed scanner grade · verifiable now</div>
-          </div>
-          <div className="rounded-xl border border-border/60 bg-surface/40 p-4 text-center flex flex-col">
-            <div className="min-h-[128px] flex items-center justify-center w-full">
-              <AdoptionNeedle count={adCount} unit={adUnit} />
+        {/* the dual mark — one cohesive instrument: trust (green→red) | adoption (teal→magenta) */}
+        <div className="relative px-7 py-6">
+          <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
+            <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
+            <div className="relative grid grid-cols-2">
+              <div className="p-6 pb-5 text-center flex flex-col items-center">
+                <div className="min-h-[132px] flex items-center justify-center"><TrustBar score={scan.trust_score} /></div>
+                <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
+                <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
+              </div>
+              <div className="p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
+                <div className="min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} /></div>
+                <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
+                <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption ? adoption.sub : 'no adoption signal yet'}</div>
+              </div>
             </div>
-            <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide gradient-text">Adoption</div>
-            <div className="mt-0.5 text-[12px] text-text-muted">{adoption ? adoption.sub : 'Just launched — no adoption signal yet'}</div>
           </div>
         </div>
 
         {/* PRIMARY action — watch */}
         <div className="relative px-7">
           <WatchCTA owner={owner} repo={repo} />
-          <p className="mt-2 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this grade drops.</p>
+          <p className="mt-2 text-center text-[12px] text-text-muted">We re-scan daily and alert you the moment this score drops.</p>
         </div>
 
         {/* a stored private repo publishes to search here (then animates into share) */}
@@ -1419,20 +1457,9 @@ function Result({ owner, repo, privateResult }: {
         </div>
       </Reveal>
 
-      {/* badge promotion + download score card — the "share your grade" assets together */}
+      {/* the distribution showcase — README badges, share card, widget, all signed */}
       <Reveal>
-        <div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div>
-        {!isPrivate && (
-          <div className="mt-3">
-            <button
-              onClick={() => downloadScoreCard({ repo: scan.repo, grade: t.name, score: scan.trust_score, tier: scan.trust_tier, gradeHex: t.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct })}
-              className="text-[12.5px] font-semibold px-3.5 py-2 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors"
-            >
-              ↓ Download score card (SVG)
-            </button>
-            <p className="mt-1.5 text-[11.5px] text-text-muted/70">A scalable card to promote your grade on your site or deck.</p>
-          </div>
-        )}
+        <div className="mt-6"><BadgePromo owner={owner} repo={repo} cardData={isPrivate ? undefined : { repo: scan.repo, grade: t.name, score: scan.trust_score, tier: scan.trust_tier, gradeHex: t.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct }} /></div>
       </Reveal>
 
       {/* claim / ownership CTA — a one-time scan is ephemeral (report only, nothing stored) */}

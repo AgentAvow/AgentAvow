@@ -3,7 +3,7 @@ import { CountUp } from './motion'
 
 /**
  * The two-axis "Rotten Tomatoes for agent trust" score:
- *  - Attestation Trust — the signed, verifiable safety grade (REAL, live now).
+ *  - Attestation Trust — the signed, verifiable safety score (REAL, live now).
  *  - Adoption — how much the ecosystem actually uses it (usage signal). Not yet
  *    wired end-to-end, so it's shown honestly as "coming soon" rather than faked.
  *    Pass `adoption` once real usage data exists to light it up.

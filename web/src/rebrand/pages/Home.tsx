@@ -6,10 +6,9 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustMini, AdoptionMini } from '../components/TrustMark'
+import { TrustBar, AdoptionNeedle, TrustMini, AdoptionMini } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
-import { DualScore } from '../components/DualScore'
 
 const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
 
@@ -138,12 +137,8 @@ export default function RebrandHome() {
     enabled: !!example?.repoPath,
     staleTime: 5 * 60_000,
   })
-  const exAdoption = exAdopt
-    ? {
-        label: exAdopt.stars != null && exAdopt.stars > 0 ? `★ ${exAdopt.stars.toLocaleString()}` : `${exAdopt.checks.toLocaleString()} checks`,
-        sub: `${exAdopt.watchers} watching · on AgentAvow`,
-      }
-    : null
+  const exCount = exAdopt ? (exAdopt.stars && exAdopt.stars > 0 ? exAdopt.stars : exAdopt.checks) : 0
+  const exUnit = exAdopt?.stars && exAdopt.stars > 0 ? 'stars' : 'checks'
 
   return (
     <div>
@@ -160,7 +155,7 @@ export default function RebrandHome() {
             Is this AI tool <span className="gradient-text-bio">safe</span> to connect?
           </h1>
           <p className="mt-5 mx-auto max-w-[50ch] text-lg text-text-muted font-light">
-            Scan any tool, MCP server, or skill your agent connects to. Get a signed safety grade in seconds
+            Scan any tool, MCP server, or skill your agent connects to. Get a signed safety score in seconds
             — free, no signup, and verifiable offline.
           </p>
 
@@ -230,21 +225,31 @@ export default function RebrandHome() {
             <Eyebrow>A trust score you can verify</Eyebrow>
             <h2 className="mt-3 text-2xl md:text-3xl font-bold">Two scores, one signed record.</h2>
             <p className="mt-3 text-text-muted">
-              Attestation Trust is your signed safety grade. Adoption shows how much the ecosystem actually
+              Attestation Trust is your signed safety score. Adoption shows how much the ecosystem actually
               uses a tool — real usage, not opinions.
             </p>
           </div>
 
           {example ? (
             <div className="glass rounded-2xl overflow-hidden max-w-[620px] mx-auto mt-8">
-              <div className="flex items-center gap-4 p-5 border-b border-border/60">
-                <div className="w-14 h-14 rounded-2xl grid place-items-center text-xl font-extrabold" style={{ color: example.t.color, background: `${example.t.color}1f` }}>{example.row.trust_score as number}</div>
-                <div className="min-w-0">
-                  <div className="font-mono text-[13px] text-text-muted break-all">{example.display}</div>
-                  <div className="mt-1 text-[12px] font-semibold gradient-text">a real scan · {example.row.trust_score}/100</div>
+              <div className="flex items-center gap-3 p-5 border-b border-border/60">
+                <div className="font-mono text-[13.5px] break-all min-w-0 flex-1">{example.display}</div>
+                <span className="font-mono text-[11px] text-text-muted shrink-0">a real scan</span>
+              </div>
+              {/* the dual mark — real artwork, tier-tinted, a preview of the score page */}
+              <div className="relative border-b border-border/60 overflow-hidden">
+                <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(340px 130px at 25% -10%, ${example.t.color}1c, transparent 70%), radial-gradient(340px 130px at 78% -10%, rgba(45,212,191,0.12), transparent 70%)` }} />
+                <div className="relative grid grid-cols-2">
+                  <div className="p-5 text-center flex flex-col items-center">
+                    <div className="min-h-[126px] flex items-center justify-center"><TrustBar score={example.row.trust_score as number} /></div>
+                    <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: example.t.color }}>Attestation Trust</div>
+                  </div>
+                  <div className="p-5 text-center flex flex-col items-center border-l border-border/50">
+                    <div className="min-h-[126px] flex items-center justify-center"><AdoptionNeedle count={exCount} unit={exUnit} /></div>
+                    <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
+                  </div>
                 </div>
               </div>
-              <div className="p-4 border-b border-border/60"><DualScore score={example.row.trust_score as number} adoption={exAdoption} /></div>
               <div className="p-5 flex flex-wrap gap-5 text-[13px] text-text-muted">
                 <span><b className="text-danger tabular-nums">{example.row.critical ?? 0}</b> critical</span>
                 <span><b className="text-warning tabular-nums">{example.row.high ?? 0}</b> high</span>
@@ -275,7 +280,7 @@ export default function RebrandHome() {
             <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Checking a tool</div>
             <h3 className="text-xl font-bold">Browse the trust catalog</h3>
             <p className="text-text-muted text-[14.5px] flex-1">
-              See tools ranked by grade before you connect one — with the exact reason for each score, not a
+              See tools ranked by score before you connect one — with the exact reason for each score, not a
               star rating.
             </p>
             <span className="mt-2 self-start text-[14.5px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform">Browse the catalog →</span>
@@ -285,7 +290,7 @@ export default function RebrandHome() {
             <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Building a tool</div>
             <h3 className="text-xl font-bold">Get a signed badge</h3>
             <p className="text-text-muted text-[14.5px] flex-1">
-              Drop a signed trust badge in your README in one line. Every viewer can verify the grade — and
+              Drop a signed trust badge in your README in one line. Every viewer can verify the score — and
               gate your CI on it.
             </p>
             <span className="mt-2 self-start text-[14.5px] font-semibold text-accent group-hover:translate-x-1 transition-transform">Get your badge →</span>
@@ -305,13 +310,13 @@ export default function RebrandHome() {
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a grade drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a score drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
               <Link to={rp("/rebrand/login")} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
             </div>
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">For developers</div>
               <h3 className="mt-2 text-xl font-semibold">Add to your CI</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Run the scan on every pull request with the GitHub Action. Gate merges on a minimum grade so a dependency can never silently regress in your pipeline.</p>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Run the scan on every pull request with the GitHub Action. Gate merges on a minimum score so a dependency can never silently regress in your pipeline.</p>
               <Link to={rp("/rebrand/badge")} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to your CI →</Link>
             </div>
           </div>
@@ -329,7 +334,7 @@ export default function RebrandHome() {
             {[
               ['01', 'Paste a URL', 'A repo, MCP server, npm/PyPI package, or skill. No signup.'],
               ['02', 'We scan it', 'Across 12 categories — secrets, exec sinks, exfiltration, prompt injection, obfuscation, deps.'],
-              ['03', 'Get a signed grade', 'A letter grade plus a signed attestation anyone can verify offline against our public key.'],
+              ['03', 'Get a signed score', 'A 0–100 trust score plus a signed attestation anyone can verify offline against our public key.'],
             ].map(([n, h, p], i) => (
               <div key={n} className={`p-6 ${i < 2 ? 'md:border-r border-border/60' : ''}`}>
                 <div className="font-mono text-[12px] text-primary-light tracking-wide">{n}</div>
@@ -377,7 +382,7 @@ export default function RebrandHome() {
           <div className="max-w-[56ch]">
             <Eyebrow>Browse</Eyebrow>
             <h2 className="mt-3 text-2xl md:text-3xl font-bold">See how the tools you're about to trust actually score.</h2>
-            <p className="mt-3 text-text-muted">Safest-first. Open any tool for the evidence behind its grade.</p>
+            <p className="mt-3 text-text-muted">Safest-first. Open any tool for the evidence behind its score.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-3.5 mt-8">
             {teaser.length > 0
@@ -410,7 +415,7 @@ export default function RebrandHome() {
           <div className="max-w-[56ch]">
             <Eyebrow>For developers</Eyebrow>
             <h2 className="mt-3 text-2xl md:text-3xl font-bold">One line. A signed trust badge in your README.</h2>
-            <p className="mt-3 text-text-muted">Check your repo, copy the badge. Every reader can verify the grade — and clicking it re-checks your tool.</p>
+            <p className="mt-3 text-text-muted">Check your repo, copy the badge. Every reader can verify the score — and clicking it re-checks your tool.</p>
           </div>
           <div className="grid md:grid-cols-2 gap-6 items-center mt-6">
             <div className="min-w-0">
@@ -438,7 +443,7 @@ export default function RebrandHome() {
             <div className="max-w-[54ch]">
               <Eyebrow>Own a tool?</Eyebrow>
               <h2 className="mt-3 text-2xl md:text-3xl font-bold">Claim it — and own how it shows up.</h2>
-              <p className="mt-3 text-text-muted">Prove you own a repo to run private scans, get alerted the moment its grade changes, and own how it appears in the catalog &amp; search. <span className="text-text">Public repos</span> verify with a GitHub topic; <span className="text-text">private repos</span> connect the GitHub App — scanned continuously, no token to paste.</p>
+              <p className="mt-3 text-text-muted">Prove you own a repo to run private scans, get alerted the moment its score changes, and own how it appears in the catalog &amp; search. <span className="text-text">Public repos</span> verify with a GitHub topic; <span className="text-text">private repos</span> connect the GitHub App — scanned continuously, no token to paste.</p>
             </div>
             <Link to={rp("/rebrand/tools")} className="shrink-0 font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all">Claim your tool →</Link>
           </div>

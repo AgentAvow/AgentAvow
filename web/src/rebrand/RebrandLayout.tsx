@@ -120,7 +120,7 @@ function Wordmark({ id = 'hdr' }: { id?: string }) {
           </linearGradient>
         </defs>
       </svg>
-      AgentAvow<span className="text-text-muted font-medium">™</span>
+      AgentAvow<span className="align-super text-[9px] text-text-muted font-medium ml-0.5">™</span>
     </motion.span>
   )
 }
@@ -237,7 +237,7 @@ export default function RebrandLayout() {
   return (
     <div className="min-h-screen bg-background text-text">
       <Orbs />
-      <header className="sticky top-0 z-20 glass border-b border-border/60">
+      <header className="sticky top-0 z-20 bg-surface border-b border-border/60">
         <div className="max-w-[1080px] mx-auto px-6 h-[62px] flex items-center gap-7">
           <Link to={rp("/rebrand")} aria-label="AgentAvow home">
             <Wordmark />

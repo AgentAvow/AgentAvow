@@ -83,13 +83,13 @@ export default function Submit() {
     <div className="max-w-[720px] mx-auto px-6 py-20">
       <SEOHead
         title="List your tool — AgentAvow"
-        description="Add your tool to the AgentAvow catalog: get a signed safety grade, appear in Browse, and claim it for change alerts."
+        description="Add your tool to the AgentAvow catalog: get a signed safety score, appear in Browse, and claim it for change alerts."
         path="/submit"
       />
       <div className="text-center">
         <div className="font-mono text-[12px] uppercase tracking-wide text-primary-light">For authors</div>
         <h1 className="mt-2 text-3xl md:text-4xl font-extrabold tracking-tight">List your tool</h1>
-        <p className="mt-4 text-text-muted max-w-[52ch] mx-auto">Add your tool to the catalog. We scan it, give it a <span className="text-text">signed safety grade</span>, and list it in Browse so agents can find and trust it. Free, no account.</p>
+        <p className="mt-4 text-text-muted max-w-[52ch] mx-auto">Add your tool to the catalog. We scan it, give it a <span className="text-text">signed safety score</span>, and list it in Browse so agents can find and trust it. Free, no account.</p>
       </div>
 
       {!listed ? (

@@ -41,7 +41,7 @@ interface RunState {
 const META: Record<string, { label: string; blurb: string }> = {
   check_tool: {
     label: 'Check a tool',
-    blurb: "Fetch a real signed safety grade for a known repo — the same verdict a public caller gets.",
+    blurb: "Fetch a real signed safety score for a known repo — the same verdict a public caller gets.",
   },
   list_catalog: {
     label: 'Browse catalog',
@@ -273,7 +273,7 @@ export default function RebrandSandbox() {
             <Link to={rp('/rebrand/account')} className="text-primary-light font-semibold hover:text-primary underline-offset-2 hover:underline">
               API key on your account
             </Link>{' '}
-            to scan on your own schedule, watch tools for change-alerts, and gate CI on a minimum grade.
+            to scan on your own schedule, watch tools for change-alerts, and gate CI on a minimum score.
           </p>
         </div>
       </Reveal>

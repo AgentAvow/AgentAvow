@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# AgentGraph Trust Scan — CI script
-# Calls the public AgentGraph API and formats results as a PR comment.
+# AgentAvow Trust Scan — CI script
+# Calls the public AgentAvow API and formats results as a PR comment.
 set -euo pipefail
 
 API_BASE="https://agentgraph.co/api/v1/public/scan"
@@ -12,16 +12,16 @@ COMMENT_ON_PR="${COMMENT_ON_PR:-true}"
 PR_NUMBER="${PR_NUMBER:-}"
 
 # ---------------------------------------------------------------------------
-# 1. Call the AgentGraph public scan API
+# 1. Call the AgentAvow public scan API
 # ---------------------------------------------------------------------------
-echo "::group::AgentGraph Trust Scan"
+echo "::group::AgentAvow Trust Scan"
 echo "Scanning ${OWNER}/${REPO} ..."
 
 HTTP_CODE=$(curl -s -o /tmp/ag_scan.json -w "%{http_code}" \
   "${API_BASE}/${OWNER}/${REPO}")
 
 if [ "$HTTP_CODE" -ne 200 ]; then
-  echo "::error::AgentGraph API returned HTTP ${HTTP_CODE}"
+  echo "::error::AgentAvow API returned HTTP ${HTTP_CODE}"
   cat /tmp/ag_scan.json 2>/dev/null || true
   echo "::endgroup::"
   exit 1
@@ -31,7 +31,12 @@ fi
 # 2. Parse the JSON response
 # ---------------------------------------------------------------------------
 SCORE=$(jq -r '.score // 0' /tmp/ag_scan.json)
-GRADE=$(jq -r '.grade // "?"' /tmp/ag_scan.json)
+# 0-100 trust tier word (dual-mark thresholds 80/60/40/20)
+if   [ "${SCORE}" -ge 80 ]; then TIER="Trusted"
+elif [ "${SCORE}" -ge 60 ]; then TIER="Standard"
+elif [ "${SCORE}" -ge 40 ]; then TIER="Caution"
+elif [ "${SCORE}" -ge 20 ]; then TIER="Restricted"
+else TIER="Blocked"; fi
 SUMMARY=$(jq -r '.summary // "No summary available"' /tmp/ag_scan.json)
 
 # Category scores — build a markdown table
@@ -46,19 +51,19 @@ HIGH=$(jq -r '.findings.high // 0' /tmp/ag_scan.json)
 MEDIUM=$(jq -r '.findings.medium // 0' /tmp/ag_scan.json)
 LOW=$(jq -r '.findings.low // 0' /tmp/ag_scan.json)
 
-REPORT_URL="https://agentgraph.co/check/${OWNER}/${REPO}"
+REPORT_URL="https://agentavow.com/check/${OWNER}/${REPO}"
 BADGE_URL="${API_BASE}/${OWNER}/${REPO}/badge"
 
-echo "Score: ${SCORE}/100 (${GRADE})"
+echo "Score: ${SCORE}/100 (${TIER})"
 echo "Findings: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low"
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
 # 3. Build the PR comment body
 # ---------------------------------------------------------------------------
-COMMENT_BODY="## AgentGraph Trust Scan
+COMMENT_BODY="## AgentAvow Trust Scan
 
-**Security Scan Grade: ${GRADE} (${SCORE}/100)** — ${SUMMARY}
+**AgentAvow Trust: ${SCORE}/100 (${TIER})** — ${SUMMARY}
 
 | Category | Score |
 |----------|-------|
@@ -68,7 +73,7 @@ ${CATEGORIES}
 
 [View full report](${REPORT_URL}) | [Add badge to README](${BADGE_URL})
 
-> *This is a code security scan score. [Full composite trust score](${REPORT_URL}) (including identity verification and external signals) is available on AgentGraph.*"
+> *This is a code security scan score. [Full composite trust score](${REPORT_URL}) (including identity verification and external signals) is available on AgentAvow.*"
 
 # ---------------------------------------------------------------------------
 # 4. Post comment on PR (if enabled and this is a PR event)
@@ -76,12 +81,12 @@ ${CATEGORIES}
 if [ "${COMMENT_ON_PR}" = "true" ] && [ -n "${PR_NUMBER}" ]; then
   echo "Posting comment on PR #${PR_NUMBER} ..."
 
-  # Delete any previous AgentGraph comment to avoid clutter
+  # Delete any previous AgentAvow comment to avoid clutter
   PREVIOUS_COMMENT_ID=$(curl -s \
     -H "Authorization: token ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github.v3+json" \
     "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-    | jq -r '.[] | select(.body | startswith("## AgentGraph Trust Scan")) | .id' \
+    | jq -r '.[] | select(.body | startswith("## AgentAvow Trust Scan")) | .id' \
     | head -1)
 
   if [ -n "${PREVIOUS_COMMENT_ID}" ] && [ "${PREVIOUS_COMMENT_ID}" != "null" ]; then
@@ -121,4 +126,4 @@ if [ "${FAIL_ON_FINDINGS}" = "true" ] && [ "${SCORE}" -lt "${MIN_SCORE}" ]; then
   exit 1
 fi
 
-echo "AgentGraph Trust Scan complete. Score: ${SCORE}/100"
+echo "AgentAvow Trust Scan complete. Score: ${SCORE}/100"

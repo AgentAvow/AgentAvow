@@ -15,7 +15,7 @@ const SECTIONS: Section[] = [
   {
     title: 'About AgentAvow',
     items: [
-      { q: 'What is AgentAvow?', a: 'AgentAvow gives any tool, MCP server, or package a signed, verifiable safety grade — so you know whether it\'s safe for your AI agent to connect to. Paste a URL, get a letter grade backed by scan evidence anyone can recompute.' },
+      { q: 'What is AgentAvow?', a: 'AgentAvow gives any tool, MCP server, or package a signed, verifiable safety score — so you know whether it\'s safe for your AI agent to connect to. Paste a URL, get a signed 0–100 trust score backed by scan evidence anyone can recompute.' },
       { q: 'Is AgentAvow free?', a: 'Yes. Checking any tool is free and requires no account. An account is only needed to watch tools for change-alerts, manage API keys, or claim repositories you own.' },
       { q: 'Do I need an account to use it?', a: 'No. Checking a tool and browsing the catalog are free and anonymous — no signup, no tracking required to get a result.' },
     ],
@@ -23,30 +23,30 @@ const SECTIONS: Section[] = [
   {
     title: 'The scan & the score',
     items: [
-      { q: 'How does the scan work?', a: 'We read the actual source code across 12 safety categories — exposed secrets, unsafe code execution, data handling, filesystem and network access, prompt-injection surfaces, obfuscation, and dependency health — and produce a letter grade plus a signed attestation.' },
-      { q: 'What does the grade mean?', a: 'An A–F letter grade mapped from a 0–100 score; higher is safer. It reflects a scan at a point in time — tools can change after they\'re scanned, so watch anything you depend on.' },
-      { q: 'What are the two scores — Attestation Trust and Adoption?', a: 'Attestation Trust is the signed safety grade from our scanner (verifiable now). Adoption reflects how much the ecosystem actually uses a tool — real usage like stars, checks, and watchers, not opinions.' },
+      { q: 'How does the scan work?', a: 'We read the actual source code across 12 safety categories — exposed secrets, unsafe code execution, data handling, filesystem and network access, prompt-injection surfaces, obfuscation, and dependency health — and produce a 0–100 trust score plus a signed attestation.' },
+      { q: 'What does the score mean?', a: 'A 0–100 trust score that maps to a tier — Trusted (80+), Standard, Caution, Restricted, or Blocked; higher is safer. It reflects a scan at a point in time — tools can change after they\'re scanned, so watch anything you depend on.' },
+      { q: 'What are the two scores — Attestation Trust and Adoption?', a: 'Attestation Trust is the signed safety score from our scanner (verifiable now). Adoption reflects how much the ecosystem actually uses a tool — real usage like stars, checks, and watchers, not opinions.' },
     ],
   },
   {
     title: 'Verification & trust',
     items: [
-      { q: 'What makes the grade "verifiable"?', a: 'Every result is signed with Ed25519 (JWS). You can verify any attestation offline against our public keys — no call back to us required. If a single byte of the grade is altered, verification fails. It\'s a signature, not just a badge.' },
-      { q: 'How do I verify a grade myself?', a: 'Use the live verification tool on the How-it-works page, or check any attestation against our public JWKS. The evidence format and conformance vectors are published and versioned in the open.' },
+      { q: 'What makes the grade "verifiable"?', a: 'Every result is signed with Ed25519 (JWS). You can verify any attestation offline against our public keys — no call back to us required. If a single byte of the score is altered, verification fails. It\'s a signature, not just a badge.' },
+      { q: 'How do I verify a score myself?', a: 'Use the live verification tool on the How-it-works page, or check any attestation against our public JWKS. The evidence format and conformance vectors are published and versioned in the open.' },
     ],
   },
   {
     title: 'For developers',
     items: [
       { q: 'How do I add a trust badge to my README?', a: 'Check your repo and copy one line of Markdown. The badge regenerates on every view (never stale), is signed, and links back to a full, verifiable report — no account needed to mint one.' },
-      { q: 'Is there an API, SDK, or GitHub Action?', a: 'Yes — a REST API, a Python SDK/CLI, and a GitHub Action that can gate pull requests on a minimum grade. See the developer page and docs.' },
+      { q: 'Is there an API, SDK, or GitHub Action?', a: 'Yes — a REST API, a Python SDK/CLI, and a GitHub Action that can gate pull requests on a minimum score. See the developer page and docs.' },
       { q: 'Can I scan a private repo?', a: 'Yes. Claim the repository to unlock private scans (verify ownership with a GitHub topic — no token stored), or scan with a token you supply that\'s used transiently and never persisted.' },
     ],
   },
   {
     title: 'Account & watching',
     items: [
-      { q: 'What does "watching" a tool do?', a: 'We re-scan the tools you watch and alert you — by email, in-app, or webhook — the moment a grade drops or a signed definition changes. That\'s the rug-pull you\'d otherwise miss.' },
+      { q: 'What does "watching" a tool do?', a: 'We re-scan the tools you watch and alert you — by email, in-app, or webhook — the moment a score drops or a signed definition changes. That\'s the rug-pull you\'d otherwise miss.' },
       { q: 'How do I claim a tool I own?', a: 'Add a GitHub topic we give you to the repo to prove ownership. A verified claim unlocks private scans, continuous re-scans with change alerts, and own how the tool appears in the catalog and search.' },
     ],
   },
@@ -67,7 +67,7 @@ export default function RebrandFAQ() {
     <div className="max-w-[820px] mx-auto px-6 py-16">
       <Helmet>
         <title>FAQ — AgentAvow</title>
-        <meta name="description" content="Frequently asked questions about AgentAvow — signed, verifiable safety grades for the tools your AI agents connect to." />
+        <meta name="description" content="Frequently asked questions about AgentAvow — signed, verifiable trust scores for the tools your AI agents connect to." />
         <script type="application/ld+json">{JSON.stringify(FAQ_JSONLD)}</script>
       </Helmet>
 

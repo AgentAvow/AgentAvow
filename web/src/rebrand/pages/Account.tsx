@@ -49,7 +49,7 @@ interface Notif {
 
 interface WebhookState { url: string | null; active: boolean; last_status: number | null }
 
-/** Alert webhook — POST grade-change alerts to a URL (Slack/CI/your app). */
+/** Alert webhook — POST score-change alerts to a URL (Slack/CI/your app). */
 function AlertWebhook() {
   const qc = useQueryClient()
   const [url, setUrl] = useState('')
@@ -74,7 +74,7 @@ function AlertWebhook() {
   return (
     <div className="mt-10">
       <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Alert webhook</h2>
-      <p className="text-text-muted text-[13px] mb-3">Get grade-change alerts POSTed to a URL — Slack, your CI, your app — in addition to email.</p>
+      <p className="text-text-muted text-[13px] mb-3">Get score-change alerts POSTed to a URL — Slack, your CI, your app — in addition to email.</p>
       {current ? (
         <div className="glass rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0">
@@ -246,7 +246,7 @@ export default function RebrandAccount() {
           <div className="flex flex-col gap-2">{[0, 1, 2].map((i) => <div key={i} className="glass rounded-xl h-[76px] animate-pulse" />)}</div>
         ) : rows.length === 0 ? (
           <div className="glass rounded-2xl p-8 text-center">
-            <p className="text-text-muted text-[14px]">You're not watching any tools yet. Watch a tool and we'll re-scan it and alert you if its grade drops or its signed definition changes.</p>
+            <p className="text-text-muted text-[14px]">You're not watching any tools yet. Watch a tool and we'll re-scan it and alert you if its score drops or its signed definition changes.</p>
             <Link to={rp("/rebrand/browse")} className="inline-block mt-4 text-[13.5px] font-semibold text-primary-light hover:text-primary">Browse scored tools →</Link>
           </div>
         ) : (
