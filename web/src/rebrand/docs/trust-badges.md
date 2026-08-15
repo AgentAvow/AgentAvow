@@ -30,7 +30,7 @@ GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}/badge
 
 ## Two badges: trust and adoption
 
-The grade answers *is it safe?* Add `?metric=adoption` for the second, separate signal — *do independent
+The score answers *is it safe?* Add `?metric=adoption` for the second, separate signal — *do independent
 parties rely on it?* (downloads / dependents / stars, never a fabricated number):
 
 ```markdown
@@ -58,7 +58,7 @@ flat-square) and light/dark themes.
 ## Gate your CI on it
 
 The badge is the display; the **GitHub Action** is the enforcement. Run the scan on every pull request and
-fail the build if the grade drops below a threshold:
+fail the build if the score drops below a threshold:
 
 ```yaml
 # .github/workflows/agentavow.yml

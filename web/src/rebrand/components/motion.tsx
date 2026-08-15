@@ -19,10 +19,13 @@ export function Reveal({
   y?: number
 }) {
   const reduce = useReducedMotion()
+  // Under reduced-motion, bypass the scroll reveal entirely so content is always
+  // visible (never a blank section waiting on an IntersectionObserver that won't fire).
+  if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       className={className}
-      initial={reduce ? false : { opacity: 0, y }}
+      initial={{ opacity: 0, y }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: '-70px' }}
       transition={{ duration: 0.55, ease: 'easeOut', delay }}
@@ -48,10 +51,11 @@ export function RevealStagger({
   y?: number
 }) {
   const reduce = useReducedMotion()
+  if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       className={className}
-      initial={reduce ? undefined : 'hidden'}
+      initial="hidden"
       whileInView="show"
       viewport={{ once: true, margin: '-60px' }}
       variants={{ show: { transition: { staggerChildren: stagger } } }}

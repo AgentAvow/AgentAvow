@@ -101,7 +101,7 @@ export default function RebrandHowItWorks() {
       <Reveal>
         <div id="verify" className="mt-12 glass rounded-2xl p-7 border-l-4 border-primary/60">
           <Eyebrow>Verify</Eyebrow>
-          <h2 className="mt-2 text-xl font-bold">Every grade is signed. Verify it offline.</h2>
+          <h2 className="mt-2 text-xl font-bold">Every score is signed. Verify it offline.</h2>
           <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
             Each result is signed with Ed25519 (JWS). You can verify any attestation against our public keys — no call
             back to us required. If a single byte of the score is altered, verification fails. That's what makes this a

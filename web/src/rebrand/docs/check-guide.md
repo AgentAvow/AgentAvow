@@ -1,8 +1,8 @@
 # Is this tool safe? Reading your AgentAvow scan
 
 AgentAvow scans the tools, MCP servers, packages, and skills your AI agents connect to, and returns a
-**signed safety grade** you can verify yourself. This guide explains what the grade means and how to read a
-result.
+**signed 0–100 safety score** you can verify yourself. This guide explains what the score means and how to
+read a result.
 
 > Staged rebrand doc. Product/serving URLs use `agentavow.com` (the post-cutover host). Verification
 > identifiers (JWKS, `@context`) stay on `agentgraph.co` — those are permanent and never move.
@@ -21,20 +21,23 @@ GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}
 
 The result is cached for 1 hour. Add `?force=true` to force a fresh scan.
 
-## The grade
+## The score
 
-Every scan returns a single **letter grade (A+ → F)** plus a 0–100 score. The grade is the headline; the
-subscores tell you *why*.
+Every scan returns a single **0–100 trust score**. The score is the headline; the subscores tell you *why*.
+It maps to a **tier** (higher is safer):
 
-- **A+ / A** — Trusted: no high or critical findings, clean dependencies
-- **B** — Good: minor issues, safe for most uses
-- **C** — Caution: real findings worth reviewing before you connect
-- **D** — Risky: high-severity issues present
-- **F** — Blocked: critical issues; do not connect
+- **80–100 · Trusted** — no high or critical findings, clean dependencies.
+- **60–79 · Standard** — minor issues; safe for most uses.
+- **40–59 · Caution** — real findings worth reviewing before you connect.
+- **20–39 · Restricted** — high-severity issues present; human-in-the-loop.
+- **0–19 · Blocked** — critical issues; do not connect.
+
+The earned top tier, **Certified**, is separate — a score of 96+ *plus* verified provenance, no drift, and full
+coverage (see [How scoring works](./how-grading-works.md)).
 
 ### Subscores
 
-The overall grade is composed from category subscores, each independently graded:
+The overall score is composed from category subscores, each independently scored:
 
 - **Secret hygiene** — hardcoded tokens, keys, credentials
 - **Code safety** — unsafe `exec`/shell, dangerous sinks
@@ -42,17 +45,15 @@ The overall grade is composed from category subscores, each independently graded
 - **Dependencies** — known-vulnerable packages
 - …across **12 detection categories** total.
 
-## Trust tiers → recommended limits
+## Score → recommended posture
 
-Each grade maps to a **trust tier** with a recommended execution posture, so a gateway or framework can act
-on it automatically:
+Each tier maps to a **recommended execution posture**, so a gateway or framework can act on it automatically:
 
-- `verified` (96–100) — unlimited execution
-- `trusted` (81–95) — 60 req/min, 8K tokens
-- `standard` (51–80) — 30 req/min, 4K tokens
-- `minimal` (31–50) — 15 req/min, user confirmation
-- `restricted` (11–30) — 5 req/min, user confirmation
-- `blocked` (0–10) — execution denied
+- **Trusted** — connect normally, standard budget.
+- **Standard** — standard rate + token limits.
+- **Caution** — confirm before sensitive tool calls.
+- **Restricted** — human-in-the-loop; no autonomous execution.
+- **Blocked** — execution denied.
 
 ## Findings
 
@@ -70,7 +71,7 @@ you can recompute it. See [Verify an AgentAvow attestation](./verify-attestation
 
 ## Stay safe over time
 
-Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its grade drops
+Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its score drops
 or its signed definition changes — the rug-pull you'd otherwise miss.
 
 ## Next

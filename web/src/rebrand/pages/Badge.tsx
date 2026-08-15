@@ -7,7 +7,7 @@ const REPO_HINTS = ['owner/repo', 'your-org/mcp-server', 'your-agent-toolkit', '
 
 const DEV_RESOURCES: [string, string, string][] = [
   ['API sandbox', 'Try the scan API live — no signup, ephemeral token, read-only.', '/rebrand/sandbox'],
-  ['Docs', 'Guides: reading a grade, badges, verifying attestations.', '/rebrand/docs'],
+  ['Docs', 'Guides: reading a score, badges, verifying attestations.', '/rebrand/docs'],
   ['API reference', 'The REST API — every endpoint, offline-verifiable verdicts.', '/api/v1/redoc'],
   ['Verify keys (JWKS)', 'Public signing keys to verify any attestation offline.', 'https://agentgraph.co/.well-known/jwks.json'],
   ['How it works', 'The score, the evidence format, and the open standards.', '/rebrand/how-it-works'],

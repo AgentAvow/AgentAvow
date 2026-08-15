@@ -388,13 +388,13 @@ function CertifiedPanel({ certified }: { certified?: { eligible?: boolean; check
               <span aria-hidden>✦</span> AgentAvow Certified
             </span>
           ) : (
-            <h3 className="text-[15px] font-bold">Not yet Certified (A+)</h3>
+            <h3 className="text-[15px] font-bold">Not yet Certified</h3>
           )}
         </div>
         <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">
           {eligible
             ? 'This tool meets every requirement for AgentAvow Certified — the top tier. Certification is re-checked on every scan, so it stays true only while it stays true.'
-            : 'A+ (Certified) is earned, not just a high score — it requires all of the following. Anything unchecked shows exactly what to fix to earn it:'}
+            : 'Certified is earned, not just a high score — it requires all of the following. Anything unchecked shows exactly what to fix to earn it:'}
         </p>
         <ul className="mt-3 flex flex-col gap-1.5">
           {_CERT_LABELS.filter(([k]) => checks[k] !== undefined).map(([k, label]) => (
@@ -1450,8 +1450,8 @@ function Result({ owner, repo, privateResult }: {
             <svg viewBox="0 0 24 24" fill="none" className="w-[18px] h-[18px]"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" /><path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
             Signed · Ed25519 / JWS
           </div>
-          <h3 className="mt-2 text-lg font-bold">This grade is signed — you don't have to trust us.</h3>
-          <p className="mt-1 text-text-muted text-[14px] max-w-[62ch]">Every result carries a cryptographic signature you can verify offline against our public keys. If anyone tampers with the grade, verification fails. That's the difference between a badge and a signature.</p>
+          <h3 className="mt-2 text-lg font-bold">This score is signed — you don't have to trust us.</h3>
+          <p className="mt-1 text-text-muted text-[14px] max-w-[62ch]">Every result carries a cryptographic signature you can verify offline against our public keys. If anyone tampers with the score, verification fails. That's the difference between a badge and a signature.</p>
           <div className="mt-3 flex gap-4 flex-wrap">
             <a href="https://agentgraph.co/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-primary-light hover:text-primary">Public keys (JWKS) →</a>
             <Link to={rp("/rebrand/how-it-works")} className="text-[13px] font-semibold text-primary-light hover:text-primary">How verification works →</Link>

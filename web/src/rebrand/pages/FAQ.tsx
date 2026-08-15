@@ -31,7 +31,7 @@ const SECTIONS: Section[] = [
   {
     title: 'Verification & trust',
     items: [
-      { q: 'What makes the grade "verifiable"?', a: 'Every result is signed with Ed25519 (JWS). You can verify any attestation offline against our public keys — no call back to us required. If a single byte of the score is altered, verification fails. It\'s a signature, not just a badge.' },
+      { q: 'What makes the score verifiable?', a: 'Every result is signed with Ed25519 (JWS). You can verify any attestation offline against our public keys — no call back to us required. If a single byte of the score is altered, verification fails. It\'s a signature, not just a badge.' },
       { q: 'How do I verify a score myself?', a: 'Use the live verification tool on the How-it-works page, or check any attestation against our public JWKS. The evidence format and conformance vectors are published and versioned in the open.' },
     ],
   },
@@ -75,7 +75,7 @@ export default function RebrandFAQ() {
         <div className="max-w-[60ch]">
           <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">FAQ</span>
           <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">Questions, answered.</h1>
-          <p className="mt-3 text-text-muted">Everything about checking tools, verifying grades, and staying safe over time.</p>
+          <p className="mt-3 text-text-muted">Everything about checking tools, verifying scores, and staying safe over time.</p>
         </div>
       </Reveal>
 
