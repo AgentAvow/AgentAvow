@@ -122,6 +122,13 @@ export default function RebrandHome() {
     staleTime: 5 * 60_000,
   })
   const s = cat?.summary
+  // Live headline stat: % of scanned tools with a high/critical finding (matches the Index).
+  const flaggedPct = (() => {
+    const crit = Object.values(s?.by_surface_critical || {}).reduce((a, b) => a + b, 0)
+    const high = Object.values(s?.by_surface_high || {}).reduce((a, b) => a + b, 0)
+    const scanned = s?.repo_scans_total || Object.values(s?.by_surface || {}).reduce((a, b) => a + b, 0)
+    return scanned ? Math.round(((crit + high) / scanned) * 100) : null
+  })()
   const teaser = (cat?.rows ?? []).filter((r) => r.trust_score != null).slice(0, 3)
   // A real scored tool for the signed-result example (no mock/fabricated data).
   const example = (() => {
@@ -192,6 +199,23 @@ export default function RebrandHome() {
           </div>
         </motion.div>
       </section>
+
+      {/* ①.5 HEADLINE STAT — the "why this matters" number, computed live, links to the Index. */}
+      {flaggedPct != null && flaggedPct > 0 && (
+        <section className="max-w-[820px] mx-auto px-6 pt-8 pb-2">
+          <Reveal>
+            <Link to={rp('/rebrand/index')} className="block text-center group">
+              <p className="text-[26px] md:text-[32px] font-extrabold tracking-tight leading-snug text-balance">
+                <span className="gradient-text-bio">{flaggedPct}%</span> of the tools your agent connects to carry a serious security flaw.
+              </p>
+              <p className="mt-2.5 text-text-muted text-[14.5px]">
+                You'd never run code from a stranger — your agent does it every day.
+                <span className="text-primary-light group-hover:underline"> See the public index →</span>
+              </p>
+            </Link>
+          </Reveal>
+        </section>
+      )}
 
       {/* ② PROOF-OF-SCALE STRIP — LIVE, numbers count up. Moved up: scale credibility first. */}
       <section className="max-w-[1080px] mx-auto px-6 pt-4 pb-10">
