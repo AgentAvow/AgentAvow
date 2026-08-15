@@ -38,6 +38,7 @@ function WidgetPreview({ slug, theme }: { slug: string; theme: 'dark' | 'light' 
 const REPO_HINTS = ['owner/repo', 'your-org/mcp-server', 'your-agent-toolkit', 'your-python-package']
 
 const DEV_RESOURCES: [string, string, string][] = [
+  ['Declare your scope', 'Ship an .agentavow.yml — declared egress + capabilities, surfaced on your score.', 'https://github.com/AgentAvow/AgentAvow/blob/main/.agentavow.yml'],
   ['API sandbox', 'Try the scan API live — no signup, ephemeral token, read-only.', '/rebrand/sandbox'],
   ['Docs', 'Guides: reading a score, badges, verifying attestations.', '/rebrand/docs'],
   ['API reference', 'The REST API — every endpoint, offline-verifiable verdicts.', '/api/v1/redoc'],
