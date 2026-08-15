@@ -40,22 +40,25 @@ const GRAD_TEXT = { background: 'linear-gradient(100deg,#2dd4bf,#e879f9)', Webki
 
 // ── HERO ────────────────────────────────────────────────────────────────────
 
-/** Trust — vertical segmented power bar + number + tier word. */
-export function TrustBar({ score }: { score: number }) {
+/** Trust — vertical segmented power bar + number + tier word.
+ * Geometry is locked to the mark spec: 10 segments 12×5px (gap 2.5), number 22px/800,
+ * "/100" 10px mono, tier word 10px/700. `scale` uniformly resizes the whole instrument
+ * (defaults to spec size 1) so the hero and the card read as the same object. */
+export function TrustBar({ score, scale = 1 }: { score: number; scale?: number }) {
   const t = getTrustTier(score)
   const total = 10
   const lv = Math.round(score / 10)
   return (
     <div className="flex flex-col items-center">
-      <div className="flex flex-col-reverse gap-[3px]">
+      <div className="flex flex-col-reverse" style={{ gap: 2.5 * scale }}>
         {Array.from({ length: total }).map((_, i) => (
-          <div key={i} className="w-[16px] h-[7px] rounded-[1px]" style={{ background: i < lv ? t.color : 'var(--color-border)' }} />
+          <div key={i} style={{ width: 12 * scale, height: 5 * scale, borderRadius: 1, background: i < lv ? t.color : 'var(--color-border)' }} />
         ))}
       </div>
-      <div className="mt-2.5 text-[34px] font-extrabold leading-none tabular-nums" style={{ color: t.color }}>
-        {score}<span className="ml-1 text-[12px] font-mono text-text-muted align-baseline">/100</span>
+      <div className="font-extrabold leading-none tabular-nums" style={{ color: t.color, fontSize: 22 * scale, marginTop: 6 * scale }}>
+        {score}<span className="font-mono align-baseline text-text-muted" style={{ fontSize: 10 * scale, marginLeft: 2 * scale }}>/100</span>
       </div>
-      <div className="mt-0.5 text-[12px] font-bold" style={{ color: t.color }}>{t.name}</div>
+      <div className="font-bold" style={{ color: t.color, fontSize: 10 * scale, marginTop: 2 * scale }}>{t.name}</div>
     </div>
   )
 }
@@ -63,7 +66,7 @@ export function TrustBar({ score }: { score: number }) {
 /** Adoption — VU needle that fills-to-level + compact count + tier word. Prefer the
  * backend's 0–100 adoption score (`scorePct`) for the fill + tier so the needle agrees
  * with the adoption detail panel; fall back to a count-derived estimate. */
-export function AdoptionNeedle({ count, unit, scorePct, tier }: { count?: number | null; unit?: string; scorePct?: number | null; tier?: string | null }) {
+export function AdoptionNeedle({ count, unit, scorePct, tier, scale = 1 }: { count?: number | null; unit?: string; scorePct?: number | null; tier?: string | null; scale?: number }) {
   const gid = useId()
   const c = count || 0
   const pct = scorePct != null ? scorePct : adoptionPct(c)
@@ -74,19 +77,19 @@ export function AdoptionNeedle({ count, unit, scorePct, tier }: { count?: number
   const [nx, ny] = P(cx, cy, r - 16, ang)
   return (
     <div className="flex flex-col items-center">
-      <svg width="150" viewBox="0 0 200 94" className="text-text-muted" style={{ overflow: 'visible' }}>
+      <svg width={118 * scale} viewBox="0 0 200 94" className="text-text-muted" style={{ overflow: 'visible' }}>
         <defs>
           <linearGradient id={gid} gradientUnits="userSpaceOnUse" x1="26" y1="0" x2="174" y2="0">
             <stop stopColor="#2dd4bf" /><stop offset="1" stopColor="#e879f9" />
           </linearGradient>
         </defs>
         {has && ang > a0 + 1.5 && <path d={ARC(cx, cy, r, a0, ang)} fill="none" stroke={`url(#${gid})`} strokeWidth={8} />}
-        <path d={ARC(cx, cy, r, Math.max(ang, a0 + 0.5), a1)} fill="none" stroke="currentColor" strokeWidth={8} opacity={0.18} />
+        <path d={ARC(cx, cy, r, Math.max(ang, a0 + 0.5), a1)} fill="none" stroke="var(--color-border)" strokeWidth={8} />
         {Array.from({ length: 9 }).map((_, i) => {
           const ta = a0 + 180 * ((i + 1) / 10)
           const [x0, y0] = P(cx, cy, r - 6, ta)
           const [x1, y1] = P(cx, cy, r - (i + 1 === 5 ? 14 : 10), ta)
-          return <line key={i} x1={x0.toFixed(1)} y1={y0.toFixed(1)} x2={x1.toFixed(1)} y2={y1.toFixed(1)} stroke="currentColor" strokeWidth={i + 1 === 5 ? 1.6 : 1} opacity={0.35} />
+          return <line key={i} x1={x0.toFixed(1)} y1={y0.toFixed(1)} x2={x1.toFixed(1)} y2={y1.toFixed(1)} stroke="currentColor" strokeWidth={i + 1 === 5 ? 1.6 : 1} opacity={0.4} />
         })}
         {has ? (
           <><line x1={cx} y1={cy} x2={nx.toFixed(1)} y2={ny.toFixed(1)} stroke="#2dd4bf" strokeWidth={3.4} strokeLinecap="round" /><circle cx={cx} cy={cy} r={5.5} fill="#2dd4bf" /></>
@@ -94,11 +97,11 @@ export function AdoptionNeedle({ count, unit, scorePct, tier }: { count?: number
           <circle cx={cx} cy={cy} r={5.5} fill="currentColor" opacity={0.3} />
         )}
       </svg>
-      <div className="-mt-1 text-[30px] font-extrabold leading-none tabular-nums text-text">
+      <div className="font-extrabold leading-none tabular-nums text-text" style={{ fontSize: 22 * scale, marginTop: -2 * scale }}>
         {has ? compactNum(c) : <span className="text-text-muted/70">New</span>}
-        {has && unit && <span className="ml-1.5 text-[13px] font-mono text-text-muted align-baseline">{unit}</span>}
+        {has && unit && <span className="font-mono align-baseline text-text-muted" style={{ fontSize: 10 * scale, marginLeft: 3 * scale }}>{unit}</span>}
       </div>
-      <div className="mt-0.5 text-[12px] font-bold">
+      <div className="font-bold" style={{ fontSize: 10 * scale, marginTop: 2 * scale }}>
         {has ? <span style={GRAD_TEXT}>{tierWord}</span> : <span className="text-text-muted">no adoption signal yet</span>}
       </div>
     </div>

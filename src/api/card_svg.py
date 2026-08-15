@@ -11,8 +11,8 @@ import math
 
 # ── palettes ────────────────────────────────────────────────────────────────
 _DARK = {
-    "bg": "#0b1220", "panel_line": "#243458", "line_soft": "#1e2c4a",
-    "text": "#eef2fb", "muted": "#93a1c0", "faint": "#6b7a99",
+    "bg": "#0a0e18", "panel_line": "#243458", "line_soft": "#1a273f",
+    "text": "#eef2fb", "muted": "#93a1c0", "faint": "#63728f",
     "ndl": "#2dd4bf", "g1": "#2dd4bf", "g2": "#e879f9",
 }
 _LIGHT = {
@@ -71,7 +71,7 @@ def render_card_svg(
     tword = _trust_word(s) if has_score else "—"
 
     # ── trust segmented bar (left) ───────────────────────────────────────────
-    total, seg_w, seg_h, gap = 10, 15, 4.5, 2.5
+    total, seg_w, seg_h, gap = 10, 12, 5, 2.5  # spec: 12×5px, gap 2.5
     lv = round(s / 10) if has_score else 0
     bar_x = 90
     bottom = 122
@@ -119,14 +119,14 @@ def render_card_svg(
   </g>
   <text x="{card_w - 20}" y="28" text-anchor="end" fill="{c['muted']}" font-size="12" font-family="ui-monospace,SF Mono,Menlo,monospace">{coordinate}</text>
   <!-- trust -->
-  <text x="{bar_x}" y="52" text-anchor="middle" fill="{c['faint']}" font-size="8.5" font-weight="700" letter-spacing="1.4" font-family="ui-monospace,monospace">TRUST</text>
+  <text x="{bar_x}" y="44" text-anchor="middle" fill="{c['faint']}" font-size="8.5" font-weight="700" letter-spacing="1.4" font-family="ui-monospace,monospace">TRUST</text>
   {cells}
   <text x="{bar_x}" y="138" text-anchor="middle" fill="{tcol}" font-size="20" font-weight="800">{score_txt}<tspan fill="{c['faint']}" font-size="10" font-family="ui-monospace,monospace"> /100</tspan></text>
   <text x="{bar_x}" y="150" text-anchor="middle" fill="{tcol}" font-size="9.5" font-weight="700">{tword}</text>
   <!-- divider -->
   <line x1="180" y1="46" x2="180" y2="140" stroke="{c['line_soft']}"/>
   <!-- adoption -->
-  <text x="{ncx}" y="52" text-anchor="middle" fill="{c['faint']}" font-size="8.5" font-weight="700" letter-spacing="1.4" font-family="ui-monospace,monospace">ADOPTION · REACH</text>
+  <text x="{ncx}" y="44" text-anchor="middle" fill="{c['faint']}" font-size="8.5" font-weight="700" letter-spacing="1.4" font-family="ui-monospace,monospace">ADOPTION · REACH</text>
   {fill_arc}{rest_arc}{ticks}{needle}
   <text x="{ncx}" y="138" text-anchor="middle" fill="{c['text'] if has_ad else c['faint']}" font-size="21" font-weight="800">{ad_num}</text>
   <text x="{ncx}" y="150" text-anchor="middle" fill="{c['g2'] if has_ad else c['faint']}" font-size="9.5" font-weight="700">{ad_word}</text>

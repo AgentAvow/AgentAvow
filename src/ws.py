@@ -233,7 +233,9 @@ class ConnectionManager:
         sent = 0
         dead = []
         message = json.dumps(data, default=str)
-        for ws in sockets:
+        # Snapshot: _safe_send awaits, and a concurrent connect/disconnect can mutate
+        # the live set mid-iteration ("Set changed size during iteration"). Iterate a copy.
+        for ws in list(sockets):
             if await self._safe_send(ws, message):
                 sent += 1
             else:
@@ -264,7 +266,7 @@ class ConnectionManager:
         message = json.dumps(data, default=str)
         sent = 0
         dead = []
-        for ws in self._all:
+        for ws in list(self._all):  # snapshot — _safe_send awaits; set can mutate mid-loop
             if await self._safe_send(ws, message):
                 sent += 1
             else:
