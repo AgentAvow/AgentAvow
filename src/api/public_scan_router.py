@@ -1684,6 +1684,62 @@ async def scan_badge(
 
 
 @router.get(
+    "/{owner}/{repo}/card.svg",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+)
+async def scan_card(
+    owner: str,
+    repo: str,
+    theme: str = Query("dark", pattern="^(dark|light)$"),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """The LIVE dual-mark card as a hosted SVG — trust bar + adoption needle, branded,
+    always-current. Link/embed it like the badge (`<img>`), never a stale download."""
+    full_name = f"{owner}/{repo}"
+    # Trust score — composite entity, else cached scan, else regenerate on demand.
+    score: int | None = None
+    entity_trust = await _get_entity_trust(full_name, db)
+    if entity_trust and entity_trust.get("composite_score") is not None:
+        score = entity_trust["composite_score"]
+    else:
+        cached = await _get_cached(owner, repo)
+        if cached:
+            score = cached["trust_score"]
+        else:
+            try:
+                fresh = await public_scan(owner=owner, repo=repo, force=False, db=db)
+                score = fresh.security_score
+            except Exception:
+                score = None
+
+    # Adoption — surface-aware headline + 0-100 score.
+    a_surface = owner.lower() if owner.lower() in (
+        "npm", "pypi", "crates", "huggingface", "docker",
+    ) else "github"
+    a_score100, a_count, _unit = await surface_adoption_summary(a_surface, owner, repo)
+    coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
+
+    from src.api.card_svg import render_card_svg
+    svg = render_card_svg(
+        coordinate=coordinate,
+        score=int(score) if score is not None else None,
+        adoption_display=_compact_int(a_count) or None,
+        adoption_pct=int(a_score100 or 0),
+        adoption_tier=None,
+        theme=theme,
+    )
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=300, s-maxage=3600",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.get(
     "/og.png",
     dependencies=[Depends(rate_limit_reads)],
     response_class=Response,

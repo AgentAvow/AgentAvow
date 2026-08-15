@@ -87,7 +87,10 @@ export default function RebrandHowItWorks() {
       </RevealStagger>
 
       {/* categories */}
-      <Reveal><h2 className="mt-12 text-xl font-bold">What we check</h2></Reveal>
+      <Reveal>
+        <h2 className="mt-12 text-xl font-bold">What we check</h2>
+        <p className="mt-1.5 text-text-muted text-[14px] max-w-[62ch]">The engine runs <strong className="text-text">12 detection categories</strong> — a score page shows the ones that applied to that surface. The main ones:</p>
+      </Reveal>
       <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-4" stagger={0.03}>
         {CATEGORIES.map(([h, p]) => (
           <div key={h} className="glass rounded-xl px-4 py-3">

@@ -60,12 +60,15 @@ export function TrustBar({ score }: { score: number }) {
   )
 }
 
-/** Adoption — VU needle that fills-to-level + compact count + tier word. */
-export function AdoptionNeedle({ count, unit }: { count?: number | null; unit?: string }) {
+/** Adoption — VU needle that fills-to-level + compact count + tier word. Prefer the
+ * backend's 0–100 adoption score (`scorePct`) for the fill + tier so the needle agrees
+ * with the adoption detail panel; fall back to a count-derived estimate. */
+export function AdoptionNeedle({ count, unit, scorePct, tier }: { count?: number | null; unit?: string; scorePct?: number | null; tier?: string | null }) {
   const gid = useId()
   const c = count || 0
-  const has = c > 0
-  const pct = adoptionPct(c)
+  const pct = scorePct != null ? scorePct : adoptionPct(c)
+  const has = pct > 0 || c > 0
+  const tierWord = tier || adoptionTierWord(pct)
   const cx = 100, cy = 88, r = 74, a0 = 180, a1 = 360
   const ang = a0 + (pct / 100) * 180
   const [nx, ny] = P(cx, cy, r - 16, ang)
@@ -96,7 +99,7 @@ export function AdoptionNeedle({ count, unit }: { count?: number | null; unit?: 
         {has && unit && <span className="ml-1.5 text-[13px] font-mono text-text-muted align-baseline">{unit}</span>}
       </div>
       <div className="mt-0.5 text-[12px] font-bold">
-        {has ? <span style={GRAD_TEXT}>{adoptionTierWord(pct)}</span> : <span className="text-text-muted">no adoption signal yet</span>}
+        {has ? <span style={GRAD_TEXT}>{tierWord}</span> : <span className="text-text-muted">no adoption signal yet</span>}
       </div>
     </div>
   )

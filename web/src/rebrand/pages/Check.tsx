@@ -19,7 +19,6 @@ import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
-import { downloadScoreCard, scoreCardSvg, type ScoreCardData } from '../lib/scoreCard'
 
 /**
  * Rebrand-native check / trust-score page — built for ANY user, not just devs.
@@ -130,7 +129,7 @@ function AdoptionRing({ surface, owner = '', repo }: { surface: string; owner?: 
   return (
     <div className="rounded-xl border border-border/60 bg-surface/40 p-5 text-center w-[240px]">
       <div className="min-h-[128px] flex items-center justify-center">
-        <AdoptionNeedle count={has ? h!.count : 0} unit={has ? h!.unit : undefined} />
+        <AdoptionNeedle count={has ? h!.count : 0} unit={has ? h!.unit : undefined} scorePct={data?.adoption_score_100} />
       </div>
       <div className="mt-3 font-mono text-[11px] font-bold uppercase tracking-wide gradient-text">Adoption</div>
       <div className="mt-0.5 text-[12px] text-text-muted">{has ? 'independent reliance' : 'no adoption signal yet'}</div>
@@ -201,28 +200,39 @@ function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; 
 }
 
 /** Prominent badge promotion — dynamic origin so copied embeds always resolve. */
-/** "Show it off" — the two signed distribution assets: the README badge (Trust or
- * Trust+Adoption) and the downloadable share card. Both regenerate from the current
- * signed verdict, so they can't go stale or be faked. */
-function BadgePromo({ owner, repo, cardData }: { owner: string; repo: string; cardData?: ScoreCardData }) {
+/** "Show it off" — the two signed, LIVE, hosted assets: the README badge (Trust or
+ * Trust+Adoption) and the dual-mark card. Both are served from a URL and regenerate
+ * from the current signed verdict — always current, embeddable anywhere, never a
+ * stale download. */
+function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
   const [tab, setTab] = useState<'trust' | 'combined'>('trust')
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<'badge' | 'card' | null>(null)
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
   const link = `${origin}/check/${owner}/${repo}`
   const badgeBase = `${origin}/api/v1/public/scan/${owner}/${repo}/badge`
   const badge = tab === 'trust'
     ? { url: badgeBase, alt: 'AgentAvow Trust' }
     : { url: `${badgeBase}?metric=combined`, alt: 'AgentAvow' }
-  const md = `[![${badge.alt}](${badge.url})](${link})`
-  const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1400) }
-  const cardSrc = cardData ? `data:image/svg+xml;utf8,${encodeURIComponent(scoreCardSvg(cardData))}` : null
+  const badgeMd = `[![${badge.alt}](${badge.url})](${link})`
+  const cardUrl = `${origin}/api/v1/public/scan/${owner}/${repo}/card.svg`
+  const cardMd = `[![AgentAvow scores](${cardUrl})](${link})`
+  const copyIt = (which: 'badge' | 'card', text: string) => {
+    if (navigator.clipboard) navigator.clipboard.writeText(text)
+    setCopied(which); setTimeout(() => setCopied(null), 1400)
+  }
+  const codeBox = (which: 'badge' | 'card', text: string) => (
+    <div className="relative mt-3">
+      <pre className="font-mono text-[11.5px] bg-surface border border-border rounded-lg px-3 py-2.5 pr-14 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">{text}</pre>
+      <button onClick={() => copyIt(which, text)} className="absolute top-1.5 right-1.5 font-mono text-[10.5px] px-2 py-0.5 rounded bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied === which ? 'copied ✓' : 'copy'}</button>
+    </div>
+  )
   return (
     <div className="glass rounded-2xl p-6 relative overflow-hidden">
       <div className="absolute -right-20 -top-20 w-48 h-48 rounded-full bg-accent/10 blur-3xl pointer-events-none" />
       <div className="relative">
         <div className="font-mono text-[11px] uppercase tracking-wide text-accent">Show it off</div>
         <h3 className="mt-1 text-lg font-bold">Put your signed mark anywhere.</h3>
-        <p className="mt-1 text-text-muted text-[13.5px] max-w-[56ch]">Both regenerate from the live signed verdict — they can&apos;t go stale or be faked. Free, no account.</p>
+        <p className="mt-1 text-text-muted text-[13.5px] max-w-[56ch]">Both are hosted, always-current images that regenerate from the live signed verdict — they can&apos;t go stale or be faked. Free, no account.</p>
 
         <div className="mt-5 grid md:grid-cols-2 gap-4 items-stretch">
           {/* README badge — Trust or Trust+Adoption */}
@@ -238,22 +248,20 @@ function BadgePromo({ owner, repo, cardData }: { owner: string; repo: string; ca
             <a href={link} target="_blank" rel="noopener noreferrer" className="mt-4 flex items-center justify-center rounded-lg border border-border/60 bg-surface py-7">
               <img src={badge.url} alt={badge.alt} className="h-[26px] rounded shadow-md" />
             </a>
-            <div className="relative mt-3">
-              <pre className="font-mono text-[11.5px] bg-surface border border-border rounded-lg px-3 py-2.5 pr-14 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">{md}</pre>
-              <button onClick={copy} className="absolute top-1.5 right-1.5 font-mono text-[10.5px] px-2 py-0.5 rounded bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied ? 'copied ✓' : 'copy'}</button>
-            </div>
-            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">regenerates on every view · links to this report</p>
+            {codeBox('badge', badgeMd)}
+            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">the badge row · regenerates on every view</p>
           </div>
-          {/* Share card — dated snapshot */}
+          {/* Live card — the hosted dual-mark image */}
           <div className="rounded-xl border border-border bg-surface/40 p-5 flex flex-col">
             <div className="flex items-center justify-between gap-2">
-              <div className="font-semibold text-[14px]">Share card</div>
-              {cardData && <button onClick={() => downloadScoreCard(cardData)} className="font-mono text-[11px] px-2.5 py-1 rounded-lg border border-border text-primary-light hover:border-primary-light transition-colors">↓ SVG</button>}
+              <div className="font-semibold text-[14px]">Live card</div>
+              <a href={cardUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">open ↗</a>
             </div>
-            {cardSrc
-              ? <img src={cardSrc} alt="AgentAvow share card" className="mt-4 rounded-lg border border-border/60 w-full" />
-              : <div className="mt-4 flex-1 min-h-[132px] rounded-lg border border-border/60 grid place-items-center text-text-muted text-[12px]">Public repos only</div>}
-            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">a dated snapshot for slides &amp; social</p>
+            <a href={link} target="_blank" rel="noopener noreferrer" className="mt-4 block rounded-lg overflow-hidden border border-border/60">
+              <img src={cardUrl} alt="AgentAvow trust + adoption card" className="w-full block" />
+            </a>
+            {codeBox('card', cardMd)}
+            <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">a richer, always-current image · a Security section or product page</p>
           </div>
         </div>
         <Link to={rp('/rebrand/badge')} className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-light hover:text-primary">Badge builder — pick a badge, theme, and format →</Link>
@@ -1249,6 +1257,14 @@ function Result({ owner, repo, privateResult }: {
     retry: 0,
     enabled: !!scan && !isPrivate,
   })
+  // The canonical 0–100 adoption score + tier (same query the detail panel uses, so
+  // the hero needle and the panel always agree). Deduped by react-query.
+  const { data: adoptionScore } = useQuery({
+    queryKey: ['rebrand-adoption', owner, repo],
+    queryFn: async () => (await publicApi.get<{ adoption_score_100?: number; tier?: string }>(`/public/scan/${owner}/${repo}/adoption`)).data,
+    retry: 0,
+    enabled: !!scan && !isPrivate,
+  })
 
   if (!oneTimePrivate && isLoading) return <ScanningLoader owner={owner} repo={repo} />
   // Public scan came back empty — we may still be checking the owner's private report.
@@ -1291,9 +1307,6 @@ function Result({ owner, repo, privateResult }: {
   const adChecks = adoptionData?.checks ?? 0
   const adCount = adStars || adChecks
   const adUnit = adStars ? 'stars' : 'checks'
-  const compact = (n: number) => (n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n))
-  // Log-scaled traction bar (1 → 100k maps 0 → 100%); a visual, the real count is shown above it.
-  const adoptionPct = adCount ? Math.min(100, Math.round((Math.log10(adCount + 1) / 5) * 100)) : 0
 
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
@@ -1335,7 +1348,7 @@ function Result({ owner, repo, privateResult }: {
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
               </div>
               <div className="p-6 pb-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
-                <div className="min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} /></div>
+                <div className="min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} /></div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption ? adoption.sub : 'no adoption signal yet'}</div>
               </div>
@@ -1461,7 +1474,7 @@ function Result({ owner, repo, privateResult }: {
 
       {/* the distribution showcase — README badge (trust / trust+adoption) + share card */}
       <Reveal>
-        <div className="mt-6"><BadgePromo owner={owner} repo={repo} cardData={isPrivate ? undefined : { repo: scan.repo, grade: t.name, score: scan.trust_score, tier: scan.trust_tier, gradeHex: t.color, attestation: scan.trust_score, adoption: adCount ? compact(adCount) : 'New', adoptionSub: adCount ? adUnit : '', adoptionPct }} /></div>
+        <div className="mt-6"><BadgePromo owner={owner} repo={repo} /></div>
       </Reveal>
 
       {/* claim / ownership CTA — a one-time scan is ephemeral (report only, nothing stored) */}
