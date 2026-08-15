@@ -305,28 +305,9 @@ async def _cached_scan_response(
     jws = create_jws(canonicalize(payload))
     entity_trust = await _get_entity_trust(full_name, db)
     trust_envelope = await _build_scan_envelope(owner, repo, cached, db)
-    return PublicScanResponse(
-        repo=full_name,
-        trust_score=cached["trust_score"],
-        security_score=cached["trust_score"],
-        trust_tier=cached["trust_tier"],
-        recommended_limits=RecommendedLimits(**cached["recommended_limits"]),
-        scan_result=cached["scan_result"],
-        certified=cached.get("certified") or {},
-        findings=FindingsSummary(**cached["findings"]),
-        positive_signals=cached.get("positive_signals", []),
-        package_coordinate=cached.get("package_coordinate", {}),
-        tool_description=cached.get("tool_description", ""),
-        long_description=cached.get("long_description", ""),
-        category_scores=cached.get("category_scores", {}),
-        metadata=ScanMetadata(**cached["metadata"]),
-        scanned_at=cached["scanned_at"],
-        cached=True,
-        jws=jws,
-        tool_manifest_digest=cached.get("tool_manifest_digest"),
-        tool_digests=cached.get("tool_digests", {}),
-        entity_trust=entity_trust,
-        trust_envelope=trust_envelope,
+    return _package_response(
+        full_name, cached, jws, cached=True,
+        entity_trust=entity_trust, trust_envelope=trust_envelope,
     )
 
 
@@ -744,10 +725,27 @@ def _compute_tool_drift(old: dict | None, new: dict) -> dict | None:
 # 2-segment catch-all doesn't shadow them.
 
 
-def _package_response(full: str, data: dict, jws: str, cached: bool) -> PublicScanResponse:
-    """Build a PublicScanResponse from a native-package scan dict (mirrors the
-    repo path, minus entity_trust/envelope which are GitHub-repo concepts)."""
+def _package_response(
+    full: str,
+    data: dict,
+    jws: str,
+    cached: bool,
+    *,
+    entity_trust: dict | None = None,
+    trust_envelope: dict | None = None,
+    tool_drift: dict | None = None,
+) -> PublicScanResponse:
+    """Single builder for every PublicScanResponse — package AND GitHub-repo paths.
+
+    The GitHub-repo path additionally supplies ``entity_trust``, ``trust_envelope``,
+    and ``tool_drift`` (all no-ops for native packages). Routing every response
+    through here is deliberate: it's what keeps a new field (e.g. ``declared_scope``)
+    from silently defaulting on one path because a hand-written construction forgot it.
+    """
     return PublicScanResponse(
+        entity_trust=entity_trust,
+        trust_envelope=trust_envelope,
+        tool_drift=tool_drift,
         repo=full,
         trust_score=data["trust_score"],
         security_score=data["trust_score"],
@@ -1167,32 +1165,9 @@ async def public_scan(
             entity_trust = await _get_entity_trust(full_name, db)
             trust_envelope = await _build_scan_envelope(owner, repo, cached, db)
 
-            return PublicScanResponse(
-                repo=full_name,
-                trust_score=cached["trust_score"],
-                security_score=cached["trust_score"],
-                trust_tier=cached["trust_tier"],
-                recommended_limits=RecommendedLimits(**cached["recommended_limits"]),
-                scan_result=cached["scan_result"],
-                findings=FindingsSummary(**cached["findings"]),
-                positive_signals=cached.get("positive_signals", []),
-                grade=cached.get("grade") or _grade_from_score(cached["trust_score"]),
-                certified=cached.get("certified", {}),
-                coverage=cached.get("coverage", {}),
-                provenance=cached.get("provenance", {}),
-                package_coordinate=cached.get("package_coordinate", {}),
-                tool_description=cached.get("tool_description", ""),
-                long_description=cached.get("long_description", ""),
-                category_scores=cached.get("category_scores", {}),
-                metadata=ScanMetadata(**cached["metadata"]),
-                scanned_at=cached["scanned_at"],
-                cached=True,
-                jws=jws,
-                tool_manifest_digest=cached.get("tool_manifest_digest"),
-                tool_digests=cached.get("tool_digests", {}),
-                declared_scope=cached.get("declared_scope", {}),
-                entity_trust=entity_trust,
-                trust_envelope=trust_envelope,
+            return _package_response(
+                full_name, cached, jws, cached=True,
+                entity_trust=entity_trust, trust_envelope=trust_envelope,
             )
 
     # Fetch previous cached score before running a fresh scan (for change detection)
@@ -1264,32 +1239,9 @@ async def public_scan(
             jws = create_jws(canonicalize(payload))
             entity_trust = await _get_entity_trust(full_name, db)
             trust_envelope = await _build_scan_envelope(owner, repo, stale, db)
-            return PublicScanResponse(
-                repo=full_name,
-                trust_score=stale["trust_score"],
-                security_score=stale["trust_score"],
-                trust_tier=stale["trust_tier"],
-                recommended_limits=RecommendedLimits(**stale["recommended_limits"]),
-                scan_result=stale["scan_result"],
-                findings=FindingsSummary(**stale["findings"]),
-                positive_signals=stale.get("positive_signals", []),
-                grade=stale.get("grade") or _grade_from_score(stale["trust_score"]),
-                certified=stale.get("certified", {}),
-                coverage=stale.get("coverage", {}),
-                provenance=stale.get("provenance", {}),
-                package_coordinate=stale.get("package_coordinate", {}),
-                tool_description=stale.get("tool_description", ""),
-                long_description=stale.get("long_description", ""),
-                category_scores=stale.get("category_scores", {}),
-                metadata=ScanMetadata(**stale["metadata"]),
-                scanned_at=stale["scanned_at"],
-                cached=True,
-                jws=jws,
-                tool_manifest_digest=stale.get("tool_manifest_digest"),
-                tool_digests=stale.get("tool_digests", {}),
-                declared_scope=stale.get("declared_scope", {}),
-                entity_trust=entity_trust,
-                trust_envelope=trust_envelope,
+            return _package_response(
+                full_name, stale, jws, cached=True,
+                entity_trust=entity_trust, trust_envelope=trust_envelope,
             )
         # No cache to fall back on — tell the caller to retry, don't hang or 502.
         raise HTTPException(
@@ -1345,34 +1297,9 @@ async def public_scan(
     entity_trust = await _get_entity_trust(full_name, db)
     trust_envelope = await _build_scan_envelope(owner, repo, data, db)
 
-    return PublicScanResponse(
-        repo=full_name,
-        trust_score=data["trust_score"],
-        security_score=data["trust_score"],
-        trust_tier=data["trust_tier"],
-        recommended_limits=RecommendedLimits(**data["recommended_limits"]),
-        scan_result=data["scan_result"],
-        findings=FindingsSummary(**data["findings"]),
-        grade=data.get("grade") or _grade_from_score(data["trust_score"]),
-        certified=data.get("certified") or {},
-        coverage=data.get("coverage", {}),
-        supply_chain=data.get("supply_chain", {}),
-        provenance=data.get("provenance", {}),
-        positive_signals=data["positive_signals"],
-        package_coordinate=data.get("package_coordinate", {}),
-        tool_description=data.get("tool_description", ""),
-        long_description=data.get("long_description", ""),
-        category_scores=data.get("category_scores", {}),
-        metadata=ScanMetadata(**data["metadata"]),
-        scanned_at=data["scanned_at"],
-        cached=False,
-        jws=jws,
-        tool_manifest_digest=data.get("tool_manifest_digest"),
-        tool_digests=data.get("tool_digests", {}),
-        tool_drift=drift,
-        declared_scope=data.get("declared_scope", {}),
-        entity_trust=entity_trust,
-        trust_envelope=trust_envelope,
+    return _package_response(
+        full_name, data, jws, cached=False,
+        entity_trust=entity_trust, trust_envelope=trust_envelope, tool_drift=drift,
     )
 
 

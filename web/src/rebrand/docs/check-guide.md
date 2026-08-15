@@ -63,6 +63,12 @@ of a tool: recomputable scan evidence, not a star rating.
 
 False positive? See [how scoring works](./how-grading-works.md).
 
+## Declare your tool's scope (optional)
+
+Own the tool? Drop an [`.agentavow.yml`](https://github.com/AgentAvow/AgentAvow/blob/main/.agentavow.yml) at your
+repo root declaring the hosts it contacts and the capabilities it uses — AgentAvow surfaces it on your score page
+as **Declared scope**, and the behavioral tier holds the tool to it: any egress it didn't declare becomes a finding.
+
 ## Shareable results & the signature
 
 Every result lives at a shareable URL — `agentavow.com/check/{owner}/{repo}` — and ships with a **signed JWS
