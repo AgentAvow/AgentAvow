@@ -189,9 +189,9 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
   const fmt = (at?: number) => at ? new Date(at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'now'
   const firstDate = fmt(pts[0].at)
   const lastDate = fmt(pts[pts.length - 1].at)
-  // Version-diff: the change since the previous scan.
-  const prev = pts[pts.length - 2]
-  const delta = current - prev.score
+  // Version-diff: the change since the FIRST recorded scan (all-time). Always shown —
+  // "unchanged" is itself a signal for a trust score.
+  const delta = current - pts[0].score
 
   return (
     <Reveal>
@@ -199,11 +199,9 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
           <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Trust score over time</h3>
           <span className="font-mono text-[11.5px] text-text-muted">
-            {delta !== 0 && (
-              <b className="mr-2" style={{ color: delta > 0 ? '#22c55e' : '#ef4444' }}>
-                {delta > 0 ? '↑' : '↓'}{Math.abs(delta)} since {fmt(prev.at)}
-              </b>
-            )}
+            <b className="mr-2" style={{ color: delta > 0 ? '#22c55e' : delta < 0 ? '#ef4444' : undefined }}>
+              {delta > 0 ? `↑${delta}` : delta < 0 ? `↓${Math.abs(delta)}` : 'unchanged'} since {firstDate}
+            </b>
             {pts.length} scans · now <b style={{ color: lastG.color }}>{current}/100</b>
           </span>
         </div>
