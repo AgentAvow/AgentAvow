@@ -45,7 +45,14 @@
     var parts = verdict.jws.split('.');
     if (parts.length !== 3) throw new Error('malformed');
     var header = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[0])));
-    var jwks = await (await fetch(verdict.jwks_url || (ORIGIN + '/.well-known/jwks.json'))).json();
+    // Fetch the JWKS from OUR origin (where widget.js loaded from). It's served there
+    // with CORS *, so this is same-origin on agentavow.com (CSP-safe) and a plain
+    // cross-origin GET on any third-party embed — no dependency on the embedding
+    // page's connect-src allowing the canonical agentgraph.co host.
+    var jwksUrl = ORIGIN + '/.well-known/jwks.json';
+    var jwks;
+    try { jwks = await (await fetch(jwksUrl)).json(); }
+    catch (e) { jwks = await (await fetch(verdict.jwks_url || jwksUrl)).json(); }
     var keys = (jwks && jwks.keys) || [];
     var jwk = keys.filter(function (k) { return k.kid === header.kid; })[0] || keys[0];
     if (!jwk) throw new Error('no-key');

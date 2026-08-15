@@ -1719,6 +1719,16 @@ async def scan_card(
         "npm", "pypi", "crates", "huggingface", "docker",
     ) else "github"
     a_score100, a_count, _unit = await surface_adoption_summary(a_surface, owner, repo)
+    # Use the SAME full multi-axis adoption score the score page shows, so the card's
+    # tier word can never disagree with the report (surface_adoption_summary is a
+    # lighter, stars-only estimate for some surfaces). Keep its headline count.
+    try:
+        _full = await scan_adoption(owner=owner, repo=repo, db=db)
+        _fs = _full.get("adoption_score_100") if _full else None
+        if _fs is not None and not _full.get("insufficient_data"):
+            a_score100 = _fs
+    except Exception:
+        pass
     coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
 
     from src.api.card_svg import render_card_svg
