@@ -45,6 +45,7 @@ const SEV_CLASS: Record<string, string> = {
 
 const VERDICT_STYLE = {
   safe: { ring: 'text-success', chip: 'bg-success/15 text-success', label: 'SAFE' },
+  ok: { ring: 'text-success', chip: 'bg-success/15 text-success', label: 'GENERALLY SAFE' },
   caution: { ring: 'text-warning', chip: 'bg-warning/15 text-warning', label: 'CAUTION' },
   risky: { ring: 'text-danger', chip: 'bg-danger/15 text-danger', label: 'RISKY' },
 }

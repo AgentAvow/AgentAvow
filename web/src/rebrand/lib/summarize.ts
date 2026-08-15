@@ -22,7 +22,7 @@ export interface ScanLike {
 }
 
 export interface PlainSummary {
-  verdict: 'safe' | 'caution' | 'risky'
+  verdict: 'safe' | 'ok' | 'caution' | 'risky'
   headline: string
   paragraph: string
   goodPractices: string[]
@@ -37,9 +37,15 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
   const total = s.findings?.total ?? 0
   const cats = s.category_scores ?? {}
 
-  const verdict: PlainSummary['verdict'] = score >= 81 ? 'safe' : score >= 51 ? 'caution' : 'risky'
+  // Aligned to the trust tiers: Trusted (≥80) · Standard (≥60) · Caution (≥40) · below.
+  // A solid Standard-tier tool reads as "generally safe", not "caution" — the old
+  // safe≥81/caution≥51 split (calibrated for inflated scores) mislabelled the whole
+  // 60–80 band as caution.
+  const verdict: PlainSummary['verdict'] =
+    score >= 80 ? 'safe' : score >= 60 ? 'ok' : score >= 40 ? 'caution' : 'risky'
   const headline =
     verdict === 'safe' ? 'Looks safe to connect'
+    : verdict === 'ok' ? 'Generally safe to connect'
     : verdict === 'caution' ? 'Connect with caution'
     : 'Think twice before connecting'
 
@@ -69,6 +75,8 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
     paragraph = `We scanned ${short} across 12 safety categories and found nothing alarming. It follows good security practices and carries a signed, verifiable grade — reasonable to connect to your agent.`
   } else if (verdict === 'safe') {
     paragraph = `${short} scored well overall. We found ${total} minor thing${total === 1 ? '' : 's'} but no critical risks — it follows solid security practices and is generally safe to connect.`
+  } else if (verdict === 'ok') {
+    paragraph = `${short} scored solidly. We flagged ${total} thing${total === 1 ? '' : 's'} worth a glance${high ? `, ${high} of them higher-severity` : ''} but nothing critical — generally safe to connect once you've skimmed the details below.`
   } else if (verdict === 'caution') {
     paragraph = `${short} is a mixed bag. It does some things well, but we flagged ${total} issue${total === 1 ? '' : 's'}${high ? `, including ${high} worth reviewing` : ''}. Read the details below before you connect it to anything sensitive.`
   } else {
