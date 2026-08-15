@@ -4,6 +4,51 @@ import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 import { TrustMini, AdoptionMini } from '../components/TrustMark'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
+import { publicApi } from '../../lib/scanApi'
+
+interface RecentItem { surface: string; name: string; full_name: string | null; trust_score: number | null; at: string | null }
+
+/** Live "just scanned…" feed — real recent scans, refreshed on an interval. */
+function RecentFeed() {
+  const { data } = useQuery({
+    queryKey: ['recent-scans'],
+    queryFn: async () => (await publicApi.get<{ items: RecentItem[] }>('/public/scan-catalog/recent?limit=12')).data,
+    staleTime: 30_000, refetchInterval: 45_000,
+  })
+  const items = data?.items || []
+  if (!items.length) return null
+  const ago = (iso: string | null) => {
+    if (!iso) return ''
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
+    if (s < 90) return 'just now'
+    if (s < 3600) return `${Math.round(s / 60)}m ago`
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`
+    return `${Math.round(s / 86400)}d ago`
+  }
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2">
+        <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-60" /><span className="relative inline-flex rounded-full h-2 w-2 bg-success" /></span>
+        <h2 className="text-[16px] font-bold">Just scanned</h2>
+      </div>
+      <div className="mt-3 flex flex-col divide-y divide-border/40">
+        {items.map((it, i) => {
+          const href = linkFor(it as unknown as CatalogRow)
+          const inner = (
+            <div className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-surface-hover/50 transition-colors">
+              <div className="min-w-0 flex-1">
+                <div className="font-mono text-[12.5px] truncate">{it.name || it.full_name}</div>
+                <div className="font-mono text-[10px] text-text-muted/70">{SURFACE_LABEL[it.surface] || it.surface} · {ago(it.at)}</div>
+              </div>
+              {it.trust_score != null && <TrustMini score={it.trust_score} />}
+            </div>
+          )
+          return href ? <Link key={i} to={href} className="block">{inner}</Link> : <div key={i}>{inner}</div>
+        })}
+      </div>
+    </div>
+  )
+}
 
 /**
  * The public index — the outside-in, independent, signed leaderboard of agent-tool
@@ -155,6 +200,9 @@ export default function RebrandTrustIndex() {
         <Board title="Safest npm packages" note="by trust" rows={npm.data?.rows} isLoading={npm.isLoading} />
         <Board title="Safest PyPI packages" note="by trust" rows={pypi.data?.rows} isLoading={pypi.isLoading} />
       </div>
+
+      {/* live feed — real recent scans */}
+      <div className="mt-4"><Reveal><RecentFeed /></Reveal></div>
 
       {certified.data?.rows && certified.data.rows.length > 0 && (
         <div className="mt-4">

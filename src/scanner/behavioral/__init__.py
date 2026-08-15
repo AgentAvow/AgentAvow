@@ -13,10 +13,14 @@ dedicated Linux host with Docker + gVisor — never the prod box. See
 """
 from __future__ import annotations
 
+from src.scanner.behavioral.manifest import DeclaredScope, parse_manifest
 from src.scanner.behavioral.runner import (
     BehavioralResult,
     behavioral_findings,
     run_behavioral,
 )
 
-__all__ = ["BehavioralResult", "behavioral_findings", "run_behavioral"]
+__all__ = [
+    "BehavioralResult", "DeclaredScope", "behavioral_findings",
+    "parse_manifest", "run_behavioral",
+]

@@ -116,6 +116,23 @@ function ClaimedBadge({ surface, owner = '', repo }: { surface: string; owner?: 
 /** Adoption as a co-equal RING for the non-GitHub views (was only a small pill). Big
  * number + unit; a dashed muted ring when there's no adoption signal (e.g. a live MCP
  * endpoint, or a brand-new package) so it never fabricates reliance. */
+/** "Safer than X% of tools scanned" — the Insygna-style percentile, from the live
+ * catalog distribution. Renders nothing until it resolves (or if the corpus is empty). */
+function Percentile({ score }: { score: number }) {
+  const { data } = useQuery({
+    queryKey: ['score-percentile', score],
+    queryFn: async () => (await publicApi.get<{ percentile: number | null; population: number }>(
+      `/public/scan-catalog/percentile?score=${score}`)).data,
+    staleTime: 600_000, retry: 0,
+  })
+  if (data?.percentile == null) return null
+  return (
+    <div className="mt-1.5 text-[11.5px] text-text-muted">
+      Safer than <b className="text-text tabular-nums">{data.percentile}%</b> of tools scanned
+    </div>
+  )
+}
+
 function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified = false }: {
   trustScore: number; trustLabel: string; surface: string; owner?: string; repo: string; certified?: boolean
 }) {
@@ -140,6 +157,7 @@ function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified
             <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{certified ? <CertifiedMark score={trustScore} scale={big} /> : <TrustBar score={trustScore} scale={big} />}</div>
             <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: certified ? undefined : t.color }}>{trustLabel}</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
+            <Percentile score={trustScore} />
           </div>
           <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
             <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">
@@ -171,13 +189,23 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
   const fmt = (at?: number) => at ? new Date(at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'now'
   const firstDate = fmt(pts[0].at)
   const lastDate = fmt(pts[pts.length - 1].at)
+  // Version-diff: the change since the previous scan.
+  const prev = pts[pts.length - 2]
+  const delta = current - prev.score
 
   return (
     <Reveal>
       <div className="mt-6 glass rounded-2xl p-6">
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
           <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Trust score over time</h3>
-          <span className="font-mono text-[11.5px] text-text-muted">{pts.length} scans · now <b style={{ color: lastG.color }}>{current}/100</b></span>
+          <span className="font-mono text-[11.5px] text-text-muted">
+            {delta !== 0 && (
+              <b className="mr-2" style={{ color: delta > 0 ? '#22c55e' : '#ef4444' }}>
+                {delta > 0 ? '↑' : '↓'}{Math.abs(delta)} since {fmt(prev.at)}
+              </b>
+            )}
+            {pts.length} scans · now <b style={{ color: lastG.color }}>{current}/100</b>
+          </span>
         </div>
         <p className="text-text-muted text-[13px] mt-1 mb-3">A living record — every re-scan, not a one-shot snapshot. Watch this tool to be alerted the moment the line drops.</p>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[90px]" preserveAspectRatio="none" aria-hidden="true">
@@ -1354,6 +1382,7 @@ function Result({ owner, repo, privateResult }: {
                 <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{(scan as { certified?: { eligible?: boolean } }).certified?.eligible ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
+                <Percentile score={scan.trust_score} />
               </div>
               <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
                 <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} scale={heroBig} /></div>

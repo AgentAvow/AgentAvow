@@ -93,9 +93,16 @@ async def run_behavioral(
     coordinate: str,
     *,
     expected_hosts: set[str] | None = None,
+    manifest: str | None = None,
     timeout: int = 45,
 ) -> BehavioralResult:
-    """Run the target in the sandbox and return observed behavior. Fails OPEN."""
+    """Run the target in the sandbox and return observed behavior. Fails OPEN.
+
+    ``manifest`` is the tool's optional ``.agentavow.yml`` text; its declared egress hosts
+    are added to ``expected_hosts`` so a tool is judged against what its author declared."""
+    from src.scanner.behavioral.manifest import parse_manifest
+    expected = set(expected_hosts or set()) | parse_manifest(manifest).egress_set()
+    expected_hosts = expected
     surface = (surface or "").lower()
     plan = _SURFACE_PLAN.get(surface)
     if not plan or not _RUNNER.exists():

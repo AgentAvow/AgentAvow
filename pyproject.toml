@@ -68,6 +68,7 @@ ignore = ["UP007"]  # We handle union types with __future__ annotations
 "scripts/*" = ["E501"]  # Scripts have long string literals (SVG paths, seed data)
 "src/api/badge_router.py" = ["E501"]  # SVG templates have long inline XML
 "src/api/card_svg.py" = ["E501"]  # SVG template has long inline XML
+"tests/test_behavioral_scan.py" = ["E501"]  # inline .agentavow.yml fixture strings
 "src/api/metrics_dashboard_router.py" = ["E501"]  # Inline HTML/CSS dashboard template
 
 [tool.pytest.ini_options]

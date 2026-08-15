@@ -270,7 +270,9 @@ def _build_catalog() -> dict[str, Any]:
         x402_endpoints_total=len(x402_rows),
         x402_compliant=x402_compliant,
     )
-    return {"rows": rows, "summary": summary, "static_cats": static_cats}
+    # Sorted score list for percentile lookups ("safer than X% of scanned tools").
+    scores = sorted(r.trust_score for r in rows if r.trust_score is not None)
+    return {"rows": rows, "summary": summary, "static_cats": static_cats, "scores": scores}
 
 
 def _get_catalog() -> dict[str, Any]:
@@ -468,3 +470,51 @@ async def refresh_catalog() -> dict[str, Any]:
     _CATALOG_CACHE = None
     catalog = _get_catalog()
     return {"status": "rebuilt", "total_scans": catalog["summary"].total_scans}
+
+
+@router.get("/percentile", dependencies=[Depends(rate_limit_reads)])
+async def score_percentile(score: int = Query(..., ge=0, le=100)) -> dict[str, Any]:
+    """"Safer than X% of scanned tools." Returns the percentile of `score` against the
+    catalog's scored-tool distribution (share scoring strictly lower), plus the population."""
+    import bisect
+    scores: list[int] = _get_catalog().get("scores") or []
+    n = len(scores)
+    if not n:
+        return {"score": score, "percentile": None, "population": 0}
+    below = bisect.bisect_left(scores, score)
+    pct = round((below / n) * 100)
+    return {"score": score, "percentile": pct, "population": n}
+
+
+@router.get("/recent", dependencies=[Depends(rate_limit_reads)])
+async def recent_scans(
+    limit: int = Query(15, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """The N most-recently-scanned tools — the live 'just scanned…' feed. Real scans only."""
+    from src.models import CommunityScan
+    try:
+        rows = (await db.execute(
+            select(CommunityScan)
+            .where(CommunityScan.trust_score.isnot(None))
+            .order_by(CommunityScan.last_scanned_at.desc())
+            .limit(limit)
+        )).scalars().all()
+    except Exception:
+        logger.warning("recent_scans fetch failed", exc_info=True)
+        return {"items": []}
+    items = []
+    for c in rows:
+        surf = (getattr(c, "surface", None) or "github").lower()
+        _pkg = surf in ("npm", "pypi", "crates", "huggingface", "docker", "mcp")
+        name = c.repo if _pkg else c.full_name
+        items.append({
+            "surface": surf,
+            "name": name,
+            "full_name": c.full_name,
+            "trust_score": c.trust_score,
+            "critical": c.critical,
+            "high": c.high,
+            "at": c.last_scanned_at.isoformat() if c.last_scanned_at else None,
+        })
+    return {"items": items}

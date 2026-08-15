@@ -24,6 +24,7 @@ const CATEGORIES = [
 
 const STANDARDS = [
   ['Safety Model spec (v1)', 'Exactly how a scan composes into the 0–100 score, the tiers, and the Certified gate — the model published separately from the code, so anyone can recompute a score from the same findings.', 'https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/agentavow-safety-model-v1.md'],
+  ['Tool manifest — .agentavow.yml', 'Declare the hosts your tool contacts and the capabilities it uses; the sandbox holds it to its own declaration. Undeclared egress is a finding.', 'https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/agentavow-manifest-v0.md'],
   ['CTEF — Cryptographic Trust Evidence Format', 'The signed, reproducible evidence envelope any implementer can recompute byte-for-byte. Versioned in the open.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards'],
   ['Published test vectors', 'Conformance vectors served at /.well-known so anyone can validate their own implementation against ours.', 'https://agentgraph.co/.well-known/cte-test-vectors.json'],
   ['ERC-8004 bridge', 'Interop with the on-chain agent-trust registry standard.', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/agentgraph_bridge_erc8004'],

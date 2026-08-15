@@ -66,3 +66,30 @@ def test_run_behavioral_fails_open_on_unsupported_surface():
     r = asyncio.run(run_behavioral("crates", "serde"))
     assert r.ran is False
     assert r.error is not None
+
+
+def test_manifest_absent_is_empty():
+    from src.scanner.behavioral.manifest import parse_manifest
+    assert parse_manifest(None).present is False
+    assert parse_manifest("   ").egress_set() == set()
+
+
+def test_manifest_parses_egress_and_caps():
+    from src.scanner.behavioral.manifest import parse_manifest
+    m = parse_manifest("version: agentavow-manifest-v0\negress:\n  - api.x.com\n  - .cdn.y.net\ncapabilities:\n  - network:egress\n  - bogus:cap\n")
+    assert m.present is True
+    assert m.egress_set() == {"api.x.com", "cdn.y.net"}
+    assert m.capabilities == ["network:egress"]  # bogus cap dropped
+
+
+def test_manifest_wrong_version_ignored():
+    from src.scanner.behavioral.manifest import parse_manifest
+    assert parse_manifest("version: something-else\negress: [evil.net]").present is False
+
+
+def test_manifest_declared_host_suppresses_egress_finding():
+    from src.scanner.behavioral.manifest import parse_manifest
+    from src.scanner.behavioral.runner import _classify_egress
+    declared = parse_manifest("version: agentavow-manifest-v0\negress: [api.mytool.com]").egress_set()
+    assert _classify_egress(["api.mytool.com"], declared) == []
+    assert _classify_egress(["evil.net"], declared) == ["evil.net"]
