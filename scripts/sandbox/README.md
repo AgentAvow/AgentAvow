@@ -27,21 +27,32 @@ docker run --rm --runtime=runsc hello-world   # smoke test the isolation layer
 # → prints the JSON BehavioralResult: {egress_hosts, exit_code, timed_out, ...}
 ```
 
-## How it works
-1. A private Docker network with **no default route to the internet**.
-2. A **tinyproxy** sidecar on that network is the *only* egress path; it logs every host
-   the target requests.
-3. The target runs under **`--runtime=runsc`** (gVisor), **read-only root**, **no host
-   mounts**, dropped caps, CPU/mem/pids-capped, `HTTP(S)_PROXY` pointed at the proxy, and a
-   hard wall-clock **timeout** (kill after N seconds).
-4. On exit we collect the proxy's host log → **observed egress**, plus the exit code and
-   whether it timed out. Phase 1 diffs egress against an allowlist / the tool's declared
-   hosts and emits behavioral findings.
+## How it works (Phase 1)
+1. The target runs under **`--runtime=runsc`** (gVisor), **read-only root**, **no host
+   mounts**, dropped caps, `no-new-privileges`, CPU/mem/pids-capped, and a hard wall-clock
+   **timeout** (killed after N seconds).
+2. Egress is captured **passively** with `tcpdump` **inside the container's own network
+   namespace** (`nsenter -t <pid> -n`) — DNS query names + TLS SNI. Because it's kernel-level
+   packet capture, not a proxy, the target **cannot bypass it** by ignoring `HTTP_PROXY`.
+3. Filesystem writes come from `docker diff` (added/changed paths, minus the ephemeral
+   tmpfs mounts).
+4. Output is a JSON `BehavioralResult` = `{egress_hosts, fs_writes, exit_code, timed_out}`.
+   The Python orchestrator (`src/scanner/behavioral/`) diffs `egress_hosts` against the
+   package registries + the tool's declared hosts, and turns unexpected egress into a
+   signed **behavioral** finding.
 
-## Known Phase-0 limitations (hardened in Phase 1)
-- Egress capture is **proxy-env based** — malware that ignores `HTTP_PROXY` and dials raw
-  sockets would evade it. **Phase 1: transparent redirect** (iptables in the target's
-  netns forces all egress through the proxy, so it can't be bypassed), plus raw-connection
-  logging and filesystem/process capture from the sandbox layer.
-- No artifact materialization yet (you pass an image+command); Phase 1 fetches the npm
-  tarball / pip package / MCP repo and runs its install hook + import automatically.
+## Validate on the dedicated instance
+This runner is written for a gVisor host and hasn't been executed on prod (by design).
+Before wiring it into the pipeline, on the dedicated instance:
+```bash
+sudo ./behavioral_run.sh node:20-alpine 'npm install left-pad && node -e "require(\"left-pad\")"'
+# expect: egress_hosts ⊇ ["registry.npmjs.org"], no unexpected hosts, fs writes under node_modules/
+```
+Needs `tcpdump` + root (for `nsenter`). Note gVisor uses a user-space netstack; confirm the
+in-netns capture sees the sandbox's egress on your kernel/gVisor platform, and fall back to
+capturing on the container's `veth`/bridge if not.
+
+## Still ahead (Phase 1.5)
+- **Process capture** (what the target spawned) — via a runsc/ptrace hook or auditd.
+- **Automatic artifact materialization** — the Python layer currently drives npm/pypi via
+  `install + import`; add MCP stdio (`list-tools`) and richer per-surface exercise.
