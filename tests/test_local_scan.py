@@ -138,3 +138,28 @@ def test_tutorial_and_docs_secrets_skipped(tmp_path):
     files = {f.file_path for f in result.findings if f.category == "secret"}
     assert "docs_src/tutorial001.py" not in files
     assert "latest_config.py" in files
+
+
+def test_findings_tagged_shipped_and_sorted(tmp_path):
+    """Findings carry a `shipped` flag and shipped ones sort first, so the list
+    leads with what an agent actually runs (not test-suite noise)."""
+    _git_init(tmp_path)
+    (tmp_path / "app.py").write_text("import os\ndef r(c):\n    os.system(c)\n")
+    (tmp_path / "tests").mkdir()
+    # fs_access is downgraded-but-kept in test files (unlike unsafe_exec, which is
+    # skipped there) — so this yields a non-shipped finding to sort behind app.py.
+    (tmp_path / "tests" / "test_app.py").write_text(
+        "import shutil\ndef test_x(p):\n    shutil.rmtree(p)\n"
+    )
+    _commit_all(tmp_path)
+
+    from src.scanner.local_scan import result_to_dict, scan_local
+    d = result_to_dict(scan_local(tmp_path))
+    items = d["findings"]
+    assert all("shipped" in it for it in items)
+    # the shipped app.py finding must come before the tests/ one
+    shipped_flags = [it["shipped"] for it in items]
+    assert shipped_flags == sorted(shipped_flags, reverse=True), "shipped must sort first"
+    app = next(it for it in items if it["file"] == "app.py")
+    test = next(it for it in items if it["file"].startswith("tests/"))
+    assert app["shipped"] is True and test["shipped"] is False

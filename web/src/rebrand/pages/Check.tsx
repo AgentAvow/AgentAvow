@@ -942,7 +942,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
                 <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
                 <div className="min-w-0">
                   <div className="text-[14px]">{it.name}</div>
-                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}</div>
+                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{(it as {shipped?: boolean}).shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
                   {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
                 </div>
               </div>
@@ -1137,7 +1137,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
                 <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
                 <div className="min-w-0">
                   <div className="text-[14px]">{it.name}</div>
-                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}</div>
+                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{(it as {shipped?: boolean}).shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
                   {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
                 </div>
               </div>
@@ -1239,7 +1239,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
                 <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
                 <div className="min-w-0">
                   <div className="text-[14px]">{it.name}</div>
-                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}</div>
+                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}{(it as {shipped?: boolean}).shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
                   {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
                 </div>
               </div>
@@ -1576,7 +1576,7 @@ function Result({ owner, repo, privateResult }: {
                 <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
                 <div className="min-w-0">
                   <div className="text-[14px]">{it.name}</div>
-                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}</div>
+                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}{(it as {shipped?: boolean}).shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
                   {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
                 </div>
               </div>

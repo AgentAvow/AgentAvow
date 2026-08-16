@@ -35,12 +35,22 @@ from src.scanner.scan import (
     _compute_manifest_digest,
     _dedupe_findings,
     _detect_language,
+    _is_nonshipped_path,
+    _is_test_or_doc_file,
     _load_allowlist,
     _scan_content,
     _scan_dependencies,
     _select_scan_files,
     _should_skip_path,
 )
+
+_SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def _is_shipped(path: str) -> bool:
+    """False for test/doc/example paths — those score at a fraction, so the output
+    leads with the shipped surface an agent actually runs."""
+    return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
 
 # Skip files larger than ~1MB — matches the practical hosted fetch cap and keeps
 # a huge generated/vendored file from dominating the scan.
@@ -304,8 +314,14 @@ def result_to_dict(result: ScanResult) -> dict:
                 "file": f.file_path,
                 "line": f.line_number,
                 "remediation": f.remediation,
+                "shipped": _is_shipped(f.file_path),
             }
-            for f in result.findings
+            # shipped findings first, then by severity — lead with what an agent runs
+            for f in sorted(
+                result.findings,
+                key=lambda x: (not _is_shipped(x.file_path),
+                               _SEV_RANK.get(x.severity, 5)),
+            )
         ],
     }
 
@@ -364,7 +380,10 @@ def _print_human(result: ScanResult, stream=sys.stderr) -> None:
           f"{c['medium']} medium · {c['low']} low", file=stream)
     if result.is_mcp_server:
         print("  Context     : MCP server (fs_access/unsafe_exec discounted)", file=stream)
-    top = [f for f in result.findings if f.severity in ("critical", "high")][:15]
+    top = sorted(
+        [f for f in result.findings if f.severity in ("critical", "high")],
+        key=lambda x: (not _is_shipped(x.file_path), _SEV_RANK.get(x.severity, 5)),
+    )[:15]
     if top:
         print("\n  Top findings:", file=stream)
         for f in top:

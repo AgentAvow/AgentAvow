@@ -80,6 +80,30 @@ _DRIFT_IGNORE_NAMES = frozenset({
 })
 _DRIFT_IGNORE_DIR_MARKERS = ("dist-info", "egg-info")
 
+# Directories/files a BUILD STEP normally emits — compiled/bundled output that is
+# expected to be present in the published package but absent from (or different in)
+# the git source. A TS package ships dist/*.js built from src/*.ts; that path-level
+# difference is NOT a poisoned-tarball signal. The CONTENT of these files is still
+# scanned for malware by scan_artifact_files — this only suppresses the path-drift
+# FINDING, so a compiled package doesn't get a spurious HIGH "ships N files" drift.
+_BUILD_OUTPUT_DIR_SEGMENTS = frozenset({
+    "dist", "build", "_build", "es", "esm", "cjs", "umd", "out",
+    "target", "bundle", "bundles", ".next", "__generated__", "generated",
+})
+_BUILD_OUTPUT_SUFFIXES = (
+    ".min.js", ".min.css", ".map", ".js.map", ".css.map",
+    ".d.ts", ".d.mts", ".d.cts",
+)
+
+
+def _is_expected_build_output(path: str) -> bool:
+    """True for a file a build step normally produces (compiled/bundled/generated),
+    so its path-level difference from the git source is expected, not injection."""
+    low = path.lower()
+    if low.endswith(_BUILD_OUTPUT_SUFFIXES):
+        return True
+    return any(seg in _BUILD_OUTPUT_DIR_SEGMENTS for seg in Path(low).parts)
+
 
 # ---------------------------------------------------------------------------
 # PyPI setup.py install-time exec detection (AST — never executed)
@@ -548,9 +572,15 @@ def compute_drift(
 
     added = drift["added_files"]
 
-    # Added SOURCE files that the repo never committed = injected-code drift.
+    # Added SOURCE files that the repo never committed = injected-code drift —
+    # EXCEPT expected build output (dist/*.js compiled from src/*.ts, *.min.js,
+    # *.d.ts, …), which every compiled package ships and whose content is scanned
+    # separately. Without this, every TS/JS package with a build step got a spurious
+    # HIGH "ships N source files not in the repo" drift.
     suspicious_added = [
-        p for p in added if Path(p).suffix.lower() in _DRIFT_SOURCE_EXTS
+        p for p in added
+        if Path(p).suffix.lower() in _DRIFT_SOURCE_EXTS
+        and not _is_expected_build_output(p)
     ]
     if suspicious_added:
         preview = ", ".join(suspicious_added[:5])
@@ -570,7 +600,12 @@ def compute_drift(
                 "built from the tagged commit; treat unexplained additions as malicious."
             ),
         ))
-    if modified:
+    # Modified files that are expected build transforms (a rebuilt dist/, a stamped
+    # version file, a regenerated .d.ts) aren't tampering — only assert drift on
+    # SOURCE files whose committed content the artifact changed.
+    suspicious_modified = [p for p in modified if not _is_expected_build_output(p)]
+    if suspicious_modified:
+        modified = suspicious_modified
         preview = ", ".join(modified[:5])
         findings.append(Finding(
             category="artifact_drift",

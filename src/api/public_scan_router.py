@@ -603,8 +603,17 @@ def _scan_result_to_dict(result: object) -> dict:
     for f in result.findings:
         categories[f.category] = categories.get(f.category, 0) + 1
 
-    # Individual findings — severity-sorted, capped, NO raw snippet (avoid leaking any
-    # matched secret value into the public API; file_path + line_number are public).
+    # Individual findings — NO raw snippet (avoid leaking any matched secret value;
+    # file_path + line_number are public). Each item is tagged shipped vs non-shipped
+    # (test/doc/example) so the list can lead with what actually counts — those are
+    # scored at a fraction, so a package isn't judged on its test-suite noise. Sort:
+    # shipped first, then by severity, so the top of the (capped) list is the surface
+    # an agent actually runs.
+    from src.scanner.scan import _is_nonshipped_path, _is_test_or_doc_file
+
+    def _is_shipped(path: str) -> bool:
+        return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
+
     _sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     finding_items = [
         {
@@ -614,8 +623,12 @@ def _scan_result_to_dict(result: object) -> dict:
             "file_path": f.file_path,
             "line_number": f.line_number,
             "remediation": f.remediation or "",
+            "shipped": _is_shipped(f.file_path),
         }
-        for f in sorted(result.findings, key=lambda x: _sev_rank.get(x.severity, 5))
+        for f in sorted(
+            result.findings,
+            key=lambda x: (not _is_shipped(x.file_path), _sev_rank.get(x.severity, 5)),
+        )
     ][:100]
 
     tier_info = _compute_tier(result.trust_score)
