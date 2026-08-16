@@ -112,7 +112,10 @@ function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; 
 
 function Board({ title, note, rows, isLoading, certified = false }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean }) {
   return (
-    <div className="glass rounded-2xl p-5">
+    // min-w-0: grid items default to min-width:auto and won't shrink below their
+    // content — a long tool name in a row was forcing the card past the viewport
+    // on mobile (horizontal scroll). Let it clamp to its grid track.
+    <div className="glass rounded-2xl p-5 min-w-0">
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-[16px] font-bold">{title}</h2>
         <span className="font-mono text-[10.5px] text-text-muted uppercase tracking-wide shrink-0">{note}</span>
