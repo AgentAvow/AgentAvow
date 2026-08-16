@@ -1,0 +1,85 @@
+name: "AgentAvow Local Scan"
+description: >-
+  Run AgentAvow's tool-safety scan IN your CI runner, on your checked-out code.
+  Works on private repos (the code never leaves the runner, no token needed) and
+  emits SARIF + JSON findings you can gate the build on. Same engine and score as
+  a hosted AgentAvow scan of the same tree.
+author: "AgentAvow"
+branding:
+  icon: "shield"
+  color: "green"
+
+inputs:
+  path:
+    description: "Directory to scan (relative to the workspace)."
+    required: false
+    default: "."
+  min-score:
+    description: "Fail the job if the trust score is below this (0–100). Empty = don't gate on score."
+    required: false
+    default: ""
+  fail-on:
+    description: "Fail the job if any finding at/above this severity is present: critical | high | medium. Empty = don't gate on findings."
+    required: false
+    default: ""
+  upload-sarif:
+    description: "Upload results.sarif to GitHub code scanning (needs security-events: write)."
+    required: false
+    default: "true"
+  ref:
+    description: "AgentAvow scanner version to install (git ref of AgentAvow/AgentAvow)."
+    required: false
+    default: "main"
+
+outputs:
+  trust-score:
+    description: "The computed 0–100 trust score."
+    value: ${{ steps.scan.outputs.trust-score }}
+  tier:
+    description: "Trust tier (Trusted / Standard / Caution / Restricted / Blocked)."
+    value: ${{ steps.scan.outputs.tier }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install AgentAvow scanner
+      shell: bash
+      run: pip install --quiet "agentavow @ git+https://github.com/AgentAvow/AgentAvow.git@${{ inputs.ref }}"
+
+    - name: Scan
+      id: scan
+      shell: bash
+      run: |
+        set -o pipefail
+        ARGS=("${{ inputs.path }}" --json results.json --sarif results.sarif)
+        if [ -n "${{ inputs.min-score }}" ]; then ARGS+=(--min-score "${{ inputs.min-score }}"); fi
+        if [ -n "${{ inputs.fail-on }}" ]; then ARGS+=(--fail-on "${{ inputs.fail-on }}"); fi
+        # Run the scan but capture the gate exit code so we can still publish SARIF.
+        set +e
+        agentavow scan "${ARGS[@]}"
+        GATE=$?
+        set -e
+        # Surface score/tier as step outputs regardless of the gate result.
+        SCORE=$(python -c "import json;print(json.load(open('results.json'))['trust_score'])")
+        TIER=$(python -c "import json;print(json.load(open('results.json'))['tier'])")
+        echo "trust-score=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "tier=$TIER" >> "$GITHUB_OUTPUT"
+        {
+          echo "## AgentAvow — local scan"
+          echo ""
+          echo "**Trust score: $SCORE / 100 ($TIER)**"
+          python -c "import json;d=json.load(open('results.json'));c=d['counts'];print(f\"\\n{c['critical']} critical · {c['high']} high · {c['medium']} medium · {c['low']} low\")"
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit $GATE
+
+    - name: Upload SARIF to code scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && hashFiles('results.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: results.sarif
+        category: agentavow

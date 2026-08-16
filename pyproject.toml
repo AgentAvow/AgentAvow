@@ -50,6 +50,7 @@ erc8004 = [
 
 [project.scripts]
 agentgraph-trust = "agentgraph_trust.server:main"
+agentavow = "src.scanner.local_scan:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]

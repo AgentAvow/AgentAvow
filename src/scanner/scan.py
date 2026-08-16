@@ -791,6 +791,41 @@ def _is_test_or_doc_file(file_path: str) -> bool:
     return False
 
 
+def _select_scan_files(
+    tree: list[dict], user_excludes: set[str] | None = None,
+) -> tuple[list[dict], int, bool]:
+    """Filter a file tree to the scannable set, cap at ``_MAX_FILES_PER_REPO``, and
+    order a big monorepo so the sample favors shipped source over test/vendored files.
+
+    Returns ``(scan_files, total_scannable, sampled)``. Shared by ``scan_repo``
+    (hosted, GitHub tree) and ``local_scan.scan_local`` (offline, git-tracked tree)
+    so the two paths select the SAME files — file selection can't drift between them.
+    """
+    excl = {e.lower() for e in (user_excludes or set())}
+
+    def _excluded(path: str) -> bool:
+        low = path.lower()
+        return any(e in low for e in excl)
+
+    scannable = [
+        it for it in tree
+        if not _should_skip_path(it["path"])
+        and _is_source_file(it["path"])
+        and not _excluded(it["path"])
+    ]
+    total = len(scannable)
+    sampled = total > _MAX_FILES_PER_REPO
+    if total > _MAX_FILES_PER_REPO:
+        # Grade the shipped surface first, not the test/example/vendored tree, so a
+        # 200-file sample of a monorepo is representative of what an agent runs.
+        scannable.sort(key=lambda it: (
+            _is_nonshipped_path(it["path"]) or _is_test_or_doc_file(it["path"]),
+            it["path"].count("/"),
+            it["path"],
+        ))
+    return scannable[:_MAX_FILES_PER_REPO], total, sampled
+
+
 def _is_infra_file(file_path: str) -> bool:
     """Check if a file is CI/infra config (graded like tests/docs, not shipped code).
 
@@ -2973,36 +3008,14 @@ async def scan_repo(
                         pass
                 break
 
-        # Filter to scannable files (respecting user excludes)
-        def _user_excluded(path: str) -> bool:
-            low = path.lower()
-            return any(exc in low for exc in user_excludes)
-
-        scannable_files = [
-            item for item in tree
-            if not _should_skip_path(item["path"])
-            and _is_source_file(item["path"])
-            and not _user_excluded(item["path"])
-        ]
-        # Coverage disclosure (#4): record the full scannable count BEFORE truncation,
-        # and flag when the signed grade is only a sample of the repo.
-        result.total_scannable_files = len(scannable_files)
-        # OR: keep an already-set truncation flag (partial tree from a large
-        # monorepo) even when the returned sample is under the file cap.
-        result.sampled = (
-            result.sampled or result.total_scannable_files > _MAX_FILES_PER_REPO
+        # Filter to scannable files (respecting user excludes). Shared with the
+        # offline local scanner via _select_scan_files so selection can't drift.
+        # Coverage disclosure (#4): total_scannable is the full count BEFORE the cap;
+        # OR-in any already-set truncation flag (partial tree from a big monorepo).
+        scan_files, result.total_scannable_files, _sel_sampled = _select_scan_files(
+            tree, user_excludes,
         )
-        # When we can only sample (big monorepo), grade the SHIPPED surface, not its
-        # test/example/vendored tree: rank shipped source + shallow paths first so the
-        # 200-file sample is representative of what an agent actually runs. (Fixes the
-        # react-style D/30 where the sample was dominated by test/build files.)
-        if len(scannable_files) > _MAX_FILES_PER_REPO:
-            scannable_files.sort(key=lambda it: (
-                _is_nonshipped_path(it["path"]) or _is_test_or_doc_file(it["path"]),
-                it["path"].count("/"),
-                it["path"],
-            ))
-        scan_files = scannable_files[:_MAX_FILES_PER_REPO]
+        result.sampled = result.sampled or _sel_sampled
 
         # Load allowlist once for the whole scan
         allowlist = _load_allowlist()

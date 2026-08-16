@@ -208,9 +208,9 @@ export default function RebrandBadge() {
       <h2 className="mt-12 text-xl font-bold">Wire it into your workflow</h2>
       <div className="grid md:grid-cols-3 gap-3.5 mt-4">
         {([
-          ['GitHub Action', 'Gate PRs on a minimum score. Posts the report as a check comment.', 'min_score: 60', 'https://github.com/AgentAvow/trust-scan-action'],
-          ['Python SDK / CLI', 'Programmatic scans + attestation verification in your pipeline.', 'agentavow scan owner/repo', 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk'],
-          ['REST API', 'The same signed verdicts, offline-verifiable against our JWKS.', 'GET /public/scan/{owner}/{repo}', '/api/v1/redoc'],
+          ['Local scan (CLI)', 'Scan your working tree offline — no code leaves your machine. SARIF + JSON out, gate on a min score.', 'agentavow scan .', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/scanner/local_scan.py'],
+          ['GitHub Action', 'Runs the scan in your runner — works on private repos, gates the build, uploads SARIF.', 'uses: AgentAvow/AgentAvow/local-scan-action@main', 'https://github.com/AgentAvow/AgentAvow/tree/main/local-scan-action'],
+          ['REST API', 'The hosted scan + signed attestation, offline-verifiable against our JWKS.', 'GET /public/scan/{owner}/{repo}', '/api/v1/redoc'],
         ] as [string, string, string, string][]).map(([h, p, code, href]) => (
           <a key={h} href={rp(href)} target={href.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" className="glass card-hover rounded-xl p-5 block">
             <div className="flex items-center justify-between gap-2"><div className="text-[15px] font-semibold">{h}</div><span className="text-primary-light text-[13px]">→</span></div>
