@@ -32,3 +32,28 @@ jobs:
           echo "tier        = ${{ steps.ag.outputs.tier }}"
           test -f results.json && echo "results.json written" || (echo "missing results.json" && exit 1)
           test -f results.sarif && echo "results.sarif written" || (echo "missing results.sarif" && exit 1)
+
+  # Proves the gate actually BLOCKS a below-threshold build: scan a planted-unsafe
+  # fixture with an impossible min-score and assert the Action step failed.
+  gate-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Plant an unsafe fixture
+        run: |
+          mkdir -p _gate_fixture
+          printf 'import os\ndef r(c):\n    os.system(c)\n' > _gate_fixture/app.py
+      - id: gate
+        continue-on-error: true
+        uses: ./local-scan-action
+        with:
+          path: _gate_fixture
+          min-score: "100"
+          upload-sarif: "false"
+      - name: Assert the gate failed the build
+        run: |
+          if [ "${{ steps.gate.outcome }}" != "failure" ]; then
+            echo "expected the gate to FAIL (min-score 100) but outcome was '${{ steps.gate.outcome }}'"
+            exit 1
+          fi
+          echo "gate correctly failed the build below the threshold"

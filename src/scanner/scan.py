@@ -1034,6 +1034,17 @@ def _upgrade_shell_true_severity(
     return severity
 
 
+# Obvious non-secret placeholders. The matched secret value is separator/case-
+# normalized (CHANGE-ME-IN-PRODUCTION -> changemeinproduction) then substring-
+# checked against these, so hyphen/underscore/case variants all collapse. Kept
+# high-precision — these tokens effectively never appear inside a real credential.
+_SECRET_PLACEHOLDER_CORES = (
+    "changeme", "replaceme", "placeholder", "example", "yourapikey", "yourapitoken",
+    "yoursecret", "yourtoken", "yourkey", "yourpassword", "dummy", "redacted",
+    "notasecret", "insertkey", "insertyour", "todo", "fixme", "xxxx", "foobar",
+)
+
+
 def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
@@ -1090,10 +1101,10 @@ def _scan_content(
                 # Skip if the MATCHED VALUE is clearly a placeholder (not the whole line).
                 # The captured secret value (group 1 when present, else the full match).
                 val = match.group(1) if match.groups() else match.group()
-                val_lower = val.lower()
-                if val in ("YOUR_API_KEY", "your_api_key", "xxx", "changeme") or any(
-                    tok in val_lower for tok in ("example", "placeholder", "your_api_key")
-                ):
+                # Collapse separators/case so "CHANGE-ME-IN-PRODUCTION", "change_me",
+                # "your-api-key" all reduce to a comparable core before matching.
+                val_norm = re.sub(r"[^a-z0-9]", "", val.lower())
+                if any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES):
                     continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):

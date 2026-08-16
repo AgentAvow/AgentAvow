@@ -64,7 +64,7 @@ def test_gitignored_files_are_not_scanned(tmp_path):
     (tmp_path / "app.py").write_text("x = 1\n")
     # a gitignored file stuffed with a hardcoded secret — must be invisible to the scan
     (tmp_path / "secrets_dump.py").write_text(
-        'AWS_SECRET = "AKIAIOSFODNN7EXAMPLE" + "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"\n'
+        'api_key = "kQ8fJ2mN7pR4tV6wX9zB1cD3eF5gH0jL"\n'
     )
     _commit_all(tmp_path)
 
@@ -98,3 +98,23 @@ def test_non_directory_errors(tmp_path):
     f.write_text("hi")
     result = scan_local(f)
     assert result.error is not None
+
+
+def test_secret_placeholders_are_not_flagged(tmp_path):
+    """Regression: placeholder defaults (CHANGE-ME-IN-PRODUCTION, your-api-key, …)
+    must NOT be graded as leaked secrets, but a real-looking key still must."""
+    _git_init(tmp_path)
+    (tmp_path / "config.py").write_text(
+        'DEFAULT_SECRET = "CHANGE-ME-IN-PRODUCTION"\n'
+        'API_KEY = "your-api-key-here"\n'
+    )
+    (tmp_path / "real.py").write_text(
+        'api_key = "kQ8fJ2mN7pR4tV6wX9zB1cD3eF5gH0jL"\n'
+    )
+    _commit_all(tmp_path)
+
+    result = scan_local(tmp_path)
+    secrets = [f for f in result.findings if f.category == "secret"]
+    files = {f.file_path for f in secrets}
+    assert "config.py" not in files, "placeholder default was flagged as a secret"
+    assert "real.py" in files, "a real-looking secret should still be caught"
