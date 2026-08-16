@@ -796,8 +796,13 @@ def _is_test_or_doc_file(file_path: str) -> bool:
     fname = Path(file_path).name.lower()
     if ".test." in fname or ".spec." in fname:
         return True
-    # Doc / example directories
-    if any(p in ("docs", "doc", "examples", "example", "samples") for p in parts):
+    # Doc / example / tutorial directories (docs_src, tutorials, cookbook, snippets…)
+    if any(p in ("docs", "doc", "docs_src", "examples", "example", "samples", "sample",
+                 "tutorial", "tutorials", "cookbook", "snippet", "snippets",
+                 "guide", "guides", "recipes") for p in parts):
+        return True
+    # Tutorial/example files by name (tutorial001.py, example_client.ts, demo_app.py)
+    if name.startswith(("tutorial", "example", "demo", "sample")):
         return True
     # Config examples
     if ".example" in lower or ".sample" in lower or ".template" in lower:
@@ -1132,8 +1137,10 @@ def _scan_content(
         for name, pattern, severity in SECRET_PATTERNS:
             match = pattern.search(line)
             if match:
-                # Extra filter: skip if it's in a .env.example or test file
-                if ".example" in file_path or "test" in file_path.lower():
+                # Skip secrets in test/doc/example/tutorial files — those are example
+                # keys, not shipped credentials (and this also fixes the old "latest"
+                # substring bug: "test" in file_path matched latest_config.py).
+                if is_test_or_doc:
                     continue
                 # Skip if the MATCHED VALUE is clearly a placeholder (not the whole line).
                 # The captured secret value (group 1 when present, else the full match).

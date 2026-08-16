@@ -118,3 +118,23 @@ def test_secret_placeholders_are_not_flagged(tmp_path):
     files = {f.file_path for f in secrets}
     assert "config.py" not in files, "placeholder default was flagged as a secret"
     assert "real.py" in files, "a real-looking secret should still be caught"
+
+
+def test_tutorial_and_docs_secrets_skipped(tmp_path):
+    """Example keys in tutorial/docs/example files are not shipped credentials."""
+    _git_init(tmp_path)
+    (tmp_path / "docs_src").mkdir()
+    (tmp_path / "docs_src" / "tutorial001.py").write_text(
+        'api_key = "kQ8fJ2mN7pR4tV6wX9zB1cD3eF5gH0jL"\n'
+    )
+    # a real source secret must still be caught (guards over-suppression, incl. the
+    # old "latest" substring bug where "test" matched latest_config.py)
+    (tmp_path / "latest_config.py").write_text(
+        'api_key = "kQ8fJ2mN7pR4tV6wX9zB1cD3eF5gH0jL"\n'
+    )
+    _commit_all(tmp_path)
+
+    result = scan_local(tmp_path)
+    files = {f.file_path for f in result.findings if f.category == "secret"}
+    assert "docs_src/tutorial001.py" not in files
+    assert "latest_config.py" in files
