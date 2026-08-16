@@ -15,7 +15,7 @@ What you get locally is **identical** to a hosted scan of the same tree: the sam
 ## CLI
 
 ```bash
-pip install "agentavow @ git+https://github.com/AgentAvow/AgentAvow.git"
+pip install "git+https://github.com/AgentAvow/AgentAvow.git"
 agentavow scan .
 ```
 

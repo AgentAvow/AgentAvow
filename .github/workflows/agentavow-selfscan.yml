@@ -1,0 +1,33 @@
+name: AgentAvow self-scan
+
+# Dogfood + end-to-end test of the local-scan Action: run it in a real runner
+# against this repo. Report-only (no gate) so it never blocks; it validates the
+# install → scan → outputs path.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "local-scan-action/**"
+      - "src/scanner/**"
+      - ".github/workflows/agentavow-selfscan.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: ag
+        uses: ./local-scan-action
+        with:
+          path: .
+          upload-sarif: "false"
+      - name: Show outputs
+        run: |
+          echo "trust-score = ${{ steps.ag.outputs.trust-score }}"
+          echo "tier        = ${{ steps.ag.outputs.tier }}"
+          test -f results.json && echo "results.json written" || (echo "missing results.json" && exit 1)
+          test -f results.sarif && echo "results.sarif written" || (echo "missing results.sarif" && exit 1)

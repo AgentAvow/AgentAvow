@@ -49,7 +49,7 @@ runs:
 
     - name: Install AgentAvow scanner
       shell: bash
-      run: pip install --quiet "agentavow @ git+https://github.com/AgentAvow/AgentAvow.git@${{ inputs.ref }}"
+      run: pip install --quiet "git+https://github.com/AgentAvow/AgentAvow.git@${{ inputs.ref }}"
 
     - name: Scan
       id: scan

@@ -50,6 +50,6 @@ jobs:
 ## Same thing locally (inner loop)
 
 ```bash
-pip install "agentavow @ git+https://github.com/AgentAvow/AgentAvow.git"
+pip install "git+https://github.com/AgentAvow/AgentAvow.git"
 agentavow scan . --min-score 60 --sarif out.sarif --json out.json
 ```
