@@ -234,8 +234,16 @@ def _is_nonshipped_path(path: str) -> bool:
 
 
 def _finding_grade_weight(f) -> float:
-    """Score weight for one finding: 1.0 for shipped code, a fraction for non-shipped."""
-    return _NONSHIPPED_FINDING_WEIGHT if _is_nonshipped_path(f.file_path) else 1.0
+    """Score weight for one finding: 1.0 for shipped code, a fraction for non-shipped.
+
+    Non-shipped covers both dir-based (tests/, examples/, docs/ …) AND file-based
+    test conventions (foo_test.go, foo.test.ts, foo.spec.js) that live next to
+    source — those are the tool's tests, not the surface an agent connects to.
+    """
+    path = f.file_path
+    if _is_nonshipped_path(path) or _is_test_or_doc_file(path):
+        return _NONSHIPPED_FINDING_WEIGHT
+    return 1.0
 
 
 def _is_source_file(path: str) -> bool:
@@ -781,6 +789,12 @@ def _is_test_or_doc_file(file_path: str) -> bool:
     if name.startswith("test_") or name.endswith("_test") or name.endswith("_spec"):
         return True
     if name == "conftest":
+        return True
+    # Co-located test/spec files that sit NEXT TO source (not under a tests/ dir):
+    # foo.test.ts, foo.spec.js, Bar.test.tsx, foo_test.go's dotless form is handled
+    # above. The stem check misses these because Path.stem keeps the ".test" infix.
+    fname = Path(file_path).name.lower()
+    if ".test." in fname or ".spec." in fname:
         return True
     # Doc / example directories
     if any(p in ("docs", "doc", "examples", "example", "samples") for p in parts):
@@ -2076,7 +2090,10 @@ async def _maybe_scan_artifact(
     if not getattr(settings, "scanner_scan_artifact", False):
         return
 
-    coord = artifact or _discover_artifact_coord(owner, repo, tree, token, ref)
+    # Resolve the artifact from the repo's OWN manifest (accurate registry name),
+    # not the bare repo-folder guess — a folder-name collision would diff against an
+    # unrelated package and attribute its drift + deps to this repo.
+    coord = artifact or await _accurate_artifact_coord(owner, repo, tree, token, ref)
     if not coord:
         return
     ecosystem, name, version = coord
@@ -2138,24 +2155,62 @@ async def _maybe_scan_artifact(
     result.coverage["db_snapshots"] = snaps
 
 
-def _discover_artifact_coord(
+async def _accurate_artifact_coord(
     owner: str, repo: str, tree: list[dict], token: str | None, ref: str | None,
 ) -> tuple[str, str, str | None] | None:
-    """Best-effort (ecosystem, name, version) from the repo's root manifest.
+    """Resolve the published ``(ecosystem, name, version)`` from the repo's OWN root
+    manifest — the accurate registry name, NEVER the bare repo-folder guess.
 
-    Only reads what we can infer synchronously from the tree — root ``package.json``
-    (npm) or ``pyproject.toml`` / ``setup.py`` (PyPI). Version is left ``None`` so the
-    fetcher resolves the registry's latest. Returns None when no coordinate is found.
+    This is the package-identity guard for the artifact scan. Using the folder name
+    (the old behavior) meant ``owner/servers`` was diffed against an unrelated npm
+    ``servers`` package — producing bogus artifact_drift + that stranger's whole
+    dependency graph attributed to the repo (even a Go repo picking up npm CVEs).
+    We only return a coordinate when the repo's manifest actually NAMES a published
+    package, and never for a ``"private": true`` package. Returns None otherwise, so
+    the artifact scan is skipped rather than run against a stranger.
     """
     root_names = {Path(it["path"]).name.lower(): it["path"]
                   for it in tree if "/" not in it["path"]}
-    # We only have the tree here (not contents); the caller can pass an explicit
-    # coordinate. Auto-discovery uses the presence of a root manifest as the signal
-    # and defers name resolution to the fetch step via the repo name as a fallback.
+
+    async def _read(path: str) -> str | None:
+        try:
+            return await _fetch_file_content(owner, repo, path, token, ref)
+        except Exception:  # noqa: BLE001 — fail-open
+            return None
+
     if "package.json" in root_names:
-        return ("npm", repo, None)
-    if "pyproject.toml" in root_names or "setup.py" in root_names or "setup.cfg" in root_names:
-        return ("pypi", repo, None)
+        txt = await _read(root_names["package.json"])
+        if not txt:
+            return None
+        try:
+            data = json.loads(txt) or {}
+        except (ValueError, TypeError):
+            return None
+        if data.get("private") is True:  # workspace root / never published
+            return None
+        name = data.get("name")
+        return ("npm", name, None) if isinstance(name, str) and name else None
+
+    for mf in ("pyproject.toml", "setup.py", "setup.cfg"):
+        if mf in root_names:
+            txt = await _read(root_names[mf])
+            if not txt:
+                return None
+            m = re.search(
+                r'(?mi)^\s*name\s*=\s*["\']([A-Za-z0-9][A-Za-z0-9._-]*)["\']', txt,
+            )
+            return ("pypi", m.group(1), None) if m else None
+
+    if "cargo.toml" in root_names:
+        txt = await _read(root_names["cargo.toml"])
+        if not txt:
+            return None
+        m = re.search(
+            r'(?is)\[package\].*?^\s*name\s*=\s*["\']([A-Za-z0-9][A-Za-z0-9._-]*)["\']',
+            txt, re.MULTILINE,
+        )
+        return ("crates", m.group(1), None) if m else None
+
     return None
 
 
@@ -2163,8 +2218,8 @@ async def _resolve_repo_package(
     owner: str, repo: str, tree: list[dict], token: str | None, ref: str | None,
 ) -> dict:
     """Resolve the published (surface, registry-name) a repo maps to by READING its
-    root manifest — the accurate name, not the repo-name guess ``_discover_artifact_coord``
-    uses for the fetch. Returns ``{}`` when the repo publishes no recognizable package.
+    root manifest — the accurate published name. Returns ``{}`` when the repo
+    publishes no recognizable package.
 
     Best-effort + fail-open: any fetch/parse error falls back to the repo name (which
     npm/PyPI normalization usually accepts) or ``{}``."""
