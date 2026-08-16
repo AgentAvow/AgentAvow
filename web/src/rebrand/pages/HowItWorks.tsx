@@ -95,6 +95,28 @@ export default function RebrandHowItWorks() {
         ))}
       </RevealStagger>
 
+      {/* run it yourself — local / CI */}
+      <Reveal>
+        <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <h3 className="text-[16px] font-bold">Or run it in CI — on private code.</h3>
+            <span className="font-mono text-[11px] text-text-muted">same engine · same score · offline</span>
+          </div>
+          <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
+            The exact scanner runs in your own runner or terminal, so a <strong className="text-text">private repo</strong> never
+            leaves your machine. Gate a PR on a minimum score and get findings as inline annotations — the signed attestation
+            is the one part that stays with us.
+          </p>
+          <pre className="mt-3 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3 text-text overflow-x-auto">{`# CI (private repos, runs in the runner)
+- uses: AgentAvow/AgentAvow/local-scan-action@main
+  with: { min-score: "60" }
+
+# or locally
+agentavow scan . --min-score 60`}</pre>
+          <Link to={rp('/rebrand/docs/run-locally')} className="inline-block mt-3 text-[13.5px] font-semibold text-primary-light hover:text-primary">Run locally &amp; in CI →</Link>
+        </div>
+      </Reveal>
+
       {/* categories */}
       <Reveal>
         <h2 className="mt-12 text-xl font-bold">What we check</h2>
