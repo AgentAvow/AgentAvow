@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write  # upload SARIF to code scanning
 
 jobs:
   scan:
@@ -24,7 +25,7 @@ jobs:
         uses: ./local-scan-action
         with:
           path: .
-          upload-sarif: "false"
+          upload-sarif: "true"
       - name: Show outputs
         run: |
           echo "trust-score = ${{ steps.ag.outputs.trust-score }}"
