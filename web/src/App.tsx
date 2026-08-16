@@ -248,6 +248,7 @@ function AppRoutes() {
           <Route path="submit" element={<RebrandSubmit />} />
           <Route path="badge" element={<RebrandBadge />} />
           <Route path="docs" element={<RebrandDocs />} />
+          <Route path="docs/:slug" element={<RebrandDocs />} />
           <Route path="check" element={<RebrandCheck />} />
           <Route path="check/mcp" element={<RebrandCheck />} />
           <Route path="check/skill/:owner/:repo" element={<RebrandCheck />} />

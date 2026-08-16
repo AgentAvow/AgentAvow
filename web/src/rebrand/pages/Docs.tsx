@@ -1,10 +1,11 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import Markdown from 'react-markdown'
 import howGradingWorks from '../docs/how-grading-works.md?raw'
 import gateOnTheGrade from '../docs/gate-on-the-grade.md?raw'
 import checkGuide from '../docs/check-guide.md?raw'
+import runLocally from '../docs/run-locally.md?raw'
 import trustBadges from '../docs/trust-badges.md?raw'
 import verifyAttestations from '../docs/verify-attestations.md?raw'
 
@@ -18,6 +19,7 @@ const DOCS = [
   { slug: 'how-grading-works', title: 'How scoring works', body: howGradingWorks },
   { slug: 'gate-on-the-grade', title: 'Gate on the score', body: gateOnTheGrade },
   { slug: 'check-guide', title: 'Reading your scan score', body: checkGuide },
+  { slug: 'run-locally', title: 'Run locally & in CI', body: runLocally },
   { slug: 'trust-badges', title: 'Add a trust badge', body: trustBadges },
   { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations },
 ]
@@ -28,8 +30,8 @@ const MORE: [string, string][] = [
   ['Scan catalog', '/rebrand/browse'],
   ['How it works', '/rebrand/how-it-works'],
   ['Standards & research', '/rebrand/research'],
-  ['SDK & CLI', 'https://github.com/AgentAvow/AgentAvow/tree/main/sdk'],
-  ['GitHub Action', 'https://github.com/AgentAvow/trust-scan-action'],
+  ['CLI (local scan)', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/scanner/local_scan.py'],
+  ['GitHub Action', 'https://github.com/AgentAvow/AgentAvow/tree/main/local-scan-action'],
   ['API reference', '/api/v1/redoc'],
 ]
 
@@ -49,8 +51,20 @@ const PROSE = [
 ].join(' ')
 
 export default function RebrandDocs() {
-  const [active, setActive] = useState(DOCS[0].slug)
-  const doc = DOCS.find((d) => d.slug === active) ?? DOCS[0]
+  // Deep-linkable: /docs/<slug> selects a doc (shareable URLs); the bare /docs
+  // lands on the first. Clicking a doc pushes the slug so the URL stays copyable.
+  const { slug } = useParams()
+  const navigate = useNavigate()
+  const doc = DOCS.find((d) => d.slug === slug) ?? DOCS[0]
+  const active = doc.slug
+  const setActive = (s: string) => {
+    navigate(rp(`/rebrand/docs/${s}`))
+    window.scrollTo({ top: 0 })
+  }
+  // If someone hits an unknown slug, normalize the URL to the first doc.
+  useEffect(() => {
+    if (slug && !DOCS.some((d) => d.slug === slug)) navigate(rp('/rebrand/docs'), { replace: true })
+  }, [slug, navigate])
 
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-14 grid md:grid-cols-[220px_1fr] gap-10">
