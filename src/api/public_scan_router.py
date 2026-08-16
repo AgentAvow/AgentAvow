@@ -92,6 +92,9 @@ class ScanFinding(BaseModel):
     file_path: str
     line_number: int
     remediation: str = ""
+    # False for test/doc/example paths (scored at a fraction). The list is sorted
+    # shipped-first so consumers lead with the surface an agent actually runs.
+    shipped: bool = True
 
 
 class FindingsSummary(BaseModel):
