@@ -28,23 +28,28 @@ PCAP="$(mktemp /tmp/${RUN_ID}.XXXX.pcap)"
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; rm -f "$PCAP" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-# 1. Start the target: gVisor, read-only root, no host mounts, dropped caps, capped, and a
-#    real network (we observe passively rather than proxy, so nothing to bypass).
+# 1. Start capturing DNS + TLS SNI on the HOST side of the docker bridge, BEFORE the target
+#    runs. gVisor uses a user-space netstack, so tcpdump run via `nsenter` into the container's
+#    own netns sees nothing — we capture where the packets actually cross the host kernel (the
+#    bridge). On a dedicated single-container sandbox the bridge carries only this run's egress,
+#    so no per-container IP filter is needed (and the target cannot bypass a kernel-side capture).
+BRIDGE="$(docker network inspect bridge -f '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null)"
+[ -z "$BRIDGE" ] && BRIDGE=docker0
+timeout "$TIMEOUT" tcpdump -l -nn -i "$BRIDGE" -w "$PCAP" '(udp port 53) or (tcp port 443)' >/dev/null 2>&1 &
+TCPDUMP_PID=$!
+sleep 0.3  # let tcpdump attach before the target does any egress
+
+# 2. Start the target: gVisor, read-only root, a writable /work tmpfs as the cwd (installs
+#    need somewhere to write), no host mounts, dropped caps, capped, and a real network (we
+#    observe passively rather than proxy, so nothing to bypass).
 docker run -d --name "$NAME" \
   --runtime="$RUNTIME" \
-  --read-only --tmpfs /tmp:exec --tmpfs /run \
+  --read-only --tmpfs /tmp:exec --tmpfs /run --tmpfs /work:exec \
+  --workdir /work \
   --cap-drop ALL --security-opt no-new-privileges \
   --memory 512m --cpus 1 --pids-limit 256 \
   "$IMAGE" sh -c "$CMD" >/dev/null 2>&1 \
   || { echo '{"error":"container_start_failed"}'; exit 0; }
-
-# 2. Capture DNS + TLS SNI inside the container's network namespace for the run's duration.
-CPID="$(docker inspect -f '{{.State.Pid}}' "$NAME" 2>/dev/null)"
-if [ -n "${CPID:-$CPID}" ] && [ "$CPID" != "0" ]; then
-  nsenter -t "$CPID" -n timeout "$TIMEOUT" \
-    tcpdump -l -nn -w "$PCAP" '(udp port 53) or (tcp port 443)' >/dev/null 2>&1 &
-  TCPDUMP_PID=$!
-fi
 
 # 3. Wait for the target, bounded by the wall-clock timeout.
 TIMED_OUT=false
