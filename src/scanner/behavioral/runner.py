@@ -124,9 +124,7 @@ async def run_behavioral(
         key = (getattr(settings, "scanner_behavioral_sandbox_key", "") or "").strip()
         remote_runner = (getattr(settings, "scanner_behavioral_sandbox_runner", "")
                          or "/home/ec2-user/behavioral_run.sh")
-        remote = "sudo {} {} {} {}".format(
-            shlex.quote(remote_runner), shlex.quote(image),
-            shlex.quote(cmd), shlex.quote(str(timeout)))
+        remote = f"sudo {shlex.quote(remote_runner)} {shlex.quote(image)} {shlex.quote(cmd)} {shlex.quote(str(timeout))}"
         argv = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
                 "-o", "BatchMode=yes"]
         if key:
