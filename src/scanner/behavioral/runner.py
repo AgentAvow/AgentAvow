@@ -115,17 +115,16 @@ async def run_behavioral(
     # run on the app/prod host — set ``scanner_behavioral_sandbox_host`` to a dedicated
     # gVisor box and we SSH the runner there. With no host configured we fall back to the
     # local runner (dev/test on a machine that IS the sandbox).
-    from src.config import settings
     import shlex
+
+    from src.config import settings
     host = (getattr(settings, "scanner_behavioral_sandbox_host", "") or "").strip()
     if host:
         user = getattr(settings, "scanner_behavioral_sandbox_user", "ec2-user") or "ec2-user"
         key = (getattr(settings, "scanner_behavioral_sandbox_key", "") or "").strip()
         remote_runner = (getattr(settings, "scanner_behavioral_sandbox_runner", "")
                          or "/home/ec2-user/behavioral_run.sh")
-        remote = "sudo {} {} {} {}".format(
-            shlex.quote(remote_runner), shlex.quote(image), shlex.quote(cmd),
-            shlex.quote(str(timeout)))
+        remote = f"sudo {shlex.quote(remote_runner)} {shlex.quote(image)} {shlex.quote(cmd)} {shlex.quote(str(timeout))}"
         argv = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
                 "-o", "BatchMode=yes"]
         if key:
