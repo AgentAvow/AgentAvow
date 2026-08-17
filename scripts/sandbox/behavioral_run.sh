@@ -71,12 +71,28 @@ FS_JSON="$(docker diff "$NAME" 2>/dev/null | grep -E '^[AC] ' \
 python3 - "$IMAGE" "$EXIT_CODE" "$TIMED_OUT" "$HOSTS_JSON" "$FS_JSON" <<'PY'
 import sys, json
 image, exit_code, timed_out, hosts, fs = sys.argv[1:6]
+
+def _arr(s):
+    # The shell capture can carry a doubled/blank fallback (e.g. "[]\n[]"); take the
+    # first line that parses as a JSON array, else empty. Keeps the runner robust.
+    for line in (s or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            v = json.loads(line)
+            if isinstance(v, list):
+                return v
+        except Exception:
+            continue
+    return []
+
 print(json.dumps({
     "image": image,
     "exit_code": int(exit_code) if str(exit_code).lstrip("-").isdigit() else None,
     "timed_out": timed_out == "true",
-    "egress_hosts": json.loads(hosts),
-    "fs_writes": json.loads(fs),
+    "egress_hosts": _arr(hosts),
+    "fs_writes": _arr(fs),
     "schema": "behavioral-v1",
 }))
 PY
