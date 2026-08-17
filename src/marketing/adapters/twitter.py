@@ -42,6 +42,59 @@ _FALLBACK_CARD_PATH = (
     Path(__file__).resolve().parent.parent / "assets" / "card-features.png"
 )
 
+# X surfaces write budgets via response headers. The 24h app/user caps are the
+# ones that bite regular posting; the MONTHLY tier cap (Free ~1,500/mo) is not in
+# a header, so a 403 whose 24h budget still has room usually means that monthly
+# cap or an app-permission problem — which is why the plain 403 is ambiguous.
+_X_LOW_REMAINING = 10  # warn when this few 24h posts remain
+
+
+def _extract_x_limits(headers) -> tuple[str, int | None]:
+    """Summarize X rate-limit headers and return the tightest 24h remaining
+    (or None if X didn't report it). Purely diagnostic — never raises."""
+    def _g(k: str) -> int | None:
+        v = headers.get(k)
+        return int(v) if v not in (None, "") and str(v).lstrip("-").isdigit() else None
+
+    win_rem, win_lim = _g("x-rate-limit-remaining"), _g("x-rate-limit-limit")
+    u24_rem, u24_lim = _g("x-user-limit-24hour-remaining"), _g("x-user-limit-24hour-limit")
+    a24_rem, a24_lim = _g("x-app-limit-24hour-remaining"), _g("x-app-limit-24hour-limit")
+    parts: list[str] = []
+    if win_rem is not None:
+        parts.append(f"window {win_rem}/{win_lim}")
+    if u24_rem is not None:
+        parts.append(f"user-24h {u24_rem}/{u24_lim}")
+    if a24_rem is not None:
+        parts.append(f"app-24h {a24_rem}/{a24_lim}")
+    rem_24h = min([r for r in (u24_rem, a24_rem) if r is not None], default=None)
+    summary = "limits: " + (", ".join(parts) if parts else "(none reported)")
+    return summary, rem_24h
+
+
+def _classify_x_403(body_text: str, remaining_24h: int | None) -> str:
+    """Turn X's generic 403 into a specific, actionable reason."""
+    b = (body_text or "").lower()
+    if "duplicate" in b:
+        return "duplicate content (X rejects identical posts) — vary the text"
+    if remaining_24h == 0:
+        return "24h post cap reached — resets within a day"
+    if "not permitted" in b or "forbidden" in b:
+        return ("monthly write cap or app permission — check developer.x.com "
+                "usage/limits (Free tier ~1,500 posts/mo) and that the app is Read+Write")
+    return "forbidden — check developer.x.com app permissions and usage"
+
+
+def _reset_human(reset_epoch: str | None) -> str:
+    """Format an X rate-limit reset epoch as a readable UTC time."""
+    if not reset_epoch or not str(reset_epoch).isdigit():
+        return "soon"
+    try:
+        from datetime import timezone
+        return datetime.fromtimestamp(int(reset_epoch), tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC")
+    except Exception:
+        return "soon"
+
 
 class TwitterAdapter(AbstractPlatformAdapter):
     platform_name = "twitter"
@@ -208,14 +261,36 @@ class TwitterAdapter(AbstractPlatformAdapter):
                     },
                 )
 
+            limits_str, remaining_24h = _extract_x_limits(resp.headers)
+
             if resp.status_code == 429:
+                when = _reset_human(resp.headers.get("x-rate-limit-reset"))
+                logger.warning("Twitter 429 rate limited; resets %s (%s)", when, limits_str)
                 return ExternalPostResult(
-                    success=False, error="Rate limited", rate_limited=True,
+                    success=False,
+                    error=f"Rate limited by X — resets {when} ({limits_str})",
+                    rate_limited=True,
+                )
+
+            if resp.status_code == 403:
+                reason = _classify_x_403(resp.text, remaining_24h)
+                logger.warning("Twitter 403: %s | %s | body=%s",
+                               reason, limits_str, resp.text[:200])
+                return ExternalPostResult(
+                    success=False,
+                    error=f"X 403 — {reason} ({limits_str})",
+                    rate_limited=(remaining_24h == 0),
                 )
 
             resp.raise_for_status()
             data = resp.json().get("data", {})
             tweet_id = data.get("id")
+
+            # Proactively warn as the 24h write budget runs down (early alert
+            # before posts start failing outright).
+            if remaining_24h is not None and remaining_24h <= _X_LOW_REMAINING:
+                logger.warning("Twitter 24h post budget low: %s remaining (%s)",
+                               remaining_24h, limits_str)
 
             return ExternalPostResult(
                 success=True,
@@ -223,9 +298,10 @@ class TwitterAdapter(AbstractPlatformAdapter):
                 url=f"https://x.com/i/status/{tweet_id}" if tweet_id else None,
             )
         except httpx.HTTPStatusError as exc:
+            limits_str, _ = _extract_x_limits(exc.response.headers)
             logger.warning(
-                "Twitter post failed: %s %s",
-                exc.response.status_code, exc.response.text,
+                "Twitter post failed: %s %s | %s",
+                exc.response.status_code, exc.response.text, limits_str,
             )
             return ExternalPostResult(
                 success=False,
