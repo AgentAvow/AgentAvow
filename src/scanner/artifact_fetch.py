@@ -138,6 +138,9 @@ class ArtifactFile:
     text: str | None = None        # decoded utf-8 text if textual, else None (binary)
     text_sha256: str | None = None  # sha256 of the decoded-text utf-8 (drift-modified)
     is_binary: bool = False
+    # git blob SHA-1 of the raw bytes (== GitHub's tree entry `sha`). Lets drift
+    # compare the artifact against a repo TREE at a release tag with no content fetch.
+    git_blob_sha: str = ""
 
 
 @dataclass
@@ -281,6 +284,10 @@ def _make_file(path: str, raw: bytes) -> ArtifactFile:
         text=text,
         text_sha256=text_sha,
         is_binary=is_binary,
+        # git blob SHA-1: sha1("blob <len>\0" + bytes) — matches GitHub's tree `sha`.
+        git_blob_sha=hashlib.sha1(
+            b"blob " + str(len(raw)).encode() + b"\x00" + raw
+        ).hexdigest(),
     )
 
 

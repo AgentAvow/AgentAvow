@@ -2103,6 +2103,46 @@ async def _run_supply_chain(
     result.supply_chain = sc_summary
 
 
+async def _release_tree_shas(
+    owner: str, repo: str, version: str, token: str | None,
+) -> dict[str, str] | None:
+    """``{path: git-blob-sha}`` of the repo AT the release tag for ``version`` (tries
+    ``v{version}`` then ``{version}``), or None when no matching tag resolves.
+
+    This is what lets the artifact scan diff a published package against its OWN
+    tagged source instead of the default branch — which for an active repo has moved
+    on since the release, producing spurious "ships/modifies N files" drift. GitHub's
+    tree entry ``sha`` is the git blob SHA, so one tree call (no content fetch) gives
+    the whole comparison basis.
+    """
+    if not version:
+        return None
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"token {token}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
+        for tag in (f"v{version}", version):
+            try:
+                resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/git/trees/{tag}",
+                    headers=headers, params={"recursive": "1"},
+                )
+            except httpx.HTTPError:
+                continue
+            await _note_github(resp, f"release tree {owner}/{repo}@{tag}")
+            if resp.status_code != 200:
+                continue
+            body = resp.json()
+            shas = {
+                it["path"]: it["sha"]
+                for it in body.get("tree", [])
+                if it.get("type") == "blob" and it.get("path") and it.get("sha")
+            }
+            if shas:
+                return shas
+    return None
+
+
 async def _maybe_scan_artifact(
     result: ScanResult,
     owner: str,
@@ -2142,10 +2182,14 @@ async def _maybe_scan_artifact(
         # drift; the fetched text hashes drive modified-file drift.
         repo_paths = {it["path"] for it in tree if it.get("type") == "blob"}
 
+        async def _resolve_release_shas(v: str):
+            return await _release_tree_shas(owner, repo, v, token)
+
         art = await scan_published_artifact(
             ecosystem, name, version,
             repo_paths=repo_paths,
             repo_text_hashes=repo_text_hashes,
+            release_shas_resolver=_resolve_release_shas,
         )
     except Exception:
         logger.warning("Artifact scan wiring failed for %s/%s — repo-only stands",

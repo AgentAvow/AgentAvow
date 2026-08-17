@@ -510,6 +510,7 @@ def compute_drift(
     repo_text_hashes: dict[str, str] | None,
     *,
     has_install_hook: bool,
+    release_blob_shas: dict[str, str] | None = None,
 ) -> tuple[dict, list]:
     """Diff the artifact tree against the repo. Returns ``(drift_summary, findings)``.
 
@@ -520,6 +521,13 @@ def compute_drift(
 
     Suspicious *added source* files (real code the repo never committed) raise
     ``artifact_drift`` findings — the core poisoned-tarball signal.
+
+    ``release_blob_shas`` ({path: git-blob-sha} of the repo AT THE RELEASE TAG the
+    artifact was built from) is the accurate comparison basis: the published package
+    should equal its own tagged source. When provided, the diff runs against it via
+    git blob SHAs (no content fetch needed). Without it we fall back to the repo's
+    DEFAULT BRANCH, which for an active repo has moved past the release — producing
+    spurious "modifies/ships N files" drift that is really just release-vs-main skew.
     """
     from src.scanner.scan import Finding
 
@@ -528,21 +536,32 @@ def compute_drift(
 
     added: list[str] = []
     modified: list[str] = []
-    for path, af in fetched.files.items():
-        if _is_drift_ignorable(path):
-            continue
-        if path not in repo_paths and path not in repo_text_hashes:
-            added.append(path)
-        else:
-            repo_hash = repo_text_hashes.get(path)
-            if repo_hash and af.text_sha256 and repo_hash != af.text_sha256:
+    if release_blob_shas is not None:
+        # Accurate basis: compare the artifact against its own release tag by git blob SHA.
+        for path, af in fetched.files.items():
+            if _is_drift_ignorable(path):
+                continue
+            tag_sha = release_blob_shas.get(path)
+            if tag_sha is None:
+                added.append(path)
+            elif af.git_blob_sha and af.git_blob_sha != tag_sha:
                 modified.append(path)
+        have_repo_view = bool(release_blob_shas)
+    else:
+        # Fallback: default-branch view (path set + decoded-text hashes).
+        for path, af in fetched.files.items():
+            if _is_drift_ignorable(path):
+                continue
+            if path not in repo_paths and path not in repo_text_hashes:
+                added.append(path)
+            else:
+                repo_hash = repo_text_hashes.get(path)
+                if repo_hash and af.text_sha256 and repo_hash != af.text_sha256:
+                    modified.append(path)
+        have_repo_view = bool(repo_paths or repo_text_hashes)
 
     added.sort()
     modified.sort()
-
-    # We can only compute meaningful drift when we actually know the repo file set.
-    have_repo_view = bool(repo_paths or repo_text_hashes)
 
     # If NONE of the artifact's non-ignorable files line up with a repo path, the
     # two trees don't correspond (e.g. a monorepo subdir package, or a repo whose
@@ -652,6 +671,7 @@ async def scan_published_artifact(
     *,
     repo_paths: set[str] | None = None,
     repo_text_hashes: dict[str, str] | None = None,
+    release_shas_resolver=None,
     client: httpx.AsyncClient | None = None,
 ) -> ArtifactScanResult:
     """Fetch → verify → unpack → scan → drift the published artifact. **Fail-open.**
@@ -676,8 +696,18 @@ async def scan_published_artifact(
             return result
 
         findings, files_scanned, has_hook = scan_artifact_files(fetched)
+        # Prefer comparing the artifact against the RELEASE TAG it was built from
+        # (accurate); the resolver returns {path: git-blob-sha} for that tag, or None
+        # when no matching tag exists — then compute_drift falls back to the branch view.
+        release_blob_shas = None
+        if release_shas_resolver is not None and fetched.version:
+            try:
+                release_blob_shas = await release_shas_resolver(fetched.version)
+            except Exception:  # noqa: BLE001 — never let tag resolution break a scan
+                release_blob_shas = None
         drift, drift_findings = compute_drift(
             fetched, repo_paths, repo_text_hashes, has_install_hook=has_hook,
+            release_blob_shas=release_blob_shas,
         )
         findings.extend(drift_findings)
 
