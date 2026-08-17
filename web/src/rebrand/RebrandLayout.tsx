@@ -129,7 +129,7 @@ const NAV = [
   ['/rebrand/browse', 'Browse'],
   ['/rebrand/index', 'The Index'],
   ['/rebrand/submit', 'List your tool'],
-  ['/rebrand/badge', 'For developers'],
+  ['/rebrand/for-developers', 'For developers'],
   ['/rebrand/how-it-works', 'How it works'],
   ['/rebrand/docs', 'Docs'],
 ]
