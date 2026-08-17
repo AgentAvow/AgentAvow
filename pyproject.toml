@@ -27,6 +27,7 @@ dependencies = [
     "rfc8785>=0.1.4,<1.0",
     "agentgraph-trust>=0.3.0",
     "Pillow>=10.0,<12.0",
+    "boto3>=1.34,<2.0",
 ]
 
 [project.optional-dependencies]

@@ -229,6 +229,11 @@ class Settings(BaseSettings):
     scanner_behavioral_sandbox_user: str = "ec2-user"
     scanner_behavioral_sandbox_key: str = ""       # path to the SSH key on the app host
     scanner_behavioral_sandbox_runner: str = "/home/ec2-user/behavioral_run.sh"
+    # SSM exec path (preferred — no SSH key on prod). When mode="ssm" and an
+    # instance id is set, the runner is sent via AWS Systems Manager instead of SSH.
+    scanner_behavioral_sandbox_mode: str = ""      # "ssm" | "ssh" | "" (local)
+    scanner_behavioral_sandbox_instance_id: str = ""   # e.g. i-01f112e173bdcfdb6
+    scanner_behavioral_sandbox_region: str = "us-east-1"
 
     # --- Phase 5: maintainer / behavioral trust signals -----------------------
     # Cheap GitHub-METADATA maintainer signals (NO code execution, NO sandbox):

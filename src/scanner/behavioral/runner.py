@@ -88,6 +88,48 @@ def _classify_egress(hosts: list[str], expected: set[str]) -> list[str]:
     return sorted(set(out))
 
 
+def _run_via_ssm(instance_id: str, region: str, command: str, timeout: int) -> str | None:
+    """Run ``command`` on the sandbox via SSM Send-Command; return its stdout.
+
+    The no-key path: prod's IAM role is allowed to send AWS-RunShellScript to the
+    one sandbox instance, so nothing SSHes and no private key sits on prod. SSM
+    runs the command as root on the target. Synchronous (boto3) — call through
+    ``asyncio.to_thread``. Returns None on any failure (missing boto3, API error,
+    or the command not finishing in time); the caller treats None as fail-open."""
+    try:
+        import boto3
+    except ImportError:
+        return None
+    import time
+    try:
+        ssm = boto3.client("ssm", region_name=region)
+        resp = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName="AWS-RunShellScript",
+            Parameters={"commands": [command], "executionTimeout": [str(timeout + 120)]},
+            TimeoutSeconds=60,
+        )
+    except Exception:
+        return None
+    command_id = (resp.get("Command") or {}).get("CommandId")
+    if not command_id:
+        return None
+    deadline = time.time() + timeout + 90
+    while time.time() < deadline:
+        time.sleep(2)
+        try:
+            inv = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
+        except Exception:
+            # InvocationDoesNotExist is expected in the moment right after send — keep polling.
+            continue
+        status = inv.get("Status")
+        if status == "Success":
+            return inv.get("StandardOutputContent", "") or ""
+        if status in ("Failed", "Cancelled", "TimedOut", "Undeliverable", "Terminated"):
+            return None
+    return None
+
+
 async def run_behavioral(
     surface: str,
     coordinate: str,
@@ -112,39 +154,60 @@ async def run_behavioral(
     cmd = cmd_tmpl.format(name=coordinate, import_name=_import_name(coordinate))
 
     # Where the runner executes. A behavioral scan runs UNTRUSTED code, so it must never
-    # run on the app/prod host — set ``scanner_behavioral_sandbox_host`` to a dedicated
-    # gVisor box and we SSH the runner there. With no host configured we fall back to the
-    # local runner (dev/test on a machine that IS the sandbox).
+    # run on the app/prod host. Three exec paths, in priority order:
+    #   - SSM  (mode="ssm" + instance_id): prod sends the runner to the sandbox via AWS
+    #     Systems Manager — NO SSH key on prod. Preferred.
+    #   - SSH  (sandbox_host set): SSH the runner to the sandbox box.
+    #   - local: run the runner here (dev/test on a machine that IS the sandbox).
     import shlex
 
     from src.config import settings
+    remote_runner = (getattr(settings, "scanner_behavioral_sandbox_runner", "")
+                     or "/home/ec2-user/behavioral_run.sh")
+    mode = (getattr(settings, "scanner_behavioral_sandbox_mode", "") or "").strip().lower()
+    instance_id = (getattr(settings, "scanner_behavioral_sandbox_instance_id", "") or "").strip()
     host = (getattr(settings, "scanner_behavioral_sandbox_host", "") or "").strip()
-    if host:
-        user = getattr(settings, "scanner_behavioral_sandbox_user", "ec2-user") or "ec2-user"
-        key = (getattr(settings, "scanner_behavioral_sandbox_key", "") or "").strip()
-        remote_runner = (getattr(settings, "scanner_behavioral_sandbox_runner", "")
-                         or "/home/ec2-user/behavioral_run.sh")
-        remote = f"sudo {shlex.quote(remote_runner)} {shlex.quote(image)} {shlex.quote(cmd)} {shlex.quote(str(timeout))}"
-        argv = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
-                "-o", "BatchMode=yes"]
-        if key:
-            argv += ["-i", key]
-        argv += [f"{user}@{host}", remote]
+
+    stdout_text: str | None
+    if mode == "ssm" and instance_id:
+        region = (getattr(settings, "scanner_behavioral_sandbox_region", "")
+                  or "us-east-1").strip()
+        # SSM runs the command as root on the target, so no sudo wrapper is needed.
+        command = (f"bash {shlex.quote(remote_runner)} {shlex.quote(image)} "
+                   f"{shlex.quote(cmd)} {shlex.quote(str(timeout))}")
+        stdout_text = await asyncio.to_thread(
+            _run_via_ssm, instance_id, region, command, timeout)
+        if stdout_text is None:
+            return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
+                                    error="ssm_unavailable")
     else:
-        argv = ["bash", str(_RUNNER), image, cmd, str(timeout)]
+        if host:
+            user = getattr(settings, "scanner_behavioral_sandbox_user", "ec2-user") or "ec2-user"
+            key = (getattr(settings, "scanner_behavioral_sandbox_key", "") or "").strip()
+            remote = (f"sudo {shlex.quote(remote_runner)} {shlex.quote(image)} "
+                      f"{shlex.quote(cmd)} {shlex.quote(str(timeout))}")
+            argv = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
+                    "-o", "BatchMode=yes"]
+            if key:
+                argv += ["-i", key]
+            argv += [f"{user}@{host}", remote]
+        else:
+            argv = ["bash", str(_RUNNER), image, cmd, str(timeout)]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            # generous outer timeout — the runner has its own wall-clock kill.
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 60)
+        except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
+            return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
+                                    error=f"runner_unavailable:{type(exc).__name__}")
+        stdout_text = stdout.decode("utf-8", "replace")
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        # generous outer timeout — the runner has its own wall-clock kill.
-        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 60)
-    except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
-        return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
-                                error=f"runner_unavailable:{type(exc).__name__}")
-    try:
-        data = json.loads(stdout.decode("utf-8", "replace") or "{}")
+        data = json.loads(stdout_text or "{}")
     except json.JSONDecodeError:
         return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
                                 error="runner_bad_output")
