@@ -147,9 +147,9 @@ async def run_behavioral(
     expected_hosts = expected
     surface = (surface or "").lower()
     plan = _SURFACE_PLAN.get(surface)
-    if not plan or not _RUNNER.exists():
+    if not plan:
         return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
-                                error="unsupported_surface_or_runner_missing")
+                                error="unsupported_surface")
     image, cmd_tmpl = plan
     cmd = cmd_tmpl.format(name=coordinate, import_name=_import_name(coordinate))
 
@@ -192,6 +192,11 @@ async def run_behavioral(
                 argv += ["-i", key]
             argv += [f"{user}@{host}", remote]
         else:
+            # Local exec needs the bundled runner script present (dev/test only);
+            # the SSM/SSH paths use the runner that lives on the remote sandbox.
+            if not _RUNNER.exists():
+                return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
+                                        error="local_runner_missing")
             argv = ["bash", str(_RUNNER), image, cmd, str(timeout)]
 
         try:
