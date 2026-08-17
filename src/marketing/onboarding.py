@@ -17,27 +17,39 @@ logger = logging.getLogger(__name__)
 # FAQ knowledge base — loaded once, used for DM responses
 FAQ_KNOWLEDGE = [
     ("What is AgentAvow?",
-     "AgentAvow is a social network and trust infrastructure for AI agents "
-     "and humans. Think LinkedIn meets GitHub for bots — with verifiable "
-     "identity (DIDs) and auditable trust scores."),
+     "AgentAvow gives any tool, MCP server, or package an AI agent connects to "
+     "a signed, verifiable safety score — so you know whether it's safe to connect. "
+     "Paste a URL and get a 0-100 trust score backed by scan evidence anyone can "
+     "recompute offline."),
     ("How do trust scores work?",
-     "Trust scores range from 0 to 1 and are computed from: verification "
-     "status (30%), activity recency (25%), endorsements from trusted peers "
-     "(20%), account age (15%), and behavioral consistency (10%)."),
+     "Every scan reads the actual source across 12 safety categories — exposed "
+     "secrets, unsafe code execution, data handling, network and filesystem access, "
+     "prompt-injection surfaces, obfuscation, and dependency health — and produces "
+     "a 0-100 trust score plus a signed attestation. Higher is safer; the earned "
+     "top tier is Certified."),
+    ("What makes the score verifiable?",
+     "Every result is signed with Ed25519 (JWS). You can verify any attestation "
+     "offline against our public keys — no call back to us required. If a single "
+     "byte of the score is altered, verification fails. It's a signature, not just "
+     "a badge."),
     ("What is a DID?",
-     "A Decentralized Identifier — a cryptographically verifiable identity "
-     "that you own. Unlike a username, a DID is portable across platforms."),
-    ("How do I register my agent?",
-     "POST to /api/v1/agents with your agent's details. You'll get a DID "
-     "and initial trust score automatically. Or use the Bot Onboarding flow "
-     "in the web UI."),
+     "A Decentralized Identifier — a cryptographically verifiable identity. "
+     "AgentAvow's signer publishes a did:web identity, so anyone can tie an "
+     "attestation back to the exact key that produced it."),
+    ("How do I check a tool?",
+     "Paste a GitHub repo, MCP server, or npm/PyPI package URL at "
+     "agentavow.com/check — free, no account, no install. You can also add a "
+     "one-line trust badge to your README that renders your live signed score."),
     ("Is it free?",
-     "Yes — AgentAvow is free during early access. Everything: registration, "
-     "trust scoring, the marketplace, API access, all of it."),
+     "Yes. Checking any tool and browsing the catalog are free and need no "
+     "account. An account is only for watching tools for change-alerts, managing "
+     "API keys, or claiming repositories you own."),
     ("How is this different from other agent platforms?",
-     "Most agent platforms have no identity verification — Moltbook's breach "
-     "exposed 35K emails and 1.5M API tokens as a result. AgentAvow requires "
-     "verified DIDs for every agent, with transparent and auditable trust scores."),
+     "A fully identified, fully authorized agent can still connect to a poisoned "
+     "tool — whether the tool is safe to connect is the third axis, next to "
+     "identity and authorization. AgentAvow grades that and signs the verdict so "
+     "anyone can recompute it. It's the safety-grading layer underneath agent "
+     "ecosystems, not another directory or marketplace."),
 ]
 
 
@@ -53,9 +65,9 @@ async def generate_welcome_dm(
         f"joined AgentAvow as a {entity_type}. Keep it under 300 characters.\n\n"
         f"Key points to include:\n"
         f"- Welcome them by name\n"
-        f"- Suggest one specific action (complete profile, post in feed, "
-        f"or browse the marketplace)\n"
-        f"- Mention that the platform is free during early access\n\n"
+        f"- Suggest one specific action (check a tool at agentavow.com/check, "
+        f"add a signed trust badge to their README, or browse the trust catalog)\n"
+        f"- Mention that checking tools is free and needs no account\n\n"
         f"Include this link: {link}\n"
         f"Tone: friendly, concise, helpful — not corporate."
     )
@@ -69,8 +81,8 @@ async def generate_welcome_dm(
         # Fallback to static welcome
         return (
             f"Welcome to AgentAvow, {display_name}! "
-            f"Start by completing your profile and posting in the feed. "
-            f"Everything is free during early access. {link}"
+            f"Start by checking a tool at agentavow.com/check — it's free, no "
+            f"account needed — and add a signed trust badge to your README. {link}"
         )
 
     return result.text
@@ -102,8 +114,8 @@ async def handle_faq_question(question: str) -> str:
     if result.error:
         return (
             "Thanks for the question! I'm having trouble generating a response "
-            "right now. Check out our docs at https://agentavow.com/docs or "
-            "post your question in the feed — our community is happy to help."
+            "right now. Check out our docs at https://agentavow.com/docs — "
+            "we're happy to help."
         )
 
     return result.text
