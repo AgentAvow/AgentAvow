@@ -188,6 +188,10 @@ class PublicScanResponse(BaseModel):
     # imported entity (Case B), else a scan-only single-contribution envelope
     # (Case A). Verifiable against the JWKS in jwks_url.
     trust_envelope: dict | None = None
+    # Opt-in behavioral sandbox result (deep scan). SEPARATE from the signed score:
+    # a runtime observation is not offline-recomputable, so it is never folded into
+    # trust_score or the JWS. None unless ?behavioral=true and the tier is enabled.
+    behavioral: dict | None = None
     score_note: str = (
         "trust_score is the security scan score (code analysis only). "
         "For full entity trust including identity and external signals, "
@@ -351,6 +355,36 @@ def _tool_description(result) -> str:
     if lang:
         return f"A {lang} project"
     return "A source repository"
+
+
+async def _behavioral_block(data: dict) -> dict | None:
+    """Run the behavioral sandbox tier for a scan's npm/pypi coordinate, if enabled.
+
+    Returns a block for the response, kept SEPARATE from the signed score (a runtime
+    observation is not offline-recomputable, so it must never enter trust_score or the
+    JWS). None if the feature flag is off; a ``{"ran": False, "reason": …}`` block if
+    there's no package to exercise or the tier errors (fail-open)."""
+    from src.config import settings
+    if not getattr(settings, "scanner_behavioral_enabled", False):
+        return None
+    pkg = data.get("package_coordinate") or {}
+    surface = (pkg.get("surface") or "").lower()
+    name = pkg.get("name")
+    if surface not in ("npm", "pypi") or not name:
+        return {"ran": False, "reason": "no npm/pypi package mapped to exercise in the sandbox"}
+    from src.scanner.behavioral.runner import behavioral_findings, run_behavioral
+    try:
+        res = await run_behavioral(surface, str(name))
+    except Exception:
+        logger.exception("behavioral tier failed for %s", name)
+        return {"ran": False, "reason": "behavioral tier error"}
+    block = res.to_public_dict()
+    block["findings"] = [
+        {"category": f.category, "name": f.name, "severity": f.severity,
+         "remediation": f.remediation}
+        for f in behavioral_findings(res)
+    ]
+    return block
 
 
 async def _track_checker(request) -> None:
@@ -1144,6 +1178,12 @@ async def public_scan(
     repo: str,
     request: Request = None,
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    behavioral: bool = Query(
+        False,
+        description="Also run the behavioral sandbox tier (deep scan, ~45s; implies "
+        "a fresh scan). Returns a separate `behavioral` block; never affects the "
+        "signed score.",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Scan a GitHub repo and return trust tier with recommended rate limits.
@@ -1167,6 +1207,11 @@ async def public_scan(
         raise HTTPException(400, "Invalid owner")
     if not repo.replace("-", "").replace("_", "").replace(".", "").isalnum():
         raise HTTPException(400, "Invalid repo name")
+
+    # A behavioral deep scan must be paired with a fresh static scan so the two
+    # views describe the same artifact state — so ?behavioral=true implies force.
+    if behavioral:
+        force = True
 
     # Check cache
     if not force:
@@ -1313,10 +1358,13 @@ async def public_scan(
     entity_trust = await _get_entity_trust(full_name, db)
     trust_envelope = await _build_scan_envelope(owner, repo, data, db)
 
-    return _package_response(
+    resp = _package_response(
         full_name, data, jws, cached=False,
         entity_trust=entity_trust, trust_envelope=trust_envelope, tool_drift=drift,
     )
+    if behavioral:
+        resp.behavioral = await _behavioral_block(data)
+    return resp
 
 
 _HISTORY_CACHE_PREFIX = "public_scan_history:"
