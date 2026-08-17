@@ -165,11 +165,13 @@ export default function RebrandTrustIndex() {
         <div className="mt-10 grid sm:grid-cols-3 gap-3">
           <div className="glass rounded-2xl p-6 sm:col-span-2 relative overflow-hidden">
             <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(420px 160px at 15% -20%, rgba(239,68,68,0.12), transparent 70%)' }} />
-            <div className="relative">
-              <div className="text-[52px] md:text-[64px] font-extrabold leading-none tabular-nums" style={{ color: '#f59e0b' }}>
+            {/* stack on mobile; on desktop the number + copy sit side-by-side so the
+                wide 2-col box doesn't leave a big empty right half. */}
+            <div className="relative flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
+              <div className="text-[52px] md:text-[64px] font-extrabold leading-none tabular-nums shrink-0" style={{ color: '#f59e0b' }}>
                 {stat ? `${stat.pct}%` : '—'}
               </div>
-              <p className="mt-2 text-text text-[15px] max-w-[46ch]">
+              <p className="text-text text-[15px]">
                 of scanned agent tools carry a <strong>high or critical</strong> safety finding.
                 {stat && <span className="text-text-muted"> ({stat.flagged.toLocaleString()} of {stat.scanned.toLocaleString()} graded.)</span>}
               </p>
