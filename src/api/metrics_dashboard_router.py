@@ -236,11 +236,17 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
 
     # --- Redis-backed counters (badge fetches, API-key calls, + v2 signals) ---
     badge_by_day = await _read_daily_counter("badge_fetch", day_strs)
+    readme_render_by_day = await _read_daily_counter("badge_render_readme", day_strs)
     api_call_by_day = await _read_daily_counter("api_call", day_strs)
     adoption_by_day = await _read_daily_counter("adoption_hit", day_strs)
     rescan_by_day = await _read_daily_counter("force_rescan", day_strs)
     install_by_day = await _read_daily_counter("install_click", day_strs)
     badge_fetches_window = sum(badge_by_day.values())
+    readme_renders_window = sum(readme_render_by_day.values())
+    # "Badges rendering in READMEs" leaderboard (cumulative, all-time) — the live
+    # adoption-proof list + warmest re-outreach targets.
+    from src.scanner.adoption_sources import get_readme_badge_leaderboard
+    readme_leaderboard = await get_readme_badge_leaderboard(15)
     api_calls_window = sum(api_call_by_day.values())
     adoption_hits_window = sum(adoption_by_day.values())
     force_rescans_window = sum(rescan_by_day.values())
@@ -322,6 +328,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "new_repos": int(new_repos_window),
             "watches_created": int(watches_created_window),
             "badge_fetches": int(badge_fetches_window),
+            "readme_renders": int(readme_renders_window),
             "attestations_issued": int(attestations_window),
             "api_calls": int(api_calls_window),
             "adoption_hits": int(adoption_hits_window),
@@ -364,7 +371,13 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "onetime_scans_window": int(private_scans_onetime_window),
         },
         "alert_webhooks": {"active": int(alert_webhooks_active)},
-        "badges": {"fetches_window": int(badge_fetches_window)},
+        "badges": {
+            "fetches_window": int(badge_fetches_window),
+            "readme_renders_window": int(readme_renders_window),
+            "leaderboard": [
+                {"repo": repo, "renders": renders} for repo, renders in readme_leaderboard
+            ],
+        },
         "catalog": {
             "size_total": int(catalog_size_total),
             "community_scans": int(unique_repos_total),
@@ -576,6 +589,21 @@ function surfaceTable(bySurface){
   return out+'</tbody></table>';
 }
 
+function readmeLeaderboard(rows){
+  rows = rows || [];
+  if(!rows.length){
+    return '<p class="muted">No README badge renders recorded yet. Counts start '
+      + 'accruing once a repo embeds the badge (GitHub camo proxy fetches it).</p>';
+  }
+  let out='<table><thead><tr><th>Repo</th><th class="num">README renders</th></tr></thead><tbody>';
+  for(const r of rows){
+    const repo=esc(r.repo||'?');
+    out+='<tr><td><a href="https://github.com/'+repo+'" target="_blank" rel="noopener">'
+      +repo+'</a></td><td class="num">'+fmt(r.renders)+'</td></tr>';
+  }
+  return out+'</tbody></table>';
+}
+
 function render(d){
   d = d || {};
   // Guard every section so a missing/renamed field degrades to 0 instead of
@@ -596,7 +624,7 @@ function render(d){
   let html='<div class="grid">'
     + card("Repos scanned", scans.repos_scanned_window, "new: "+fmt(scans.new_repos_window), s.repos_scanned)
     + card("Watches created", watches.created_window, fmt(watches.active)+" active", s.watches_created)
-    + card("Badge fetches", badges.fetches_window, "Redis counter", s.badge_fetches)
+    + card("Badge fetches", badges.fetches_window, fmt(badges.readme_renders_window)+" rendered in READMEs", s.badge_fetches)
     + card("Attestations issued", attest.issued_window, fmt(attest.issued_total)+" total", null)
     + card("API keys active", apiKeys.active, fmt(apiKeys.calls_window)+" calls (win)", s.api_calls)
     + card("Catalog size", catalog.size_total, fmt(catalog.community_scans)+" community", null)
@@ -610,6 +638,9 @@ function render(d){
     + '<section><h2>Grade distribution (scanned corpus)</h2><div class="panel">'+gradeBars(scans.grade_distribution||{})+'</div></section>'
     + '<section><h2>Scans by surface</h2><div class="panel">'+surfaceTable(catalog.by_surface||{})+'</div></section>'
     + '</div>';
+
+  html+='<section><h2>Badges rendering in READMEs (adoption + re-outreach list)</h2><div class="panel">'
+    + readmeLeaderboard(badges.leaderboard)+'</div></section>';
 
   html+='<section class="notes"><h2>How these are computed</h2><div class="panel"><ul>';
   for(const note of (d.notes||[])){ html+='<li>'+esc(note)+'</li>'; }

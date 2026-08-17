@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 _UNIQ_TTL = 60 * 60 * 24 * 90       # 90d unique-checker window
 _BADGE_REF_TTL = 60 * 60 * 24 * 32  # 32d so a 30d union always has coverage
+_README_LEADERBOARD_KEY = "adopt:badge:readme:top"  # cumulative ZSET: repo -> README renders
+_README_LEADERBOARD_TTL = 60 * 60 * 24 * 120  # 120d idle TTL (refreshed on each render)
 _VERIFY_TTL = 60 * 60 * 24 * 90
 
 # Our own hosts — never counted toward badge-embed domain diversity.
@@ -195,6 +197,63 @@ async def get_badge_embed_domains(entity_id: str, days: int = 30) -> int:
         return len(hosts)
     except Exception:
         return 0
+
+
+def _is_github_camo(user_agent: str | None) -> bool:
+    """True if the request is GitHub's image proxy fetching an embedded badge.
+
+    A badge in a GitHub README is fetched server-side by ``camo.githubusercontent``
+    (User-Agent ``github-camo (<hash>)``), which strips the Referer — so the
+    User-Agent, not the Referer, is the reliable "rendered in a README" signal.
+    """
+    return "camo" in (user_agent or "").lower()
+
+
+async def record_badge_render(repo_label: str | None, user_agent: str | None) -> None:
+    """Segment a badge render: if it's a GitHub README embed (camo proxy), bump
+    the ``badge_render_readme`` counter and a cumulative per-repo leaderboard.
+
+    Best-effort — MUST NEVER break the badge render. This is the "badges actually
+    rendering in READMEs" signal (real adoption), distinct from ``badge_fetch``
+    which counts every render including score-page previews.
+    """
+    if not _is_github_camo(user_agent):
+        return
+    try:
+        from src.api.metrics_dashboard_router import bump_metric
+
+        await bump_metric("badge_render_readme")
+    except Exception:
+        pass
+    if not repo_label:
+        return
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        await r.zincrby(_README_LEADERBOARD_KEY, 1, repo_label)
+        await r.expire(_README_LEADERBOARD_KEY, _README_LEADERBOARD_TTL)
+    except Exception:
+        pass
+
+
+async def get_readme_badge_leaderboard(top_n: int = 15) -> list[tuple[str, int]]:
+    """Top-N repos by cumulative README badge renders: ``[(owner/repo, count)]``.
+
+    The live "badges rendering in the wild" list — adoption proof + the warmest
+    re-outreach targets. Best-effort ([] on any failure)."""
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        rows = await r.zrevrange(_README_LEADERBOARD_KEY, 0, max(0, top_n - 1), withscores=True)
+        out: list[tuple[str, int]] = []
+        for member, score in rows:
+            label = member.decode() if isinstance(member, bytes) else str(member)
+            out.append((label, int(score)))
+        return out
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------

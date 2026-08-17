@@ -690,9 +690,20 @@ async def get_trust_badge_svg(
     # Best-effort adoption axis-D signal: log the Referer host so we can count
     # distinct badge-embed domains (30d). MUST never break the badge render.
     try:
-        from src.scanner.adoption_sources import record_badge_referer
+        from src.scanner.adoption_sources import (
+            record_badge_referer,
+            record_badge_render,
+        )
 
         await record_badge_referer(str(entity_id), request.headers.get("referer"))
+        # Segment README embeds (GitHub camo proxy) + per-repo leaderboard.
+        _src = getattr(entity, "source_url", None) or ""
+        _repo_label = None
+        if "github.com/" in _src:
+            _parts = _src.split("github.com/", 1)[1].strip("/").split("/")
+            if len(_parts) >= 2 and _parts[0] and _parts[1]:
+                _repo_label = f"{_parts[0]}/{_parts[1]}"
+        await record_badge_render(_repo_label, request.headers.get("user-agent"))
     except Exception:
         pass
 
