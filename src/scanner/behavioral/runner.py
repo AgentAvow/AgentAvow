@@ -110,9 +110,33 @@ async def run_behavioral(
                                 error="unsupported_surface_or_runner_missing")
     image, cmd_tmpl = plan
     cmd = cmd_tmpl.format(name=coordinate, import_name=_import_name(coordinate))
+
+    # Where the runner executes. A behavioral scan runs UNTRUSTED code, so it must never
+    # run on the app/prod host — set ``scanner_behavioral_sandbox_host`` to a dedicated
+    # gVisor box and we SSH the runner there. With no host configured we fall back to the
+    # local runner (dev/test on a machine that IS the sandbox).
+    from src.config import settings
+    import shlex
+    host = (getattr(settings, "scanner_behavioral_sandbox_host", "") or "").strip()
+    if host:
+        user = getattr(settings, "scanner_behavioral_sandbox_user", "ec2-user") or "ec2-user"
+        key = (getattr(settings, "scanner_behavioral_sandbox_key", "") or "").strip()
+        remote_runner = (getattr(settings, "scanner_behavioral_sandbox_runner", "")
+                         or "/home/ec2-user/behavioral_run.sh")
+        remote = "sudo {} {} {} {}".format(
+            shlex.quote(remote_runner), shlex.quote(image), shlex.quote(cmd),
+            shlex.quote(str(timeout)))
+        argv = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
+                "-o", "BatchMode=yes"]
+        if key:
+            argv += ["-i", key]
+        argv += [f"{user}@{host}", remote]
+    else:
+        argv = ["bash", str(_RUNNER), image, cmd, str(timeout)]
+
     try:
         proc = await asyncio.create_subprocess_exec(
-            "bash", str(_RUNNER), image, cmd, str(timeout),
+            *argv,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         # generous outer timeout — the runner has its own wall-clock kill.

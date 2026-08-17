@@ -220,6 +220,16 @@ class Settings(BaseSettings):
     # any fetch/unpack error falls back to the repo-only grade and never breaks a scan.
     scanner_scan_artifact: bool = True   # enabled 08-09 — validate grades + latency live
 
+    # --- Behavioral tier (runs the tool in a gVisor sandbox to observe egress) ----
+    # OFF until a dedicated sandbox box is configured. NEVER run the runner locally on
+    # prod (it executes untrusted code) — set scanner_behavioral_sandbox_host to the
+    # dedicated gVisor instance and the runner is SSH'd there. Fail-open.
+    scanner_behavioral_enabled: bool = False
+    scanner_behavioral_sandbox_host: str = ""      # dedicated gVisor box IP/host
+    scanner_behavioral_sandbox_user: str = "ec2-user"
+    scanner_behavioral_sandbox_key: str = ""       # path to the SSH key on the app host
+    scanner_behavioral_sandbox_runner: str = "/home/ec2-user/behavioral_run.sh"
+
     # --- Phase 5: maintainer / behavioral trust signals -----------------------
     # Cheap GitHub-METADATA maintainer signals (NO code execution, NO sandbox):
     # bus factor / contributor concentration (/contributors), release cadence +
