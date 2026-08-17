@@ -90,6 +90,20 @@ export interface PublicScanResponse {
   jwks_url: string
   entity_trust?: Record<string, unknown> | null
   trust_envelope?: unknown
+  behavioral?: BehavioralResult | null
+}
+
+/** Runtime observation from the behavioral sandbox tier (opt-in deep scan).
+ * Separate from the signed score — a runtime observation isn't recomputable. */
+export interface BehavioralResult {
+  ran: boolean
+  reason?: string
+  timed_out?: boolean
+  egress_hosts?: string[]
+  unexpected_egress?: string[]
+  fs_writes_sample?: string[]
+  error?: string | null
+  findings?: { category: string; name: string; severity: string; remediation?: string }[]
 }
 
 export interface WalletScanResponse {

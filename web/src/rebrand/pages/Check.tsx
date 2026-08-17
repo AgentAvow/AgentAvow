@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'reac
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark } from '../components/TrustMark'
@@ -785,6 +785,83 @@ function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; i
   )
 }
 
+/** Opt-in behavioral deep scan — install & run the package in the gVisor sandbox
+ * and report what it actually did (network egress, filesystem writes). Only shown
+ * for npm/PyPI coordinates (the surfaces the sandbox can exercise). The result is
+ * a runtime observation, kept SEPARATE from the signed score. */
+function BehavioralPanel({ owner, repo, surface }: { owner: string; repo: string; surface?: string }) {
+  const mut = useMutation({ mutationFn: () => fetchBehavioralScan(owner, repo) })
+  const b = mut.data?.behavioral
+  if (surface !== 'npm' && surface !== 'pypi') return null
+  const undeclared = b?.unexpected_egress ?? []
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Behavioral analysis</h3>
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">sandbox · gVisor</span>
+        </div>
+        <p className="mt-1.5 text-text-muted text-[13px] max-w-[64ch]">
+          Install and run the package in an isolated sandbox and watch what it actually does —
+          the hosts it contacts, the files it writes. Any egress beyond the package registry and
+          its declared hosts is flagged. Takes ~45s and never changes the signed score.
+        </p>
+
+        {!b && (
+          <button
+            onClick={() => mut.mutate()}
+            disabled={mut.isPending}
+            className="mt-3 font-semibold text-[13.5px] px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-70"
+          >
+            {mut.isPending ? 'Running in the sandbox… (~45s)' : 'Run behavioral analysis'}
+          </button>
+        )}
+        {mut.isError && <p className="mt-3 text-[13px] text-danger">Couldn&apos;t run the behavioral scan — please try again shortly.</p>}
+
+        {b && !b.ran && (
+          <p className="mt-3 text-[13px] text-text-muted">Behavioral scan didn&apos;t run: {b.reason || b.error || 'no package to exercise in the sandbox'}.</p>
+        )}
+        {b && b.ran && (
+          <div className="mt-4 space-y-3">
+            {undeclared.length > 0 ? (
+              <div className="flex items-center gap-2 text-[13.5px] font-semibold text-danger"><span>⚠</span> Contacted {undeclared.length} undeclared host{undeclared.length > 1 ? 's' : ''} at install/run time.</div>
+            ) : (
+              <div className="flex items-center gap-2 text-[13.5px] font-semibold text-success"><span>✓</span> No unexpected network egress observed.</div>
+            )}
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Network egress ({b.egress_hosts?.length ?? 0})</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {b.egress_hosts?.length ? b.egress_hosts.map((h) => {
+                    const bad = undeclared.includes(h)
+                    return <span key={h} className={`font-mono text-[11.5px] px-2 py-1 rounded-md border ${bad ? 'bg-danger/10 border-danger/40 text-danger' : 'bg-surface border-border text-text'}`}>{h}{bad ? ' ⚠' : ''}</span>
+                  }) : <span className="text-text-muted text-[12.5px]">none</span>}
+                </div>
+              </div>
+              <div>
+                <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Filesystem writes ({b.fs_writes_sample?.length ?? 0})</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {b.fs_writes_sample?.length ? b.fs_writes_sample.map((p) => (
+                    <span key={p} className="font-mono text-[11.5px] px-2 py-1 rounded-md bg-surface border border-border text-text-muted">{p}</span>
+                  )) : <span className="text-text-muted text-[12.5px]">none</span>}
+                </div>
+              </div>
+            </div>
+            {(b.findings?.length ?? 0) > 0 && (
+              <div className="space-y-1.5">
+                {b.findings!.map((fnd, i) => (
+                  <div key={i} className="text-[12.5px] text-text-muted"><span className="font-mono text-[10.5px] uppercase px-1.5 py-0.5 rounded bg-danger/15 text-danger mr-2">{fnd.severity}</span>{fnd.name}</div>
+                ))}
+              </div>
+            )}
+            {b.timed_out && <p className="text-[12px] text-warning">Note: the run hit its time limit — results may be partial.</p>}
+          </div>
+        )}
+      </div>
+    </Reveal>
+  )
+}
+
 /** "Add to your agent" — the install-with-the-grade affordance. MCP servers get
  * true 1-click deeplinks (Cursor/VS Code/Goose) + copy commands; packages get the
  * install one-liners; skills get the clone command. The grade travels because
@@ -1491,6 +1568,9 @@ function Result({ owner, repo, privateResult }: {
 
       {/* Declared scope — the tool's own .agentavow.yml, if present */}
       <DeclaredScopePanel scope={(scan as { declared_scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string } }).declared_scope} />
+
+      {/* Behavioral deep scan — runs the package in the sandbox (npm/PyPI only) */}
+      {!isPrivate && <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} />}
 
       {/* Adoption — the real 5-axis metric, distinct from safety (public repos only) */}
       {!isPrivate && <AdoptionPanel owner={owner} repo={repo} />}

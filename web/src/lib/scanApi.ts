@@ -26,6 +26,20 @@ export async function fetchPublicScan(
   return data
 }
 
+/** Deep scan: also run the behavioral sandbox tier (~45s). Returns the same
+ * response with a `behavioral` block attached (egress/fs/exit observed by
+ * running the tool's package in isolation). Never affects the signed score. */
+export async function fetchBehavioralScan(
+  owner: string,
+  repo: string,
+): Promise<PublicScanResponse> {
+  const { data } = await publicApi.get<PublicScanResponse>(
+    `/public/scan/${owner}/${repo}?behavioral=true`,
+    { timeout: 150_000 },
+  )
+  return data
+}
+
 /** Scan a PUBLISHED npm/PyPI package by coordinate (no GitHub repo). `name` may
  * be a scoped package (@scope/pkg) — the slash is preserved in the path. */
 export async function fetchPackageScan(
