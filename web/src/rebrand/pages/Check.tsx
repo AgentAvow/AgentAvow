@@ -1383,7 +1383,7 @@ function Result({ owner, repo, privateResult }: {
   return (
     <div className="max-w-[860px] mx-auto px-6 py-14">
       <SEOHead
-        title={`Is ${owner}/${repo} safe? Grade ${scan.trust_score}/100 (${t.name})`}
+        title={`Is ${owner}/${repo} safe? Trust score ${scan.trust_score}/100 (${t.name})`}
         description={`${sum.headline} AgentAvow's signed, offline-verifiable safety score for ${owner}/${repo}: ${scan.trust_score}/100 (${t.name}).`}
         path={`/check/${owner}/${repo}`}
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}

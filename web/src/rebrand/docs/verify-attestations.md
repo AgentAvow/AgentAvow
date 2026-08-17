@@ -78,5 +78,5 @@ CTEF envelope. See the [standards docs](https://github.com/AgentAvow/AgentAvow/t
 
 ## Next
 
-- [Reading your scan grade](./check-guide.md)
+- [Reading your scan score](./check-guide.md)
 - [Add a trust badge to your README](./trust-badges.md)

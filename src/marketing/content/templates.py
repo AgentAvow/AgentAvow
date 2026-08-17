@@ -74,8 +74,8 @@ IMPORT_ANNOUNCEMENT_TWITTER = (
 IMPORT_ANNOUNCEMENT_REDDIT = (
     "## {count} Tools Scanned from {source}\n\n"
     "We've scanned {count} tools from {source} and added them to the "
-    "AgentAvow trust catalog, each with a signed A-to-F safety grade.\n\n"
-    "Every grade ships with a JWS attestation you can recompute offline "
+    "AgentAvow trust catalog, each with a signed 0-100 trust score.\n\n"
+    "Every score ships with a JWS attestation you can recompute offline "
     "against the public JWKS — verify it yourself, don't take our word.\n\n"
     "Browse them: {link}"
 )

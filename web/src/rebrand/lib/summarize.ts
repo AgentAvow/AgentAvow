@@ -72,7 +72,7 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
   const short = repo.split('/').pop() || repo
   let paragraph: string
   if (verdict === 'safe' && total === 0) {
-    paragraph = `We scanned ${short} across 12 safety categories and found nothing alarming. It follows good security practices and carries a signed, verifiable grade — reasonable to connect to your agent.`
+    paragraph = `We scanned ${short} across 12 safety categories and found nothing alarming. It follows good security practices and carries a signed, verifiable score — reasonable to connect to your agent.`
   } else if (verdict === 'safe') {
     paragraph = `${short} scored well overall. We found ${total} minor thing${total === 1 ? '' : 's'} but no critical risks — it follows solid security practices and is generally safe to connect.`
   } else if (verdict === 'ok') {

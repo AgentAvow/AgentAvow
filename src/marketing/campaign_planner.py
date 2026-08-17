@@ -29,8 +29,8 @@ AgentAvow's positioning: it gives any tool, MCP server, package, or \
 skill an AI agent connects to a signed, verifiable safety grade you can \
 recompute offline — the "is this tool safe to connect?" third axis that \
 sits next to identity and authorization.  Point it at a GitHub repo, MCP \
-server, npm/PyPI package, or OpenClaw skill and it returns an A+ to F \
-grade with per-finding detail and a cryptographic attestation (Ed25519 \
+server, npm/PyPI package, or OpenClaw skill and it returns a 0-100 \
+trust score with per-finding detail and a cryptographic attestation (Ed25519 \
 JWS) anyone can verify against the public JWKS.  The sharp line: a fully \
 identified, fully authorized agent can still connect to a poisoned tool. \
 That's the gap we close.  We are NOT a social network, a marketplace, or \
@@ -43,7 +43,7 @@ signed safety grades and README badges for MCP servers, packages, and \
 skills.  We're reaching out to MCP server authors, AI agent repos, \
 npm/PyPI maintainers, and OpenClaw skill authors — anyone shipping a \
 tool an agent connects to.  A scan is free and anonymous: point it at a \
-repo and get back a letter grade, per-finding detail pointing at the \
+repo and get back a 0-100 trust score, per-finding detail pointing at the \
 exact line, and a JWS attestation.  Check any tool: agentavow.com/check.
 
 ## Current landscape (2026)

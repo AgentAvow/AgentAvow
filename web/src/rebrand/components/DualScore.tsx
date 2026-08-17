@@ -30,7 +30,7 @@ export function DualScore({
           <span className="text-[11px] font-mono text-text-muted">/100</span>
           <span className="ml-1 text-[13px] font-bold" style={{ color: t.color }}>{t.name}</span>
         </div>
-        <div className="text-[11px] text-text-muted mt-0.5">signed scanner grade · verifiable now</div>
+        <div className="text-[11px] text-text-muted mt-0.5">signed scanner score · verifiable now</div>
       </div>
       {/* Adoption — brand teal, NEVER a trust/safety colour (popular ≠ safe). */}
       <div className="bg-surface border border-border rounded-xl px-4 py-3 relative overflow-hidden">

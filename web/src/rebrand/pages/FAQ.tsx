@@ -33,6 +33,7 @@ const SECTIONS: Section[] = [
     items: [
       { q: 'What makes the score verifiable?', a: 'Every result is signed with Ed25519 (JWS). You can verify any attestation offline against our public keys — no call back to us required. If a single byte of the score is altered, verification fails. It\'s a signature, not just a badge.' },
       { q: 'How do I verify a score myself?', a: 'Use the live verification tool on the How-it-works page, or check any attestation against our public JWKS. The evidence format and conformance vectors are published and versioned in the open.' },
+      { q: 'Isn\'t this just a directory\'s score or a self-assigned badge?', a: 'No. A directory\'s in-house number and a self-assigned badge are figures you take on faith — they live on one platform and disappear off it. An AgentAvow score is cryptographically signed and recomputable by anyone: it travels with your tool (README, npm, CI) and doesn\'t depend on us being online. A directory optimizes for discoverability; we grade for safety, and we let you check our work.' },
     ],
   },
   {

@@ -41,7 +41,7 @@ TOPICS: list[Topic] = [
                 "it's allowed to do. Neither tells you whether the tool it just "
                 "connected to is safe. A fully authorized agent will happily call "
                 "a poisoned MCP server or a malicious skill. AgentAvow scans the "
-                "tool itself and returns a signed A-to-F safety grade with "
+                "tool itself and returns a signed 0-100 trust score with "
                 "per-finding detail, and the attestation verifies offline against "
                 "a public key. Breakdown of how the grading and signing work, and "
                 "where tool safety fits next to identity and authorization."
@@ -84,7 +84,7 @@ TOPICS: list[Topic] = [
         angles={
             "twitter": (
                 "Scan any MCP server, npm/PyPI package, or skill in seconds: "
-                "point AgentAvow at the repo and get a signed A-to-F safety grade "
+                "point AgentAvow at the repo and get a signed 0-100 trust score "
                 "back. No account, no install. agentavow.com/check"
             ),
             "reddit": (
@@ -106,8 +106,8 @@ TOPICS: list[Topic] = [
                 "back. Happy to walk through reading the findings if that helps."
             ),
             "bluesky": (
-                "Shipping an MCP server or skill? Scan it, get a signed A-to-F "
-                "safety grade, drop the badge in your README. Free, no install."
+                "Shipping an MCP server or skill? Scan it, get a signed 0-100 "
+                "trust score, drop the badge in your README. Free, no install."
             ),
             "devto": (
                 "Grading and Verifying the Tools Your Agent Connects To: a "
@@ -222,7 +222,7 @@ TOPICS: list[Topic] = [
             "reddit": (
                 "We built AgentAvow: it scans the tools an AI agent connects to "
                 "(MCP servers, npm/PyPI packages, OpenClaw skills) and issues a "
-                "signed A-to-F safety grade anyone can recompute offline. If you "
+                "signed 0-100 trust score anyone can recompute offline. If you "
                 "maintain one, you can scan it free, see exactly what each finding "
                 "points at, and add a signed safety badge to your README so users "
                 "know the tool is safe to connect before they wire it in. No "

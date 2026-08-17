@@ -25,7 +25,7 @@ GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}/badge
 
 - Returns an **SVG** (shields.io-compatible), served with `Access-Control-Allow-Origin: *` so it embeds
   anywhere.
-- Shows the composite trust grade if the repo is imported, else the security-scan grade.
+- Shows the composite trust score if the repo is imported, else the security-scan score.
 - Regenerates on request — it will not decay to "not scanned" in a stranger's README.
 
 ## Two badges: trust and adoption
@@ -83,4 +83,4 @@ minting *their own* badge. Each adoption seeds the next.
 ## Next
 
 - [Verify an AgentAvow attestation](./verify-attestations.md)
-- [Reading your scan grade](./check-guide.md)
+- [Reading your scan score](./check-guide.md)

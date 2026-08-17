@@ -242,6 +242,27 @@ async def _post_planned_campaign_posts(
             })
             continue
 
+        # No-slop hard gate: planned-campaign content comes straight from the
+        # planner's content_brief and never passed through the proactive path's
+        # voice recheck. Run the AI-tells detector here too so slop can never
+        # auto-publish — on a hit, reroute to human_review instead of posting.
+        from src.marketing.content.ai_tells import check as _check_ai_tells
+
+        _slop = _check_ai_tells(post.content, platform=post.platform, strict=True)
+        if not _slop.passed:
+            post.status = "human_review"
+            post.error_message = f"Rerouted to review (no-slop gate): {_slop.hint()}"
+            logger.warning(
+                "Planned post %s (%s) rerouted to review by no-slop gate: %s",
+                post.id, post.platform, _slop.hint(),
+            )
+            results["errors"].append({
+                "id": str(post.id),
+                "platform": post.platform,
+                "error": f"slop_gate: {_slop.hint()}",
+            })
+            continue
+
         try:
             result = await adapter.post(post.content)
             if result.success:
