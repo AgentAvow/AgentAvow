@@ -368,6 +368,13 @@ class Settings(BaseSettings):
     # Pacing — spread the daily batch instead of bursting at the 00:00 UTC counter reset.
     reply_guy_min_gap_minutes: int = 40  # min spacing between auto-posted replies (anti-burst)
     reply_guy_active_start_hour_utc: int = 14  # only auto-post from this UTC hour (US daytime)
+    # Twitter writes are metered by the monthly API cap and reply engagement is ~zero,
+    # so cap Twitter replies hard (Bluesky is free and carries the volume under the
+    # global reply_guy_max_daily). Keeps X quota for the campaign posts that matter.
+    reply_guy_twitter_max_daily: int = 4
+    # Stale drafts that never posted (daily cap / window / gap) clog the queue and
+    # age out of relevance — expire them after this many hours.
+    reply_guy_draft_ttl_hours: int = 48
 
     # Email rate limiting & retry
     email_rate_limit_per_minute: int = 30

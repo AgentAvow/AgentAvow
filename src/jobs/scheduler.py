@@ -258,6 +258,7 @@ async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
                     async with session.begin():
                         from src.marketing.metrics import (
                             refresh_metrics,
+                            refresh_reply_metrics,
                         )
 
                         summary = await refresh_metrics(session)
@@ -270,6 +271,10 @@ async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
                             logger.debug(
                                 "Marketing metrics: nothing to update",
                             )
+                        # Also pull engagement for reply-guy replies (Twitter).
+                        reply_summary = await refresh_reply_metrics(session)
+                        if reply_summary.get("updated", 0) > 0:
+                            logger.info("Reply metrics refresh: %s", reply_summary)
         except Exception:
             logger.exception("Marketing metrics refresh failed")
 
@@ -489,11 +494,29 @@ async def _reply_poster_loop(interval: int = REPLY_POSTER_INTERVAL) -> None:
                 from src.database import async_session
 
                 async with async_session() as session:
-                    from datetime import datetime, timezone
+                    from datetime import datetime, timedelta, timezone
 
                     import sqlalchemy as sa
 
                     from src.models import ReplyOpportunity, ReplyTarget
+
+                    # Expire stale drafts so the queue reflects reality instead of
+                    # accreting months of never-posted opportunities.
+                    ttl_h = getattr(_rg_settings, "reply_guy_draft_ttl_hours", 48)
+                    if ttl_h > 0:
+                        cutoff = datetime.now(timezone.utc) - timedelta(hours=ttl_h)
+                        expired = await session.execute(
+                            sa.update(ReplyOpportunity)
+                            .where(
+                                ReplyOpportunity.status == "drafted",
+                                ReplyOpportunity.drafted_at < cutoff,
+                            )
+                            .values(status="skipped")
+                        )
+                        if expired.rowcount:
+                            await session.commit()
+                            logger.info("Reply guy: expired %d stale drafts (>%dh)",
+                                        expired.rowcount, ttl_h)
 
                     # Fetch drafted replies, newest first, limit to 5 per cycle
                     result = await session.execute(
@@ -552,14 +575,34 @@ async def _reply_poster_loop(interval: int = REPLY_POSTER_INTERVAL) -> None:
                             )
                         else:
                             posted = 0
-                            # One per cycle → paced across the day, not a burst.
-                            for opp in opps[:1]:
+                            # Per-platform throttle: Twitter writes burn the scarce
+                            # monthly X API cap (and reply engagement is ~zero), so cap
+                            # Twitter replies hard and let free Bluesky carry volume.
+                            # Pick the newest drafted opp still under its platform cap.
+                            tw_cap = getattr(_rg_settings, "reply_guy_twitter_max_daily", 4)
+                            tw_today = (await session.execute(
+                                sa.select(sa.func.count()).where(
+                                    ReplyOpportunity.status == "posted",
+                                    ReplyOpportunity.platform == "twitter",
+                                    ReplyOpportunity.posted_at >= today_start,
+                                )
+                            )).scalar() or 0
+
+                            def _under_cap(o: ReplyOpportunity) -> bool:
+                                return not (o.platform == "twitter" and tw_today >= tw_cap)
+
+                            opp = next((o for o in opps if _under_cap(o)), None)
+                            if opp is None:
+                                logger.debug(
+                                    "Reply guy poster: top drafts all over platform cap "
+                                    "(twitter %d/%d today)", tw_today, tw_cap,
+                                )
+                            else:
                                 try:
-                                    target_result = await session.execute(
+                                    target = (await session.execute(
                                         sa.select(ReplyTarget)
                                         .where(ReplyTarget.id == opp.target_id)
-                                    )
-                                    target = target_result.scalar_one_or_none()
+                                    )).scalar_one_or_none()
 
                                     from src.api.reply_guy_router import _post_reply
                                     url = await _post_reply(opp, target)

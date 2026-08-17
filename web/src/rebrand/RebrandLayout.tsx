@@ -66,7 +66,7 @@ function AccountMenu() {
             <Link to={rp("/rebrand/tools")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My Tools</Link>
             <Link to={rp("/rebrand/account")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">My watches</Link>
             <Link to={rp("/rebrand/settings")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Settings</Link>
-            {user.is_admin && <a href="/admin" className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</a>}
+            {user.is_admin && <Link to={rp("/rebrand/admin-dashboard")} onClick={() => setOpen(false)} className="block px-3.5 py-2 text-[13.5px] text-text-muted hover:text-text hover:bg-surface">Admin</Link>}
             <button onClick={() => { setOpen(false); logout(); navigate(rp('/rebrand')) }} className="block w-full text-left px-3.5 py-2 text-[13.5px] text-text-muted hover:text-danger hover:bg-surface border-t border-border/60 mt-1">Sign out</button>
           </div>
         )}
