@@ -134,11 +134,13 @@ async def get_dashboard_data(db: AsyncSession) -> dict:
     from src.marketing.llm.cost_tracker import get_monthly_breakdown
     daily_spend = await get_daily_spend()
     monthly_spend = await get_monthly_spend()
+    # Per-model breakdown from the Redis counters (captures all LLM usage going
+    # forward). These only started tracking recently, so for the current month they
+    # can undercount the authoritative monthly total — reconcile with an
+    # 'earlier this month (pre-tracking)' row so the breakdown always SUMS to the
+    # monthly total. This self-corrects next month.
     cost_breakdown = await get_monthly_breakdown()
-    # Fallback: if the Redis per-model counters are empty (e.g. fresh deploy before
-    # any generation this month), show the DB post-attributed breakdown so the table
-    # isn't blank.
-    if not cost_breakdown:
+    if not cost_breakdown:  # nothing tracked yet → DB post-attributed as a floor
         cost_q = await db.execute(
             select(
                 MarketingPost.llm_model,
@@ -152,6 +154,12 @@ async def get_dashboard_data(db: AsyncSession) -> dict:
         cost_breakdown = [
             {"model": row.llm_model, "calls": row.calls, "cost_usd": round(float(row.cost), 4)}
             for row in cost_q.all()
+        ]
+    tracked = round(sum(float(b.get("cost_usd") or 0) for b in cost_breakdown), 4)
+    gap = round(monthly_spend - tracked, 4)
+    if gap > 0.01:
+        cost_breakdown = list(cost_breakdown) + [
+            {"model": "earlier this month (pre-tracking)", "calls": 0, "cost_usd": gap},
         ]
 
     # Recent posts

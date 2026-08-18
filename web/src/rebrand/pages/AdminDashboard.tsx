@@ -42,7 +42,7 @@ interface MktDash {
 interface Campaign { id: string; name: string; topic: string; platforms: string[]; status: string; start_date?: string }
 interface ReplyStats { status_counts?: Record<string, number>; posted_today?: number; active_targets?: number; queue_size?: number }
 interface Eval { engagement_per_post_7d?: number; engagement_per_post_30d?: number; trend_pct?: number | null; slop_pass_rate_7d?: number | null; reply_engagement_per_post_7d?: number; posts_7d?: number; alerts?: { level: string; message: string }[] }
-interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?: string | null; draft_content?: string; drafted_at?: string | null; posted_at?: string | null; engagement_count?: number; target?: { handle?: string | null } }
+interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?: string | null; draft_content?: string; drafted_at?: string | null; posted_at?: string | null; engagement_count?: number; urgency_score?: number; target?: { handle?: string | null; follower_count?: number } }
 const REPLY_TTL_H = 48
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -283,6 +283,7 @@ function MarketingTab() {
   // Sorted by urgency (default) — the ones it'll try to post first.
   const considering = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-considering'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'drafted', limit: 20 } })).data })
   const replySent = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-sent'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'posted', sort: 'recent', limit: 20 } })).data })
+  const [replyView, setReplyView] = useState<'considering' | 'sent'>('considering')
   const byDate = <T extends { created_at?: string; posted_at?: string | null; drafted_at?: string | null }>(a: T[]) => [...a].sort((x, y) => new Date(y.posted_at || y.drafted_at || y.created_at || 0).getTime() - new Date(x.posted_at || x.drafted_at || x.created_at || 0).getTime())
 
   const genCampaign = useMutation({ mutationFn: () => api.post('/admin/marketing/campaigns/generate', {}, { timeout: 120_000 }), onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-mkt-campaigns'] }) })
@@ -380,32 +381,43 @@ function MarketingTab() {
         ) : <p className="text-text-muted text-[13px]">No scheduled campaign posts. Generate a weekly plan above.</p>}
       </Section>
 
-      <Section title="Queue 3 · Reply-guy is considering" note="Drafted replies for X + Bluesky, most-urgent first (what it'll try next). Each fades out after 48h. Edit, or post it now.">
+      <Section title="Reply-guy" note="Your best engagement channel — replies average far more traction than broadcasts.">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
           <Stat label="Posted today" value={fmt(reply.data?.posted_today)} />
           <Stat label="Active targets" value={fmt(reply.data?.active_targets)} />
           <Stat label="Considering" value={fmt(reply.data?.queue_size)} sub="drafted+new" />
           <Stat label="Sent (all-time)" value={fmt(rc.posted)} sub={`${fmt(rc.posting_error)} errors`} />
         </div>
-        {considering.data?.items?.length ? <div className="flex flex-col gap-2">{considering.data.items.map((r) => <ReplyConsideringCard key={r.id} r={r} onDone={invalidate} />)}</div> : <p className="text-text-muted text-[13px]">Nothing queued to reply to right now.</p>}
-      </Section>
-
-      <Section title="Reply-guy · Sent" note="Everything reply-guy has posted, newest first — click to see it live.">
-        {replySent.data?.items?.length ? (
-          <div className="glass rounded-2xl p-4">
-            <div className="flex flex-col divide-y divide-border/40">
-              {replySent.data.items.map((r) => (
-                <div key={r.id} className="flex items-center gap-3 py-2 text-[12.5px]">
-                  <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{r.platform}</span>
-                  <span className="flex-1 min-w-0 truncate text-text-muted">{r.draft_content || r.post_uri}</span>
-                  {typeof r.engagement_count === 'number' && r.engagement_count > 0 && <span className="tabular-nums text-text-muted/70">♥ {r.engagement_count}</span>}
-                  <span className="text-text-muted/60 shrink-0">{ago(r.posted_at)}</span>
-                  {r.reply_url && <a href={r.reply_url} target="_blank" rel="noopener" className="text-primary-light hover:text-primary shrink-0">view ↗</a>}
+        <div className="flex gap-1 border-b border-border/60 mb-3">
+          {([['considering', 'Considering next'], ['sent', 'Sent']] as const).map(([k, lbl]) => (
+            <button key={k} onClick={() => setReplyView(k)} className={`px-3.5 py-1.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors ${replyView === k ? 'border-primary text-text' : 'border-transparent text-text-muted hover:text-text'}`}>{lbl}</button>
+          ))}
+        </div>
+        {replyView === 'considering' ? (
+          <>
+            <p className="text-[12.5px] text-text-muted mb-2">Most-urgent first (what it'll try next). Each fades after 48h — edit, or post now.</p>
+            {considering.data?.items?.length ? <div className="flex flex-col gap-2">{considering.data.items.map((r) => <ReplyConsideringCard key={r.id} r={r} onDone={invalidate} />)}</div> : <p className="text-text-muted text-[13px]">Nothing queued to reply to right now.</p>}
+          </>
+        ) : (
+          <>
+            {replySent.data?.items?.length ? (
+              <div className="glass rounded-2xl p-4">
+                <div className="flex flex-col divide-y divide-border/40">
+                  {replySent.data.items.map((r) => (
+                    <div key={r.id} className="flex items-center gap-3 py-2 text-[12.5px]">
+                      <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{r.platform}</span>
+                      <span className="flex-1 min-w-0 truncate text-text-muted">{r.draft_content || r.post_uri}</span>
+                      {typeof r.engagement_count === 'number' && r.engagement_count > 0 && <span className="tabular-nums text-text-muted/70">♥ {r.engagement_count}</span>}
+                      <span className="text-text-muted/60 shrink-0">{ago(r.posted_at)}</span>
+                      {r.reply_url && <a href={r.reply_url} target="_blank" rel="noopener" className="text-primary-light hover:text-primary shrink-0">view ↗</a>}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        ) : <p className="text-text-muted text-[13px]">No replies sent yet.</p>}
+              </div>
+            ) : <p className="text-text-muted text-[13px]">No replies sent yet.</p>}
+            <div className="mt-2 text-[12.5px]"><Link to={rp('/rebrand/admin-replies')} className="text-primary-light hover:text-primary font-semibold">View all replies — sort & search →</Link></div>
+          </>
+        )}
       </Section>
 
     </>
@@ -455,8 +467,10 @@ function ReplyConsideringCard({ r, onDone }: { r: ReplyRow; onDone: () => void }
       <div className="flex items-center gap-2 text-[11.5px] font-mono text-text-muted mb-2">
         <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{r.platform}</span>
         {r.target?.handle && <span>@{r.target.handle}</span>}
-        {r.post_uri && <a href={r.post_uri} target="_blank" rel="noopener" className="hover:text-primary-light">the post ↗</a>}
-        <span className={`ml-auto ${leftH < 6 ? 'text-warning' : ''}`}>fades in {Math.round(leftH)}h · posts in the next 14:00-UTC window</span>
+        {!!r.target?.follower_count && <span>{fmt(r.target.follower_count)} followers</span>}
+        {typeof r.urgency_score === 'number' && <span title="thread heat: recency × audience × engagement">🔥 {r.urgency_score.toFixed(1)}</span>}
+        {r.post_uri && <a href={r.post_uri} target="_blank" rel="noopener" className="hover:text-primary-light">the thread ↗</a>}
+        <span className={`ml-auto ${leftH < 6 ? 'text-warning' : ''}`}>fades in {Math.round(leftH)}h · posts next 14:00-UTC window</span>
       </div>
       {editing
         ? <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} className="w-full text-[13px] rounded-lg bg-surface border border-border p-2 font-mono" />
