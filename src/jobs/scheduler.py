@@ -629,7 +629,8 @@ async def _reply_poster_loop(interval: int = REPLY_POSTER_INTERVAL) -> None:
                                     if url:
                                         opp.status = "posted"
                                         opp.posted_at = datetime.now(timezone.utc)
-                                        opp.posted_url = url
+                                        # reply_url is the real column (posted_url was a no-op)
+                                        opp.reply_url = url
                                         posted += 1
                                         logger.info(
                                             "Reply guy auto-posted: %s -> %s",

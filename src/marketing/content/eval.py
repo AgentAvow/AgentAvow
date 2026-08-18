@@ -76,12 +76,17 @@ async def get_marketing_eval(db: AsyncSession) -> dict:
     trend = round(((eng7 - eng30) / eng30) * 100, 1) if eng30 > 0 else None
 
     alerts: list[dict] = []
+    reply_wins = reply7 > eng7 and reply7 > 0
     # Engagement regression: 7d meaningfully below the 30d baseline (need enough posts).
     if eng30 > 0 and n7 >= 3 and eng7 < eng30 * 0.6:
         alerts.append({
             "level": "warn",
-            "message": f"Engagement down {abs(trend)}% vs 30-day baseline "
+            "message": f"Engagement down {abs(trend or 0)}% vs 30-day baseline "
                        f"({eng7} vs {eng30}/post). The learning loop may be drifting.",
+            "action": ("Replies are outperforming broadcasts — shift effort to reply-guy "
+                       if reply_wins else "Review recent topics; lean into what's working ")
+                      + "and check the phrases-to-approve queue.",
+            "cta": {"label": "Reply-guy →", "tab": "marketing"},
         })
     # No-slop first-pass rate dropping (bot writing more slop that needs a retry).
     if slop7 is not None and slop7 < 0.6:
@@ -89,13 +94,21 @@ async def get_marketing_eval(db: AsyncSession) -> dict:
             "level": "warn",
             "message": f"No-slop first-draft pass rate is {int(slop7 * 100)}% "
                        f"(retries rising) — voice guidance may need a refresh.",
+            "action": "Approve the learned slop phrases below to tighten the voice, and "
+                      "consider trimming overused angles.",
+            "cta": {"label": "Review phrases →", "anchor": "slop"},
         })
     # Almost-zero engagement across the board (reach problem, worth flagging).
     if n7 >= 5 and eng7 == 0:
         alerts.append({
             "level": "info",
-            "message": "Zero engagement across recent posts — reach, not quality, is the "
-                       "bottleneck. Consider targeting/timing over volume.",
+            "message": "Zero engagement across broadcast posts — reach, not quality, is the "
+                       "bottleneck.",
+            "action": (f"Your replies average {reply7}/post vs 0 for broadcasts — put effort "
+                       "into reply-guy (widen targeting) over broadcast volume."
+                       if reply_wins else
+                       "Try targeting/timing over volume; consider more replies."),
+            "cta": {"label": "Reply-guy →", "tab": "marketing"},
         })
 
     return {

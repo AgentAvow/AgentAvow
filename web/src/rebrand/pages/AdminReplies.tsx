@@ -7,7 +7,7 @@ import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
 import { rp } from '../basePath'
 
-interface Row { id: string; platform: string; draft_content?: string; post_uri?: string; reply_url?: string | null; posted_at?: string | null; engagement_count?: number; target?: { handle?: string | null } }
+interface Row { id: string; platform: string; draft_content?: string; post_uri?: string | null; reply_url?: string | null; posted_at?: string | null; engagement_count?: number; target?: { handle?: string | null } }
 type Key = 'date' | 'platform' | 'engagement'
 
 const fmt = (n?: number) => (n ?? 0).toLocaleString()
@@ -61,7 +61,7 @@ export default function AdminReplies() {
                 <td className="py-1.5 px-2 font-mono">{r.platform}{r.target?.handle && <span className="text-text-muted/60"> @{r.target.handle}</span>}</td>
                 <td className="py-1.5 px-2 text-text-muted max-w-[420px] truncate">{r.draft_content}</td>
                 <td className="py-1.5 px-2 tabular-nums text-right">{fmt(r.engagement_count)}</td>
-                <td className="py-1.5 px-2 text-right">{r.reply_url ? <a href={r.reply_url} target="_blank" rel="noopener" className="text-primary-light hover:text-primary">view ↗</a> : '—'}</td>
+                <td className="py-1.5 px-2 text-right">{(r.reply_url || r.post_uri) ? <a href={r.reply_url || r.post_uri || '#'} target="_blank" rel="noopener" className="text-primary-light hover:text-primary">{r.reply_url ? 'reply ↗' : 'thread ↗'}</a> : '—'}</td>
               </tr>
             ))}
           </tbody>

@@ -41,7 +41,7 @@ interface MktDash {
 }
 interface Campaign { id: string; name: string; topic: string; platforms: string[]; status: string; start_date?: string }
 interface ReplyStats { status_counts?: Record<string, number>; posted_today?: number; active_targets?: number; queue_size?: number }
-interface Eval { engagement_per_post_7d?: number; engagement_per_post_30d?: number; trend_pct?: number | null; slop_pass_rate_7d?: number | null; reply_engagement_per_post_7d?: number; posts_7d?: number; alerts?: { level: string; message: string }[] }
+interface Eval { engagement_per_post_7d?: number; engagement_per_post_30d?: number; trend_pct?: number | null; slop_pass_rate_7d?: number | null; reply_engagement_per_post_7d?: number; posts_7d?: number; alerts?: { level: string; message: string; action?: string }[] }
 interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?: string | null; draft_content?: string; drafted_at?: string | null; posted_at?: string | null; engagement_count?: number; urgency_score?: number; target?: { handle?: string | null; follower_count?: number } }
 const REPLY_TTL_H = 48
 
@@ -347,7 +347,10 @@ function MarketingTab() {
         {!!evalQ.data?.alerts?.length && (
           <div className="flex flex-col gap-2 mb-3">
             {evalQ.data.alerts.map((a, i) => (
-              <div key={i} className={`glass rounded-xl p-3 text-[13px] border-l-4 ${a.level === 'warn' ? 'border-warning/70 text-warning' : 'border-primary/50 text-text-muted'}`}>{a.level === 'warn' ? '⚠ ' : 'ℹ '}{a.message}</div>
+              <div key={i} className={`glass rounded-xl p-3 text-[13px] border-l-4 ${a.level === 'warn' ? 'border-warning/70' : 'border-primary/50'}`}>
+                <div className={a.level === 'warn' ? 'text-warning' : 'text-text-muted'}>{a.level === 'warn' ? '⚠ ' : 'ℹ '}{a.message}</div>
+                {a.action && <div className="mt-1 text-[12.5px] text-text">→ {a.action}</div>}
+              </div>
             ))}
           </div>
         )}
@@ -439,18 +442,19 @@ function MarketingTab() {
         ) : (
           <>
             {replySent.data?.items?.length ? (
-              <div className="glass rounded-2xl p-4">
-                <div className="flex flex-col divide-y divide-border/40">
-                  {replySent.data.items.map((r) => (
-                    <div key={r.id} className="flex items-center gap-3 py-2 text-[12.5px]">
-                      <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{r.platform}</span>
-                      <span className="flex-1 min-w-0 truncate text-text-muted">{r.draft_content || r.post_uri}</span>
-                      {typeof r.engagement_count === 'number' && r.engagement_count > 0 && <span className="tabular-nums text-text-muted/70">♥ {r.engagement_count}</span>}
-                      <span className="text-text-muted/60 shrink-0">{ago(r.posted_at)}</span>
-                      {r.reply_url && <a href={r.reply_url} target="_blank" rel="noopener" className="text-primary-light hover:text-primary shrink-0">view ↗</a>}
-                    </div>
-                  ))}
-                </div>
+              <div className="glass rounded-2xl p-4 overflow-x-auto">
+                <table className="w-full text-[12.5px]">
+                  <thead><tr className="text-text-muted/70 text-left font-mono"><th className="py-1 pr-3">when</th><th className="py-1 pr-3">platform</th><th className="py-1 pr-3">reply</th><th className="py-1 pr-2 text-right">♥</th><th className="py-1 text-right">link</th></tr></thead>
+                  <tbody>{replySent.data.items.map((r) => (
+                    <tr key={r.id} className="border-t border-border/40">
+                      <td className="py-1.5 pr-3 text-text-muted whitespace-nowrap">{ago(r.posted_at)}</td>
+                      <td className="py-1.5 pr-3 font-mono">{r.platform}{r.target?.handle && <span className="text-text-muted/60"> @{r.target.handle}</span>}</td>
+                      <td className="py-1.5 pr-3 text-text-muted max-w-[360px] truncate">{r.draft_content || r.post_uri}</td>
+                      <td className="py-1.5 pr-2 tabular-nums text-right">{fmt(r.engagement_count)}</td>
+                      <td className="py-1.5 text-right">{(r.reply_url || r.post_uri) ? <a href={r.reply_url || r.post_uri} target="_blank" rel="noopener" className="text-primary-light hover:text-primary">{r.reply_url ? 'reply ↗' : 'thread ↗'}</a> : '—'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
               </div>
             ) : <p className="text-text-muted text-[13px]">No replies sent yet.</p>}
             <div className="mt-2 text-[12.5px]"><Link to={rp('/rebrand/admin-replies')} className="text-primary-light hover:text-primary font-semibold">View all replies — sort & search →</Link></div>
@@ -506,6 +510,7 @@ function ReplyConsideringCard({ r, onDone }: { r: ReplyRow; onDone: () => void }
         <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{r.platform}</span>
         {r.target?.handle && <span>@{r.target.handle}</span>}
         {!!r.target?.follower_count && <span>{fmt(r.target.follower_count)} followers</span>}
+        {!!r.engagement_count && <span title="likes on the thread being replied to">🧵 ♥ {fmt(r.engagement_count)}</span>}
         {typeof r.urgency_score === 'number' && <span title="thread heat: recency × audience × engagement">🔥 {r.urgency_score.toFixed(1)}</span>}
         {r.post_uri && <a href={r.post_uri} target="_blank" rel="noopener" className="hover:text-primary-light">the thread ↗</a>}
         <span className={`ml-auto ${leftH < 6 ? 'text-warning' : ''}`}>fades in {Math.round(leftH)}h · posts next 14:00-UTC window</span>
