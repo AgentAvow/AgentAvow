@@ -278,7 +278,8 @@ function MarketingTab() {
   const campaigns = useQuery<Campaign[]>({ queryKey: ['admin-mkt-campaigns'], queryFn: async () => { try { return (await api.get('/admin/marketing/campaigns/proposed')).data } catch { return [] } } })
   const reply = useQuery<ReplyStats>({ queryKey: ['admin-mkt-reply'], queryFn: async () => (await api.get('/admin/engagement/stats')).data })
   // Queue 3: replies it's considering next (drafted). Feed: replies already sent.
-  const considering = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-considering'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'drafted', sort: 'recent', limit: 20 } })).data })
+  // Sorted by urgency (default) — the ones it'll try to post first.
+  const considering = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-considering'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'drafted', limit: 20 } })).data })
   const replySent = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-sent'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'posted', sort: 'recent', limit: 20 } })).data })
   const byDate = <T extends { created_at?: string; posted_at?: string | null; drafted_at?: string | null }>(a: T[]) => [...a].sort((x, y) => new Date(y.posted_at || y.drafted_at || y.created_at || 0).getTime() - new Date(x.posted_at || x.drafted_at || x.created_at || 0).getTime())
 
@@ -307,6 +308,8 @@ function MarketingTab() {
           </div>
         ) : null}
       </Section>
+
+      <RecentPostsCard posts={dash.data?.recent_posts || []} />
 
       {(() => {
         const posts = dash.data?.recent_posts || []
@@ -359,7 +362,7 @@ function MarketingTab() {
         ) : <p className="text-text-muted text-[13px]">No scheduled campaign posts. Generate a weekly plan above.</p>}
       </Section>
 
-      <Section title="Queue 3 · Reply-guy is considering" note="Drafted replies for X + Bluesky, newest first. Each fades out after 48h if not posted. Edit, or post it now.">
+      <Section title="Queue 3 · Reply-guy is considering" note="Drafted replies for X + Bluesky, most-urgent first (what it'll try next). Each fades out after 48h. Edit, or post it now.">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
           <Stat label="Posted today" value={fmt(reply.data?.posted_today)} />
           <Stat label="Active targets" value={fmt(reply.data?.active_targets)} />
@@ -387,12 +390,19 @@ function MarketingTab() {
         ) : <p className="text-text-muted text-[13px]">No replies sent yet.</p>}
       </Section>
 
-      <Section title="Recent posts" note="Your manual + weekly-campaign posts, newest first — click any to open, with engagement.">
-        {dash.data?.recent_posts?.length ? (
+    </>
+  )
+}
+
+function RecentPostsCard({ posts }: { posts: NonNullable<MktDash['recent_posts']> }) {
+  return (
+    <Section title="Recent posts" note="Your manual + weekly-campaign posts, newest first — click any to open, with engagement.">
+      {posts.length ? (
+        <>
           <div className="glass rounded-2xl p-4 overflow-x-auto">
             <table className="w-full text-[12.5px]">
               <thead><tr className="text-text-muted/70 text-left font-mono"><th className="py-1 pr-3">when</th><th className="py-1 pr-3">platform</th><th className="py-1 pr-3">post</th><th className="py-1 pr-2 text-right">♥</th><th className="py-1 pr-2 text-right">💬</th><th className="py-1 pr-2 text-right">🔁</th><th className="py-1 pr-2 text-right">👁</th><th className="py-1 text-right">cost</th></tr></thead>
-              <tbody>{[...dash.data.recent_posts].sort((a, b) => new Date(b.posted_at || 0).getTime() - new Date(a.posted_at || 0).getTime()).slice(0, 15).map((p) => (
+              <tbody>{[...posts].sort((a, b) => new Date(b.posted_at || 0).getTime() - new Date(a.posted_at || 0).getTime()).slice(0, 15).map((p) => (
                 <tr key={p.id} className="border-t border-border/40">
                   <td className="py-1.5 pr-3 text-text-muted whitespace-nowrap">{ago(p.posted_at)}</td>
                   <td className="py-1.5 pr-3 font-mono">{p.platform}</td>
@@ -406,9 +416,10 @@ function MarketingTab() {
               ))}</tbody>
             </table>
           </div>
-        ) : <p className="text-text-muted text-[13px]">No recent posts.</p>}
-      </Section>
-    </>
+          <div className="mt-2 text-[12.5px]"><Link to={rp('/rebrand/admin-posts')} className="text-primary-light hover:text-primary font-semibold">View all posts — sort & search →</Link></div>
+        </>
+      ) : <p className="text-text-muted text-[13px]">No recent posts.</p>}
+    </Section>
   )
 }
 
