@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'reac
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchMcpScan, fetchSkillScan, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchSkillScan, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark } from '../components/TrustMark'
@@ -791,8 +791,8 @@ function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; i
  * a runtime observation, kept SEPARATE from the signed score. */
 type BehavioralData = { ran: boolean; pending?: boolean; timed_out?: boolean; reason?: string; egress_hosts?: string[]; unexpected_egress?: string[]; fs_writes_sample?: string[]; error?: string | null; findings?: { category: string; name: string; severity: string; remediation?: string }[] }
 
-function BehavioralPanel({ owner, repo, surface, auto }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null }) {
-  const mut = useMutation({ mutationFn: () => fetchBehavioralScan(owner, repo) })
+function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string } }) {
+  const mut = useMutation({ mutationFn: () => pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
   const b: BehavioralData | null | undefined = mut.data?.behavioral ?? auto
   if (surface !== 'npm' && surface !== 'pypi') return null
   const pending = !!b?.pending
@@ -1309,6 +1309,9 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
           </div>
         </div>
       </Reveal>
+
+      {/* Behavioral deep scan — auto-runs for npm/PyPI packages */}
+      <BehavioralPanel owner={surface} repo={name} surface={surface} pkg={{ surface, name }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} />
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (

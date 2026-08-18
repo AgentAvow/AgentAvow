@@ -870,6 +870,7 @@ async def scan_package_endpoint(
     name: str,
     request: Request = None,
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    behavioral: bool = Query(False, description="Force a fresh behavioral sandbox run (npm/PyPI)"),
     version: str | None = Query(None, description="Exact version; default = latest"),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
@@ -901,11 +902,17 @@ async def scan_package_endpoint(
     cache_owner = surface
     cache_repo = f"{name}@{version}" if version else name
 
+    async def _with_behavioral(resp: PublicScanResponse) -> PublicScanResponse:
+        if surface in ("npm", "pypi"):
+            resp.behavioral = await _behavioral_block(
+                {"package_coordinate": {"surface": surface, "name": name}}, force=behavioral)
+        return resp
+
     if not force:
         cached = await _get_cached(cache_owner, cache_repo)
         if cached:
             jws = create_jws(canonicalize(_build_scan_payload(full, cached)))
-            return _package_response(full, cached, jws, cached=True)
+            return await _with_behavioral(_package_response(full, cached, jws, cached=True))
 
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
@@ -929,7 +936,7 @@ async def scan_package_endpoint(
     data = _scan_result_to_dict(result)
     await _set_cached(cache_owner, cache_repo, data)
     jws = create_jws(canonicalize(_build_scan_payload(full, data)))
-    return _package_response(full, data, jws, cached=False)
+    return await _with_behavioral(_package_response(full, data, jws, cached=False))
 
 
 @router.get(

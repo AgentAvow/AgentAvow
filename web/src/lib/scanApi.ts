@@ -42,6 +42,17 @@ export async function fetchBehavioralScan(
 
 /** Scan a PUBLISHED npm/PyPI package by coordinate (no GitHub repo). `name` may
  * be a scoped package (@scope/pkg) — the slash is preserved in the path. */
+export async function fetchPackageBehavioral(
+  surface: string,
+  name: string,
+): Promise<PublicScanResponse> {
+  const { data } = await publicApi.get<PublicScanResponse>(
+    `/public/scan/package/${surface}/${name}?behavioral=true`,
+    { timeout: 150_000 },
+  )
+  return data
+}
+
 export async function fetchPackageScan(
   surface: string,
   name: string,
