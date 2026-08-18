@@ -49,12 +49,18 @@ function lazyWithReload<T extends { default: React.ComponentType<unknown> }>(
 ) {
   return lazy(() =>
     factory().catch((err) => {
-      if (!sessionStorage.getItem(CHUNK_RELOAD_KEY)) {
+      // Reload once PER chunk-mismatch event, not once per session. A stale chunk
+      // after a deploy should always trigger a fresh reload; only a genuine loop
+      // (reload → fail again within the window) falls through to the ErrorBoundary.
+      // The old once-per-session guard dead-ended the 2nd mismatch across separate
+      // deploys (e.g. several deploys in a row → whole routes stopped loading).
+      const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || 0)
+      if (Date.now() - last > 20_000) {
         sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()))
         window.location.reload()
         return new Promise<T>(() => {}) // never resolves; the reload takes over
       }
-      throw err // already retried once — let the ErrorBoundary handle it
+      throw err // reloaded moments ago and still failing — let the ErrorBoundary handle it
     }),
   )
 }
