@@ -1,5 +1,8 @@
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+
+import api from '../../lib/api'
 import { rp } from '../basePath'
 import { useRotatingPlaceholder } from '../lib/hooks'
 
@@ -83,6 +86,21 @@ export default function RebrandBadge() {
   const scan = () => navigate(owner && name ? rp(`/rebrand/check/${owner}/${name}`) : rp('/rebrand/check'))
   const hint = useRotatingPlaceholder(REPO_HINTS)
 
+  // Certified detection — so a maintainer minting a Certified tool's badge sees the
+  // level-up (the badge itself already renders the earned treatment server-side).
+  const { data: certData } = useQuery({
+    queryKey: ['badge-cert', owner, name],
+    enabled: !!(owner && name.length >= 2),
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      try {
+        return (await api.get<{ certified?: { eligible?: boolean } }>(`/public/scan/${owner}/${name}`)).data
+      } catch { return null }
+    },
+  })
+  const isCertified = !!certData?.certified?.eligible
+
   const widgetSnippet = `<script src="${origin}/widget.js"\n        data-tool="${slug}"${theme === 'light' ? '\n        data-theme="light"' : ''}></script>`
   const copyWidget = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(widgetSnippet)
@@ -140,6 +158,16 @@ export default function RebrandBadge() {
             </div>
           </div>
         </div>
+
+        {isCertified && (
+          <div className="mt-4 rounded-xl p-4 flex items-center gap-3.5" style={{ background: 'linear-gradient(120deg, rgba(45,212,191,0.12), rgba(232,121,249,0.10))', border: '1px solid rgba(45,212,191,0.3)' }}>
+            <span className="font-mono text-[10.5px] font-extrabold tracking-[0.12em] px-2.5 py-1 rounded-full shrink-0" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ CERTIFIED</span>
+            <div className="min-w-0">
+              <div className="text-[14px] font-bold">Your badge just leveled up — {owner}/{name} is Certified.</div>
+              <div className="text-[12.5px] text-text-muted mt-0.5">It clears the full conjunctive gate, so your README badge renders the earned Certified treatment automatically — and drops back if it ever slips. <Link to={rp('/rebrand/certified')} className="text-primary-light hover:text-primary font-semibold">What that means →</Link></div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 flex items-center gap-3 flex-wrap">
           <span className="font-mono text-[11.5px] text-text-muted">{owner && name ? 'Live badge:' : 'Preview:'}</span>

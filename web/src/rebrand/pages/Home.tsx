@@ -353,6 +353,7 @@ export default function RebrandHome() {
             <Eyebrow>Stay safe over time</Eyebrow>
             <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">A tool is only safe until it <span className="gradient-text">changes</span>.</h2>
             <p className="mt-3 text-text-muted">Vetting once isn't enough — tools get updated, and a clean scan can quietly go bad. Two ways to never get caught by it.</p>
+            <p className="mt-2.5 text-[13px] text-text-muted/80">Every score page keeps a <strong className="text-text">public, signed timeline</strong> — score-over-time plus signed-definition drift, verifiable offline. <Link to={rp('/rebrand/check/modelcontextprotocol/servers')} className="text-primary-light hover:text-primary font-semibold">See a live timeline →</Link></p>
           </div>
           <div className="grid md:grid-cols-2 gap-4 mt-8">
             <div className="glass rounded-2xl p-7 flex flex-col">
