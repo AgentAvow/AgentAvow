@@ -235,7 +235,7 @@ function AppRoutes() {
           {/* Protected routes — require authentication */}
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/marketplace/create" element={<ProtectedRoute><CreateListing /></ProtectedRoute>} />
-          <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+          {!CUTOVER && <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />}
           <Route path="/messages" element={<ProtectedRoute><Messages /></ProtectedRoute>} />
           {!CUTOVER && <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />}
           <Route path="/agents" element={<ProtectedRoute><Agents /></ProtectedRoute>} />
