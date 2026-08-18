@@ -1775,7 +1775,7 @@ async def scan_badge(
             "npm", "pypi", "crates", "huggingface", "docker",
         ) else "github"
         _as, a_count, _au = await surface_adoption_summary(a_surface, owner, repo)
-        return _combined_badge_response(score, a_count)
+        return _combined_badge_response(score, a_count, certified=certified)
 
     # Build badge — numbers, not letters (dual-mark pivot 2026-08).
     # A Certified tool gets the distinct earned-tier treatment (the CertifiedMark
@@ -1949,26 +1949,42 @@ def _compact_int(n: int | None) -> str:
     return str(n)
 
 
-def _combined_badge_response(score: int | None, count: int | None) -> Response:
-    """Three-segment [AgentAvow | NN/100 | ★count] badge — trust + adoption in one.
+def _combined_badge_response(
+    score: int | None, count: int | None, certified: bool = False,
+) -> Response:
+    """Three-segment [AgentAvow | trust | ★count] badge — trust + adoption in one.
     The adoption box is neutral slate + teal (never a safety colour); adoption never
-    travels alone (dual-mark rule)."""
-    trust_label = f"{score}/100" if score is not None else "not scanned"
-    tcolor = _trust_score_color(int(score)) if score is not None else "#6b7280"
+    travels alone (dual-mark rule). A Certified tool's trust segment gets the earned
+    CertifiedMark gradient (teal→magenta) + "✓ Certified NN"."""
+    cert = certified and score is not None
+    if cert:
+        trust_label = f"✓ Certified {score}"
+        trust_fill = "url(#agcert)"
+        trust_text = "#06231f"
+    else:
+        trust_label = f"{score}/100" if score is not None else "not scanned"
+        trust_fill = _trust_score_color(int(score)) if score is not None else "#6b7280"
+        trust_text = "#fff"
     adopt_label = f"★ {_compact_int(count)}" if count else "New"
     bw = 80
     tw = len(trust_label) * 7 + 12
     aw = len(adopt_label) * 7 + 14
     total = bw + tw + aw
+    defs = (
+        '<defs><linearGradient id="agcert" x1="0" y1="0" x2="1" y2="0">'
+        '<stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#e879f9"/>'
+        '</linearGradient></defs>'
+    ) if cert else ""
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total}" height="20">
+  {defs}
   <rect width="{bw}" height="20" fill="#38445f" rx="3"/>
-  <rect x="{bw}" width="{tw}" height="20" fill="{tcolor}"/>
+  <rect x="{bw}" width="{tw}" height="20" fill="{trust_fill}"/>
   <rect x="{bw + tw}" width="{aw}" height="20" fill="#233047" rx="3"/>
   <rect x="{bw + tw}" width="4" height="20" fill="#233047"/>
   <text x="{bw // 2}" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
         text-anchor="middle">{settings.badge_brand}</text>
-  <text x="{bw + tw // 2}" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
-        font-weight="bold" text-anchor="middle">{trust_label}</text>
+  <text x="{bw + tw // 2}" y="14" fill="{trust_text}" font-family="Verdana,sans-serif"
+        font-size="11" font-weight="bold" text-anchor="middle">{trust_label}</text>
   <text x="{bw + tw + aw // 2}" y="14" fill="#7fe9d9" font-family="Verdana,sans-serif"
         font-size="11" text-anchor="middle">{adopt_label}</text>
 </svg>'''
