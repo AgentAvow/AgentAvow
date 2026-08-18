@@ -2,11 +2,12 @@ import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { rp } from './basePath'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AtmosphericBackground } from '../components/AtmosphericBackground'
 import { useAuth } from '../hooks/useAuth'
 import api from '../lib/api'
 import { trackEvent } from '../lib/analytics'
+import { NotifRow, isRelevant, type Notif } from './components/NotificationBits'
 
 /**
  * Signed-in account controls: a notifications bell (unread count from the real
@@ -16,8 +17,11 @@ import { trackEvent } from '../lib/analytics'
 function AccountMenu() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const [open, setOpen] = useState(false)
+  const [notifOpen, setNotifOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const notifRef = useRef<HTMLDivElement>(null)
 
   // Count only watch-alert unread — the global unread-count includes the user's
   // old social-era notifications (that's the "large number" bug), which the
@@ -32,12 +36,28 @@ function AccountMenu() {
     refetchInterval: 60_000,
   })
 
+  // The dropdown list (tool-safety notifications only) — fetched when opened.
+  const { data: notifList } = useQuery({
+    queryKey: ['rebrand-notif-list'],
+    queryFn: async () => (await api.get<{ notifications: Notif[] }>('/notifications', { params: { limit: 30 } })).data,
+    enabled: !!user && notifOpen,
+  })
+  const invalidateNotifs = () => ['rebrand-notif-list', 'rebrand-unread-watch', 'rebrand-all-notifs', 'rebrand-notifs']
+    .forEach((k) => qc.invalidateQueries({ queryKey: [k] }))
+  const markRead = useMutation({ mutationFn: (id: string) => api.post(`/notifications/${id}/read`), onSuccess: invalidateNotifs })
+  const removeNotif = useMutation({ mutationFn: (id: string) => api.delete(`/notifications/${id}`), onSuccess: invalidateNotifs })
+  const recent = (notifList?.notifications ?? []).filter(isRelevant)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5)
+
   useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    if (!open && !notifOpen) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false)
+    }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
+  }, [open, notifOpen])
 
   if (!user) {
     return <Link to={rp("/rebrand/login")} className="text-[14px] text-text-muted hover:text-text transition-colors">Sign in</Link>
@@ -48,10 +68,25 @@ function AccountMenu() {
 
   return (
     <div className="flex items-center gap-3" ref={ref}>
-      <Link to={rp("/rebrand/notifications")} className="relative p-1 text-text-muted hover:text-text transition-colors" aria-label={`Notifications${count ? `, ${count} unread` : ''}`}>
-        <svg viewBox="0 0 24 24" fill="none" className="w-[19px] h-[19px]"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><path d="M13.7 21a2 2 0 0 1-3.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
-        {count > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-accent text-white text-[10px] font-bold tabular-nums">{count > 9 ? '9+' : count}</span>}
-      </Link>
+      <div className="relative" ref={notifRef}>
+        <button onClick={() => setNotifOpen((o) => !o)} className="relative p-1 text-text-muted hover:text-text transition-colors" aria-label={`Notifications${count ? `, ${count} unread` : ''}`}>
+          <svg viewBox="0 0 24 24" fill="none" className="w-[19px] h-[19px]"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><path d="M13.7 21a2 2 0 0 1-3.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+          {count > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-accent text-white text-[10px] font-bold tabular-nums">{count > 9 ? '9+' : count}</span>}
+        </button>
+        {notifOpen && (
+          <div className="absolute right-0 mt-2 w-[340px] max-w-[calc(100vw-2rem)] glass rounded-xl border border-border/60 shadow-xl z-30 overflow-hidden">
+            <div className="px-3.5 py-2.5 border-b border-border/60 flex items-center justify-between">
+              <span className="text-[13px] font-semibold">Notifications</span>
+              <Link to={rp('/rebrand/notifications')} onClick={() => setNotifOpen(false)} className="text-[12px] font-semibold text-primary-light hover:text-primary">See all →</Link>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto p-2 flex flex-col gap-1.5">
+              {recent.length
+                ? recent.map((n) => <NotifRow key={n.id} n={n} compact onRead={markRead.mutate} onDelete={removeNotif.mutate} onNavigate={() => setNotifOpen(false)} />)
+                : <p className="text-text-muted text-[13px] py-6 text-center">You&apos;re all caught up.</p>}
+            </div>
+          </div>
+        )}
+      </div>
       <div className="relative">
         <button onClick={() => setOpen(!open)} className="flex items-center gap-2 group" aria-label="Account menu">
           {user.avatar_url
