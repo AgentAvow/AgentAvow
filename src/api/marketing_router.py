@@ -779,6 +779,22 @@ async def slop_proposals_ingest(
     return {"added": added, "received": len(items)}
 
 
+@router.post("/check-slop")
+async def check_slop(
+    body: dict,
+    current_entity: Entity = Depends(get_current_entity),
+) -> dict:
+    """Run the no-slop detector on arbitrary copy (for the 'Check my copy' button on
+    hand-written drafts). Returns pass/fail + reasons + a fix hint."""
+    require_admin(current_entity)
+    from src.marketing.content.ai_tells import check as check_ai_tells
+    content = (body or {}).get("content", "") or ""
+    platform = (body or {}).get("platform", "linkedin") or "linkedin"
+    r = check_ai_tells(content, platform=platform, strict=True)
+    return {"passed": r.passed, "severity": r.severity, "reasons": r.reasons,
+            "hint": r.hint()}
+
+
 @router.get("/slop-proposals")
 async def slop_proposals(
     current_entity: Entity = Depends(get_current_entity),

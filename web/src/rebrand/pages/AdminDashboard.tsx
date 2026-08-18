@@ -242,6 +242,9 @@ function DraftCard({ d, onDone }: { d: Draft; onDone: () => void }) {
     mutationFn: (body: { action: string; content?: string; posted_url?: string }) => api.post(`/admin/marketing/drafts/${d.id}`, body),
     onSuccess: onDone,
   })
+  const slopCheck = useMutation<{ passed: boolean; reasons: string[]; hint: string }>({
+    mutationFn: async () => (await api.post('/admin/marketing/check-slop', { content: text, platform: d.platform })).data,
+  })
   return (
     <div className="glass rounded-xl p-4">
       <div className="flex items-center gap-2 text-[11.5px] font-mono text-text-muted mb-2">
@@ -258,6 +261,7 @@ function DraftCard({ d, onDone }: { d: Draft; onDone: () => void }) {
         {editing ? (
           <>
             <button onClick={() => act.mutate({ action: 'edit_approve', content: text })} disabled={act.isPending} className="px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">Save &amp; {manual ? 'keep' : 'post'}</button>
+            <button onClick={() => slopCheck.mutate()} disabled={slopCheck.isPending} className="px-3 py-1.5 rounded-lg border border-primary/50 text-primary-light disabled:opacity-60">{slopCheck.isPending ? 'Checking…' : 'Check for slop'}</button>
             <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded-lg border border-border text-text-muted">Cancel</button>
           </>
         ) : manual ? (
@@ -276,6 +280,11 @@ function DraftCard({ d, onDone }: { d: Draft; onDone: () => void }) {
           </>
         )}
       </div>
+      {slopCheck.data && (
+        slopCheck.data.passed
+          ? <p className="mt-2 text-[12.5px] text-success">✓ No-slop check passed — reads clean.</p>
+          : <p className="mt-2 text-[12.5px] text-warning">⚠ Slop detected: {slopCheck.data.hint || slopCheck.data.reasons.join(', ')}</p>
+      )}
       {act.isError && <p className="mt-2 text-[12px] text-danger">Action failed — try again.</p>}
     </div>
   )

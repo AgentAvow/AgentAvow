@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
@@ -190,10 +191,15 @@ async def _fetch_bluesky_posts(handle: str, since: datetime) -> list | None:
             created_str = record.get("createdAt", "")
             if not created_str:
                 continue
-            # Parse ISO timestamp
-            created = datetime.fromisoformat(
-                created_str.replace("Z", "+00:00"),
-            )
+            # Parse ISO timestamp. Bluesky can return NANOSECOND precision (e.g.
+            # …43.791082215+00:00 — 9 fractional digits), which datetime.fromisoformat
+            # on py3.9 rejects. Truncate fractional seconds to 6 digits; skip on any
+            # remaining parse error rather than failing the whole target.
+            iso = re.sub(r"(\.\d{6})\d+", r"\1", created_str.replace("Z", "+00:00"))
+            try:
+                created = datetime.fromisoformat(iso)
+            except ValueError:
+                continue
             if created <= since:
                 continue
             posts.append({

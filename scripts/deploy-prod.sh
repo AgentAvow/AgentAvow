@@ -145,6 +145,12 @@ fi
 
 # --- Step 4: Build frontend ---
 if $FRONTEND; then
+  step "Linting website copy for AI-slop (warn-only)"
+  if ! $DRY_RUN; then
+    remote "cd ~/${PROJECT_DIR} && python3 scripts/lint_website_copy.py 2>&1 || true" | while IFS= read -r line; do
+      echo "    $line"
+    done
+  fi
   step "Building frontend (npm ci + npm run build)"
   if $DRY_RUN; then
     echo "    Would run: cd ~/${PROJECT_DIR}/web && npm ci && npm run build"
