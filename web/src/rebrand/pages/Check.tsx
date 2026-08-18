@@ -789,10 +789,13 @@ function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; i
  * and report what it actually did (network egress, filesystem writes). Only shown
  * for npm/PyPI coordinates (the surfaces the sandbox can exercise). The result is
  * a runtime observation, kept SEPARATE from the signed score. */
-function BehavioralPanel({ owner, repo, surface }: { owner: string; repo: string; surface?: string }) {
+type BehavioralData = { ran: boolean; pending?: boolean; timed_out?: boolean; reason?: string; egress_hosts?: string[]; unexpected_egress?: string[]; fs_writes_sample?: string[]; error?: string | null; findings?: { category: string; name: string; severity: string; remediation?: string }[] }
+
+function BehavioralPanel({ owner, repo, surface, auto }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null }) {
   const mut = useMutation({ mutationFn: () => fetchBehavioralScan(owner, repo) })
-  const b = mut.data?.behavioral
+  const b: BehavioralData | null | undefined = mut.data?.behavioral ?? auto
   if (surface !== 'npm' && surface !== 'pypi') return null
+  const pending = !!b?.pending
   const undeclared = b?.unexpected_egress ?? []
   return (
     <Reveal>
@@ -807,18 +810,19 @@ function BehavioralPanel({ owner, repo, surface }: { owner: string; repo: string
           its declared hosts is flagged. Takes ~45s and never changes the signed score.
         </p>
 
-        {!b && (
-          <button
-            onClick={() => mut.mutate()}
-            disabled={mut.isPending}
-            className="mt-3 font-semibold text-[13.5px] px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-70"
-          >
-            {mut.isPending ? 'Running in the sandbox… (~45s)' : 'Run behavioral analysis'}
-          </button>
-        )}
+        <button
+          onClick={() => mut.mutate()}
+          disabled={mut.isPending}
+          className="mt-3 font-semibold text-[13.5px] px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-70"
+        >
+          {mut.isPending ? 'Running in the sandbox… (~45s)' : (b && b.ran ? 'Re-run behavioral analysis' : 'Run behavioral analysis')}
+        </button>
         {mut.isError && <p className="mt-3 text-[13px] text-danger">Couldn&apos;t run the behavioral scan — please try again shortly.</p>}
 
-        {b && !b.ran && (
+        {pending && !mut.isPending && (
+          <p className="mt-3 text-[13px] text-text-muted">Behavioral analysis is running in the background — reload in about a minute, or hit the button to run it now.</p>
+        )}
+        {b && !b.ran && !pending && (
           <p className="mt-3 text-[13px] text-text-muted">Behavioral scan didn&apos;t run: {b.reason || b.error || 'no package to exercise in the sandbox'}.</p>
         )}
         {b && b.ran && (
@@ -1569,8 +1573,8 @@ function Result({ owner, repo, privateResult }: {
       {/* Declared scope — the tool's own .agentavow.yml, if present */}
       <DeclaredScopePanel scope={(scan as { declared_scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string } }).declared_scope} />
 
-      {/* Behavioral deep scan — runs the package in the sandbox (npm/PyPI only) */}
-      {!isPrivate && <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} />}
+      {/* Behavioral deep scan — auto-runs for npm/PyPI; re-run on demand */}
+      {!isPrivate && <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} />}
 
       {/* Adoption — the real 5-axis metric, distinct from safety (public repos only) */}
       {!isPrivate && <AdoptionPanel owner={owner} repo={repo} />}

@@ -357,21 +357,24 @@ def _tool_description(result) -> str:
     return "A source repository"
 
 
-async def _behavioral_block(data: dict) -> dict | None:
-    """Run the behavioral sandbox tier for a scan's npm/pypi coordinate, if enabled.
+_BEHAVIORAL_CACHE_TTL = 24 * 3600  # a package's runtime behavior rarely changes intra-day
 
-    Returns a block for the response, kept SEPARATE from the signed score (a runtime
-    observation is not offline-recomputable, so it must never enter trust_score or the
-    JWS). None if the feature flag is off; a ``{"ran": False, "reason": …}`` block if
-    there's no package to exercise or the tier errors (fail-open)."""
-    from src.config import settings
-    if not getattr(settings, "scanner_behavioral_enabled", False):
+
+def _behavioral_cache_key(surface: str, name: str) -> str:
+    return f"behavioral:{surface}:{str(name).lower()}"
+
+
+async def _get_cached_behavioral(surface: str, name: str) -> dict | None:
+    try:
+        from src.redis_client import get_redis
+        raw = await get_redis().get(_behavioral_cache_key(surface, name))
+        return json.loads(raw) if raw else None
+    except Exception:
         return None
-    pkg = data.get("package_coordinate") or {}
-    surface = (pkg.get("surface") or "").lower()
-    name = pkg.get("name")
-    if surface not in ("npm", "pypi") or not name:
-        return {"ran": False, "reason": "no npm/pypi package mapped to exercise in the sandbox"}
+
+
+async def _run_and_cache_behavioral(surface: str, name: str) -> dict | None:
+    """Run the sandbox tier once and cache the result (24h). Returns the block."""
     from src.scanner.behavioral.runner import behavioral_findings, run_behavioral
     try:
         res = await run_behavioral(surface, str(name))
@@ -384,7 +387,40 @@ async def _behavioral_block(data: dict) -> dict | None:
          "remediation": f.remediation}
         for f in behavioral_findings(res)
     ]
+    try:
+        from src.redis_client import get_redis
+        await get_redis().set(
+            _behavioral_cache_key(surface, name), json.dumps(block), ex=_BEHAVIORAL_CACHE_TTL,
+        )
+    except Exception:
+        pass
     return block
+
+
+async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
+    """Behavioral tier for a scan's npm/pypi coordinate, kept SEPARATE from the signed
+    score (a runtime observation isn't offline-recomputable).
+
+    AUTOMATIC + non-blocking: returns the cached result if present; if not, kicks off a
+    background run (so the scorecard fills in on the next load) and returns a ``pending``
+    marker. ``force=True`` (the manual "re-run" button) runs a fresh one inline."""
+    from src.config import settings
+    if not getattr(settings, "scanner_behavioral_enabled", False):
+        return None
+    pkg = data.get("package_coordinate") or {}
+    surface = (pkg.get("surface") or "").lower()
+    name = pkg.get("name")
+    if surface not in ("npm", "pypi") or not name:
+        return {"ran": False, "reason": "no npm/pypi package to exercise"} if force else None
+    if force:
+        return await _run_and_cache_behavioral(surface, str(name)) or {
+            "ran": False, "reason": "behavioral tier error"}
+    cached = await _get_cached_behavioral(surface, str(name))
+    if cached:
+        return cached
+    # Not cached — run it in the background so it's ready next time, return pending now.
+    asyncio.create_task(_run_and_cache_behavioral(surface, str(name)))
+    return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
 
 
 async def _track_checker(request) -> None:
@@ -1362,8 +1398,9 @@ async def public_scan(
         full_name, data, jws, cached=False,
         entity_trust=entity_trust, trust_envelope=trust_envelope, tool_drift=drift,
     )
-    if behavioral:
-        resp.behavioral = await _behavioral_block(data)
+    # Behavioral runs AUTOMATICALLY for npm/pypi-mapped repos (cached/background),
+    # enriching the scorecard without a click. ?behavioral=true forces a fresh run.
+    resp.behavioral = await _behavioral_block(data, force=behavioral)
     return resp
 
 

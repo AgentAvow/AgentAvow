@@ -356,6 +356,16 @@ async def generate_proactive(
     # the competitive landscape and transparency stance.
     global_ctx = _GLOBAL_KNOWLEDGE if topic.key != "operator_recruitment" else ""
 
+    # Self-learning loop: fold in what's actually earned engagement lately + phrases
+    # the bot has overused (so it varies them). Best-effort — never blocks generation.
+    try:
+        from src.database import async_session
+        from src.marketing.content.performance import get_learning_context
+        async with async_session() as _db:
+            global_ctx = global_ctx + await get_learning_context(_db, platform)
+    except Exception:
+        logger.debug("learning context unavailable", exc_info=True)
+
     if platform in ("devto", "hashnode"):
         prompt = _build_blog_prompt(
             platform=platform,
