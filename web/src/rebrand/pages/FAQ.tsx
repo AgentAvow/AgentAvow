@@ -41,14 +41,14 @@ const SECTIONS: Section[] = [
     items: [
       { q: 'How do I add a trust badge to my README?', a: 'Check your repo and copy one line of Markdown. The badge regenerates on every view (never stale), is signed, and links back to a full, verifiable report — no account needed to mint one.' },
       { q: 'Is there an API, SDK, or GitHub Action?', a: 'Yes — a REST API, a Python SDK/CLI, and a GitHub Action that can gate pull requests on a minimum score. See the developer page and docs.' },
-      { q: 'Can I scan a private repo?', a: 'Yes. Claim the repository to unlock private scans (verify ownership with a GitHub topic — no token stored), or scan with a token you supply that\'s used transiently and never persisted.' },
+      { q: 'Can I scan a private repo?', a: 'Yes. Claim the repository to get private scans (verify ownership with a GitHub topic — no token stored), or scan with a token you supply that\'s used transiently and never persisted.' },
     ],
   },
   {
     title: 'Account & watching',
     items: [
       { q: 'What does "watching" a tool do?', a: 'We re-scan the tools you watch and alert you — by email, in-app, or webhook — the moment a score drops or a signed definition changes. That\'s the rug-pull you\'d otherwise miss.' },
-      { q: 'How do I claim a tool I own?', a: 'Add a GitHub topic we give you to the repo to prove ownership. A verified claim unlocks private scans, continuous re-scans with change alerts, and own how the tool appears in the catalog and search.' },
+      { q: 'How do I claim a tool I own?', a: 'Add a GitHub topic we give you to the repo to prove ownership. A verified claim gives you private scans, continuous re-scans with change alerts, and control over how the tool appears in the catalog and search.' },
     ],
   },
 ]

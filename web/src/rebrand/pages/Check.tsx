@@ -817,7 +817,7 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
         >
           {mut.isPending ? 'Running in the sandbox… (~45s)' : (b && b.ran ? 'Re-run behavioral analysis' : 'Run behavioral analysis')}
         </button>
-        {mut.isError && <p className="mt-3 text-[13px] text-danger">Couldn&apos;t run the behavioral scan — please try again shortly.</p>}
+        {mut.isError && <p className="mt-3 text-[13px] text-danger">Couldn&apos;t run the behavioral scan — please try again in a moment.</p>}
 
         {pending && !mut.isPending && (
           <p className="mt-3 text-[13px] text-text-muted">Behavioral analysis is running in the background — reload in about a minute, or hit the button to run it now.</p>
@@ -1431,7 +1431,7 @@ function Result({ owner, repo, privateResult }: {
       <div className="max-w-[620px] mx-auto px-6 py-24 text-center">
         <div className="glass rounded-2xl p-8">
           <h2 className="text-xl font-semibold">Couldn't scan {owner}/{repo}</h2>
-          <p className="mt-2 text-text-muted text-[14px]">The scanner didn't return a result. <strong className="text-text">If this is a private repo</strong>, its report isn't public — re-scan it privately with a read-only token to see it. Otherwise the scan service may be busy; try again shortly.</p>
+          <p className="mt-2 text-text-muted text-[14px]">The scanner didn't return a result. <strong className="text-text">If this is a private repo</strong>, its report isn't public — re-scan it privately with a read-only token to see it. Otherwise the scan service may be busy; try again in a moment.</p>
           <div className="mt-5 flex items-center justify-center gap-4 flex-wrap">
             <Link to={rp(`/rebrand/tools?owner=${owner}&repo=${repo}`)} className="text-[13.5px] font-semibold text-primary-light hover:text-primary">Scan it privately →</Link>
             <Link to={rp("/rebrand/browse")} className="text-[13.5px] font-semibold text-text-muted hover:text-text">Browse scored tools →</Link>
