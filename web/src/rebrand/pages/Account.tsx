@@ -235,7 +235,7 @@ export default function RebrandAccount() {
               <Link to={rp('/rebrand/notifications')} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">See all &amp; manage →</Link>
             </div>
             <div className="flex flex-col gap-2">
-              {alerts.slice(0, 5).map((n) => (
+              {alerts.slice(0, 3).map((n) => (
                 <NotifRow key={n.id} n={n} onRead={markReadNotif.mutate} onDelete={deleteNotif.mutate} />
               ))}
             </div>

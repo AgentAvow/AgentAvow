@@ -47,7 +47,7 @@ function AccountMenu() {
   const markRead = useMutation({ mutationFn: (id: string) => api.post(`/notifications/${id}/read`), onSuccess: invalidateNotifs })
   const removeNotif = useMutation({ mutationFn: (id: string) => api.delete(`/notifications/${id}`), onSuccess: invalidateNotifs })
   const recent = (notifList?.notifications ?? []).filter(isRelevant)
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 3)
 
   useEffect(() => {
     if (!open && !notifOpen) return
