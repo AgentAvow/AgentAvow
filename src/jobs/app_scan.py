@@ -279,7 +279,7 @@ async def _maybe_notify(
     ref = full_name
     try:
         if dropped or drift:
-            reason = "grade dropped" if dropped else "signed definition changed"
+            reason = "score dropped" if dropped else "signed definition changed"
             title = f"{owner}/{repo} — {reason}"
             body = (
                 f"A private repo you connected changed: {reason}"
@@ -291,7 +291,7 @@ async def _maybe_notify(
             )
             return 1
         if improved:
-            title = f"{owner}/{repo} — grade improved 🎉"
+            title = f"{owner}/{repo} — score improved 🎉"
             body = (
                 f"Good news: a private repo you connected improved "
                 f"({prev_score} → {new_score}/100). See what changed."

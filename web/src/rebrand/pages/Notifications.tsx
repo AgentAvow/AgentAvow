@@ -40,7 +40,7 @@ export default function Notifications() {
   }, [relevant, filter])
   const unreadIds = relevant.filter((n) => !n.is_read).map((n) => n.id)
 
-  if (isLoading) return <div className="max-w-[720px] mx-auto px-6 py-24 text-center text-text-muted">Loading…</div>
+  if (isLoading) return <div className="max-w-[860px] mx-auto px-6 py-24 text-center text-text-muted">Loading…</div>
   if (!user) return (
     <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
       <h1 className="text-2xl font-extrabold tracking-tight">Sign in to see your notifications</h1>
@@ -50,7 +50,7 @@ export default function Notifications() {
 
   const tabs: [Filter, string][] = [['all', 'All'], ['unread', 'Unread'], ['watch_alert', 'Alerts'], ['watch_good_news', 'Good news']]
   return (
-    <div className="max-w-[720px] mx-auto px-6 py-14">
+    <div className="max-w-[860px] mx-auto px-6 py-14">
       <Reveal>
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>

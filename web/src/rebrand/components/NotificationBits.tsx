@@ -25,6 +25,17 @@ export function parseScores(body: string): { from: number; to: number } | null {
   return { from, to }
 }
 
+/** Drop the "(94 -> 63)" parenthetical from the sentence when we also render the
+ * score chip — so the numbers show once, in the chip, and the sentence keeps the
+ * context ("…score dropped. Review it before your agents keep using it."). */
+export function stripScores(body: string): string {
+  return body
+    .replace(/\s*\(\s*\d{1,3}\s*(?:->|→|to)\s*\d{1,3}(?:\s*\/\s*100)?\s*\)/g, '')
+    .replace(/\s+([.,])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 export const ago = (iso: string) => {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
   if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m`
@@ -61,9 +72,12 @@ export function NotifRow({ n, compact, onRead, onDelete, onNavigate }: {
         <span className="text-[13.5px] font-semibold min-w-0 truncate">{n.title}</span>
         <span className="text-[11px] text-text-muted/70 ml-auto shrink-0">{ago(n.created_at)} ago</span>
       </div>
-      {scores
-        ? <div className="mt-1.5"><ScoreChange from={scores.from} to={scores.to} /></div>
-        : <div className={`text-[12.5px] text-text-muted mt-1 ${compact ? 'line-clamp-2' : ''}`}>{n.body}</div>}
+      <div className="mt-1.5 flex flex-col gap-1.5">
+        {scores && <ScoreChange from={scores.from} to={scores.to} />}
+        <p className={`text-[12.5px] leading-snug text-text-muted ${compact ? 'line-clamp-2' : ''}`}>
+          {scores ? stripScores(n.body) : n.body}
+        </p>
+      </div>
       <div className="mt-2 flex gap-3 text-[12px] font-semibold">
         {n.reference_id && <Link to={rp(`/rebrand/check/${n.reference_id}`)} onClick={onNavigate} className="text-primary-light hover:text-primary">Re-check →</Link>}
         {!n.is_read && <button onClick={() => onRead(n.id)} className="text-text-muted hover:text-text">Mark read</button>}

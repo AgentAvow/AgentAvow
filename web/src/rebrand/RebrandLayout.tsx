@@ -74,7 +74,7 @@ function AccountMenu() {
           {count > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-accent text-white text-[10px] font-bold tabular-nums">{count > 9 ? '9+' : count}</span>}
         </button>
         {notifOpen && (
-          <div className="absolute right-0 mt-2 w-[340px] max-w-[calc(100vw-2rem)] glass rounded-xl border border-border/60 shadow-xl z-30 overflow-hidden">
+          <div className="absolute right-0 mt-2 w-[360px] max-w-[calc(100vw-2.5rem)] glass rounded-xl border border-border/60 shadow-xl z-30 overflow-hidden">
             <div className="px-3.5 py-2.5 border-b border-border/60 flex items-center justify-between">
               <span className="text-[13px] font-semibold">Notifications</span>
               <Link to={rp('/rebrand/notifications')} onClick={() => setNotifOpen(false)} className="text-[12px] font-semibold text-primary-light hover:text-primary">See all →</Link>

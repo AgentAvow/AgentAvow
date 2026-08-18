@@ -922,7 +922,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 and new_score > w.last_score + 5
             )
             if dropped or drift:
-                reason = "grade dropped" if dropped else "signed definition changed"
+                reason = "score dropped" if dropped else "signed definition changed"
                 title = f"{w.owner}/{w.repo} — {reason}"
                 body = (
                     f"A tool you're watching changed: {reason}"
@@ -979,7 +979,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             elif improved:
                 # Good news — a watched tool got safer. A lighter, positive nudge
                 # (also a reason to bring the watcher back to the site).
-                title = f"{w.owner}/{w.repo} — grade improved 🎉"
+                title = f"{w.owner}/{w.repo} — score improved 🎉"
                 body = (
                     f"Good news: a tool you're watching improved "
                     f"({w.last_score} → {new_score}/100). See what changed."

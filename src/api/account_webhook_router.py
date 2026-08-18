@@ -92,7 +92,7 @@ async def test_webhook(
         "repo": "example",
         "old_score": 92,
         "new_score": 74,
-        "reason": "grade dropped",
+        "reason": "score dropped",
     }
     status = None
     try:

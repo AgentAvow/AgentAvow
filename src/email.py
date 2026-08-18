@@ -79,15 +79,15 @@ def render_watch_notification(
         )
         cta_label, subject = "Review the change", f"AgentAvow alert · {repo} definition changed"
     else:  # drop
-        accent, tag = "#ef4444", "Grade dropped"
+        accent, tag = "#ef4444", "Score dropped"
         headline = f"{repo} got riskier"
         score_line = f"{old_score} → {new_score} · down {abs(delta)} pts"
         message = (
-            f"A tool you're watching dropped a grade. <b style=\"color:#f1f5f9;\">{full}</b> "
+            f"A tool you're watching dropped in score. <b style=\"color:#f1f5f9;\">{full}</b> "
             f"fell from {old_score} to {new_score}/100 — review it before your agents keep "
             f"connecting to it."
         )
-        cta_label, subject = "See the report", f"AgentAvow alert · {repo} grade dropped"
+        cta_label, subject = "See the report", f"AgentAvow alert · {repo} score dropped"
 
     html = _load_template(
         "watch_notification.html",

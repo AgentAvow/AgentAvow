@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
 import { TrustPill } from '../components/TrustMark'
+import { NotifRow } from '../components/NotificationBits'
 import { Reveal, RevealStagger } from '../components/motion'
 
 /**
@@ -204,6 +205,10 @@ export default function RebrandAccount() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['rebrand-watches'] }),
   })
 
+  const invalidateNotifs = () => qc.invalidateQueries({ queryKey: ['rebrand-notifs'] })
+  const markReadNotif = useMutation({ mutationFn: (id: string) => api.post(`/notifications/${id}/read`), onSuccess: invalidateNotifs })
+  const deleteNotif = useMutation({ mutationFn: (id: string) => api.delete(`/notifications/${id}`), onSuccess: invalidateNotifs })
+
   if (!user) return null
 
   const rows = watches ?? []
@@ -216,7 +221,7 @@ export default function RebrandAccount() {
           <div className="max-w-[60ch]">
             <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">My watches</span>
             <h1 className="mt-1 text-2xl md:text-3xl font-extrabold tracking-tight">Watch tools for changes</h1>
-            <p className="mt-2 text-text-muted text-[14px]">We re-scan the tools you watch and tell you when something changes — a grade <span className="text-text">drops</span>, a <span className="text-text">signed definition changes</span>, or a tool you flagged gets <span className="text-text">safer</span> — so you always know where the tools your agents rely on stand.</p>
+            <p className="mt-2 text-text-muted text-[14px]">We re-scan the tools you watch and tell you when something changes — a <span className="text-text">score drops</span>, a <span className="text-text">signed definition changes</span>, or a tool you flagged gets <span className="text-text">safer</span> — so you always know where the tools your agents rely on stand.</p>
           </div>
         </div>
       </Reveal>
@@ -231,11 +236,7 @@ export default function RebrandAccount() {
             </div>
             <div className="flex flex-col gap-2">
               {alerts.slice(0, 5).map((n) => (
-                <div key={n.id} className={`glass rounded-xl px-4 py-3 border-l-4 ${n.is_read ? 'border-border' : 'border-warning'}`}>
-                  <div className="text-[14px] font-semibold">{n.title}</div>
-                  <div className="text-[13px] text-text-muted mt-0.5">{n.body}</div>
-                  {n.reference_id && <Link to={rp(`/rebrand/check/${n.reference_id}`)} className="inline-block mt-1.5 text-[12.5px] text-primary-light hover:text-primary">Re-check →</Link>}
-                </div>
+                <NotifRow key={n.id} n={n} onRead={markReadNotif.mutate} onDelete={deleteNotif.mutate} />
               ))}
             </div>
           </div>
