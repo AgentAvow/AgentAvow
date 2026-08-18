@@ -260,6 +260,44 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
   )
 }
 
+/** The recompute-on-release drift feed, surfaced. The score chart above shows the
+ * NUMBER over time; this shows whether the tool's SIGNED DEFINITION drifted (a
+ * rug-pull can change the tools without moving the score) — from the signed,
+ * offline-recomputable /drift feed. Self-hides until there's recorded history. */
+function DefinitionDrift({ owner, repo }: { owner: string; repo: string }) {
+  const { data } = useQuery({
+    queryKey: ['drift', owner, repo],
+    retry: false,
+    queryFn: async () => {
+      try {
+        return (await publicApi.get<{
+          summary: { points: number; drift_events: number }
+          history: { manifest_drift: boolean }[]
+        }>(`/public/drift/${owner}/${repo}`)).data
+      } catch { return null }
+    },
+  })
+  if (!data) return null
+  const driftCount = data.history.filter((h) => h.manifest_drift).length
+  const feedUrl = `/api/v1/public/drift/${owner}/${repo}`
+  return (
+    <Reveal>
+      <div className="mt-3 glass rounded-2xl p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Definition integrity</h3>
+          <a href={feedUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">signed feed ↗</a>
+        </div>
+        <p className="text-[13px] mt-1.5">
+          {driftCount > 0
+            ? <><span className="text-warning font-semibold">Signed definition changed {driftCount}×</span> — the tool&apos;s manifest drifted across a release, even where the score held. That&apos;s the rug-pull signal.</>
+            : <><span className="text-success font-semibold">Signed definition stable</span> — no tool-manifest drift across {data.summary.points} recorded scan{data.summary.points === 1 ? '' : 's'}.</>}
+        </p>
+        <p className="text-text-muted text-[12px] mt-1">A signed, offline-recomputable timeline — verify it against our JWKS instead of taking our word.</p>
+      </div>
+    </Reveal>
+  )
+}
+
 /** Share row — copy link + branded X / Bluesky icons. */
 function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; score: number; grade: string }) {
   const [copied, setCopied] = useState(false)
@@ -1585,6 +1623,9 @@ function Result({ owner, repo, privateResult }: {
 
       {/* score history timeline (living record) */}
       <ScoreHistory history={adoptionData?.history ?? []} current={scan.trust_score} />
+
+      {/* recompute-on-release drift feed — signed-definition integrity over time */}
+      {!isPrivate && <DefinitionDrift owner={owner} repo={repo} />}
 
       {/* findings summary */}
       <RevealStagger className="grid grid-cols-3 gap-3 mt-4" stagger={0.06}>
