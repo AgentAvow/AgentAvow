@@ -88,6 +88,17 @@ BLOCKLIST_WORDS: frozenset[str] = frozenset({
 })
 
 # Multi-word phrases. Lowercased substring match against the lowercased text.
+# Learned/approved slop phrases (from edit-learning + LLM proposals, admin-approved).
+# Populated at startup + on approval by slop_learning.refresh_dynamic_blocklist().
+_DYNAMIC_BLOCKLIST: set[str] = set()
+
+
+def set_dynamic_blocklist(phrases: set[str]) -> None:
+    """Replace the learned dynamic blocklist (called after approvals / refresh)."""
+    global _DYNAMIC_BLOCKLIST
+    _DYNAMIC_BLOCKLIST = {p.lower() for p in phrases if p}
+
+
 BLOCKLIST_PHRASES: tuple[str, ...] = (
     # Hedge openers
     "it's worth noting",
@@ -346,10 +357,14 @@ def check(
         reasons.append("blocklist_word")
         severity = "block" if strict else "warn"
 
-    # 2. Blocklist phrases
+    # 2. Blocklist phrases (static + the learned/approved dynamic set)
     blocked_phrases = [p for p in BLOCKLIST_PHRASES if p in lower]
     if blocked_phrases:
         reasons.append("blocklist_phrase")
+        severity = "block" if strict else "warn"
+    if any(p in lower for p in _DYNAMIC_BLOCKLIST):
+        if "blocklist_phrase" not in reasons:
+            reasons.append("blocklist_phrase")
         severity = "block" if strict else "warn"
 
     # 3. Negative parallelism

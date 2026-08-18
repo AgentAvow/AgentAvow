@@ -279,6 +279,8 @@ function MarketingTab() {
   const campaigns = useQuery<Campaign[]>({ queryKey: ['admin-mkt-campaigns'], queryFn: async () => { try { return (await api.get('/admin/marketing/campaigns/proposed')).data } catch { return [] } } })
   const reply = useQuery<ReplyStats>({ queryKey: ['admin-mkt-reply'], queryFn: async () => (await api.get('/admin/engagement/stats')).data })
   const evalQ = useQuery<Eval>({ queryKey: ['admin-mkt-eval'], queryFn: async () => (await api.get('/admin/marketing/eval')).data })
+  const slop = useQuery<{ proposals: { phrase: string; reason: string }[] }>({ queryKey: ['admin-mkt-slop'], queryFn: async () => (await api.get('/admin/marketing/slop-proposals')).data })
+  const slopAct = useMutation({ mutationFn: (b: { phrase: string; action: string }) => api.post('/admin/marketing/slop-proposals/action', b), onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-mkt-slop'] }) })
   // Queue 3: replies it's considering next (drafted). Feed: replies already sent.
   // Sorted by urgency (default) — the ones it'll try to post first.
   const considering = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-considering'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'drafted', limit: 20 } })).data })
@@ -327,6 +329,23 @@ function MarketingTab() {
           <Stat label="Posts measured (7d)" value={fmt(evalQ.data?.posts_7d)} />
         </div>
       </Section>
+
+      {!!slop.data?.proposals?.length && (
+        <Section title="No-slop — phrases to review" note="Learned from your edits + model proposals. Approve to add to the blocklist (bans it from future copy), or reject.">
+          <div className="flex flex-col gap-2">
+            {slop.data.proposals.map((p) => (
+              <div key={p.phrase} className="glass rounded-xl p-3 flex items-center gap-3 flex-wrap">
+                <span className="font-mono text-[13px] text-text">"{p.phrase}"</span>
+                <span className="text-[11.5px] text-text-muted/70">{p.reason}</span>
+                <div className="ml-auto flex gap-2 text-[12.5px] font-semibold">
+                  <button onClick={() => slopAct.mutate({ phrase: p.phrase, action: 'approve' })} className="px-3 py-1 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark">Ban it</button>
+                  <button onClick={() => slopAct.mutate({ phrase: p.phrase, action: 'reject' })} className="px-3 py-1 rounded-lg border border-border text-text-muted">Keep allowed</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <RecentPostsCard posts={dash.data?.recent_posts || []} />
 

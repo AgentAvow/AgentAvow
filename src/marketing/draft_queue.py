@@ -154,11 +154,18 @@ async def edit_and_approve(
     if not post:
         return None
 
+    original = post.content or ""
     post.content = new_content
     post.content_hash = content_hash(new_content)
     post.status = "queued"
     await db.flush()
     logger.info("Draft edited and approved: %s (%s)", post.id, post.platform)
+    # No-slop learning: what the human edited OUT is a labeled slop signal → propose it.
+    try:
+        from src.marketing.content.slop_learning import propose_from_edit
+        await propose_from_edit(original, new_content)
+    except Exception:
+        pass
     return post
 
 

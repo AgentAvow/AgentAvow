@@ -280,6 +280,20 @@ async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
                         eval_alert = await check_and_alert_eval(session)
                         if eval_alert.get("sent"):
                             logger.info("Eval alert sent: %s", eval_alert)
+                        # No-slop learning: load approved phrases into the detector; mine
+                        # new candidates weekly (Mondays) for admin review.
+                        from datetime import datetime as _dt
+                        from datetime import timezone as _tz
+
+                        from src.marketing.content.slop_learning import (
+                            propose_from_llm,
+                            refresh_dynamic_blocklist,
+                        )
+                        await refresh_dynamic_blocklist()
+                        if _dt.now(_tz.utc).weekday() == 0:
+                            proposed = await propose_from_llm()
+                            if proposed:
+                                logger.info("Slop learning: proposed %d new candidates", proposed)
         except Exception:
             logger.exception("Marketing metrics refresh failed")
 

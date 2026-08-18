@@ -96,6 +96,14 @@ async def _draft_single(opp: ReplyOpportunity) -> None:
         "You are a technical expert writing a reply on social media. "
         "Output ONLY the reply text. No quotes, no preamble, no explanation."
     )
+    # Self-learning: feed in the replies that actually earned engagement.
+    try:
+        from src.database import async_session
+        from src.marketing.content.performance import get_reply_learning_context
+        async with async_session() as _db:
+            base_system = base_system + await get_reply_learning_context(_db, opp.platform)
+    except Exception:
+        pass
     result = await llm_generate(
         prompt,
         content_type="engagement_reply",

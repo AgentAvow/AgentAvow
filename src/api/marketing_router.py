@@ -745,6 +745,32 @@ async def get_bot_activity(
     )
 
 
+@router.get("/slop-proposals")
+async def slop_proposals(
+    current_entity: Entity = Depends(get_current_entity),
+) -> dict:
+    """Candidate slop phrases (from edit-learning + LLM proposals) awaiting approval."""
+    require_admin(current_entity)
+    from src.marketing.content.slop_learning import list_proposals
+    return {"proposals": await list_proposals()}
+
+
+@router.post("/slop-proposals/action")
+async def slop_proposals_action(
+    body: dict,
+    current_entity: Entity = Depends(get_current_entity),
+) -> dict:
+    """Approve (→ dynamic blocklist) or reject a candidate slop phrase."""
+    require_admin(current_entity)
+    from src.marketing.content.slop_learning import act
+    phrase = (body or {}).get("phrase", "")
+    action = (body or {}).get("action", "")
+    if action not in ("approve", "reject") or not phrase:
+        raise HTTPException(400, "phrase + action(approve|reject) required")
+    ok = await act(phrase, action)
+    return {"ok": ok}
+
+
 @router.get("/eval")
 async def marketing_eval(
     current_entity: Entity = Depends(get_current_entity),

@@ -123,3 +123,29 @@ async def get_learning_context(db: AsyncSession, platform: str | None = None) ->
     perf = await get_performance_context(db, platform)
     avoid = await get_overused_phrases(db, platform)
     return perf + avoid
+
+
+async def get_reply_learning_context(db: AsyncSession, platform: str | None = None) -> str:
+    """What replies have earned engagement — injected into the reply drafter so it does
+    more of what lands. Replies are the best-performing channel, so this matters most."""
+    from src.models import ReplyOpportunity
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    q = select(ReplyOpportunity).where(
+        ReplyOpportunity.status == "posted",
+        ReplyOpportunity.posted_at >= since,
+        ReplyOpportunity.engagement_count > 0,
+    )
+    if platform:
+        q = q.where(ReplyOpportunity.platform == platform)
+    try:
+        rows = list((await db.execute(q.order_by(
+            ReplyOpportunity.engagement_count.desc()).limit(3))).scalars().all())
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    parts = ["\n- REPLIES THAT EARNED ENGAGEMENT (echo this voice, don't copy):"]
+    for r in rows:
+        snippet = re.sub(r"\s+", " ", (r.draft_content or "")).strip()[:160]
+        parts.append(f"  ({r.engagement_count} engagements) \"{snippet}\"")
+    return "\n".join(parts) + "\n"
