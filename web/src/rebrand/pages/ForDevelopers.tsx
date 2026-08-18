@@ -95,7 +95,7 @@ export default function RebrandForDevelopers() {
         {[
           ['01', 'Scan', 'Free, no signup. Paste your repo/package at the check page, or run it locally:', 'agentavow scan .', rp('/rebrand/check')],
           ['02', 'Fix', 'The report lists each finding with the exact file, line, and a fix — plus a signed attestation of the result.', 'critical · high · medium', rp('/rebrand/docs/how-grading-works')],
-          ['03', 'Earn & claim', 'Hit the bar and you earn the score — the top tier is Certified (a public, conjunctive gate, no cheating). Then claim your badge.', 'Score → Certified', rp('/rebrand/badge')],
+          ['03', 'Earn & claim', 'Hit the bar and you earn the score — the top tier is Certified (a public, conjunctive gate, no cheating). Then claim your badge.', 'Score → Certified', rp('/rebrand/certified')],
         ].map(([n, h, p, code, href]) => (
           <Link key={n} to={href} className="glass card-hover rounded-xl p-5 block min-w-0">
             <div className="font-mono text-[12px] text-primary-light">{n}</div>
@@ -138,7 +138,7 @@ export default function RebrandForDevelopers() {
             ['Embeddable widget', 'The full dual-mark card + an in-browser "Verify offline" button, for docs sites and landing pages — one script tag.', rp('/rebrand/badge')],
             ['Share / social card', 'A downloadable card of your score for a launch post, changelog, or slide.', rp('/rebrand/badge')],
             ['Signed report link', 'The full report + JWS attestation at agentavow.com/check/you/your-repo — verifiable offline against our JWKS.', rp('/rebrand/check')],
-            ['The "Certified" mark', 'Earn the top tier through the public conjunctive gate and display the Certified treatment — the earned top tier.', rp('/rebrand/how-it-works')],
+            ['The "Certified" mark', 'Earn the top tier through the public conjunctive gate and display the Certified treatment — the earned top tier.', rp('/rebrand/certified')],
           ].map(([h, p, href]) => (
             <Link key={h} to={href} className="block rounded-xl border border-border/60 p-4 hover:border-primary-light/60 transition-colors">
               <div className="text-[14px] font-semibold">{h}</div>

@@ -110,15 +110,19 @@ function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; 
     : <div>{inner}</div>
 }
 
-function Board({ title, note, rows, isLoading, certified = false }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean }) {
+function Board({ title, note, rows, isLoading, certified = false, href }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean; href?: string }) {
   return (
     // min-w-0: grid items default to min-width:auto and won't shrink below their
     // content — a long tool name in a row was forcing the card past the viewport
     // on mobile (horizontal scroll). Let it clamp to its grid track.
     <div className="glass rounded-2xl p-5 min-w-0">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-[16px] font-bold">{title}</h2>
-        <span className="font-mono text-[10.5px] text-text-muted uppercase tracking-wide shrink-0">{note}</span>
+        <h2 className="text-[16px] font-bold">
+          {href ? <Link to={href} className="hover:text-primary-light transition-colors">{title}</Link> : title}
+        </h2>
+        {href
+          ? <Link to={href} className="font-mono text-[10.5px] text-primary-light hover:text-primary uppercase tracking-wide shrink-0">{note} · what's this? →</Link>
+          : <span className="font-mono text-[10.5px] text-text-muted uppercase tracking-wide shrink-0">{note}</span>}
       </div>
       <div className="mt-3 flex flex-col divide-y divide-border/40">
         {isLoading && <div className="py-8 text-center text-text-muted text-[13px]">loading…</div>}
@@ -201,7 +205,7 @@ export default function RebrandTrustIndex() {
 
       {certified.data?.rows && certified.data.rows.length > 0 && (
         <div className="mt-4">
-          <Board title="AgentAvow Certified" note="the top tier · gated" rows={certified.data.rows} isLoading={certified.isLoading} certified />
+          <Board title="AgentAvow Certified" note="the top tier · gated" rows={certified.data.rows} isLoading={certified.isLoading} certified href={rp('/rebrand/certified')} />
         </div>
       )}
 

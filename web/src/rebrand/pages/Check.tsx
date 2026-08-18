@@ -493,6 +493,7 @@ function CertifiedPanel({ certified }: { certified?: { eligible?: boolean; check
             </li>
           ))}
         </ul>
+        <Link to={rp('/rebrand/certified')} className="inline-block mt-3 text-[12.5px] font-semibold text-primary-light hover:text-primary">Learn about Certified →</Link>
       </div>
     </Reveal>
   )

@@ -38,6 +38,8 @@ A **Blocked** score and any **known-malicious (MAL)** dependency block execution
 
 Certification is **re-checked every scan and is revocable**: if provenance expires, drift appears, or a new critical lands, certification is revoked automatically. "Certified" means *currently, verifiably true* — not "was true once." It is not buyable, not self-attested, and not reachable by a repo-only scan no matter how clean.
 
+See the [**Certified page**](/certified) for the live gate, the hard disqualifiers, and the tools that are Certified today.
+
 ## Coverage & offline recompute
 
 Every verdict carries a **coverage block** stating exactly what was measured: the surface, the scan depth (`repo-only` / `artifact` / `artifact+live`), the exact artifact digest, the provenance binding, and the dated snapshot of every external database consulted (OSV export, registry timestamp, Rekor index). That's what makes the score **recomputable** — pin the bytes and the DB dates, and any verifier re-derives the identical verdict and checks the signature against our public JWKS. See **Verify an attestation**.

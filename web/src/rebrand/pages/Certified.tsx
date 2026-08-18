@@ -1,10 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import api from '../../lib/api'
 import { rp } from '../basePath'
+import { type CatalogRow, rowIdentity } from '../catalog'
 import { CertifiedMark } from '../components/TrustMark'
 import { Reveal } from '../components/motion'
+
+const PKG_SURFACES = ['npm', 'pypi', 'crates', 'docker', 'hf']
+
+/** Per-surface check link for a certified catalog row. */
+function certLink(row: CatalogRow): string | null {
+  const fn = row.full_name || ''
+  if (PKG_SURFACES.includes(row.surface)) {
+    const nm = (row.name || '').includes(':') ? (row.name || '').split(':').slice(1).join(':') : row.name
+    return nm ? rp(`/rebrand/check/pkg/${row.surface}/${nm}`) : null
+  }
+  if (fn.includes('/')) return rp(`/rebrand/check/${fn}`)
+  return null
+}
 
 /**
  * Certified — the public, legible gate. Documents exactly what earns the top tier
@@ -47,6 +61,20 @@ export default function RebrandCertified() {
   const [result, setResult] = useState<{ target: string; certified: Certified } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [cohort, setCohort] = useState<CatalogRow[]>([])
+  const [cohortTotal, setCohortTotal] = useState<number | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    api.get<{ rows: CatalogRow[]; total?: number }>('/public/scan-catalog', {
+      params: { grade: 'certified', sort: 'score-desc', limit: 16 },
+    }).then((r) => {
+      if (!alive) return
+      setCohort(r.data.rows ?? [])
+      setCohortTotal(r.data.total ?? null)
+    }).catch(() => { /* non-blocking */ })
+    return () => { alive = false }
+  }, [])
 
   const run = async () => {
     const path = toPath(input)
@@ -78,6 +106,32 @@ export default function RebrandCertified() {
           <div className="shrink-0"><CertifiedMark score={97} /></div>
         </div>
       </Reveal>
+
+      {/* proof — the real cohort, live from the catalog */}
+      {cohort.length > 0 && (
+        <Reveal>
+          <div className="mt-12">
+            <h2 className="text-xl font-bold">It's not theoretical — {cohortTotal ?? cohort.length} tools are Certified today</h2>
+            <p className="mt-1.5 text-text-muted text-[14px] max-w-[64ch]">Earned, not assigned — each one publishes verifiable build provenance and clears every check below. Recognize a few? That's the point.</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {cohort.map((row) => {
+                const href = certLink(row)
+                const label = rowIdentity(row).display
+                const pill = (
+                  <span className="inline-flex items-center gap-2 rounded-full pl-1 pr-3 py-1 bg-surface border border-border/60 hover:border-primary-light/60 transition-colors">
+                    <span className="font-mono text-[10.5px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ {row.trust_score}</span>
+                    <span className="font-mono text-[12.5px]">{label}</span>
+                  </span>
+                )
+                return href
+                  ? <Link key={label} to={href}>{pill}</Link>
+                  : <span key={label}>{pill}</span>
+              })}
+            </div>
+            <Link to={rp('/rebrand/index')} className="inline-block mt-4 text-[13px] font-semibold text-primary-light hover:text-primary">See the full Certified board →</Link>
+          </div>
+        </Reveal>
+      )}
 
       {/* the gate */}
       <Reveal>
