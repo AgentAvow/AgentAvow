@@ -1,7 +1,10 @@
 """Embeddable trust badge endpoint — shields.io-style SVG for READMEs.
 
-Returns an SVG or JSON trust badge showing entity name, trust score, and
-verification status.  Designed for embedding in GitHub READMEs and docs.
+DEPRECATED (2026-08): superseded by the repo-addressable ``/public/scan/{owner}/
+{repo}/badge`` (and the entity ``/badges/trust/{id}.svg`` ``detailed`` style). This
+entity-id-keyed three-segment badge is kept serving because third parties may embed
+it, but it now delegates all colour/width/font to ``badge_style`` so it stays
+consistent with the current badges. Prefer the repo-addressable badge for new use.
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.badge_style import BADGE_FONT, trust_color, trust_word, verdana_width
 from src.api.rate_limit import rate_limit_reads
 from src.database import get_db
 from src.models import Entity, FrameworkSecurityScan, TrustScore
@@ -24,26 +28,9 @@ router = APIRouter(tags=["badges"])
 # --- Constants ---
 
 BADGE_LABEL_COLOR = "#555"
-BADGE_FONT = "Verdana,Geneva,DejaVu Sans,sans-serif"
 BADGE_FONT_SIZE = 11
 BADGE_HEIGHT = 20
-BADGE_CHAR_WIDTH = 6.5
 BADGE_PADDING = 10
-
-
-def _trust_tier_color(score: float) -> tuple[str, str]:
-    """Return (hex_color, tier_word) for the 0-100 Trust mark (green->red at
-    80/60/40/20 — dual-mark pivot 2026-08)."""
-    s = score * 100
-    if s >= 80:
-        return "#22C55E", "Trusted"
-    if s >= 60:
-        return "#5BBF3A", "Standard"
-    if s >= 40:
-        return "#F59E0B", "Caution"
-    if s >= 20:
-        return "#F97316", "Restricted"
-    return "#EF4444", "Blocked"
 
 
 def _render_embed_badge_svg(
@@ -62,12 +49,12 @@ def _render_embed_badge_svg(
     value_text = f"{score_pct} {status_char}"
 
     label = "AgentAvow"
-    label_width = len(label) * BADGE_CHAR_WIDTH + BADGE_PADDING
-    name_width = len(entity_name) * BADGE_CHAR_WIDTH + BADGE_PADDING
-    value_width = len(value_text) * BADGE_CHAR_WIDTH + BADGE_PADDING
+    label_width = verdana_width(label) + BADGE_PADDING
+    name_width = verdana_width(entity_name) + BADGE_PADDING
+    value_width = verdana_width(value_text) + BADGE_PADDING
     total_width = label_width + name_width + value_width
 
-    color, _ = _trust_tier_color(score)
+    color = trust_color(round(score * 100))
 
     label_center = label_width / 2
     name_center = label_width + name_width / 2
@@ -178,7 +165,7 @@ async def get_embeddable_badge(
         entity_name = entity_name[:max_name_len - 1] + "\u2026"
 
     if format == "json":
-        color, tier = _trust_tier_color(score)
+        color, tier = trust_color(round(score * 100)), trust_word(round(score * 100))
         data = {
             "entity_id": str(entity_id),
             "entity_name": entity_name,

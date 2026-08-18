@@ -1666,30 +1666,11 @@ def _display_grade(
     return base
 
 
-def _grade_color(grade: str) -> str:
-    """Return badge color for a letter grade. Legacy — the badge now colours by
-    score via _trust_score_color (dual-mark pivot 2026-08)."""
-    return {
-        "A+": "#14B8A6",
-        "A": "#2DD4BF",
-        "B": "#22C55E",
-        "C": "#F59E0B",
-        "D": "#F97316",
-        "F": "#EF4444",
-    }.get(grade, "#6b7280")
-
-
 def _trust_score_color(score: int) -> str:
-    """0-100 Trust mark colour — green->red at 80/60/40/20 (mark spec)."""
-    if score >= 80:
-        return "#22C55E"  # Trusted
-    if score >= 60:
-        return "#5BBF3A"  # Standard
-    if score >= 40:
-        return "#F59E0B"  # Caution
-    if score >= 20:
-        return "#F97316"  # Restricted
-    return "#EF4444"  # Blocked
+    """0-100 Trust mark colour — delegates to the shared badge_style mapping so
+    every badge/card/OG surface colours identically (green->red at 80/60/40/20)."""
+    from src.api.badge_style import trust_color
+    return trust_color(int(score))
 
 
 @router.get(
@@ -1799,7 +1780,6 @@ async def scan_badge(
 async def scan_card(
     owner: str,
     repo: str,
-    theme: str = Query("dark", pattern="^(dark|light)$"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """The LIVE dual-mark card as a hosted SVG — trust bar + adoption needle, branded,
@@ -1845,7 +1825,6 @@ async def scan_card(
         adoption_display=_compact_int(a_count) or None,
         adoption_pct=int(a_score100 or 0),
         adoption_tier=None,
-        theme=theme,
     )
     return Response(
         content=svg,
@@ -1956,6 +1935,14 @@ def _combined_badge_response(
     The adoption box is neutral slate + teal (never a safety colour); adoption never
     travels alone (dual-mark rule). A Certified tool's trust segment gets the earned
     CertifiedMark gradient (teal→magenta) + "✓ Certified NN"."""
+    import math
+
+    from src.api.badge_style import (
+        BADGE_FONT,
+        cert_gradient_def,
+        trust_color,
+        verdana_width,
+    )
     cert = certified and score is not None
     if cert:
         trust_label = f"✓ Certified {score}"
@@ -1963,29 +1950,25 @@ def _combined_badge_response(
         trust_text = "#06231f"
     else:
         trust_label = f"{score}/100" if score is not None else "not scanned"
-        trust_fill = _trust_score_color(int(score)) if score is not None else "#6b7280"
+        trust_fill = trust_color(int(score)) if score is not None else "#6b7280"
         trust_text = "#fff"
     adopt_label = f"★ {_compact_int(count)}" if count else "New"
     bw = 80
-    tw = len(trust_label) * 7 + 12
-    aw = len(adopt_label) * 7 + 14
+    tw = math.ceil(verdana_width(trust_label) + 14)
+    aw = math.ceil(verdana_width(adopt_label) + 14)
     total = bw + tw + aw
-    defs = (
-        '<defs><linearGradient id="agcert" x1="0" y1="0" x2="1" y2="0">'
-        '<stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#e879f9"/>'
-        '</linearGradient></defs>'
-    ) if cert else ""
+    defs = f"<defs>{cert_gradient_def()}</defs>" if cert else ""
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total}" height="20">
   {defs}
   <rect width="{bw}" height="20" fill="#38445f" rx="3"/>
   <rect x="{bw}" width="{tw}" height="20" fill="{trust_fill}"/>
   <rect x="{bw + tw}" width="{aw}" height="20" fill="#233047" rx="3"/>
   <rect x="{bw + tw}" width="4" height="20" fill="#233047"/>
-  <text x="{bw // 2}" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
+  <text x="{bw // 2}" y="14" fill="#fff" font-family="{BADGE_FONT}" font-size="11"
         text-anchor="middle">{settings.badge_brand}</text>
-  <text x="{bw + tw // 2}" y="14" fill="{trust_text}" font-family="Verdana,sans-serif"
+  <text x="{bw + tw // 2}" y="14" fill="{trust_text}" font-family="{BADGE_FONT}"
         font-size="11" font-weight="bold" text-anchor="middle">{trust_label}</text>
-  <text x="{bw + tw + aw // 2}" y="14" fill="#7fe9d9" font-family="Verdana,sans-serif"
+  <text x="{bw + tw + aw // 2}" y="14" fill="#7fe9d9" font-family="{BADGE_FONT}"
         font-size="11" text-anchor="middle">{adopt_label}</text>
 </svg>'''
     return Response(
@@ -2003,22 +1986,20 @@ def _certified_badge_response(score: int) -> Response:
     teal→magenta gradient (matches the on-site mark). Only rendered for a tool that
     currently clears the conjunctive Certified gate — recomputed every scan, so it
     can't outlive the thing it attests."""
+    import math
+
+    from src.api.badge_style import BADGE_FONT, CERT_GRADIENT, cert_gradient_def, verdana_width
     label = f"✓ Certified {score}"
-    label_width = len(label) * 7 + 16
+    label_width = math.ceil(verdana_width(label) + 16)
     total_width = 80 + label_width
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
-  <defs>
-    <linearGradient id="agcert" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#2dd4bf"/>
-      <stop offset="1" stop-color="#e879f9"/>
-    </linearGradient>
-  </defs>
+  <defs>{cert_gradient_def()}</defs>
   <rect width="80" height="20" fill="#0b0f17" rx="3"/>
   <rect x="80" width="{label_width}" height="20" fill="url(#agcert)" rx="3"/>
-  <rect x="80" width="4" height="20" fill="#2dd4bf"/>
-  <text x="40" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
+  <rect x="80" width="4" height="20" fill="{CERT_GRADIENT[0]}"/>
+  <text x="40" y="14" fill="#fff" font-family="{BADGE_FONT}" font-size="11"
         text-anchor="middle">{settings.badge_brand}</text>
-  <text x="{80 + label_width // 2}" y="14" fill="#06231f" font-family="Verdana,sans-serif"
+  <text x="{80 + label_width // 2}" y="14" fill="#06231f" font-family="{BADGE_FONT}"
         font-size="11" font-weight="bold" text-anchor="middle">{label}</text>
 </svg>'''
     return Response(
@@ -2033,15 +2014,18 @@ def _certified_badge_response(score: int) -> Response:
 
 def _simple_badge_response(label: str, color: str) -> Response:
     """A two-segment [brand | label] shields-style SVG badge Response (open CORS)."""
-    label_width = len(label) * 7 + 10
+    import math
+
+    from src.api.badge_style import BADGE_FONT, verdana_width
+    label_width = math.ceil(verdana_width(label) + 12)
     total_width = 80 + label_width
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
   <rect width="80" height="20" fill="#555" rx="3"/>
   <rect x="80" width="{label_width}" height="20" fill="{color}" rx="3"/>
   <rect x="80" width="4" height="20" fill="{color}"/>
-  <text x="40" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
+  <text x="40" y="14" fill="#fff" font-family="{BADGE_FONT}" font-size="11"
         text-anchor="middle">{settings.badge_brand}</text>
-  <text x="{80 + label_width // 2}" y="14" fill="#fff" font-family="Verdana,sans-serif"
+  <text x="{80 + label_width // 2}" y="14" fill="#fff" font-family="{BADGE_FONT}"
         font-size="11" text-anchor="middle">{label}</text>
 </svg>'''
     return Response(
@@ -2489,10 +2473,14 @@ def _render_og_svg(
     """Render a 1200x630 SVG Open Graph preview card.
 
     Clean single-ring "attestation trust" card. Adoption/usage counts are not
-    in scope for this function's inputs, so a single centered grade ring is
+    in scope for this function's inputs, so a single centered score ring is
     rendered (twin-ring layout is reserved for callers that have adoption data).
     """
-    color = _grade_color(grade)
+    from src.api.badge_style import trust_color, trust_word
+    _ = grade  # legacy param — the card now leads with the 0-100 number, not a letter
+    scored = score is not None and score > 0 and verdict != "Not Yet Scanned"
+    color = trust_color(int(score)) if scored else "#6b7280"
+    tier = trust_word(int(score)) if scored else "Not scanned"
 
     # Escape XML entities in repo name (matches existing badge escaping)
     display_name = f"{owner}/{repo}".replace("&", "&amp;").replace("<", "&lt;")
@@ -2546,11 +2534,11 @@ def _render_og_svg(
     <circle cx="0" cy="0" r="100" fill="none" stroke="{color}" stroke-width="20"
             stroke-linecap="round" stroke-dasharray="{dash:.2f} {circ:.2f}"
             transform="rotate(-90)"/>
-    <text x="0" y="18" text-anchor="middle" fill="{color}"
+    <text x="0" y="6" text-anchor="middle" fill="{color}"
           font-family="system-ui,-apple-system,sans-serif"
-          font-size="86" font-weight="800">{grade}</text>
-    <text x="0" y="52" text-anchor="middle" fill="#94A3B8"
-          font-family="monospace" font-size="24">{score}/100</text>
+          font-size="68" font-weight="800">{score}</text>
+    <text x="0" y="40" text-anchor="middle" fill="#94A3B8"
+          font-family="monospace" font-size="22">/100 &#183; {tier}</text>
   </g>
 
   <!-- Ring label -->

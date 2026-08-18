@@ -11,6 +11,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.badge_style import BADGE_FONT, trust_color, trust_word, verdana_width
 from src.api.rate_limit import rate_limit_reads
 from src.database import get_db
 from src.models import Entity, FrameworkSecurityScan, TrustScore
@@ -25,80 +26,28 @@ _CACHE_HEADERS = {
     "Cross-Origin-Resource-Policy": "cross-origin",
 }
 
-# ---------------------------------------------------------------------------
-# Font metrics — Verdana 11px approximate char widths (integer tenths)
-# Measured from shields.io's Verdana width table.
-# ---------------------------------------------------------------------------
-
-_VERDANA_WIDTHS: dict[str, float] = {
-    " ": 3.58, "!": 3.94, '"': 5.06, "#": 7.78, "$": 6.36, "%": 8.89,
-    "&": 7.52, "'": 2.81, "(": 4.33, ")": 4.33, "*": 6.36, "+": 7.78,
-    ",": 3.58, "-": 4.33, ".": 3.58, "/": 4.58, "0": 6.36, "1": 6.36,
-    "2": 6.36, "3": 6.36, "4": 6.36, "5": 6.36, "6": 6.36, "7": 6.36,
-    "8": 6.36, "9": 6.36, ":": 4.33, ";": 4.33, "<": 7.78, "=": 7.78,
-    ">": 7.78, "?": 5.56, "@": 10.0, "A": 7.17, "B": 6.89, "C": 6.67,
-    "D": 7.72, "E": 6.22, "F": 5.67, "G": 7.72, "H": 7.72, "I": 4.33,
-    "J": 4.67, "K": 7.0, "L": 5.83, "M": 8.83, "N": 7.61, "O": 7.78,
-    "P": 6.06, "Q": 7.78, "R": 6.89, "S": 6.67, "T": 6.11, "U": 7.39,
-    "V": 7.17, "W": 10.17, "X": 6.33, "Y": 6.11, "Z": 6.56,
-    "a": 5.94, "b": 6.39, "c": 5.17, "d": 6.39, "e": 5.94, "f": 3.83,
-    "g": 6.39, "h": 6.50, "i": 2.94, "j": 3.61, "k": 6.0, "l": 2.94,
-    "m": 9.78, "n": 6.50, "o": 6.28, "p": 6.39, "q": 6.39, "r": 4.50,
-    "s": 5.0, "t": 4.17, "u": 6.50, "v": 5.72, "w": 8.22, "x": 5.44,
-    "y": 5.72, "z": 5.0,
-}
-_DEFAULT_CHAR_WIDTH = 6.5
-
-
-def _text_width(text: str) -> float:
-    """Measure text width in pixels using Verdana 11px metrics."""
-    return sum(_VERDANA_WIDTHS.get(ch, _DEFAULT_CHAR_WIDTH) for ch in text)
-
-
-# ---------------------------------------------------------------------------
-# Brand colors from design-system/tokens.json trust-tiers
-# ---------------------------------------------------------------------------
-
 _BRAND_TEAL = "#0D9488"
-_BRAND_TEAL_BRIGHT = "#2DD4BF"
+
+# Text metrics + the 0-100 colour/tier vocabulary now live in badge_style (shared
+# across every shields-style renderer). These thin wrappers keep the 0.0-1.0 score
+# interface this module's callers use.
+_text_width = verdana_width
 
 
 def _trust_tier_color(score: float) -> str:
-    """Return a hex color for the 0-100 Trust mark (dual-mark system).
-
-    Trust owns the semantic green->red scale; thresholds 80/60/40/20 match the
-    locked mark spec (Trusted / Standard / Caution / Restricted / Blocked).
-    Score is 0.0-1.0. See gradeSystem.ts getTrustTier() for the frontend twin.
-    """
-    s = score * 100
-    if s >= 80:
-        return "#22C55E"  # Trusted   — green-500
-    if s >= 60:
-        return "#5BBF3A"  # Standard  — lighter green
-    if s >= 40:
-        return "#F59E0B"  # Caution   — amber-500
-    if s >= 20:
-        return "#F97316"  # Restricted— orange-500
-    return "#EF4444"  # Blocked   — red-500
+    """0-100 Trust mark hex colour. ``score`` is 0.0-1.0."""
+    return trust_color(round(score * 100))
 
 
 def _trust_tier_word(score: float) -> str:
-    """Return the 0-100 tier word for the Trust mark."""
-    s = score * 100
-    if s >= 80:
-        return "Trusted"
-    if s >= 60:
-        return "Standard"
-    if s >= 40:
-        return "Caution"
-    if s >= 20:
-        return "Restricted"
-    return "Blocked"
+    """0-100 Trust mark tier word. ``score`` is 0.0-1.0."""
+    return trust_word(round(score * 100))
 
 
 def _trust_tier_label(score: float) -> str:
-    """Legacy A-F letter map. Retained for scoring compat/tests only — the badge
-    display now shows the 0-100 number, not a letter (dual-mark pivot 2026-08)."""
+    """Legacy A-F letter map (``score`` 0.0-1.0). NOT shown on any badge — the badges
+    show the 0-100 number (dual-mark pivot 2026-08). Retained only for scoring-parity
+    tests (test_trust_scoring_v6). Do not use for display."""
     s = score * 100
     if s >= 96:
         return "A+"
@@ -111,20 +60,6 @@ def _trust_tier_label(score: float) -> str:
     if s >= 21:
         return "D"
     return "F"
-
-
-def _status_text(has_operator: bool, is_provisional: bool) -> str:
-    """Unused — kept for backward compatibility. Badge now shows letter grade."""
-    if is_provisional:
-        return "unclaimed"
-    if has_operator:
-        return "verified"
-    return "unverified"
-
-
-def _grade_label(score: float) -> str:
-    """Legacy alias — retained so older call sites resolve. Not shown on the badge."""
-    return _trust_tier_label(score)
 
 
 # ---------------------------------------------------------------------------
@@ -144,28 +79,19 @@ _X_PATH = "M7.5 3.2L6.8 2.5 5 4.3 3.2 2.5l-.7.7L4.3 5 2.5 6.8l.7.7L5 5.7l1.8 1.8
 
 
 # ---------------------------------------------------------------------------
-# Theme colors
+# Badge palette — one self-contained style (its own backgrounds), so the badge
+# reads on any page ground. No per-viewer theming: a server-rendered <img> can't
+# see prefers-color-scheme, and shields-style badges ship one fixed scheme.
 # ---------------------------------------------------------------------------
 
-def _theme_colors(theme: str) -> dict:
-    if theme == "dark":
-        return {
-            "label_bg": _BRAND_TEAL,
-            "label_text": "#fff",
-            "mid_bg": "#2d2d2d",
-            "mid_text": "#e0e0e0",
-            "value_text": "#fff",
-            "shadow_fill": "#000",
-        }
-    # light (default)
-    return {
-        "label_bg": _BRAND_TEAL,
-        "label_text": "#fff",
-        "mid_bg": "#555",
-        "mid_text": "#fff",
-        "value_text": "#fff",
-        "shadow_fill": "#010101",
-    }
+_TC = {
+    "label_bg": _BRAND_TEAL,
+    "label_text": "#fff",
+    "mid_bg": "#555",
+    "mid_text": "#fff",
+    "value_text": "#fff",
+    "shadow_fill": "#010101",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -190,10 +116,9 @@ def _render_compact_svg(
     score: float,
     has_operator: bool,
     is_provisional: bool,
-    theme: str,
     scan_status: str | None = None,
 ) -> str:
-    tc = _theme_colors(theme)
+    tc = _TC
     color = _trust_tier_color(score)
     score_pct = round(score * 100)
     value_label = f"{score_pct}/100"
@@ -220,7 +145,7 @@ def _render_compact_svg(
     scan_text_x = label_width + value_width + scan_width / 2
     height = 20
     rx = 3
-    font = "Verdana,Geneva,DejaVu Sans,sans-serif"
+    font = BADGE_FONT
 
     scan_svg = ""
     if scan_label:
@@ -274,10 +199,9 @@ def _render_detailed_svg(
     has_operator: bool,
     is_provisional: bool,
     entity_name: str,
-    theme: str,
     scan_status: str | None = None,
 ) -> str:
-    tc = _theme_colors(theme)
+    tc = _TC
     color = _trust_tier_color(score)
     score_pct = str(round(score * 100))
 
@@ -316,7 +240,7 @@ def _render_detailed_svg(
     scan_text_x = left_width + mid_width + right_width + scan_width / 2
     height = 20
     rx = 3
-    font = "Verdana,Geneva,DejaVu Sans,sans-serif"
+    font = BADGE_FONT
 
     is_verified = has_operator and not is_provisional
     check_icon = _CHECK_PATH if is_verified else _X_PATH
@@ -381,12 +305,11 @@ def _render_minimal_svg(
     score: float,
     has_operator: bool,
     is_provisional: bool,
-    theme: str,
     scan_status: str | None = None,
 ) -> str:
     color = _trust_tier_color(score)
     score_pct = str(round(score * 100))
-    tc = _theme_colors(theme)
+    tc = _TC
 
     text_w = _text_width(score_pct)
     # Shield icon (small, 8px) + score
@@ -405,7 +328,7 @@ def _render_minimal_svg(
     scan_text_x = pill_width + scan_width / 2
     height = 20
     rx = 3
-    font = "Verdana,Geneva,DejaVu Sans,sans-serif"
+    font = BADGE_FONT
 
     is_verified = has_operator and not is_provisional
     icon_path = _SHIELD_PATH
@@ -456,10 +379,9 @@ def _render_flat_square_svg(
     score: float,
     has_operator: bool,
     is_provisional: bool,
-    theme: str,
     scan_status: str | None = None,
 ) -> str:
-    tc = _theme_colors(theme)
+    tc = _TC
     color = _trust_tier_color(score)
     score_pct = round(score * 100)
     value_label = f"{score_pct}/100"
@@ -484,7 +406,7 @@ def _render_flat_square_svg(
     value_text_x = label_width + value_width / 2
     scan_text_x = label_width + value_width + scan_width / 2
     height = 20
-    font = "Verdana,Geneva,DejaVu Sans,sans-serif"
+    font = BADGE_FONT
 
     scan_rect = ""
     if scan_width:
@@ -547,27 +469,26 @@ def _render_badge_svg(
     has_operator: bool,
     is_provisional: bool = False,
     style: str = "compact",
-    theme: str = "light",
     entity_name: str = "",
     scan_status: str | None = None,
 ) -> str:
-    """Render an SVG trust badge in the requested style and theme."""
+    """Render an SVG trust badge in the requested style (single self-contained palette)."""
     if style == "detailed":
         return _render_detailed_svg(
-            score, has_operator, is_provisional, entity_name, theme,
+            score, has_operator, is_provisional, entity_name,
             scan_status,
         )
     if style == "minimal":
         return _render_minimal_svg(
-            score, has_operator, is_provisional, theme, scan_status,
+            score, has_operator, is_provisional, scan_status,
         )
     if style == "flat-square":
         return _render_flat_square_svg(
-            score, has_operator, is_provisional, theme, scan_status,
+            score, has_operator, is_provisional, scan_status,
         )
     # compact (default)
     return _render_compact_svg(
-        score, has_operator, is_provisional, theme, scan_status,
+        score, has_operator, is_provisional, scan_status,
     )
 
 
@@ -595,9 +516,6 @@ async def get_readme_badge(
     style: _STYLE_OPTIONS = Query(
         "compact", description="Badge visual style",
     ),
-    theme: Literal["light", "dark"] = Query(
-        "light", description="Badge color theme",
-    ),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Return a copy-paste snippet for embedding a trust badge in a README."""
@@ -609,8 +527,6 @@ async def get_readme_badge(
     params: list[str] = []
     if style != "compact":
         params.append(f"style={style}")
-    if theme != "light":
-        params.append(f"theme={theme}")
     # Always add scale=1.5 for README snippets (bigger badge)
     params.append("scale=1.5")
     badge_url += "?" + "&".join(params)
@@ -665,9 +581,6 @@ async def get_trust_badge_svg(
     request: Request,
     style: _STYLE_OPTIONS = Query(
         "compact", description="Badge visual style",
-    ),
-    theme: Literal["light", "dark"] = Query(
-        "light", description="Badge color theme",
     ),
     scale: float = Query(
         1.0, ge=1.0, le=3.0,
@@ -730,7 +643,6 @@ async def get_trust_badge_svg(
         has_operator=has_operator,
         is_provisional=is_provisional,
         style=style,
-        theme=theme,
         entity_name=entity.display_name or str(entity_id),
         scan_status=scan_status,
     )

@@ -9,29 +9,17 @@ from __future__ import annotations
 
 import math
 
-# ── palettes ────────────────────────────────────────────────────────────────
+from src.api.badge_style import trust_color
+
+# ── palette ─────────────────────────────────────────────────────────────────
+# One self-contained (dark) card — it carries its own background, so it reads on
+# any page ground. No per-viewer theming (a hosted <img> can't see the page theme;
+# g1/g2 are the shared CERT_GRADIENT teal→magenta).
 _DARK = {
     "bg": "#0a0e18", "panel_line": "#243458", "line_soft": "#1a273f",
     "text": "#eef2fb", "muted": "#93a1c0", "faint": "#63728f",
     "ndl": "#2dd4bf", "g1": "#2dd4bf", "g2": "#e879f9",
 }
-_LIGHT = {
-    "bg": "#ffffff", "panel_line": "#dbe2f0", "line_soft": "#e6ecf5",
-    "text": "#0d1524", "muted": "#3b4657", "faint": "#586882",
-    "ndl": "#0d9488", "g1": "#0e7490", "g2": "#a21caf",
-}
-
-
-def _trust_color(score: int, light: bool) -> str:
-    if score >= 80:
-        return "#15803D" if light else "#22C55E"
-    if score >= 60:
-        return "#3F7D1F" if light else "#5BBF3A"
-    if score >= 40:
-        return "#B45309" if light else "#F59E0B"
-    if score >= 20:
-        return "#C2410C" if light else "#F97316"
-    return "#B91C1C" if light else "#EF4444"
 
 
 def _trust_word(score: int) -> str:
@@ -58,16 +46,15 @@ def _arc(cx: float, cy: float, r: float, a0: float, a1: float) -> str:
 
 def render_card_svg(
     *, coordinate: str, score: int | None, adoption_display: str | None,
-    adoption_pct: int, adoption_tier: str | None, theme: str = "dark",
+    adoption_pct: int, adoption_tier: str | None,
 ) -> str:
     """Compose the condensed dual-mark card SVG (≈360×156). `score` None → 'not scanned'."""
-    light = theme == "light"
-    c = _LIGHT if light else _DARK
+    c = _DARK
     card_w, card_h = 360, 156
 
     has_score = score is not None
     s = int(score) if has_score else 0
-    tcol = _trust_color(s, light) if has_score else c["faint"]
+    tcol = trust_color(s) if has_score else c["faint"]
     tword = _trust_word(s) if has_score else "—"
 
     # ── trust segmented bar (left) ───────────────────────────────────────────

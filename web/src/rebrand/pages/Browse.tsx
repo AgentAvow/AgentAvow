@@ -163,7 +163,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
       {href && (
         <div className="mt-3">
           <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">
-            {row.trust_score != null ? 'Report & install →' : 'View →'}
+            {row.trust_score != null ? 'See report & install →' : 'View →'}
           </Link>
         </div>
       )}

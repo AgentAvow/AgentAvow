@@ -11,7 +11,6 @@
  *
  * Attributes on the <script> (or a target <div data-agentavow-tool="...">):
  *   data-tool   required — coordinate: "npm/chalk", "pypi/requests", "owner/repo"
- *   data-theme  "dark" (default) | "light"
  *   data-verify "true" (default) | "false"  — hide the verify control
  */
 (function () {
@@ -70,10 +69,10 @@
     return n;
   }
 
-  function mount(host, tool, theme, wantVerify) {
+  function mount(host, tool, wantVerify) {
     var path = coordToPath(tool);
     if (!path) return;
-    var cardUrl = ORIGIN + '/api/v1/public/scan/' + path + '/card.svg?theme=' + theme;
+    var cardUrl = ORIGIN + '/api/v1/public/scan/' + path + '/card.svg';
     var reportUrl = ORIGIN + '/check/' + path;
     var verdictUrl = ORIGIN + '/api/v1/public/scan/' + path + '/verdict.json';
 
@@ -135,7 +134,6 @@
       var placeholder = el('div');
       t.appendChild(placeholder);
       mount(placeholder, t.getAttribute('data-agentavow-tool'),
-        t.getAttribute('data-theme') || 'dark',
         t.getAttribute('data-verify') !== 'false');
     }
   }
@@ -149,7 +147,6 @@
       var anchor = el('span');
       s.parentNode.insertBefore(anchor, s.nextSibling);
       mount(anchor, s.getAttribute('data-tool'),
-        s.getAttribute('data-theme') || 'dark',
         s.getAttribute('data-verify') !== 'false');
     }
   }

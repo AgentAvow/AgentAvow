@@ -628,12 +628,65 @@ function CampaignActions({ id, onDone }: { id: string; onDone: () => void }) {
 }
 
 // ── SHELL ────────────────────────────────────────────────────────────────
+interface RadarItem {
+  full_name: string; owner: string; repo: string; stars?: number; framework?: string
+  trust_score?: number; certified?: boolean; critical?: number; high?: number
+  has_shields?: boolean; priority?: number; channel?: string; angle?: string
+  badge_ask?: boolean; score_url?: string
+}
+
+function RadarTab() {
+  const qc = useQueryClient()
+  const queue = useQuery<{ queue: RadarItem[]; total: number }>({
+    queryKey: ['radar-queue'],
+    queryFn: async () => (await api.get('/admin/recruitment/radar/queue', { params: { limit: 100 } })).data,
+  })
+  const run = useMutation({
+    mutationFn: () => api.post('/admin/recruitment/radar/run', null, { params: { limit: 25 } }),
+    onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: ['radar-queue'] }), 4000),
+  })
+  const items = queue.data?.queue ?? []
+  return (
+    <div className="mt-6">
+      <Section
+        title="Developer radar — outreach queue"
+        note="Discovers MCP/agent repos, scans + ranks them into a personal outreach list. Human-gated — it never contacts anyone. Send the top ones yourself, a few a day."
+        right={<button onClick={() => run.mutate()} disabled={run.isPending} className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{run.isPending ? 'Started…' : 'Run radar'}</button>}
+      >
+        {run.isSuccess && <p className="text-[12.5px] text-text-muted mb-3">Radar running in the background — the queue refreshes in a few seconds (a full cycle scans ~25 repos, ~2–4 min).</p>}
+        {queue.isLoading && <p className="text-text-muted text-[13px]">Loading queue…</p>}
+        {!queue.isLoading && !items.length && <p className="text-text-muted text-[13px]">Queue empty — hit “Run radar” to discover + rank candidates.</p>}
+        <div className="flex flex-col gap-2">
+          {items.map((it) => (
+            <div key={it.full_name} className="glass rounded-xl px-4 py-3">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="font-mono text-[10.5px] font-bold tabular-nums w-9 text-primary-light">{it.priority ?? '—'}</span>
+                <a href={it.score_url || `https://agentavow.com/check/${it.full_name}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[13.5px] font-semibold text-text hover:text-primary-light truncate">{it.full_name}</a>
+                {it.certified
+                  ? <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ CERT {it.trust_score}</span>
+                  : <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-surface border border-border/60 text-text-muted">{it.trust_score ?? '—'}/100</span>}
+                {it.badge_ask
+                  ? <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/10 text-success">badge ask</span>
+                  : <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded bg-warning/10 text-warning">fix-first</span>}
+                {it.has_shields && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface border border-border/60 text-text-muted">shields ✓</span>}
+                <span className="text-[11px] text-text-muted/70 ml-auto">★{it.stars ?? 0}{it.framework ? ` · ${it.framework}` : ''}</span>
+              </div>
+              {it.channel && <p className="text-[12.5px] text-text-muted mt-1.5">{it.channel}</p>}
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  )
+}
+
 export default function AdminDashboard() {
   const { user, isLoading } = useAuth()
   // Tab lives in the URL so browser back/forward restores it.
   const [sp, setSp] = useSearchParams()
-  const tab: 'metrics' | 'marketing' = sp.get('tab') === 'marketing' ? 'marketing' : 'metrics'
-  const setTab = (t: 'metrics' | 'marketing') => setSp(t === 'metrics' ? {} : { tab: t })
+  const _t = sp.get('tab')
+  const tab: 'metrics' | 'marketing' | 'radar' = _t === 'marketing' ? 'marketing' : _t === 'radar' ? 'radar' : 'metrics'
+  const setTab = (t: 'metrics' | 'marketing' | 'radar') => setSp(t === 'metrics' ? {} : { tab: t })
 
   if (isLoading) return <div className="max-w-[1080px] mx-auto px-6 py-24 text-center text-text-muted">Loading…</div>
   if (!user?.is_admin) return (
@@ -654,12 +707,12 @@ export default function AdminDashboard() {
           <a href="/admin" className="text-[12.5px] text-text-muted hover:text-text font-semibold">Legacy admin ↗</a>
         </div>
         <div className="mt-6 flex gap-1 border-b border-border/60">
-          {(['metrics', 'marketing'] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 text-[14px] font-semibold capitalize border-b-2 -mb-px transition-colors ${tab === t ? 'border-primary text-text' : 'border-transparent text-text-muted hover:text-text'}`}>{t}</button>
+          {(['metrics', 'marketing', 'radar'] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 text-[14px] font-semibold capitalize border-b-2 -mb-px transition-colors ${tab === t ? 'border-primary text-text' : 'border-transparent text-text-muted hover:text-text'}`}>{t === 'radar' ? 'Dev radar' : t}</button>
           ))}
         </div>
       </Reveal>
-      {tab === 'metrics' ? <MetricsTab /> : <MarketingTab />}
+      {tab === 'metrics' ? <MetricsTab /> : tab === 'marketing' ? <MarketingTab /> : <RadarTab />}
     </div>
   )
 }

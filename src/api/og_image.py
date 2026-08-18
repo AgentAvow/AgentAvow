@@ -17,19 +17,15 @@ _FG = (233, 238, 245)       # near-white text
 _MUTED = (148, 163, 184)    # slate-400
 _TEAL = (34, 211, 238)
 
-# 0-100 Trust tier → accent RGB + word (green->red at 80/60/40/20, dual-mark).
+# 0-100 Trust tier → accent RGB + word. Derived from the shared badge_style mapping
+# (single source of truth) — PIL needs an RGB tuple, so we convert the shared hex.
 def _score_tier(score: int | None) -> tuple[tuple[int, int, int], str]:
     if score is None:
         return _MUTED, ""
-    if score >= 80:
-        return (34, 197, 94), "Trusted"      # #22C55E
-    if score >= 60:
-        return (91, 191, 58), "Standard"     # #5BBF3A
-    if score >= 40:
-        return (245, 158, 11), "Caution"     # #F59E0B
-    if score >= 20:
-        return (249, 115, 22), "Restricted"  # #F97316
-    return (239, 68, 68), "Blocked"          # #EF4444
+    from src.api.badge_style import trust_color, trust_word
+    hexv = trust_color(int(score)).lstrip("#")
+    rgb = (int(hexv[0:2], 16), int(hexv[2:4], 16), int(hexv[4:6], 16))
+    return rgb, trust_word(int(score))
 
 
 def _font(size: int):

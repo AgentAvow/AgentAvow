@@ -87,6 +87,32 @@ async def _marketing_sync_loop(interval: int = MARKETING_SYNC_INTERVAL) -> None:
         await asyncio.sleep(interval)
 
 
+DEVELOPER_RADAR_INTERVAL = 6 * 60 * 60  # check every 6h; the day-guard makes it weekly
+
+
+async def _developer_radar_loop(interval: int = DEVELOPER_RADAR_INTERVAL) -> None:
+    """Weekly developer-discovery radar (Mondays): refresh GitHub discovery, then scan +
+    rank new MCP/agent prospects into the human-gated outreach queue. NEVER contacts
+    anyone — it only fills the queue an admin reviews and sends from."""
+    from src.database import async_session
+
+    logger.info("Developer radar loop started (interval=%ds, runs Mondays)", interval)
+    while True:
+        try:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            # Mondays (weekday 0), afternoon UTC. run_developer_radar only processes
+            # `discovered` rows, so a second same-day tick is naturally near-empty.
+            if now.weekday() == 0 and now.hour >= 14:
+                from src.jobs.developer_radar import run_developer_radar
+                async with async_session() as s:
+                    summary = await run_developer_radar(s, discover=True, limit=40)
+                logger.info("Developer radar cycle: %s", summary)
+        except Exception:
+            logger.exception("Developer radar loop failed")
+        await asyncio.sleep(interval)
+
+
 async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
     """Periodically run all scheduled jobs in the background."""
     from src.database import async_session
@@ -1479,6 +1505,12 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     asyncio.create_task(
         _marketing_sync_loop(),
         name="marketing-sync",
+    )
+
+    # Job 23: Weekly developer-discovery radar (Mondays) — fills the outreach queue
+    asyncio.create_task(
+        _developer_radar_loop(),
+        name="developer-radar",
     )
 
     asyncio.create_task(
