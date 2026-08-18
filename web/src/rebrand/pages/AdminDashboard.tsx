@@ -41,7 +41,8 @@ interface MktDash {
 }
 interface Campaign { id: string; name: string; topic: string; platforms: string[]; status: string; start_date?: string }
 interface ReplyStats { status_counts?: Record<string, number>; posted_today?: number; active_targets?: number; queue_size?: number }
-interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?: string | null; draft_content?: string; posted_at?: string | null; engagement_count?: number }
+interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?: string | null; draft_content?: string; drafted_at?: string | null; posted_at?: string | null; engagement_count?: number; target?: { handle?: string | null } }
+const REPLY_TTL_H = 48
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 const fmt = (n: number | undefined | null) => (n ?? 0).toLocaleString()
@@ -268,13 +269,18 @@ function DraftCard({ d, onDone }: { d: Draft; onDone: () => void }) {
 
 function MarketingTab() {
   const qc = useQueryClient()
-  const invalidate = () => { qc.invalidateQueries({ queryKey: ['admin-mkt-drafts'] }); qc.invalidateQueries({ queryKey: ['admin-mkt-dash'] }) }
+  const invalidate = () => { ['admin-mkt-drafts', 'admin-mkt-planned', 'admin-mkt-dash', 'admin-mkt-reply-considering', 'admin-mkt-reply-sent'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })) }
   const health = useQuery<Health>({ queryKey: ['admin-mkt-health'], queryFn: async () => (await api.get('/admin/marketing/health')).data })
   const dash = useQuery<MktDash>({ queryKey: ['admin-mkt-dash'], queryFn: async () => (await api.get('/admin/marketing/dashboard')).data })
-  const drafts = useQuery<Draft[]>({ queryKey: ['admin-mkt-drafts'], queryFn: async () => (await api.get('/admin/marketing/drafts', { params: { status: 'human_review,draft,planned', limit: 40 } })).data })
+  // Queue 1: things I must post by hand (human_review). Queue 2: scheduled campaign posts (planned).
+  const manual = useQuery<Draft[]>({ queryKey: ['admin-mkt-drafts'], queryFn: async () => (await api.get('/admin/marketing/drafts', { params: { status: 'human_review,draft', limit: 40 } })).data })
+  const planned = useQuery<Draft[]>({ queryKey: ['admin-mkt-planned'], queryFn: async () => (await api.get('/admin/marketing/drafts', { params: { status: 'planned', limit: 60 } })).data })
   const campaigns = useQuery<Campaign[]>({ queryKey: ['admin-mkt-campaigns'], queryFn: async () => { try { return (await api.get('/admin/marketing/campaigns/proposed')).data } catch { return [] } } })
   const reply = useQuery<ReplyStats>({ queryKey: ['admin-mkt-reply'], queryFn: async () => (await api.get('/admin/engagement/stats')).data })
-  const replies = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-recent'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'posted', limit: 12 } })).data })
+  // Queue 3: replies it's considering next (drafted). Feed: replies already sent.
+  const considering = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-considering'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'drafted', sort: 'recent', limit: 20 } })).data })
+  const replySent = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-sent'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'posted', sort: 'recent', limit: 20 } })).data })
+  const byDate = <T extends { created_at?: string; posted_at?: string | null; drafted_at?: string | null }>(a: T[]) => [...a].sort((x, y) => new Date(y.posted_at || y.drafted_at || y.created_at || 0).getTime() - new Date(x.posted_at || x.drafted_at || x.created_at || 0).getTime())
 
   const genCampaign = useMutation({ mutationFn: () => api.post('/admin/marketing/campaigns/generate', {}, { timeout: 120_000 }), onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-mkt-campaigns'] }) })
   const trigger = useMutation({ mutationFn: () => api.post('/admin/marketing/trigger', {}), onSuccess: invalidate })
@@ -302,6 +308,20 @@ function MarketingTab() {
         ) : null}
       </Section>
 
+      {(() => {
+        const posts = dash.data?.recent_posts || []
+        const scored = posts.map((p) => ({ p, e: (p.metrics?.likes || 0) + (p.metrics?.comments || 0) + (p.metrics?.shares || 0) })).filter((x) => x.e > 0).sort((a, b) => b.e - a.e)
+        if (!scored.length) return null
+        const top = scored[0]
+        return (
+          <Reveal><div className="mt-6 glass rounded-2xl p-5 border-l-4 border-success/60">
+            <div className="text-[12px] font-mono uppercase tracking-wide text-text-muted">What's working 💡</div>
+            <p className="mt-1.5 text-[13.5px]">Best-performing recent post ({top.e} engagements) on <span className="font-mono">{top.p.platform}</span>{top.p.url && <> — <a href={top.p.url} target="_blank" rel="noopener" className="text-primary-light hover:text-primary">open ↗</a></>}: <span className="text-text-muted">"{top.p.content.slice(0, 120)}…"</span></p>
+            <p className="mt-1 text-[11.5px] text-text-muted/70">The engine can weight future posts toward what earns engagement — closed-loop self-tuning is the next step (staged).</p>
+          </div></Reveal>
+        )
+      })()}
+
       <Section title="Weekly campaign planner" note="Generate a week of posts, review, approve or reject. Approved posts land in the draft queue below." right={<button onClick={() => genCampaign.mutate()} disabled={genCampaign.isPending} className="text-[12.5px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">{genCampaign.isPending ? 'Generating…' : 'Generate weekly plan'}</button>}>
         {campaigns.data?.length ? (
           <div className="flex flex-col gap-2">
@@ -317,46 +337,70 @@ function MarketingTab() {
         ) : <p className="text-text-muted text-[13px]">No proposed campaigns. Generate a weekly plan to review one.</p>}
       </Section>
 
-      <Section title="Draft queue" note="Every automated draft awaiting your review — approve, edit, reject, or mark manually posted. This is where your queued drafts show up.">
-        {drafts.data?.length ? <div className="flex flex-col gap-2">{drafts.data.map((d) => <DraftCard key={d.id} d={d} onDone={invalidate} />)}</div> : <p className="text-text-muted text-[13px]">No drafts awaiting review.</p>}
+      <Section title="Queue 1 · To post by hand" note="Drafts on manual-post platforms (LinkedIn/Reddit/HN/Product Hunt) awaiting you — edit, mark posted, or reject. Newest first.">
+        {(() => { const q = byDate((manual.data || []).filter((d) => ['linkedin', 'reddit', 'hackernews', 'producthunt'].includes(d.platform))); return q.length ? <div className="flex flex-col gap-2">{q.map((d) => <DraftCard key={d.id} d={d} onDone={invalidate} />)}</div> : <p className="text-text-muted text-[13px]">Nothing to post by hand right now.</p> })()}
       </Section>
 
-      <Section title="Reply-guy" note="Twitter capped to protect the X quota; Bluesky carries volume. Recent auto-replies below, with links.">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <Section title="Queue 2 · Scheduled this week" note="What the weekly campaign will auto-post, and when. You'll likely never touch this — edit if you want to.">
+        {byDate(planned.data || []).length ? (
+          <div className="flex flex-col gap-2">
+            {byDate(planned.data || []).map((d) => (
+              <div key={d.id} className="glass rounded-xl p-4">
+                <div className="flex items-center gap-2 text-[11.5px] font-mono text-text-muted">
+                  <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{d.platform}</span>
+                  {(d as Draft & { scheduled_day?: string }).scheduled_day && <span>📅 {(d as Draft & { scheduled_day?: string }).scheduled_day}</span>}
+                  {d.topic && <span>{d.topic}</span>}
+                  <a href={`/admin`} className="ml-auto text-primary-light hover:text-primary">edit ↗</a>
+                </div>
+                <p className="mt-2 text-[12.5px] text-text-muted whitespace-pre-wrap">{d.content.slice(0, 180)}{d.content.length > 180 ? '…' : ''}</p>
+              </div>
+            ))}
+          </div>
+        ) : <p className="text-text-muted text-[13px]">No scheduled campaign posts. Generate a weekly plan above.</p>}
+      </Section>
+
+      <Section title="Queue 3 · Reply-guy is considering" note="Drafted replies for X + Bluesky, newest first. Each fades out after 48h if not posted. Edit, or post it now.">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
           <Stat label="Posted today" value={fmt(reply.data?.posted_today)} />
           <Stat label="Active targets" value={fmt(reply.data?.active_targets)} />
-          <Stat label="Queue" value={fmt(reply.data?.queue_size)} sub="drafted+new" />
-          <Stat label="Posted (all-time)" value={fmt(rc.posted)} sub={`${fmt(rc.posting_error)} errors`} />
+          <Stat label="Considering" value={fmt(reply.data?.queue_size)} sub="drafted+new" />
+          <Stat label="Sent (all-time)" value={fmt(rc.posted)} sub={`${fmt(rc.posting_error)} errors`} />
         </div>
-        {replies.data?.items?.length ? (
-          <div className="glass rounded-2xl p-4 mt-3">
-            <div className="text-[12px] font-mono uppercase tracking-wide text-text-muted mb-2">Recent replies</div>
+        {considering.data?.items?.length ? <div className="flex flex-col gap-2">{considering.data.items.map((r) => <ReplyConsideringCard key={r.id} r={r} onDone={invalidate} />)}</div> : <p className="text-text-muted text-[13px]">Nothing queued to reply to right now.</p>}
+      </Section>
+
+      <Section title="Reply-guy · Sent" note="Everything reply-guy has posted, newest first — click to see it live.">
+        {replySent.data?.items?.length ? (
+          <div className="glass rounded-2xl p-4">
             <div className="flex flex-col divide-y divide-border/40">
-              {replies.data.items.map((r) => (
+              {replySent.data.items.map((r) => (
                 <div key={r.id} className="flex items-center gap-3 py-2 text-[12.5px]">
                   <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{r.platform}</span>
                   <span className="flex-1 min-w-0 truncate text-text-muted">{r.draft_content || r.post_uri}</span>
-                  {typeof r.engagement_count === 'number' && <span className="tabular-nums text-text-muted/70">♥ {r.engagement_count}</span>}
-                  <span className="text-text-muted/60">{ago(r.posted_at)}</span>
+                  {typeof r.engagement_count === 'number' && r.engagement_count > 0 && <span className="tabular-nums text-text-muted/70">♥ {r.engagement_count}</span>}
+                  <span className="text-text-muted/60 shrink-0">{ago(r.posted_at)}</span>
                   {r.reply_url && <a href={r.reply_url} target="_blank" rel="noopener" className="text-primary-light hover:text-primary shrink-0">view ↗</a>}
                 </div>
               ))}
             </div>
           </div>
-        ) : null}
+        ) : <p className="text-text-muted text-[13px]">No replies sent yet.</p>}
       </Section>
 
-      <Section title="Recent posts" note="Latest published posts — click to open.">
+      <Section title="Recent posts" note="Your manual + weekly-campaign posts, newest first — click any to open, with engagement.">
         {dash.data?.recent_posts?.length ? (
           <div className="glass rounded-2xl p-4 overflow-x-auto">
             <table className="w-full text-[12.5px]">
-              <thead><tr className="text-text-muted/70 text-left font-mono"><th className="py-1 pr-3">when</th><th className="py-1 pr-3">platform</th><th className="py-1 pr-3">post</th><th className="py-1 pr-3 text-right">♥</th><th className="py-1 text-right">cost</th></tr></thead>
-              <tbody>{dash.data.recent_posts.slice(0, 12).map((p) => (
+              <thead><tr className="text-text-muted/70 text-left font-mono"><th className="py-1 pr-3">when</th><th className="py-1 pr-3">platform</th><th className="py-1 pr-3">post</th><th className="py-1 pr-2 text-right">♥</th><th className="py-1 pr-2 text-right">💬</th><th className="py-1 pr-2 text-right">🔁</th><th className="py-1 pr-2 text-right">👁</th><th className="py-1 text-right">cost</th></tr></thead>
+              <tbody>{[...dash.data.recent_posts].sort((a, b) => new Date(b.posted_at || 0).getTime() - new Date(a.posted_at || 0).getTime()).slice(0, 15).map((p) => (
                 <tr key={p.id} className="border-t border-border/40">
                   <td className="py-1.5 pr-3 text-text-muted whitespace-nowrap">{ago(p.posted_at)}</td>
                   <td className="py-1.5 pr-3 font-mono">{p.platform}</td>
-                  <td className="py-1.5 pr-3 text-text-muted max-w-[420px] truncate">{p.url ? <a href={p.url} target="_blank" rel="noopener" className="hover:text-primary-light">{p.content.slice(0, 100)} ↗</a> : p.content.slice(0, 100)}</td>
-                  <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(p.metrics?.likes)}</td>
+                  <td className="py-1.5 pr-3 text-text-muted max-w-[360px] truncate">{p.url ? <a href={p.url} target="_blank" rel="noopener" className="hover:text-primary-light">{p.content.slice(0, 90)} ↗</a> : p.content.slice(0, 90)}</td>
+                  <td className="py-1.5 pr-2 tabular-nums text-right">{fmt(p.metrics?.likes)}</td>
+                  <td className="py-1.5 pr-2 tabular-nums text-right">{fmt(p.metrics?.comments)}</td>
+                  <td className="py-1.5 pr-2 tabular-nums text-right">{fmt(p.metrics?.shares)}</td>
+                  <td className="py-1.5 pr-2 tabular-nums text-right text-text-muted">{fmt(p.metrics?.impressions)}</td>
                   <td className="py-1.5 tabular-nums text-right text-text-muted">{usd(p.llm_cost_usd)}</td>
                 </tr>
               ))}</tbody>
@@ -365,6 +409,44 @@ function MarketingTab() {
         ) : <p className="text-text-muted text-[13px]">No recent posts.</p>}
       </Section>
     </>
+  )
+}
+
+function ReplyConsideringCard({ r, onDone }: { r: ReplyRow; onDone: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(r.draft_content || '')
+  const act = useMutation({
+    mutationFn: (body: { action: string; draft_content?: string }) => api.post(`/admin/engagement/queue/${r.id}/action`, body),
+    onSuccess: onDone,
+  })
+  const ageH = r.drafted_at ? (Date.now() - new Date(r.drafted_at).getTime()) / 3.6e6 : 0
+  const leftH = Math.max(0, REPLY_TTL_H - ageH)
+  return (
+    <div className="glass rounded-xl p-4">
+      <div className="flex items-center gap-2 text-[11.5px] font-mono text-text-muted mb-2">
+        <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{r.platform}</span>
+        {r.target?.handle && <span>@{r.target.handle}</span>}
+        {r.post_uri && <a href={r.post_uri} target="_blank" rel="noopener" className="hover:text-primary-light">the post ↗</a>}
+        <span className={`ml-auto ${leftH < 6 ? 'text-warning' : ''}`}>fades in {Math.round(leftH)}h · posts in the next 14:00-UTC window</span>
+      </div>
+      {editing
+        ? <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} className="w-full text-[13px] rounded-lg bg-surface border border-border p-2 font-mono" />
+        : <p className="text-[13px] text-text whitespace-pre-wrap">{r.draft_content}</p>}
+      <div className="mt-3 flex gap-2 flex-wrap text-[12.5px] font-semibold">
+        {editing ? (
+          <>
+            <button onClick={() => { act.mutate({ action: 'edit', draft_content: text }); setEditing(false) }} className="px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark">Save</button>
+            <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded-lg border border-border text-text-muted">Cancel</button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => act.mutate({ action: 'approve' })} disabled={act.isPending} className="px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-success to-primary disabled:opacity-60">Post it now</button>
+            <button onClick={() => setEditing(true)} className="px-3 py-1.5 rounded-lg border border-border text-text-muted">Edit</button>
+            <button onClick={() => act.mutate({ action: 'skip' })} disabled={act.isPending} className="px-3 py-1.5 rounded-lg border border-border text-text-muted hover:text-danger">Skip</button>
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 

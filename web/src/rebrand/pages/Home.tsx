@@ -8,6 +8,7 @@ import { publicApi } from '../../lib/scanApi'
 import { getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
+import { trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
 
 const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
@@ -78,6 +79,7 @@ export default function RebrandHome() {
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
     const v = input.trim()
+    if (v) trackEvent('guest_cta_click', '/rebrand', 'check_a_tool')
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }

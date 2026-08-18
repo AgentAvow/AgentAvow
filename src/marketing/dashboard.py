@@ -127,33 +127,32 @@ async def get_dashboard_data(db: AsyncSession) -> dict:
         total_shares += m.get("shares", 0)
         total_impressions += m.get("impressions", 0)
 
-    # LLM cost breakdown
-    cost_q = await db.execute(
-        select(
-            MarketingPost.llm_model,
-            func.count(MarketingPost.id).label("calls"),
-            func.coalesce(func.sum(MarketingPost.llm_tokens_in), 0).label("tokens_in"),
-            func.coalesce(func.sum(MarketingPost.llm_tokens_out), 0).label("tokens_out"),
-            func.coalesce(func.sum(MarketingPost.llm_cost_usd), 0.0).label("cost"),
-        ).where(
-            MarketingPost.llm_model.isnot(None),
-            MarketingPost.created_at >= month_ago,
-        ).group_by(MarketingPost.llm_model),
-    )
-    cost_breakdown = [
-        {
-            "model": row.llm_model,
-            "calls": row.calls,
-            "tokens_in": row.tokens_in,
-            "tokens_out": row.tokens_out,
-            "cost_usd": round(float(row.cost), 4),
-        }
-        for row in cost_q.all()
-    ]
-
-    # Budget status
+    # LLM cost — ALL from the same source (cost_tracker Redis counters) so the
+    # per-model breakdown reconciles with the monthly total. This captures every
+    # LLM call (reply-guy drafts + campaign planning included), unlike the old
+    # breakdown which summed only stored MarketingPosts and undercounted.
+    from src.marketing.llm.cost_tracker import get_monthly_breakdown
     daily_spend = await get_daily_spend()
     monthly_spend = await get_monthly_spend()
+    cost_breakdown = await get_monthly_breakdown()
+    # Fallback: if the Redis per-model counters are empty (e.g. fresh deploy before
+    # any generation this month), show the DB post-attributed breakdown so the table
+    # isn't blank.
+    if not cost_breakdown:
+        cost_q = await db.execute(
+            select(
+                MarketingPost.llm_model,
+                func.count(MarketingPost.id).label("calls"),
+                func.coalesce(func.sum(MarketingPost.llm_cost_usd), 0.0).label("cost"),
+            ).where(
+                MarketingPost.llm_model.isnot(None),
+                MarketingPost.created_at >= month_ago,
+            ).group_by(MarketingPost.llm_model),
+        )
+        cost_breakdown = [
+            {"model": row.llm_model, "calls": row.calls, "cost_usd": round(float(row.cost), 4)}
+            for row in cost_q.all()
+        ]
 
     # Recent posts
     recent_q = await db.execute(

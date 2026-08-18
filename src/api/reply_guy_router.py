@@ -156,17 +156,27 @@ async def get_queue(
     platform: str | None = None,
     limit: int = 20,
     offset: int = 0,
+    sort: str = "urgency",  # "urgency" (default, legacy) | "recent" (newest first)
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get reply opportunities queue sorted by urgency."""
+    """Get reply opportunities queue. Sorted by urgency by default; ``sort=recent``
+    orders newest-first (by posted_at for sent replies, else created_at)."""
     require_admin(current_entity)
 
+    if sort == "recent":
+        order = (
+            ReplyOpportunity.posted_at.desc().nullslast()
+            if status == "posted"
+            else ReplyOpportunity.created_at.desc()
+        )
+    else:
+        order = ReplyOpportunity.urgency_score.desc()
     q = (
         select(ReplyOpportunity)
         .options(selectinload(ReplyOpportunity.target))
         .where(ReplyOpportunity.status == status)
-        .order_by(ReplyOpportunity.urgency_score.desc())
+        .order_by(order)
         .offset(offset)
         .limit(limit)
     )
@@ -196,6 +206,10 @@ async def get_queue(
                 "drafted_at": (
                     o.drafted_at.isoformat() if o.drafted_at else None
                 ),
+                "posted_at": (
+                    o.posted_at.isoformat() if o.posted_at else None
+                ),
+                "reply_url": o.reply_url,
                 "urgency_score": round(o.urgency_score or 0, 2),
                 "engagement_count": o.engagement_count,
                 "target": {

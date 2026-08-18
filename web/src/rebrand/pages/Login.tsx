@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useAuth } from '../../hooks/useAuth'
+import { trackEvent } from '../../lib/analytics'
 
 /**
  * Rebrand-styled sign-in / sign-up. Reuses the real auth (useAuth().login/register)
@@ -25,7 +26,9 @@ export default function RebrandLogin() {
     setBusy(true)
     try {
       if (mode === 'signup') {
+        trackEvent('register_start', '/rebrand/login')
         await register(email, password, name.trim() || email.split('@')[0])
+        trackEvent('register_complete', '/rebrand/login')
       } else {
         await login(email, password)
       }

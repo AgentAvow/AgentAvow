@@ -59,16 +59,48 @@ async def record_usage(
         daily_key = f"ag:mktg:cost:{today}"
         monthly_key = f"ag:mktg:cost:month:{month}"
 
+        # Per-model monthly cost + call count so the dashboard breakdown reconciles
+        # with the monthly total (both from THIS single source — all LLM usage,
+        # including reply-guy drafts and campaign planning, not just stored posts).
+        model_cost_key = f"ag:mktg:cost:model:{month}:{model}"
+        model_calls_key = f"ag:mktg:calls:model:{month}:{model}"
+
         pipe = r.pipeline()
         pipe.incrbyfloat(daily_key, cost)
         pipe.expire(daily_key, 86400 * 2)  # TTL 2 days
         pipe.incrbyfloat(monthly_key, cost)
         pipe.expire(monthly_key, 86400 * 35)  # TTL ~1 month
+        pipe.incrbyfloat(model_cost_key, cost)
+        pipe.expire(model_cost_key, 86400 * 35)
+        pipe.incr(model_calls_key)
+        pipe.expire(model_calls_key, 86400 * 35)
         await pipe.execute()
     except Exception:
         logger.debug("Redis unavailable for cost tracking, using in-memory")
 
     return cost
+
+
+async def get_monthly_breakdown(month: str | None = None) -> list[dict]:
+    """Per-model spend for the month: ``[{model, cost_usd, calls}]`` — the SAME
+    source as ``get_monthly_spend`` so the breakdown sums to the monthly total.
+    Best-effort ([] on failure)."""
+    target = month or date.today().isoformat()[:7]
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        cost_keys = [k async for k in r.scan_iter(match=f"ag:mktg:cost:model:{target}:*")]
+        out: list[dict] = []
+        for ck in cost_keys:
+            key = ck.decode() if isinstance(ck, bytes) else ck
+            model = key.rsplit(":", 1)[-1]
+            cost = float(await r.get(ck) or 0)
+            calls = int(await r.get(f"ag:mktg:calls:model:{target}:{model}") or 0)
+            out.append({"model": model, "cost_usd": round(cost, 4), "calls": calls})
+        return sorted(out, key=lambda x: x["cost_usd"], reverse=True)
+    except Exception:
+        return []
 
 
 async def get_daily_spend(day: date | None = None) -> float:
