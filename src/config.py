@@ -375,6 +375,10 @@ class Settings(BaseSettings):
     # Stale drafts that never posted (daily cap / window / gap) clog the queue and
     # age out of relevance — expire them after this many hours.
     reply_guy_draft_ttl_hours: int = 48
+    # Shared secret so an external tool (e.g. the news-digest bot) can POST candidate
+    # AI-slop phrases into the approval queue without a full admin login. Empty = the
+    # ingest endpoint is disabled. Set via env SLOP_PROPOSAL_SECRET.
+    slop_proposal_secret: str = ""
 
     # Email rate limiting & retry
     email_rate_limit_per_minute: int = 30

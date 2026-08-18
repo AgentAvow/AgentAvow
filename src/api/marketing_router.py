@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -752,6 +752,31 @@ async def get_bot_activity(
         failed=failed,
         total=len(rows),
     )
+
+
+@router.post("/slop-proposals/ingest")
+async def slop_proposals_ingest(
+    body: dict,
+    request: Request,
+) -> dict:
+    """Ingest candidate AI-slop phrases from an external tool (e.g. the news-digest bot)
+    into the approval queue. Auth via the ``X-Proposal-Secret`` header matching
+    ``SLOP_PROPOSAL_SECRET``. Body: ``{"phrases": [{"phrase": str, "reason": str}, ...]}``
+    or ``{"phrases": ["phrase", ...]}``. Nothing is applied until an admin approves it."""
+    from src.config import settings
+    secret = (settings.slop_proposal_secret or "").strip()
+    if not secret or request.headers.get("x-proposal-secret", "") != secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    from src.marketing.content.slop_learning import propose
+    items = (body or {}).get("phrases") or []
+    added = 0
+    for it in items[:50]:
+        phrase = it if isinstance(it, str) else (it or {}).get("phrase", "")
+        reason = (it or {}).get("reason", "news-digest lesson") if isinstance(it, dict) \
+            else "news-digest lesson"
+        if await propose(phrase, reason):
+            added += 1
+    return {"added": added, "received": len(items)}
 
 
 @router.get("/slop-proposals")
