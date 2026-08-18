@@ -169,6 +169,31 @@ async def edit_and_approve(
     return post
 
 
+async def edit_content(
+    db: AsyncSession, post_id: uuid.UUID, new_content: str,
+) -> MarketingPost | None:
+    """Edit a post's content WITHOUT changing its status — for scheduled/planned
+    campaign posts the user wants to tweak but keep on schedule."""
+    post = (await db.execute(
+        select(MarketingPost).where(
+            MarketingPost.id == post_id,
+            MarketingPost.status.in_(("human_review", "draft", "queued", "planned")),
+        ),
+    )).scalar_one_or_none()
+    if not post:
+        return None
+    original = post.content or ""
+    post.content = new_content
+    post.content_hash = content_hash(new_content)
+    await db.flush()
+    try:
+        from src.marketing.content.slop_learning import propose_from_edit
+        await propose_from_edit(original, new_content)
+    except Exception:
+        pass
+    return post
+
+
 async def mark_manually_posted(
     db: AsyncSession,
     post_id: uuid.UUID,

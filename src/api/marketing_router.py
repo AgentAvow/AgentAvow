@@ -59,7 +59,7 @@ def _draft_playbook(post: object) -> dict | None:
 
 
 class DraftActionRequest(BaseModel):
-    action: str = Field(..., pattern="^(approve|reject|edit_approve|mark_posted)$")
+    action: str = Field(..., pattern="^(approve|reject|edit_approve|edit|mark_posted)$")
     content: str | None = None  # Required for edit_approve
     reason: str | None = None   # Optional for reject
     posted_url: str | None = None  # Optional URL where it was manually posted
@@ -313,6 +313,15 @@ async def action_draft(
                 detail="content required for edit_approve",
             )
         post = await edit_and_approve(db, post_id, req.content)
+    elif req.action == "edit":
+        # Plain content edit (no status change) — for scheduled/planned campaign posts.
+        if not req.content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="content required for edit",
+            )
+        from src.marketing.draft_queue import edit_content
+        post = await edit_content(db, post_id, req.content)
     elif req.action == "mark_posted":
         from src.marketing.draft_queue import mark_manually_posted
 

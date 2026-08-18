@@ -268,6 +268,35 @@ function DraftCard({ d, onDone }: { d: Draft; onDone: () => void }) {
   )
 }
 
+function PlannedCard({ d, onDone }: { d: Draft; onDone: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(d.content)
+  const day = (d as Draft & { scheduled_day?: string }).scheduled_day
+  const act = useMutation({
+    mutationFn: () => api.post(`/admin/marketing/drafts/${d.id}`, { action: 'edit', content: text }),
+    onSuccess: () => { setEditing(false); onDone() },
+  })
+  return (
+    <div className="glass rounded-xl p-4">
+      <div className="flex items-center gap-2 text-[11.5px] font-mono text-text-muted">
+        <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{d.platform}</span>
+        {day && <span>📅 {day}</span>}
+        {d.topic && <span>{d.topic}</span>}
+        {!editing && <button onClick={() => setEditing(true)} className="ml-auto text-primary-light hover:text-primary font-semibold">edit</button>}
+      </div>
+      {editing ? (
+        <>
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} className="mt-2 w-full text-[13px] rounded-lg bg-surface border border-border p-2 font-mono" />
+          <div className="mt-2 flex gap-2 text-[12.5px] font-semibold">
+            <button onClick={() => act.mutate()} disabled={act.isPending} className="px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60">Save</button>
+            <button onClick={() => { setEditing(false); setText(d.content) }} className="px-3 py-1.5 rounded-lg border border-border text-text-muted">Cancel</button>
+          </div>
+        </>
+      ) : <p className="mt-2 text-[12.5px] text-text-muted whitespace-pre-wrap">{d.content.slice(0, 220)}{d.content.length > 220 ? '…' : ''}</p>}
+    </div>
+  )
+}
+
 function MarketingTab() {
   const qc = useQueryClient()
   const invalidate = () => { ['admin-mkt-drafts', 'admin-mkt-planned', 'admin-mkt-dash', 'admin-mkt-reply-considering', 'admin-mkt-reply-sent'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })) }
@@ -382,20 +411,10 @@ function MarketingTab() {
         {(() => { const q = byDate((manual.data || []).filter((d) => ['linkedin', 'reddit', 'hackernews', 'producthunt'].includes(d.platform))); return q.length ? <div className="flex flex-col gap-2">{q.map((d) => <DraftCard key={d.id} d={d} onDone={invalidate} />)}</div> : <p className="text-text-muted text-[13px]">Nothing to post by hand right now.</p> })()}
       </Section>
 
-      <Section title="Queue 2 · Scheduled this week" note="What the weekly campaign will auto-post, and when. You'll likely never touch this — edit if you want to.">
+      <Section title="Queue 2 · Scheduled this week" note="What the weekly campaign will auto-post, and when. You'll likely never touch it — but you can edit any post here.">
         {byDate(planned.data || []).length ? (
           <div className="flex flex-col gap-2">
-            {byDate(planned.data || []).map((d) => (
-              <div key={d.id} className="glass rounded-xl p-4">
-                <div className="flex items-center gap-2 text-[11.5px] font-mono text-text-muted">
-                  <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{d.platform}</span>
-                  {(d as Draft & { scheduled_day?: string }).scheduled_day && <span>📅 {(d as Draft & { scheduled_day?: string }).scheduled_day}</span>}
-                  {d.topic && <span>{d.topic}</span>}
-                  <span className="ml-auto text-text-muted/60">managed by the weekly campaign</span>
-                </div>
-                <p className="mt-2 text-[12.5px] text-text-muted whitespace-pre-wrap">{d.content.slice(0, 180)}{d.content.length > 180 ? '…' : ''}</p>
-              </div>
-            ))}
+            {byDate(planned.data || []).map((d) => <PlannedCard key={d.id} d={d} onDone={invalidate} />)}
           </div>
         ) : <p className="text-text-muted text-[13px]">No scheduled campaign posts. Generate a weekly plan above.</p>}
       </Section>
