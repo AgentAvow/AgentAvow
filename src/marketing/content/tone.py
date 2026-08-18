@@ -232,8 +232,15 @@ HUMAN_VOICE_RULES = (
     "point, or a real specific ask ('tell us what breaks', 'reply with your repo').\n"
     "BANNED formatting: emoji used as bullets or to decorate headers; bold "
     "sprinkled mid-sentence for emphasis. Let the words carry it.\n"
+    "SUBSTANCE TESTS (run both on every sentence before keeping it):\n"
+    "1. Portability test: if the sentence could move unchanged into a post about "
+    "a different company or product, it is filler. Delete it or replace it with a "
+    "claim only true of this subject — a fact, number, mechanism, or consequence.\n"
+    "2. Concrete over abstract: never assert a quality ('faster', 'more secure', "
+    "'seamless') without the specific number, name, date, or mechanism that proves "
+    "it. If you don't have the specific, drop the claim rather than pad it.\n"
     "DO: vary sentence length; use the occasional fragment; start some sentences "
-    "with 'And' or 'But'; prefer concrete nouns and real numbers over abstractions; "
+    "with 'And' or 'But'; "
     "sound like one engineer who actually built this typing fast — not a brand."
 )
 
