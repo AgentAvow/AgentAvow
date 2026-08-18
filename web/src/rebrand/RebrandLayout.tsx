@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AtmosphericBackground } from '../components/AtmosphericBackground'
 import { useAuth } from '../hooks/useAuth'
 import api from '../lib/api'
+import { trackEvent } from '../lib/analytics'
 
 /**
  * Signed-in account controls: a notifications bell (unread count from the real
@@ -210,6 +211,13 @@ function Orbs() {
 
 export default function RebrandLayout() {
   const { pathname } = useLocation()
+
+  // Anonymous page-view tracking (fire-and-forget) so the admin traffic funnel
+  // has real session data — the live cutover tree never emitted this before, so
+  // the funnel was starved. Feeds /analytics/conversion (session-keyed).
+  useEffect(() => {
+    trackEvent('guest_page_view', pathname)
+  }, [pathname])
 
   // Rebrand-only favicon + title swap — restored on unmount so the live site
   // (which shares index.html) keeps its own identity until the real cutover.

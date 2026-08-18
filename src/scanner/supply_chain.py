@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 
 import httpx
@@ -580,9 +580,13 @@ async def analyze_supply_chain(
             )
             if indirect:
                 marked = 0
-                for d in deps:
+                # Dep is a frozen dataclass — rebuild the entry via replace() rather
+                # than mutating in place (which raised FrozenInstanceError and made the
+                # whole OSV pass fail-open to regex on every scan with transitive deps).
+                deps = list(deps)
+                for i, d in enumerate(deps):
                     if getattr(d, "direct", True) and f"{d.name.lower()}@{d.version}" in indirect:
-                        d.direct = False
+                        deps[i] = replace(d, direct=False)
                         marked += 1
                 if marked:
                     result.db_snapshots["depsdev_graph"] = f"{r_eco}:{r_name}@{r_ver}"
