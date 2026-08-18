@@ -1732,6 +1732,7 @@ async def scan_badge(
 
     # Check if this repo is imported as an AgentGraph entity
     entity_trust = await _get_entity_trust(full_name, db)
+    certified = False  # the earned top tier — renders a distinct badge treatment
 
     # Determine which score to show: composite trust vs security scan
     if (
@@ -1742,12 +1743,16 @@ async def scan_badge(
         # Entity exists on AgentGraph — show composite trust score
         score = entity_trust["composite_score"]
         score_type = "Trust"
+        # Certified is a repo/artifact property — read it from the cached scan if present.
+        _c = await _get_cached(owner, repo)
+        certified = bool((( _c or {}).get("certified") or {}).get("eligible"))
     else:
         # No entity — fall back to security scan score
         cached = await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
             score_type = "Scan"
+            certified = bool((cached.get("certified") or {}).get("eligible"))
         else:
             # Cache miss: regenerate on demand rather than decaying to a grey
             # "not scanned" pill. A README badge is hit long after the 1h cache
@@ -1758,6 +1763,7 @@ async def scan_badge(
                 fresh = await public_scan(owner=owner, repo=repo, force=False, db=db)
                 score = fresh.security_score
                 score_type = "Scan"
+                certified = bool((getattr(fresh, "certified", None) or {}).get("eligible"))
             except Exception:
                 logger.warning("badge regenerate failed for %s/%s", owner, repo, exc_info=True)
                 score = None
@@ -1771,7 +1777,11 @@ async def scan_badge(
         _as, a_count, _au = await surface_adoption_summary(a_surface, owner, repo)
         return _combined_badge_response(score, a_count)
 
-    # Build badge — numbers, not letters (dual-mark pivot 2026-08)
+    # Build badge — numbers, not letters (dual-mark pivot 2026-08).
+    # A Certified tool gets the distinct earned-tier treatment (the CertifiedMark
+    # gradient), not the plain trust pill.
+    if score is not None and certified:
+        return _certified_badge_response(int(score))
     if score is not None:
         color = _trust_score_color(int(score))
         label = f"{score_type}: {score}/100"
@@ -1961,6 +1971,39 @@ def _combined_badge_response(score: int | None, count: int | None) -> Response:
         font-weight="bold" text-anchor="middle">{trust_label}</text>
   <text x="{bw + tw + aw // 2}" y="14" fill="#7fe9d9" font-family="Verdana,sans-serif"
         font-size="11" text-anchor="middle">{adopt_label}</text>
+</svg>'''
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=3600, s-maxage=86400",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+def _certified_badge_response(score: int) -> Response:
+    """The earned-tier badge: [AgentAvow | ✓ Certified NN] with the CertifiedMark
+    teal→magenta gradient (matches the on-site mark). Only rendered for a tool that
+    currently clears the conjunctive Certified gate — recomputed every scan, so it
+    can't outlive the thing it attests."""
+    label = f"✓ Certified {score}"
+    label_width = len(label) * 7 + 16
+    total_width = 80 + label_width
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
+  <defs>
+    <linearGradient id="agcert" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2dd4bf"/>
+      <stop offset="1" stop-color="#e879f9"/>
+    </linearGradient>
+  </defs>
+  <rect width="80" height="20" fill="#0b0f17" rx="3"/>
+  <rect x="80" width="{label_width}" height="20" fill="url(#agcert)" rx="3"/>
+  <rect x="80" width="4" height="20" fill="#2dd4bf"/>
+  <text x="40" y="14" fill="#fff" font-family="Verdana,sans-serif" font-size="11"
+        text-anchor="middle">{settings.badge_brand}</text>
+  <text x="{80 + label_width // 2}" y="14" fill="#06231f" font-family="Verdana,sans-serif"
+        font-size="11" font-weight="bold" text-anchor="middle">{label}</text>
 </svg>'''
     return Response(
         content=svg,
