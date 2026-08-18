@@ -166,6 +166,7 @@ const NAV = [
   ['/rebrand/index', 'The Index'],
   ['/rebrand/submit', 'List your tool'],
   ['/rebrand/for-developers', 'For developers'],
+  ['/rebrand/preflight', 'Preflight'],
   ['/rebrand/how-it-works', 'How it works'],
   ['/rebrand/docs', 'Docs'],
 ]

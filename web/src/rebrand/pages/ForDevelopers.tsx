@@ -13,15 +13,36 @@ import { Reveal, RevealStagger } from '../components/motion'
 
 const BADGE_MD = '[![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)'
 
+// The signed-score block a maintainer pastes into their MCP server.json so the
+// score travels into the registry record itself. The live, signed block for a
+// specific repo comes from /api/v1/public/registry-snippet/{owner}/{repo}.
+const REGISTRY_SNIPPET = `"_meta": {
+  "io.modelcontextprotocol.registry/publisher-provided": {
+    "com.agentavow/trust": {
+      "trustScore": 92,
+      "certified": false,
+      "subject": "github:you/your-repo",
+      "issuer": "did:web:agentgraph.co",
+      "attestation": "<signed JWS — recompute & verify offline>",
+      "jwks": "https://agentgraph.co/.well-known/jwks.json"
+    }
+  }
+}`
+
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
 }
 
 export default function RebrandForDevelopers() {
   const [copied, setCopied] = useState(false)
+  const [copiedSnip, setCopiedSnip] = useState(false)
   const copy = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(BADGE_MD)
     setCopied(true); setTimeout(() => setCopied(false), 1400)
+  }
+  const copySnip = () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(REGISTRY_SNIPPET)
+    setCopiedSnip(true); setTimeout(() => setCopiedSnip(false), 1400)
   }
 
   return (
@@ -41,6 +62,7 @@ export default function RebrandForDevelopers() {
           </p>
           <div className="mt-6 flex gap-3 flex-wrap">
             <Link to={rp('/rebrand/check')} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Scan your tool →</Link>
+            <Link to={rp('/rebrand/preflight')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Preflight for the app stores</Link>
             <Link to={rp('/rebrand/badge')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Mint a badge</Link>
           </div>
         </div>
@@ -103,6 +125,14 @@ export default function RebrandForDevelopers() {
           <button onClick={copy} className="absolute top-2 right-2 font-mono text-[11px] px-2 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied ? 'copied ✓' : 'copy'}</button>
         </div>
         <p className="mt-2 font-mono text-[11px] text-text-muted/70">swap in your own owner/repo — regenerates on every view, never goes stale</p>
+
+        <div className="mt-6 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">MCP registry — signed score in your server.json</div>
+        <div className="relative">
+          <pre className="font-mono text-[11.5px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto">{REGISTRY_SNIPPET}</pre>
+          <button onClick={copySnip} className="absolute top-2 right-2 font-mono text-[11px] px-2 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copiedSnip ? 'copied ✓' : 'copy'}</button>
+        </div>
+        <p className="mt-2 font-mono text-[11px] text-text-muted/70">rides the <span className="text-text-muted">publisher-provided</span> <span className="text-text-muted">_meta</span> slot into the registry record — offline-recomputable, so a reviewer verifies it without trusting us. Live block: <span className="text-primary-light">/api/v1/public/registry-snippet/you/your-repo</span></p>
+
         <div className="mt-5 grid sm:grid-cols-2 gap-4">
           {[
             ['Embeddable widget', 'The full dual-mark card + an in-browser "Verify offline" button, for docs sites and landing pages — one script tag.', rp('/rebrand/badge')],

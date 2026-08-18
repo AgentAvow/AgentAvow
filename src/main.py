@@ -13,7 +13,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.a2a_router import router as a2a_router
 from src.api.account_claims_router import router as account_claims_router
-from src.api.github_app_router import router as github_app_router
 from src.api.account_keys_router import router as account_keys_router
 from src.api.account_router import router as account_router
 from src.api.account_webhook_router import router as account_webhook_router
@@ -52,6 +51,7 @@ from src.api.enhanced_profile_router import router as enhanced_profile_router
 from src.api.evolution_router import router as evolution_router
 from src.api.export_router import router as export_router
 from src.api.feed_router import router as feed_router
+from src.api.github_app_router import router as github_app_router
 from src.api.graph_router import router as graph_router
 from src.api.insights_router import router as insights_router
 from src.api.interaction_router import router as interaction_router
@@ -68,6 +68,7 @@ from src.api.notification_router import router as notification_router
 from src.api.og_router import router as og_router
 from src.api.onboarding_router import router as onboarding_router
 from src.api.org_router import router as org_router
+from src.api.preflight_router import router as preflight_router
 from src.api.profile_router import router as profile_router
 from src.api.public_scan_router import router as public_scan_router
 from src.api.ratelimit_router import router as ratelimit_router
@@ -707,6 +708,7 @@ app.include_router(jwks_router)
 
 # Public scan API — trust-tiered security scanning (no auth required)
 app.include_router(public_scan_router, prefix=settings.api_v1_prefix)
+app.include_router(preflight_router, prefix=settings.api_v1_prefix)
 app.include_router(watch_router, prefix=settings.api_v1_prefix)
 app.include_router(account_keys_router, prefix=settings.api_v1_prefix)
 app.include_router(account_webhook_router, prefix=settings.api_v1_prefix)

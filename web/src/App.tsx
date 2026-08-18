@@ -127,6 +127,8 @@ const RebrandAdminReplies = lazyWithReload(() => import('./rebrand/pages/AdminRe
 const RebrandNotifications = lazyWithReload(() => import('./rebrand/pages/Notifications'))
 const RebrandBadge = lazyWithReload(() => import('./rebrand/pages/Badge'))
 const RebrandForDevelopers = lazyWithReload(() => import('./rebrand/pages/ForDevelopers'))
+const RebrandPreflight = lazyWithReload(() => import('./rebrand/pages/Preflight'))
+const RebrandCertified = lazyWithReload(() => import('./rebrand/pages/Certified'))
 const RebrandDocs = lazyWithReload(() => import('./rebrand/pages/Docs'))
 const RebrandCheck = lazyWithReload(() => import('./rebrand/pages/Check'))
 const RebrandSubmit = lazyWithReload(() => import('./rebrand/pages/Submit'))
@@ -263,6 +265,8 @@ function AppRoutes() {
           <Route path="submit" element={<RebrandSubmit />} />
           <Route path="badge" element={<RebrandBadge />} />
           <Route path="for-developers" element={<RebrandForDevelopers />} />
+          <Route path="preflight" element={<RebrandPreflight />} />
+          <Route path="certified" element={<RebrandCertified />} />
           <Route path="docs" element={<RebrandDocs />} />
           <Route path="docs/:slug" element={<RebrandDocs />} />
           <Route path="check" element={<RebrandCheck />} />
