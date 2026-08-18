@@ -225,7 +225,10 @@ export default function RebrandAccount() {
       {alerts.length > 0 && (
         <Reveal>
           <div className="mt-8">
-            <h2 className="text-[13px] font-mono uppercase tracking-wide text-warning mb-3">Recent alerts</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-[13px] font-mono uppercase tracking-wide text-warning">Recent alerts</h2>
+              <Link to={rp('/rebrand/notifications')} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">See all &amp; manage →</Link>
+            </div>
             <div className="flex flex-col gap-2">
               {alerts.slice(0, 5).map((n) => (
                 <div key={n.id} className={`glass rounded-xl px-4 py-3 border-l-4 ${n.is_read ? 'border-border' : 'border-warning'}`}>

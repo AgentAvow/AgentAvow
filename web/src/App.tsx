@@ -124,6 +124,7 @@ const RebrandTrustIndex = lazyWithReload(() => import('./rebrand/pages/TrustInde
 const RebrandAdminDashboard = lazyWithReload(() => import('./rebrand/pages/AdminDashboard'))
 const RebrandAdminPosts = lazyWithReload(() => import('./rebrand/pages/AdminPosts'))
 const RebrandAdminReplies = lazyWithReload(() => import('./rebrand/pages/AdminReplies'))
+const RebrandNotifications = lazyWithReload(() => import('./rebrand/pages/Notifications'))
 const RebrandBadge = lazyWithReload(() => import('./rebrand/pages/Badge'))
 const RebrandForDevelopers = lazyWithReload(() => import('./rebrand/pages/ForDevelopers'))
 const RebrandDocs = lazyWithReload(() => import('./rebrand/pages/Docs'))
@@ -258,6 +259,7 @@ function AppRoutes() {
           <Route path="admin-dashboard" element={<RebrandAdminDashboard />} />
           <Route path="admin-posts" element={<RebrandAdminPosts />} />
           <Route path="admin-replies" element={<RebrandAdminReplies />} />
+          <Route path="notifications" element={<RebrandNotifications />} />
           <Route path="submit" element={<RebrandSubmit />} />
           <Route path="badge" element={<RebrandBadge />} />
           <Route path="for-developers" element={<RebrandForDevelopers />} />
