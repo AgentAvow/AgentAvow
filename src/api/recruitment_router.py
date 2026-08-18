@@ -156,7 +156,7 @@ async def update_prospect(
 
     if body.status is not None:
         valid_statuses = {
-            "discovered", "contacted", "visited", "registered",
+            "discovered", "queued", "contacted", "visited", "registered",
             "onboarded", "active", "promoting", "declined", "skipped",
         }
         if body.status not in valid_statuses:
@@ -171,3 +171,65 @@ async def update_prospect(
     await db.flush()
     await db.refresh(prospect)
     return _prospect_to_out(prospect)
+
+
+@router.post("/radar/run")
+async def run_radar(
+    limit: int = Query(25, le=100),
+    discover: bool = Query(True),
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Fire one developer-radar cycle in the background: refresh GitHub discovery,
+    then scan + rank new prospects into the ``queued`` outreach list. Human-gated —
+    it NEVER contacts anyone. Poll ``/radar/queue`` for results."""
+    require_admin(current_entity)
+
+    import asyncio
+
+    from src.database import async_session
+    from src.jobs.developer_radar import run_developer_radar
+
+    async def _bg() -> None:
+        try:
+            async with async_session() as s:
+                await run_developer_radar(s, discover=discover, limit=limit)
+        except Exception:
+            logger.exception("radar background cycle failed")
+
+    asyncio.create_task(_bg())
+    return {"ok": True, "status": "started",
+            "note": "Radar running in the background — poll /admin/recruitment/radar/queue."}
+
+
+@router.get("/radar/queue")
+async def radar_queue(
+    limit: int = Query(50, le=200),
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The ranked outreach queue — scored prospects, highest outreach-priority first.
+    Each item carries the score, whether it already shows shields, the recommended
+    channel (badge-ask vs value-first/fix), and the angle. Kenne sends manually."""
+    require_admin(current_entity)
+
+    import json
+
+    rows = (await db.scalars(
+        select(RecruitmentProspect)
+        .where(RecruitmentProspect.status == "queued")
+        .limit(limit)
+    )).all()
+
+    items = []
+    for p in rows:
+        try:
+            enr = json.loads(p.notes) if p.notes else {}
+        except Exception:
+            enr = {}
+        items.append({
+            "full_name": p.platform_id, "owner": p.owner_login, "repo": p.repo_name,
+            "stars": p.stars, "framework": p.framework_detected, **enr,
+        })
+    items.sort(key=lambda x: x.get("priority", 0), reverse=True)
+    return {"queue": items, "total": len(items)}

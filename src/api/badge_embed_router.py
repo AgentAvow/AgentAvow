@@ -58,7 +58,7 @@ def _render_embed_badge_svg(
     Includes scan status in title if available.
     """
     score_pct = str(round(score * 100))
-    status_char = "\\u2713" if is_verified else "\\u2717"
+    status_char = "✓" if is_verified else "✗"  # ✓ / ✗ (was double-escaped → rendered literal text)
     value_text = f"{score_pct} {status_char}"
 
     label = "AgentAvow"
