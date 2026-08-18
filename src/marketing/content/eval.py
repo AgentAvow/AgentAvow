@@ -67,6 +67,27 @@ async def _reply_engagement(db: AsyncSession, days: int = 7) -> tuple[float, int
     return round(total / len(rows), 2), len(rows)
 
 
+async def _engagement_by_platform(db: AsyncSession, days: int = 30) -> list[dict]:
+    """Avg engagement PER POST by platform — which channels actually earn their keep."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = list((await db.execute(
+        select(MarketingPost.platform, MarketingPost.metrics_json).where(
+            MarketingPost.status == "posted",
+            MarketingPost.posted_at >= since,
+            MarketingPost.metrics_json.isnot(None),
+        ),
+    )).all())
+    agg: dict[str, list[int]] = {}
+    for plat, m in rows:
+        agg.setdefault(plat, []).append(_eng(m))
+    out = [
+        {"platform": p, "eng_per_post": round(sum(v) / len(v), 2), "posts": len(v),
+         "total": sum(v)}
+        for p, v in agg.items()
+    ]
+    return sorted(out, key=lambda x: x["eng_per_post"], reverse=True)
+
+
 async def get_marketing_eval(db: AsyncSession) -> dict:
     """The eval snapshot + any active alerts."""
     eng7, n7 = await _avg_engagement(db, 7)
@@ -114,6 +135,7 @@ async def get_marketing_eval(db: AsyncSession) -> dict:
     return {
         "engagement_per_post_7d": eng7,
         "engagement_per_post_30d": eng30,
+        "by_platform": await _engagement_by_platform(db, 30),
         "trend_pct": trend,
         "posts_7d": n7,
         "posts_30d": n30,

@@ -41,7 +41,9 @@ interface MktDash {
 }
 interface Campaign { id: string; name: string; topic: string; platforms: string[]; status: string; start_date?: string }
 interface ReplyStats { status_counts?: Record<string, number>; posted_today?: number; active_targets?: number; queue_size?: number }
-interface Eval { engagement_per_post_7d?: number; engagement_per_post_30d?: number; trend_pct?: number | null; slop_pass_rate_7d?: number | null; reply_engagement_per_post_7d?: number; posts_7d?: number; alerts?: { level: string; message: string; action?: string }[] }
+interface Eval { engagement_per_post_7d?: number; engagement_per_post_30d?: number; trend_pct?: number | null; slop_pass_rate_7d?: number | null; reply_engagement_per_post_7d?: number; posts_7d?: number; by_platform?: { platform: string; eng_per_post: number; posts: number; total: number }[]; alerts?: { level: string; message: string; action?: string }[] }
+interface Conversions { platforms?: { platform: string; clicks: number; signups: number; cost_usd: number; cost_per_signup: number | null }[]; total_clicks?: number; total_signups?: number; total_cost_usd?: number }
+interface TargetPerf { targets?: { handle: string; platform: string; replies: number; avg_engagement: number; total_engagement: number }[] }
 interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?: string | null; draft_content?: string; drafted_at?: string | null; posted_at?: string | null; engagement_count?: number; urgency_score?: number; target?: { handle?: string | null; follower_count?: number } }
 const REPLY_TTL_H = 48
 
@@ -122,6 +124,10 @@ function MetricsTab() {
   const traffic = useQuery<Conversion>({
     queryKey: ['admin-dash-traffic'],
     queryFn: async () => { try { return (await api.get('/analytics/conversion')).data } catch { return {} } },
+  })
+  const flagged = useQuery<{ pct: number | null; flagged: number; scanned: number }>({
+    queryKey: ['admin-dash-flagged'],
+    queryFn: async () => { try { return (await api.get('/public/scan-catalog/flagged-stat')).data } catch { return { pct: null, flagged: 0, scanned: 0 } } },
   })
   const tf = traffic.data?.funnel || []
   const tmax = Math.max(...tf.map((r) => r.count), 1)
@@ -208,6 +214,13 @@ function MetricsTab() {
           </div>
         </Section>
       </div>
+
+      <Section title="Catalog risk" note="Share of scanned tools carrying a high/critical finding — the headline safety signal (and content angle).">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <Stat label="Flagged (high/critical)" value={flagged.data?.pct != null ? `${flagged.data.pct}%` : '—'} sub={`${fmt(flagged.data?.flagged)} of ${fmt(flagged.data?.scanned)}`} />
+        </div>
+        <p className="mt-2 text-[11.5px] text-text-muted/70">Per-finding-category breakdown (which types are most common) needs category tallies stored on scan — staged.</p>
+      </Section>
 
       <Section title="Catalog by surface">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -309,6 +322,8 @@ function MarketingTab() {
   const reply = useQuery<ReplyStats>({ queryKey: ['admin-mkt-reply'], queryFn: async () => (await api.get('/admin/engagement/stats')).data })
   const evalQ = useQuery<Eval>({ queryKey: ['admin-mkt-eval'], queryFn: async () => (await api.get('/admin/marketing/eval')).data })
   const slop = useQuery<{ proposals: { phrase: string; reason: string }[] }>({ queryKey: ['admin-mkt-slop'], queryFn: async () => (await api.get('/admin/marketing/slop-proposals')).data })
+  const conv = useQuery<Conversions>({ queryKey: ['admin-mkt-conversions'], queryFn: async () => { try { return (await api.get('/admin/marketing/conversions', { params: { days: 30 } })).data } catch { return {} } } })
+  const targetPerf = useQuery<TargetPerf>({ queryKey: ['admin-mkt-target-perf'], queryFn: async () => { try { return (await api.get('/admin/engagement/target-performance')).data } catch { return {} } } })
   const slopAct = useMutation({ mutationFn: (b: { phrase: string; action: string }) => api.post('/admin/marketing/slop-proposals/action', b), onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-mkt-slop'] }) })
   // Queue 3: replies it's considering next (drafted). Feed: replies already sent.
   // Sorted by urgency (default) — the ones it'll try to post first.
@@ -360,6 +375,36 @@ function MarketingTab() {
           <Stat label="Reply engagement (7d)" value={fmt(evalQ.data?.reply_engagement_per_post_7d)} sub="per reply" />
           <Stat label="Posts measured (7d)" value={fmt(evalQ.data?.posts_7d)} />
         </div>
+      </Section>
+
+      <Section title="ROI — cost per signup" note="Marketing spend tied to actual signups (UTM-attributed, 30d). The honest 'is this worth it?' number.">
+        {conv.data?.platforms?.length ? (
+          <div className="glass rounded-2xl p-4 overflow-x-auto">
+            <table className="w-full text-[12.5px]">
+              <thead><tr className="text-text-muted/70 text-left font-mono"><th className="py-1 pr-3">platform</th><th className="py-1 pr-3 text-right">clicks</th><th className="py-1 pr-3 text-right">signups</th><th className="py-1 pr-3 text-right">cost</th><th className="py-1 text-right">cost / signup</th></tr></thead>
+              <tbody>
+                {conv.data.platforms.map((p) => (
+                  <tr key={p.platform} className="border-t border-border/40">
+                    <td className="py-1.5 pr-3 font-mono">{p.platform}</td>
+                    <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(p.clicks)}</td>
+                    <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(p.signups)}</td>
+                    <td className="py-1.5 pr-3 tabular-nums text-right text-text-muted">{usd(p.cost_usd)}</td>
+                    <td className="py-1.5 tabular-nums text-right">{p.cost_per_signup != null ? usd(p.cost_per_signup) : '—'}</td>
+                  </tr>
+                ))}
+                <tr className="border-t border-border/60 font-semibold"><td className="py-1.5 pr-3">total</td><td className="py-1.5 pr-3 tabular-nums text-right">{fmt(conv.data.total_clicks)}</td><td className="py-1.5 pr-3 tabular-nums text-right">{fmt(conv.data.total_signups)}</td><td className="py-1.5 pr-3 tabular-nums text-right">{usd(conv.data.total_cost_usd)}</td><td className="py-1.5 tabular-nums text-right">{conv.data.total_signups ? usd((conv.data.total_cost_usd || 0) / conv.data.total_signups) : '—'}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="text-text-muted text-[13px]">No attributed conversions yet (needs UTM clicks → signups).</p>}
+      </Section>
+
+      <Section title="Engagement by platform" note="Average engagement per post, by channel (30d) — which platforms earn their keep.">
+        {evalQ.data?.by_platform?.length ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {evalQ.data.by_platform.map((b) => <Stat key={b.platform} label={b.platform} value={b.eng_per_post} sub={`${fmt(b.posts)} posts · ${fmt(b.total)} total`} />)}
+          </div>
+        ) : <p className="text-text-muted text-[13px]">Not enough posts with engagement data yet.</p>}
       </Section>
 
       {!!slop.data?.proposals?.length && (
@@ -429,6 +474,24 @@ function MarketingTab() {
           <Stat label="Considering" value={fmt(reply.data?.queue_size)} sub="drafted+new" />
           <Stat label="Sent (all-time)" value={fmt(rc.posted)} sub={`${fmt(rc.posting_error)} errors`} />
         </div>
+        {!!targetPerf.data?.targets?.length && (
+          <div className="glass rounded-2xl p-4 mb-3 overflow-x-auto">
+            <div className="text-[12px] font-mono uppercase tracking-wide text-text-muted mb-2">Top targets by reply engagement — double down on these</div>
+            <table className="w-full text-[12.5px]">
+              <thead><tr className="text-text-muted/70 text-left font-mono"><th className="py-1 pr-3">target</th><th className="py-1 pr-3 text-right">replies</th><th className="py-1 pr-3 text-right">avg ♥</th><th className="py-1 text-right">total ♥</th></tr></thead>
+              <tbody>
+                {targetPerf.data.targets.slice(0, 8).map((t) => (
+                  <tr key={`${t.platform}:${t.handle}`} className="border-t border-border/40">
+                    <td className="py-1.5 pr-3 font-mono">{t.platform} @{t.handle}</td>
+                    <td className="py-1.5 pr-3 tabular-nums text-right">{fmt(t.replies)}</td>
+                    <td className="py-1.5 pr-3 tabular-nums text-right">{t.avg_engagement}</td>
+                    <td className="py-1.5 tabular-nums text-right text-text-muted">{fmt(t.total_engagement)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         <div className="flex gap-1 border-b border-border/60 mb-3">
           {([['considering', 'Considering next'], ['sent', 'Sent']] as const).map(([k, lbl]) => (
             <button key={k} onClick={() => setReplyView(k)} className={`px-3.5 py-1.5 text-[13px] font-semibold border-b-2 -mb-px transition-colors ${replyView === k ? 'border-primary text-text' : 'border-transparent text-text-muted hover:text-text'}`}>{lbl}</button>

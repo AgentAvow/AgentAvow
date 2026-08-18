@@ -150,6 +150,37 @@ async def delete_target(
 # --- Opportunity endpoints ---
 
 
+@router.get("/target-performance")
+async def target_performance(
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-target reply performance — which accounts' threads earn the most reply
+    engagement. Feeds targeting decisions (double down on what lands)."""
+    require_admin(current_entity)
+    rows = (await db.execute(
+        select(
+            ReplyTarget.handle,
+            ReplyTarget.platform,
+            func.count(ReplyOpportunity.id).label("replies"),
+            func.coalesce(func.avg(ReplyOpportunity.engagement_count), 0).label("avg_eng"),
+            func.coalesce(func.sum(ReplyOpportunity.engagement_count), 0).label("total_eng"),
+        )
+        .join(ReplyOpportunity, ReplyOpportunity.target_id == ReplyTarget.id)
+        .where(ReplyOpportunity.status == "posted")
+        .group_by(ReplyTarget.id, ReplyTarget.handle, ReplyTarget.platform)
+        .order_by(func.avg(ReplyOpportunity.engagement_count).desc())
+        .limit(50),
+    )).all()
+    return {
+        "targets": [
+            {"handle": h, "platform": p, "replies": int(rc),
+             "avg_engagement": round(float(ae), 2), "total_engagement": int(te)}
+            for h, p, rc, ae, te in rows
+        ],
+    }
+
+
 @router.get("/queue")
 async def get_queue(
     status: str = "drafted",
