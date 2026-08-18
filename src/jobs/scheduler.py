@@ -275,6 +275,11 @@ async def _scheduler_loop(interval: int = SCHEDULER_INTERVAL) -> None:
                         reply_summary = await refresh_reply_metrics(session)
                         if reply_summary.get("updated", 0) > 0:
                             logger.info("Reply metrics refresh: %s", reply_summary)
+                        # Eval alerts (engagement regression / slop drop) → email, daily-deduped.
+                        from src.marketing.alerts import check_and_alert_eval
+                        eval_alert = await check_and_alert_eval(session)
+                        if eval_alert.get("sent"):
+                            logger.info("Eval alert sent: %s", eval_alert)
         except Exception:
             logger.exception("Marketing metrics refresh failed")
 

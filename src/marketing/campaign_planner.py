@@ -185,9 +185,16 @@ async def _configured_platforms() -> list[str]:
     """
     from src.marketing.orchestrator import _get_adapters, _is_manual_review_platform
 
+    # HuggingFace campaign posts can't auto-post — they're targeted model-repo
+    # discussions that need a repo_id (handled by the separate HF autopick flow), so
+    # a generic weekly-plan HF post is structurally dead. Exclude it from the plan.
+    _campaign_exclude = {"huggingface", "github_discussions"}
+
     adapters = _get_adapters()
     eligible: list[str] = []
     for name, adapter in adapters.items():
+        if name in _campaign_exclude:
+            continue
         if _is_manual_review_platform(name) or await adapter.is_configured():
             eligible.append(name)
     return eligible

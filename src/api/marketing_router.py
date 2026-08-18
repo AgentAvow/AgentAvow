@@ -745,6 +745,18 @@ async def get_bot_activity(
     )
 
 
+@router.get("/eval")
+async def marketing_eval(
+    current_entity: Entity = Depends(get_current_entity),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Marketing eval snapshot: engagement trend, no-slop pass rate, reply engagement,
+    and any active alerts — the 'is the learning loop working?' view."""
+    require_admin(current_entity)
+    from src.marketing.content.eval import get_marketing_eval
+    return await get_marketing_eval(db)
+
+
 @router.get("/health")
 async def marketing_health(
     current_entity: Entity = Depends(get_current_entity),

@@ -108,6 +108,23 @@ def _is_auto_post_platform(platform: str) -> bool:
     return schedule.get("auto_post", False)
 
 
+async def _bump_slop(passed: bool) -> None:
+    """Track first-draft no-slop pass rate (Redis daily counters) for the eval loop."""
+    try:
+        from datetime import datetime, timezone
+
+        from src.redis_client import get_redis
+        r = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        await r.incr(f"ag:mktg:slop:total:{day}")
+        await r.expire(f"ag:mktg:slop:total:{day}", 86400 * 40)
+        if passed:
+            await r.incr(f"ag:mktg:slop:pass:{day}")
+            await r.expire(f"ag:mktg:slop:pass:{day}", 86400 * 40)
+    except Exception:
+        pass
+
+
 async def _generate_with_voice_check(
     prompt: str,
     *,
@@ -143,6 +160,7 @@ async def _generate_with_voice_check(
         return result
 
     first_check = check_ai_tells(result.text, platform=platform, strict=True)
+    await _bump_slop(first_check.passed)  # track first-draft pass rate for the eval loop
     if first_check.passed:
         return result
 

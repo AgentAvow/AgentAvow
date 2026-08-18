@@ -720,3 +720,52 @@ async def run_watchdog_checks(db: AsyncSession) -> dict:
             results[name] = "error"
 
     return results
+
+
+async def check_and_alert_eval(db: AsyncSession) -> dict:
+    """Email the admin when the marketing eval surfaces WARN-level alerts (engagement
+    regression / no-slop pass-rate drop). Deduped to once/day so it never spams.
+    Best-effort — never raises into the scheduler."""
+    try:
+        from src.marketing.content.eval import get_marketing_eval
+        ev = await get_marketing_eval(db)
+    except Exception:
+        return {"sent": False, "reason": "eval_failed"}
+    warns = [a for a in ev.get("alerts", []) if a.get("level") == "warn"]
+    if not warns:
+        return {"sent": False, "alerts": 0}
+    # Once-per-day dedup.
+    try:
+        from datetime import datetime, timezone
+
+        from src.redis_client import get_redis
+        r = get_redis()
+        key = "ag:mktg:eval_alert:" + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if await r.get(key):
+            return {"sent": False, "reason": "already_sent_today", "alerts": len(warns)}
+        await r.set(key, "1", ex=86400)
+    except Exception:
+        pass
+    try:
+        from sqlalchemy import select as sa_select
+
+        from src.email import send_email
+        from src.models import Entity
+        admin = (await db.execute(
+            sa_select(Entity).where(
+                Entity.email == settings.admin_email, Entity.is_active.is_(True),
+            ).limit(1),
+        )).scalar_one_or_none()
+        if not admin:
+            return {"sent": False, "reason": "no_admin"}
+        body = "<h3>Marketing eval alerts</h3><ul>" + "".join(
+            f"<li>{a['message']}</li>" for a in warns
+        ) + "</ul><p style='color:#64748b'>See the admin dashboard → Marketing → Eval.</p>"
+        await send_email(
+            admin.email, f"MarketingBot: {len(warns)} eval alert(s)", body,
+        )
+        logger.info("Eval alert emailed: %d warn(s)", len(warns))
+        return {"sent": True, "alerts": len(warns)}
+    except Exception:
+        logger.exception("Failed to send eval alert")
+        return {"sent": False, "reason": "send_failed"}

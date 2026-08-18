@@ -9,7 +9,7 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
@@ -41,6 +41,7 @@ interface MktDash {
 }
 interface Campaign { id: string; name: string; topic: string; platforms: string[]; status: string; start_date?: string }
 interface ReplyStats { status_counts?: Record<string, number>; posted_today?: number; active_targets?: number; queue_size?: number }
+interface Eval { engagement_per_post_7d?: number; engagement_per_post_30d?: number; trend_pct?: number | null; slop_pass_rate_7d?: number | null; reply_engagement_per_post_7d?: number; posts_7d?: number; alerts?: { level: string; message: string }[] }
 interface ReplyRow { id: string; platform: string; post_uri?: string; reply_url?: string | null; draft_content?: string; drafted_at?: string | null; posted_at?: string | null; engagement_count?: number; target?: { handle?: string | null } }
 const REPLY_TTL_H = 48
 
@@ -277,6 +278,7 @@ function MarketingTab() {
   const planned = useQuery<Draft[]>({ queryKey: ['admin-mkt-planned'], queryFn: async () => (await api.get('/admin/marketing/drafts', { params: { status: 'planned', limit: 60 } })).data })
   const campaigns = useQuery<Campaign[]>({ queryKey: ['admin-mkt-campaigns'], queryFn: async () => { try { return (await api.get('/admin/marketing/campaigns/proposed')).data } catch { return [] } } })
   const reply = useQuery<ReplyStats>({ queryKey: ['admin-mkt-reply'], queryFn: async () => (await api.get('/admin/engagement/stats')).data })
+  const evalQ = useQuery<Eval>({ queryKey: ['admin-mkt-eval'], queryFn: async () => (await api.get('/admin/marketing/eval')).data })
   // Queue 3: replies it's considering next (drafted). Feed: replies already sent.
   // Sorted by urgency (default) — the ones it'll try to post first.
   const considering = useQuery<{ items: ReplyRow[] }>({ queryKey: ['admin-mkt-reply-considering'], queryFn: async () => (await api.get('/admin/engagement/queue', { params: { status: 'drafted', limit: 20 } })).data })
@@ -307,6 +309,22 @@ function MarketingTab() {
             <p className="text-[11px] text-text-muted/60 mt-1">Note: the monthly figure counts all LLM usage (incl. reply-guy drafts); this table is only spend attributed to stored posts — the two differ until cost tracking is unified.</p>
           </div>
         ) : null}
+      </Section>
+
+      <Section title="Learning-loop eval" note="Is the self-tuning actually working? Engagement trend, no-slop first-pass rate, reply engagement — plus alerts.">
+        {!!evalQ.data?.alerts?.length && (
+          <div className="flex flex-col gap-2 mb-3">
+            {evalQ.data.alerts.map((a, i) => (
+              <div key={i} className={`glass rounded-xl p-3 text-[13px] border-l-4 ${a.level === 'warn' ? 'border-warning/70 text-warning' : 'border-primary/50 text-text-muted'}`}>{a.level === 'warn' ? '⚠ ' : 'ℹ '}{a.message}</div>
+            ))}
+          </div>
+        )}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Stat label="Engagement / post (7d)" value={fmt(evalQ.data?.engagement_per_post_7d)} sub={evalQ.data?.trend_pct != null ? `${evalQ.data.trend_pct > 0 ? '▲' : '▼'} ${Math.abs(evalQ.data.trend_pct)}% vs 30d` : `${fmt(evalQ.data?.engagement_per_post_30d)}/post (30d)`} />
+          <Stat label="No-slop first-pass" value={evalQ.data?.slop_pass_rate_7d != null ? `${Math.round(evalQ.data.slop_pass_rate_7d * 100)}%` : '—'} sub="clean on first draft" />
+          <Stat label="Reply engagement (7d)" value={fmt(evalQ.data?.reply_engagement_per_post_7d)} sub="per reply" />
+          <Stat label="Posts measured (7d)" value={fmt(evalQ.data?.posts_7d)} />
+        </div>
       </Section>
 
       <RecentPostsCard posts={dash.data?.recent_posts || []} />
@@ -353,7 +371,7 @@ function MarketingTab() {
                   <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">{d.platform}</span>
                   {(d as Draft & { scheduled_day?: string }).scheduled_day && <span>📅 {(d as Draft & { scheduled_day?: string }).scheduled_day}</span>}
                   {d.topic && <span>{d.topic}</span>}
-                  <a href={`/admin`} className="ml-auto text-primary-light hover:text-primary">edit ↗</a>
+                  <span className="ml-auto text-text-muted/60">managed by the weekly campaign</span>
                 </div>
                 <p className="mt-2 text-[12.5px] text-text-muted whitespace-pre-wrap">{d.content.slice(0, 180)}{d.content.length > 180 ? '…' : ''}</p>
               </div>
@@ -483,7 +501,10 @@ function CampaignActions({ id, onDone }: { id: string; onDone: () => void }) {
 // ── SHELL ────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const { user, isLoading } = useAuth()
-  const [tab, setTab] = useState<'metrics' | 'marketing'>('metrics')
+  // Tab lives in the URL so browser back/forward restores it.
+  const [sp, setSp] = useSearchParams()
+  const tab: 'metrics' | 'marketing' = sp.get('tab') === 'marketing' ? 'marketing' : 'metrics'
+  const setTab = (t: 'metrics' | 'marketing') => setSp(t === 'metrics' ? {} : { tab: t })
 
   if (isLoading) return <div className="max-w-[1080px] mx-auto px-6 py-24 text-center text-text-muted">Loading…</div>
   if (!user?.is_admin) return (
