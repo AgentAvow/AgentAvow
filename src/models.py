@@ -2525,6 +2525,40 @@ class CommunityScan(Base):
     )
 
 
+class ScanHistory(Base):
+    """Append-only timeline of a tool's signed score + tool-manifest digest, one row
+    per *material change* (score moved or the signed definition drifted). Powers the
+    public recompute-on-release drift feed: "v2.1 added a destructive tool → 88→40".
+    ``CommunityScan`` keeps only the latest state; this keeps the history.
+    """
+
+    __tablename__ = "scan_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    surface = Column(String(16), nullable=False, default="github", server_default="github")
+    owner = Column(String(255), nullable=False)
+    repo = Column(String(512), nullable=False)
+    full_name = Column(String(512), nullable=False, index=True)
+    trust_score = Column(Integer, nullable=True)
+    grade = Column(String(4), nullable=True)
+    certified = Column(Boolean, default=False, server_default="false", nullable=False)
+    critical = Column(Integer, nullable=True)
+    high = Column(Integer, nullable=True)
+    tool_manifest_digest = Column(String(128), nullable=True)
+    # Delta vs the previous history row for this full_name (null on the first point).
+    score_delta = Column(Integer, nullable=True)
+    # True when this row's tool_manifest_digest differs from the previous row's
+    # (a signed-definition change — the rug-pull signal, even if the score held).
+    manifest_drift = Column(Boolean, default=False, server_default="false", nullable=False)
+    scanned_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True,
+    )
+
+    __table_args__ = (
+        Index("ix_scan_history_full_name_time", "full_name", "scanned_at"),
+    )
+
+
 class PrivateScanResult(Base):
     """The stored result of a scheduled PRIVATE-repo scan run via a connected
     GitHub App installation. Owner-scoped and NEVER surfaced in the public catalog

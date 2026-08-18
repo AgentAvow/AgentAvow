@@ -521,6 +521,61 @@ async def _capture_community_scan(
         except Exception:
             pass
 
+    # Durable, drift-aware history point — appended only on a MATERIAL change (score
+    # moved or the signed tool-manifest digest drifted). Powers the public drift feed.
+    await _record_scan_history(_full, surface, owner, repo, data, db)
+
+
+async def _record_scan_history(
+    full_name: str, surface: str, owner: str, repo: str, data: dict, db: AsyncSession,
+) -> None:
+    """Append a ScanHistory row iff the score or the signed tool-manifest digest
+    changed since the last recorded point. Best-effort — never breaks a scan."""
+    from sqlalchemy import desc, select
+
+    from src.models import ScanHistory
+
+    try:
+        new_score = data.get("trust_score")
+        new_digest = data.get("tool_manifest_digest")
+        findings = data.get("findings") or {}
+        last = (await db.execute(
+            select(ScanHistory)
+            .where(ScanHistory.full_name == full_name)
+            .order_by(desc(ScanHistory.scanned_at))
+            .limit(1)
+        )).scalar_one_or_none()
+
+        if last is not None:
+            score_same = last.trust_score == new_score
+            digest_same = (last.tool_manifest_digest or None) == (new_digest or None)
+            if score_same and digest_same:
+                return  # nothing material changed — don't grow the timeline
+            score_delta = (
+                new_score - last.trust_score
+                if new_score is not None and last.trust_score is not None else None
+            )
+            manifest_drift = bool(last.tool_manifest_digest and new_digest
+                                  and last.tool_manifest_digest != new_digest)
+        else:
+            score_delta, manifest_drift = None, False
+
+        db.add(ScanHistory(
+            surface=(surface or "github").lower(),
+            owner=owner, repo=repo, full_name=full_name,
+            trust_score=new_score,
+            grade=data.get("grade"),
+            certified=bool((data.get("certified") or {}).get("eligible")),
+            critical=findings.get("critical"),
+            high=findings.get("high"),
+            tool_manifest_digest=new_digest,
+            score_delta=score_delta,
+            manifest_drift=manifest_drift,
+        ))
+        await db.commit()
+    except Exception:
+        logger.debug("scan_history append failed for %s", full_name, exc_info=True)
+
 
 _SCAN_FRESHNESS_TTL = 604800  # 7 days — scan evidence freshness (design §3)
 

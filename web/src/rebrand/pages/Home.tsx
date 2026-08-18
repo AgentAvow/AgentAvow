@@ -302,6 +302,7 @@ export default function RebrandHome() {
                 <div className="font-mono text-[11px] uppercase tracking-[0.16em] gradient-text font-semibold">The top tier</div>
                 <h3 className="mt-1.5 text-xl font-bold">Certified — the earned pinnacle.</h3>
                 <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[44ch] mx-auto sm:mx-0">Score 96+ <em>and</em> verified provenance, no manifest drift, full category coverage — revocable the moment any of it slips. Not a sticker you buy; a bar you clear.</p>
+                <p className="mt-2 text-[12.5px] text-text-muted/90 max-w-[44ch] mx-auto sm:mx-0"><span className="text-text">sigstore</span>, <span className="text-text">react</span>, <span className="text-text">axios</span> and more clear it today — not theoretical.</p>
                 <Link to={rp('/rebrand/certified')} className="inline-block mt-2.5 text-[13px] font-semibold text-primary-light hover:text-primary">See the gate + who's Certified →</Link>
               </div>
             </div>
@@ -309,9 +310,9 @@ export default function RebrandHome() {
         </Reveal>
       </section>
 
-      {/* ③ TWO-AUDIENCE FORK — checking a tool / building a tool */}
+      {/* ③ THREE-AUDIENCE FORK — checking a tool / building a tool / shipping to a store */}
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
-        <Reveal className="grid md:grid-cols-2 gap-4">
+        <Reveal className="grid md:grid-cols-3 gap-4">
           <Link to={rp("/rebrand/browse")} className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 border-primary/60 relative overflow-hidden">
             <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/10 blur-2xl group-hover:bg-primary/20 transition-colors" />
             <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Checking a tool</div>
@@ -331,6 +332,16 @@ export default function RebrandHome() {
               gate your CI on it.
             </p>
             <span className="mt-2 self-start text-[14.5px] font-semibold text-accent group-hover:translate-x-1 transition-transform">Get your badge →</span>
+          </Link>
+          <Link to={rp("/rebrand/preflight")} className="group glass card-hover rounded-2xl p-6 flex flex-col gap-2 border-l-4 relative overflow-hidden" style={{ borderLeftColor: '#A78BFA' }}>
+            <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full blur-2xl transition-colors" style={{ background: 'rgba(167,139,250,0.12)' }} />
+            <div className="font-mono text-[11px] uppercase tracking-wide" style={{ color: '#A78BFA' }}>Shipping to an app store</div>
+            <h3 className="text-xl font-bold">Preflight your connector</h3>
+            <p className="text-text-muted text-[14.5px] flex-1">
+              Submitting to the Claude connectors or OpenAI apps directory? Check it against their review
+              gates first — and walk in knowing you pass.
+            </p>
+            <span className="mt-2 self-start text-[14.5px] font-semibold group-hover:translate-x-1 transition-transform" style={{ color: '#A78BFA' }}>Run a preflight →</span>
           </Link>
         </Reveal>
       </section>

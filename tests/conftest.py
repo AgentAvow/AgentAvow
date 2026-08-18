@@ -439,6 +439,29 @@ async def _clean_db_once():
             "ALTER TABLE IF EXISTS tool_watches ALTER COLUMN repo TYPE VARCHAR(512)",
         ]:
             await conn.execute(text(_ddl))
+        # scan_history (migration t20) — drift-feed timeline
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS scan_history ("
+            "  id UUID PRIMARY KEY,"
+            "  surface VARCHAR(16) NOT NULL DEFAULT 'github',"
+            "  owner VARCHAR(255) NOT NULL,"
+            "  repo VARCHAR(512) NOT NULL,"
+            "  full_name VARCHAR(512) NOT NULL,"
+            "  trust_score INTEGER,"
+            "  grade VARCHAR(4),"
+            "  certified BOOLEAN NOT NULL DEFAULT false,"
+            "  critical INTEGER,"
+            "  high INTEGER,"
+            "  tool_manifest_digest VARCHAR(128),"
+            "  score_delta INTEGER,"
+            "  manifest_drift BOOLEAN NOT NULL DEFAULT false,"
+            "  scanned_at TIMESTAMPTZ NOT NULL DEFAULT now()"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scan_history_full_name_time "
+            "ON scan_history (full_name, scanned_at)"
+        ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_webhooks_active "
             "ON webhook_subscriptions (is_active)"

@@ -14,12 +14,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import cache
 from src.api.rate_limit import rate_limit_reads, rate_limit_scans
+from src.database import get_db
 from src.preflight.gates import evaluate_gates
 
 logger = logging.getLogger(__name__)
@@ -263,3 +267,86 @@ async def registry_snippet(owner: str, repo: str):
                 "self-verifying: recompute the score offline and check the EdDSA signature "
                 f"against {JWKS_URL}.",
     }
+
+
+# ── Recompute-on-release drift feed ──────────────────────────────────────────
+DRIFT_SCHEMA = "https://schema.agentgraph.co/attestation/drift/v1"
+
+
+async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession) -> dict:
+    from src.models import ScanHistory
+    from src.signing import canonicalize, create_jws
+
+    rows = (await db.execute(
+        select(ScanHistory)
+        .where(ScanHistory.full_name == full_name)
+        .order_by(desc(ScanHistory.scanned_at))
+        .limit(50)
+    )).scalars().all()
+    if not rows:
+        raise HTTPException(404, "No scan history yet for this tool — scan it first, "
+                                 "then re-scan on your next release to build the feed.")
+
+    points = [{
+        "scanned_at": r.scanned_at.isoformat() if r.scanned_at else None,
+        "trust_score": r.trust_score,
+        "grade": r.grade,
+        "certified": r.certified,
+        "critical": r.critical,
+        "high": r.high,
+        "score_delta": r.score_delta,
+        "manifest_drift": r.manifest_drift,
+    } for r in rows]
+    latest = rows[0]
+    drift_events = sum(1 for r in rows if r.manifest_drift or (r.score_delta or 0) != 0)
+
+    now = datetime.now(timezone.utc).isoformat()
+    signed_payload = {
+        "@context": DRIFT_SCHEMA,
+        "type": "ScoreDriftAttestation",
+        "issuer": {"id": ISSUER, "name": "AgentAvow"},
+        "subject": {"id": subject_id, "fullName": full_name},
+        "issuedAt": now,
+        "latest": {
+            "trustScore": latest.trust_score,
+            "certified": latest.certified,
+            "toolManifestDigest": latest.tool_manifest_digest,
+            "scannedAt": latest.scanned_at.isoformat() if latest.scanned_at else None,
+        },
+        "history": [{
+            "scannedAt": p["scanned_at"], "trustScore": p["trust_score"],
+            "scoreDelta": p["score_delta"], "manifestDrift": p["manifest_drift"],
+        } for p in points],
+    }
+    jws = create_jws(canonicalize(signed_payload))
+    return {
+        "subject": subject_id,
+        "full_name": full_name,
+        "current_score": latest.trust_score,
+        "certified": latest.certified,
+        "summary": {
+            "points": len(points),
+            "drift_events": drift_events,
+            "first_seen": points[-1]["scanned_at"],
+            "last_change": points[0]["scanned_at"],
+        },
+        "history": points,
+        "signed": {"jws": jws, "kid": KID, "jwks_url": JWKS_URL},
+    }
+
+
+@router.get("/drift/pkg/{surface}/{name:path}", dependencies=[Depends(rate_limit_reads)])
+async def drift_pkg(surface: str, name: str, db: AsyncSession = Depends(get_db)):
+    """Signed score/definition drift timeline for a package (npm/pypi/crates/…)."""
+    surface = surface.lower()
+    full_name = f"{surface}:{name}"
+    return await _drift_payload(full_name, f"{surface}:{name}", db)
+
+
+@router.get("/drift/{owner}/{repo}", dependencies=[Depends(rate_limit_reads)])
+async def drift_repo(owner: str, repo: str, db: AsyncSession = Depends(get_db)):
+    """Signed score/definition drift timeline for a GitHub repo — the recompute-on-
+    release feed: every version bump that moved the score or drifted the signed
+    tool definition, offline-recomputable against our JWKS."""
+    full_name = f"{owner}/{repo}"
+    return await _drift_payload(full_name, f"github:{full_name}", db)
