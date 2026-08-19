@@ -62,7 +62,10 @@ def _apply_summary(surface: str, row: dict, summ: dict) -> None:
         row.update(summ)
 
 
-async def _rescore_surface(surface: str, limit: int, retry_errors: bool, token: str | None) -> int:
+async def _rescore_surface(
+    surface: str, limit: int, retry_errors: bool, token: str | None,
+    min_score: int | None = None,
+) -> int:
     fn, key = SURFACES[surface]
     path = _common.DATA_DIR / fn
     data = _common.read_json(path, default=None)
@@ -75,8 +78,12 @@ async def _rescore_surface(surface: str, limit: int, retry_errors: bool, token: 
         print(f"[{surface}] empty, skip")
         return 0
 
+    # Targeted high-priority pass (--min-score): sweep the WHOLE file for rows at or
+    # above min_score, ignoring (and never advancing) the grind's persistent cursor so
+    # a concurrent/subsequent full grind resumes exactly where it left off.
+    prioritized = min_score is not None
     cursor_path = _common.DATA_DIR / f".rescore-cursor-{surface}.json"
-    start = int(_common.read_json(cursor_path, default={"i": 0}).get("i", 0)) % n
+    start = 0 if prioritized else int(_common.read_json(cursor_path, default={"i": 0}).get("i", 0)) % n
 
     from src.scanner.scan import scan_repo
 
@@ -93,6 +100,10 @@ async def _rescore_surface(surface: str, limit: int, retry_errors: bool, token: 
             continue
         if _row_has_error(surface, row) and not retry_errors:
             continue  # known-unfetchable; a full pass would just re-fail it
+        if prioritized:
+            sc = row.get("trust_score")
+            if sc is None or sc < min_score:
+                continue  # only the high-scorers this pass
         print(f"[{surface}] rescore {done + 1}/{limit}: {full}")
         try:
             result = await scan_repo(full, token=token)
@@ -106,19 +117,25 @@ async def _rescore_surface(surface: str, limit: int, retry_errors: bool, token: 
         done += 1
         if done % 15 == 0:  # periodic durable checkpoint
             _common.write_json_atomic(path, data)
-            _common.write_json_atomic(cursor_path, {"i": i})
+            if not prioritized:
+                _common.write_json_atomic(cursor_path, {"i": i})
         policy.wait()
 
     _common.write_json_atomic(path, data)
-    _common.write_json_atomic(cursor_path, {"i": i})
-    print(f"[{surface}] re-scored {done} rows; cursor {start} -> {i} of {n}")
+    if not prioritized:
+        _common.write_json_atomic(cursor_path, {"i": i})
+    print(f"[{surface}] re-scored {done} rows"
+          + ("" if prioritized else f"; cursor {start} -> {i} of {n}"))
     return done
 
 
-async def _main_async(surfaces: list[str], limit: int, retry_errors: bool, token: str | None) -> None:
+async def _main_async(
+    surfaces: list[str], limit: int, retry_errors: bool, token: str | None,
+    min_score: int | None = None,
+) -> None:
     total = 0
     for s in surfaces:
-        total += await _rescore_surface(s, limit, retry_errors, token)
+        total += await _rescore_surface(s, limit, retry_errors, token, min_score=min_score)
     print(f"[rescore] complete — {total} rows re-scored across {len(surfaces)} surface(s)")
 
 
@@ -130,10 +147,13 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=150, help="scannable rows per surface per run")
     parser.add_argument("--retry-errors", action="store_true",
                         help="also re-attempt rows that previously failed to fetch")
+    parser.add_argument("--min-score", type=int, default=None,
+                        help="targeted pass: only re-score rows whose current trust_score >= N "
+                             "(sweeps the whole file, ignores + never advances the grind cursor)")
     args = parser.parse_args()
     surfaces = [args.surface] if args.surface else list(SURFACES)
     token = _common.load_secret("GITHUB_TOKEN")
-    asyncio.run(_main_async(surfaces, args.limit, args.retry_errors, token))
+    asyncio.run(_main_async(surfaces, args.limit, args.retry_errors, token, min_score=args.min_score))
     return 0
 
 
