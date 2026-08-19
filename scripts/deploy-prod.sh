@@ -234,7 +234,7 @@ else
 import httpx, sys, time
 time.sleep(1)
 import os
-email = os.environ.get(\"ADMIN_EMAIL\", \"admin@agentgraph.co\")
+email = os.environ.get(\"ADMIN_EMAIL\", \"kenne@agentgraph.co\")
 password = os.environ.get(\"ADMIN_PASSWORD\", \"\")
 if not password:
     print(\"LOGIN_SKIP: set ADMIN_EMAIL and ADMIN_PASSWORD env vars to verify login\")
