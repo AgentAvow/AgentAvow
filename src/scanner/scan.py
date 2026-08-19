@@ -3247,12 +3247,13 @@ async def scan_repo(
                 "video", "ffmpeg", "media", "sound", "wav", "mp3",
                 "transcribe", "transcription",
             }
-            # Check repo name and description
+            # Anti-gaming: the fs-access discount must NOT be reachable by putting
+            # "audio" in the free-text DESCRIPTION (author-controlled). Require a real
+            # signal — a media keyword in the repo NAME (public, costly to fake) OR
+            # actual media files in the tree. Description text alone no longer qualifies.
             repo_lower = full_name.lower()
-            desc_lower = description.lower()
-            if any(kw in repo_lower or kw in desc_lower for kw in media_keywords):
+            if any(kw in repo_lower for kw in media_keywords):
                 result.is_media_tool = True
-            # Check file patterns in tree
             if not result.is_media_tool:
                 media_file_patterns = {
                     ".wav", ".mp3", ".ogg", ".flac", ".m4a",

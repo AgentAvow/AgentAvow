@@ -2152,7 +2152,7 @@ async def scan_checks(
     except Exception:
         checks = 0
 
-    # First-party adoption axis-D: dedup on identity (never inflatable). Best-
+    # First-party adoption axis-D: dedup on identity; only authenticated checkers count (see below). Best-
     # effort — a Redis miss leaves unique_checkers at 0 and never fails the call.
     unique_checkers = 0
     try:
@@ -2163,12 +2163,16 @@ async def scan_checks(
             record_unique_checker,
         )
 
-        identity = checker_identity(
-            _get_entity_id(request),
-            _get_client_ip(request),
-            request.headers.get("user-agent", ""),
-        )
-        await record_unique_checker(owner, repo, identity)
+        # Anti-gaming: only AUTHENTICATED checkers count toward a tool's adoption axis.
+        # Anonymous identity is hash(ip|ua) with no rate limit, so an author could rotate
+        # IPs to manufacture "unique checkers" on their own tool. Anonymous checks still
+        # feed the site-wide reach HLL (_track_checker), just not per-tool adoption.
+        _eid = _get_entity_id(request)
+        if _eid:
+            identity = checker_identity(
+                _eid, _get_client_ip(request), request.headers.get("user-agent", ""),
+            )
+            await record_unique_checker(owner, repo, identity)
         unique_checkers = await get_unique_checkers(owner, repo)
     except Exception:
         unique_checkers = 0

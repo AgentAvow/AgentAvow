@@ -22,7 +22,7 @@ tool spikes on one axis; a genuinely adopted one lights up several):
     (A) Registry downloads + trend       (npm/PyPI/crates/Docker)
     (B) Reverse-dependents               (hardest to game)
     (C) Social stars + velocity          (+ fake-star-burst detection)
-    (D) First-party (ours, unfakeable)   (unique checkers, badge-embed domains,
+    (D) First-party (ours, auth-gated — hard to fake)   (unique checkers, badge-embed domains,
                                           verify-pulls, in-graph connections)
     (E) MCP / agent-registry usage       (Smithery / PulseMCP / Glama)
 
@@ -411,7 +411,7 @@ def build_axis_first_party(
     raw_checks: int = 0,
     cap: float = 500.0,
 ) -> tuple:
-    """(D) First-party (ours, unfakeable) — returns (AxisResult, volume_factor).
+    """(D) First-party (ours, auth-gated — hard to fake) — returns (AxisResult, volume_factor).
 
     Scored on the UNIQUE estimate (HyperLogLog / set keyed by authed identity,
     fallback hashed IP+UA), NOT the inflatable raw ``checks`` INCR.  ``raw_checks``
