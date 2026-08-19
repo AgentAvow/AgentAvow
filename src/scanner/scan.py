@@ -1773,6 +1773,11 @@ _CRIT_DEDUCTION = 22
 # "Trusted/verified" over a real open critical — no matter how many positives offset it.
 _CRITICAL_CEILING = 45
 
+# Softer ceiling for a BLOCKING high (including a vulnerable direct/prod dependency): a
+# tool with an open high can't sit in the top "verified" band or read a perfect 100 —
+# it stays Trusted, just not pristine — so "high: 1" never coexists with 100/verified.
+_HIGH_CEILING = 90
+
 
 def _calculate_trust_score(result: ScanResult) -> int:
     """Calculate a trust score (0-100) based on findings and signals.
@@ -1900,6 +1905,8 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # consistently and surfaced as a non-shipped finding, never as a headline critical.
     if _blocking_crit_count(result) > 0:
         score = min(score, _CRITICAL_CEILING)
+    elif _blocking_high_count(result) > 0:
+        score = min(score, _HIGH_CEILING)
 
     return score
 

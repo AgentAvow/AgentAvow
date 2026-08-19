@@ -57,6 +57,13 @@ def test_known_malicious_blocks_even_in_a_test_path():
     assert _calculate_trust_score(r) <= _CRITICAL_CEILING
 
 
+def test_shipped_high_cannot_be_a_perfect_verified_score():
+    from src.scanner.scan import _HIGH_CEILING
+    r = _result([_f("high", "src/server.py")], mcp=True)
+    assert r.shipped_high_count == 1
+    assert _calculate_trust_score(r) <= _HIGH_CEILING  # out of the top verified band
+
+
 def test_the_invariant_no_trusted_score_with_a_shipped_critical():
     # This is the CI assertion the audit asked for, at the unit level.
     for path in ("src/x.py", "server.js", "main.py", "lib/tool.ts"):
