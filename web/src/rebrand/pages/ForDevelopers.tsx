@@ -29,6 +29,13 @@ const REGISTRY_SNIPPET = `"_meta": {
   }
 }`
 
+// Our own MCP server — the "is this safe to install?" check an agent runs before connecting a tool.
+const MCP_CONFIG = `{
+  "mcpServers": {
+    "agentavow-trust": { "command": "uvx", "args": ["agentavow-trust"] }
+  }
+}`
+
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
 }
@@ -43,6 +50,11 @@ export default function RebrandForDevelopers() {
   const copySnip = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(REGISTRY_SNIPPET)
     setCopiedSnip(true); setTimeout(() => setCopiedSnip(false), 1400)
+  }
+  const [copiedMcp, setCopiedMcp] = useState(false)
+  const copyMcp = () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(MCP_CONFIG)
+    setCopiedMcp(true); setTimeout(() => setCopiedMcp(false), 1400)
   }
 
   return (
@@ -147,6 +159,25 @@ export default function RebrandForDevelopers() {
           ))}
         </div>
       </div>
+
+      {/* Give your agent a safety check — our own MCP server, in the install loop */}
+      <Reveal>
+        <div className="mt-16 glass rounded-2xl p-6 md:p-7 border-l-4 border-primary/60">
+          <Eyebrow>For anyone running an agent</Eyebrow>
+          <h2 className="mt-2 text-xl md:text-2xl font-bold">Give your agent a safety check before it connects anything.</h2>
+          <p className="mt-2 text-text-muted text-[14.5px] max-w-[64ch] leading-relaxed">
+            Add AgentAvow's own MCP server to Claude Code, Cursor, or any MCP client. Now your agent can ask
+            <strong className="text-text"> "is this tool safe to install?"</strong> and get a signed 0–100 score + findings
+            back — <em>before</em> it connects an unknown server or runs a package. Free, no account, read-only.
+          </p>
+          <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Add to your MCP client (one line)</div>
+          <div className="relative">
+            <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto">{MCP_CONFIG}</pre>
+            <button onClick={copyMcp} className="absolute top-2 right-2 font-mono text-[11px] px-2 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copiedMcp ? 'copied ✓' : 'copy'}</button>
+          </div>
+          <p className="mt-2.5 text-[13px] text-text-muted">Prefer the terminal? <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">npx agentavow-trust scan owner/repo</code> — a signed score from the command line, no install.</p>
+        </div>
+      </Reveal>
 
       {/* CTA */}
       <Reveal>
