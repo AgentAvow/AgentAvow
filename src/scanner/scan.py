@@ -833,11 +833,12 @@ def _finding_is_blocking(f: object) -> bool:
     name = (getattr(f, "name", "") or "")
     if name.startswith("Known-malicious") or "malicious" in name.lower():
         return True
-    # Transitive dependency vulns are less reachable → not headline-blocking; they flow
-    # through the bounded, saturating dependency penalty instead. A DIRECT-prod dep vuln
-    # (reachable) IS blocking, so a reachable critical CVE floors the tool on its own.
-    if (getattr(f, "category", "") in _DEP_CATEGORIES
-            and getattr(f, "reachability", "direct") == "transitive"):
+    # Dependency/supply-chain vulns do NOT hard-block: a CVE in a dependency (often
+    # transitive, unreachable, or severity-inflated) shouldn't floor a reputable tool to
+    # Caution the way a first-party code RCE does. They flow through the separate,
+    # bounded, reachability-weighted _dependency_penalty (and a known-malicious dep still
+    # short-circuits above / via _DEP_MAL_PENALTY). Only FIRST-PARTY shipped code blocks.
+    if getattr(f, "category", "") in _DEP_CATEGORIES:
         return False
     path = getattr(f, "file_path", None)
     if not path:
