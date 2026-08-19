@@ -64,6 +64,29 @@ def test_shipped_high_cannot_be_a_perfect_verified_score():
     assert _calculate_trust_score(r) <= _HIGH_CEILING  # out of the top verified band
 
 
+def test_suppression_cannot_hide_a_critical():
+    """Anti-gaming #1: a suppressed line matching a critical/high pattern is detected,
+    so `ag-scan:ignore` can't silently hide a real critical."""
+    from src.scanner.scan import _line_has_blocking_match
+    assert _line_has_blocking_match("eval(user_input)  # ag-scan:ignore", "python") is True
+    assert _line_has_blocking_match("x = 1  # ag-scan:ignore", "python") is False
+
+
+def test_path_rename_cannot_dodge_the_floor():
+    """Anti-gaming #2: a real critical in scripts//sandbox//demo_ still floors."""
+    from src.scanner.scan import _is_blocking_exempt_path
+    # runtime-plausible dirs / filenames are NOT exempt from the floor
+    assert _is_blocking_exempt_path("scripts/server.py") is False
+    assert _is_blocking_exempt_path("sandbox/main.py") is False
+    assert _is_blocking_exempt_path("demo_server.py") is False
+    assert _is_blocking_exempt_path("tooling/run.py") is False
+    # genuine non-runtime code IS exempt
+    assert _is_blocking_exempt_path("tests/test_x.py") is True
+    assert _is_blocking_exempt_path("docs/guide.py") is True
+    assert _is_blocking_exempt_path("examples/demo.py") is True
+    assert _is_blocking_exempt_path("foo.test.ts") is True
+
+
 def test_the_invariant_no_trusted_score_with_a_shipped_critical():
     # This is the CI assertion the audit asked for, at the unit level.
     for path in ("src/x.py", "server.js", "main.py", "lib/tool.ts"):

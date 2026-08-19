@@ -10,10 +10,18 @@ from src.scanner.scan import _scan_content
 class TestInlineSuppression:
     """Option 1: Lines with ag-scan:ignore are skipped."""
 
-    def test_suppression_skips_finding(self):
-        code = 'api_key = "sk-ant-AAAA1234567890BBBB1234567890CCCC1234567890DD"  # ag-scan:ignore\n'
+    def test_suppression_skips_low_medium_finding(self):
+        # Suppression silences a genuine low/medium false positive (legit use).
+        code = 'subprocess.run(["ls"])  # ag-scan:ignore\n'
         findings, _, _ = _scan_content(code, "config.py")
         assert len(findings) == 0
+
+    def test_suppression_cannot_hide_a_real_secret(self):
+        # Anti-gaming: a distinctive provider secret can NOT be hidden with a comment
+        # (dropping it silently was a one-line bypass of the critical/high floor).
+        code = 'api_key = "sk-ant-AAAA1234567890BBBB1234567890CCCC1234567890DD"  # ag-scan:ignore\n'
+        findings, _, _ = _scan_content(code, "config.py")
+        assert len(findings) > 0
 
     def test_no_suppression_still_flags(self):
         code = 'api_key = "sk-ant-AAAA1234567890BBBB1234567890CCCC1234567890DD"\n'

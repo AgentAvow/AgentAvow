@@ -843,7 +843,41 @@ def _finding_is_blocking(f: object) -> bool:
     path = getattr(f, "file_path", None)
     if not path:
         return True
-    return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
+    # Blocking uses a TIGHTER exemption than the finding-weight discount: a real
+    # critical in a runtime-plausible dir an author could rename into (scripts/,
+    # tooling/, sandbox/, playground/, site/, a `demo_server.py` at root) still
+    # floors the score. Only genuinely-non-runtime code (tests/fixtures/docs/
+    # examples/benchmarks, co-located test files) is exempt from the floor — that
+    # noise is still weight-discounted elsewhere, it just can't hide a real critical.
+    return not _is_blocking_exempt_path(path)
+
+
+# Dirs that are truly never the runtime surface an agent connects to. STRICTER than
+# _NON_PROD_DIR_MARKERS: it drops scripts/tooling/release/site/website/playground/
+# sandbox/demo(s) — an author can ship the real entry point there, so a critical in
+# them must still block. Used ONLY for the blocking/floor decision.
+_BLOCKING_EXEMPT_DIRS = frozenset({
+    "example", "examples", "sample", "samples",
+    "test", "tests", "__tests__", "e2e", "integration", "fixture", "fixtures", "spec",
+    "benchmark", "benchmarks", "bench", "benches", "docs", "doc",
+})
+
+
+def _is_blocking_exempt_path(path: str) -> bool:
+    """True if a finding here should NOT drive the critical/high floor — only true
+    non-runtime code (test/fixture/docs/example dirs, or a co-located test/spec file).
+    Deliberately does NOT honor the demo/sample/example FILENAME-prefix or scripts/
+    tooling/sandbox dirs, which are author-controlled floor-dodges."""
+    parts = [p.lower() for p in Path(path).parts[:-1]]
+    if any(p in _BLOCKING_EXEMPT_DIRS for p in parts):
+        return True
+    fname = Path(path).name.lower()
+    stem = Path(path).stem.lower()
+    if ".test." in fname or ".spec." in fname:
+        return True
+    if stem.startswith("test_") or stem.endswith(("_test", "_spec")) or stem == "conftest":
+        return True
+    return False
 
 
 def _blocking_crit_count(result: object) -> int:
@@ -966,6 +1000,21 @@ def _lang_ok(pattern_name: str, file_lang: str | None) -> bool:
     if file_lang is None:
         return False
     return file_lang in required
+
+
+def _line_has_blocking_match(line: str, file_lang: str | None) -> bool:
+    """True if a line matches a critical/high pattern in the RCE/secret/exfil sets —
+    used so an inline `ag-scan:ignore` can't silently hide a real critical. Cheap:
+    only runs on the (rare) suppressed lines, and only over the high-severity sets."""
+    for pset in (
+        SECRET_PATTERNS, UNSAFE_EXEC_PATTERNS, INSECURE_DESERIALIZATION_PATTERNS,
+        DYNAMIC_REMOTE_LOAD_PATTERNS, EXFILTRATION_PATTERNS, OBFUSCATION_PATTERNS,
+    ):
+        for name, pattern, severity in pset:
+            if severity in ("critical", "high") and _lang_ok(name, file_lang) \
+                    and pattern.search(line):
+                return True
+    return False
 
 
 def _is_safe_exec_context(
@@ -1173,12 +1222,17 @@ def _scan_content(
         # handling is now scoped to the matched secret VALUE only (see the secret loop).
 
         # --- Option 1: Inline suppression ---
-        # If the line contains "ag-scan:ignore", skip pattern checks but
-        # count it — excessive suppression is suspicious.
-        # Track the line for severity-weighted penalty calculation later.
+        # If the line contains "ag-scan:ignore", it suppresses LOW/MEDIUM findings
+        # (legitimate false-positive silencing) — but it can NOT hide a critical/high:
+        # a suppression comment on a line that matches a critical/high pattern falls
+        # through to normal processing (which still applies allowlist/context/lang and
+        # then emits the finding), so hiding a real critical with a one-line comment is
+        # no longer free. Every suppression still counts toward the suppression penalty.
         if _SUPPRESSION_COMMENT in line:
             suppressed_count += 1
-            continue
+            if not _line_has_blocking_match(line, file_lang):
+                continue
+            # else: fall through — the critical/high finding is created below.
 
         # Check secrets
         for name, pattern, severity in SECRET_PATTERNS:
