@@ -833,6 +833,12 @@ def _finding_is_blocking(f: object) -> bool:
     name = (getattr(f, "name", "") or "")
     if name.startswith("Known-malicious") or "malicious" in name.lower():
         return True
+    # Transitive dependency vulns are less reachable → not headline-blocking; they flow
+    # through the bounded, saturating dependency penalty instead. A DIRECT-prod dep vuln
+    # (reachable) IS blocking, so a reachable critical CVE floors the tool on its own.
+    if (getattr(f, "category", "") in _DEP_CATEGORIES
+            and getattr(f, "reachability", "direct") == "transitive"):
+        return False
     path = getattr(f, "file_path", None)
     if not path:
         return True
@@ -1177,11 +1183,6 @@ def _scan_content(
         for name, pattern, severity in SECRET_PATTERNS:
             match = pattern.search(line)
             if match:
-                # Skip secrets in test/doc/example/tutorial files — those are example
-                # keys, not shipped credentials (and this also fixes the old "latest"
-                # substring bug: "test" in file_path matched latest_config.py).
-                if is_test_or_doc:
-                    continue
                 # Skip if the MATCHED VALUE is clearly a placeholder (not the whole line).
                 # The captured secret value (group 1 when present, else the full match).
                 val = match.group(1) if match.groups() else match.group()
@@ -1193,10 +1194,21 @@ def _scan_content(
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
+                # A DISTINCTIVE provider secret (AWS/GitHub/private key/…) in a test/doc
+                # file is a real leak — surface it, downgraded, instead of hiding it
+                # (dropping test/doc secrets entirely made a genuine leaked key invisible).
+                # A GENERIC "api_key = <random>" in a tutorial is almost always an example,
+                # so it stays skipped there to avoid noise. Placeholder + allowlist filters
+                # (above) already removed the obvious fakes.
+                sev = severity
+                if is_test_or_doc:
+                    if name.startswith("Generic"):
+                        continue
+                    sev = "medium" if severity in ("critical", "high") else "low"
                 findings.append(Finding(
                     category="secret",
                     name=name,
-                    severity=severity,
+                    severity=sev,
                     file_path=file_path,
                     line_number=line_num,
                     snippet=_redact_secret(stripped[:120], match),
@@ -1933,6 +1945,12 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         "install_hook": "dependency_health",
         # Phase 2: repo↔artifact drift (injected/modified files) is a code-safety axis.
         "artifact_drift": "code_safety",
+        # MCP-native detectors — without these the evidence cards read all-green for a
+        # server the headline grade already dinged (a lethal-trifecta / lying-annotation
+        # server showed 100 on every axis).
+        "schema_risk": "code_safety",
+        "annotation_lie": "code_safety",
+        "lethal_trifecta": "data_handling",
     }
     severity_weights = {"critical": 25, "high": 15, "medium": 8, "low": 3}
 
