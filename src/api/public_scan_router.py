@@ -2426,6 +2426,20 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
             if stars is not None:
                 headline = {"count": stars, "unit": "stars"}
                 axes.append(build_axis_stars(stars=stars))
+            # (E) MCP-registry usage (Smithery / PulseMCP / marketplace) — a real SECOND
+            # axis so MCP servers aren't scored on GitHub stars alone (the single-axis
+            # 55/100 saturation). Fail-open: absent when there's no registry signal.
+            try:
+                from src.scanner.adoption import build_axis_mcp_registry
+                from src.scanner.adoption_sources import get_mcp_registry_signals
+                _mcp = await get_mcp_registry_signals(owner.strip(), r)
+                if _mcp:
+                    _ekeys = ("smithery_downloads", "smithery_stars", "pulsemcp_stars",
+                              "tool_call_count", "marketplace_installs")
+                    axes.append(build_axis_mcp_registry(
+                        **{k: _mcp[k] for k in _ekeys if k in _mcp}))
+            except Exception:
+                logger.debug("axis-E fetch failed for mcp %s/%s", owner, r, exc_info=True)
     elif s == "github":
         stars = await _github_stars(owner.strip(), repo.strip())
         if stars is not None:
