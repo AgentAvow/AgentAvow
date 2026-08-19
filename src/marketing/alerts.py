@@ -212,60 +212,36 @@ async def _send_failure_alert(
     if not admin:
         return
 
+    from src.email import _load_template
+
     count = len(failures)
     title = (
         f"MarketingBot: {count} failure"
         f"{'s' if count != 1 else ''} this tick"
     )
 
-    # Build failure list for email
-    failure_rows = ""
-    for f in failures[:10]:
-        platform = f.get("platform", f.get("type", "—"))
-        error = f.get("error", "unknown")[:100]
-        failure_rows += (
-            "<tr>"
-            "<td style='padding:6px 10px;"
-            "border-bottom:1px solid #e2e8f0;"
-            f"color:#1e293b;'>{f['type']}</td>"
-            "<td style='padding:6px 10px;"
-            "border-bottom:1px solid #e2e8f0;"
-            f"color:#1e293b;font-weight:600;'>{platform}</td>"
-            "<td style='padding:6px 10px;"
-            "border-bottom:1px solid #e2e8f0;"
-            f"color:#dc2626;font-size:13px;'>{error}</td>"
-            "</tr>"
-        )
-
+    # Summarize the failures for the branded (single-card) template. Most ticks fail
+    # one post; when several fail, join them so nothing is lost.
+    platforms = ", ".join(
+        f"{f.get('platform', f.get('type', '—'))} ({f.get('type', '—')})"
+        for f in failures[:10]
+    )
+    errors = " · ".join((f.get("error", "unknown") or "unknown")[:120] for f in failures[:10])
     body = (
-        f"{count} failures detected in the latest marketing tick. "
-        f"Check the dashboard for details."
+        f"{count} marketing post{'s' if count != 1 else ''} failed to publish this tick. "
+        f"Retry from the Marketing tab in the admin dashboard."
     )
 
-    html = (
-        "<div style='font-family:sans-serif;padding:20px;"
-        "color:#1e293b;'>"
-        f"<h2 style='color:#dc2626;'>{title}</h2>"
-        f"<p>{body}</p>"
-        "<table style='width:100%;border-collapse:collapse;"
-        "margin:16px 0;background:#f8fafc;"
-        "border:1px solid #e2e8f0;border-radius:8px;'>"
-        "<tr>"
-        "<th style='text-align:left;padding:6px 10px;"
-        "color:#64748b;font-size:12px;"
-        "border-bottom:1px solid #e2e8f0;'>Type</th>"
-        "<th style='text-align:left;padding:6px 10px;"
-        "color:#64748b;font-size:12px;"
-        "border-bottom:1px solid #e2e8f0;'>Platform</th>"
-        "<th style='text-align:left;padding:6px 10px;"
-        "color:#64748b;font-size:12px;"
-        "border-bottom:1px solid #e2e8f0;'>Error</th>"
-        "</tr>"
-        f"{failure_rows}"
-        "</table>"
-        "<p><a href='https://agentavow.com/admin' "
-        "style='color:#6366f1;'>View Dashboard</a></p>"
-        "</div>"
+    html = _load_template(
+        "marketing_post_failure.html",
+        platform=platforms or "—",
+        content_preview=(
+            body if count == 1
+            else f"{count} failures this tick — {platforms}."
+        ),
+        error=errors or "unknown",
+        dashboard_url="https://agentavow.com/admin-dashboard?tab=marketing",
+        fallback=body,
     )
 
     # In-app notification
