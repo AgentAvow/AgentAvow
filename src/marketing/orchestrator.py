@@ -768,20 +768,18 @@ async def run_marketing_tick(db: AsyncSession) -> dict:
         except Exception:
             logger.exception("Draft notification failed")
 
-    # 3. Run HF auto-pick cycle on posting days (Wed/Sat)
+    # 3. Run HF auto-pick cycle — gated on PLATFORM_SCHEDULE so disabling huggingface in
+    # config actually disables it (was a hardcoded Wed/Sat that bypassed the config and
+    # kept auto-posting to strangers' HF repos; disabled 2026-08-19).
     try:
-        from datetime import date as _date
-
-        _today = _date.today().strftime("%a").lower()
-        hf_days = {"wed", "sat"}
-        if _today in hf_days:
+        if _is_platform_scheduled_today("huggingface") and _is_auto_post("huggingface"):
             from src.marketing.hf_autopick import run_hf_autopick_cycle
 
             hf_result = await run_hf_autopick_cycle()
             results["hf_autopick"] = hf_result
             logger.info("HF auto-pick result: %s", hf_result.get("status"))
         else:
-            results["hf_autopick"] = {"status": "not_hf_day", "today": _today}
+            results["hf_autopick"] = {"status": "disabled"}
     except Exception:
         logger.exception("HF auto-pick cycle failed")
         results["hf_autopick"] = {"error": "cycle_failed"}

@@ -134,7 +134,9 @@ PLATFORM_SCHEDULE: dict[str, dict] = {
     "bluesky": {"posts_per_week": 2, "auto_post": True, "days": ["mon", "fri"]},
     # DISABLED until May 1 — account karma is -1, dead channel
     "reddit": {"posts_per_week": 0, "auto_post": False, "days": []},
-    "huggingface": {"posts_per_week": 1, "auto_post": True, "days": ["wed"]},
+    # DISABLED 2026-08-19 (Kenne): auto-posting marketing comments on STRANGERS' HF model
+    # discussions is spam-adjacent (against our anti-spam stance) and was failing anyway.
+    "huggingface": {"posts_per_week": 0, "auto_post": False, "days": []},
     "devto": {"posts_per_week": 1, "auto_post": True, "days": ["thu"]},  # weekly article
     # Founder posts: 1 draft/week → human_review. Kenne edits into his own voice and posts from
     # his PERSONAL Founder profile (personal reach >> company page). Never auto-posts.
