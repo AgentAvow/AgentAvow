@@ -74,19 +74,28 @@ class CredentialListResponse(BaseModel):
 
 
 def _compute_proof(credential_data: dict) -> dict:
-    """Compute a deterministic proof hash for the credential.
-
-    In production this would use Ed25519 or similar. For now we use
-    SHA-256 as a content-integrity proof that can be verified against
-    the AgentGraph API.
+    """A genuine cryptographic proof over the credential — a W3C-recognized
+    ``JsonWebSignature2020`` DataIntegrity proof carrying our real Ed25519 signature
+    (the same key + JCS canonicalization behind every scan attestation and the JWKS),
+    NOT a bare content hash. A verifier canonicalizes the credential (sans proof),
+    checks the compact JWS in ``jws`` against our public JWKS, and re-derives the
+    trust score offline — so the VC is signed, portable, and third-party-verifiable.
     """
+    from src.signing import KID, canonicalize, create_jws
+
+    jws = create_jws(canonicalize(credential_data))
     canonical = json.dumps(credential_data, sort_keys=True, default=str)
     digest = hashlib.sha256(canonical.encode()).hexdigest()
     return {
-        "type": "AgentGraphIntegrityProof2026",
+        "type": "JsonWebSignature2020",
         "created": datetime.now(timezone.utc).isoformat(),
-        "verificationMethod": f"{AGENTGRAPH_ISSUER}#key-1",
+        "verificationMethod": f"{AGENTGRAPH_ISSUER}#{KID}",
         "proofPurpose": "assertionMethod",
+        # The real cryptographic proof — a compact Ed25519 JWS verifiable offline
+        # against our public JWKS (the signed part).
+        "jws": jws,
+        # SHA-256 content digest retained for the /credentials/verify convenience path
+        # and backward compatibility.
         "proofValue": digest,
     }
 

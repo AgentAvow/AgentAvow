@@ -79,7 +79,8 @@ async def test_export_trust_credential(client, db):
     cred = data["credentials"][0]
     assert "TrustScoreCredential" in cred["type"]
     assert cred["credentialSubject"]["trust_score"] == pytest.approx(0.82, abs=0.01)
-    assert cred["proof"]["type"] == "AgentGraphIntegrityProof2026"
+    assert cred["proof"]["type"] == "JsonWebSignature2020"
+    assert cred["proof"]["jws"].count(".") == 2  # real Ed25519 JWS
     assert cred["issuer"] == "did:web:agentgraph.co"
 
 

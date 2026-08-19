@@ -1,6 +1,6 @@
 {
   "name": "agentavow-trust",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Client-side verification of AgentAvow Trust Score v2 signed envelopes (JCS-canonical, Ed25519-over-SHA-256). Peer of the Python agentavow-sdk verify module. Formerly agentgraph-trust.",
   "type": "module",
   "license": "MIT",
@@ -15,7 +15,8 @@
   "files": [
     "index.js",
     "src/",
-    "README.md"
+    "README.md",
+    "bin/"
   ],
   "engines": {
     "node": ">=18"
@@ -36,5 +37,8 @@
     "jws",
     "did",
     "verifiable"
-  ]
+  ],
+  "bin": {
+    "agentavow-trust": "bin/cli.js"
+  }
 }

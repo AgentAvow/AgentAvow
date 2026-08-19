@@ -211,19 +211,36 @@ async def preflight_repo(
 
 
 def _registry_meta(subject_id: str, subject_full: str, data: dict) -> dict:
-    """Build the compact ``_meta`` publisher-provided trust block (§ server.json)."""
+    """Build the compact ``_meta`` publisher-provided trust block (§ server.json).
+
+    Shaped as a W3C Verifiable Credential (VC Data Model v2 context + type) so it rides
+    the same DID/VC standard the identity-registry players use — the safety SCORE none of
+    them issue, carried in the credential format they already consume. The Ed25519 JWS in
+    ``proof`` is offline-verifiable against our JWKS; the score is recomputable from the
+    findings. Only the SAFETY score is signed here — adoption is not a credentialed claim.
+    """
     jws = _sign(subject_full, data)
     trust = {
-        "schema": SCHEMA,
-        "trustScore": int(data.get("trust_score") or 0),
-        "trustTier": str(data.get("trust_tier") or ""),
-        "grade": str(data.get("grade") or ""),
-        "certified": bool((data.get("certified") or {}).get("eligible")),
-        "subject": subject_id,
+        "@context": [
+            "https://www.w3.org/ns/credentials/v2",
+            "https://agentgraph.co/ns/trust/v1",
+        ],
+        "type": ["VerifiableCredential", "TrustScoreCredential"],
         "issuer": ISSUER,
-        "kid": KID,
-        "jwks": JWKS_URL,
-        "attestation": jws,
+        "credentialSubject": {
+            "id": subject_id,
+            "trustScore": int(data.get("trust_score") or 0),
+            "trustTier": str(data.get("trust_tier") or ""),
+            "grade": str(data.get("grade") or ""),
+            "certified": bool((data.get("certified") or {}).get("eligible")),
+        },
+        "proof": {
+            "type": "JsonWebSignature2020",
+            "verificationMethod": f"{ISSUER}#{KID}",
+            "jwks": JWKS_URL,
+            "jws": jws,
+        },
+        "schema": SCHEMA,
         "report": _report_url("repo" if subject_id.startswith("github:") else "mcp",
                               subject_full.replace("mcp:", "")),
     }
