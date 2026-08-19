@@ -2050,6 +2050,39 @@ def _simple_badge_response(label: str, color: str) -> Response:
     )
 
 
+async def _npm_pkg_belongs_to_repo(pkg: str, owner: str, repo: str) -> bool:
+    """True only if npm package ``pkg`` provably points back to ``owner/repo`` via its
+    registry ``repository.url``. Gates the download/dependent adoption axes so a repo
+    can't inherit an unrelated same-named package's numbers. Fail-CLOSED (no match on
+    error/miss) — better to under-attribute adoption than to manufacture it."""
+    from src.redis_client import get_redis
+
+    key = f"npmowns:{pkg}:{owner}/{repo}"
+    try:
+        r = get_redis()
+        cached = await r.get(key)
+        if cached is not None:
+            return cached in (b"1", "1")
+    except Exception:
+        r = None
+    match = False
+    try:
+        from src.ssrf import ssrf_safe_async_client
+        async with ssrf_safe_async_client(timeout=6) as client:
+            resp = await client.get(f"https://registry.npmjs.org/{pkg}")
+            if resp.status_code == 200:
+                repo_url = ((resp.json().get("repository") or {}).get("url") or "").lower()
+                match = f"{owner}/{repo}".lower() in repo_url
+    except Exception:
+        match = False
+    if r is not None:
+        try:
+            await r.set(key, "1" if match else "0", ex=86400)
+        except Exception:
+            pass
+    return match
+
+
 async def _github_stars(owner: str, repo: str) -> int | None:
     """Public star count for a repo (no claim needed). Cached 24h in Redis."""
     from src.redis_client import get_redis
@@ -2195,10 +2228,14 @@ async def scan_adoption(
     axes = []
     raw_inputs: dict = {}
 
-    # (A) registry downloads — try npm by repo name (best-effort, fail-open).
-    dl = await fetch_npm_downloads(repo)
-    # (B) reverse-dependents — ecosyste.ms npm registry.
-    dep = await fetch_ecosystems_dependents("npmjs.org", repo)
+    # (A) registry downloads + (B) reverse-dependents — ONLY when the npm package of
+    # this name provably belongs to THIS repo (its registry repository.url points back
+    # here). Without the check, github.com/anyone/react inherits the real react's
+    # downloads + dependents — a false attribution AND a one-line gaming vector.
+    dl = dep = None
+    if await _npm_pkg_belongs_to_repo(repo, owner, repo):
+        dl = await fetch_npm_downloads(repo)
+        dep = await fetch_ecosystems_dependents("npmjs.org", repo)
 
     dep_pkgs = (dep or {}).get("dependent_packages")
     dep_repos = (dep or {}).get("dependent_repos")
