@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentavow-trust"
-version = "0.4.0"
+version = "0.4.1"
 description = "MCP server for AgentAvow (formerly agentgraph-trust) — trust verification, security scanning, and identity lookup for AI agents"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,6 +22,7 @@ dependencies = [
 packages = ["agentgraph_trust"]
 
 [project.scripts]
+agentavow-trust = "agentgraph_trust.server:main"
 agentgraph-trust = "agentgraph_trust.server:main"
 
 [project.optional-dependencies]

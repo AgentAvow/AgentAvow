@@ -35,6 +35,12 @@ const MCP_CONFIG = `{
     "agentavow-trust": { "command": "uvx", "args": ["agentavow-trust"] }
   }
 }`
+// One-click Cursor deep-link (name + base64 config, the format Cursor's install-mcp expects).
+const CURSOR_INSTALL = `https://cursor.com/install-mcp?name=agentavow-trust&config=${encodeURIComponent(
+  (typeof btoa !== 'undefined' ? btoa : (s: string) => Buffer.from(s).toString('base64'))(
+    JSON.stringify({ command: 'uvx', args: ['agentavow-trust'] }),
+  ),
+)}`
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
@@ -170,7 +176,11 @@ export default function RebrandForDevelopers() {
             <strong className="text-text"> "is this tool safe to install?"</strong> and get a signed 0–100 score + findings
             back — <em>before</em> it connects an unknown server or runs a package. Free, no account, read-only.
           </p>
-          <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Add to your MCP client (one line)</div>
+          <div className="mt-4 flex gap-2.5 flex-wrap">
+            <a href={CURSOR_INSTALL} className="inline-flex items-center gap-2 font-semibold text-[13.5px] px-4 py-2 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Add to Cursor — one click →</a>
+            <a href="https://pypi.org/project/agentavow-trust/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">PyPI ↗</a>
+          </div>
+          <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Or add it by hand (any MCP client)</div>
           <div className="relative">
             <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto">{MCP_CONFIG}</pre>
             <button onClick={copyMcp} className="absolute top-2 right-2 font-mono text-[11px] px-2 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copiedMcp ? 'copied ✓' : 'copy'}</button>
