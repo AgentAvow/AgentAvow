@@ -184,6 +184,19 @@ class ScanResult:
     def medium_count(self) -> int:
         return sum(1 for f in self.findings if f.severity == "medium")
 
+    # "Blocking" counts — findings in SHIPPED code (or known-malicious anywhere). These
+    # drive the headline grade/tier/number so all surfaces agree about a real critical,
+    # instead of the number discounting a non-shipped finding the letter still caps on.
+    @property
+    def shipped_critical_count(self) -> int:
+        return sum(1 for f in self.findings
+                   if f.severity == "critical" and _finding_is_blocking(f))
+
+    @property
+    def shipped_high_count(self) -> int:
+        return sum(1 for f in self.findings
+                   if f.severity == "high" and _finding_is_blocking(f))
+
 
 def _should_skip_path(path: str) -> bool:
     """Check if a file path should be skipped."""
@@ -808,6 +821,33 @@ def _is_test_or_doc_file(file_path: str) -> bool:
     if ".example" in lower or ".sample" in lower or ".template" in lower:
         return True
     return False
+
+
+def _finding_is_blocking(f: object) -> bool:
+    """Whether a finding should drive the HEADLINE grade/tier/number (not just the
+    letter). True when it's in shipped/runtime code, OR known-malicious wherever it
+    sits (a MAL finding is dangerous even under tests/). A finding with no known path
+    is treated as blocking (conservative — an unlocated critical isn't waved through).
+    Keeps the score, tier, grade, and headline count in agreement about one critical.
+    """
+    name = (getattr(f, "name", "") or "")
+    if name.startswith("Known-malicious") or "malicious" in name.lower():
+        return True
+    path = getattr(f, "file_path", None)
+    if not path:
+        return True
+    return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
+
+
+def _blocking_crit_count(result: object) -> int:
+    """Blocking-critical count, tolerant of lightweight fakes (fall back to raw)."""
+    v = getattr(result, "shipped_critical_count", None)
+    return getattr(result, "critical_count", 0) if v is None else v
+
+
+def _blocking_high_count(result: object) -> int:
+    v = getattr(result, "shipped_high_count", None)
+    return getattr(result, "high_count", 0) if v is None else v
 
 
 def _select_scan_files(
@@ -1681,9 +1721,11 @@ def _certified_status(result: ScanResult) -> dict:
             drift.get("added_files") or drift.get("modified_files")
             or drift.get("has_install_hook")
         ),
-        # 4. zero critical/high across code + supply-chain, and no known-malicious dep
+        # 4. zero BLOCKING (shipped/known-malicious) critical or high, and no MAL dep.
+        # Uses the blocking counts so Certified agrees with the headline number/grade —
+        # a finding only in a benchmark/test file doesn't secretly veto the top tier.
         "no_critical_or_high": (
-            result.critical_count == 0 and result.high_count == 0
+            _blocking_crit_count(result) == 0 and _blocking_high_count(result) == 0
             and not any(f.name.startswith("Known-malicious") for f in result.findings)
         ),
         # 5. a signed, recomputable verdict (coverage block with pinned snapshots)
@@ -1725,6 +1767,11 @@ _CODE_HM_DEDUCTION_CAP = 42
 # findings-baseline repo (68) into Caution (≤46 before highs), so a critical can never sit
 # in the Trusted band — the property the old ×15 + MCP exemption violated.
 _CRIT_DEDUCTION = 22
+
+# Hard ceiling when a BLOCKING (shipped or known-malicious) critical exists: the number
+# is floored to the top of the Caution band so the score, tier, and colour can never read
+# "Trusted/verified" over a real open critical — no matter how many positives offset it.
+_CRITICAL_CEILING = 45
 
 
 def _calculate_trust_score(result: ScanResult) -> int:
@@ -1845,7 +1892,16 @@ def _calculate_trust_score(result: ScanResult) -> int:
         excess = result.suppressed_count - 3
         score -= excess * 3
 
-    return max(0, min(100, int(round(score))))
+    score = max(0, min(100, int(round(score))))
+
+    # A blocking (shipped / known-malicious) critical caps the NUMBER too — not just the
+    # letter — so score/tier/colour agree with the grade. A non-shipped-only critical
+    # (e.g. subprocess in a benchmark harness) does NOT floor: it's discounted everywhere
+    # consistently and surfaced as a non-shipped finding, never as a headline critical.
+    if _blocking_crit_count(result) > 0:
+        score = min(score, _CRITICAL_CEILING)
+
+    return score
 
 
 def _calculate_category_scores(result: ScanResult) -> dict[str, int]:

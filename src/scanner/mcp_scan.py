@@ -235,7 +235,7 @@ def analyze_mcp(
         result.findings.append(_finding(
             "lethal_trifecta",
             "Lethal trifecta: private-data access + external comms + action/exec across the tools",
-            "high", "server",
+            "critical", "server",
             "Split powerful capabilities across servers, or confirm the exfil-capable path.",
         ))
 

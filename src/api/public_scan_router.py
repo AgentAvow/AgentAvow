@@ -711,14 +711,20 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
 
 def _scan_result_to_dict(result: object) -> dict:
     """Convert a ScanResult dataclass to a cacheable dict."""
+    # Blocking (shipped / known-malicious) counts drive the headline grade/tier/number
+    # so all surfaces agree about a real critical. Real ScanResult exposes the property;
+    # fall back to raw counts for lightweight fakes.
+    _sc = getattr(result, "shipped_critical_count", None)
+    ship_crit = result.critical_count if _sc is None else _sc
+    _sh = getattr(result, "shipped_high_count", None)
+    ship_high = result.high_count if _sh is None else _sh
+
     # Top-line label — derived from the FINAL grade (which already reflects the
     # certified gate, the critical cap, and the calibrated deductions), NOT raw finding
     # counts. Otherwise a big library capped to A/B still read "critical" from a single
     # count, contradicting its own grade.
     _elig = (getattr(result, "certified", None) or {}).get("eligible")
-    _grade = _display_grade(
-        result.trust_score, _elig, getattr(result, "critical_count", 0),
-    )
+    _grade = _display_grade(result.trust_score, _elig, ship_crit)
     if _grade in ("A+", "A"):
         scan_result = "clean"
     elif _grade in ("B", "C"):
@@ -775,13 +781,19 @@ def _scan_result_to_dict(result: object) -> dict:
         # Letter grade with the A+ certified gate applied (flag-gated; == score-only
         # grade when the gate is off). Stored so every consumer reads one grade.
         "grade": _display_grade(
-            result.trust_score, _certified.get("eligible"), result.critical_count),
+            result.trust_score, _certified.get("eligible"), ship_crit),
         "trust_tier": tier_info["tier"],
         "recommended_limits": tier_info["recommended_limits"],
         "scan_result": scan_result,
         "findings": {
-            "critical": result.critical_count,
-            "high": result.high_count,
+            # Headline counts are the BLOCKING (shipped / known-malicious) criticals &
+            # highs, so the "N critical" the UI shows agrees with the number, grade, and
+            # tier. Non-shipped criticals/highs still appear in `items` (tagged
+            # shipped=false) for full transparency — they're just not headline-counted.
+            "critical": ship_crit,
+            "high": ship_high,
+            "critical_all": result.critical_count,
+            "high_all": result.high_count,
             "medium": result.medium_count,
             "total": len(result.findings),
             "categories": categories,
