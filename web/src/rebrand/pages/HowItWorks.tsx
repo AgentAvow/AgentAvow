@@ -1,8 +1,12 @@
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal, RevealStagger } from '../components/motion'
 import { TrustBar, AdoptionNeedle } from '../components/TrustMark'
 import { VerifyDemo } from '../components/VerifyDemo'
+import { cursorStdio, vscodeStdio } from '../lib/installLinks'
+
+const AA_MCP = { name: 'agentavow-trust', command: 'uvx', args: ['agentavow-trust'] }
 
 /**
  * How it works — the transparency page. Explains the aggregate-over-signed-evidence
@@ -38,6 +42,14 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 }
 
 export default function RebrandHowItWorks() {
+  const location = useLocation()
+  useEffect(() => {
+    if (!location.hash) return
+    const id = location.hash.slice(1)
+    // ScrollToTop fires on route change; wait a tick so our scroll wins
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+    return () => clearTimeout(t)
+  }, [location.hash])
   return (
     <div className="max-w-[880px] mx-auto px-6 py-16">
       <Reveal>
@@ -131,6 +143,24 @@ agentavow scan . --min-score 60`}</pre>
           </div>
         ))}
       </RevealStagger>
+
+      {/* MCP plug — give your own agent this same check, built in */}
+      <Reveal>
+        <div id="mcp-check" className="mt-12 glass rounded-2xl p-7 border-l-4 border-primary/60 scroll-mt-24">
+          <Eyebrow>For your agent</Eyebrow>
+          <h2 className="mt-2 text-xl font-bold">Give your own agent this check, built in.</h2>
+          <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
+            The same scan runs as an <strong className="text-text">MCP server</strong>. Add it to your agent and it can ask
+            <em> "is this safe to install?"</em> — getting a signed safety score <strong className="text-text">before</strong> it
+            connects any tool, package, or server. Free, no account. One line: <code className="font-mono text-[12.5px] text-primary-light bg-surface px-1.5 py-0.5 rounded">uvx agentavow-trust</code>
+          </p>
+          <div className="mt-4 flex gap-3 flex-wrap items-center">
+            <a href={cursorStdio(AA_MCP)} className="inline-flex items-center gap-2 font-semibold text-[13.5px] px-4 py-2 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Add to Cursor →</a>
+            <a href={vscodeStdio(AA_MCP)} className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to VS Code →</a>
+            <Link to={rp('/rebrand/for-developers')} className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claude Code & full setup →</Link>
+          </div>
+        </div>
+      </Reveal>
 
       {/* verify — the home for Verify */}
       <Reveal>

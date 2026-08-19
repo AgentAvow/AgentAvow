@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.agentavow/agentavow-trust",
+  "name": "com.agentavow/agentavow-trust",
   "title": "AgentAvow Trust",
   "description": "Signed, offline-verifiable safety scores for the MCP servers, packages & tools an agent connects to",
   "version": "0.4.1",

@@ -6,7 +6,7 @@ import hmac
 import json
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.signing import (
     canonicalize_jcs_strict,
@@ -20,6 +20,13 @@ router = APIRouter(tags=["jwks"])
 # OATR (Open Agent Trust Registry) identity
 _OATR_ISSUER_ID = "agentgraph"
 _OATR_PUBLIC_KEY = "jWRrozl7KF08Cxjpu41FpdLMvXMC_L8U2ZYJUMvckgk"
+
+# MCP Registry HTTP domain-verification key (namespace com.agentavow/*).
+# The registry fetches /.well-known/mcp-registry-auth, reads this Ed25519
+# public key, and challenges the publisher to sign with the matching private
+# key (held offline, never committed). Proves we control agentavow.com and
+# authorizes publishing under the com.agentavow/* namespace.
+_MCP_REGISTRY_AUTH_PUBKEY = "yVsQ2iV04DaVqHjO6P/yfbUAkJ7pa8nPT4H76KuvHN4="
 
 # ── Webhook test vectors ──────────────────────────────────────────────
 # Partners implementing the scan-change receiver (MoltBridge, Verascore,
@@ -52,6 +59,25 @@ async def jwks() -> JSONResponse:
         keys.extend(get_trust_v2_jwks())
     return JSONResponse(
         content={"keys": keys},
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.get("/.well-known/mcp-registry-auth")
+async def mcp_registry_auth() -> PlainTextResponse:
+    """Domain-ownership proof for the official MCP Registry (HTTP method).
+
+    The registry fetches this file to verify we control agentavow.com, then
+    challenges us to sign a nonce with the private key matching the published
+    Ed25519 public key. On success it grants the ``com.agentavow/*`` namespace.
+    Format: ``v=MCPv1; k=ed25519; p=<base64 public key>``.
+    """
+    body = f"v=MCPv1; k=ed25519; p={_MCP_REGISTRY_AUTH_PUBKEY}\n"
+    return PlainTextResponse(
+        content=body,
         headers={
             "Cache-Control": "public, max-age=3600",
             "Access-Control-Allow-Origin": "*",

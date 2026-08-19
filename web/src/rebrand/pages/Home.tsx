@@ -348,7 +348,7 @@ export default function RebrandHome() {
           </Link>
         </Reveal>
         <Reveal>
-          <Link to={rp('/rebrand/for-developers')} className="mt-4 glass rounded-2xl px-6 py-4 flex items-center gap-4 flex-wrap hover:border-primary-light/50 border border-transparent transition-colors group">
+          <Link to={rp('/rebrand/how-it-works') + '#mcp-check'} className="mt-4 glass rounded-2xl px-6 py-4 flex items-center gap-4 flex-wrap hover:border-primary-light/50 border border-transparent transition-colors group">
             <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-1 rounded bg-primary/15 text-primary-light shrink-0">New</span>
             <div className="min-w-0 flex-1">
               <div className="text-[15px] font-semibold">Running an agent? Give it a built-in safety check.</div>
