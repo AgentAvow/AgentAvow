@@ -30,8 +30,8 @@ _BADGE_ASK_MIN = 80  # ≥80 → pride+proof badge note; below → value-first /
 _SHIELDS_RE = re.compile(r"shields\.io|img\.shields\.io|badgen\.net|!\[[^\]]*\]\([^)]*badge", re.I)
 
 
-async def _detect_shields(owner: str, repo: str, token: str | None) -> bool:
-    """Best-effort: does the README already display badges? (zero-friction signal)."""
+async def _fetch_readme(owner: str, repo: str, token: str | None) -> str | None:
+    """Best-effort README text — feeds both the shields signal and the LLM draft."""
     try:
         import base64
 
@@ -45,12 +45,51 @@ async def _detect_shields(owner: str, repo: str, token: str | None) -> bool:
                 f"https://api.github.com/repos/{owner}/{repo}/readme", headers=headers,
             )
             if r.status_code != 200:
-                return False
-            content = r.json().get("content", "")
-            readme = base64.b64decode(content).decode("utf-8", "ignore")
-            return bool(_SHIELDS_RE.search(readme))
+                return None
+            return base64.b64decode(r.json().get("content", "")).decode("utf-8", "ignore")
     except Exception:
-        return False
+        return None
+
+
+async def _llm_draft(owner: str, repo: str, description: str, score: int | None,
+                     certified: bool, badge_ask: bool, top_finding: str | None,
+                     readme: str | None) -> str | None:
+    """An LLM-written, genuinely specific outreach note that reads the maintainer's
+    actual README — not a template. Returns None if the LLM is unavailable (caller
+    falls back to the deterministic template)."""
+    system = (
+        "You draft SHORT, genuine, value-first outreach notes from Kenne (founder of "
+        "AgentAvow — a signed, offline-recomputable safety score for AI-agent tools) to "
+        "open-source maintainers. Hard rules: reference something SPECIFIC and real about "
+        "THEIR tool from the README (what it does, a design choice) so it can't read as a "
+        "template; never salesy or generic; 4-6 sentences, no emojis; warm but brief. For a "
+        "HIGH scorer, it's pride+proof — mention the signed README badge they could add. For "
+        "a LOWER scorer, lead with a genuine offer to help with the SPECIFIC finding and do "
+        "NOT mention a badge. It must read like a human who actually looked at their repo."
+    )
+    excerpt = (readme or description or "")[:1600]
+    posture = (
+        "HIGH scorer — pride+proof, offer the signed badge" if badge_ask
+        else "LOWER scorer — value-first, cite the finding, NO badge ask"
+    )
+    prompt = (
+        f"Maintainer's tool: {owner}/{repo}\n"
+        f"One-line description: {description or '(none)'}\n"
+        f"AgentAvow score: {score}/100"
+        f"{' — CERTIFIED, the earned top tier' if certified else ''}\n"
+        f"Posture: {posture}\n"
+        f"Top finding: {top_finding or 'none notable'}\n"
+        f"Their signed report: https://agentavow.com/check/{owner}/{repo}\n\n"
+        f"README excerpt:\n{excerpt}\n\nWrite the outreach note only — no preamble."
+    )
+    try:
+        from src.marketing.llm.anthropic_client import generate
+        r = await generate(prompt, system=system, max_tokens=420, temperature=0.7)
+        text = (r.text or "").strip()
+        return text or None
+    except Exception:
+        logger.debug("radar LLM draft failed for %s/%s", owner, repo, exc_info=True)
+        return None
 
 
 def _rank(score: int | None, stars: int, has_shields: bool, certified: bool,
@@ -172,16 +211,23 @@ async def run_developer_radar(
             certified = bool((getattr(result, "certified", None) or {}).get("eligible"))
             crit = result.critical_count
             high = result.high_count
-            has_shields = await _detect_shields(owner, repo, token)
+            readme = await _fetch_readme(owner, repo, token)
+            has_shields = bool(readme and _SHIELDS_RE.search(readme))
             rank = _rank(score, p.stars or 0, has_shields, certified, crit, high)
             top = _top_finding(result)
-            draft = _draft(owner, repo, score, certified, rank["badge_ask"], top)
+            # Prefer an LLM-written, repo-specific note; fall back to the template.
+            llm = await _llm_draft(
+                owner, repo, p.description or "", score, certified,
+                rank["badge_ask"], top, readme,
+            )
+            draft = llm or _draft(owner, repo, score, certified, rank["badge_ask"], top)
 
             p.notes = json.dumps({
                 "trust_score": score, "certified": certified,
                 "critical": crit, "high": high, "has_shields": has_shields,
                 "stars": p.stars, "score_url": f"https://agentavow.com/check/{owner}/{repo}",
                 "top_finding": top, "draft": draft,
+                "draft_source": "llm" if llm else "template",
                 **rank,
             })
             p.status = "queued"

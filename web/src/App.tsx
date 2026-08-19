@@ -138,6 +138,7 @@ const RebrandAccount = lazyWithReload(() => import('./rebrand/pages/Account'))
 const RebrandMyTools = lazyWithReload(() => import('./rebrand/pages/MyTools'))
 const RebrandHowItWorks = lazyWithReload(() => import('./rebrand/pages/HowItWorks'))
 const RebrandResearch = lazyWithReload(() => import('./rebrand/pages/Research'))
+const RebrandSoasQ3 = lazyWithReload(() => import('./rebrand/pages/StateOfAgentSecurityQ3'))
 const RebrandClaim = lazyWithReload(() => import('./rebrand/pages/Claim'))
 const RebrandFAQ = lazyWithReload(() => import('./rebrand/pages/FAQ'))
 const RebrandSettings = lazyWithReload(() => import('./rebrand/pages/Settings'))
@@ -279,6 +280,7 @@ function AppRoutes() {
           <Route path="tools" element={<RebrandMyTools />} />
           <Route path="how-it-works" element={<RebrandHowItWorks />} />
           <Route path="research" element={<RebrandResearch />} />
+          <Route path="state-of-agent-security-q3-2026" element={<RebrandSoasQ3 />} />
           <Route path="claim" element={<RebrandClaim />} />
           <Route path="faq" element={<RebrandFAQ />} />
           <Route path="settings" element={<RebrandSettings />} />

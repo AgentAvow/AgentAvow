@@ -8,7 +8,7 @@ import { Reveal, RevealStagger } from '../components/motion'
 
 const REPORTS: { title: string; sub: string; date: string; status: 'live' | 'upcoming'; href?: string }[] = [
   { title: 'State of Agent Security 2026', sub: 'Agent distribution surfaces + the signed-evidence substrate. 35k+ tools scanned, reproducible.', date: 'Q2 2026', status: 'live', href: '/state-of-agent-security-2026' },
-  { title: 'State of Agent Security — Q3 2026', sub: 'The next quarterly cut, with the growing community-scan corpus.', date: 'Aug 2026', status: 'upcoming' },
+  { title: 'State of Agent Security — Q3 2026', sub: 'We scanned 24,756 agent tools — 43% carry a high/critical finding. The tool-safety blind spot, sized (live figure).', date: 'Aug 2026', status: 'live', href: '/state-of-agent-security-q3-2026' },
 ]
 
 const PUBLICATIONS: { title: string; sub: string; href: string }[] = [
