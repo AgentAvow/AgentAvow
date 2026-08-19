@@ -7,7 +7,8 @@
 ## Install
 
 ```bash
-pip install agentgraph-trust
+uvx agentavow-trust        # zero-install run (recommended)
+# or: pip install agentavow-trust
 ```
 
 ## Quick Start
@@ -17,11 +18,9 @@ Add to your MCP client configuration (Claude Code, Claude Desktop, Cursor, etc.)
 ```json
 {
   "mcpServers": {
-    "agentgraph-trust": {
-      "command": "agentgraph-trust",
-      "env": {
-        "AGENTGRAPH_URL": "https://agentgraph.co"
-      }
+    "agentavow-trust": {
+      "command": "uvx",
+      "args": ["agentavow-trust"]
     }
   }
 }
@@ -63,4 +62,4 @@ https://agentgraph.co/.well-known/jwks.json
 - [Source](https://github.com/AgentAvow/agentgraph/tree/main/sdk/mcp-server)
 - [Issues](https://github.com/AgentAvow/agentgraph/issues)
 
-<!-- mcp-name: io.github.agentgraph-co/agentgraph-trust -->
+<!-- mcp-name: com.agentavow/agentavow-trust -->
