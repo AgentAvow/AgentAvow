@@ -12,9 +12,9 @@ declare global {
 
 /**
  * Live preview that dogfoods the real hosted widget.js — loads the script once,
- * then re-renders a [data-agentavow-tool] target whenever the slug/theme changes.
+ * then re-renders a [data-agentavow-tool] target whenever the slug changes.
  */
-function WidgetPreview({ slug, theme }: { slug: string; theme: 'dark' | 'light' }) {
+function WidgetPreview({ slug }: { slug: string }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const origin = typeof window !== 'undefined' ? window.location.origin : ''
@@ -29,11 +29,11 @@ function WidgetPreview({ slug, theme }: { slug: string; theme: 'dark' | 'light' 
     } else if (window.AgentAvow) {
       window.AgentAvow.render(ref.current || undefined)
     }
-  }, [slug, theme])
-  // key forces a fresh, unmounted target element whenever slug/theme changes
+  }, [slug])
+  // key forces a fresh, unmounted target element whenever the slug changes
   return (
     <div ref={ref}>
-      <div key={`${slug}:${theme}`} data-agentavow-tool={slug} data-theme={theme} />
+      <div key={slug} data-agentavow-tool={slug} />
     </div>
   )
 }
@@ -62,17 +62,13 @@ export default function RebrandBadge() {
   const [copiedW, setCopiedW] = useState(false)
   // Trust, or Trust + Adoption (combined) — adoption never travels alone.
   const [variant, setVariant] = useState<'trust' | 'combined'>('trust')
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const navigate = useNavigate()
   const slug = repo.trim() || 'you/your-repo'
   const [owner, name] = slug.includes('/') ? slug.split('/') : ['', '']
   // Dynamic origin so the copied badge resolves NOW (agentgraph.co) and after
   // cutover (agentavow.com) — never a dead hardcoded agentavow.com link pre-DNS.
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  const _p = new URLSearchParams()
-  if (variant === 'combined') _p.set('metric', 'combined')
-  if (theme === 'light') _p.set('theme', 'light')
-  const _qs = _p.toString() ? `?${_p.toString()}` : ''
+  const _qs = variant === 'combined' ? '?metric=combined' : ''
   const badgeSrc = `${origin}/api/v1/public/scan/${slug}/badge${_qs}`
   const badgeAlt = variant === 'trust' ? 'AgentAvow Trust' : 'AgentAvow'
   const markdown = `[![${badgeAlt}](${badgeSrc})](${origin}/check/${slug})`
@@ -101,7 +97,7 @@ export default function RebrandBadge() {
   })
   const isCertified = !!certData?.certified?.eligible
 
-  const widgetSnippet = `<script src="${origin}/widget.js"\n        data-tool="${slug}"${theme === 'light' ? '\n        data-theme="light"' : ''}></script>`
+  const widgetSnippet = `<script src="${origin}/widget.js"\n        data-tool="${slug}"></script>`
   const copyWidget = () => {
     if (navigator.clipboard) navigator.clipboard.writeText(widgetSnippet)
     setCopiedW(true)
@@ -139,21 +135,13 @@ export default function RebrandBadge() {
           </button>
         </div>
 
-        {/* choose: badge + theme */}
+        {/* choose: badge variant */}
         <div className="mt-5 flex items-center gap-5 flex-wrap">
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Badge</span>
             <div className="inline-flex rounded-lg border border-border overflow-hidden">
               {([['trust', 'Trust'], ['combined', 'Trust + Adoption']] as const).map(([v, lbl]) => (
                 <button key={v} onClick={() => setVariant(v)} className={`px-3 py-1 font-mono text-[12px] transition-colors ${variant === v ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{lbl}</button>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Theme</span>
-            <div className="inline-flex rounded-lg border border-border overflow-hidden">
-              {(['dark', 'light'] as const).map((th) => (
-                <button key={th} onClick={() => setTheme(th)} className={`px-3 py-1 font-mono text-[12px] capitalize transition-colors ${theme === th ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{th}</button>
               ))}
             </div>
           </div>
@@ -171,7 +159,7 @@ export default function RebrandBadge() {
 
         <div className="mt-4 flex items-center gap-3 flex-wrap">
           <span className="font-mono text-[11.5px] text-text-muted">{owner && name ? 'Live badge:' : 'Preview:'}</span>
-          <span className={`inline-flex p-3 rounded-lg ${theme === 'light' ? 'bg-white' : 'bg-surface-hover'}`}>
+          <span className="inline-flex p-3 rounded-lg bg-surface-hover">
             {owner && name ? (
               <img src={badgeSrc} alt={`${slug} ${badgeAlt}`} className="h-[24px] rounded shadow-md" />
             ) : variant === 'trust' ? (
@@ -214,7 +202,7 @@ export default function RebrandBadge() {
           <div>
             <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Live preview</div>
             {owner && name
-              ? <WidgetPreview slug={slug} theme={theme} />
+              ? <WidgetPreview slug={slug} />
               : <p className="text-text-muted text-[13px] italic">Enter a repo above to preview the live widget.</p>}
           </div>
           <div>

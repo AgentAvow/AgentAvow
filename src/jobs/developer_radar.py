@@ -85,6 +85,50 @@ def _rank(score: int | None, stars: int, has_shields: bool, certified: bool,
             "badge_ask": certified or s >= _BADGE_ASK_MIN, "ideal_stars": ideal_stars}
 
 
+_SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def _top_finding(result) -> str | None:
+    """The single most-severe finding, phrased for an outreach note."""
+    fs = sorted(getattr(result, "findings", []) or [],
+                key=lambda x: _SEV_ORDER.get(x.severity, 5))
+    if not fs:
+        return None
+    f = fs[0]
+    loc = ""
+    if getattr(f, "file_path", None):
+        loc = f.file_path + (f":{f.line_number}" if getattr(f, "line_number", None) else "")
+    return f"a {f.severity}-severity {f.category} finding" + (f" in {loc}" if loc else "")
+
+
+def _draft(owner: str, repo: str, score: int | None, certified: bool,
+           badge_ask: bool, top_finding: str | None) -> str:
+    """A personalized, value-first outreach draft that uses our own tools (the signed
+    score, the specific finding, the README badge). Kenne personalizes + sends manually."""
+    url = f"https://agentavow.com/check/{owner}/{repo}"
+    if certified:
+        return (
+            f"Hi — {owner}/{repo} is AgentAvow Certified ({score}/100), the earned top "
+            "tier: a public, conjunctive gate you can recompute offline against our public "
+            "keys (not a hosted 'trust us' number). That's a rare signal. If you'd want the "
+            f"one-line README badge that renders it live, it's on the page: {url}. No ask — "
+            "just figured you'd want to know you cleared it."
+        )
+    if badge_ask:
+        return (
+            f"Hi — {repo} scored {score}/100 on AgentAvow, a signed, offline-recomputable "
+            "safety score for agent tools (anyone can re-derive it against our public keys). "
+            f"Clean result: {url}. There's a one-line README badge that renders your live "
+            "signed score if it's useful. Nice work on the hygiene."
+        )
+    finding = f" The top item is {top_finding}." if top_finding else ""
+    return (
+        f"Hi — I ran {repo} through AgentAvow (a signed safety scan for agent tools) and "
+        f"wanted to share the findings, they might be useful.{finding} Full report + a "
+        f"verifiable attestation: {url}. Happy to walk through any of it — no ask."
+    )
+
+
 async def run_developer_radar(
     db: AsyncSession, *, discover: bool = True, limit: int = 25,
 ) -> dict:
@@ -130,11 +174,14 @@ async def run_developer_radar(
             high = result.high_count
             has_shields = await _detect_shields(owner, repo, token)
             rank = _rank(score, p.stars or 0, has_shields, certified, crit, high)
+            top = _top_finding(result)
+            draft = _draft(owner, repo, score, certified, rank["badge_ask"], top)
 
             p.notes = json.dumps({
                 "trust_score": score, "certified": certified,
                 "critical": crit, "high": high, "has_shields": has_shields,
                 "stars": p.stars, "score_url": f"https://agentavow.com/check/{owner}/{repo}",
+                "top_finding": top, "draft": draft,
                 **rank,
             })
             p.status = "queued"

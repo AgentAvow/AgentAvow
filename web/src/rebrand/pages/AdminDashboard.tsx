@@ -632,7 +632,50 @@ interface RadarItem {
   full_name: string; owner: string; repo: string; stars?: number; framework?: string
   trust_score?: number; certified?: boolean; critical?: number; high?: number
   has_shields?: boolean; priority?: number; channel?: string; angle?: string
-  badge_ask?: boolean; score_url?: string
+  badge_ask?: boolean; score_url?: string; draft?: string; top_finding?: string
+}
+
+// Curator targets — one relationship → many placements. Static (from dev-first-adopter-list.md).
+const CURATORS: [string, string, string][] = [
+  ['Puliczek/awesome-mcp-security', '729★', 'tightest fit — an MCP *security* list; approach first'],
+  ['rohitg00/awesome-devops-mcp-servers', '1k★', 'niche/reachable — PR under tooling/security'],
+  ['wong2/awesome-mcp-servers', '4.3k★', 'reachable — same PR play'],
+  ['appcypher/awesome-mcp-servers', '5.7k★', 'reachable — same'],
+  ['punkpeye/awesome-mcp-servers', '92k★', 'canonical, hardest — approach LAST, after a win or two'],
+]
+
+function RadarRow({ it }: { it: RadarItem }) {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const copy = () => { if (it.draft && navigator.clipboard) { navigator.clipboard.writeText(it.draft); setCopied(true); setTimeout(() => setCopied(false), 1400) } }
+  return (
+    <div className="glass rounded-xl px-4 py-3">
+      <div className="flex items-center gap-2.5 flex-wrap">
+        <span className="font-mono text-[10.5px] font-bold tabular-nums w-9 text-primary-light">{it.priority ?? '—'}</span>
+        <a href={it.score_url || `https://agentavow.com/check/${it.full_name}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[13.5px] font-semibold text-text hover:text-primary-light truncate">{it.full_name}</a>
+        {it.certified
+          ? <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ CERT {it.trust_score}</span>
+          : <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-surface border border-border/60 text-text-muted">{it.trust_score ?? '—'}/100</span>}
+        {it.badge_ask
+          ? <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/10 text-success">badge ask</span>
+          : <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded bg-warning/10 text-warning">fix-first</span>}
+        {it.has_shields && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface border border-border/60 text-text-muted">shields ✓</span>}
+        <span className="text-[11px] text-text-muted/70 ml-auto">★{it.stars ?? 0}{it.framework ? ` · ${it.framework}` : ''}</span>
+      </div>
+      {it.channel && <p className="text-[12.5px] text-text-muted mt-1.5">{it.channel}</p>}
+      {it.draft && (
+        <div className="mt-1.5">
+          <button onClick={() => setOpen(!open)} className="text-[12px] font-semibold text-primary-light hover:text-primary">{open ? 'Hide draft' : 'Show draft'} →</button>
+          {open && (
+            <div className="mt-2 relative">
+              <p className="text-[12.5px] text-text bg-surface border border-border rounded-lg p-3 pr-16 whitespace-pre-wrap leading-relaxed">{it.draft}</p>
+              <button onClick={copy} className="absolute top-2 right-2 font-mono text-[11px] px-2 py-1 rounded-md bg-surface-hover border border-border text-text-muted hover:text-primary-light">{copied ? 'copied ✓' : 'copy'}</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function RadarTab() {
@@ -657,21 +700,17 @@ function RadarTab() {
         {queue.isLoading && <p className="text-text-muted text-[13px]">Loading queue…</p>}
         {!queue.isLoading && !items.length && <p className="text-text-muted text-[13px]">Queue empty — hit “Run radar” to discover + rank candidates.</p>}
         <div className="flex flex-col gap-2">
-          {items.map((it) => (
-            <div key={it.full_name} className="glass rounded-xl px-4 py-3">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="font-mono text-[10.5px] font-bold tabular-nums w-9 text-primary-light">{it.priority ?? '—'}</span>
-                <a href={it.score_url || `https://agentavow.com/check/${it.full_name}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[13.5px] font-semibold text-text hover:text-primary-light truncate">{it.full_name}</a>
-                {it.certified
-                  ? <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ CERT {it.trust_score}</span>
-                  : <span className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-surface border border-border/60 text-text-muted">{it.trust_score ?? '—'}/100</span>}
-                {it.badge_ask
-                  ? <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded bg-success/10 text-success">badge ask</span>
-                  : <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded bg-warning/10 text-warning">fix-first</span>}
-                {it.has_shields && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface border border-border/60 text-text-muted">shields ✓</span>}
-                <span className="text-[11px] text-text-muted/70 ml-auto">★{it.stars ?? 0}{it.framework ? ` · ${it.framework}` : ''}</span>
-              </div>
-              {it.channel && <p className="text-[12.5px] text-text-muted mt-1.5">{it.channel}</p>}
+          {items.map((it) => <RadarRow key={it.full_name} it={it} />)}
+        </div>
+      </Section>
+
+      <Section title="Curator targets" note="One relationship → many placements. Awesome-list PRs, ordered by reachability (not size).">
+        <div className="flex flex-col gap-2">
+          {CURATORS.map(([repo, stars, why]) => (
+            <div key={repo} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3 flex-wrap">
+              <a href={`https://github.com/${repo}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[13px] font-semibold text-text hover:text-primary-light">{repo}</a>
+              <span className="font-mono text-[11px] text-text-muted">{stars}</span>
+              <span className="text-[12.5px] text-text-muted ml-auto">{why}</span>
             </div>
           ))}
         </div>
