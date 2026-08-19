@@ -58,14 +58,23 @@ async def _llm_draft(owner: str, repo: str, description: str, score: int | None,
     actual README — not a template. Returns None if the LLM is unavailable (caller
     falls back to the deterministic template)."""
     system = (
-        "You draft SHORT, genuine, value-first outreach notes from Kenne (founder of "
-        "AgentAvow — a signed, offline-recomputable safety score for AI-agent tools) to "
-        "open-source maintainers. Hard rules: reference something SPECIFIC and real about "
-        "THEIR tool from the README (what it does, a design choice) so it can't read as a "
-        "template; never salesy or generic; 4-6 sentences, no emojis; warm but brief. For a "
-        "HIGH scorer, it's pride+proof — mention the signed README badge they could add. For "
-        "a LOWER scorer, lead with a genuine offer to help with the SPECIFIC finding and do "
-        "NOT mention a badge. It must read like a human who actually looked at their repo."
+        "You write a SHORT personal message from Kenne, a founder who is genuinely trying "
+        "to solve trust for AI-agent tools and wants to solve it WITH the maintainer, not "
+        "sell them anything. This must read like a real human wrote it from the heart in "
+        "one sitting — NOT a marketing pitch, NOT a feature list, NOT polished corporate "
+        "copy. Voice rules: warm, humble, a little informal; plain everyday words, not "
+        "jargon; it's fine if the grammar isn't perfect or a sentence runs on — that reads "
+        "human. Reference ONE specific real thing about THEIR tool (from the README) so it's "
+        "clearly not a template. Weave in genuine notes like: 'I saw you were working on X "
+        "and I really want to solve the trust problem with agent tools', 'I hope this isn't "
+        "too forward', 'honestly I'm just trying to build trust for the tools agents "
+        "connect to', 'regardless, I'd love your feedback', 'any ideas on how we could "
+        "build trust here that I'm not thinking about?', 'help me solve this'. Ask for their "
+        "help/ideas, don't pitch. 3-5 short sentences. No emojis. At most ONE link (their "
+        "own report). For a HIGH scorer you can mention the free badge exists but softly, as "
+        "an aside, never the point. For a LOWER scorer, offer to help with the specific "
+        "finding and do NOT mention a badge. End on wanting to solve this together. It should "
+        "feel like a person, not a product."
     )
     excerpt = (readme or description or "")[:1600]
     posture = (
@@ -144,27 +153,26 @@ def _draft(owner: str, repo: str, score: int | None, certified: bool,
            badge_ask: bool, top_finding: str | None) -> str:
     """A personalized, value-first outreach draft that uses our own tools (the signed
     score, the specific finding, the README badge). Kenne personalizes + sends manually."""
+    # Human, from-the-heart fallback (used only if the LLM is down). Deliberately plain
+    # and a little informal — asks for help, doesn't pitch. See _llm_draft for the voice.
     url = f"https://agentavow.com/check/{owner}/{repo}"
-    if certified:
+    if certified or badge_ask:
         return (
-            f"Hi — {owner}/{repo} is AgentAvow Certified ({score}/100), the earned top "
-            "tier: a public, conjunctive gate you can recompute offline against our public "
-            "keys (not a hosted 'trust us' number). That's a rare signal. If you'd want the "
-            f"one-line README badge that renders it live, it's on the page: {url}. No ask — "
-            "just figured you'd want to know you cleared it."
+            f"Hey — hope this isn't too forward. I came across {repo} and really liked what "
+            f"you're building. I'm honestly just trying to figure out how we build trust for "
+            f"the tools agents connect to, and yours came out looking really solid ({url}). "
+            f"There's a little badge thing if you ever want it, but no pressure at all — "
+            f"mostly I'd just love your take: what would actually make you trust a tool "
+            f"before you connect it? Trying to solve this and would rather do it with people "
+            f"actually building in this space."
         )
-    if badge_ask:
-        return (
-            f"Hi — {repo} scored {score}/100 on AgentAvow, a signed, offline-recomputable "
-            "safety score for agent tools (anyone can re-derive it against our public keys). "
-            f"Clean result: {url}. There's a one-line README badge that renders your live "
-            "signed score if it's useful. Nice work on the hygiene."
-        )
-    finding = f" The top item is {top_finding}." if top_finding else ""
+    finding = f" (the thing that stood out was {top_finding})" if top_finding else ""
     return (
-        f"Hi — I ran {repo} through AgentAvow (a signed safety scan for agent tools) and "
-        f"wanted to share the findings, they might be useful.{finding} Full report + a "
-        f"verifiable attestation: {url}. Happy to walk through any of it — no ask."
+        f"Hey — I hope this is ok to send. I've been trying to solve the trust problem for "
+        f"agent tools and I ran {repo} through what I'm building{finding}. Not trying to "
+        f"call anything out — genuinely just want to help if it's useful, here's the full "
+        f"thing: {url}. Honestly I'd love your feedback too — any ideas on how we could "
+        f"build trust here that I'm not thinking about? Would love to solve this together."
     )
 
 
