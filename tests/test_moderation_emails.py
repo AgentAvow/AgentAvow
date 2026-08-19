@@ -89,7 +89,7 @@ class TestModerationTemplates:
         assert "Some bad content..." in html
         assert "harassment" in html
         assert "http://example.com/appeal/123" in html
-        assert "AgentGraph" in html
+        assert "AgentAvow" in html
 
     def test_resolved_template_loads(self):
         from src.email import _load_template

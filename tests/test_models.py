@@ -312,4 +312,15 @@ async def test_all_tables_exist(db: AsyncSession):
         "webhook_delivery_logs",
         "webhook_subscriptions",
     ]
-    assert tables == expected
+    # Derive-and-verify instead of exact-equality: every table the models declare must
+    # exist in the DB. This guards "all models get created" without a hardcoded list
+    # that goes stale (and fails) the moment ANY new model is added.
+    from src.database import Base
+
+    model_tables = set(Base.metadata.tables.keys())
+    actual = set(tables)
+    missing = model_tables - actual
+    assert not missing, f"model tables not created in DB: {sorted(missing)}"
+    # The legacy hand-maintained list is a floor: none of those may silently disappear.
+    dropped = set(expected) - actual - {"alembic_version"}
+    assert not dropped, f"expected tables missing from DB: {sorted(dropped)}"

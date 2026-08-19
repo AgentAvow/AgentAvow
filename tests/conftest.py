@@ -462,6 +462,34 @@ async def _clean_db_once():
             "CREATE INDEX IF NOT EXISTS ix_scan_history_full_name_time "
             "ON scan_history (full_name, scanned_at)"
         ))
+        # alert_webhooks + tool_watches — present in models; the raw-DDL test DB never
+        # created them (pre-existing gap surfaced when test_all_tables_exist was fixed
+        # to derive from Base.metadata).
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS alert_webhooks ("
+            "  id UUID PRIMARY KEY,"
+            "  entity_id UUID NOT NULL,"
+            "  url VARCHAR(512) NOT NULL,"
+            "  active BOOLEAN NOT NULL DEFAULT true,"
+            "  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
+            "  last_delivery_at TIMESTAMPTZ,"
+            "  last_status INTEGER"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS tool_watches ("
+            "  id UUID PRIMARY KEY,"
+            "  watcher_id UUID NOT NULL,"
+            "  surface VARCHAR(16) NOT NULL DEFAULT 'github',"
+            "  owner VARCHAR(255) NOT NULL,"
+            "  repo VARCHAR(512) NOT NULL,"
+            "  last_score INTEGER,"
+            "  last_manifest_digest VARCHAR(128),"
+            "  active BOOLEAN NOT NULL DEFAULT true,"
+            "  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
+            "  last_checked_at TIMESTAMPTZ"
+            ")"
+        ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_webhooks_active "
             "ON webhook_subscriptions (is_active)"
