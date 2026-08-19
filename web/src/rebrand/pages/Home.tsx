@@ -402,6 +402,7 @@ export default function RebrandHome() {
             <Eyebrow>Where AgentAvow fits</Eyebrow>
             <h2 className="mt-3 text-2xl md:text-3xl font-bold">Identity and authorization are being solved. The tool it connects to isn't.</h2>
             <p className="mt-3 text-text-muted">A perfectly identified, fully authorized agent can still connect to a poisoned tool. We build <em>on</em> the identity and authorization work — interoperating with those standards rather than reinventing them — and own the third axis: is the thing it connects to actually safe, and can you prove it?</p>
+            <p className="mt-3 text-text-muted">And we're an <strong className="text-text">independent, unaffiliated auditor</strong> — not a scanner owned by a vendor that also sells the gateway it gates, and not a directory grading its own listings. Even our independence you don't have to take on faith: every score is <strong className="text-text">signed and recheckable offline</strong>, so you verify the number yourself instead of trusting who issued it.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-4 mt-8">
             <div className="glass rounded-2xl p-6">

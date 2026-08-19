@@ -17,6 +17,7 @@ const CATEGORIES = [
   ['Data handling', 'Where your data goes and how it\'s treated.'],
   ['Filesystem access', 'What files it can read and write, and whether that\'s scoped.'],
   ['Network & exfiltration', 'Calls out to external hosts that could leak data.'],
+  ['Lethal trifecta', 'The exfiltration setup: a tool (or a server’s tools together) that can read private data + reach the internet + take actions. Any one is fine; all three is how data walks out. We flag it as a blocking critical.'],
   ['Prompt injection', 'Surfaces where a malicious input could hijack the agent.'],
   ['Obfuscation', 'Hidden or deliberately unreadable payloads.'],
   ['Dependency health', 'Outdated or known-vulnerable dependencies.'],
@@ -170,6 +171,43 @@ agentavow scan . --min-score 60`}</pre>
           </a>
         ))}
       </RevealStagger>
+
+      {/* how we're different — the one row only we can fill */}
+      <Reveal>
+        <div className="mt-12">
+          <Eyebrow>How we're different</Eyebrow>
+          <h2 className="mt-2 text-xl font-bold">Everyone can give you a number. One row is ours alone.</h2>
+          <p className="mt-2 text-text-muted text-[14px] max-w-[64ch]">There are good MCP scanners and trust registries now — the ecosystem needs them. Here's the honest landscape and the one property none of them have.</p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-[13.5px] border-collapse min-w-[520px]">
+              <thead>
+                <tr className="text-text-muted">
+                  <th className="text-left font-semibold py-2 pr-4">Property</th>
+                  <th className="text-left font-semibold py-2 px-3">Directory scores<br /><span className="font-normal text-[11px]">(Smithery, mcp registries)</span></th>
+                  <th className="text-left font-semibold py-2 px-3">Trust checkers<br /><span className="font-normal text-[11px]">(mcpskills, others)</span></th>
+                  <th className="text-left font-semibold py-2 px-3 text-primary-light">AgentAvow</th>
+                </tr>
+              </thead>
+              <tbody className="[&_td]:py-2.5 [&_td]:border-t [&_td]:border-border/50">
+                {[
+                  ['Free public safety score + README badge', '~', '✓', '✓'],
+                  ['You can recompute it yourself', '✕', '✓', '✓'],
+                  ['Independent (not a vendor grading its own gateway/listings)', '✕', '~', '✓'],
+                  ['Cryptographically SIGNED — tamper-evident, offline-verifiable', '✕', '✕', '✓'],
+                ].map(([prop, a, b, us]) => (
+                  <tr key={prop}>
+                    <td className="pr-4 text-text">{prop}</td>
+                    <td className="px-3 text-center text-text-muted">{a}</td>
+                    <td className="px-3 text-center text-text-muted">{b}</td>
+                    <td className="px-3 text-center font-bold text-primary-light">{us}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-[12.5px] text-text-muted/80">Recompute proves the math. A signature proves <em>who</em> issued the score, <em>when</em>, and that the number in your README wasn't altered — the audit trail a live-fetched badge structurally can't give. (Signing covers the safety score; adoption is a separate directional signal.)</p>
+        </div>
+      </Reveal>
 
       <Reveal>
         <div className="mt-12 text-center">
