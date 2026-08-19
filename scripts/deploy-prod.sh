@@ -212,6 +212,12 @@ else
   else
     fail "Backend did not become healthy within 30 seconds. Check logs: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs backend --tail 50'"
   fi
+
+  # Reclaim disk from the image we just replaced (each deploy builds a fresh backend
+  # image; without this they pile up and fill the 30G root — happened 2026-08-19).
+  # Safe: prunes only unreferenced images/cache, never volumes or running containers.
+  remote "docker image prune -af >/dev/null 2>&1 || true; docker builder prune -af >/dev/null 2>&1 || true" 2>/dev/null || true
+  ok "Old images pruned"
 fi
 
 # --- Step 7: Verify login ---
