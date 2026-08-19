@@ -347,6 +347,16 @@ export default function RebrandHome() {
             <span className="mt-2 self-start text-[14.5px] font-semibold group-hover:translate-x-1 transition-transform" style={{ color: '#A78BFA' }}>Run a preflight →</span>
           </Link>
         </Reveal>
+        <Reveal>
+          <Link to={rp('/rebrand/for-developers')} className="mt-4 glass rounded-2xl px-6 py-4 flex items-center gap-4 flex-wrap hover:border-primary-light/50 border border-transparent transition-colors group">
+            <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-1 rounded bg-primary/15 text-primary-light shrink-0">New</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-semibold">Running an agent? Give it a built-in safety check.</div>
+              <div className="text-[13.5px] text-text-muted mt-0.5">Add AgentAvow's MCP server to Claude Code or Cursor — your agent asks "is this safe to install?" before it connects anything.</div>
+            </div>
+            <span className="text-[14px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform shrink-0">Add it →</span>
+          </Link>
+        </Reveal>
       </section>
 
       {/* ⑧→ STAY SAFE OVER TIME — moved right below the two audience cards */}
