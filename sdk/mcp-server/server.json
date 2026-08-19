@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.agentavow/agentavow-trust",
   "title": "AgentAvow Trust",
-  "description": "Is this tool safe to install? A signed, offline-verifiable safety score for the MCP servers, packages, and tools an agent connects to \u2014 security scan + trust verification, free and no account.",
+  "description": "Signed, offline-verifiable safety scores for the MCP servers, packages & tools an agent connects to",
   "version": "0.4.1",
   "packages": [
     {
