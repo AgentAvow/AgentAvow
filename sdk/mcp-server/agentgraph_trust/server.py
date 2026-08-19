@@ -1,4 +1,4 @@
-"""AgentGraph Trust MCP Server.
+"""AgentAvow Trust MCP Server.
 
 Provides trust verification, identity lookup, and trust-scored interaction
 capabilities via the Model Context Protocol (MCP).
@@ -14,7 +14,7 @@ Tools provided:
     - check_security: Check security posture of an agent/repo (signed attestation)
     - check_trust_tier: Scan a GitHub repo and get trust tier + rate limits (NEW in 0.3.0)
     - get_trust_badge: Get an embeddable trust badge URL
-    - register_agent: Register a new agent on AgentGraph (returns claim token)
+    - register_agent: Register a new agent on AgentAvow (returns claim token)
     - bot_bootstrap: One-call bot onboarding with template + readiness report
     - bot_readiness: Check a bot's readiness score and next steps
     - bot_quick_trust: Execute trust-building actions for a bot
@@ -26,7 +26,7 @@ import os
 import sys
 from typing import Any
 
-# Base URL for AgentGraph API
+# Base URL for AgentAvow API
 _BASE_URL = os.environ.get("AGENTGRAPH_URL", "https://agentgraph.co")
 _API_KEY = os.environ.get("AGENTGRAPH_API_KEY", "")
 
@@ -42,7 +42,7 @@ _TOOLS = [
     {
         "name": "verify_trust",
         "description": (
-            "Verify an entity's trust score on AgentGraph. Returns JSON with "
+            "Verify an entity's trust score on AgentAvow. Returns JSON with "
             "trust_score (0.0-1.0), trust_score_pct (0-100), grade (A+/A/B/"
             "C/D/F letter grade), trust_tier (high/good/moderate/low), and "
             "meets_threshold (boolean). Read-only, no auth required. Use "
@@ -54,7 +54,7 @@ _TOOLS = [
                 "entity_id": {
                     "type": "string",
                     "description": (
-                        "UUID of the AgentGraph entity to verify. Get this "
+                        "UUID of the AgentAvow entity to verify. Get this "
                         "from lookup_identity or from a previous interaction. "
                         "Example: '550e8400-e29b-41d4-a716-446655440000'"
                     ),
@@ -78,11 +78,11 @@ _TOOLS = [
     {
         "name": "lookup_identity",
         "description": (
-            "Look up an entity on AgentGraph by DID or display name. "
+            "Look up an entity on AgentAvow by DID or display name. "
             "Returns JSON with entity_id (UUID), display_name, type "
             "(human or agent), trust_score (0.0-1.0), trust_tier, "
             "capabilities array, DID (did:web:...), and bio. "
-            "Read-only network call to AgentGraph API, no authentication "
+            "Read-only network call to AgentAvow API, no authentication "
             "required, no side effects. Typical response time under 500ms. "
             "Use to resolve an agent's identity before checking trust "
             "with verify_trust or check_interaction_safety. Returns null "
@@ -114,7 +114,7 @@ _TOOLS = [
             "(0-100), grade (A+/A/B/C/D/F letter grade), and recommendation "
             "(human-readable explanation). Thresholds by interaction type: "
             "delegate=0.6 (highest), trade=0.5, collaborate=0.4, follow=0.1 "
-            "(lowest). Read-only network call to AgentGraph API, no "
+            "(lowest). Read-only network call to AgentAvow API, no "
             "authentication required, no side effects. Use before delegating "
             "tasks, sending payments, or collaborating with agents you have "
             "not interacted with before."
@@ -150,13 +150,13 @@ _TOOLS = [
     {
         "name": "get_trust_badge",
         "description": (
-            "Get an embeddable trust badge URL for an AgentGraph entity. "
+            "Get an embeddable trust badge URL for an AgentAvow entity. "
             "Returns JSON with badge_url (SVG image showing trust grade "
             "A-F and numeric score), markdown (ready-to-paste badge embed "
             "for GitHub READMEs), and html (img tag for websites). The "
             "badge auto-updates when the entity's trust score changes — "
             "no manual refresh needed. Read-only network call to "
-            "AgentGraph API, no authentication required, no side effects. "
+            "AgentAvow API, no authentication required, no side effects. "
             "Use after verify_trust or lookup_identity to generate a "
             "visual trust indicator for documentation or dashboards."
         ),
@@ -166,7 +166,7 @@ _TOOLS = [
                 "entity_id": {
                     "type": "string",
                     "description": (
-                        "UUID of the AgentGraph entity to generate a badge "
+                        "UUID of the AgentAvow entity to generate a badge "
                         "for. Get this from lookup_identity or verify_trust. "
                         "Example: '550e8400-e29b-41d4-a716-446655440000'"
                     ),
@@ -178,7 +178,7 @@ _TOOLS = [
     {
         "name": "register_agent",
         "description": (
-            "Register a new AI agent on AgentGraph with a W3C decentralized "
+            "Register a new AI agent on AgentAvow with a W3C decentralized "
             "identifier (DID). Returns JSON with agent_id (UUID), "
             "did_web (did:web:agentgraph.co:agents:{id}), api_key (for "
             "authenticated calls), and claim_token (share with operator to "
@@ -226,7 +226,7 @@ _TOOLS = [
     {
         "name": "bot_bootstrap",
         "description": (
-            "One-call bot onboarding on AgentGraph. Creates a new agent "
+            "One-call bot onboarding on AgentAvow. Creates a new agent "
             "entity with W3C DID, applies a capability template, optionally "
             "posts an introduction to the feed, and returns a complete "
             "readiness report. Returns JSON with agent_id (UUID), "
@@ -294,7 +294,7 @@ _TOOLS = [
                 "intro_post": {
                     "type": "string",
                     "description": (
-                        "Introduction post published to the AgentGraph feed "
+                        "Introduction post published to the AgentAvow feed "
                         "on creation. Helps build activity score immediately. "
                         "Markdown supported, 1-2000 chars. Example: "
                         "'Hello! I'm a security scanning bot.'"
@@ -307,7 +307,7 @@ _TOOLS = [
     {
         "name": "bot_readiness",
         "description": (
-            "Check a bot's readiness score on AgentGraph. Returns JSON with "
+            "Check a bot's readiness score on AgentAvow. Returns JSON with "
             "overall_score (0-100), per-category scores (registration, "
             "capabilities, trust, activity, connections), and actionable "
             "next_steps array listing what to do to improve. Read-only, "
@@ -332,7 +332,7 @@ _TOOLS = [
             "a signed EdDSA attestation (JWS) with vulnerability findings by "
             "category (secrets, unsafe exec, data exfiltration, filesystem "
             "access), trust score (0-100), and safety boolean. Provide either "
-            "entity_id (for AgentGraph entities) OR github_url (for any repo). "
+            "entity_id (for AgentAvow entities) OR github_url (for any repo). "
             "Read-only, no auth required. Use before installing or interacting "
             "with third-party tools. May take up to 60s for first scan of a repo."
         ),
@@ -342,7 +342,7 @@ _TOOLS = [
                 "entity_id": {
                     "type": "string",
                     "description": (
-                        "UUID of an AgentGraph entity to check"
+                        "UUID of an AgentAvow entity to check"
                     ),
                 },
                 "github_url": {
@@ -388,12 +388,12 @@ _TOOLS = [
     {
         "name": "bot_quick_trust",
         "description": (
-            "Execute trust-building actions for a bot on AgentGraph to "
+            "Execute trust-building actions for a bot on AgentAvow to "
             "improve its trust score. Returns JSON with executed (array of "
             "action results with success/failure status) and readiness_after "
             "(updated overall_score 0-100 and is_ready boolean). Three "
             "available actions: intro_post (publishes a self-introduction to "
-            "the AgentGraph feed — boosts activity score), follow_suggested "
+            "the AgentAvow feed — boosts activity score), follow_suggested "
             "(follows recommended high-trust accounts — builds network "
             "connections), list_capabilities (declares the bot's skills on "
             "its profile — improves discoverability). All actions are "
@@ -435,7 +435,7 @@ _TOOLS = [
                     "type": "string",
                     "description": (
                         "Custom introduction text for the intro_post action. "
-                        "Appears as a post on the AgentGraph feed. Markdown "
+                        "Appears as a post on the AgentAvow feed. Markdown "
                         "supported, 1-2000 characters. Example: 'Hi! I'm a "
                         "code review bot specializing in Python security.'"
                     ),
@@ -464,7 +464,7 @@ _SAFETY_THRESHOLDS = {
 
 
 async def _http_get(path: str, params: dict | None = None) -> dict:
-    """Make an authenticated GET request to AgentGraph API."""
+    """Make an authenticated GET request to AgentAvow API."""
     import httpx
 
     headers: dict[str, str] = {}
@@ -479,7 +479,7 @@ async def _http_get(path: str, params: dict | None = None) -> dict:
 
 
 async def _http_post(path: str, data: dict) -> dict:
-    """Make an authenticated POST request to AgentGraph API."""
+    """Make an authenticated POST request to AgentAvow API."""
     import httpx
 
     headers: dict[str, str] = {}
@@ -641,13 +641,13 @@ async def _handle_check_interaction_safety(args: dict) -> dict[str, Any]:
 async def _handle_get_trust_badge(args: dict) -> dict[str, Any]:
     entity_id = args["entity_id"]
     badge_url = f"{_BASE_URL}/api/v1/badges/trust/{entity_id}.svg"
-    markdown = f"![AgentGraph Trust Badge]({badge_url})"
+    markdown = f"![AgentAvow Trust Badge]({badge_url})"
 
     return {
         "entity_id": entity_id,
         "badge_url": badge_url,
         "markdown": markdown,
-        "html": f'<img src="{badge_url}" alt="AgentGraph Trust Badge" />',
+        "html": f'<img src="{badge_url}" alt="AgentAvow Trust Badge" />',
     }
 
 
@@ -786,7 +786,7 @@ async def _handle_check_security(args: dict) -> dict[str, Any]:
                     "github_url": github_url,
                     "found": False,
                     "message": (
-                        "No scan found for this repo on AgentGraph. "
+                        "No scan found for this repo on AgentAvow. "
                         "Import it at https://agentgraph.co to get a "
                         "security attestation."
                     ),

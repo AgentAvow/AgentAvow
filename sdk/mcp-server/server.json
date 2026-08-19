@@ -1,14 +1,14 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.agentgraph-co/agentgraph-trust",
-  "title": "AgentGraph Trust",
-  "description": "Security scanning and trust verification for AI agent tools.",
-  "version": "0.3.1",
+  "name": "io.github.agentavow/agentavow-trust",
+  "title": "AgentAvow Trust",
+  "description": "Is this tool safe to install? A signed, offline-verifiable safety score for the MCP servers, packages, and tools an agent connects to — security scan + trust verification, free and no account.",
+  "version": "0.3.2",
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "agentgraph-trust",
-      "version": "0.3.1",
+      "identifier": "agentavow-trust",
+      "version": "0.3.2",
       "transport": {
         "type": "stdio"
       }
