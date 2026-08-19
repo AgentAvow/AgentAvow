@@ -143,6 +143,16 @@ def _row_grade(
     return _display_grade(score, None, critical or 0)
 
 
+def _guard_stale_score(score: int | None, critical: int | None) -> int | None:
+    """Safety net for pre-calibration stored/seed rows. A row still reading Trusted
+    (>=81) while carrying a critical is impossible under the fixed scorer — floor it so
+    Browse can never show a 100-with-a-critical while the corpus re-scans. Correct rows
+    (score<81, or no critical) pass through unchanged; re-scanned rows overwrite this."""
+    if score is not None and (critical or 0) > 0 and score >= 81:
+        return 45
+    return score
+
+
 def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     """Convert a per-surface raw record into the unified row shape."""
     if surface == "x402":
@@ -163,6 +173,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
         # A fetch failure (empty/private/unreachable repo) is UNSCANNABLE — it is not
         # a 0/Blocked grade. Null the score so it reads "fetch error", not "Blocked".
         oc_score = None if oc_err else raw.get("trust_score")
+        oc_score = _guard_stale_score(oc_score, raw.get("critical_count"))
         return CatalogRow(
             surface="openclaw",
             name=full_name,
@@ -184,6 +195,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     # Same rule: a scan that couldn't fetch the repo is unscannable, not a 0. Failed
     # fetches were stored as trust_score=0 and rendered as Blocked — null them here.
     score = None if err else raw.get("trust_score")
+    score = _guard_stale_score(score, raw.get("critical"))
     return CatalogRow(
         surface=surface,
         name=raw.get("name", "") or raw.get("full_name", ""),
