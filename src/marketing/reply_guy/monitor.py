@@ -221,9 +221,15 @@ async def _fetch_bluesky_posts(handle: str, since: datetime) -> list | None:
                 continue
             if created <= since:
                 continue
+            text = (record.get("text") or "").strip()
+            # Image/link-only posts carry empty text. Skip them: handing an empty
+            # post to the LLM produced meta-refusals ("the post appears empty, could
+            # you share what they wrote…") that got auto-posted as replies.
+            if not text:
+                continue
             posts.append({
                 "uri": post_data.get("uri", ""),
-                "text": record.get("text", ""),
+                "text": text,
                 "timestamp": created,
                 "likes": post_data.get("likeCount", 0),
             })

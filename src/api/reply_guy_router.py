@@ -364,6 +364,21 @@ async def _post_reply(
     if not content:
         return None
 
+    # Content-integrity gate — the single source of truth for "is this real copy?".
+    # The reply pipeline historically bypassed it and auto-posted, which is how the
+    # meta-refusals ("the post appears empty, could you share what X wrote…") reached
+    # live timelines. Reject scaffolding/meta/brief-echoes here so NO reply path —
+    # auto-poster or manual approve — can post them.
+    from src.marketing.content.engine import content_quality_issue
+
+    _issue = content_quality_issue(content)
+    if _issue:
+        logger.warning(
+            "Reply content-quality gate rejected draft for %s (%s): %s | %r",
+            opp.id, opp.platform, _issue, content[:100],
+        )
+        return None
+
     if opp.platform == "bluesky":
         from src.marketing.adapters.bluesky import BlueskyAdapter
 

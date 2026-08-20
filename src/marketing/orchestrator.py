@@ -222,11 +222,37 @@ async def _post_planned_campaign_posts(
             })
             continue
 
-        # Quality gate: planned posts store the campaign's content_brief, which is
-        # sometimes the LLM's plan description ("Tweet sharing ... %") rather than
-        # finished copy. Never post an unfilled brief — fail it loudly instead.
-        from src.marketing.content.engine import content_quality_issue
+        # Planned posts store the campaign's content_brief — a description of WHAT to
+        # write ("Short thread… Open with… Close with the link"), NOT finished copy.
+        # Expand the brief into a real post first; posting the brief verbatim was the
+        # bug behind ~half the proactive feed reading as raw LLM stage directions.
+        # On any generation failure, fail loudly — NEVER fall back to posting the brief.
+        from src.marketing.content.engine import (
+            content_quality_issue,
+            generate_from_brief,
+        )
 
+        _gen = await generate_from_brief(post.content, post.platform, post.topic or "")
+        if _gen.error or not _gen.text:
+            post.status = "failed"
+            post.error_message = (
+                f"brief→post generation failed: {_gen.error or 'empty'} "
+                f"| brief: {(post.content or '')[:80]}"
+            )
+            logger.warning(
+                "Planned post %s (%s) generation from brief failed: %s",
+                post.id, post.platform, _gen.error or "empty",
+            )
+            results["errors"].append({
+                "id": str(post.id), "platform": post.platform,
+                "error": f"brief_generation: {_gen.error or 'empty'}",
+            })
+            continue
+        post.content = _gen.text
+        post.content_hash = _gen.content_hash
+
+        # Quality gate (backstop): even after generation, never post something that
+        # still reads as a brief/scaffolding/meta-refusal — fail it loudly instead.
         _quality = content_quality_issue(post.content)
         if _quality:
             post.status = "failed"

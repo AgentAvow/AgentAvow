@@ -83,6 +83,19 @@ async def generate_drafts(limit: int = 20) -> dict:
 async def _draft_single(opp: ReplyOpportunity) -> None:
     """Generate a draft reply for a single opportunity."""
     target = opp.target
+
+    # Never draft against an empty source post — that produced meta-refusals
+    # ("the post appears empty, could you share what they wrote…") which then
+    # auto-posted. Skip loudly instead of asking the LLM to reply to nothing.
+    if not (opp.post_content or "").strip():
+        async with async_session() as db:
+            opp_db = await db.get(ReplyOpportunity, opp.id)
+            if opp_db:
+                opp_db.status = "skipped"
+                await db.commit()
+        logger.info("Skipped reply draft for %s: empty source post", opp.id)
+        return
+
     prompt = _REPLY_PROMPT.format(
         author=target.display_name or target.handle,
         followers=target.follower_count,
@@ -98,7 +111,6 @@ async def _draft_single(opp: ReplyOpportunity) -> None:
     )
     # Self-learning: feed in the replies that actually earned engagement.
     try:
-        from src.database import async_session
         from src.marketing.content.performance import get_reply_learning_context
         async with async_session() as _db:
             base_system = base_system + await get_reply_learning_context(_db, opp.platform)
@@ -159,6 +171,23 @@ async def _draft_single(opp: ReplyOpportunity) -> None:
             draft = truncated[: last_period + 1]
         else:
             draft = truncated.rsplit(" ", 1)[0] + "..."
+
+    # Content-integrity gate before the draft can ever reach the auto-poster: reject
+    # brief-echoes, stage directions, and meta-refusals (single source of truth).
+    from src.marketing.content.engine import content_quality_issue
+
+    _issue = content_quality_issue(draft)
+    if _issue:
+        async with async_session() as db:
+            opp_db = await db.get(ReplyOpportunity, opp.id)
+            if opp_db:
+                opp_db.status = "failed"
+                await db.commit()
+        logger.warning(
+            "Reply draft for %s failed content-quality gate (%s): %r",
+            opp.id, _issue, draft[:100],
+        )
+        return
 
     async with async_session() as db:
         opp_db = await db.get(ReplyOpportunity, opp.id)

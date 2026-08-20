@@ -258,24 +258,129 @@ _BRIEF_ECHO_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Imperative-led brief: the text OPENS with a stage direction ("Short thread…",
+# "Show a…", "Draft/Write a…", "Quote-react to…", "N-post thread") instead of BEING
+# the post. Anchored at start. These are how the planner's content_briefs actually
+# read, which the older _BRIEF_ECHO_RE ("Tweet sharing…") never matched.
+_BRIEF_LEADING_RE = re.compile(
+    r"^\s*(?:"
+    r"short\s+(?:thread|take|post|reaction)\b"
+    r"|show\s+(?:a|an|the)\b"
+    r"|draft(?:ing)?\s+(?:a|an|the)?\b"
+    r"|write\s+(?:a|an|the)?\b"
+    r"|post\s+(?:a|an|the)\b"
+    r"|quote[- ]?react\b"
+    r"|open\s+with\b"
+    r"|reply\s+to\s+(?:the|this)\b"
+    r"|\d+[- ]post\s+thread\b"
+    r")",
+    re.IGNORECASE,
+)
+
+# Embedded stage directions — phrases that appear in a plan/brief but ~never in
+# finished social copy. Any hit means the text is scaffolding, not the post.
+_BRIEF_DIRECTIVE_RE = re.compile(
+    r"\bopen\s+with\b"
+    r"|\bclose\s+with\b"
+    r"|\bpivot\s*:"
+    r"|\blabel\s+['\"]"
+    r"|\btag\s+as\s+\["
+    r"|\bbot[- ]?label(?:led|ed)\b"
+    r"|\bdisclose\s*:"
+    r"|\bpost\s+[12]\s*:"
+    r"|\d\s*-\s*\d\s+skeets\b"
+    r"|\[bot\s+post\b",
+    re.IGNORECASE,
+)
+
+# LLM meta-refusal posted instead of a real reply (empty / unclear source post).
+_META_REFUSAL_RE = re.compile(
+    r"appears?\s+to\s+be\s+empty"
+    r"|no\s+text\s+to\s+(?:reply|respond)"
+    r"|could\s+you\s+(?:share|provide|clarify)"
+    r"|so\s+i\s+can\s+(?:draft|write|reply|respond)"
+    r"|what\s+.{0,30}?\s+actually\s+(?:wrote|said)"
+    r"|share\s+what\s+.{0,30}?\s+wrote",
+    re.IGNORECASE,
+)
+
 
 def content_quality_issue(text: str) -> str | None:
-    """Return a reason string if ``text`` looks like an unfilled brief/template
-    rather than finished copy, else None.
+    """Return a reason string if ``text`` looks like an unfilled brief/template,
+    LLM scaffolding, or a meta-refusal rather than finished copy, else None.
 
     Single source of truth for "is this real content or LLM scaffolding?" —
     called at every boundary that posts or queues content (proactive generation,
-    the draft queue, planned campaign posts) so brief-echoes and unfilled
-    placeholders can never reach a live post or the review queue again.
+    the draft queue, planned campaign posts, AND every reply path) so brief-echoes,
+    stage directions, meta-refusals, and unfilled placeholders can never reach a
+    live post or the review queue again.
     """
     t = (text or "").strip()
     if not t:
         return "empty"
-    if _BRIEF_ECHO_RE.match(t):
-        return "brief-echo (describes the post instead of being the post)"
+    if _BRIEF_ECHO_RE.match(t) or _BRIEF_LEADING_RE.match(t):
+        return "brief-echo (opens with a stage direction instead of being the post)"
+    if _BRIEF_DIRECTIVE_RE.search(t):
+        return "brief-echo (contains plan directives like 'open with' / 'label' / 'skeets')"
+    if _META_REFUSAL_RE.search(t):
+        return "meta-refusal (LLM asked for the post instead of writing content)"
     if _PLACEHOLDER_RE.search(t):
         return "unfilled placeholder (bare %, {var}, XX, or ___)"
     return None
+
+
+async def generate_from_brief(
+    brief: str, platform: str, topic_key: str = "",
+) -> GeneratedContent:
+    """Turn a campaign-planner ``content_brief`` (a description of WHAT to post) into
+    the actual finished post.
+
+    The weekly planner emits briefs like "Short thread… Open with the HN question…
+    Close with the link" — stage directions, not copy. Historically the orchestrator
+    posted these verbatim (≈half the proactive feed was raw briefs). This expands the
+    brief into real copy; the caller still runs the result through
+    ``content_quality_issue`` as a backstop and routes to human review if it fails.
+    """
+    from src.marketing.content.tone import get_tone
+
+    tone = get_tone(platform)
+    prompt = (
+        f"You are writing a real {platform} post. Below is a BRIEF describing what to "
+        f"write — it is the instructions, NOT the post.\n\n"
+        f"BRIEF:\n{brief}\n\n"
+        f"Write the ACTUAL finished post the brief describes. Rules:\n"
+        f"- Output ONLY the text a reader would see. Never restate the brief or "
+        f"describe the post.\n"
+        f"- Never include stage-direction words: 'Short thread', 'Open with', "
+        f"'Close with', 'Pivot:', 'Label', 'Tag as', 'skeets', 'bot post', "
+        f"'Disclose:', 'Post 1:'.\n"
+        f"- No surrounding quotes, no preamble, no meta-commentary about format.\n"
+        f"- Max {tone.max_length} characters.\n"
+        f"{_GLOBAL_KNOWLEDGE}"
+    )
+    result = await _generate_with_voice_check(
+        prompt,
+        system=tone.system_prompt,
+        content_type=f"{platform}_post",
+        max_tokens=_max_tokens_for_platform(platform),
+        platform=platform,
+    )
+    if result.error:
+        return GeneratedContent(
+            text="", topic=topic_key, platform=platform, post_type="planned",
+            error=result.error,
+        )
+    stripped = _strip_meta_prefix(result.text)
+    if not stripped:
+        return GeneratedContent(
+            text="", topic=topic_key, platform=platform, post_type="planned",
+            error="LLM returned empty content from brief",
+        )
+    return GeneratedContent(
+        text=stripped, topic=topic_key, platform=platform, post_type="planned",
+        content_hash=content_hash(stripped),
+        llm_model=getattr(result, "model", None),
+    )
 
 
 async def generate_proactive(
