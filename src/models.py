@@ -2255,7 +2255,14 @@ class ReplyOpportunity(Base):
     posted_at = Column(DateTime(timezone=True))
     reply_url = Column(String(500))
     urgency_score = Column(Float, default=0.0)
+    # engagement_count is the SOURCE post's likes (captured at ingestion) — NOT ours.
+    # our_engagement is OUR reply's earned likes, filled by the metrics refresh; this is
+    # the only trustworthy signal for the reply self-learning loop.
     engagement_count = Column(Integer, default=0)
+    our_engagement = Column(Integer, default=0)
+    # Why a post failed (adapter error / gate rejection) — was silently discarded before,
+    # making 168 failures un-triageable.
+    error_message = Column(Text)
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )

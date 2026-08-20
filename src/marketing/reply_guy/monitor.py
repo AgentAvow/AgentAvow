@@ -35,6 +35,14 @@ _RELEVANCE_KEYWORDS = [
 ]
 
 
+def is_relevant(text: str) -> bool:
+    """True if the post is actually on-topic for us. When
+    ``reply_guy_require_relevance`` is on, we only reply to these — no more replying
+    to a target's off-topic posts (birds, pinball) just because they're on the list."""
+    low = (text or "").lower()
+    return any(kw in low for kw in _RELEVANCE_KEYWORDS)
+
+
 async def monitor_all_targets() -> dict:
     """Check all active targets for new posts. Returns stats."""
     async with async_session() as db:
@@ -72,6 +80,30 @@ async def _check_target(target: ReplyTarget) -> int:
     if _is_blocklisted(target.handle):
         logger.info("Skipping blocklisted handle %s (%s)", target.handle, target.platform)
         return 0
+
+    # Per-target cooldown: never pester the same account more than once per window.
+    from src.config import settings
+    cooldown_h = getattr(settings, "reply_guy_target_cooldown_hours", 0)
+    if cooldown_h > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=cooldown_h)
+        async with async_session() as db:
+            last_posted = await db.scalar(
+                select(ReplyOpportunity.posted_at)
+                .where(
+                    ReplyOpportunity.target_id == target.id,
+                    ReplyOpportunity.status == "posted",
+                    ReplyOpportunity.posted_at.is_not(None),
+                )
+                .order_by(ReplyOpportunity.posted_at.desc())
+                .limit(1)
+            )
+        if last_posted is not None:
+            lp = last_posted if last_posted.tzinfo else last_posted.replace(tzinfo=timezone.utc)
+            if lp > cutoff:
+                logger.debug(
+                    "Target %s in cooldown (last reply %s)", target.handle, lp,
+                )
+                return 0
 
     since = target.last_checked_at or (
         datetime.now(timezone.utc) - timedelta(hours=24)

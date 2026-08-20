@@ -650,7 +650,7 @@ async def _reply_poster_loop(interval: int = REPLY_POSTER_INTERVAL) -> None:
                                     )).scalar_one_or_none()
 
                                     from src.api.reply_guy_router import _post_reply
-                                    url = await _post_reply(opp, target)
+                                    url, err = await _post_reply(opp, target)
 
                                     if url:
                                         opp.status = "posted"
@@ -664,12 +664,14 @@ async def _reply_poster_loop(interval: int = REPLY_POSTER_INTERVAL) -> None:
                                         )
                                     else:
                                         opp.status = "posting_error"
+                                        opp.error_message = (err or "unknown")[:500]
                                         logger.warning(
-                                            "Reply guy post failed: %s %s",
-                                            opp.platform, opp.post_uri,
+                                            "Reply guy post failed: %s %s — %s",
+                                            opp.platform, opp.post_uri, err,
                                         )
-                                except Exception:
+                                except Exception as exc:
                                     opp.status = "posting_error"
+                                    opp.error_message = str(exc)[:500]
                                     logger.exception(
                                         "Reply guy post error: %s", opp.post_uri,
                                     )

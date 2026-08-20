@@ -361,17 +361,27 @@ class Settings(BaseSettings):
     domain: str = "agentgraph.co"
 
     # Reply Guy system
+    # RAMPED DOWN 2026-08-20: the bot was replying up to ~20/day, unsolicited, to
+    # hand-picked strangers with no topic threshold — spam-adjacent, and it earned ~0
+    # engagement (a complaint from Xe iaso triggered the review). New posture: FAR less
+    # volume, on-topic ONLY, at most once/week per account, quality-gated. No per-post
+    # bot disclosure (solo operator) — defensibility comes from behaving well: low
+    # frequency, genuine relevance, and never pestering the same person.
     reply_guy_enabled: bool = True
-    reply_guy_max_daily: int = 20
+    reply_guy_max_daily: int = 4  # was 20 — global cap across platforms
     reply_guy_monitor_interval: int = 300  # seconds
     reply_guy_auto_post: bool = True  # auto-post drafted replies (no manual approval)
     # Pacing — spread the daily batch instead of bursting at the 00:00 UTC counter reset.
-    reply_guy_min_gap_minutes: int = 40  # min spacing between auto-posted replies (anti-burst)
+    reply_guy_min_gap_minutes: int = 120  # was 40 — wider spacing between auto-posted replies
     reply_guy_active_start_hour_utc: int = 14  # only auto-post from this UTC hour (US daytime)
-    # Twitter writes are metered by the monthly API cap and reply engagement is ~zero,
-    # so cap Twitter replies hard (Bluesky is free and carries the volume under the
-    # global reply_guy_max_daily). Keeps X quota for the campaign posts that matter.
-    reply_guy_twitter_max_daily: int = 4
+    # Twitter writes are metered by the monthly API cap and reply engagement is ~zero.
+    reply_guy_twitter_max_daily: int = 2  # was 4
+    # Never reply to the same account more than once per this window (anti-pestering).
+    reply_guy_target_cooldown_hours: int = 168  # 7 days
+    # Only draft/post replies at or above this urgency, AND (when require_relevance) only
+    # when the post actually hit a topic keyword — so it never replies to off-topic posts.
+    reply_guy_min_urgency: float = 2.8
+    reply_guy_require_relevance: bool = True
     # Stale drafts that never posted (daily cap / window / gap) clog the queue and
     # age out of relevance — expire them after this many hours.
     reply_guy_draft_ttl_hours: int = 48

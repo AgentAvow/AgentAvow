@@ -246,9 +246,36 @@ class BlueskyAdapter(AbstractPlatformAdapter):
             return []
 
     async def fetch_metrics(self, post_external_id: str) -> EngagementMetrics:
-        # AT Protocol doesn't have a direct metrics endpoint
-        # Would need to count likes/reposts via separate queries
-        return EngagementMetrics()
+        """Engagement for one post via the public app.bsky.feed.getPosts endpoint.
+
+        ``post_external_id`` is an at:// URI (what post()/reply() return as external_id).
+        Returns like/reply/repost counts; empty on any error (never raises)."""
+        uri = post_external_id or ""
+        if not uri.startswith("at://"):
+            return EngagementMetrics()
+        try:
+            import httpx
+
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts",
+                    params={"uris": uri},
+                    timeout=15,
+                )
+            if resp.status_code != 200:
+                return EngagementMetrics()
+            posts = resp.json().get("posts", [])
+            if not posts:
+                return EngagementMetrics()
+            p = posts[0]
+            return EngagementMetrics(
+                likes=p.get("likeCount", 0) or 0,
+                comments=p.get("replyCount", 0) or 0,
+                shares=p.get("repostCount", 0) or 0,
+            )
+        except Exception:
+            logger.debug("Bluesky fetch_metrics failed for %s", uri, exc_info=True)
+            return EngagementMetrics()
 
     async def health_check(self) -> bool:
         return await self._ensure_session()

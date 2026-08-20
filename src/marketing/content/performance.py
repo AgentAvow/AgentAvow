@@ -126,16 +126,32 @@ async def get_learning_context(db: AsyncSession, platform: str | None = None) ->
 
 
 async def get_reply_learning_context(db: AsyncSession, platform: str | None = None) -> str:
-    """What replies have earned engagement — injected into the reply drafter so it does
+    """What OUR replies have actually earned — injected into the reply drafter so it does
     more of what lands.
 
-    DISABLED (2026-08-20): ``ReplyOpportunity.engagement_count`` is set at ingestion
-    from the SOURCE post's like count (monitor.py — the tweet/skeet we're replying TO),
-    not our reply's engagement, and ``refresh_reply_metrics`` only ever corrects it for
-    a tiny fraction (bluesky is skipped entirely; ~99% of twitter rows lack a reply_url).
-    So ordering by it taught the drafter to echo replies made to VIRAL threads rather
-    than replies that actually resonated — learning from a vanity metric of someone
-    else's post. Returning "" until a dedicated, reliably-captured our-reply-engagement
-    field exists (Phase 2), so we stop mis-teaching the bot.
-    """
-    return ""
+    Reads ``our_engagement`` (OUR reply's likes/replies/reposts, filled by the metrics
+    refresh) — NOT ``engagement_count``, which is the SOURCE post's likes captured at
+    ingestion. Ordering by the latter used to teach the bot to echo replies made to VIRAL
+    threads rather than replies that resonated; this reads the trustworthy signal. Emits
+    nothing until real engagement exists, so it never learns from noise."""
+    from src.models import ReplyOpportunity
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    q = select(ReplyOpportunity).where(
+        ReplyOpportunity.status == "posted",
+        ReplyOpportunity.posted_at >= since,
+        ReplyOpportunity.our_engagement > 0,
+    )
+    if platform:
+        q = q.where(ReplyOpportunity.platform == platform)
+    try:
+        rows = list((await db.execute(q.order_by(
+            ReplyOpportunity.our_engagement.desc()).limit(3))).scalars().all())
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    parts = ["\n- YOUR REPLIES THAT ACTUALLY LANDED (echo this voice, don't copy):"]
+    for r in rows:
+        snippet = re.sub(r"\s+", " ", (r.draft_content or "")).strip()[:160]
+        parts.append(f"  ({r.our_engagement} engagements) \"{snippet}\"")
+    return "\n".join(parts) + "\n"

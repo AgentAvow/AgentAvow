@@ -96,7 +96,10 @@ def _reply_post_id(platform: str, url: str | None) -> str | None:
     # Twitter/X: https://x.com/i/status/<id> (or /<user>/status/<id>)
     if platform == "twitter" and "status/" in url:
         return url.rstrip("/").split("status/")[-1].split("?")[0]
-    return None  # bluesky needs its at:// uri — tracked separately, skip for now
+    # Bluesky: we now store the at:// URI directly in reply_url — fetch_metrics takes it.
+    if platform == "bluesky" and url.startswith("at://"):
+        return url
+    return None
 
 
 async def refresh_reply_metrics(db: AsyncSession) -> dict:
@@ -127,7 +130,9 @@ async def refresh_reply_metrics(db: AsyncSession) -> dict:
             continue
         try:
             m = await adapter.fetch_metrics(pid)
-            opp.engagement_count = (m.likes or 0) + (m.comments or 0) + (m.shares or 0)
+            # OUR reply's engagement — the trustworthy signal for the learning loop.
+            # (engagement_count stays the SOURCE post's likes, set at ingestion.)
+            opp.our_engagement = (m.likes or 0) + (m.comments or 0) + (m.shares or 0)
             updated += 1
         except Exception:
             logger.debug("Reply metric refresh failed for %s", opp.id)

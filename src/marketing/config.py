@@ -131,7 +131,8 @@ PLATFORM_SCHEDULE: dict[str, dict] = {
     # Auto-post restored Jun 9 after fixing the engine self-label leak
     # (_strip_meta_prefix + prompt guards in content/engine.py).
     "twitter": {"posts_per_week": 1, "auto_post": True, "days": ["wed"]},
-    "bluesky": {"posts_per_week": 2, "auto_post": True, "days": ["mon", "fri"]},
+    # Ramped down 2026-08-20 (2→1): far less proactive volume, quality over cadence.
+    "bluesky": {"posts_per_week": 1, "auto_post": True, "days": ["wed"]},
     # DISABLED until May 1 — account karma is -1, dead channel
     "reddit": {"posts_per_week": 0, "auto_post": False, "days": []},
     # DISABLED 2026-08-19 (Kenne): auto-posting marketing comments on STRANGERS' HF model

@@ -295,17 +295,25 @@ async def opportunity_action(
             raise HTTPException(400, "Target not found")
 
         try:
-            result = await _post_reply(opp, target)
+            url, err = await _post_reply(opp, target)
         except Exception as exc:
             logger.exception("Failed to post reply for %s", opp_id)
+            opp.status = "posting_error"
+            opp.error_message = str(exc)[:500]
+            await db.commit()
             raise HTTPException(500, f"Failed to post: {exc}") from exc
+
+        if not url:
+            opp.status = "posting_error"
+            opp.error_message = (err or "unknown")[:500]
+            await db.commit()
+            raise HTTPException(502, f"Post rejected: {err}")
 
         opp.status = "posted"
         opp.posted_at = datetime.now(timezone.utc)
-        if result:
-            opp.reply_url = result
+        opp.reply_url = url
         await db.commit()
-        return {"message": "Posted", "reply_url": result}
+        return {"message": "Posted", "reply_url": url}
 
     raise HTTPException(400, f"Unknown action: {body.action}")
 
@@ -358,11 +366,15 @@ async def get_stats(
 
 async def _post_reply(
     opp: ReplyOpportunity, target: ReplyTarget,
-) -> str | None:
-    """Post a reply via the appropriate platform adapter."""
+) -> tuple[str | None, str | None]:
+    """Post a reply via the appropriate platform adapter.
+
+    Returns ``(url, error)``: a URL on success, or an error string on failure (so the
+    caller can persist WHY it failed instead of discarding the reason).
+    """
     content = opp.draft_content
     if not content:
-        return None
+        return None, "empty draft_content"
 
     # Content-integrity gate — the single source of truth for "is this real copy?".
     # The reply pipeline historically bypassed it and auto-posted, which is how the
@@ -377,14 +389,20 @@ async def _post_reply(
             "Reply content-quality gate rejected draft for %s (%s): %s | %r",
             opp.id, opp.platform, _issue, content[:100],
         )
-        return None
+        return None, f"content-quality gate: {_issue}"
 
     if opp.platform == "bluesky":
         from src.marketing.adapters.bluesky import BlueskyAdapter
 
         adapter = BlueskyAdapter()
         result = await adapter.reply(opp.post_uri, content)
-        return result.url if result.success else None
+        # Store the at:// URI (external_id) — engagement refresh needs it; falls back to
+        # the web URL if the adapter didn't return one.
+        return (
+            (result.external_id or result.url, None)
+            if result.success
+            else (None, result.error or "bluesky reply failed")
+        )
 
     if opp.platform == "twitter":
         from src.marketing.adapters.twitter import TwitterAdapter
@@ -400,6 +418,8 @@ async def _post_reply(
 
         adapter = TwitterAdapter()
         result = await adapter.post(quote_content)
-        return result.url if result.success else None
+        if result.success:
+            return result.url, None
+        return None, result.error or "twitter post failed"
 
-    return None
+    return None, f"unknown platform: {opp.platform}"

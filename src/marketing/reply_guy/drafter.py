@@ -56,12 +56,18 @@ _TONE_HINTS = {
 
 async def generate_drafts(limit: int = 20) -> dict:
     """Generate drafts for all undrafted opportunities. Returns stats."""
+    from src.config import settings
+    min_urgency = getattr(settings, "reply_guy_min_urgency", 0.0)
     async with async_session() as db:
         opps = (
             await db.scalars(
                 select(ReplyOpportunity)
                 .options(selectinload(ReplyOpportunity.target))
-                .where(ReplyOpportunity.status == "new")
+                .where(
+                    ReplyOpportunity.status == "new",
+                    # Urgency floor: don't draft low-priority opportunities at all.
+                    ReplyOpportunity.urgency_score >= min_urgency,
+                )
                 .order_by(ReplyOpportunity.urgency_score.desc())
                 .limit(limit)
             )
@@ -94,6 +100,22 @@ async def _draft_single(opp: ReplyOpportunity) -> None:
                 opp_db.status = "skipped"
                 await db.commit()
         logger.info("Skipped reply draft for %s: empty source post", opp.id)
+        return
+
+    # Relevance gate: only reply to posts that are actually on-topic for us. Stops the
+    # bot replying to a target's off-topic posts (birds, pinball) just because the
+    # author is on the list — a core reason the replies read as random spam.
+    from src.config import settings
+    from src.marketing.reply_guy.monitor import is_relevant
+    if getattr(settings, "reply_guy_require_relevance", False) and not is_relevant(
+        opp.post_content,
+    ):
+        async with async_session() as db:
+            opp_db = await db.get(ReplyOpportunity, opp.id)
+            if opp_db:
+                opp_db.status = "skipped"
+                await db.commit()
+        logger.info("Skipped reply draft for %s: off-topic (relevance gate)", opp.id)
         return
 
     prompt = _REPLY_PROMPT.format(
