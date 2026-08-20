@@ -1845,6 +1845,19 @@ _CRITICAL_CEILING = 45
 # it stays Trusted, just not pristine — so "high: 1" never coexists with 100/verified.
 _HIGH_CEILING = 90
 
+# Evidence-confidence cap. A clean scan with very little to go on (a handful of files, no
+# real code to analyze) is "we found nothing" — NOT "this is excellent". Left uncapped, a
+# 4-file MCP wrapper with a README + license floats into the 90s next to thoroughly-vetted,
+# well-tested projects, so a near-perfect score stops meaning "trustworthy" and starts
+# meaning "small". The cap bounds the UPPER score by how much we could actually inspect;
+# it never raises a score, and it's a no-op once real findings already lowered it. Tests are
+# a genuine investment signal, so a tested small repo earns headroom back.
+_EVIDENCE_MIN_FILES = 8        # below this = a thin scan
+_EVIDENCE_VERY_THIN_FILES = 3  # at/under this = barely anything to inspect
+_EVIDENCE_THIN_CAP = 82        # clean-but-thin: just under the 84 clean baseline
+_EVIDENCE_VERY_THIN_CAP = 74   # clean-but-barely-scanned
+_EVIDENCE_TESTS_HEADROOM = 5   # a tested small repo earns some of it back
+
 
 def _calculate_trust_score(result: ScanResult) -> int:
     """Calculate a trust score (0-100) based on findings and signals.
@@ -1965,6 +1978,17 @@ def _calculate_trust_score(result: ScanResult) -> int:
         score -= excess * 3
 
     score = max(0, min(100, int(round(score))))
+
+    # Evidence-confidence cap — bound the score by how much we could actually inspect, so a
+    # thin scan can't read as "excellent" (see the constants above). Pure min(): never
+    # raises a score, and a findings-laden repo already sits below the cap so it's a no-op
+    # there. Skipped/unscannable scans never reach here (their score is null).
+    files = result.files_scanned or 0
+    if 0 < files < _EVIDENCE_MIN_FILES:
+        cap = _EVIDENCE_VERY_THIN_CAP if files <= _EVIDENCE_VERY_THIN_FILES else _EVIDENCE_THIN_CAP
+        if result.has_tests:
+            cap += _EVIDENCE_TESTS_HEADROOM
+        score = min(score, cap)
 
     # A blocking (shipped / known-malicious) critical caps the NUMBER too — not just the
     # letter — so score/tier/colour agree with the grade. A non-shipped-only critical

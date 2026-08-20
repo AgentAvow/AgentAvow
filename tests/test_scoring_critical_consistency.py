@@ -92,3 +92,60 @@ def test_the_invariant_no_trusted_score_with_a_shipped_critical():
     for path in ("src/x.py", "server.js", "main.py", "lib/tool.ts"):
         r = _result([_f("critical", path)], mcp=True)
         assert not (_calculate_trust_score(r) >= 81 and r.shipped_critical_count > 0)
+
+
+# ── Evidence-confidence cap (2026-08-19) ──────────────────────────────────────
+# A clean scan with little to inspect can't read as "excellent". These lock the
+# cap: a thin scan is bounded below the clean baseline, tests earn headroom back,
+# a substantial clean repo is untouched, and the cap NEVER raises a score.
+from src.scanner.scan import (  # noqa: E402
+    _EVIDENCE_THIN_CAP,
+    _EVIDENCE_VERY_THIN_CAP,
+)
+
+
+def _clean(files: int, tests: bool = False) -> ScanResult:
+    r = ScanResult(repo="o/r", stars=0, description="", framework="")
+    r.findings = []
+    r.has_readme = r.has_license = True
+    r.has_tests = tests
+    r.files_scanned = files
+    return r
+
+
+def test_thin_clean_scan_is_capped_below_baseline():
+    # 5 files, no tests, nothing found — clean but too thin to certify high.
+    r = _clean(files=5, tests=False)
+    assert _calculate_trust_score(r) <= _EVIDENCE_THIN_CAP
+
+
+def test_very_thin_scan_capped_harder():
+    r = _clean(files=2, tests=False)
+    assert _calculate_trust_score(r) <= _EVIDENCE_VERY_THIN_CAP
+
+
+def test_tests_earn_headroom_on_a_small_repo():
+    # A tested small repo can score higher than an untested one of the same size.
+    assert _calculate_trust_score(_clean(files=5, tests=True)) > \
+        _calculate_trust_score(_clean(files=5, tests=False))
+
+
+def test_substantial_clean_repo_is_not_capped():
+    # 20 files scanned — plenty of basis; the cap must not touch it.
+    r = _clean(files=20, tests=True)
+    assert _calculate_trust_score(r) > _EVIDENCE_THIN_CAP
+
+
+def test_cap_never_raises_a_score():
+    # A thin repo that ALSO has a blocking critical stays floored — the cap is a
+    # ceiling, never a floor, so it can't lift a bad score up to the cap.
+    r = _clean(files=2, tests=False)
+    r.findings = [_f("critical", "src/server.py")]
+    assert _calculate_trust_score(r) <= _CRITICAL_CEILING
+
+
+def test_zero_files_scanned_is_not_capped():
+    # files_scanned=0 often means "not populated", not "empty repo" — don't cap on it.
+    r = _clean(files=0, tests=False)
+    # no exception + a real score; cap logic is skipped for files==0
+    assert 0 <= _calculate_trust_score(r) <= 100
