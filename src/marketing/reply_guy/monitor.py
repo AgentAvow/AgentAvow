@@ -13,6 +13,19 @@ from src.models import ReplyOpportunity, ReplyTarget
 
 logger = logging.getLogger(__name__)
 
+# Permanent do-not-reply blocklist. Handles here are NEVER monitored or replied to,
+# even if a matching ReplyTarget row is (re-)added or marked active. This is the durable
+# guarantee behind an opt-out request — someone who asks us to stop must stay stopped.
+# Normalize entries lowercase, no leading '@'. (Xe iaso asked us to stop, 2026-08-20.)
+_HANDLE_BLOCKLIST = {
+    "xeiaso.net",
+}
+
+
+def _is_blocklisted(handle: str) -> bool:
+    return (handle or "").strip().lower().lstrip("@") in _HANDLE_BLOCKLIST
+
+
 # Keywords that boost relevance score when found in a post
 _RELEVANCE_KEYWORDS = [
     "ai agent", "mcp server", "agent trust", "autonomous agent",
@@ -54,6 +67,12 @@ async def monitor_all_targets() -> dict:
 
 async def _check_target(target: ReplyTarget) -> int:
     """Check a single target for new posts. Returns number of new opportunities."""
+    # Permanent opt-out: never monitor or reply to a blocklisted handle, whatever the
+    # ReplyTarget row says. Belt-and-suspenders behind deactivating the row itself.
+    if _is_blocklisted(target.handle):
+        logger.info("Skipping blocklisted handle %s (%s)", target.handle, target.platform)
+        return 0
+
     since = target.last_checked_at or (
         datetime.now(timezone.utc) - timedelta(hours=24)
     )
