@@ -122,13 +122,26 @@ def extract_owner_repo(url: str | None) -> str | None:
 def summarize_scan_result(result: Any) -> dict:
     """Convert a ScanResult to a JSON-serializable summary."""
     _err = getattr(result, "error", None)
+    # BLOCKING counts drive the score (a non-shipped/test-dir/dependency critical does
+    # NOT floor it), so the catalog badge must show the SAME blocking counts — otherwise
+    # a legitimately-high tool renders as "96/A · 2 critical", reviving the exact
+    # score-vs-findings contradiction the scoring fix resolved. All-counts kept as
+    # *_all for the detail view.
+    _all_crit = getattr(result, "critical_count", 0)
+    _all_high = getattr(result, "high_count", 0)
+    _ship_crit = getattr(result, "shipped_critical_count", None)
+    _ship_high = getattr(result, "shipped_high_count", None)
+    _block_crit = _all_crit if _ship_crit is None else _ship_crit
+    _block_high = _all_high if _ship_high is None else _ship_high
     return {
         # A fetch failure is UNSCANNABLE, not a 0 — null the score so the catalog
         # reads "fetch error", never "Blocked". (Previously defaulted to 0 on error.)
         "trust_score": None if _err else getattr(result, "trust_score", 0),
         "findings_count": len(getattr(result, "findings", []) or []),
-        "critical": getattr(result, "critical_count", 0),
-        "high": getattr(result, "high_count", 0),
+        "critical": _block_crit,
+        "high": _block_high,
+        "critical_all": _all_crit,
+        "high_all": _all_high,
         "files_scanned": getattr(result, "files_scanned", 0),
         "primary_language": getattr(result, "primary_language", ""),
         "has_readme": getattr(result, "has_readme", False),
