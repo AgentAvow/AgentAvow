@@ -158,25 +158,38 @@ async def target_performance(
     """Per-target reply performance — which accounts' threads earn the most reply
     engagement. Feeds targeting decisions (double down on what lands)."""
     require_admin(current_entity)
+    # Rank by OUR reply's engagement (our_engagement), NOT engagement_count — the latter
+    # is the SOURCE post's likes (the tweet/skeet we replied to), which made popular
+    # accounts (Anthropic, OpenAI) look like our best targets when it was just their
+    # own reach. Surface both, clearly labeled, so targeting decisions use real data.
     rows = (await db.execute(
         select(
             ReplyTarget.handle,
             ReplyTarget.platform,
             func.count(ReplyOpportunity.id).label("replies"),
-            func.coalesce(func.avg(ReplyOpportunity.engagement_count), 0).label("avg_eng"),
-            func.coalesce(func.sum(ReplyOpportunity.engagement_count), 0).label("total_eng"),
+            func.coalesce(func.avg(ReplyOpportunity.our_engagement), 0).label("our_avg"),
+            func.coalesce(func.sum(ReplyOpportunity.our_engagement), 0).label("our_total"),
+            func.coalesce(func.avg(ReplyOpportunity.engagement_count), 0).label("src_avg"),
         )
         .join(ReplyOpportunity, ReplyOpportunity.target_id == ReplyTarget.id)
         .where(ReplyOpportunity.status == "posted")
         .group_by(ReplyTarget.id, ReplyTarget.handle, ReplyTarget.platform)
-        .order_by(func.avg(ReplyOpportunity.engagement_count).desc())
+        .order_by(
+            func.sum(ReplyOpportunity.our_engagement).desc(),
+            func.count(ReplyOpportunity.id).desc(),
+        )
         .limit(50),
     )).all()
     return {
         "targets": [
             {"handle": h, "platform": p, "replies": int(rc),
-             "avg_engagement": round(float(ae), 2), "total_engagement": int(te)}
-            for h, p, rc, ae, te in rows
+             # OUR reply engagement — the number that actually reflects what lands.
+             "our_avg_engagement": round(float(oa), 2),
+             "our_total_engagement": int(ot),
+             # The posts we replied TO — their popularity, NOT ours. Labeled so it can't
+             # be mistaken for our performance again.
+             "their_post_avg_likes": round(float(sa), 2)}
+            for h, p, rc, oa, ot, sa in rows
         ],
     }
 
@@ -242,7 +255,11 @@ async def get_queue(
                 ),
                 "reply_url": o.reply_url,
                 "urgency_score": round(o.urgency_score or 0, 2),
-                "engagement_count": o.engagement_count,
+                # our_engagement = OUR reply's likes/replies/reposts (the real signal);
+                # engagement_count = the SOURCE post's likes (kept, clearly named).
+                "our_engagement": getattr(o, "our_engagement", 0) or 0,
+                "source_post_likes": o.engagement_count,
+                "error_message": getattr(o, "error_message", None),
                 "target": {
                     "handle": o.target.handle if o.target else None,
                     "display_name": (
