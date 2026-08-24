@@ -241,6 +241,14 @@ async def run_developer_radar(
             p.status = "queued"
             summary["scored"] += 1
             summary["queued"] += 1
+        except asyncio.TimeoutError:
+            # A candidate scan overran the 90s budget — expected under load (e.g. the
+            # corpus grind running concurrently, or GitHub rate limits). Not a bug: the
+            # radar is human-gated and just skips this candidate. WARN, don't page Sentry.
+            logger.warning(
+                "developer_radar: scan timed out for %s/%s (skipped)", owner, repo,
+            )
+            summary["errors"] += 1
         except Exception:
             logger.exception("developer_radar: scan failed for %s/%s", owner, repo)
             summary["errors"] += 1
