@@ -28,8 +28,8 @@ const SURFACES = [
 ]
 
 const SORTS = [
-  { key: 'score-desc', label: 'Highest trust' },
   { key: 'adoption', label: 'Widely relied upon' },
+  { key: 'score-desc', label: 'Highest trust' },
   { key: 'score-asc', label: 'Lowest trust' },
   { key: 'name', label: 'Name (A–Z)' },
 ]
@@ -201,7 +201,7 @@ function SummaryStrip({ s }: { s: CatalogSummary }) {
 }
 
 const DEFAULT_SURFACE = SURFACES[0].key
-const DEFAULT_SORT = 'score-desc'
+const DEFAULT_SORT = 'adoption'
 
 export default function RebrandBrowse() {
   // URL is the source of truth for every filter — so navigating into a tool and

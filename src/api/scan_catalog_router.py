@@ -450,17 +450,19 @@ async def scan_catalog(
         # today; unknown adoption sorts last).
         filtered = sorted(filtered, key=lambda r: (r.adoption_count or -1), reverse=True)
     else:
-        # DEFAULT rank (no explicit sort): actionable, trustworthy rows first. Skipped/
-        # errored scrapes (e.g. thousands of unscannable MCP-registry entries) sink to
-        # the bottom; among the rest, live-routable MCP endpoints and higher grades lead.
-        # This is what stops a junk-heavy tab from burying its few real tools.
+        # DEFAULT rank (no explicit sort): "widely relied upon" first — the most-adopted
+        # tools lead (stars for repos, downloads for packages/community rows), which
+        # surfaces a natural spread of real scores (popular != perfect) instead of leading
+        # with a block of 100s. Skipped/errored scrapes (e.g. thousands of unscannable
+        # MCP-registry entries) still sink to the bottom; trust_score is only a tiebreaker
+        # among rows of equal adoption. (Kenne 2026-08-26: default to widely-relied-upon.)
         def _rank(r: CatalogRow):
             junk = bool(r.skipped or r.scan_error)
-            live_mcp = r.surface == "mcp" and bool(
-                (r.endpoint_url or "").startswith("http")
-                or (r.name or "").startswith("http")
+            return (
+                junk,
+                -(r.adoption_count or -1),
+                -(r.trust_score if r.trust_score is not None else -1),
             )
-            return (junk, not live_mcp, -(r.trust_score if r.trust_score is not None else -1))
         filtered = sorted(filtered, key=_rank)
 
     total = len(filtered)
