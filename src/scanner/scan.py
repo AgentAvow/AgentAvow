@@ -2303,6 +2303,43 @@ async def _release_tree_shas(
     return None
 
 
+async def _published_pkg_repo_slug(ecosystem: str, name: str) -> str | None:
+    """The ``owner/repo`` (lowercased) that a PUBLISHED npm/PyPI package declares as its
+    source, or None if it declares none. Lets the artifact scan skip a diff when a repo's
+    manifest name collides with an UNRELATED published package of the same name."""
+    urls: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
+            if ecosystem == "pypi":
+                resp = await client.get(f"https://pypi.org/pypi/{name}/json")
+                if resp.status_code != 200:
+                    return None
+                info = (resp.json() or {}).get("info", {}) or {}
+                urls = [v for v in (info.get("project_urls") or {}).values()
+                        if isinstance(v, str)]
+                if isinstance(info.get("home_page"), str):
+                    urls.append(info["home_page"])
+            elif ecosystem == "npm":
+                resp = await client.get(f"https://registry.npmjs.org/{name}")
+                if resp.status_code != 200:
+                    return None
+                data = resp.json() or {}
+                repo_field = data.get("repository")
+                if isinstance(repo_field, str):
+                    urls.append(repo_field)
+                elif isinstance(repo_field, dict) and isinstance(repo_field.get("url"), str):
+                    urls.append(repo_field["url"])
+                if isinstance(data.get("homepage"), str):
+                    urls.append(data["homepage"])
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+    for u in urls:
+        m = re.search(r"github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git|/|#|$)", u, re.IGNORECASE)
+        if m:
+            return m.group(1).lower()
+    return None
+
+
 async def _maybe_scan_artifact(
     result: ScanResult,
     owner: str,
@@ -2334,6 +2371,21 @@ async def _maybe_scan_artifact(
     if not coord:
         return
     ecosystem, name, version = coord
+
+    # Name-collision guard: if the PUBLISHED package declares a source repo that is a
+    # DIFFERENT GitHub repo than the one we're scanning, this manifest name collides
+    # with an unrelated package (e.g. our `agentgraph` vs the unrelated PyPI `agentgraph`
+    # task-parallelism library). Diffing would attribute a stranger's files as bogus
+    # artifact_drift — skip the artifact scan entirely. Only skips on a POSITIVE mismatch
+    # (declared-and-different); a package declaring the same repo, or none, proceeds.
+    if ecosystem in ("pypi", "npm"):
+        declared = await _published_pkg_repo_slug(ecosystem, name)
+        if declared and declared != f"{owner}/{repo}".lower():
+            logger.info(
+                "artifact scan skipped: %s package %r declares repo %r, not %s/%s",
+                ecosystem, name, declared, owner, repo,
+            )
+            return
 
     try:
         from src.scanner.artifact_scan import scan_published_artifact
