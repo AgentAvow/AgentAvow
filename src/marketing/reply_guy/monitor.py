@@ -329,7 +329,9 @@ async def _fetch_twitter_posts(handle: str, since: datetime) -> list:
                     "uri": f"https://x.com/{handle}/status/{tweet['id']}",
                     "text": tweet.get("text", ""),
                     "timestamp": (
-                        datetime.fromisoformat(created.replace("Z", "+00:00"))
+                        datetime.fromisoformat(
+                            re.sub(r"(\.\d{6})\d+", r"\1", created.replace("Z", "+00:00"))
+                        )
                         if created else datetime.now(timezone.utc)
                     ),
                     "likes": metrics.get("like_count", 0),
