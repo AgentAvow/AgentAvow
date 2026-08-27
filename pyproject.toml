@@ -46,7 +46,7 @@ prod = [
 ]
 erc8004 = [
     "web3>=6.15,<8.0",
-    "eth-account>=0.11,<1.0",
+    "eth-account>=0.14.0,<1.0",
 ]
 
 [project.scripts]
