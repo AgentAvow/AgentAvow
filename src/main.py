@@ -771,6 +771,9 @@ async def ping() -> dict:
 
 
 @app.get(f"{settings.api_v1_prefix}")
+# Also serve the trailing-slash form directly: nginx 301s /api/v1 -> /api/v1/, and
+# without this route FastAPI's redirect_slashes 307s it back -> infinite redirect loop.
+@app.get(f"{settings.api_v1_prefix}/", include_in_schema=False)
 async def api_overview() -> dict:
     """API overview with all available endpoint groups."""
     prefix = settings.api_v1_prefix

@@ -1430,10 +1430,14 @@ async def public_scan(
         raise HTTPException(500, "Internal error while scanning repository")
 
     if result.error:
-        raise HTTPException(
-            404 if "not found" in (result.error or "").lower() else 502,
-            f"Scan error: {result.error}",
-        )
+        # A missing / private / empty repo is a client-side "not found" (404), not an
+        # upstream gateway failure (502) — 502 would trip external uptime monitors.
+        low = (result.error or "").lower()
+        not_found = any(s in low for s in (
+            "not found", "may be empty or private", "empty or private",
+            "could not fetch repo tree",
+        ))
+        raise HTTPException(404 if not_found else 502, f"Scan error: {result.error}")
 
     # Convert to dict and cache
     data = _scan_result_to_dict(result)
