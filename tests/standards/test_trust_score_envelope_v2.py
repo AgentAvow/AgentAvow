@@ -289,7 +289,7 @@ def test_all_positive_score_correct(fixed_time):
     """Score is the (clamped) sum of weighted contributions."""
     env = _fixture_all_positive(fixed_time)
     expected = 0.18 + 0.12 + 0.20 + 0.10 + 0.06  # 0.66
-    assert env["trust_score"] == expected
+    assert env["trust_score"] == pytest.approx(expected)  # float sum; avoid exact-equality
 
 
 def test_contested_signal_preserved(fixed_time):

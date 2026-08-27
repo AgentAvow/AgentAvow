@@ -1859,6 +1859,30 @@ _EVIDENCE_VERY_THIN_CAP = 74   # clean-but-barely-scanned
 _EVIDENCE_TESTS_HEADROOM = 5   # a tested small repo earns some of it back
 
 
+# `.agentavow.yml` declared capabilities → the finding categories they legitimize.
+# Conservative on purpose: env:read does NOT excuse secret findings, and network:egress
+# does NOT excuse `exfiltration` (a lethal-trifecta data-theft signal) — only the
+# generic remote-load surface. Criticals are never discounted by any of these.
+_CAP_TO_CATEGORY: dict[str, str] = {
+    "filesystem:read": "fs_access",
+    "filesystem:write": "fs_access",
+    "process:spawn": "unsafe_exec",
+    "network:egress": "dynamic_remote_load",
+}
+
+
+def _declared_categories(result: ScanResult) -> set[str]:
+    """Finding categories the tool DECLARED as intended scope via `.agentavow.yml`.
+    These get the same softened (never-for-criticals) treatment as an MCP server's
+    inherent capabilities — the honest, non-gaming way for a tool to say 'this is
+    my job' about a high/medium finding."""
+    scope = result.declared_scope if isinstance(result.declared_scope, dict) else {}
+    if not scope.get("present"):
+        return set()
+    caps = scope.get("capabilities") or []
+    return {_CAP_TO_CATEGORY[c] for c in caps if c in _CAP_TO_CATEGORY}
+
+
 def _calculate_trust_score(result: ScanResult) -> int:
     """Calculate a trust score (0-100) based on findings and signals.
 
@@ -1884,15 +1908,21 @@ def _calculate_trust_score(result: ScanResult) -> int:
     total_findings = code_critical + code_high + code_medium
     score = 84 if total_findings < 0.5 else 68
 
-    # For MCP servers and media/audio tools, high/medium findings in their EXPECTED
-    # capability categories (fs access, subprocess exec) are discounted — those are the
-    # tool's job. But a CRITICAL is a critical: it always deducts in full, MCP or not.
-    # (Previously criticals in expected categories deducted 0, which let MCP servers with
-    # critical findings score 100 — the calibration bug this replaces.)
-    if result.is_mcp_server or result.is_media_tool:
-        expected_categories = (
-            {"fs_access", "unsafe_exec"} if result.is_mcp_server else {"fs_access"}
-        )
+    # High/medium findings in a tool's EXPECTED capability categories are discounted —
+    # that's the tool's job. Two sources of "expected":
+    #   1. MCP servers / media tools — fs access + subprocess exec are inherent to the type.
+    #   2. `.agentavow.yml` DECLARED capabilities — the tool's own signed-off scope (item 3):
+    #      e.g. declaring `network:egress` softens `dynamic_remote_load`.
+    # A CRITICAL always deducts in full regardless — you can NOT declare away a critical
+    # (so a malicious tool can't self-declare its way out of a real exfil/exec critical).
+    expected_categories: set[str] = set()
+    if result.is_mcp_server:
+        expected_categories |= {"fs_access", "unsafe_exec"}
+    elif result.is_media_tool:
+        expected_categories |= {"fs_access"}
+    expected_categories |= _declared_categories(result)
+
+    if expected_categories:
         exp_high = sum(
             _finding_grade_weight(f) for f in code_findings
             if f.severity == "high" and f.category in expected_categories
@@ -2303,6 +2333,43 @@ async def _release_tree_shas(
     return None
 
 
+async def _published_pkg_repo_slug(ecosystem: str, name: str) -> str | None:
+    """The ``owner/repo`` (lowercased) that a PUBLISHED npm/PyPI package declares as its
+    source, or None if it declares none. Lets the artifact scan skip a diff when a repo's
+    manifest name collides with an UNRELATED published package of the same name."""
+    urls: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
+            if ecosystem == "pypi":
+                resp = await client.get(f"https://pypi.org/pypi/{name}/json")
+                if resp.status_code != 200:
+                    return None
+                info = (resp.json() or {}).get("info", {}) or {}
+                urls = [v for v in (info.get("project_urls") or {}).values()
+                        if isinstance(v, str)]
+                if isinstance(info.get("home_page"), str):
+                    urls.append(info["home_page"])
+            elif ecosystem == "npm":
+                resp = await client.get(f"https://registry.npmjs.org/{name}")
+                if resp.status_code != 200:
+                    return None
+                data = resp.json() or {}
+                repo_field = data.get("repository")
+                if isinstance(repo_field, str):
+                    urls.append(repo_field)
+                elif isinstance(repo_field, dict) and isinstance(repo_field.get("url"), str):
+                    urls.append(repo_field["url"])
+                if isinstance(data.get("homepage"), str):
+                    urls.append(data["homepage"])
+    except (httpx.HTTPError, ValueError, TypeError):
+        return None
+    for u in urls:
+        m = re.search(r"github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git|/|#|$)", u, re.IGNORECASE)
+        if m:
+            return m.group(1).lower()
+    return None
+
+
 async def _maybe_scan_artifact(
     result: ScanResult,
     owner: str,
@@ -2334,6 +2401,21 @@ async def _maybe_scan_artifact(
     if not coord:
         return
     ecosystem, name, version = coord
+
+    # Name-collision guard: if the PUBLISHED package declares a source repo that is a
+    # DIFFERENT GitHub repo than the one we're scanning, this manifest name collides
+    # with an unrelated package (e.g. our `agentgraph` vs the unrelated PyPI `agentgraph`
+    # task-parallelism library). Diffing would attribute a stranger's files as bogus
+    # artifact_drift — skip the artifact scan entirely. Only skips on a POSITIVE mismatch
+    # (declared-and-different); a package declaring the same repo, or none, proceeds.
+    if ecosystem in ("pypi", "npm"):
+        declared = await _published_pkg_repo_slug(ecosystem, name)
+        if declared and declared != f"{owner}/{repo}".lower():
+            logger.info(
+                "artifact scan skipped: %s package %r declares repo %r, not %s/%s",
+                ecosystem, name, declared, owner, repo,
+            )
+            return
 
     try:
         from src.scanner.artifact_scan import scan_published_artifact
