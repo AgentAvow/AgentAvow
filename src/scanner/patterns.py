@@ -296,7 +296,16 @@ DYNAMIC_REMOTE_LOAD_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "Unpinned npx/uvx package (no @version pin)",
-        re.compile(r"""\b(?:npx|uvx)\s+(?!.*@)[a-zA-Z@][\w\-/]+"""),
+        # Excludes well-known LOCAL build/lint/test tools (vite, tsc, eslint, …): `npx vite
+        # build` runs the repo's own devDependency, not a remote download — flagging it was
+        # a false positive hitting nearly every JS/TS project's Dockerfile/CI.
+        re.compile(
+            r"""\b(?:npx|uvx)\s+(?!(?:vite|tsc|vue-tsc|svelte-check|tailwindcss|webpack|"""
+            r"""rollup|esbuild|tsup|parcel|next|nuxt|astro|remix|eslint|prettier|biome|"""
+            r"""stylelint|jest|vitest|mocha|ava|playwright|cypress|tsx|ts-node|nodemon|"""
+            r"""storybook|turbo|nx|rimraf|cross-env|concurrently|npm-run-all|serve|"""
+            r"""http-server|gh-pages|ng|vue-cli-service)\b)(?!.*@)[a-zA-Z@][\w\-/]+"""
+        ),
         "medium",
     ),
 ]
