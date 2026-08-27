@@ -2,7 +2,7 @@
 name = "agentgraph"
 version = "0.1.0"
 description = "Trust and identity infrastructure for the agent internet"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.104.0,<1.0",
     "uvicorn[standard]>=0.24.0,<1.0",
