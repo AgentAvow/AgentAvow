@@ -514,7 +514,13 @@ PROMPT_INJECTION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
             # are NOT injection and must not false-fire.
             r"<\s*/?\s*(?-i:system|important|instructions?)\s*>"
             r"|(?:^|[\s\"'])system\s*prompt\s*:"
-            r"|you\s+are\s+now\s+(?:a|an|the)?\s"
+            # "you are now …" only fires on an AI role/mode OVERRIDE context — not benign
+            # "you are now the verified owner / a premium member" (which the old broad
+            # `(?:a|an|the)?\s` FP'd on, while also missing "you are now IN developer mode").
+            r"|you\s+are\s+now\s+(?:in\s+)?(?:a\s+|an\s+|the\s+)?(?:developer|debug|god|"
+            r"admin(?:istrator)?|root|sudo|dan\b|jailbroken|jailbreak|unrestricted|uncensored|"
+            r"unfiltered|unlimited|do[\s-]?anything|free\s+from|no\s+longer\s+bound|not\s+bound|"
+            r"without\s+restrict)"
             r"|your\s+(?:new|real|actual)\s+(?:instructions?|task|role)\s+(?:is|are)",
             re.IGNORECASE,
         ),

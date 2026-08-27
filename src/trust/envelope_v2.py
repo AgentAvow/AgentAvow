@@ -16,16 +16,17 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 import rfc8785
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
-from cryptography.exceptions import InvalidSignature
 
 # Envelope-level constants — match the JSON schema exactly.
 SHAPE_VERSION = "trust-score-envelope-v2.0"

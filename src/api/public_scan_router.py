@@ -2152,8 +2152,8 @@ async def scan_checks(
     except Exception:
         checks = 0
 
-    # First-party adoption axis-D: dedup on identity; only authenticated checkers count (see below). Best-
-    # effort — a Redis miss leaves unique_checkers at 0 and never fails the call.
+    # First-party adoption axis-D: dedup on identity; only authenticated checkers count
+    # (see below). Best-effort — a Redis miss leaves unique_checkers at 0, never fails the call.
     unique_checkers = 0
     try:
         from src.api.rate_limit import _get_client_ip, _get_entity_id
