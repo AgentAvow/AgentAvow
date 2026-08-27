@@ -54,7 +54,7 @@ def to_observation(scan: dict) -> dict:
     )
     att = scan.get("attestation") or {}
     return {
-        "signal": "trustmodel.safety.score",
+        "signal": "agentgraph.safety.score",
         "subject": scan.get("repo") or scan.get("target"),
         "container": {"score": score, "riskCodes": risk_codes, "explanation": explanation},
         "provenance": {
