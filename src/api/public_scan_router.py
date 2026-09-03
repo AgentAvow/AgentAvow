@@ -33,11 +33,17 @@ from src.config import settings
 from src.database import get_db
 from src.signing import (
     KID,
-    canonicalize,
     create_jws,
     get_trust_v2_kid,
     get_trust_v2_signing_key,
 )
+# Scan attestations sign over RFC 8785 (JCS) canonical bytes so a consumer can
+# recompute the verdict offline, exactly as the published CTEF vectors do. The
+# legacy `canonicalize()` (ASCII-escaped, null-stripping — not RFC 8785) is
+# aliased out here; already-signed attestations keep verifying (a JWS verifies
+# over its stored bytes) and expire within 24h, so the live set becomes fully
+# recomputable within a day of deploy.
+from src.signing import canonicalize_jcs_strict as canonicalize
 from src.trust.aggregate_sources import components_to_contributions
 from src.trust.envelope_v2 import Contribution, EnvelopeError, build_envelope, sign_envelope
 

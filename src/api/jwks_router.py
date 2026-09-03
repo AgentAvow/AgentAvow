@@ -564,9 +564,6 @@ async def cte_test_vectors() -> JSONResponse:
                         "envelope identity, signed-snapshot when only the "
                         "member list needs unlinkability. Both variants "
                         "will be named in the v0.3.2 normative rule table. "
-                        "APS (aeoess/agent-passport-system) has committed "
-                        "to adopting the same claim_type value in "
-                        "adapter mappings when it lands. "
                         "Specification forthcoming."
                     ),
                 },

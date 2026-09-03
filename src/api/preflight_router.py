@@ -79,7 +79,7 @@ async def _cache_set(key: str, value: dict) -> None:
 
 def _sign(subject_full: str, data: dict) -> str:
     from src.api.public_scan_router import _build_scan_payload
-    from src.signing import canonicalize, create_jws
+    from src.signing import canonicalize_jcs_strict as canonicalize, create_jws
 
     return create_jws(canonicalize(_build_scan_payload(subject_full, data)))
 
@@ -292,7 +292,7 @@ DRIFT_SCHEMA = "https://schema.agentgraph.co/attestation/drift/v1"
 
 async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession) -> dict:
     from src.models import ScanHistory
-    from src.signing import canonicalize, create_jws
+    from src.signing import canonicalize_jcs_strict as canonicalize, create_jws
 
     rows = (await db.execute(
         select(ScanHistory)
