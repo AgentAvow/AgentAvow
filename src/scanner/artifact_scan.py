@@ -563,6 +563,19 @@ def compute_drift(
     added.sort()
     modified.sort()
 
+    # Expected build output (compiled dist/, *.d.ts, source maps, …) is not drift:
+    # every compiled package ships it, and its CONTENT is scanned separately. Split it
+    # out of the drift SUMMARY so the Certified `no_drift` gate — which reads
+    # added_files/modified_files — stays consistent with the artifact_drift FINDINGS
+    # below, which already exclude it. Without this a TS/JS package can never certify:
+    # its dist/ shows as dozens of "added" files even against a clean diff.
+    added_real = [p for p in added if not _is_expected_build_output(p)]
+    modified_real = [p for p in modified if not _is_expected_build_output(p)]
+    build_output = sorted(
+        {p for p in added if _is_expected_build_output(p)}
+        | {p for p in modified if _is_expected_build_output(p)}
+    )
+
     # If NONE of the artifact's non-ignorable files line up with a repo path, the
     # two trees don't correspond (e.g. a monorepo subdir package, or a repo whose
     # tree we couldn't fully fetch). Treating every artifact file as "added" there
@@ -574,11 +587,13 @@ def compute_drift(
 
     drift = {
         "compared": comparable,
-        "added_files": added if comparable else [],
-        "modified_files": modified,
+        "added_files": added_real if comparable else [],
+        "modified_files": modified_real,
         "has_install_hook": bool(has_install_hook),
-        "added_count": len(added) if comparable else 0,
-        "modified_count": len(modified),
+        "added_count": len(added_real) if comparable else 0,
+        "modified_count": len(modified_real),
+        "build_output_files": build_output if comparable else [],
+        "build_output_count": len(build_output) if comparable else 0,
     }
 
     findings: list = []
