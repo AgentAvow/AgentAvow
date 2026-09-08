@@ -5,7 +5,8 @@ Barron's "it's not just X, it's Y" research:
   - Overused vocabulary (delve, tapestry, crucial, pivotal, ...)
   - Negative parallelism: "not just X, but Y" / "not X, but Y"
   - Copula avoidance: "serves as", "stands as", "represents", ...
-  - Em-dash density (when combined with other tells)
+  - Em-dash density per 1,000 words (calibrated to the Freeburg 2026 corpus
+    study: AI ~10.6 vs human ~3.2 per 1,000; blocks only alongside other tells)
   - Missing punchy short sentences (no human variability)
   - Empty closer hedges: "in conclusion", "ultimately", ...
   - Empty opener hedges: "in today's ever-evolving world", ...
@@ -314,7 +315,10 @@ class CheckResult:
                 "Ready to..., What if...). Open with a real statement."
             )
         if "high_em_dash_density" in self.reasons:
-            parts.append("Replace most em-dashes with periods or commas.")
+            parts.append(
+                "Replace most em-dashes with periods or commas — human writing "
+                "averages ~3 per 1,000 words; this draft is well above that."
+            )
         if "no_short_sentence" in self.reasons:
             parts.append(
                 "Include at least one sentence under 8 words. "
@@ -379,11 +383,16 @@ def check(
             reasons.append(name)
             severity = "block" if strict else "warn"
 
-    # 4. Em-dash density (per 500 chars). Only fires above threshold AND
-    # requires another tell present — em-dashes alone are fine punctuation.
+    # 4. Em-dash density, per 1,000 words. Calibrated from the Freeburg 2026
+    # corpus study (700k+ words): GPT-4.1 averages 10.62 em dashes per 1,000
+    # words vs a 3.23 human baseline — density, not mere presence, is the
+    # signal. Threshold 7.0 ≈ 2× the human rate, below the AI mean. Requires
+    # >= 2 dashes so a single dash in a short post can't trip it on density
+    # alone, and stays a soft warn unless another tell is present.
+    word_count = len(text.split())
     em_count = len(_EM_DASH_RE.findall(text))
-    em_density = (em_count / len(text)) * 500 if text else 0.0
-    if em_density > 2.5:
+    em_density = (em_count / word_count) * 1000 if word_count else 0.0
+    if em_count >= 2 and em_density > 7.0:
         # Soft warn unless paired with another tell — humans use em-dashes too.
         if reasons:
             reasons.append("high_em_dash_density")
@@ -396,7 +405,6 @@ def check(
     # 5. Short-sentence variety. Skip for short-form platforms (one sentence
     # in 280 chars can't have rhythm variety).
     sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
-    word_count = len(text.split())
     has_short = any(len(s.split()) <= 7 for s in sentences)
     short_form = platform in {"twitter", "bluesky"}
     if not short_form and len(sentences) >= 3 and not has_short:
@@ -466,8 +474,10 @@ VOICE_PROMPT_FRAGMENT = (
     "at uniform medium length.\n"
     "## Don't OVERCORRECT into the other tell: mechanically choppy, em-dash-"
     "free, perfectly-even prose reads as a bot trying not to look like a bot. "
-    "Em-dashes are fine in moderation. The goal is a real human's uneven "
-    "rhythm and specific detail, not sanitized blandness.\n"
+    "Em-dashes are fine in moderation — human writing averages about 3 per "
+    "1,000 words; AI text runs 3x that, so stay near the human rate. The goal "
+    "is a real human's uneven rhythm and specific detail, not sanitized "
+    "blandness.\n"
     "Skip 'I'd be happy to' / 'Certainly!' / 'Great question' openers — "
     "just answer.\n"
 )

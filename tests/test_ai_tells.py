@@ -150,6 +150,35 @@ def test_em_dash_density_alone_does_not_block():
     assert r.passed or r.severity == "warn"
 
 
+def test_em_dash_density_calibrated_per_1000_words():
+    """Threshold is 7 per 1,000 words (Freeburg 2026: AI ~10.6, human ~3.2).
+    Near-human density passes clean; AI-level density warns; AI-level density
+    plus another tell blocks."""
+    # ~60 words, 0 dashes + padding: one dash later would be ~16/1000 — but a
+    # SINGLE dash never trips the rule (em_count >= 2 guard).
+    filler = "The scanner reads the manifest and grades the repo. " * 8
+    one_dash = filler + "It works — finally."
+    r = check(one_dash, platform="devto", strict=True)
+    assert "high_em_dash_density" not in r.reasons
+
+    # Two dashes in ~90 words ≈ 22/1000 → warns, but alone never blocks.
+    two_dash = filler + "It works — finally — and ships today."
+    r = check(two_dash, platform="devto", strict=True)
+    assert "high_em_dash_density" in r.reasons
+    assert r.passed
+
+    # Same density + a blocklist word → block.
+    r = check(two_dash + " A robust result.", platform="devto", strict=True)
+    assert "high_em_dash_density" in r.reasons
+    assert not r.passed
+
+    # Human-rate density on long copy stays silent: 2 dashes in ~800 words.
+    long_human = "The scanner reads the manifest and grades the repo. " * 89
+    long_human += "It works — finally — and ships today."
+    r = check(long_human, platform="devto", strict=True)
+    assert "high_em_dash_density" not in r.reasons
+
+
 def test_copula_avoidance_density_warns():
     """Three 'serves as'/'represents'/'stands as' in one draft = AI rhythm."""
     text = (
