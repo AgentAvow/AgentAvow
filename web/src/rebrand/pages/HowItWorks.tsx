@@ -34,6 +34,7 @@ const STANDARDS = [
   ['Published test vectors', 'Conformance vectors served at /.well-known so anyone can validate their own implementation against ours.', 'https://agentgraph.co/.well-known/cte-test-vectors.json'],
   ['ERC-8004 bridge', 'Interop with the on-chain agent-trust registry standard.', 'https://github.com/AgentAvow/AgentAvow/tree/main/src/agentgraph_bridge_erc8004'],
   ['AIPOU cross-fixture', 'A shared conformance fixture proving two independent implementations agree.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/conformance'],
+  ['Independently cross-run in the LF DT lab', 'Our CTEF conformance vectors, positive and adversarial/fail-closed, were reproduced byte-for-byte in the Linux Foundation Decentralized Trust Agent Authority Conformance lab, by a party other than us.', 'https://github.com/Agent-Authority-Conformance/aps-conformance-suite/pull/43'],
   ['MCP & AIP bridges', 'Adapters so the trust layer plugs into the frameworks agents already use.', 'https://github.com/AgentAvow/AgentAvow/tree/main/docs/protocol'],
 ]
 
