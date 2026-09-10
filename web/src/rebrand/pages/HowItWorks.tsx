@@ -167,11 +167,13 @@ agentavow scan . --min-score 60`}</pre>
       <Reveal>
         <div id="verify" className="mt-12 glass rounded-2xl p-7 border-l-4 border-primary/60">
           <Eyebrow>Verify</Eyebrow>
-          <h2 className="mt-2 text-xl font-bold">Every score is signed. Verify it offline.</h2>
+          <h2 className="mt-2 text-xl font-bold">Signed, so a tool can't show one grade and be another.</h2>
           <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
-            Each result is signed with Ed25519 (JWS). You can verify any attestation against our public keys — no call
-            back to us required. If a single byte of the score is altered, verification fails. That's what makes this a
-            <strong className="text-text"> signature, not just a badge</strong>: you don't have to trust AgentAvow, you can check the math.
+            Each result is signed with Ed25519 (JWS): the score <strong className="text-text">and</strong> the tool's definition,
+            captured the moment we graded it. Nobody can hand you a doctored number, and if a tool swaps its definition after
+            you trusted it, the signed digest no longer matches and we flag it. Verify any attestation offline against our
+            public keys — a <strong className="text-text">signature, not just a badge</strong>: you don't have to trust
+            AgentAvow, you can check the math.
           </p>
           <div className="mt-4 flex gap-4 flex-wrap">
             <a href="https://agentgraph.co/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Public keys (JWKS) ↗</a>

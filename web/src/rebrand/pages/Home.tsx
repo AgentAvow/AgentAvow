@@ -289,7 +289,7 @@ export default function RebrandHome() {
                 {example.repoPath && <Link to={rp(`/rebrand/check/${example.repoPath}`)} className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">See the full report →</Link>}
               </div>
               <div className="px-5 py-3.5 border-t border-border/60 text-[12.5px] text-text-muted leading-relaxed">
-                Don't take our word for it — <Link to={rp('/rebrand/how-it-works#verify')} className="text-primary-light hover:text-primary font-semibold">verify the signature yourself, or tamper with it and watch it fail →</Link>
+                A signed record means a tool can't show you one grade and be another. Don't take our word for it — <Link to={rp('/rebrand/how-it-works#verify')} className="text-primary-light hover:text-primary font-semibold">verify the signature yourself, or tamper with it and watch it fail →</Link>
               </div>
             </div>
           ) : (
