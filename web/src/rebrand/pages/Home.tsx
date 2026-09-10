@@ -161,8 +161,8 @@ export default function RebrandHome() {
             Is this AI tool <span className="gradient-text-bio">safe</span> to connect?
           </h1>
           <p className="mt-5 mx-auto max-w-[50ch] text-lg text-text-muted font-light">
-            Scan any tool, MCP server, or skill your agent connects to. Get a signed safety score in seconds
-            — free, no signup, and verifiable offline.
+            Scan any tool, MCP server, or skill your agent connects to, and get a signed safety score before
+            you wire it in. Free, no signup, verifiable offline.
           </p>
 
           <form
