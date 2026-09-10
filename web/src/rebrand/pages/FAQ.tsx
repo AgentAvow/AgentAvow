@@ -26,6 +26,7 @@ const SECTIONS: Section[] = [
       { q: 'How does the scan work?', a: 'We read the actual source code across 12 safety categories — exposed secrets, unsafe code execution, data handling, filesystem and network access, prompt-injection surfaces, obfuscation, and dependency health — and produce a 0–100 trust score plus a signed attestation.' },
       { q: 'What does the score mean?', a: 'A 0–100 trust score that maps to a tier — Trusted (80+), Standard, Caution, Restricted, or Blocked; higher is safer. It reflects a scan at a point in time — tools can change after they\'re scanned, so watch anything you depend on.' },
       { q: 'What are the two scores — Attestation Trust and Adoption?', a: 'Attestation Trust is the signed safety score from our scanner (verifiable now). Adoption reflects how much the ecosystem actually uses a tool — real usage like stars, checks, and watchers, not opinions.' },
+      { q: 'Can my agent check tools automatically, before it connects?', a: 'Yes. Add AgentAvow\'s MCP server to your agent (Claude Code, Cursor, or your own runtime) and it pulls a tool\'s signed grade before your agent connects, so an unsafe tool is stopped in the loop rather than found after the fact. It uses the same free, signed scan as the website and needs no account.' },
     ],
   },
   {

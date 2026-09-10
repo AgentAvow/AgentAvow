@@ -353,12 +353,18 @@ export default function RebrandHome() {
       <section className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
           <div className="text-center max-w-[56ch] mx-auto">
-            <Eyebrow>Stay safe over time</Eyebrow>
-            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">A tool is only safe until it <span className="gradient-text">changes</span>.</h2>
-            <p className="mt-3 text-text-muted">Vetting once isn't enough — tools get updated, and a clean scan can quietly go bad. Two ways to never get caught by it.</p>
+            <Eyebrow>Protection that keeps working</Eyebrow>
+            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">Safe before you connect it, and after it <span className="gradient-text">changes</span>.</h2>
+            <p className="mt-3 text-text-muted">One scan is a snapshot. Three ways to make the check automatic and continuous, so nothing unsafe slips through the moment you stop looking.</p>
             <p className="mt-2.5 text-[13px] text-text-muted/80">Every score page keeps a <strong className="text-text">public, signed timeline</strong> — score-over-time plus signed-definition drift, verifiable offline. <Link to={rp('/rebrand/check/modelcontextprotocol/servers')} className="text-primary-light hover:text-primary font-semibold">See a live timeline →</Link></p>
           </div>
-          <div className="grid md:grid-cols-2 gap-4 mt-8">
+          <div className="grid md:grid-cols-3 gap-4 mt-8">
+            <div className="glass rounded-2xl p-7 flex flex-col">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
+              <h3 className="mt-2 text-xl font-semibold">Check before it connects</h3>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Add AgentAvow's MCP to your agent (Claude Code, Cursor, or your own runtime). It pulls a tool's signed grade before your agent connects, so an unsafe tool is stopped in the loop, not found after the fact.</p>
+              <Link to={rp("/rebrand/how-it-works") + "#mcp-check"} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Set it up →</Link>
+            </div>
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
@@ -399,7 +405,7 @@ export default function RebrandHome() {
             <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-1 rounded bg-primary/15 text-primary-light shrink-0">New</span>
             <div className="min-w-0 flex-1">
               <div className="text-[15px] font-semibold">Running an agent? Give it a built-in safety check.</div>
-              <div className="text-[13.5px] text-text-muted mt-0.5">Add AgentAvow's MCP server to Claude Code or Cursor — your agent asks "is this safe to install?" before it connects anything.</div>
+              <div className="text-[13.5px] text-text-muted mt-0.5">Add AgentAvow's MCP server to Claude Code or Cursor, and your agent asks "is this safe?" before it connects anything.</div>
             </div>
             <span className="text-[14px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform shrink-0">Add it →</span>
           </Link>

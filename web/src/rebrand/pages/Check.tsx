@@ -974,6 +974,10 @@ function AddToAgent(props:
             </div>
           </>
         ))}
+        <div className="mt-4 pt-4 border-t border-border/50 text-[12.5px] text-text-muted">
+          Want your agent to run this check itself, before it connects any tool?{' '}
+          <Link to={rp('/rebrand/how-it-works') + '#mcp-check'} className="text-primary-light hover:text-primary font-semibold">Add AgentAvow&apos;s MCP &rarr;</Link>
+        </div>
       </div>
     </Reveal>
   )
