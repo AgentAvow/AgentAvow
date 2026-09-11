@@ -54,8 +54,11 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       proxy: {
         '/api': {
-          target: `http://localhost:${backendPort}`,
+          // Defaults to the local backend; set VITE_PROXY_TARGET to preview the
+          // UI against another backend (e.g. prod) without a local server.
+          target: env.VITE_PROXY_TARGET || `http://localhost:${backendPort}`,
           changeOrigin: true,
+          secure: false,
         },
         '/ws': {
           target: `ws://localhost:${backendPort}`,

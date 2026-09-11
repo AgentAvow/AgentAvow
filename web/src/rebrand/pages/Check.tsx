@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchSkillScan, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark } from '../components/TrustMark'
+import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
@@ -41,13 +41,6 @@ const SEV_CLASS: Record<string, string> = {
   medium: 'text-warning bg-warning/15',
   low: 'text-text-muted bg-surface-hover',
   info: 'text-text-muted bg-surface-hover',
-}
-
-const VERDICT_STYLE = {
-  safe: { ring: 'text-success', chip: 'bg-success/15 text-success', label: 'SAFE' },
-  ok: { ring: 'text-success', chip: 'bg-success/15 text-success', label: 'GENERALLY SAFE' },
-  caution: { ring: 'text-warning', chip: 'bg-warning/15 text-warning', label: 'CAUTION' },
-  risky: { ring: 'text-danger', chip: 'bg-danger/15 text-danger', label: 'RISKY' },
 }
 
 const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
@@ -1026,8 +1019,8 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
             <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}</h1>
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
-            <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
+          <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="install" /></div>
           <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="openclaw" owner={owner} repo={repo} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
@@ -1163,8 +1156,8 @@ function McpResult({ endpoint }: { endpoint: string }) {
             <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all font-mono">{endpoint}</h1>
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
-            <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
+          <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
           <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="mcp" owner="mcp" repo={endpoint} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
@@ -1327,8 +1320,8 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
             <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{name}</h1>
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
-            <div className="mt-1 font-mono text-[13px] text-text-muted">{verdict} · {scan.trust_tier}</div>
           </div>
+          <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="use" /></div>
           <ScoreDuo trustScore={scan.trust_score} trustLabel="Attestation Trust" surface={surface} repo={name} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
@@ -1491,7 +1484,6 @@ function Result({ owner, repo, privateResult }: {
   const f = scan.findings
   const cats = scan.category_scores || {}
   const sum = summarize(scan, scan.repo)
-  const v = VERDICT_STYLE[sum.verdict]
   const adoption = adoptionData
     ? {
         label: adoptionData.stars != null && adoptionData.stars > 0
@@ -1526,7 +1518,6 @@ function Result({ owner, repo, privateResult }: {
         {/* header: verdict + plain-English headline */}
         <div className="relative px-7 pt-6">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded ${v.chip}`}>{v.label}</span>
             {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">{storedPrivate ? '🔒 Private · via GitHub App' : '🔒 Private scan · not public'}</span>}
             {!isPrivate && <ClaimedBadge surface="github" owner={owner} repo={repo} />}
           </div>
@@ -1536,6 +1527,7 @@ function Result({ owner, repo, privateResult }: {
           {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/70 max-w-[64ch]">{(scan as { long_description?: string }).long_description}</div>}
         </div>
 
+        <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
         {/* the dual mark — one cohesive instrument: trust (green→red) | adoption (teal→magenta) */}
         <div className="relative px-4 sm:px-7 py-6">
           <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">

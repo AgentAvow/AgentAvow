@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { getTrustTier } from '../../components/trust/gradeSystem'
+import { getTrustTier, scoreToGrade, binaryVerdict } from '../../components/trust/gradeSystem'
 
 /**
  * The AgentAvow dual mark (0–100 pivot 2026-08).
@@ -188,5 +188,64 @@ export function TrustPill({ score, className = '' }: { score: number; showTier?:
       <span className="text-[14px] font-extrabold">{score}</span>
       <span className="text-[9px] opacity-60">/100</span>
     </span>
+  )
+}
+
+/**
+ * Binary verdict banner (Shawn #4) — the plain decision above the number.
+ * Derived from the already-signed scan; never a rescore. Safe = A/A+ (>=81) AND
+ * no blocking critical/high (the server's certified.checks.no_critical_or_high
+ * gate). Verb is surface-aware (connect / install / use).
+ */
+export function VerdictBadge(
+  { scan, verb = 'connect', className = '' }: {
+    scan: {
+      trust_score?: number | null
+      certified?: { checks?: { no_critical_or_high?: boolean } }
+      findings?: unknown
+      critical?: number | null
+      high?: number | null
+    }
+    verb?: 'connect' | 'install' | 'use'
+    className?: string
+  },
+) {
+  const score = scan.trust_score ?? 0
+  const raw = scan.findings
+  const findings: Array<{ severity?: string }> = Array.isArray(raw)
+    ? (raw as Array<{ severity?: string }>)
+    : Array.isArray((raw as { items?: unknown } | null | undefined)?.items)
+      ? (raw as { items: Array<{ severity?: string }> }).items
+      : []
+  let crit: number
+  let high: number
+  if (findings.length) {
+    crit = findings.filter((f) => f.severity === 'critical').length
+    high = findings.filter((f) => f.severity === 'high').length
+  } else {
+    crit = scan.critical ?? 0
+    high = scan.high ?? 0
+  }
+  const noBlocking = typeof scan.certified?.checks?.no_critical_or_high === 'boolean'
+    ? scan.certified.checks.no_critical_or_high
+    : crit === 0 && high === 0
+  const safe = binaryVerdict(score, noBlocking) === 'safe'
+  const blocking = crit + high
+  const reason = safe
+    ? 'No blocking issues found.'
+    : blocking > 0
+      ? `${blocking} blocking finding${blocking === 1 ? '' : 's'} to review below.`
+      : `Grade ${scoreToGrade(score)}, below the safe bar.`
+  return (
+    <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${safe ? 'bg-success/10 border-success/30' : 'bg-warning/10 border-warning/30'} ${className}`}>
+      <span className={`text-lg leading-none ${safe ? 'text-success' : 'text-warning'}`} aria-hidden="true">{safe ? '✓' : '⚠'}</span>
+      <div className="min-w-0">
+        <div className={`font-bold text-[15px] ${safe ? 'text-success' : 'text-warning'}`}>
+          {safe ? `Safe to ${verb}` : `Review before you ${verb}`}
+        </div>
+        <div className="text-[12.5px] text-text-muted">{reason}</div>
+      </div>
+      <span className="ml-auto font-mono text-[10px] text-text-muted/60 shrink-0 hidden sm:block">derived from the signed score</span>
+    </div>
   )
 }

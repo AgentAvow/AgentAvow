@@ -93,6 +93,17 @@ export function gradeInfo(grade: LetterGrade): GradeInfo {
   return { grade, ...GRADE_MAP[grade] }
 }
 
+/**
+ * Binary decision layer over the signed score (Shawn feedback #4). A VIEW, not a
+ * rescore: 'safe' iff the score is A/A+ (>=81) AND there are no blocking critical
+ * or high findings (the server's `certified.checks.no_critical_or_high` gate,
+ * which already excludes test/benchmark-only findings). Anything else is
+ * 'needs_review'. The signed 0-100 and attestation are unchanged.
+ */
+export function binaryVerdict(score: number, noBlockingCritHigh: boolean): 'safe' | 'needs_review' {
+  return score >= 81 && noBlockingCritHigh ? 'safe' : 'needs_review'
+}
+
 // ─── 0–100 Trust mark (dual-mark pivot 2026-08) ─────────────────────────────
 // The product now displays a 0–100 number + tier word, not an A–F letter.
 // Trust owns the semantic green→red scale; thresholds 80/60/40/20 per the locked
