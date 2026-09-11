@@ -43,6 +43,132 @@ const SEV_CLASS: Record<string, string> = {
   info: 'text-text-muted bg-surface-hover',
 }
 
+function prettyCat(key: string): string {
+  return CAT_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// Detection-category → subscore axis, mirroring src/scanner/scan.py, so a toggle on an
+// axis (e.g. Code safety) filters the findings that roll up into it (unsafe_exec, obfuscation…).
+const FINDING_AXIS: Record<string, string> = {
+  secret: 'secret_hygiene',
+  unsafe_exec: 'code_safety', obfuscation: 'code_safety', dynamic_remote_load: 'code_safety',
+  hidden_unicode: 'code_safety', prompt_injection: 'code_safety', insecure_deserialization: 'code_safety',
+  artifact_drift: 'code_safety', schema_risk: 'code_safety', annotation_lie: 'code_safety',
+  exfiltration: 'data_handling', toxic_flow: 'data_handling', lethal_trifecta: 'data_handling',
+  fs_access: 'filesystem_access',
+  dependency: 'dependency_health', install_hook: 'dependency_health',
+}
+const axisOf = (c?: string): string => (c ? (FINDING_AXIS[c] || c) : '')
+
+type FindingItem = { category?: string; name?: string; severity?: string; file_path?: string; line_number?: number; remediation?: string; shipped?: boolean }
+
+/**
+ * Category scores + findings with "what do you care about" priority toggles (Shawn #5).
+ * A VIEW only: toggles reorder/emphasize the subscore cards and re-rank the findings;
+ * they NEVER change the score, grade, or verdict. Nothing is hidden — findings outside
+ * the selected categories collapse behind a counted "show" fold.
+ */
+function CategoryFindings({ categoryScores, findings, maxFindings = 15, emptyMessage }: {
+  categoryScores?: Record<string, number> | null
+  findings?: { items?: FindingItem[]; critical?: number; high?: number; total?: number } | null
+  maxFindings?: number
+  emptyMessage: string
+}) {
+  const scores = categoryScores || {}
+  const items = findings?.items || []
+  const scoreKeys = Object.keys(scores).filter((k) => scores[k] != null)
+  const universe = Array.from(new Set([...scoreKeys, ...items.map((i) => axisOf(i.category)).filter(Boolean)]))
+  // Default: every category selected, so the chips read as an obvious set you narrow
+  // by deselecting — clearer affordance than starting empty.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(universe))
+  const [showOther, setShowOther] = useState(false)
+  const narrowed = selected.size !== universe.length
+  const toggle = (k: string) => setSelected((prev) => {
+    const n = new Set(prev)
+    if (n.has(k)) n.delete(k); else n.add(k)
+    return n
+  })
+  const orderedKeys = narrowed
+    ? [...scoreKeys.filter((k) => selected.has(k)), ...scoreKeys.filter((k) => !selected.has(k))]
+    : scoreKeys
+  const inCare = items.filter((i) => selected.has(axisOf(i.category)))
+  const other = items.filter((i) => !selected.has(axisOf(i.category)))
+  const otherCats = Array.from(new Set(other.map((i) => axisOf(i.category)).filter(Boolean)))
+
+  const renderItem = (it: FindingItem, i: number) => (
+    <div key={i} className="glass rounded-xl px-4 py-3 flex gap-3 items-start">
+      <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity || 'info'] || SEV_CLASS.info}`}>{it.severity}</span>
+      <div className="min-w-0">
+        <div className="text-[14px]">{it.name}</div>
+        <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}{it.shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
+        {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
+      </div>
+    </div>
+  )
+
+  return (
+    <>
+      {universe.length > 1 && (
+        <Reveal>
+          <div className="mt-8 flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-text-muted mr-1">What do you care about?</span>
+            {universe.map((k) => {
+              const on = selected.has(k)
+              return (
+                <button key={k} onClick={() => toggle(k)}
+                  className={`font-mono text-[12px] rounded-full px-3 py-1 border transition-colors ${on ? 'border-primary-light text-primary-light bg-primary/10' : 'border-border text-text-muted hover:text-text'}`}>
+                  {on ? '✓ ' : ''}{prettyCat(k)}
+                </button>
+              )
+            })}
+            {narrowed && <button onClick={() => setSelected(new Set(universe))} className="text-[11.5px] text-text-muted hover:text-text underline underline-offset-2">reset</button>}
+          </div>
+          <div className="mt-1.5 text-[11px] text-text-muted/70">Filters what you see, not the score.</div>
+        </Reveal>
+      )}
+
+      {scoreKeys.length > 0 && (
+        <>
+          <Reveal><h3 className="mt-6 text-[13px] font-mono uppercase tracking-wide text-text-muted">Category scores{narrowed ? ' · your priorities first' : ''}</h3></Reveal>
+          <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-3" stagger={0.04}>
+            {orderedKeys.map((key) => (
+              <div key={key} className={`glass rounded-xl px-4 py-3 flex items-center justify-between transition-opacity ${narrowed && !selected.has(key) ? 'opacity-45' : ''}`}>
+                <span className="text-[14px]">{prettyCat(key)}</span>
+                <TrustPill score={scores[key]} />
+              </div>
+            ))}
+          </RevealStagger>
+        </>
+      )}
+
+      <RevealStagger className="grid grid-cols-3 gap-3 mt-6" stagger={0.06}>
+        {[['critical', findings?.critical ?? 0, 'text-danger'], ['high', findings?.high ?? 0, 'text-warning'], ['total', findings?.total ?? 0, 'text-text']].map(([lab, n, cls]) => (
+          <div key={lab as string} className="glass rounded-xl p-4 text-center">
+            <CountUp value={n as number} className={`block text-2xl font-bold tabular-nums ${cls}`} />
+            <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">{lab as string}</div>
+          </div>
+        ))}
+      </RevealStagger>
+
+      {items.length > 0 ? (
+        <>
+          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">{narrowed ? `Findings in the categories you care about (${inCare.length})` : `The details (${items.length})`}</h3></Reveal>
+          <div className="flex flex-col gap-2 mt-3">
+            {inCare.slice(0, maxFindings).map(renderItem)}
+          </div>
+          {narrowed && other.length > 0 && (showOther ? (
+            <div className="flex flex-col gap-2 mt-2">{other.slice(0, maxFindings).map((it, i) => renderItem(it, i + 100000))}</div>
+          ) : (
+            <button onClick={() => setShowOther(true)} className="mt-3 text-[12.5px] text-text-muted hover:text-text">▸ {other.length} more in other categories ({otherCats.map(prettyCat).join(', ')}) — show</button>
+          ))}
+        </>
+      ) : (
+        <Reveal><div className="mt-6 glass rounded-2xl p-6 text-[13.5px] text-success">{emptyMessage}</div></Reveal>
+      )}
+    </>
+  )
+}
+
 const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
 
 /** "Watch this tool" — the PRIMARY action. Full-width gradient CTA.
@@ -1217,53 +1343,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
         )
       })()}
 
-      {/* CATEGORY SCORES — the per-axis breakdown, same as every other score page */}
-      {scan.category_scores && Object.keys(scan.category_scores).length > 0 && (
-        <>
-          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">Category scores</h3></Reveal>
-          <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-3" stagger={0.04}>
-            {Object.entries(CAT_LABELS).filter(([key]) => (scan.category_scores as Record<string, number>)[key] != null).map(([key, label]) => {
-              const sc = (scan.category_scores as Record<string, number>)[key]
-              return (
-                <div key={key} className="glass rounded-xl px-4 py-3 flex items-center justify-between">
-                  <span className="text-[14px]">{label}</span>
-                  <TrustPill score={sc} />
-                </div>
-              )
-            })}
-          </RevealStagger>
-        </>
-      )}
-
-      {/* findings summary — critical/high/total, consistent with repo/package pages */}
-      <RevealStagger className="grid grid-cols-3 gap-3 mt-6" stagger={0.06}>
-        {[['critical', f?.critical ?? 0, 'text-danger'], ['high', f?.high ?? 0, 'text-warning'], ['total', f?.total ?? 0, 'text-text']].map(([lab, n, cls]) => (
-          <div key={lab as string} className="glass rounded-xl p-4 text-center">
-            <CountUp value={n as number} className={`block text-2xl font-bold tabular-nums ${cls}`} />
-            <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">{lab as string}</div>
-          </div>
-        ))}
-      </RevealStagger>
-
-      {f?.items && f.items.length > 0 ? (
-        <>
-          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">The details ({f.items.length})</h3></Reveal>
-          <div className="flex flex-col gap-2 mt-3">
-            {f.items.slice(0, 15).map((it, i) => (
-              <div key={i} className="glass rounded-xl px-4 py-3 flex gap-3 items-start">
-                <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
-                <div className="min-w-0">
-                  <div className="text-[14px]">{it.name}</div>
-                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{(it as {shipped?: boolean}).shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
-                  {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : (
-        <Reveal><div className="mt-6 glass rounded-2xl p-6 text-[13.5px] text-success">✓ No capability-surface risks found — clean tool set.</div></Reveal>
-      )}
+      <CategoryFindings categoryScores={scan.category_scores as Record<string, number> | undefined} findings={f} maxFindings={15} emptyMessage="✓ No capability-surface risks found — clean tool set." />
 
       <div className="mt-8 flex justify-center">
         <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} grade={t.name} />
@@ -1623,29 +1703,7 @@ function Result({ owner, repo, privateResult }: {
       {/* recompute-on-release drift feed — signed-definition integrity over time */}
       {!isPrivate && <DefinitionDrift owner={owner} repo={repo} />}
 
-      {/* findings summary */}
-      <RevealStagger className="grid grid-cols-3 gap-3 mt-4" stagger={0.06}>
-        {[['critical', f?.critical ?? 0, 'text-danger'], ['high', f?.high ?? 0, 'text-warning'], ['total', f?.total ?? 0, 'text-text']].map(([lab, n, cls]) => (
-          <div key={lab as string} className="glass rounded-xl p-4 text-center">
-            <CountUp value={n as number} className={`block text-2xl font-bold tabular-nums ${cls}`} />
-            <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted">{lab as string}</div>
-          </div>
-        ))}
-      </RevealStagger>
-
-      {/* category subscores */}
-      <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">Category scores</h3></Reveal>
-      <RevealStagger className="grid sm:grid-cols-2 gap-2.5 mt-3" stagger={0.04}>
-        {Object.entries(CAT_LABELS).filter(([key]) => (cats as Record<string, number>)[key] != null).map(([key, label]) => {
-          const sc = (cats as Record<string, number>)[key]
-          return (
-            <div key={key} className="glass rounded-xl px-4 py-3 flex items-center justify-between">
-              <span className="text-[14px]">{label}</span>
-              <TrustPill score={sc} />
-            </div>
-          )
-        })}
-      </RevealStagger>
+      <CategoryFindings categoryScores={cats as Record<string, number>} findings={f} maxFindings={12} emptyMessage="✓ No risks found — clean across all categories." />
 
       {/* scan facts */}
       <Reveal>
@@ -1692,23 +1750,6 @@ function Result({ owner, repo, privateResult }: {
       {storedPrivate && <PublishStoredCTA owner={owner} repo={repo} published={published} />}
 
       {/* findings detail */}
-      {f?.items && f.items.length > 0 && (
-        <>
-          <Reveal><h3 className="mt-8 text-[13px] font-mono uppercase tracking-wide text-text-muted">The details ({f.items.length})</h3></Reveal>
-          <RevealStagger className="flex flex-col gap-2 mt-3" stagger={0.03}>
-            {f.items.slice(0, 12).map((it, i) => (
-              <div key={i} className="glass rounded-xl px-4 py-3 flex gap-3 items-start">
-                <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${SEV_CLASS[it.severity] || SEV_CLASS.info}`}>{it.severity}</span>
-                <div className="min-w-0">
-                  <div className="text-[14px]">{it.name}</div>
-                  <div className="font-mono text-[11.5px] text-text-muted break-all">{it.file_path}{it.line_number ? `:${it.line_number}` : ''}{(it as {shipped?: boolean}).shipped === false && <span className="ml-2 font-sans text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted/60" title="In a test/doc/example file — scored at a fraction of shipped code">in tests</span>}</div>
-                  {it.remediation && <div className="text-[12px] text-text-muted/85 mt-1">→ {it.remediation}</div>}
-                </div>
-              </div>
-            ))}
-          </RevealStagger>
-        </>
-      )}
 
       {/* share — floats at the bottom, consistent with every other score page */}
       {!isPrivate && (
