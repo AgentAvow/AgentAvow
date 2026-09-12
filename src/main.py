@@ -61,6 +61,8 @@ from src.api.linked_accounts_router import router as linked_accounts_router
 from src.api.marketing_router import router as marketing_router
 from src.api.marketplace_router import router as marketplace_router
 from src.api.mcp_router import router as mcp_router
+from src.bridges.mcp_streamable import mcp_asgi_app
+from src.bridges.mcp_streamable import session_manager as mcp_session_manager
 from src.api.metrics_dashboard_router import router as metrics_dashboard_router
 from src.api.migration_router import router as migration_router
 from src.api.moderation_router import router as moderation_router
@@ -265,7 +267,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Pre-generate OpenAPI schema (avoids 3s+ generation on first request)
     app.openapi()
 
-    yield
+    # Remote MCP (Streamable HTTP) session manager — powers the /mcp connector.
+    # Must run in the parent lifespan (Starlette doesn't run a mounted sub-app's own).
+    async with mcp_session_manager.run():
+        yield
 
     # Shutdown: stop scheduler if running
     if settings.enable_scheduler:
@@ -679,6 +684,10 @@ app.include_router(x402_router, prefix=settings.api_v1_prefix)
 app.include_router(disputes_router, prefix=settings.api_v1_prefix)
 app.include_router(marketplace_router, prefix=settings.api_v1_prefix)
 app.include_router(mcp_router, prefix=settings.api_v1_prefix)
+# Remote MCP server (Streamable HTTP) for the Claude Directory + other clients —
+# mounted at root /mcp (public: https://agentavow.com/mcp). Distinct from the
+# legacy REST bridge above at /api/v1/mcp.
+app.mount("/mcp", mcp_asgi_app)
 app.include_router(migration_router, prefix=settings.api_v1_prefix)
 app.include_router(moderation_router, prefix=settings.api_v1_prefix)
 app.include_router(notification_router, prefix=settings.api_v1_prefix)
