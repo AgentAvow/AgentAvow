@@ -53,7 +53,7 @@ _INSTRUCTIONS = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.5.0",
+    version="0.5.1",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -269,15 +269,20 @@ _TOOLS: list[types.Tool] = [
             "properties": {
                 "registry": {
                     "type": "string",
-                    "description": "Package registry: npm, pypi, crates, docker, or hf. "
-                                   "(Aliases also accepted: surface, ecosystem.)",
+                    "description": "Package registry: npm, pypi, crates, docker, or hf.",
                 },
+                "surface": {"type": "string", "description": "Alias for registry."},
+                "ecosystem": {"type": "string", "description": "Alias for registry."},
                 "name": {
                     "type": "string",
                     "description": "Package name, e.g. 'chalk' (or 'org/model' for hf).",
                 },
             },
-            "required": ["registry", "name"],
+            # Only 'name' is hard-required so a call using the 'surface'/'ecosystem' alias
+            # for the registry passes schema validation and reaches the handler (which
+            # resolves the alias). Missing/invalid registry returns a friendly, value-
+            # listing error from the handler rather than an opaque schema rejection.
+            "required": ["name"],
         },
         annotations=_RO(title="Scan a package", readOnlyHint=True),
     ),
