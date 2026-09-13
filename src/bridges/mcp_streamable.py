@@ -14,6 +14,7 @@ Design (see docs/internal/claude-directory-listing-plan.md):
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 
@@ -86,6 +87,32 @@ def _trust_bar(score: int) -> str:
     return "▓" * filled + "░" * (20 - filled)
 
 
+def _compact_int(n: int | None) -> str:
+    """355306335 -> '355M'. Empty string for None."""
+    if not n:
+        return ""
+    n = int(n)
+    for div, suf in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "k")):
+        if n >= div:
+            return f"{n / div:.1f}".rstrip("0").rstrip(".") + suf
+    return str(n)
+
+
+async def _adoption(surface: str, owner: str, repo: str) -> tuple[int, str, int] | None:
+    """Real adoption signal (downloads/wk, stars) for a target. Best-effort: a short
+    timeout and fail-open so a slow registry lookup never delays or breaks a scan."""
+    try:
+        from src.api.public_scan_router import surface_adoption_summary
+        score, count, unit = await asyncio.wait_for(
+            surface_adoption_summary(surface, owner, repo), timeout=6.0
+        )
+        if count:
+            return (int(count), unit or "", int(score or 0))
+    except Exception:
+        pass
+    return None
+
+
 def _trust_band(score: float) -> str:
     """Plain-English descriptor for a 0-1 agent trust score (API returns no tier)."""
     if score >= 0.6:
@@ -111,8 +138,16 @@ def _findings(items: list[dict], limit: int = 5) -> list[dict]:
     return out
 
 
-def _scan_block(data: dict, verb: str, report_path: str) -> str:
-    """Shape a /public/scan response into a plain-TLDR-first markdown block."""
+def _scan_block(
+    data: dict,
+    verb: str,
+    report_path: str,
+    target: str,
+    adoption: tuple[int, str, int] | None = None,
+) -> str:
+    """Shape a /public/scan response into a response that leads with a plain verdict
+    (which survives the model summarizing the tool output), followed by a compact 8-bit
+    trust/adoption card, the findings, and the signed-report links."""
     score = int(data.get("trust_score") or 0)
     checks = (data.get("certified") or {}).get("checks") or {}
     items = (data.get("findings") or {}).get("items") or []
@@ -129,33 +164,45 @@ def _scan_block(data: dict, verb: str, report_path: str) -> str:
         why = f"{crit + high} blocking finding{'' if crit + high == 1 else 's'} (critical/high)."
     else:
         why = f"Score below the safe bar ({score}/100)."
-    summary = f"{'Safe to ' + verb if safe else 'Review before you ' + verb} — {score}/100. {why}"
+    head = f"{'✅ Safe to ' + verb if safe else '⚠️ Review before you ' + verb}"
+    adopt_clause = ""
+    if adoption:
+        count, unit, _ = adoption
+        adopt_clause = f" Adoption: {_compact_int(count)} {unit}.".rstrip()
+    # Line 1 carries the whole verdict in words, so it survives even if a client only
+    # relays the model's one-line summary of the tool result.
+    lines = [f"{head} — {target}, {score}/100. {why}{adopt_clause}", ""]
 
-    lines = [summary, ""]
+    # Compact 8-bit card. Left-aligned with a top/bottom rule (no right border, which is
+    # what breaks alignment across renderers). Renders in any monospace view.
+    glyph = "✔ SAFE" if safe else "⚠ REVIEW"
+    card = [
+        "```",
+        "── AGENTAVOW · trust check ──────────────",
+        f"  {target}",
+        f"  TRUST     {_trust_bar(score)}  {score:>3}/100  {glyph}",
+    ]
+    if adoption:
+        count, unit, ascore = adoption
+        card.append(f"  ADOPTION  {_trust_bar(ascore)}  {_compact_int(count)} {unit}".rstrip())
+    if bool(data.get("jws")):
+        card.append("  signed ✔ Ed25519 · recompute offline")
+    card += ["─────────────────────────────────────────", "```", ""]
+    lines += card
+
     fs = _findings(items)
     if fs:
-        lines.append("**Findings:**")
+        lines.append("**Top findings:**")
         for f in fs:
             tail = f" → {f['remediation']}" if f.get("remediation") else ""
             lines.append(f"- [{f['severity']}] {f['what']} ({f['where']}){tail}")
         if len(items) > len(fs):
             lines.append(f"- … {len(items) - len(fs)} more")
         lines.append("")
-    # 8-bit detail (renders in monospace/terminal clients; harmless elsewhere)
-    mark = "◆ NEEDS REVIEW" if not safe else "✓ SAFE"
-    lines += [
-        "```",
-        "╔═══════════ AGENTAVOW ═══════════╗",
-        f" TRUST  {_trust_bar(score)}  {score:>3}  {mark}",
-        "╚═══════════════════════════════════╝",
-        "```",
-        "",
-    ]
-    signed = bool(data.get("jws"))
+
     lines.append(
         f"Full report: {_WEB_BASE}{report_path} · "
         f"Verify offline: {_WEB_BASE}/how-it-works#verify"
-        + ("  · signed ✓ (Ed25519/JWS, recomputable)" if signed else "")
     )
     return "\n".join(lines)
 
@@ -346,7 +393,10 @@ async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                              "or pass owner and repo separately.")
             data = await _get(f"/public/scan/{owner}/{repo}")
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
-            return _text(_scan_block(data, "connect", f"/check/{owner}/{repo}"))
+            adoption = await _adoption("github", owner, repo)
+            return _text(_scan_block(
+                data, "connect", f"/check/{owner}/{repo}", f"{owner}/{repo}", adoption
+            ))
         if name == "scan_package":
             surface = (arguments.get("registry") or arguments.get("surface")
                        or arguments.get("ecosystem") or "").strip().lower()
@@ -359,12 +409,18 @@ async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                              "name, e.g. registry='npm', name='chalk'.")
             data = await _get(f"/public/scan/package/{surface}/{pkg}")
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
-            return _text(_scan_block(data, "use", f"/check/pkg/{surface}/{pkg}"))
+            adoption = await _adoption(surface, surface, pkg)
+            return _text(_scan_block(
+                data, "use", f"/check/pkg/{surface}/{pkg}", f"{pkg} · {surface}", adoption
+            ))
         if name == "scan_mcp_server":
             url = arguments["endpoint_url"]
             data = await _get("/public/scan/mcp", params={"endpoint": url})
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
-            return _text(_scan_block(data, "connect", "/check"))
+            # A bare MCP endpoint has no registry/stars adoption signal — omit it rather
+            # than fabricate one.
+            label = url.split("://", 1)[-1].split("/", 1)[0] or "MCP server"
+            return _text(_scan_block(data, "connect", "/check", label))
         if name == "verify_trust":
             eid = arguments["entity_id"]
             min_trust = float(arguments.get("min_trust", 0.3))
