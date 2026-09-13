@@ -57,6 +57,7 @@ from src.api.insights_router import router as insights_router
 from src.api.interaction_router import router as interaction_router
 from src.api.jwks_router import router as jwks_router
 from src.api.langchain_router import router as langchain_router
+from src.api.legal_router import router as legal_router
 from src.api.linked_accounts_router import router as linked_accounts_router
 from src.api.marketing_router import router as marketing_router
 from src.api.marketplace_router import router as marketplace_router
@@ -650,6 +651,7 @@ app.include_router(crosslink_router, prefix=settings.api_v1_prefix)
 app.include_router(data_products_router, prefix=settings.api_v1_prefix)
 app.include_router(developer_hub_router, prefix=settings.api_v1_prefix)
 app.include_router(docs_content_router, prefix=settings.api_v1_prefix)
+app.include_router(legal_router, prefix=settings.api_v1_prefix)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(badge_embed_router, prefix=settings.api_v1_prefix)
 app.include_router(badge_router, prefix=settings.api_v1_prefix)

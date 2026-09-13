@@ -29,6 +29,7 @@ interface Metrics {
   badges?: { readme_renders_window?: number; leaderboard?: { repo: string; renders: number }[] }
   catalog?: { by_surface?: Record<string, number>; by_category?: Record<string, number>; size_total?: number }
   funnel?: { scanned?: number; watched?: number; claimed?: number; installs?: number }
+  mcp?: { calls_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; by_tool?: Record<string, number> }
 }
 interface Draft { id: string; platform: string; content: string; topic: string | null; status: string; created_at: string; post_type?: string; llm_model?: string | null }
 interface Health { marketing_enabled?: boolean; anthropic_configured?: boolean; ollama_available?: boolean; daily_spend_usd?: number; monthly_spend_usd?: number; adapters?: Record<string, { configured: boolean; healthy: boolean }> }
@@ -156,8 +157,49 @@ function MetricsTab() {
           <Stat label="Active watches" value={fmt(data?.watches?.active)} sub={`${fmt(data?.watches?.total)} all-time`} />
           <Stat label="Verified claims" value={fmt(data?.claims?.verified_total)} sub={`${fmt(data?.claims?.public)} public · ${fmt(data?.claims?.private)} private`} />
           <Stat label="Active badges" value={fmt(data?.attestations?.verification_badges_active)} />
+          <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.needs_review_window)} needs-review · ${fmt(data?.mcp?.errors_window)} err`} />
         </div>
       </Section>
+
+      {(() => {
+        const mcp = data?.mcp || {}
+        const calls = mcp.calls_window ?? 0
+        const ok = mcp.ok_window ?? 0
+        const err = mcp.errors_window ?? 0
+        const safe = mcp.safe_window ?? 0
+        const rev = mcp.needs_review_window ?? 0
+        const errRate = calls ? Math.round((err * 100) / calls) : 0
+        const scans = safe + rev
+        const safePct = scans ? Math.round((safe * 100) / scans) : 0
+        const tools = Object.entries(mcp.by_tool || {}).sort((a, b) => b[1] - a[1])
+        const anyTool = tools.some(([, n]) => n > 0)
+        return (
+          <Section title="MCP connector (Claude Directory)" note="Usage of the remote MCP server at agentavow.com/mcp — the tools an agent calls to check a target before it connects. Fail-open counters; zero means no connector traffic yet.">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <Stat label="Total calls" value={fmt(calls)} />
+              <Stat label="Ok" value={fmt(ok)} sub={`${errRate}% error rate`} />
+              <Stat label="Errors" value={fmt(err)} />
+              <Stat label="Safe verdicts" value={fmt(safe)} sub={scans ? `${safePct}% of scans` : undefined} />
+              <Stat label="Needs-review" value={fmt(rev)} />
+            </div>
+            <div className="glass rounded-2xl p-5 mt-3">
+              <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Calls by tool</div>
+              {anyTool ? (
+                <div className="space-y-1">
+                  {tools.map(([t, n]) => (
+                    <div key={t} className="flex justify-between text-[12.5px] py-0.5">
+                      <span className="font-mono text-text-muted truncate">{t}</span>
+                      <span className="tabular-nums text-text-muted/70 ml-3">{fmt(n)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[12.5px] text-text-muted/70">No connector calls recorded yet. Counts start once the connector is live and used in Claude.</p>
+              )}
+            </div>
+          </Section>
+        )
+      })()}
 
       <Section title="Traffic funnel — where users drop off" note="Scan → watch → claim → install, with step-to-step conversion (this window).">
         <div className="glass rounded-2xl p-6 flex flex-col gap-3">

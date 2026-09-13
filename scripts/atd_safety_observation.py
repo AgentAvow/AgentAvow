@@ -43,16 +43,19 @@ def to_observation(scan: dict) -> dict:
     risk_codes = sorted(
         {_CATEGORY_TO_RISK.get(it.get("category"), "SAFETY_OTHER") for it in items}
     )
-    tier = scan.get("tier")
+    # Real scan payload carries the tier as `trust_tier` and the attestation flat at
+    # the top level (`jws` / `key_id` / `jwks_url` / `algorithm`), not nested.
+    tier = scan.get("trust_tier") or scan.get("tier")
+    grade = scan.get("grade")
     total = findings.get("total", len(items))
     n_crit = findings.get("critical", 0)
     n_high = findings.get("high", 0)
+    tier_str = f"{tier}" + (f", grade {grade}" if grade else "")
     explanation = (
-        f"AgentAvow static-analysis safety score {score}/100 ({tier}). "
+        f"AgentAvow static-analysis safety score {score}/100 ({tier_str}). "
         f"{total} findings ({n_crit} critical, {n_high} high) across "
         f"{len(risk_codes)} risk categories; scores the TOOL/MCP server, not the agent."
     )
-    att = scan.get("attestation") or {}
     return {
         "signal": "agentgraph.safety.score",
         "subject": scan.get("repo") or scan.get("target"),
@@ -61,9 +64,10 @@ def to_observation(scan: dict) -> dict:
             "aimId": "did:web:agentgraph.co",
             "evidence": {
                 "type": "ed25519-jws",
-                "jws": att.get("jws", "<Ed25519/JWS attestation over the JCS-canonical verdict>"),
-                "kid": att.get("key_id"),
-                "jwks_url": att.get("jwks_url", "https://agentgraph.co/.well-known/jwks.json"),
+                "algorithm": scan.get("algorithm", "EdDSA"),
+                "jws": scan.get("jws", "<Ed25519/JWS attestation over the JCS-canonical verdict>"),
+                "kid": scan.get("key_id"),
+                "jwks_url": scan.get("jwks_url", "https://agentgraph.co/.well-known/jwks.json"),
                 "recomputable": True,  # verifier re-derives the verdict offline, no trust in AgentAvow
             },
         },
