@@ -29,7 +29,33 @@ _WEB_BASE = os.environ.get("MCP_PUBLIC_WEB_BASE", "https://agentavow.com").rstri
 
 _SAFE_BAR = 81  # A/A+ floor for the binary "safe" call (matches the site verdict)
 
-server: Server = Server("agentavow-trust", version="0.4.3", website_url="https://agentavow.com")
+# Shown to the client/model on connect (MCP InitializeResult.instructions) — the "what
+# this is + how to use it" welcome. Purely descriptive: no directive that tries to make
+# the agent auto-invoke these tools (that would be prompt-injection and fail Directory review).
+_INSTRUCTIONS = (
+    "AgentAvow grades the safety of anything an AI agent connects to — a GitHub repo, an MCP "
+    "server, an npm/PyPI/crates/Docker/Hugging Face package, or a wallet-linked identity — and "
+    "returns a signed 0-100 trust score with a plain safe / needs-review verdict that anyone can "
+    "recompute offline.\n\n"
+    "When to use which tool:\n"
+    "• scan_repo — a GitHub repo, passed as 'owner/name'.\n"
+    "• scan_package — a published package (registry + name).\n"
+    "• scan_mcp_server — a live MCP server, by its https URL (checks the tool definitions "
+    "themselves for poisoning/injection).\n"
+    "• verify_trust / check_interaction_safety / lookup_identity / get_trust_badge — agent-to-"
+    "agent identity and trust.\n\n"
+    "Reading a verdict: score >=81 with no critical/high findings is 'safe to connect'; anything "
+    "else is 'review before you connect'. Every result links to a full report and a signed "
+    "(Ed25519/JWS) attestation. All tools are read-only and need no account.\n\n"
+    "A good habit is to scan a tool before connecting or installing it."
+)
+
+server: Server = Server(
+    "agentavow-trust",
+    version="0.5.0",
+    website_url="https://agentavow.com",
+    instructions=_INSTRUCTIONS,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -168,10 +194,17 @@ _TOOLS: list[types.Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
-                "owner": {"type": "string", "description": "Repo owner, e.g. 'vercel'."},
-                "repo": {"type": "string", "description": "Repo name, e.g. 'servers'."},
+                "repo": {
+                    "type": "string",
+                    "description": "Repo as 'owner/name' (e.g. 'vercel/next.js'), or just "
+                                   "the name when 'owner' is given separately.",
+                },
+                "owner": {
+                    "type": "string",
+                    "description": "Repo owner (optional if 'repo' is already 'owner/name').",
+                },
             },
-            "required": ["owner", "repo"],
+            "required": ["repo"],
         },
         annotations=_RO(title="Scan a GitHub repo", readOnlyHint=True),
     ),
@@ -187,10 +220,17 @@ _TOOLS: list[types.Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
-                "surface": {"type": "string", "description": "npm, pypi, crates, docker, hf."},
-                "name": {"type": "string", "description": "Package name, e.g. 'chalk'."},
+                "registry": {
+                    "type": "string",
+                    "description": "Package registry: npm, pypi, crates, docker, or hf. "
+                                   "(Aliases also accepted: surface, ecosystem.)",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Package name, e.g. 'chalk' (or 'org/model' for hf).",
+                },
             },
-            "required": ["surface", "name"],
+            "required": ["registry", "name"],
         },
         annotations=_RO(title="Scan a package", readOnlyHint=True),
     ),
@@ -297,12 +337,26 @@ async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     await _bump(f"tool:{name}")
     try:
         if name == "scan_repo":
-            owner, repo = arguments["owner"], arguments["repo"]
+            repo = (arguments.get("repo") or "").strip().strip("/")
+            owner = (arguments.get("owner") or "").strip()
+            if not owner and "/" in repo:
+                owner, repo = repo.split("/", 1)
+            if not owner or not repo:
+                return _text("Give the repo as 'owner/name' (e.g. 'vercel/next.js'), "
+                             "or pass owner and repo separately.")
             data = await _get(f"/public/scan/{owner}/{repo}")
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             return _text(_scan_block(data, "connect", f"/check/{owner}/{repo}"))
         if name == "scan_package":
-            surface, pkg = arguments["surface"], arguments["name"]
+            surface = (arguments.get("registry") or arguments.get("surface")
+                       or arguments.get("ecosystem") or "").strip().lower()
+            pkg = (arguments.get("name") or "").strip()
+            aliases = {"python": "pypi", "pip": "pypi", "cargo": "crates", "rust": "crates",
+                       "huggingface": "hf", "hugging_face": "hf"}
+            surface = aliases.get(surface, surface)
+            if not surface or not pkg:
+                return _text("Give a registry (npm, pypi, crates, docker, or hf) and a package "
+                             "name, e.g. registry='npm', name='chalk'.")
             data = await _get(f"/public/scan/package/{surface}/{pkg}")
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             return _text(_scan_block(data, "use", f"/check/pkg/{surface}/{pkg}"))
