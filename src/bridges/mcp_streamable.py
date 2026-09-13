@@ -53,7 +53,7 @@ _INSTRUCTIONS = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.5.1",
+    version="0.6.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -222,6 +222,38 @@ def _text(s: str) -> list[types.TextContent]:
     return [types.TextContent(type="text", text=s)]
 
 
+def _scan_struct(
+    data: dict,
+    target: str,
+    surface: str,
+    report_path: str,
+    adoption: tuple[int, str, int] | None,
+) -> dict:
+    """Stable machine-readable contract returned as structuredContent alongside the
+    human text. Keep these keys STABLE — tools/CI consume this; the prose block is free
+    to change without breaking them."""
+    items = (data.get("findings") or {}).get("items") or []
+    crit = sum(1 for i in items if i.get("severity") == "critical")
+    high = sum(1 for i in items if i.get("severity") == "high")
+    return {
+        "target": target,
+        "surface": surface,
+        "trust_score": int(data.get("trust_score") or 0),
+        "verdict": "safe" if _safe_verdict(data) else "needs_review",
+        "critical": crit,
+        "high": high,
+        "findings_total": int((data.get("findings") or {}).get("total") or len(items)),
+        "adoption": (
+            {"count": adoption[0], "unit": adoption[1], "score": adoption[2]}
+            if adoption else None
+        ),
+        "signed": bool(data.get("jws")),
+        "cached": bool(data.get("cached")),
+        "report_url": f"{_WEB_BASE}{report_path}",
+        "verify_url": f"{_WEB_BASE}/how-it-works#verify",
+    }
+
+
 # --------------------------------------------------------------------------- #
 # tool definitions (all read-only, unauthenticated)
 # --------------------------------------------------------------------------- #
@@ -250,6 +282,11 @@ _TOOLS: list[types.Tool] = [
                     "type": "string",
                     "description": "Repo owner (optional if 'repo' is already 'owner/name').",
                 },
+                "force": {
+                    "type": "boolean",
+                    "description": "Re-scan now instead of returning the cached verdict "
+                                   "(results cache ~1h). Use after the target has changed.",
+                },
             },
             "required": ["repo"],
         },
@@ -277,6 +314,11 @@ _TOOLS: list[types.Tool] = [
                     "type": "string",
                     "description": "Package name, e.g. 'chalk' (or 'org/model' for hf).",
                 },
+                "force": {
+                    "type": "boolean",
+                    "description": "Re-scan now instead of returning the cached verdict "
+                                   "(results cache ~1h). Use after a new version ships.",
+                },
             },
             # Only 'name' is hard-required so a call using the 'surface'/'ecosystem' alias
             # for the registry passes schema validation and reaches the handler (which
@@ -299,6 +341,11 @@ _TOOLS: list[types.Tool] = [
             "type": "object",
             "properties": {
                 "endpoint_url": {"type": "string", "description": "The MCP server's https:// URL."},
+                "force": {
+                    "type": "boolean",
+                    "description": "Re-scan now instead of returning the cached verdict "
+                                   "(results cache ~1h).",
+                },
             },
             "required": ["endpoint_url"],
         },
@@ -384,10 +431,14 @@ async def _list_tools() -> list[types.Tool]:
 
 
 @server.call_tool()
-async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+async def _call_tool(
+    name: str, arguments: dict
+) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
     await _bump("calls:total")
     await _bump(f"tool:{name}")
     try:
+        force = bool(arguments.get("force"))
+        fp = {"force": "true"} if force else None
         if name == "scan_repo":
             repo = (arguments.get("repo") or "").strip().strip("/")
             owner = (arguments.get("owner") or "").strip()
@@ -396,12 +447,14 @@ async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             if not owner or not repo:
                 return _text("Give the repo as 'owner/name' (e.g. 'vercel/next.js'), "
                              "or pass owner and repo separately.")
-            data = await _get(f"/public/scan/{owner}/{repo}")
+            data = await _get(f"/public/scan/{owner}/{repo}", params=fp)
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption("github", owner, repo)
-            return _text(_scan_block(
-                data, "connect", f"/check/{owner}/{repo}", f"{owner}/{repo}", adoption
-            ))
+            rp = f"/check/{owner}/{repo}"
+            return (
+                _text(_scan_block(data, "connect", rp, f"{owner}/{repo}", adoption)),
+                _scan_struct(data, f"{owner}/{repo}", "github", rp, adoption),
+            )
         if name == "scan_package":
             surface = (arguments.get("registry") or arguments.get("surface")
                        or arguments.get("ecosystem") or "").strip().lower()
@@ -412,20 +465,28 @@ async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             if not surface or not pkg:
                 return _text("Give a registry (npm, pypi, crates, docker, or hf) and a package "
                              "name, e.g. registry='npm', name='chalk'.")
-            data = await _get(f"/public/scan/package/{surface}/{pkg}")
+            data = await _get(f"/public/scan/package/{surface}/{pkg}", params=fp)
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption(surface, surface, pkg)
-            return _text(_scan_block(
-                data, "use", f"/check/pkg/{surface}/{pkg}", f"{pkg} · {surface}", adoption
-            ))
+            rp = f"/check/pkg/{surface}/{pkg}"
+            return (
+                _text(_scan_block(data, "use", rp, f"{pkg} · {surface}", adoption)),
+                _scan_struct(data, pkg, surface, rp, adoption),
+            )
         if name == "scan_mcp_server":
             url = arguments["endpoint_url"]
-            data = await _get("/public/scan/mcp", params={"endpoint": url})
+            params = {"endpoint": url}
+            if force:
+                params["force"] = "true"
+            data = await _get("/public/scan/mcp", params=params)
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             # A bare MCP endpoint has no registry/stars adoption signal — omit it rather
             # than fabricate one.
             label = url.split("://", 1)[-1].split("/", 1)[0] or "MCP server"
-            return _text(_scan_block(data, "connect", "/check", label))
+            return (
+                _text(_scan_block(data, "connect", "/check", label)),
+                _scan_struct(data, url, "mcp", "/check", None),
+            )
         if name == "verify_trust":
             eid = arguments["entity_id"]
             min_trust = float(arguments.get("min_trust", 0.3))
