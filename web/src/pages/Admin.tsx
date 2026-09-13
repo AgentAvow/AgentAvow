@@ -180,11 +180,9 @@ export default function Admin() {
       <div className="flex items-center justify-between gap-3 mb-4">
         <h1 className="text-xl font-bold">Admin Dashboard</h1>
         <a
-          href="/api/v1/admin/metrics/dashboard"
-          target="_blank"
-          rel="noopener noreferrer"
+          href="/admin-dashboard"
           className="text-sm px-3 py-1.5 rounded-md border border-border text-primary-light hover:bg-surface-hover transition-colors whitespace-nowrap"
-          title="Engagement / usage metrics (opens the signed admin dashboard)"
+          title="Engagement / usage metrics dashboard"
         >
           Metrics &#8599;
         </a>

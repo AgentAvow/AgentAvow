@@ -30,6 +30,8 @@ interface Metrics {
   catalog?: { by_surface?: Record<string, number>; by_category?: Record<string, number>; size_total?: number }
   funnel?: { scanned?: number; watched?: number; claimed?: number; installs?: number }
   mcp?: { calls_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; by_tool?: Record<string, number> }
+  private_repos?: { app_scans?: number; published_to_search?: number; app_installs_active?: number; onetime_scans_window?: number }
+  alert_webhooks?: { active?: number }
 }
 interface Draft { id: string; platform: string; content: string; topic: string | null; status: string; created_at: string; post_type?: string; llm_model?: string | null }
 interface Health { marketing_enabled?: boolean; anthropic_configured?: boolean; ollama_available?: boolean; daily_spend_usd?: number; monthly_spend_usd?: number; adapters?: Record<string, { configured: boolean; healthy: boolean }> }
@@ -158,6 +160,9 @@ function MetricsTab() {
           <Stat label="Verified claims" value={fmt(data?.claims?.verified_total)} sub={`${fmt(data?.claims?.public)} public · ${fmt(data?.claims?.private)} private`} />
           <Stat label="Active badges" value={fmt(data?.attestations?.verification_badges_active)} />
           <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.needs_review_window)} needs-review · ${fmt(data?.mcp?.errors_window)} err`} />
+          <Stat label="Private repo scans (GitHub App)" value={fmt(data?.private_repos?.app_scans)} sub={`${fmt(data?.private_repos?.app_installs_active)} installs · ${fmt(data?.private_repos?.published_to_search)} published`} />
+          <Stat label="One-time private scans" value={fmt(data?.private_repos?.onetime_scans_window)} sub="token scans (window)" />
+          <Stat label="Alert webhooks" value={fmt(data?.alert_webhooks?.active)} sub="active" />
         </div>
       </Section>
 
