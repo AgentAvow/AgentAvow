@@ -61,8 +61,6 @@ from src.api.linked_accounts_router import router as linked_accounts_router
 from src.api.marketing_router import router as marketing_router
 from src.api.marketplace_router import router as marketplace_router
 from src.api.mcp_router import router as mcp_router
-from src.bridges.mcp_streamable import mcp_asgi_app
-from src.bridges.mcp_streamable import session_manager as mcp_session_manager
 from src.api.metrics_dashboard_router import router as metrics_dashboard_router
 from src.api.migration_router import router as migration_router
 from src.api.moderation_router import router as moderation_router
@@ -96,6 +94,8 @@ from src.api.watch_router import router as watch_router
 from src.api.webhook_router import router as webhook_router
 from src.api.ws_router import router as ws_router
 from src.api.x402_router import router as x402_router
+from src.bridges.mcp_streamable import mcp_asgi_app
+from src.bridges.mcp_streamable import session_manager as mcp_session_manager
 from src.config import settings
 from src.feeds.bluesky.feed_router import router as bluesky_feed_router
 from src.logging_config import setup_logging

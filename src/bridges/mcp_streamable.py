@@ -29,23 +29,44 @@ _WEB_BASE = os.environ.get("MCP_PUBLIC_WEB_BASE", "https://agentavow.com").rstri
 
 _SAFE_BAR = 81  # A/A+ floor for the binary "safe" call (matches the site verdict)
 
-server: Server = Server("agentavow-trust")
+server: Server = Server("agentavow-trust", version="0.4.3", website_url="https://agentavow.com")
 
 
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
 async def _get(path: str, params: dict | None = None) -> dict:
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # Above the API's ~90s scan budget (so we receive its graceful 503 rather than
+    # timing out first), below nginx's 120s /mcp read timeout.
+    async with httpx.AsyncClient(timeout=110.0) as client:
         resp = await client.get(f"{_API_BASE}{path}", params=params)
         resp.raise_for_status()
         return resp.json()
+
+
+async def _bump(metric: str) -> None:
+    """Increment a Directory-connector usage counter. Best-effort — never raises,
+    so instrumentation can never break a tool call."""
+    try:
+        from src.api.metrics_dashboard_router import bump_metric
+        await bump_metric(f"mcp:{metric}")
+    except Exception:
+        pass
 
 
 def _trust_bar(score: int) -> str:
     """20-cell 8-bit trust bar, filled proportionally to the 0-100 score."""
     filled = max(0, min(20, round(score / 5)))
     return "▓" * filled + "░" * (20 - filled)
+
+
+def _trust_band(score: float) -> str:
+    """Plain-English descriptor for a 0-1 agent trust score (API returns no tier)."""
+    if score >= 0.6:
+        return "established history"
+    if score >= 0.3:
+        return "some history"
+    return "little history yet"
 
 
 def _findings(items: list[dict], limit: int = 5) -> list[dict]:
@@ -111,6 +132,17 @@ def _scan_block(data: dict, verb: str, report_path: str) -> str:
         + ("  · signed ✓ (Ed25519/JWS, recomputable)" if signed else "")
     )
     return "\n".join(lines)
+
+
+def _safe_verdict(data: dict) -> bool:
+    """The binary safe/needs-review call, identical to _scan_block's logic."""
+    score = int(data.get("trust_score") or 0)
+    items = (data.get("findings") or {}).get("items") or []
+    checks = (data.get("certified") or {}).get("checks") or {}
+    no_blocking = checks.get("no_critical_or_high")
+    if not isinstance(no_blocking, bool):
+        no_blocking = not any(i.get("severity") in ("critical", "high") for i in items)
+    return score >= _SAFE_BAR and no_blocking
 
 
 def _text(s: str) -> list[types.TextContent]:
@@ -261,28 +293,35 @@ async def _list_tools() -> list[types.Tool]:
 
 @server.call_tool()
 async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    await _bump("calls:total")
+    await _bump(f"tool:{name}")
     try:
         if name == "scan_repo":
             owner, repo = arguments["owner"], arguments["repo"]
             data = await _get(f"/public/scan/{owner}/{repo}")
+            await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             return _text(_scan_block(data, "connect", f"/check/{owner}/{repo}"))
         if name == "scan_package":
             surface, pkg = arguments["surface"], arguments["name"]
             data = await _get(f"/public/scan/package/{surface}/{pkg}")
+            await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             return _text(_scan_block(data, "use", f"/check/pkg/{surface}/{pkg}"))
         if name == "scan_mcp_server":
             url = arguments["endpoint_url"]
-            data = await _get("/public/scan/mcp", params={"endpoint_url": url})
+            data = await _get("/public/scan/mcp", params={"endpoint": url})
+            await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             return _text(_scan_block(data, "connect", "/check"))
         if name == "verify_trust":
             eid = arguments["entity_id"]
             min_trust = float(arguments.get("min_trust", 0.3))
-            d = await _get(f"/trust/{eid}")
+            d = await _get(f"/entities/{eid}/trust")
             score = float(d.get("score") or 0.0)
             pct = round(score * 100)
             meets = score >= min_trust
-            msg = (f"Trust {pct}/100 ({d.get('trust_tier', 'unknown')}) — "
-                   f"{'meets' if meets else 'below'} your {min_trust:.2f} threshold.")
+            report = f"{_WEB_BASE}/entities/{eid}/trust"
+            msg = (f"Agent trust {pct}/100 ({_trust_band(score)}) — "
+                   f"{'meets' if meets else 'below'} your {round(min_trust * 100)}/100 threshold.\n"
+                   f"Full trust report: {report}")
             return _text(msg)
         if name == "check_interaction_safety":
             eid = arguments["target_entity_id"]
@@ -292,30 +331,58 @@ async def _call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             thresholds = {"delegate": 0.6, "trade": 0.5, "collaborate": 0.4, "follow": 0.1}
             thr = thresholds.get(itype, 0.5)
             safe = score >= thr
+            report = f"{_WEB_BASE}/entities/{eid}/trust"
             return _text(
                 f"{'Safe' if safe else 'Not recommended'} for '{itype}' — "
-                f"trust {round(score * 100)}/100 vs the {thr:.2f} threshold for this interaction."
+                f"trust {round(score * 100)}/100 vs the {round(thr * 100)}/100 bar for this "
+                f"interaction.\nFull trust report: {report}"
             )
         if name == "lookup_identity":
             q = arguments["query"]
             if q.startswith("did:"):
-                path, params = "/did/resolve", {"did": q}
-            else:
-                path, params = "/search", {"q": q, "limit": 5}
-            d = await _get(path, params=params)
-            return _text(json.dumps(d, indent=2)[:2000])
+                d = await _get("/did/resolve", params={"uri": q})
+                return _text(json.dumps(d, indent=2)[:2000])
+            d = await _get("/search", params={"q": q, "limit": 5})
+            ents = d.get("entities") or []
+            if not ents:
+                return _text(f"No identities found for '{q}'. "
+                             "Try a DID (did:web:...) or a more specific name.")
+            lines = [f"Identities matching '{q}':", ""]
+            for e in ents[:5]:
+                eid = e.get("id")
+                nm = e.get("display_name") or e.get("did_web") or eid
+                pct = round(float(e.get("trust_score") or 0.0) * 100)
+                lines.append(f"- {nm} — trust {pct}/100 — {_WEB_BASE}/entities/{eid}/trust")
+            return _text("\n".join(lines))
         if name == "get_trust_badge":
             eid = arguments["entity_id"]
-            badge = f"{_WEB_BASE}/api/v1/badges/trust/{eid}.svg"
-            return _text(f"Badge: {badge}\n\nMarkdown: ![AgentAvow Trust]({badge})")
+            d = await _get(f"/entities/{eid}/trust")  # 404s cleanly if the entity is unknown
+            pct = round(float(d.get("score") or 0.0) * 100)
+            badge = f"{_API_BASE}/badges/trust/{eid}.svg"
+            report = f"{_WEB_BASE}/entities/{eid}/trust"
+            return _text(
+                f"Trust badge for this agent (currently {pct}/100):\n\n"
+                f"README markdown:\n[![AgentAvow Trust]({badge})]({report})\n\n"
+                f"Badge image: {badge}\nFull report: {report}"
+            )
         return _text(f"Unknown tool: {name}")
+    except httpx.TimeoutException:
+        await _bump("result:error")
+        return _text("That scan is taking longer than usual (large target). AgentAvow caps and "
+                     "caches scans — try again in a moment and it should come back quickly.")
     except httpx.HTTPStatusError as e:
+        await _bump("result:error")
         code = e.response.status_code
         if code == 404:
             return _text("Not found — check the target coordinates and try again.")
-        return _text(f"AgentAvow API returned {code}. Try again shortly, or check the target.")
-    except Exception as e:  # noqa: BLE001 — surface an actionable message, never a stack trace
-        return _text(f"Could not complete the check: {e}")
+        if code == 503:
+            return _text("The scan is still running (large target). Try again shortly — "
+                         "results cache once ready.")
+        return _text(f"AgentAvow returned an error ({code}). "
+                     "Try again shortly, or check the target.")
+    except Exception:  # noqa: BLE001 — actionable message; never a stack trace or internal detail
+        await _bump("result:error")
+        return _text("Could not complete the check right now. Please try again shortly.")
 
 
 # --------------------------------------------------------------------------- #

@@ -37,6 +37,7 @@ from src.signing import (
     get_trust_v2_kid,
     get_trust_v2_signing_key,
 )
+
 # Scan attestations sign over RFC 8785 (JCS) canonical bytes so a consumer can
 # recompute the verdict offline, exactly as the published CTEF vectors do. The
 # legacy `canonicalize()` (ASCII-escaped, null-stripping — not RFC 8785) is

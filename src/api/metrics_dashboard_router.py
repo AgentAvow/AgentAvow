@@ -252,6 +252,23 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     force_rescans_window = sum(rescan_by_day.values())
     install_clicks_window = sum(install_by_day.values())
 
+    # --- MCP Directory connector usage (fail-open counters from src/bridges/mcp_streamable) ---
+    mcp_tools = [
+        "scan_repo", "scan_package", "scan_mcp_server", "verify_trust",
+        "check_interaction_safety", "lookup_identity", "get_trust_badge",
+    ]
+    mcp_calls_by_day = await _read_daily_counter("mcp:calls:total", day_strs)
+    mcp_calls_window = sum(mcp_calls_by_day.values())
+    mcp_errors_window = sum((await _read_daily_counter("mcp:result:error", day_strs)).values())
+    mcp_safe_window = sum((await _read_daily_counter("mcp:verdict:safe", day_strs)).values())
+    mcp_review_window = sum(
+        (await _read_daily_counter("mcp:verdict:needs_review", day_strs)).values()
+    )
+    mcp_by_tool = {
+        t: sum((await _read_daily_counter(f"mcp:tool:{t}", day_strs)).values())
+        for t in mcp_tools
+    }
+
     # --- Daily time-series (grouped queries, then aligned to day_strs) ---
     async def _series_by_date(date_col) -> dict[str, int]:
         day_expr = _utc_date_expr(date_col)
@@ -317,6 +334,10 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "ephemeral in Redis); only active/created key counts come from the DB.",
         "Grade distribution is over the live scanned corpus (community_scans), "
         "not the static launch corpus.",
+        "MCP connector metrics come from fail-open Redis day counters in the "
+        "Streamable-HTTP server (src/bridges/mcp_streamable): total calls, per-tool "
+        "calls, safe/needs-review scan verdicts, and errors. Ok = total - errors. "
+        "No backfill; zero means no connector traffic yet.",
     ]
 
     return {
@@ -335,6 +356,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "force_rescans": int(force_rescans_window),
             "install_clicks": int(install_clicks_window),
             "unique_checkers": int(unique_checkers_window),
+            "mcp_calls": int(mcp_calls_window),
         },
         "scans": {
             "repos_scanned_window": int(repos_scanned_window),
@@ -369,6 +391,14 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "published_to_search": int(private_published),
             "app_installs_active": int(app_installs_active),
             "onetime_scans_window": int(private_scans_onetime_window),
+        },
+        "mcp": {
+            "calls_window": int(mcp_calls_window),
+            "errors_window": int(mcp_errors_window),
+            "ok_window": int(max(0, mcp_calls_window - mcp_errors_window)),
+            "safe_window": int(mcp_safe_window),
+            "needs_review_window": int(mcp_review_window),
+            "by_tool": {t: int(n) for t, n in mcp_by_tool.items()},
         },
         "alert_webhooks": {"active": int(alert_webhooks_active)},
         "badges": {
@@ -589,6 +619,29 @@ function surfaceTable(bySurface){
   return out+'</tbody></table>';
 }
 
+function mcpPanel(mcp){
+  mcp = mcp || {};
+  const calls=mcp.calls_window||0, ok=mcp.ok_window||0, err=mcp.errors_window||0;
+  const safe=mcp.safe_window||0, rev=mcp.needs_review_window||0;
+  const errRate = calls ? Math.round(err*100/calls) : 0;
+  const scans = safe+rev;
+  const safePct = scans ? Math.round(safe*100/scans) : 0;
+  let out='<p class="muted" style="margin:0 0 10px">Claude Directory / MCP connector '
+    +'(agentavow.com/mcp). '+fmt(ok)+' ok · '+fmt(err)+' errors ('+errRate+'%). '
+    +'Scan verdicts: '+fmt(safe)+' safe · '+fmt(rev)+' needs-review'
+    +(scans?(' ('+safePct+'% safe)'):'')+'.</p>';
+  const byTool=mcp.by_tool||{};
+  const rows=Object.entries(byTool).sort((a,b)=>b[1]-a[1]);
+  out+='<table><thead><tr><th>Tool</th><th class="num">Calls</th></tr></thead><tbody>';
+  if(!rows.some(r=>r[1]>0)){
+    out+='<tr><td class="muted" colspan="2">No connector calls recorded yet. '
+      +'Counts start once the connector is live and used in Claude.</td></tr>';
+  } else {
+    for(const [t,c] of rows){ out+='<tr><td>'+esc(t)+'</td><td class="num">'+fmt(c)+'</td></tr>'; }
+  }
+  return out+'</tbody></table>';
+}
+
 function readmeLeaderboard(rows){
   rows = rows || [];
   if(!rows.length){
@@ -617,6 +670,7 @@ function render(d){
   const claims = d.claims || {};
   const priv = d.private_repos || {};
   const webhooks = d.alert_webhooks || {};
+  const mcp = d.mcp || {};
   const s = d.series || {};
   const gen = d.generated_at ? new Date(d.generated_at).toLocaleString() : "—";
   document.getElementById("sub").textContent =
@@ -632,12 +686,16 @@ function render(d){
     + card("Private repos (GitHub App)", priv.app_scans, fmt(priv.app_installs_active)+" installs · "+fmt(priv.published_to_search)+" published", null)
     + card("One-time private scans", priv.onetime_scans_window, "token scans (window)", null)
     + card("Alert webhooks", webhooks.active, "active", null)
+    + card("MCP connector calls", mcp.calls_window, fmt(mcp.needs_review_window)+" needs-review · "+fmt(mcp.errors_window)+" err", null)
     + '</div>';
 
   html+='<div class="two">'
     + '<section><h2>Grade distribution (scanned corpus)</h2><div class="panel">'+gradeBars(scans.grade_distribution||{})+'</div></section>'
     + '<section><h2>Scans by surface</h2><div class="panel">'+surfaceTable(catalog.by_surface||{})+'</div></section>'
     + '</div>';
+
+  html+='<section><h2>MCP connector (Claude Directory)</h2><div class="panel">'
+    + mcpPanel(mcp)+'</div></section>';
 
   html+='<section><h2>Badges rendering in READMEs (adoption + re-outreach list)</h2><div class="panel">'
     + readmeLeaderboard(badges.leaderboard)+'</div></section>';
