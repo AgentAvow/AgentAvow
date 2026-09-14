@@ -54,7 +54,7 @@ _INSTRUCTIONS = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.7.0",
+    version="0.7.1",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -145,6 +145,7 @@ def _scan_block(
     report_path: str,
     target: str,
     adoption: tuple[int, str, int] | None = None,
+    install_hint: str = "",
 ) -> str:
     """Shape a /public/scan response into a response that leads with a plain verdict
     (which survives the model summarizing the tool output), followed by a compact 8-bit
@@ -201,6 +202,18 @@ def _scan_block(
             lines.append(f"- … {len(items) - len(fs)} more")
         lines.append("")
 
+    # A concrete next step for the agent/user — describes what to do with THIS result.
+    # (Purely about our own verdict; it never tells the agent to auto-run other tools.)
+    if safe:
+        tail = f" — {install_hint}" if install_hint else ""
+        action = f"clears the bar, so it's safe to {verb}{tail}."
+    else:
+        n = crit + high or len(items)
+        action = (
+            f"hold off. Ask me to walk through the {n} finding{'' if n == 1 else 's'} "
+            f"and whether they matter for your use, or check an alternative."
+        )
+    lines.append(f"**Next:** {action}")
     lines.append(
         f"Full report: {_WEB_BASE}{report_path} · "
         f"Verify offline: {_WEB_BASE}/how-it-works#verify"
@@ -519,8 +532,13 @@ async def _call_tool(
             adoption = await _adoption(surface, surface, pkg)
             rp = f"/check/pkg/{surface}/{pkg}"
             api = f"/api/v1/public/scan/package/{surface}/{pkg}"
+            hint = {
+                "npm": f"install with `npm install {pkg}`",
+                "pypi": f"install with `pip install {pkg}`",
+                "crates": f"add with `cargo add {pkg}`",
+            }.get(surface, "")
             return (
-                _text(_scan_block(data, "use", rp, f"{pkg} · {surface}", adoption)),
+                _text(_scan_block(data, "use", rp, f"{pkg} · {surface}", adoption, hint)),
                 _scan_struct(data, pkg, surface, rp, api, adoption),
             )
         if name == "scan_mcp_server":
