@@ -98,7 +98,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.11.0",
+    version="0.11.1",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
