@@ -111,11 +111,25 @@ if settings.sentry_dsn:
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
+        def _drop_expected_scan_timeouts(event, hint):
+            """Don't page on the designed large-scan cap. A scan that exceeds the ~90s
+            budget raises HTTPException(503, 'Scan is taking longer…') on purpose — it
+            tells the caller to retry and the result caches. That's expected behavior,
+            not an error, so it should never trigger a Sentry alert. Genuine 5xx still do."""
+            exc_info = hint.get("exc_info") if hint else None
+            if exc_info:
+                exc = exc_info[1]
+                if getattr(exc, "status_code", None) == 503 and \
+                        "taking longer" in str(getattr(exc, "detail", "")).lower():
+                    return None
+            return event
+
         sentry_sdk.init(
             dsn=settings.sentry_dsn,
             integrations=[FastApiIntegration(), SqlalchemyIntegration()],
             traces_sample_rate=0.1,
             environment="production" if not settings.debug else "development",
+            before_send=_drop_expected_scan_timeouts,
         )
     except ImportError:
         logging.getLogger(__name__).warning(
