@@ -22,7 +22,18 @@ from urllib.parse import quote
 import httpx
 import mcp.types as types
 from mcp.server.lowlevel import Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+from src.bridges.mcp_app_view import TRUST_CARD_HTML
+
+# MCP Apps (SEP-1865): an interactive trust card the host renders natively (vs. the
+# model paraphrasing our text). ui:// resource + _meta.ui.resourceUri on scan tools;
+# the card reads the scan result via ui/notifications/tool-result. Additive — hosts
+# without MCP Apps fall back to the text/structuredContent we already return.
+_CARD_URI = "ui://agentavow/trust-card.html"
+_CARD_MIME = "text/html;profile=mcp-app"
+_CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 
 # Where to reach our own public API from inside the container, and the public web
 # base for user-facing links. Overridable for staging/local preview.
@@ -87,7 +98,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.10.1",
+    version="0.11.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -554,10 +565,33 @@ _TOOLS: list[types.Tool] = [
     ),
 ]
 
+# Attach the MCP Apps trust-card view to the scan tools. Set on the field (the
+# constructor silently drops an unknown `meta=` kwarg; the field alias is _meta).
+for _t in _TOOLS:
+    if _t.name in ("scan_repo", "scan_package", "scan_mcp_server"):
+        _t.meta = _CARD_META
+
 
 @server.list_tools()
 async def _list_tools() -> list[types.Tool]:
     return _TOOLS
+
+
+@server.list_resources()
+async def _list_resources() -> list[types.Resource]:
+    return [types.Resource(
+        uri=_CARD_URI,
+        name="AgentAvow trust card",
+        description="Interactive trust card rendered from a scan result.",
+        mimeType=_CARD_MIME,
+    )]
+
+
+@server.read_resource()
+async def _read_resource(uri: object) -> list[ReadResourceContents]:
+    if str(uri).rstrip("/") == _CARD_URI.rstrip("/"):
+        return [ReadResourceContents(content=TRUST_CARD_HTML, mime_type=_CARD_MIME)]
+    return []
 
 
 # A discoverable "intro" the user can invoke from the client's prompt picker — the
