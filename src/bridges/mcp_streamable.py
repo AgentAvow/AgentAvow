@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from urllib.parse import quote
 
 import httpx
 import mcp.types as types
@@ -53,7 +54,7 @@ _INSTRUCTIONS = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.6.0",
+    version="0.7.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -225,31 +226,41 @@ def _text(s: str) -> list[types.TextContent]:
 def _scan_struct(
     data: dict,
     target: str,
-    surface: str,
+    target_type: str,
     report_path: str,
+    api_path: str,
     adoption: tuple[int, str, int] | None,
 ) -> dict:
     """Stable machine-readable contract returned as structuredContent alongside the
     human text. Keep these keys STABLE — tools/CI consume this; the prose block is free
-    to change without breaking them."""
+    to change without breaking them. ``target_type`` classifies the target
+    (github|npm|pypi|crates|docker|hf|mcp); it is deliberately named apart from the
+    scan_package ``registry`` input so consumers don't conflate the two."""
     items = (data.get("findings") or {}).get("items") or []
     crit = sum(1 for i in items if i.get("severity") == "critical")
     high = sum(1 for i in items if i.get("severity") == "high")
     return {
         "target": target,
-        "surface": surface,
+        "target_type": target_type,
         "trust_score": int(data.get("trust_score") or 0),
+        "grade": data.get("grade"),
+        "tier": data.get("trust_tier"),
         "verdict": "safe" if _safe_verdict(data) else "needs_review",
         "critical": crit,
         "high": high,
         "findings_total": int((data.get("findings") or {}).get("total") or len(items)),
+        # per-category 0-100 axes — explains WHY the score is what it is
+        "subscores": data.get("category_scores") or {},
         "adoption": (
-            {"count": adoption[0], "unit": adoption[1], "score": adoption[2]}
+            {"count": adoption[0], "unit": adoption[1], "score_0_100": adoption[2]}
             if adoption else None
         ),
         "signed": bool(data.get("jws")),
         "cached": bool(data.get("cached")),
         "report_url": f"{_WEB_BASE}{report_path}",
+        # direct JSON for agents/CI — the /check report page is a JS SPA that returns
+        # an empty shell to a non-browser fetch; this path returns the full verdict.
+        "report_json_url": f"{_WEB_BASE}{api_path}",
         "verify_url": f"{_WEB_BASE}/how-it-works#verify",
     }
 
@@ -430,6 +441,43 @@ async def _list_tools() -> list[types.Tool]:
     return _TOOLS
 
 
+# A discoverable "intro" the user can invoke from the client's prompt picker — the
+# closest thing to a post-install welcome the MCP spec offers (there is no server-
+# controlled install-time UI). Complements the connect-time `instructions`.
+_GET_STARTED = (
+    "Give me a short tour of AgentAvow. In a few lines cover: what it can check for me "
+    "(a GitHub repo, an npm/PyPI/crates/Docker/Hugging Face package, a live MCP server, "
+    "or an agent identity); how to read a verdict (a 0-100 trust score — 81+ with no "
+    "critical/high findings means safe to connect, otherwise needs review — and that "
+    "every result is signed and can be recomputed offline); and give me two or three "
+    "concrete example things I could ask you to scan right now."
+)
+
+
+@server.list_prompts()
+async def _list_prompts() -> list[types.Prompt]:
+    return [
+        types.Prompt(
+            name="agentavow_get_started",
+            title="AgentAvow: get started",
+            description="What AgentAvow checks and how to read a verdict, with examples.",
+        )
+    ]
+
+
+@server.get_prompt()
+async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResult:
+    return types.GetPromptResult(
+        description="AgentAvow quick start",
+        messages=[
+            types.PromptMessage(
+                role="user",
+                content=types.TextContent(type="text", text=_GET_STARTED),
+            )
+        ],
+    )
+
+
 @server.call_tool()
 async def _call_tool(
     name: str, arguments: dict
@@ -451,9 +499,10 @@ async def _call_tool(
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption("github", owner, repo)
             rp = f"/check/{owner}/{repo}"
+            api = f"/api/v1/public/scan/{owner}/{repo}"
             return (
                 _text(_scan_block(data, "connect", rp, f"{owner}/{repo}", adoption)),
-                _scan_struct(data, f"{owner}/{repo}", "github", rp, adoption),
+                _scan_struct(data, f"{owner}/{repo}", "github", rp, api, adoption),
             )
         if name == "scan_package":
             surface = (arguments.get("registry") or arguments.get("surface")
@@ -469,9 +518,10 @@ async def _call_tool(
             await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption(surface, surface, pkg)
             rp = f"/check/pkg/{surface}/{pkg}"
+            api = f"/api/v1/public/scan/package/{surface}/{pkg}"
             return (
                 _text(_scan_block(data, "use", rp, f"{pkg} · {surface}", adoption)),
-                _scan_struct(data, pkg, surface, rp, adoption),
+                _scan_struct(data, pkg, surface, rp, api, adoption),
             )
         if name == "scan_mcp_server":
             url = arguments["endpoint_url"]
@@ -483,9 +533,10 @@ async def _call_tool(
             # A bare MCP endpoint has no registry/stars adoption signal — omit it rather
             # than fabricate one.
             label = url.split("://", 1)[-1].split("/", 1)[0] or "MCP server"
+            api = f"/api/v1/public/scan/mcp?endpoint={quote(url, safe='')}"
             return (
                 _text(_scan_block(data, "connect", "/check", label)),
-                _scan_struct(data, url, "mcp", "/check", None),
+                _scan_struct(data, url, "mcp", "/check", api, None),
             )
         if name == "verify_trust":
             eid = arguments["entity_id"]
