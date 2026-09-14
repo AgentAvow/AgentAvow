@@ -1,14 +1,14 @@
 """Server-rendered legal pages.
 
-The interactive legal pages live in the SPA (web/src/rebrand/pages/Legal.tsx),
-but a JS-only render is invisible to non-browser fetchers — crawlers, link
-unfurlers, and app-store/Directory compliance reviewers get an empty shell.
-This router serves the SAME privacy-policy text as fully-rendered, self-contained
-HTML so the policy is always readable without executing JavaScript.
+The interactive legal pages live in the SPA (web/src/rebrand/pages/Legal.tsx), but a
+JS-only render is invisible to non-browser fetchers — crawlers, link unfurlers, and
+app-store/Directory compliance reviewers get an empty shell. This router serves the
+SAME text as fully-rendered, self-contained HTML so the policy/terms are always
+readable without executing JavaScript.
 
-Nginx routes a direct hit on /legal/privacy here; in-app soft navigation still
-renders the React page. Keep the clauses below in sync with the PRIVACY array in
-Legal.tsx (both are faithful copies of the same short, rarely-changing policy).
+Nginx routes a direct hit on /legal/privacy and /legal/terms here; in-app soft
+navigation still renders the React page. Keep the clauses below in sync with the
+PRIVACY and TERMS arrays in Legal.tsx (faithful copies of the same short text).
 """
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from fastapi.responses import HTMLResponse
 
 router = APIRouter(prefix="/legal", tags=["legal"])
 
-# (heading, body-html) — a faithful copy of PRIVACY in web/src/rebrand/pages/Legal.tsx.
 _PRIVACY_CLAUSES: list[tuple[str, str]] = [
     ("1. Overview",
      "This Policy describes what AgentAvow collects and how we use it. Checking a "
@@ -45,20 +44,70 @@ _PRIVACY_CLAUSES: list[tuple[str, str]] = [
      'Privacy questions: <a href="mailto:privacy@agentavow.com">privacy@agentavow.com</a>.'),
 ]
 
+_TERMS_CLAUSES: list[tuple[str, str]] = [
+    ("1. Acceptance of Terms",
+     'By accessing or using AgentAvow (the "Service"), you agree to be bound by these '
+     "Terms of Service. If you do not agree, do not use the Service."),
+    ("2. The Service",
+     "AgentAvow scans tools, MCP servers, and packages and produces a signed, verifiable "
+     "safety score. Checking is free and requires no account. An account is needed only "
+     "for watch/alerts, API keys, and claiming repositories you own."),
+    ("3. Eligibility",
+     "You must be at least 13 years of age (16 in the European Economic Area) to create "
+     "an account. By registering, you represent that you meet this requirement."),
+    ("4. Accounts",
+     "<ul><li>Provide accurate information when creating an account.</li><li>You are "
+     "responsible for keeping your credentials and API keys secure.</li><li>Do not create "
+     "accounts for spamming, impersonation, or abuse.</li><li>We may suspend or terminate "
+     "accounts that violate these Terms.</li></ul>"),
+    ("5. Scan Results — provided \"as is\"",
+     "Scan scores and attestations are computed algorithmically and provided for "
+     "informational purposes only. They inform a decision — they are not a warranty. "
+     "AgentAvow does not guarantee their accuracy or completeness and is not liable for "
+     "decisions made in reliance on them. Scores reflect a scan at a point in time; a tool "
+     "can change after it is scanned. Verify anything you depend on, and consider watching "
+     "it for changes."),
+    ("6. Acceptable Use",
+     "<ul><li>Do not attempt to manipulate or game scores.</li><li>Do not scrape the "
+     "Service or evade rate limits.</li><li>Do not use the Service to distribute malware, "
+     "phishing, or spam.</li><li>Do not attempt to circumvent security or moderation "
+     "systems.</li></ul>"),
+    ("7. Disclaimer of Warranties",
+     'The Service is provided "as is" and "as available" without warranties of any kind, '
+     "express or implied, including merchantability, fitness for a particular purpose, and "
+     "non-infringement. AgentAvow does not warrant that the Service will be uninterrupted, "
+     "error-free, or secure."),
+    ("8. Limitation of Liability",
+     "To the maximum extent permitted by law, AgentAvow shall not be liable for any "
+     "indirect, incidental, special, consequential, or punitive damages, or loss of "
+     "profits, data, or goodwill, arising from your use of or inability to use the Service. "
+     "AgentAvow's aggregate liability shall not exceed one hundred U.S. dollars (US $100) or "
+     "the amount you paid AgentAvow in the prior twelve months, whichever is greater."),
+    ("9. Dispute Resolution",
+     "Before any formal proceeding, contact us at "
+     '<a href="mailto:legal@agentavow.com">legal@agentavow.com</a> and attempt to resolve '
+     "the dispute informally for at least 30 days."),
+    ("10. Changes",
+     "We may update these Terms. Material changes will be posted here with an updated date. "
+     "Continued use after changes constitutes acceptance."),
+    ("11. Contact",
+     'Questions about these Terms: <a href="mailto:legal@agentavow.com">legal@agentavow.com</a>.'),
+]
 
-def _render_privacy() -> str:
+
+def _render(title: str, description: str, slug: str, clauses: list[tuple[str, str]]) -> str:
     sections = "\n".join(
         f'<section><h2>{h}</h2><div class="body">{body}</div></section>'
-        for h, body in _PRIVACY_CLAUSES
+        for h, body in clauses
     )
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy Policy · AgentAvow</title>
-<meta name="description" content="AgentAvow Privacy Policy — what we collect and how we use it. Checking a tool is anonymous.">
-<link rel="canonical" href="https://agentavow.com/legal/privacy">
+<title>{title} · AgentAvow</title>
+<meta name="description" content="{description}">
+<link rel="canonical" href="https://agentavow.com/legal/{slug}">
 <style>
   :root {{ color-scheme: light dark; --bg:#0b0f17; --fg:#e6edf3; --muted:#9aa7b6; --accent:#5eead4; --line:#1e2733; }}
   @media (prefers-color-scheme: light) {{ :root {{ --bg:#ffffff; --fg:#0b0f17; --muted:#5b6673; --accent:#0d9488; --line:#e5e9ef; }} }}
@@ -79,7 +128,7 @@ def _render_privacy() -> str:
 </head>
 <body>
   <main class="wrap">
-    <h1>Privacy Policy</h1>
+    <h1>{title}</h1>
     <p class="sub">AgentAvow · agentavow.com</p>
     {sections}
     <a class="home" href="https://agentavow.com/">← Back to AgentAvow</a>
@@ -91,4 +140,19 @@ def _render_privacy() -> str:
 @router.get("/privacy", include_in_schema=False)
 async def privacy_policy() -> HTMLResponse:
     """Fully-rendered privacy policy — readable without JavaScript."""
-    return HTMLResponse(_render_privacy())
+    return HTMLResponse(_render(
+        "Privacy Policy",
+        "AgentAvow Privacy Policy — what we collect and how we use it. Checking a tool "
+        "is anonymous.",
+        "privacy", _PRIVACY_CLAUSES,
+    ))
+
+
+@router.get("/terms", include_in_schema=False)
+async def terms_of_service() -> HTMLResponse:
+    """Fully-rendered terms of service — readable without JavaScript."""
+    return HTMLResponse(_render(
+        "Terms of Service",
+        "AgentAvow Terms of Service — using the signed safety-scanning service.",
+        "terms", _TERMS_CLAUSES,
+    ))
