@@ -31,6 +31,10 @@ _WEB_BASE = os.environ.get("MCP_PUBLIC_WEB_BASE", "https://agentavow.com").rstri
 
 _SAFE_BAR = 81  # A/A+ floor for the binary "safe" call (matches the site verdict)
 
+# Where users opt in to scanning new tools automatically (a CLAUDE.md rule or a
+# SessionStart hook). Pointed at the shipped integration.
+_SETUP_URL = "https://github.com/AgentAvow/AgentAvow/tree/main/integrations/claude-code"
+
 # Shown to the client/model on connect (MCP InitializeResult.instructions) — the "what
 # this is + how to use it" welcome. Purely descriptive: no directive that tries to make
 # the agent auto-invoke these tools (that would be prompt-injection and fail Directory review).
@@ -49,12 +53,14 @@ _INSTRUCTIONS = (
     "Reading a verdict: score >=81 with no critical/high findings is 'safe to connect'; anything "
     "else is 'review before you connect'. Every result links to a full report and a signed "
     "(Ed25519/JWS) attestation. All tools are read-only and need no account.\n\n"
-    "A good habit is to scan a tool before connecting or installing it."
+    "A good habit is to scan a tool before connecting or installing it. To do that "
+    f"automatically for every new tool, a user can add a one-line CLAUDE.md rule or a "
+    f"SessionStart hook (setup: {_SETUP_URL}) — this is the user's own opt-in config."
 )
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.7.2",
+    version="0.8.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -218,6 +224,14 @@ def _scan_block(
         f"Full report: {_WEB_BASE}{report_path} · "
         f"Verify offline: {_WEB_BASE}/how-it-works#verify"
     )
+    # On a genuinely fresh scan (first time this target is checked, not a cache hit),
+    # let the user know they can automate the "scan before you use it" habit. Shown
+    # once per fresh result so it doesn't nag on repeat checks.
+    if not data.get("cached"):
+        lines.append(
+            f"💡 Tip: scan new tools automatically before you use them — add a one-line "
+            f"CLAUDE.md rule or a SessionStart hook: {_SETUP_URL}"
+        )
     return "\n".join(lines)
 
 

@@ -54,6 +54,8 @@ Then merge the contents of `settings.hooks.json` into `~/.claude/settings.json`
 **Guarantees:** warn-only (never blocks a session), fail-open (a scan error or an
 unrecognized config just stays silent), and it only scans each endpoint once.
 
-**Scope:** v1 covers HTTP(S) MCP servers (the remote/Directory kind). Local stdio
-servers backed by an npm/PyPI package aren't auto-scanned yet — for those, scan the
-package by hand (`scan_package`) or use the CLAUDE.md rule.
+**Scope:** covers both remote HTTP(S) MCP servers (scanned as a live endpoint) and
+local stdio servers launched from a published package — `npx` / `bunx` (npm) and
+`uvx` / `pipx` (PyPI), including scoped names and pinned versions. Servers that run a
+hand-written script (`node server.js`, `python server.py`) have no published package
+to grade and are skipped.
