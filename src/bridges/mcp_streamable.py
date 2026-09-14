@@ -54,7 +54,7 @@ _INSTRUCTIONS = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.7.1",
+    version="0.7.2",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -424,7 +424,15 @@ _TOOLS: list[types.Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "A did:web:... or a display name."},
+                "query": {
+                    "type": "string",
+                    "description": "A did:web:... or a display name.",
+                    # Bounded + character-constrained: a lookup key, not freeform text.
+                    # Blocks control chars / quotes / braces used to smuggle instructions
+                    # (the injection vector our own scanner flags on unconstrained params).
+                    "maxLength": 200,
+                    "pattern": r"^[\w .:/@#+-]{1,200}$",
+                },
             },
             "required": ["query"],
         },
