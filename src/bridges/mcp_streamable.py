@@ -87,7 +87,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.9.0",
+    version="0.9.1",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -248,17 +248,27 @@ def _scan_block(
             f"or check an alternative."
         )
     else:
-        # Below the safe bar but with NO critical/high findings — the score is held down
-        # by non-finding signals (maintainer history, provenance, artifact drift,
-        # adoption), not detected risk. Say so, and name the weakest axis if it's low.
-        subs = data.get("category_scores") or {}
-        low = min(subs.items(), key=lambda kv: kv[1]) if subs else None
-        detail = f" Weakest axis: '{low[0]}' ({low[1]}/100)." if low and low[1] < 80 else ""
-        action = (
-            f"no critical or high findings — the score sits below the safe bar on "
-            f"non-finding signals (maintainer, provenance, drift, adoption), not detected "
-            f"risk.{detail} Open the report for the full breakdown."
-        )
+        # Below the safe bar but with NO critical/high findings. Two distinct causes,
+        # neither a detected risk — name the real one:
+        #   (a) thin scan: a tiny package has little to inspect, so confidence is capped;
+        #   (b) otherwise: non-finding signals (maintainer/provenance/drift/adoption).
+        files = (data.get("metadata") or {}).get("files_scanned")
+        if isinstance(files, int) and 0 < files < 8:
+            action = (
+                f"no findings — the score is capped because there was little code to "
+                f"inspect ({files} file{'' if files == 1 else 's'}). A minimal package "
+                f"limits how much can be verified; this is a confidence cap, not detected "
+                f"risk. Adoption and the signed report can help you decide."
+            )
+        else:
+            subs = data.get("category_scores") or {}
+            low = min(subs.items(), key=lambda kv: kv[1]) if subs else None
+            detail = f" Weakest axis: '{low[0]}' ({low[1]}/100)." if low and low[1] < 80 else ""
+            action = (
+                f"no critical or high findings — the score sits below the safe bar on "
+                f"non-finding signals (maintainer, provenance, drift, adoption), not "
+                f"detected risk.{detail} Open the report for the full breakdown."
+            )
     lines.append(f"**Next:** {action}")
     lines.append(
         f"Full report: {_WEB_BASE}{report_path} · "
