@@ -12,7 +12,8 @@ dist/
 venv/
 env/
 
-# Environment — secrets only (.env is committed as non-sensitive config)
+# Environment — never publish env files (use .env.example as the template)
+.env
 .env.secrets
 .env.local
 .env.staging
