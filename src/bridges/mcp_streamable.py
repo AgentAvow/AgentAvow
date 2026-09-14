@@ -32,8 +32,8 @@ _WEB_BASE = os.environ.get("MCP_PUBLIC_WEB_BASE", "https://agentavow.com").rstri
 _SAFE_BAR = 81  # A/A+ floor for the binary "safe" call (matches the site verdict)
 
 # Where users opt in to scanning new tools automatically (a CLAUDE.md rule or a
-# SessionStart hook). Pointed at the shipped integration.
-_SETUP_URL = "https://github.com/AgentAvow/AgentAvow/tree/main/integrations/claude-code"
+# SessionStart hook). The user-facing setup guide.
+_SETUP_URL = "https://agentavow.com/docs/auto-scan-claude-code"
 
 # Shown to the client/model on connect (MCP InitializeResult.instructions) — the "what
 # this is + how to use it" welcome. Purely descriptive: no directive that tries to make
@@ -58,9 +58,36 @@ _INSTRUCTIONS = (
     f"SessionStart hook (setup: {_SETUP_URL}) — this is the user's own opt-in config."
 )
 
+# Canned overview returned by the about_agentavow tool. A tool (not just a prompt)
+# so the answer is exact and relayed verbatim — no web-searching stale repo details.
+_ABOUT = (
+    "AgentAvow — the \"is this safe to connect?\" layer for AI agents.\n\n"
+    "WHAT IT CHECKS: point it at a GitHub repo, an npm/PyPI/crates/Docker/Hugging Face "
+    "package, a live MCP server, or an agent identity. You get a signed 0-100 trust "
+    "score, a plain safe / needs-review verdict, the findings behind it, and adoption "
+    "(downloads or stars). Every result is Ed25519/JWS-signed and recomputable offline. "
+    "Read-only, no account.\n\n"
+    "TOOLS:\n"
+    "• scan_repo — a GitHub repo ('owner/name')\n"
+    "• scan_package — a published package (registry + name)\n"
+    "• scan_mcp_server — a live MCP server by https URL\n"
+    "• verify_trust / check_interaction_safety / lookup_identity / get_trust_badge — "
+    "agent identity & trust\n\n"
+    "READING A VERDICT: 81+ with no critical/high findings = safe to connect; otherwise "
+    "review. A sub-81 score with zero findings means non-finding signals (maintainer, "
+    "provenance, adoption) held it down, not detected risk.\n\n"
+    "TRY:\n"
+    "• \"scan the npm package chalk\"\n"
+    "• \"scan the repo modelcontextprotocol/servers\"\n"
+    "• \"scan the MCP server at https://mcp.deepwiki.com/mcp\"\n\n"
+    f"AUTOMATE (Claude Code): add a one-line CLAUDE.md rule or a SessionStart hook so new "
+    f"tools are scanned before you use them — {_SETUP_URL}. (Claude Desktop connectors are "
+    "invoked on request; Desktop has no user CLAUDE.md or hooks.)"
+)
+
 server: Server = Server(
     "agentavow-trust",
-    version="0.8.0",
+    version="0.9.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -213,11 +240,24 @@ def _scan_block(
     if safe:
         tail = f" — {install_hint}" if install_hint else ""
         action = f"clears the bar, so it's safe to {verb}{tail}."
-    else:
-        n = crit + high or len(items)
+    elif crit + high:
+        n = crit + high
         action = (
-            f"hold off. Ask me to walk through the {n} finding{'' if n == 1 else 's'} "
-            f"and whether they matter for your use, or check an alternative."
+            f"hold off. Ask me to walk through the {n} blocking finding"
+            f"{'' if n == 1 else 's'} and whether they matter for your use, "
+            f"or check an alternative."
+        )
+    else:
+        # Below the safe bar but with NO critical/high findings — the score is held down
+        # by non-finding signals (maintainer history, provenance, artifact drift,
+        # adoption), not detected risk. Say so, and name the weakest axis if it's low.
+        subs = data.get("category_scores") or {}
+        low = min(subs.items(), key=lambda kv: kv[1]) if subs else None
+        detail = f" Weakest axis: '{low[0]}' ({low[1]}/100)." if low and low[1] < 80 else ""
+        action = (
+            f"no critical or high findings — the score sits below the safe bar on "
+            f"non-finding signals (maintainer, provenance, drift, adoption), not detected "
+            f"risk.{detail} Open the report for the full breakdown."
         )
     lines.append(f"**Next:** {action}")
     lines.append(
@@ -468,6 +508,17 @@ _TOOLS: list[types.Tool] = [
         },
         annotations=_RO(title="Get a trust badge", readOnlyHint=True),
     ),
+    types.Tool(
+        name="about_agentavow",
+        title="About AgentAvow",
+        description=(
+            "What AgentAvow is, which tool to use for what, how to read a verdict, and "
+            "example scans. Call this for an overview or when getting started. No input, "
+            "read-only."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+        annotations=_RO(title="About AgentAvow", readOnlyHint=True),
+    ),
 ]
 
 
@@ -520,6 +571,8 @@ async def _call_tool(
     await _bump("calls:total")
     await _bump(f"tool:{name}")
     try:
+        if name == "about_agentavow":
+            return _text(_ABOUT)
         force = bool(arguments.get("force"))
         fp = {"force": "true"} if force else None
         if name == "scan_repo":
