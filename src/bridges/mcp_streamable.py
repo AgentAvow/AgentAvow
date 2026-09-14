@@ -87,7 +87,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.10.0",
+    version="0.10.1",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -222,10 +222,14 @@ def _scan_block(
         why = f"No risks found; {reason}."
         glyph = "◍ LIMITED"
 
-    adopt_clause = ""
+    # Trust and adoption always travel together (as on the site's dual mark). When
+    # there's no established adoption signal (bare endpoint / brand-new package), say
+    # "new" rather than dropping the pairing.
     if adoption:
         count, unit, _ = adoption
-        adopt_clause = f" Adoption: {_compact_int(count)} {unit}.".rstrip()
+        adopt_clause = f" Adoption: {_compact_int(count)} {unit}."
+    else:
+        adopt_clause = " Adoption: new (no established public data yet)."
     # Line 1 carries the whole verdict in words, so it survives even if a client only
     # relays the model's one-line summary of the tool result.
     lines = [f"{head} — {target}, {score}/100. {why}{adopt_clause}", ""]
@@ -241,6 +245,8 @@ def _scan_block(
     if adoption:
         count, unit, ascore = adoption
         card.append(f"  ADOPTION  {_trust_bar(ascore)}  {_compact_int(count)} {unit}".rstrip())
+    else:
+        card.append(f"  ADOPTION  {_trust_bar(0)}  new")
     if bool(data.get("jws")):
         card.append("  signed ✔ Ed25519 · recompute offline")
     card += ["─────────────────────────────────────────", "```", ""]
