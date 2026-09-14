@@ -87,7 +87,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.9.1",
+    version="0.10.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -192,14 +192,36 @@ def _scan_block(
     if not isinstance(no_blocking, bool):
         no_blocking = crit == 0 and high == 0
     safe = score >= _SAFE_BAR and no_blocking
+    risk = (crit + high) > 0
+    # Three presentation treatments over the strict two machine states: a clean result
+    # that only missed the bar on coverage/signals must NOT wear the same risk warning
+    # as a target with real findings. Adoption is context here, never a verdict input.
+    mode = "safe" if safe else ("risk" if risk else "limited")
 
-    if safe:
-        why = "No blocking issues found."
-    elif crit + high:
-        why = f"{crit + high} blocking finding{'' if crit + high == 1 else 's'} (critical/high)."
+    # Reason phrase, reused in the headline and the Next step (limited mode only).
+    _files = (data.get("metadata") or {}).get("files_scanned")
+    if isinstance(_files, int) and 0 < _files < 8:
+        reason = (f"capped because there's little code to inspect "
+                  f"({_files} file{'' if _files == 1 else 's'})")
     else:
-        why = f"Score below the safe bar ({score}/100)."
-    head = f"{'✅ Safe to ' + verb if safe else '⚠️ Review before you ' + verb}"
+        _subs = data.get("category_scores") or {}
+        _low = min(_subs.items(), key=lambda kv: kv[1]) if _subs else None
+        reason = "held below the bar by non-finding signals (maintainer, provenance, drift)"
+        if _low and _low[1] < 80:
+            reason += f"; weakest axis '{_low[0]}' ({_low[1]}/100)"
+
+    if mode == "safe":
+        head, why, glyph = f"✅ Safe to {verb}", "No blocking issues found.", "✔ SAFE"
+    elif mode == "risk":
+        n = crit + high
+        head = f"⚠️ Review before you {verb}"
+        why = f"{n} blocking finding{'' if n == 1 else 's'} (critical/high)."
+        glyph = "⚠ REVIEW"
+    else:
+        head = "◍ Clean, limited coverage"
+        why = f"No risks found; {reason}."
+        glyph = "◍ LIMITED"
+
     adopt_clause = ""
     if adoption:
         count, unit, _ = adoption
@@ -210,7 +232,6 @@ def _scan_block(
 
     # Compact 8-bit card. Left-aligned with a top/bottom rule (no right border, which is
     # what breaks alignment across renderers). Renders in any monospace view.
-    glyph = "✔ SAFE" if safe else "⚠ REVIEW"
     card = [
         "```",
         "── AGENTAVOW · trust check ──────────────",
@@ -237,10 +258,10 @@ def _scan_block(
 
     # A concrete next step for the agent/user — describes what to do with THIS result.
     # (Purely about our own verdict; it never tells the agent to auto-run other tools.)
-    if safe:
+    if mode == "safe":
         tail = f" — {install_hint}" if install_hint else ""
         action = f"clears the bar, so it's safe to {verb}{tail}."
-    elif crit + high:
+    elif mode == "risk":
         n = crit + high
         action = (
             f"hold off. Ask me to walk through the {n} blocking finding"
@@ -248,27 +269,11 @@ def _scan_block(
             f"or check an alternative."
         )
     else:
-        # Below the safe bar but with NO critical/high findings. Two distinct causes,
-        # neither a detected risk — name the real one:
-        #   (a) thin scan: a tiny package has little to inspect, so confidence is capped;
-        #   (b) otherwise: non-finding signals (maintainer/provenance/drift/adoption).
-        files = (data.get("metadata") or {}).get("files_scanned")
-        if isinstance(files, int) and 0 < files < 8:
-            action = (
-                f"no findings — the score is capped because there was little code to "
-                f"inspect ({files} file{'' if files == 1 else 's'}). A minimal package "
-                f"limits how much can be verified; this is a confidence cap, not detected "
-                f"risk. Adoption and the signed report can help you decide."
-            )
-        else:
-            subs = data.get("category_scores") or {}
-            low = min(subs.items(), key=lambda kv: kv[1]) if subs else None
-            detail = f" Weakest axis: '{low[0]}' ({low[1]}/100)." if low and low[1] < 80 else ""
-            action = (
-                f"no critical or high findings — the score sits below the safe bar on "
-                f"non-finding signals (maintainer, provenance, drift, adoption), not "
-                f"detected risk.{detail} Open the report for the full breakdown."
-            )
+        # Clean, but below the bar on coverage/signals — not detected risk.
+        action = (
+            f"no risks found — the score is {reason}, a confidence limit rather than "
+            f"detected risk. Adoption and the signed report can help you decide."
+        )
     lines.append(f"**Next:** {action}")
     lines.append(
         f"Full report: {_WEB_BASE}{report_path} · "
@@ -316,13 +321,25 @@ def _scan_struct(
     items = (data.get("findings") or {}).get("items") or []
     crit = sum(1 for i in items if i.get("severity") == "critical")
     high = sum(1 for i in items if i.get("severity") == "high")
+    score = int(data.get("trust_score") or 0)
+    safe = _safe_verdict(data)
+    # Machine-readable "why": distinguishes a real risk review from a coverage cap.
+    if safe:
+        verdict_reason = "clean"
+    elif crit + high:
+        verdict_reason = "blocking_findings"
+    else:
+        files = (data.get("metadata") or {}).get("files_scanned")
+        verdict_reason = "thin_coverage" if isinstance(files, int) and 0 < files < 8 \
+            else "low_signals"
     return {
         "target": target,
         "target_type": target_type,
-        "trust_score": int(data.get("trust_score") or 0),
+        "trust_score": score,
         "grade": data.get("grade"),
         "tier": data.get("trust_tier"),
-        "verdict": "safe" if _safe_verdict(data) else "needs_review",
+        "verdict": "safe" if safe else "needs_review",
+        "verdict_reason": verdict_reason,
         "critical": crit,
         "high": high,
         "findings_total": int((data.get("findings") or {}).get("total") or len(items)),

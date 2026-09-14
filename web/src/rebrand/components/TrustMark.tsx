@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { getTrustTier, scoreToGrade, binaryVerdict } from '../../components/trust/gradeSystem'
+import { getTrustTier, binaryVerdict } from '../../components/trust/gradeSystem'
 
 /**
  * The AgentAvow dual mark (0–100 pivot 2026-08).
@@ -205,6 +205,7 @@ export function VerdictBadge(
       findings?: unknown
       critical?: number | null
       high?: number | null
+      metadata?: { files_scanned?: number | null } | null
     }
     verb?: 'connect' | 'install' | 'use'
     className?: string
@@ -231,19 +232,25 @@ export function VerdictBadge(
     : crit === 0 && high === 0
   const safe = binaryVerdict(score, noBlocking) === 'safe'
   const blocking = crit + high
-  const reason = safe
-    ? 'No blocking issues found.'
-    : blocking > 0
-      ? `${blocking} blocking finding${blocking === 1 ? '' : 's'} to review below.`
-      : `Grade ${scoreToGrade(score)}, below the safe bar.`
+  // Three visual treatments over the strict two-state verdict: a clean result that only
+  // missed the bar on coverage/signals must not wear the same warning as real findings.
+  // (Adoption is context elsewhere on the page, never a verdict input.)
+  const mode: 'safe' | 'risk' | 'limited' = safe ? 'safe' : blocking > 0 ? 'risk' : 'limited'
+  const files = scan.metadata?.files_scanned
+  const limitedReason = (typeof files === 'number' && files > 0 && files < 8)
+    ? `No risks found — the score is capped by limited coverage (${files} file${files === 1 ? '' : 's'} to inspect), not detected risk.`
+    : 'No risks found — the score is held below the bar by non-finding signals, not detected risk.'
+  const cfg = {
+    safe: { box: 'bg-success/10 border-success/30', fg: 'text-success', icon: '✓', title: `Safe to ${verb}`, reason: 'No blocking issues found.' },
+    risk: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠', title: `Review before you ${verb}`, reason: `${blocking} blocking finding${blocking === 1 ? '' : 's'} to review below.` },
+    limited: { box: 'bg-surface border-border', fg: 'text-text-muted', icon: '◍', title: 'Clean — limited coverage', reason: limitedReason },
+  }[mode]
   return (
-    <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${safe ? 'bg-success/10 border-success/30' : 'bg-warning/10 border-warning/30'} ${className}`}>
-      <span className={`text-lg leading-none ${safe ? 'text-success' : 'text-warning'}`} aria-hidden="true">{safe ? '✓' : '⚠'}</span>
+    <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${cfg.box} ${className}`}>
+      <span className={`text-lg leading-none ${cfg.fg}`} aria-hidden="true">{cfg.icon}</span>
       <div className="min-w-0">
-        <div className={`font-bold text-[15px] ${safe ? 'text-success' : 'text-warning'}`}>
-          {safe ? `Safe to ${verb}` : `Review before you ${verb}`}
-        </div>
-        <div className="text-[12.5px] text-text-muted">{reason}</div>
+        <div className={`font-bold text-[15px] ${cfg.fg}`}>{cfg.title}</div>
+        <div className="text-[12.5px] text-text-muted">{cfg.reason}</div>
       </div>
       <span className="ml-auto font-mono text-[10px] text-text-muted/60 shrink-0 hidden sm:block">derived from the signed score</span>
     </div>
