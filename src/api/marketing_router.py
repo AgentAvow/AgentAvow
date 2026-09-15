@@ -585,7 +585,7 @@ async def trigger_recap_post(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Manually trigger a marketing recap post to the AgentGraph feed."""
+    """Manually trigger a marketing recap post to the AgentAvow feed."""
     require_admin(current_entity)
     from src.marketing.recap import trigger_recap
 
@@ -645,7 +645,7 @@ async def _build_comment_worthy(db: AsyncSession) -> dict:
             from src.marketing.llm.anthropic_client import generate as anthropic_generate
 
             prompt = (
-                "You draft LinkedIn/social engagement for Kenne Ives, founder of AgentGraph "
+                "You draft LinkedIn/social engagement for Kenne Ives, founder of AgentAvow "
                 "(the trust + security layer for AI agents). For EACH item below return an "
                 "\"angle\" (one line: why it's worth Kenne's personal take) and a \"draft\" "
                 "(paste-ready, FIRST-PERSON founder voice, 2-4 sentences, specific, no hashtag "
@@ -1203,7 +1203,7 @@ async def generate_reddit_draft(
         )
 
     # --- Reddit 10% self-promotion rule ---
-    # Track post count in Redis. Only every 10th post may mention AgentGraph.
+    # Track post count in Redis. Only every 10th post may mention AgentAvow.
     from src.redis_client import get_redis
 
     reddit_count_key = "ag:reddit:post_count"
@@ -1239,7 +1239,7 @@ async def generate_reddit_draft(
             "or libraries that help answer the question. Redditors "
             "appreciate concrete resources.\n"
             "- This thread is a good fit to naturally mention "
-            "AgentGraph (agentgraph.co) if it's relevant to the "
+            "AgentAvow (agentavow.com) if it's relevant to the "
             "topic. Work it in organically as something you use or "
             "built — NOT as an ad. Pair it with other useful "
             "recommendations so it doesn't stand alone.\n"
@@ -1255,7 +1255,7 @@ async def generate_reddit_draft(
             "value to the discussion. Rules:\n"
             "- Be genuinely helpful. Share knowledge, perspectives, "
             "or experience.\n"
-            "- Do NOT mention AgentGraph, agentgraph.co, or any "
+            "- Do NOT mention AgentAvow, agentavow.com, or any "
             "product/project you work on. This is a pure community "
             "contribution.\n"
             "- Where relevant, link to specific GitHub repos, tools, "
@@ -1401,11 +1401,11 @@ async def generate_hf_draft(
     prompt += (
         "## Instructions\n"
         "- You are a developer who works on AI agent trust and "
-        "identity infrastructure (AgentGraph).\n"
+        "identity infrastructure (AgentAvow).\n"
         "- Respond with genuine technical insight relevant to "
         "the discussion.\n"
         "- If agent trust, verification, or identity is relevant, "
-        "mention AgentGraph naturally — don't force it.\n"
+        "mention AgentAvow naturally — don't force it.\n"
         "- Write 1-3 paragraphs. Be technically precise.\n"
         "- Reference the specific model/repo when relevant.\n"
         "- No marketing speak, no emojis.\n"

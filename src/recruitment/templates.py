@@ -8,16 +8,16 @@ TEMPLATES: dict[str, dict[str, str]] = {
     "mcp_server": {
         "title": "Verified trust badge for your MCP server",
         "body": (
-            "Hey! We're building [AgentGraph](https://agentgraph.co) — "
+            "Hey! We're building [AgentAvow](https://agentavow.com) — "
             "an open trust layer for AI agents: verified identity (W3C DIDs), "
             "trust scores, and auditable interaction trails.\n\n"
             "We've been cataloging MCP servers on GitHub and **{repo_name}** "
             "stood out ({stars} stars). We're offering free verified trust "
             "badges that MCP server authors can embed in their README:\n\n"
             "```markdown\n"
-            "[![AgentGraph Verified]"
-            "(https://agentgraph.co/api/v1/badges/trust/YOUR_ID.svg)]"
-            "(https://agentgraph.co/profiles/YOUR_SLUG)\n"
+            "[![AgentAvow Verified]"
+            "(https://agentavow.com/api/v1/badges/trust/YOUR_ID.svg)]"
+            "(https://agentavow.com/check)\n"
             "```\n\n"
             "**What this gets you:**\n"
             "- Verified identity (W3C DID) linked to your MCP server\n"
@@ -30,23 +30,23 @@ TEMPLATES: dict[str, dict[str, str]] = {
             "MCP servers actually need, we'd love to hear them.\n\n"
             "Not interested? Close this — we won't follow up.\n\n"
             "---\n"
-            "*One-time outreach from [AgentGraph](https://agentgraph.co). "
+            "*One-time outreach from [AgentAvow](https://agentavow.com). "
             "No further issues will be created on this repo.*"
         ),
     },
     "ai_agent": {
         "title": "Verified trust badge for your AI agent",
         "body": (
-            "Hey! We're building [AgentGraph](https://agentgraph.co) — "
+            "Hey! We're building [AgentAvow](https://agentavow.com) — "
             "an open trust layer for AI agents: verified identity (W3C DIDs), "
             "trust scores, and auditable interaction trails.\n\n"
             "**{repo_name}** caught our attention as an agent project with "
             "real traction ({stars} stars). We're offering free verified "
             "trust badges for agent developers:\n\n"
             "```markdown\n"
-            "[![AgentGraph Verified]"
-            "(https://agentgraph.co/api/v1/badges/trust/YOUR_ID.svg)]"
-            "(https://agentgraph.co/profiles/YOUR_SLUG)\n"
+            "[![AgentAvow Verified]"
+            "(https://agentavow.com/api/v1/badges/trust/YOUR_ID.svg)]"
+            "(https://agentavow.com/check)\n"
             "```\n\n"
             "**What this gets you:**\n"
             "- Verified identity (W3C DID) for your agent\n"
@@ -59,7 +59,7 @@ TEMPLATES: dict[str, dict[str, str]] = {
             "them.\n\n"
             "Not interested? Close this — we won't follow up.\n\n"
             "---\n"
-            "*One-time outreach from [AgentGraph](https://agentgraph.co). "
+            "*One-time outreach from [AgentAvow](https://agentavow.com). "
             "No further issues will be created on this repo.*"
         ),
     },
@@ -70,7 +70,7 @@ def render_template(
     template_key: str,
     repo_name: str,
     stars: int,
-    onboarding_url: str = "https://agentgraph.co/bot-onboarding",
+    onboarding_url: str = "https://agentavow.com/claim",
 ) -> tuple[str, str]:
     """Render a template, returning (title, body).
 
