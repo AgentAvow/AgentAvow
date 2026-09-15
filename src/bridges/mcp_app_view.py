@@ -150,7 +150,8 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     var el=document.getElementById("finds"); el.innerHTML="";
     if(mode!=="risk" || !list || !list.length) return;
     var html=""; for(var i=0;i<Math.min(list.length,3);i++){ var f=list[i];
-      html+='<div class="find"><span class="dot" style="background:'+sevColor(f.severity)+'"></span><span><span class="fwhat">'+esc(f.what||f.category||"finding")+'</span>'+(f.where?' <span class="fwhere">'+esc(f.where)+'</span>':'')+'</span></div>'; }
+      var times=(f.count&&f.count>1)?' <span class="mut">×'+f.count+'</span>':'';
+      html+='<div class="find"><span class="dot" style="background:'+sevColor(f.severity)+'"></span><span><span class="fwhat">'+esc(f.what||f.category||"finding")+'</span>'+times+(f.where?' <span class="fwhere">'+esc(f.where)+'</span>':'')+'</span></div>'; }
     el.innerHTML=html;
   }
   function renderSubs(subs){

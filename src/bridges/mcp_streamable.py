@@ -33,7 +33,7 @@ from src.bridges.mcp_app_view import TRUST_CARD_HTML
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v6.html"
+_CARD_URI = "ui://agentavow/trust-card-v7.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 
@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.13.1",
+    version="0.14.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -169,20 +169,47 @@ def _trust_band(score: float) -> str:
     return "little history yet"
 
 
+def _loc(it: dict) -> str:
+    where = it.get("file_path") or ""
+    if it.get("line_number"):
+        where = f"{where}:{it['line_number']}"
+    return where
+
+
 def _findings(items: list[dict], limit: int = 5) -> list[dict]:
     out = []
     for it in items[:limit]:
-        where = it.get("file_path") or ""
-        if it.get("line_number"):
-            where = f"{where}:{it['line_number']}"
         out.append({
             "severity": it.get("severity"),
             "category": it.get("category"),
             "what": it.get("name"),
-            "where": where,
+            "where": _loc(it),
             "remediation": it.get("remediation"),
         })
     return out
+
+
+def _grouped_findings(items: list[dict], limit: int = 3) -> list[dict]:
+    """Collapse repeats of the same finding into one row with a count, so a single
+    pattern hit in 25 files reads as 'X (×25)' rather than 25 separate findings."""
+    groups: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for it in items:
+        key = (it.get("severity"), it.get("name"))
+        g = groups.get(key)
+        if g is None:
+            groups[key] = {
+                "severity": it.get("severity"),
+                "category": it.get("category"),
+                "what": it.get("name"),
+                "where": _loc(it),
+                "remediation": it.get("remediation"),
+                "count": 1,
+            }
+            order.append(key)
+        else:
+            g["count"] += 1
+    return [groups[k] for k in order[:limit]]
 
 
 def _scan_block(
@@ -265,21 +292,27 @@ def _scan_block(
     card += ["─────────────────────────────────────────", "```", ""]
     lines += card
 
-    fs = _findings(items)
+    fs = _grouped_findings(items, 5)
     if fs:
         lines.append("**Top findings:**")
         for f in fs:
+            times = f" (×{f['count']})" if f.get("count", 1) > 1 else ""
             tail = f" → {f['remediation']}" if f.get("remediation") else ""
-            lines.append(f"- [{f['severity']}] {f['what']} ({f['where']}){tail}")
-        if len(items) > len(fs):
-            lines.append(f"- … {len(items) - len(fs)} more")
+            lines.append(f"- [{f['severity']}] {f['what']}{times} ({f['where']}){tail}")
+        shown = sum(f.get("count", 1) for f in fs)
+        if len(items) > shown:
+            lines.append(f"- … {len(items) - shown} more")
         lines.append("")
+
+    # Clear install CTA for a safe/certified package (own line, so the model relays it).
+    certified = bool((data.get("certified") or {}).get("eligible"))
+    if install_hint and (mode == "safe" or certified):
+        lines.append(f"**Ready to install:** `{install_hint}`")
 
     # A concrete next step for the agent/user — describes what to do with THIS result.
     # (Purely about our own verdict; it never tells the agent to auto-run other tools.)
     if mode == "safe":
-        tail = f" — {install_hint}" if install_hint else ""
-        action = f"clears the bar, so it's safe to {verb}{tail}."
+        action = f"clears the bar, so it's safe to {verb}."
     elif mode == "risk":
         n = crit + high
         action = (
@@ -355,7 +388,7 @@ def _scan_struct(
         "target": target,
         "target_type": target_type,
         "trust_score": score,
-        "grade": data.get("grade"),
+        # NOTE: no letter grade — external output is 0-100 score + tier + certified only.
         "tier": data.get("trust_tier"),
         "verdict": "safe" if safe else "needs_review",
         "verdict_reason": verdict_reason,
@@ -363,8 +396,8 @@ def _scan_struct(
         "high": high,
         "findings_total": int((data.get("findings") or {}).get("total") or len(items)),
         "certified": bool((data.get("certified") or {}).get("eligible")),
-        # top findings (severity + what + where + fix) — for the card + CI triage
-        "top_findings": _findings(items, 3),
+        # top findings, repeats collapsed to one row + count — for the card + CI triage
+        "top_findings": _grouped_findings(items, 3),
         # per-category 0-100 axes — explains WHY the score is what it is
         "subscores": data.get("category_scores") or {},
         # copy-paste install command for safe packages (None for repos/MCP endpoints)
@@ -686,9 +719,9 @@ async def _call_tool(
             rp = f"/check/pkg/{surface}/{pkg}"
             api = f"/api/v1/public/scan/package/{surface}/{pkg}"
             hint = {
-                "npm": f"install with `npm install {pkg}`",
-                "pypi": f"install with `pip install {pkg}`",
-                "crates": f"add with `cargo add {pkg}`",
+                "npm": f"npm install {pkg}",
+                "pypi": f"pip install {pkg}",
+                "crates": f"cargo add {pkg}",
             }.get(surface, "")
             return (
                 _text(_scan_block(data, "use", rp, f"{pkg} · {surface}", adoption, hint)),
