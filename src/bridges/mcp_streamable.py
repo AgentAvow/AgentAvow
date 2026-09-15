@@ -31,7 +31,9 @@ from src.bridges.mcp_app_view import TRUST_CARD_HTML
 # model paraphrasing our text). ui:// resource + _meta.ui.resourceUri on scan tools;
 # the card reads the scan result via ui/notifications/tool-result. Additive — hosts
 # without MCP Apps fall back to the text/structuredContent we already return.
-_CARD_URI = "ui://agentavow/trust-card.html"
+# Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
+# new card (bump the suffix on each card change during the render-debug phase).
+_CARD_URI = "ui://agentavow/trust-card-v3.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 
@@ -98,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.11.2",
+    version="0.11.3",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
