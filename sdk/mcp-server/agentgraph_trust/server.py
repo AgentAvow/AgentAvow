@@ -35,7 +35,7 @@ _BASE_URL = (
 ).rstrip("/")
 _WEB_BASE = _BASE_URL
 
-_VERSION = "0.5.1"
+_VERSION = "0.6.0"
 
 # Package-surface aliases, mirroring the public API + the remote connector.
 _SURFACE_ALIASES = {
@@ -96,8 +96,10 @@ def _top_findings(data: dict, limit: int = 5) -> list[dict]:
 
 
 def _incident(ih: dict) -> dict | None:
-    """Compact the API's incident_history (OSV MAL-) — context only, never scored. None
-    when there is no known compromise."""
+    """Compact the API's incident_history (OSV MAL-) into the EXACT SAME shape the remote
+    connector emits — key `incident`, nested `latest` — so the two MCP surfaces cannot
+    diverge and a consumer reading one contract never silently misses the compromise flag
+    on the other. Context only, never scored. None when there is no known compromise."""
     if not ih.get("has_incident"):
         return None
     incs = ih.get("incidents") or []
@@ -106,9 +108,11 @@ def _incident(ih: dict) -> dict | None:
         "known_compromise": True,
         "current_version_affected": bool(ih.get("current_version_affected")),
         "count": ih.get("count") or len(incs),
-        "latest_id": latest.get("id"),
-        "summary": latest.get("summary"),
-        "published": latest.get("published"),
+        "latest": {
+            "id": latest.get("id"),
+            "summary": latest.get("summary"),
+            "published": latest.get("published"),
+        },
     }
 
 
@@ -156,7 +160,7 @@ def _scan_result(data: dict, target: str, target_type: str,
         # display rule (only badge it when also safe), same as the remote connector.
         "certified": certified,
         "certified_mark": certified and safe,
-        "incident_history": incident,  # context only — was this package ever compromised?
+        "incident": incident,  # context only — same key+shape as the remote connector
         "signed": bool(data.get("jws")),
         "cached": bool(data.get("cached")),
         "report_url": report_url,

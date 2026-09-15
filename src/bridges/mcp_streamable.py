@@ -36,7 +36,7 @@ from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v10.html"
+_CARD_URI = "ui://agentavow/trust-card-v11.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 
@@ -803,9 +803,11 @@ async def _call_tool(
             # than fabricate one.
             label = url.split("://", 1)[-1].split("/", 1)[0] or "MCP server"
             api = f"/api/v1/public/scan/mcp?endpoint={quote(url, safe='')}"
+            # Target-specific report page (the web reads ?endpoint=) — not the bare /check.
+            rp = f"/check/mcp?endpoint={quote(url, safe='')}"
             return (
-                _card_text(_scan_block(data, "connect", "/check", label)),
-                _scan_struct(data, url, "mcp", "/check", api, None),
+                _card_text(_scan_block(data, "connect", rp, label)),
+                _scan_struct(data, url, "mcp", rp, api, None),
             )
         if name == "verify_trust":
             eid = arguments["entity_id"]
