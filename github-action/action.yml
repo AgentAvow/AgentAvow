@@ -1,6 +1,6 @@
-name: "AgentGraph Trust Scan"
-description: "Check the security posture of your repo with AgentGraph"
-author: "AgentGraph (agentgraph.co)"
+name: "AgentAvow Trust Scan"
+description: "Check the security posture of your repo with AgentAvow"
+author: "AgentAvow (agentavow.com)"
 
 branding:
   icon: "shield"
@@ -30,7 +30,7 @@ runs:
           sudo apt-get update -qq && sudo apt-get install -y -qq jq
         fi
 
-    - name: Run AgentGraph Trust Scan
+    - name: Run AgentAvow Trust Scan
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}

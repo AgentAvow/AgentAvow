@@ -22,7 +22,7 @@ jobs:
   trust-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: agentgraph-co/agentgraph/github-action@main
+      - uses: AgentAvow/AgentAvow/github-action@main
 ```
 
 That's it. Every PR will now receive a trust scan comment.
@@ -38,7 +38,7 @@ That's it. Every PR will now receive a trust scan comment.
 ### Enforce a minimum trust score
 
 ```yaml
-- uses: agentgraph-co/agentgraph/github-action@main
+- uses: AgentAvow/AgentAvow/github-action@main
   with:
     min_score: 70
     fail_on_findings: true
@@ -49,7 +49,7 @@ PRs with a trust score below 70 will fail the check, blocking merge (if you use 
 ### Disable PR comments
 
 ```yaml
-- uses: agentgraph-co/agentgraph/github-action@main
+- uses: AgentAvow/AgentAvow/github-action@main
   with:
     comment_on_pr: false
 ```

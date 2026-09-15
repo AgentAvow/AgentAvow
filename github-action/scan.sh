@@ -3,7 +3,7 @@
 # Calls the public AgentAvow API and formats results as a PR comment.
 set -euo pipefail
 
-API_BASE="https://agentgraph.co/api/v1/public/scan"
+API_BASE="https://agentavow.com/api/v1/public/scan"
 OWNER="${REPO_OWNER}"
 REPO="${REPO_NAME}"
 MIN_SCORE="${MIN_SCORE:-60}"
