@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.14.1",
+    version="0.14.2",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -304,10 +304,14 @@ def _scan_block(
             lines.append(f"- … {len(items) - shown} more")
         lines.append("")
 
-    # Clear install CTA for a safe/certified package (own line, so the model relays it).
-    certified = bool((data.get("certified") or {}).get("eligible"))
-    if install_hint and (mode == "safe" or certified):
-        lines.append(f"**Ready to install:** `{install_hint}`")
+    # Install CTA (own line so the model relays it). Shown for anything without blocking
+    # findings — safe gets the confident label, limited gets a "verify first" cue. Never
+    # on a review result (real findings to weigh first).
+    if install_hint and mode != "risk":
+        if mode == "safe":
+            lines.append(f"**Ready to install:** `{install_hint}`")
+        else:  # limited — no risks found, but not fully verified
+            lines.append(f"**Install** (no risks found, verify first): `{install_hint}`")
 
     # A concrete next step for the agent/user — describes what to do with THIS result.
     # (Purely about our own verdict; it never tells the agent to auto-run other tools.)
