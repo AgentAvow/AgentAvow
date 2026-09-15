@@ -172,6 +172,27 @@ def _trust_band(score: float) -> str:
     return "little history yet"
 
 
+def _no_entity_help(what: str) -> str:
+    """Guidance when an entity/identity tool is given an id/name not in the graph.
+
+    The identity graph only holds agents that have registered or been claimed, so an
+    arbitrary id legitimately resolves to nothing. Return a clearly-functional,
+    next-step answer (not a bare "not found") so this reads as a working tool — and
+    point to the scan tools, which are the product's main surface and work on any input.
+    """
+    return (
+        f"No AgentAvow entity is registered for {what}. That's expected for an id or name "
+        "that hasn't been registered — the identity graph only tracks agents that have "
+        "registered or claimed a listing.\n\n"
+        "To see AgentAvow in action right now, scan a public tool (works on any input):\n"
+        "• scan_repo — e.g. \"modelcontextprotocol/servers\"\n"
+        "• scan_package — e.g. npm \"chalk\"\n"
+        "• scan_mcp_server — any MCP endpoint URL\n"
+        "Then use lookup_identity to resolve a registered agent, and pass its id here. "
+        "Call about_agentavow for a guided overview."
+    )
+
+
 def _loc(it: dict) -> str:
     where = it.get("file_path") or ""
     if it.get("line_number"):
@@ -610,7 +631,11 @@ _TOOLS: list[types.Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
-                "entity_id": {"type": "string", "description": "UUID of the AgentAvow entity."},
+                "entity_id": {
+                    "type": "string",
+                    "description": ("UUID of a registered AgentAvow entity (resolve one with "
+                                    "lookup_identity; unknown ids return guidance, not an error)."),
+                },
                 "min_trust": {"type": "number", "description": "Min score, 0-1.", "default": 0.3},
             },
             "required": ["entity_id"],
@@ -628,7 +653,11 @@ _TOOLS: list[types.Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
-                "target_entity_id": {"type": "string", "description": "UUID of the target entity."},
+                "target_entity_id": {
+                    "type": "string",
+                    "description": ("UUID of a registered target entity "
+                                    "(resolve one with lookup_identity)."),
+                },
                 "interaction_type": {
                     "type": "string", "enum": ["delegate", "trade", "collaborate", "follow"],
                 },
@@ -672,7 +701,11 @@ _TOOLS: list[types.Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
-                "entity_id": {"type": "string", "description": "UUID of the AgentAvow entity."},
+                "entity_id": {
+                    "type": "string",
+                    "description": ("UUID of a registered AgentAvow entity "
+                                    "(resolve one with lookup_identity)."),
+                },
             },
             "required": ["entity_id"],
         },
@@ -847,7 +880,12 @@ async def _call_tool(
         if name == "verify_trust":
             eid = arguments["entity_id"]
             min_trust = float(arguments.get("min_trust", 0.3))
-            d = await _get(f"/entities/{eid}/trust")
+            try:
+                d = await _get(f"/entities/{eid}/trust")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    return _text(_no_entity_help(f"entity id '{eid}'"))
+                raise
             score = float(d.get("score") or 0.0)
             pct = round(score * 100)
             meets = score >= min_trust
@@ -859,7 +897,12 @@ async def _call_tool(
         if name == "check_interaction_safety":
             eid = arguments["target_entity_id"]
             itype = arguments["interaction_type"]
-            d = await _get(f"/entities/{eid}/trust")
+            try:
+                d = await _get(f"/entities/{eid}/trust")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    return _text(_no_entity_help(f"target entity id '{eid}'"))
+                raise
             score = float(d.get("score") or 0.0)
             # Shared per-type thresholds (src/interaction_safety.py) so the remote MCP,
             # the stdio MCP, and the A2A layer never disagree about the same interaction.
@@ -879,8 +922,7 @@ async def _call_tool(
             d = await _get("/search", params={"q": q, "limit": 5})
             ents = d.get("entities") or []
             if not ents:
-                return _text(f"No identities found for '{q}'. "
-                             "Try a DID (did:web:...) or a more specific name.")
+                return _text(_no_entity_help(f"'{q}'"))
             lines = [f"Identities matching '{q}':", ""]
             for e in ents[:5]:
                 eid = e.get("id")
@@ -890,7 +932,12 @@ async def _call_tool(
             return _text("\n".join(lines))
         if name == "get_trust_badge":
             eid = arguments["entity_id"]
-            d = await _get(f"/entities/{eid}/trust")  # 404s cleanly if the entity is unknown
+            try:
+                d = await _get(f"/entities/{eid}/trust")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    return _text(_no_entity_help(f"entity id '{eid}'"))
+                raise
             pct = round(float(d.get("score") or 0.0) * 100)
             # Public host, NOT _API_BASE (which is the internal container URL — that would
             # emit a localhost link into the user's README).
