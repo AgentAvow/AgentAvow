@@ -26,6 +26,9 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from src.bridges.mcp_app_view import TRUST_CARD_HTML
+from src.scanner.verdict import SAFE_BAR as _SHARED_SAFE_BAR
+from src.scanner.verdict import is_safe as _shared_is_safe
+from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 
 # MCP Apps (SEP-1865): an interactive trust card the host renders natively (vs. the
 # model paraphrasing our text). ui:// resource + _meta.ui.resourceUri on scan tools;
@@ -42,7 +45,7 @@ _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 _API_BASE = os.environ.get("MCP_INTERNAL_API_BASE", "http://localhost:8000/api/v1").rstrip("/")
 _WEB_BASE = os.environ.get("MCP_PUBLIC_WEB_BASE", "https://agentavow.com").rstrip("/")
 
-_SAFE_BAR = 81  # A/A+ floor for the binary "safe" call (matches the site verdict)
+_SAFE_BAR = _SHARED_SAFE_BAR  # A/A+ floor for the binary "safe" call (shared w/ the public API)
 
 # Where users opt in to scanning new tools automatically (a CLAUDE.md rule or a
 # SessionStart hook). The user-facing setup guide.
@@ -100,7 +103,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.15.2",
+    version="0.16.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -232,14 +235,10 @@ def _scan_block(
     (which survives the model summarizing the tool output), followed by a compact 8-bit
     trust/adoption card, the findings, and the signed-report links."""
     score = int(data.get("trust_score") or 0)
-    checks = (data.get("certified") or {}).get("checks") or {}
     items = (data.get("findings") or {}).get("items") or []
     crit = sum(1 for i in items if i.get("severity") == "critical")
     high = sum(1 for i in items if i.get("severity") == "high")
-    no_blocking = checks.get("no_critical_or_high")
-    if not isinstance(no_blocking, bool):
-        no_blocking = crit == 0 and high == 0
-    safe = score >= _SAFE_BAR and no_blocking
+    safe = _safe_verdict(data)
     risk = (crit + high) > 0
     # Three presentation treatments over the strict two machine states: a clean result
     # that only missed the bar on coverage/signals must NOT wear the same risk warning
@@ -353,14 +352,9 @@ def _scan_block(
 
 
 def _safe_verdict(data: dict) -> bool:
-    """The binary safe/needs-review call, identical to _scan_block's logic."""
-    score = int(data.get("trust_score") or 0)
-    items = (data.get("findings") or {}).get("items") or []
-    checks = (data.get("certified") or {}).get("checks") or {}
-    no_blocking = checks.get("no_critical_or_high")
-    if not isinstance(no_blocking, bool):
-        no_blocking = not any(i.get("severity") in ("critical", "high") for i in items)
-    return score >= _SAFE_BAR and no_blocking
+    """The binary safe/needs-review call. Delegates to the shared helper so the MCP and
+    the public API can never disagree."""
+    return _shared_is_safe(data)
 
 
 def _text(s: str) -> list[types.TextContent]:
@@ -396,14 +390,8 @@ def _scan_struct(
     score = int(data.get("trust_score") or 0)
     safe = _safe_verdict(data)
     # Machine-readable "why": distinguishes a real risk review from a coverage cap.
-    if safe:
-        verdict_reason = "clean"
-    elif crit + high:
-        verdict_reason = "blocking_findings"
-    else:
-        files = (data.get("metadata") or {}).get("files_scanned")
-        verdict_reason = "thin_coverage" if isinstance(files, int) and 0 < files < 8 \
-            else "low_signals"
+    # Shared with the public API so the two surfaces never disagree.
+    verdict_reason = _shared_verdict_reason(data, safe)
     return {
         "target": target,
         "target_type": target_type,

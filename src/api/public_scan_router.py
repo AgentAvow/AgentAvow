@@ -31,6 +31,9 @@ from src.api.rate_limit import (
 )
 from src.config import settings
 from src.database import get_db
+from src.scanner.verdict import is_safe as _is_safe
+from src.scanner.verdict import verdict_label as _verdict_label
+from src.scanner.verdict import verdict_reason as _verdict_reason
 from src.signing import (
     KID,
     create_jws,
@@ -164,6 +167,11 @@ class PublicScanResponse(BaseModel):
     trust_tier: str
     recommended_limits: RecommendedLimits
     scan_result: str  # clean, warnings, critical, error
+    # Plain "is this safe to connect?" verdict, shared verbatim with the MCP connector
+    # (src/scanner/verdict.py) so the two surfaces never disagree. Adoption is never an
+    # input — code-analysis only, matching trust_score.
+    verdict: str = "needs_review"  # safe | needs_review (score >= 81 and no critical/high)
+    verdict_reason: str = "low_signals"  # clean | blocking_findings | thin_coverage | low_signals
     findings: FindingsSummary
     positive_signals: list[str] = []
     grade: str = ""  # letter grade with the A+ certified gate applied (roadmap §7)
@@ -912,6 +920,8 @@ def _package_response(
         trust_tier=data["trust_tier"],
         recommended_limits=RecommendedLimits(**data["recommended_limits"]),
         scan_result=data["scan_result"],
+        verdict=_verdict_label(_scan_safe := _is_safe(data)),
+        verdict_reason=_verdict_reason(data, _scan_safe),
         findings=FindingsSummary(**data["findings"]),
         grade=data.get("grade") or _grade_from_score(data["trust_score"]),
         certified=data.get("certified") or {},
