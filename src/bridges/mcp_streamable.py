@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.14.2",
+    version="0.14.3",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -359,6 +359,16 @@ def _safe_verdict(data: dict) -> bool:
 
 def _text(s: str) -> list[types.TextContent]:
     return [types.TextContent(type="text", text=s)]
+
+
+def _card_text(s: str) -> list[types.TextContent]:
+    """A scan card marked audience=['user'] — a spec hint that this block is meant for
+    the human (so a client MAY render it as-is rather than let the model paraphrase it).
+    Advisory only; harmless where ignored, and the model still has structuredContent."""
+    return [types.TextContent(
+        type="text", text=s,
+        annotations=types.Annotations(audience=["user"], priority=1.0),
+    )]
 
 
 def _scan_struct(
@@ -707,7 +717,7 @@ async def _call_tool(
             rp = f"/check/{owner}/{repo}"
             api = f"/api/v1/public/scan/{owner}/{repo}"
             return (
-                _text(_scan_block(data, "connect", rp, f"{owner}/{repo}", adoption)),
+                _card_text(_scan_block(data, "connect", rp, f"{owner}/{repo}", adoption)),
                 _scan_struct(data, f"{owner}/{repo}", "github", rp, api, adoption),
             )
         if name == "scan_package":
@@ -731,7 +741,7 @@ async def _call_tool(
                 "crates": f"cargo add {pkg}",
             }.get(surface, "")
             return (
-                _text(_scan_block(data, "use", rp, f"{pkg} · {surface}", adoption, hint)),
+                _card_text(_scan_block(data, "use", rp, f"{pkg} · {surface}", adoption, hint)),
                 _scan_struct(data, pkg, surface, rp, api, adoption),
             )
         if name == "scan_mcp_server":
@@ -746,7 +756,7 @@ async def _call_tool(
             label = url.split("://", 1)[-1].split("/", 1)[0] or "MCP server"
             api = f"/api/v1/public/scan/mcp?endpoint={quote(url, safe='')}"
             return (
-                _text(_scan_block(data, "connect", "/check", label)),
+                _card_text(_scan_block(data, "connect", "/check", label)),
                 _scan_struct(data, url, "mcp", "/check", api, None),
             )
         if name == "verify_trust":
