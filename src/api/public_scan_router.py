@@ -1878,16 +1878,27 @@ async def scan_verdict(
     this cross-origin, then recomputes the Ed25519 signature in-browser against the
     public JWKS — so the check runs on the visitor's machine, not ours."""
     full_name = f"{owner}/{repo}"
+    # Cache-ONLY. The widget fetches this cross-origin from arbitrarily many pages, so it
+    # must never trigger a fresh ~25s scan (that was the perf hit + a GitHub-budget /
+    # DoS-amplification vector). Serve the cached verdict (fresh, else the long-lived stale
+    # copy) and re-sign it (attestations expire); if the repo was never scanned, say so.
+    # A badge/widget only exists for an already-scanned repo, so cache-only is sufficient.
     try:
-        scan = await public_scan(owner=owner, repo=repo, force=False, db=db)
-        body = {
-            "coordinate": full_name,
-            "score": scan.security_score,
-            "grade": scan.grade,
-            "jws": scan.jws,
-            "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
-            "link": f"https://agentavow.com/check/{full_name}",
-        }
+        cached = await _get_cached(owner, repo) or await _get_stale_cached(owner, repo)
+        if cached:
+            payload = _build_scan_payload(full_name, cached)
+            jws = create_jws(canonicalize(payload))
+            score100 = int(cached.get("trust_score") or 0)
+            body = {
+                "coordinate": full_name,
+                "score": score100,
+                "grade": cached.get("grade") or _grade_from_score(score100),
+                "jws": jws,
+                "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
+                "link": f"https://agentavow.com/check/{full_name}",
+            }
+        else:
+            body = {"coordinate": full_name, "jws": None, "error": "not_scanned"}
     except Exception:
         body = {"coordinate": full_name, "jws": None, "error": "not_scanned"}
     return Response(
