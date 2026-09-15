@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="430" height="84" viewBox="0 0 430 84" fill="none">
+  <defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="60" y1="0" x2="410" y2="0">
+    <stop stop-color="#2dd4bf"/><stop offset="0.5" stop-color="#22b8c4"/><stop offset="1" stop-color="#d946ef"/>
+  </linearGradient></defs>
+  <g transform="translate(2,12)">
+    <circle cx="30" cy="30" r="24.5" stroke="url(#g)" stroke-width="5.1"/>
+    <path d="M18 31.5l9 9 18-19.5" stroke="url(#g)" stroke-width="6.3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="82" y="54" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+        font-size="52" font-weight="800" letter-spacing="-1" fill="url(#g)">AgentAvow</text>
+</svg>
