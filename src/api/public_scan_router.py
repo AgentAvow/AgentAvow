@@ -178,6 +178,10 @@ class PublicScanResponse(BaseModel):
     certified: dict = {}  # A+ certified-tier eligibility {eligible, checks} (roadmap §7)
     coverage: dict = {}  # scan_depth / provenance_binding / db_snapshots (recompute discipline)
     supply_chain: dict = {}  # OSV/deps.dev summary (signed into the JWS; mirrored here for readers)
+    # Context-only incident history — OSV MAL- advisories for THIS package's own coordinate
+    # ("was it ever compromised?"). NOT scored, NOT signed; empty for repos w/o a coordinate
+    # or non-OSV ecosystems. {checked, has_incident, current_version_affected, count, incidents[]}.
+    incident_history: dict = {}
     provenance: dict = {}  # verified build-provenance summary (Phase 3), if any
     surface_detail: dict = {}  # per-surface detail (skill allowed_tools, MCP capabilities, …)
     # the tool's .agentavow.yml declaration ({present, egress, capabilities, note})
@@ -852,6 +856,8 @@ def _scan_result_to_dict(result: object) -> dict:
         # db_snapshots, evidence_anchors) + the OSV/deps.dev supply-chain summary.
         "coverage": getattr(result, "coverage", {}) or {},
         "supply_chain": getattr(result, "supply_chain", {}) or {},
+        # Context-only incident history (OSV MAL- for the target's own coordinate).
+        "incident_history": getattr(result, "incident_history", {}) or {},
         "scanned_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -927,6 +933,7 @@ def _package_response(
         certified=data.get("certified") or {},
         coverage=data.get("coverage", {}),
         supply_chain=data.get("supply_chain", {}),
+        incident_history=data.get("incident_history", {}),
         provenance=data.get("provenance", {}),
         surface_detail=data.get("surface_detail", {}),
         declared_scope=data.get("declared_scope", {}),

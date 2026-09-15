@@ -1150,6 +1150,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           </div>
           <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="install" /></div>
+          <IncidentBanner scan={scan} />
           <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="openclaw" owner={owner} repo={repo} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
@@ -1210,6 +1211,30 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
  * actually advertises at runtime), not a repo. The agent-specific moat. */
 /** Capability blast radius — what a tool could DO if misused / its input is poisoned,
  * distinct from its code grade. Reads surface_detail.blast_radius (MCP + skills). */
+/** Context-only incident-history banner (OSV MAL- advisories for the target's own
+ * coordinate). Never affects the score — red if the current version is flagged, amber
+ * for a past-and-cleaned compromise. Renders nothing when there's no known incident. */
+function IncidentBanner({ scan }: { scan: PublicScanResponse }) {
+  const ih = scan.incident_history
+  if (!ih?.has_incident) return null
+  const latest = (ih.incidents || [])[0] || {}
+  const affected = !!ih.current_version_affected
+  const when = (latest.published || '').slice(0, 10)
+  const id = latest.id || 'advisory'
+  return (
+    <div className={`mx-7 mt-3 rounded-xl border-l-4 px-4 py-3 text-[13px] leading-relaxed ${affected ? 'border-red-500 bg-red-500/10' : 'border-amber-500 bg-amber-500/10'}`}>
+      {affected ? (
+        <><span className="font-bold text-red-500">🚨 Known compromise — this version is flagged malicious.</span> Do not install this version.</>
+      ) : (
+        <><span className="font-bold text-amber-500">⚠ Incident history</span> — this package had a known compromise; the current version is not flagged. <span className="text-text-muted">Context only — it doesn’t change the score.</span></>
+      )}
+      <div className="mt-1 font-mono text-[11px] text-text-muted">
+        {id}{when ? ` · ${when}` : ''}{ih.count && ih.count > 1 ? ` · ${ih.count} advisories` : ''}{latest.summary ? ` — ${latest.summary}` : ''}
+      </div>
+    </div>
+  )
+}
+
 function BlastRadius({ scan }: { scan: unknown }) {
   const br = (scan as { surface_detail?: { blast_radius?: {
     level?: string; why?: string; lethal_trifecta?: boolean;
@@ -1287,6 +1312,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           </div>
           <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
+          <IncidentBanner scan={scan} />
           <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="mcp" owner="mcp" repo={endpoint} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
@@ -1405,6 +1431,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           </div>
           <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="use" /></div>
+          <IncidentBanner scan={scan} />
           <ScoreDuo trustScore={scan.trust_score} trustLabel="Attestation Trust" surface={surface} repo={name} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
         </div>
       </Reveal>
@@ -1611,6 +1638,7 @@ function Result({ owner, repo, privateResult }: {
         </div>
 
         <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
+        <IncidentBanner scan={scan} />
         {/* the dual mark — one cohesive instrument: trust (green→red) | adoption (teal→magenta) */}
         <div className="relative px-4 sm:px-7 py-6">
           <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">

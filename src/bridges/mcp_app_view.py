@@ -55,6 +55,8 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   .mut { color:var(--muted); }
   .grad { background:linear-gradient(100deg,#2dd4bf,#e879f9); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .why { color:var(--muted); font-size:12.5px; margin:12px 2px 0; }
+  .incident { margin:10px 2px 0; padding:8px 10px; border-left:3px solid #F59E0B; background:rgba(245,158,11,.08); border-radius:6px; font-size:12px; line-height:1.45; }
+  .incident .imeta { color:var(--muted); font-family:ui-monospace,monospace; font-size:11px; }
   .finds { margin:10px 0 0; display:flex; flex-direction:column; gap:6px; }
   .find { display:flex; gap:8px; align-items:baseline; font-size:12px; }
   .dot { flex:none; width:7px; height:7px; border-radius:50%; margin-top:4px; }
@@ -97,6 +99,7 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
       <div class="col"><div class="caplabel">Adoption</div><div id="adopt"></div></div>
     </div>
     <div class="why" id="why"></div>
+    <div class="incident" id="incident" style="display:none"></div>
     <div class="finds" id="finds"></div>
     <div class="subs" id="subs" style="display:none"></div>
     <div class="cta" id="cta" style="display:none"><span class="ctalabel" id="ctalabel"></span><div class="ctarow"><code class="cmd" id="cmd"></code><button id="copy">Copy</button></div></div>
@@ -186,6 +189,17 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     var why=whys[reason]||"";
     if(certified) why="Certified — artifact scanned, provenance verified, no drift, signed & recomputable. "+why;
     document.getElementById("why").textContent = why;
+    // Incident history banner (context only — never part of the score). Red if the
+    // current version is flagged malicious, amber for a past-and-cleaned compromise.
+    var incEl=document.getElementById("incident"), inc=sc.incident;
+    if(inc){
+      var iid=(inc.latest&&inc.latest.id)||"advisory", iwhen=((inc.latest&&inc.latest.published)||"").slice(0,10);
+      var affected=!!inc.current_version_affected;
+      incEl.style.display="block"; incEl.style.borderLeftColor=affected?"#EF4444":"#F59E0B";
+      incEl.innerHTML = affected
+        ? '<b style="color:#EF4444">\u{1F6A8} Known compromise — this version is flagged malicious</b> <span class="imeta">'+esc(iid)+(iwhen?" · "+esc(iwhen):"")+'</span>'
+        : '<b style="color:#F59E0B">⚠ Incident history</b> — a past compromise ('+esc(iid)+(iwhen?", "+esc(iwhen):"")+'); current version not flagged. <span class="imeta">Context only — not scored.</span>';
+    } else { incEl.style.display="none"; }
     // Install CTA — tiered: safe/certified get the primary "Ready to install" treatment;
     // limited gets the command muted with a "verify first" cue (no risks found, but not
     // fully verified); review gets NO install (real findings to weigh first).

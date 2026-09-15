@@ -151,6 +151,11 @@ class ScanResult:
     # at their empty defaults and behaves exactly as before.
     coverage: dict = field(default_factory=dict)
     supply_chain: dict = field(default_factory=dict)
+    # Context-only incident history (OSV MAL- advisories for the TARGET's own coordinate —
+    # "was this package ever compromised?"). NEVER scored, NEVER signed — historical
+    # context alongside the verdict. Empty for repos with no package coordinate / non-OSV
+    # ecosystems / when the lookup fails (fail-open).
+    incident_history: dict = field(default_factory=dict)
     # Phase 2 artifact scanning: repo↔artifact drift summary + a compact summary of
     # the published-artifact fetch/scan. Both stay empty for repo-only scans (the
     # feature is flag-gated), so existing behaviour is unchanged.
@@ -2990,6 +2995,12 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
     result.certified = _certified_status(result)
+    # Context-only incident history (OSV MAL- for this package). Fail-open; never scored.
+    try:
+        from src.scanner.incident_history import fetch_incident_history
+        result.incident_history = await fetch_incident_history(surface, name, version)
+    except Exception:
+        pass
     return result
 
 
@@ -3659,6 +3670,18 @@ async def scan_repo(
         except Exception:  # noqa: BLE001 — fail-open
             logger.debug("package-coordinate resolve failed for %s/%s", owner, repo,
                          exc_info=True)
+
+        # --- Context-only incident history (OSV MAL- for the mapped package) ----
+        # Only when the repo maps to a published package; never scored/signed. Fail-open.
+        try:
+            _coord = result.package_coordinate or {}
+            if _coord.get("surface") and _coord.get("name"):
+                from src.scanner.incident_history import fetch_incident_history
+                result.incident_history = await fetch_incident_history(
+                    _coord["surface"], _coord["name"], None,
+                )
+        except Exception:  # noqa: BLE001 — fail-open
+            pass
 
         # --- Phase 5: maintainer / behavioral signals --------------------------
         # Feature-flagged (default OFF) and FAIL-OPEN. GitHub-METADATA only (no

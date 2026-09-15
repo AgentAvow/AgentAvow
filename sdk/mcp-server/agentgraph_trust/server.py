@@ -35,7 +35,7 @@ _BASE_URL = (
 ).rstrip("/")
 _WEB_BASE = _BASE_URL
 
-_VERSION = "0.5.0"
+_VERSION = "0.5.1"
 
 # Package-surface aliases, mirroring the public API + the remote connector.
 _SURFACE_ALIASES = {
@@ -95,6 +95,23 @@ def _top_findings(data: dict, limit: int = 5) -> list[dict]:
     return out
 
 
+def _incident(ih: dict) -> dict | None:
+    """Compact the API's incident_history (OSV MAL-) — context only, never scored. None
+    when there is no known compromise."""
+    if not ih.get("has_incident"):
+        return None
+    incs = ih.get("incidents") or []
+    latest = incs[0] if incs else {}
+    return {
+        "known_compromise": True,
+        "current_version_affected": bool(ih.get("current_version_affected")),
+        "count": ih.get("count") or len(incs),
+        "latest_id": latest.get("id"),
+        "summary": latest.get("summary"),
+        "published": latest.get("published"),
+    }
+
+
 _REASON_BLURB = {
     "clean": "no critical/high findings and above the safe bar",
     "blocking_findings": "held back by a critical/high finding — review before connecting",
@@ -110,6 +127,7 @@ def _scan_result(data: dict, target: str, target_type: str,
     verdict / verdict_reason / trust_score come straight from the API."""
     crit, high, total = _findings_counts(data)
     score = int(data.get("trust_score") or 0)
+    incident = _incident(data.get("incident_history") or {})
     verdict = data.get("verdict") or "needs_review"
     reason = data.get("verdict_reason") or "low_signals"
     certified = bool((data.get("certified") or {}).get("eligible"))
@@ -138,6 +156,7 @@ def _scan_result(data: dict, target: str, target_type: str,
         # display rule (only badge it when also safe), same as the remote connector.
         "certified": certified,
         "certified_mark": certified and safe,
+        "incident_history": incident,  # context only — was this package ever compromised?
         "signed": bool(data.get("jws")),
         "cached": bool(data.get("cached")),
         "report_url": report_url,

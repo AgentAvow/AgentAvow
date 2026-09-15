@@ -77,6 +77,15 @@ export interface PublicScanResponse {
   // MCP { tool_count, capabilities }, package { digest }.
   surface_detail?: { skill_name?: string; allowed_tools?: string[]; has_lifecycle_hooks?: boolean; tool_count?: number; capabilities?: Record<string, number>; [k: string]: unknown }
   category_scores: Partial<CategoryScores>
+  // Context-only incident history — OSV MAL- advisories for THIS package's own coordinate
+  // ("was it ever compromised?"). NOT scored, NOT signed. Empty for repos w/o a coordinate.
+  incident_history?: {
+    checked?: boolean
+    has_incident?: boolean
+    current_version_affected?: boolean
+    count?: number
+    incidents?: { id?: string; summary?: string; published?: string; current_version_affected?: boolean }[]
+  }
   metadata: ScanMetadata
   scanned_at: string
   cached: boolean

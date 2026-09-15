@@ -36,7 +36,7 @@ from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v9.html"
+_CARD_URI = "ui://agentavow/trust-card-v10.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 
@@ -302,6 +302,23 @@ def _scan_block(
     card += ["─────────────────────────────────────────", "```", ""]
     lines += card
 
+    # Incident history (context, not scored): was this package ever caught being malicious?
+    _inc = _incident_summary(data.get("incident_history") or {})
+    if _inc:
+        _latest = _inc.get("latest") or {}
+        _id = _latest.get("id") or "advisory"
+        _when = (str(_latest.get("published") or "")[:10]) or "date unknown"
+        if _inc.get("current_version_affected"):
+            lines.append(
+                f"🚨 **Known compromise — this version is flagged malicious** "
+                f"({_id}, {_when}). Do not install this version.")
+        else:
+            lines.append(
+                f"⚠️ **Incident history:** this package had a known compromise "
+                f"({_id}, {_when}); the current version is not flagged. Context only — "
+                f"it does not change the score.")
+        lines.append("")
+
     fs = _grouped_findings(items, 5)
     if fs:
         lines.append("**Top findings:**")
@@ -371,6 +388,25 @@ def _card_text(s: str) -> list[types.TextContent]:
     )]
 
 
+def _incident_summary(ih: dict) -> dict | None:
+    """Compact the scan's incident_history (OSV MAL-) into an MCP-friendly object, or
+    None when there is no known incident. Context only — never affects the verdict."""
+    if not ih.get("has_incident"):
+        return None
+    incs = ih.get("incidents") or []
+    latest = incs[0] if incs else {}
+    return {
+        "known_compromise": True,
+        "current_version_affected": bool(ih.get("current_version_affected")),
+        "count": ih.get("count") or len(incs),
+        "latest": {
+            "id": latest.get("id"),
+            "summary": latest.get("summary"),
+            "published": latest.get("published"),
+        },
+    }
+
+
 def _scan_struct(
     data: dict,
     target: str,
@@ -412,6 +448,9 @@ def _scan_struct(
         "certified_mark": bool((data.get("certified") or {}).get("eligible")) and safe,
         # top findings, repeats collapsed to one row + count — for the card + CI triage
         "top_findings": _grouped_findings(items, 3),
+        # context-only incident history (was this package ever compromised?) — never
+        # part of the score/verdict; None when there is no known incident.
+        "incident": _incident_summary(data.get("incident_history") or {}),
         # per-category 0-100 axes — explains WHY the score is what it is
         "subscores": data.get("category_scores") or {},
         # copy-paste install command — packages with NO blocking findings only (None for
