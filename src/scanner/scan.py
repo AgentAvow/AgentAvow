@@ -86,6 +86,12 @@ _REMEDIATION_HINTS: dict[str, str] = {
         "send — the prompt-injection→exfiltration chain. Isolate the capabilities: don't "
         "let untrusted content reach an outbound path that can carry secrets"
     ),
+    "git_autorun": (
+        "This repo ships a git-config that executes a command on ordinary git operations "
+        "(the GitSpawn class — a plain `git status`/`clone` becomes code execution). Remove "
+        "the committed .git/config or .gitconfig; never ship core.fsmonitor / core.hooksPath "
+        "/ core.sshCommand or `!`-shell aliases in a repo"
+    ),
 }
 
 
@@ -200,6 +206,10 @@ class ScanResult:
 
 def _should_skip_path(path: str) -> bool:
     """Check if a file path should be skipped."""
+    # Never skip a git-config file — a shipped .git/config is the GitSpawn autorun vector,
+    # so we must inspect it even though .git/ is otherwise a skipped directory.
+    if _is_git_config_file(path):
+        return False
     parts = Path(path).parts
     for part in parts:
         if part in SKIP_DIRS:
@@ -910,7 +920,7 @@ def _select_scan_files(
     scannable = [
         it for it in tree
         if not _should_skip_path(it["path"])
-        and _is_source_file(it["path"])
+        and (_is_source_file(it["path"]) or _is_git_config_file(it["path"]))
         and not _excluded(it["path"])
     ]
     total = len(scannable)
@@ -1467,6 +1477,10 @@ def _scan_content(
     if is_metadata and Path(file_path).name.lower().endswith(".json"):
         findings.extend(_scan_manifest_exec(content, file_path))
 
+    # Git-config autorun (GitSpawn class) — a shipped .git/config or .gitconfig that
+    # executes a command on routine git operations. Path-gated inside the scanner.
+    findings.extend(_scan_git_autorun(content, file_path))
+
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
     findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
 
@@ -1606,6 +1620,84 @@ def _scan_install_hooks(content: str, file_path: str) -> list[Finding]:
             snippet=f"{hook}: {cmd}"[:120],
             remediation=_REMEDIATION_HINTS["install_hook"],
         ))
+    return findings
+
+
+def _is_git_config_file(file_path: str) -> bool:
+    """True if the path is a git config file that could carry autorun directives.
+
+    Covers a committed/shipped `.gitconfig`, a nested `.git/config` (the GitSpawn vector —
+    a repo that ships its own `.git/` so any git command in the clone auto-executes), and
+    dotfile-template variants (`gitconfig`)."""
+    p = Path(file_path)
+    name = p.name.lower()
+    if name in (".gitconfig", "gitconfig"):
+        return True
+    # a `config` file living inside a (committed) .git directory
+    return name == "config" and any(part.lower() == ".git" for part in p.parts)
+
+
+# git-config keys that cause a command to run during ordinary git operations. These
+# are the "clone → any git op → RCE" (GitSpawn class) vectors. fsmonitor/hooksPath/
+# sshCommand fire on routine commands (status/add/commit/fetch/push) with no opt-in →
+# high; pager/editor need a specific command → medium; `!`-aliases need the alias to be
+# invoked → medium.
+_GIT_AUTORUN_CORE_HIGH = {"fsmonitor", "hookspath", "sshcommand"}
+_GIT_AUTORUN_CORE_SHELL = {"pager", "editor"}  # only dangerous when set to a shell command
+_GIT_SECTION_RE = re.compile(r'^\s*\[\s*([A-Za-z0-9.-]+)(?:\s+"[^"]*")?\s*\]')
+_GIT_KV_RE = re.compile(r'^\s*([A-Za-z][A-Za-z0-9-]*)\s*=\s*(.*?)\s*$')
+# A value that runs a shell command (vs a plain program name like `vim`/`less`): shell
+# metacharacters, an explicit `sh -c`, or a fetch/interpreter invocation.
+_GIT_SHELL_DANGER_RE = re.compile(
+    r"[;&|`]|\$\(|\b(?:sh|bash|zsh|ash)\s+-c\b|\b(?:curl|wget|nc|eval|python[0-9.]*|perl|node|ruby)\b")
+
+
+def _scan_git_autorun(content: str, file_path: str) -> list[Finding]:
+    """Flag git-config directives that execute a command on routine git operations.
+
+    A repo that ships a `.git/config` or `.gitconfig` with `core.fsmonitor` (or
+    `core.hooksPath` / `core.sshCommand` / a `!`-shell alias) set to a command turns a
+    plain `git status`/`clone` into remote code execution (the GitSpawn class). Static,
+    path-gated — only runs on git-config files."""
+    findings: list[Finding] = []
+    if not _is_git_config_file(file_path):
+        return findings
+    section = ""
+    for i, raw in enumerate(content.splitlines()):
+        m = _GIT_SECTION_RE.match(raw)
+        if m:
+            section = m.group(1).lower()
+            continue
+        kv = _GIT_KV_RE.match(raw)
+        if not kv:
+            continue
+        key, value = kv.group(1).lower(), kv.group(2).strip().strip('"').strip("'")
+        if not value:
+            continue
+        sev = label = None
+        if section == "core" and key in _GIT_AUTORUN_CORE_HIGH:
+            # fsmonitor=true is the built-in monitor (safe); a path/command is the attack.
+            if key == "fsmonitor" and value.lower() in ("true", "false"):
+                continue
+            sev, label = "high", f"core.{kv.group(1)} runs a command on routine git operations"
+        elif section == "core" and key in _GIT_AUTORUN_CORE_SHELL:
+            # pager/editor are usually a plain program (vim/less) — only a shell command runs code.
+            if _GIT_SHELL_DANGER_RE.search(value):
+                sev, label = "high", f"core.{kv.group(1)} runs a shell command (on git {key})"
+        elif section == "alias" and value.startswith("!"):
+            sev, label = "medium", f"git alias '{kv.group(1)}' runs a shell command"
+        elif section in ("include", "includeif") and key == "path":
+            sev, label = "medium", "git-config include pulls in another config file"
+        if sev:
+            findings.append(Finding(
+                category="git_autorun",
+                name=f"Git-config autorun: {label}",
+                severity=sev,
+                file_path=file_path,
+                line_number=i + 1,
+                snippet=f"[{section}] {kv.group(1)} = {value}"[:120],
+                remediation=_REMEDIATION_HINTS["git_autorun"],
+            ))
     return findings
 
 
@@ -2052,6 +2144,8 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         "fs_access": "filesystem_access",
         "dependency": "dependency_health",
         "install_hook": "dependency_health",
+        # Git-config autorun (GitSpawn class) is a code-execution vector → code-safety axis.
+        "git_autorun": "code_safety",
         # Phase 2: repo↔artifact drift (injected/modified files) is a code-safety axis.
         "artifact_drift": "code_safety",
         # MCP-native detectors — without these the evidence cards read all-green for a
