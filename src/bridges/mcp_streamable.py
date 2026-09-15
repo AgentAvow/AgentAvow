@@ -33,7 +33,7 @@ from src.bridges.mcp_app_view import TRUST_CARD_HTML
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v3.html"
+_CARD_URI = "ui://agentavow/trust-card-v4.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 
@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.11.3",
+    version="0.12.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -362,6 +362,8 @@ def _scan_struct(
         "critical": crit,
         "high": high,
         "findings_total": int((data.get("findings") or {}).get("total") or len(items)),
+        # top findings (severity + what + where + fix) — for the card + CI triage
+        "top_findings": _findings(items, 3),
         # per-category 0-100 axes — explains WHY the score is what it is
         "subscores": data.get("category_scores") or {},
         "adoption": (
