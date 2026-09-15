@@ -36,7 +36,7 @@ from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v11.html"
+_CARD_URI = "ui://agentavow/trust-card-v12.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 

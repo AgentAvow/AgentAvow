@@ -65,10 +65,7 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   .subs { margin:12px 0 0; display:grid; grid-template-columns:1fr 1fr; gap:5px 16px; }
   .sub { display:flex; align-items:center; gap:7px; font-size:11px; }
   .slabel { flex:1; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sbar { flex:none; width:34px; height:4px; border-radius:99px; background:var(--track); overflow:hidden; }
-  .sfill { height:100%; border-radius:99px; background:var(--muted); }
-  .sfill.b1 { background:#22C55E; } .sfill.b2 { background:#5BBF3A; } .sfill.b3 { background:#F59E0B; }
-  .sfill.b4 { background:#F97316; } .sfill.b5 { background:#EF4444; }
+  .sbar { flex:none; }
   .subcap { grid-column:1/-1; font-size:9.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:1px; }
   .sval { flex:none; width:22px; text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); }
   .cta { margin:13px 0 0; display:flex; flex-direction:column; align-items:stretch; gap:6px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 11px; }
@@ -160,18 +157,22 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
       html+='<div class="find"><span class="dot" style="background:'+sevColor(f.severity)+'"></span><span><span class="fwhat">'+esc(f.what||f.category||"finding")+'</span>'+times+(f.where?' <span class="fwhere">'+esc(f.where)+'</span>':'')+'</span></div>'; }
     el.innerHTML=html;
   }
-  function axisBand(v){ return v>=80?"b1":v>=60?"b2":v>=40?"b3":v>=20?"b4":"b5"; }
   function renderSubs(subs){
     var el=document.getElementById("subs"); var keys=subs?Object.keys(subs):[];
-    // Show ONLY the axes that lost points (< 100). A clean scan has all axes at 100, so
-    // this stays hidden (no wall of identical bars); the axes that dropped ARE the signal.
-    // Colour via a CSS class, not an injected inline background — strict host sandboxes can
-    // strip dynamic inline styles, which is what left the old bars grey.
+    // Show ONLY the axes that lost points (< 100): a clean scan has all axes at 100, so
+    // this stays hidden (no wall of identical bars); the ones that dropped ARE the signal.
+    // Draw each bar as inline SVG (width + fill as attributes) — the same technique the
+    // trust bar and adoption needle use. HTML/CSS-styled bars rendered grey in the host
+    // sandbox (nested-fill layout didn't resolve); SVG fill attributes render reliably.
     var dropped=[]; for(var i=0;i<keys.length;i++){ if((+subs[keys[i]]||0)<100) dropped.push(keys[i]); }
     if(!dropped.length){ el.style.display="none"; return; }
     var html='<div class="subcap">Where the score dropped</div>';
-    for(var j=0;j<dropped.length;j++){ var k=dropped[j], v=+subs[k]||0;
-      html+='<div class="sub"><span class="slabel">'+esc(axisLabel(k))+'</span><span class="sbar"><span class="sfill '+axisBand(v)+'" style="width:'+v+'%"></span></span><span class="sval">'+v+'</span></div>'; }
+    for(var j=0;j<dropped.length;j++){ var k=dropped[j], v=+subs[k]||0, w=(v*34/100).toFixed(1);
+      html+='<div class="sub"><span class="slabel">'+esc(axisLabel(k))+'</span>'
+        +'<svg class="sbar" width="34" height="4" viewBox="0 0 34 4" aria-hidden="true">'
+        +'<rect width="34" height="4" rx="2" fill="#94a3b8" fill-opacity="0.25"/>'
+        +'<rect width="'+w+'" height="4" rx="2" fill="'+axisColor(v)+'"/></svg>'
+        +'<span class="sval">'+v+'</span></div>'; }
     el.innerHTML=html; el.style.display="grid";
   }
 
