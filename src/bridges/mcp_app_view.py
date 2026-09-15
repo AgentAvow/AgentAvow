@@ -66,7 +66,10 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   .sbar { flex:none; width:34px; height:4px; border-radius:99px; background:var(--track); overflow:hidden; }
   .sfill { height:100%; border-radius:99px; }
   .sval { flex:none; width:22px; text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); }
-  .cta { margin:13px 0 0; display:flex; align-items:center; gap:8px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  .cta { margin:13px 0 0; display:flex; flex-direction:column; align-items:stretch; gap:6px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 11px; }
+  .ctalabel { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+  .ctalabel.ok { color:#22C55E; }
+  .ctarow { display:flex; align-items:center; gap:8px; }
   .cmd { flex:1; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:var(--fg); overflow:auto; white-space:nowrap; user-select:all; }
   .foot { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
   .signed { font-size:11px; color:var(--muted); }
@@ -96,7 +99,7 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     <div class="why" id="why"></div>
     <div class="finds" id="finds"></div>
     <div class="subs" id="subs" style="display:none"></div>
-    <div class="cta" id="cta" style="display:none"><code class="cmd" id="cmd"></code><button class="ghost" id="copy">Copy</button></div>
+    <div class="cta" id="cta" style="display:none"><span class="ctalabel" id="ctalabel"></span><div class="ctarow"><code class="cmd" id="cmd"></code><button id="copy">Copy</button></div></div>
     <div class="foot"><span class="signed" id="signed"></span><div class="btns"><button id="report" style="display:none">View full report ↗</button></div></div>
   </div>
 <script>
@@ -178,10 +181,16 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     var why=whys[reason]||"";
     if(certified) why="Certified — artifact scanned, provenance verified, no drift, signed & recomputable. "+why;
     document.getElementById("why").textContent = why;
-    // Install CTA — only for a safe/certified PACKAGE (we have an install command).
-    var cta=document.getElementById("cta");
-    if(sc.install && (mode==="safe"||certified)){ document.getElementById("cmd").textContent=sc.install; cta.style.display="flex"; }
-    else { cta.style.display="none"; }
+    // Install CTA — tiered: safe/certified get the primary "Ready to install" treatment;
+    // limited gets the command muted with a "verify first" cue (no risks found, but not
+    // fully verified); review gets NO install (real findings to weigh first).
+    var cta=document.getElementById("cta"), copyBtn=document.getElementById("copy"), ctaLabel=document.getElementById("ctalabel");
+    if(sc.install && mode!=="risk"){
+      document.getElementById("cmd").textContent=sc.install;
+      if(mode==="safe"||certified){ ctaLabel.textContent="Ready to install"; ctaLabel.className="ctalabel ok"; copyBtn.className=""; }
+      else { ctaLabel.textContent="Install · no risks found, verify first"; ctaLabel.className="ctalabel mut"; copyBtn.className="ghost"; }
+      cta.style.display="flex";
+    } else { cta.style.display="none"; }
     document.getElementById("signed").textContent = (sc.signed?"signed ✔ Ed25519":"unsigned") + " · " + (sc.cached?"cached ≤1h":"fresh scan");
     reportUrl=sc.report_url||null;
     if(reportUrl){ document.getElementById("report").style.display="inline-block"; }

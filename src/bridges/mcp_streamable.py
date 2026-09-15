@@ -33,7 +33,7 @@ from src.bridges.mcp_app_view import TRUST_CARD_HTML
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v5.html"
+_CARD_URI = "ui://agentavow/trust-card-v6.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 
@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.13.0",
+    version="0.13.1",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
