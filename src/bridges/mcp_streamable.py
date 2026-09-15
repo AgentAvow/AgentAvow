@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.15.0",
+    version="0.15.1",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -244,7 +244,10 @@ def _scan_block(
         reason = (f"capped because there's little code to inspect "
                   f"({_files} file{'' if _files == 1 else 's'})")
     else:
-        _subs = data.get("category_scores") or {}
+        # Only compare numeric subscores — a null/non-numeric value would make min() raise
+        # and turn a successful scan into a generic error.
+        _subs = {k: v for k, v in (data.get("category_scores") or {}).items()
+                 if isinstance(v, (int, float))}
         _low = min(_subs.items(), key=lambda kv: kv[1]) if _subs else None
         reason = "held below the bar by non-finding signals (maintainer, provenance, drift)"
         if _low and _low[1] < 80:
@@ -335,14 +338,9 @@ def _scan_block(
         f"Full report: {_WEB_BASE}{report_path} · "
         f"Verify offline: {_WEB_BASE}/how-it-works#verify"
     )
-    # On a genuinely fresh scan (first time this target is checked, not a cache hit),
-    # let the user know they can automate the "scan before you use it" habit. Shown
-    # once per fresh result so it doesn't nag on repeat checks.
-    if not data.get("cached"):
-        lines.append(
-            f"💡 Tip: scan new tools automatically before you use them — add a one-line "
-            f"CLAUDE.md rule or a SessionStart hook: {_SETUP_URL}"
-        )
+    # (The "automate scanning via a CLAUDE.md rule / SessionStart hook" pitch is NOT
+    #  emitted per-scan — a reviewer could read config-changing suggestions in tool output
+    #  as friction. It lives in about_agentavow + the docs page instead.)
     return "\n".join(lines)
 
 
@@ -420,12 +418,14 @@ def _scan_struct(
         "top_findings": _grouped_findings(items, 3),
         # per-category 0-100 axes — explains WHY the score is what it is
         "subscores": data.get("category_scores") or {},
-        # copy-paste install command for safe packages (None for repos/MCP endpoints)
-        "install": {
-            "npm": f"npm install {target}",
-            "pypi": f"pip install {target}",
-            "crates": f"cargo add {target}",
-        }.get(target_type),
+        # copy-paste install command — packages with NO blocking findings only (None for
+        # repos/MCP endpoints, and None when there are critical/high findings to weigh
+        # first, so a consumer can't read "install present" as "safe to install").
+        "install": (
+            {"npm": f"npm install {target}", "pypi": f"pip install {target}",
+             "crates": f"cargo add {target}"}.get(target_type)
+            if crit + high == 0 else None
+        ),
         "adoption": (
             {"count": adoption[0], "unit": adoption[1], "score_0_100": adoption[2]}
             if adoption else None
@@ -809,7 +809,9 @@ async def _call_tool(
             eid = arguments["entity_id"]
             d = await _get(f"/entities/{eid}/trust")  # 404s cleanly if the entity is unknown
             pct = round(float(d.get("score") or 0.0) * 100)
-            badge = f"{_API_BASE}/badges/trust/{eid}.svg"
+            # Public host, NOT _API_BASE (which is the internal container URL — that would
+            # emit a localhost link into the user's README).
+            badge = f"{_WEB_BASE}/api/v1/badges/trust/{eid}.svg"
             report = f"{_WEB_BASE}/entities/{eid}/trust"
             return _text(
                 f"Trust badge for this agent (currently {pct}/100):\n\n"
