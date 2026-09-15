@@ -75,6 +75,7 @@ ignore = ["UP007"]  # We handle union types with __future__ annotations
 "src/scanner/behavioral/runner.py" = ["E501"]  # one long shlex-quoted remote command
 "src/api/metrics_dashboard_router.py" = ["E501"]  # Inline HTML/CSS dashboard template
 "src/api/legal_router.py" = ["E501"]  # Inline HTML/CSS privacy-policy template
+"src/api/docs_content_router.py" = ["E501"]  # Inline HTML/CSS docs template
 "src/bridges/mcp_app_view.py" = ["E501"]  # Inline HTML/CSS/JS MCP Apps trust-card View
 "src/api/marketing_router.py" = ["E501"]  # Long f-string post/prompt literals
 "tests/*" = ["N802", "E501"]  # Descriptive test names + inline fixture strings

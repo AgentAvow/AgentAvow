@@ -119,6 +119,7 @@ const Research = lazyWithReload(() => import('./pages/Research'))
 // AgentAvow rebrand sandbox — isolated /rebrand/* tree (see docs/internal/rebrand-build-spec-and-loose-ends.md)
 const RebrandLayout = lazyWithReload(() => import('./rebrand/RebrandLayout'))
 const RebrandHome = lazyWithReload(() => import('./rebrand/pages/Home'))
+const RebrandNotFound = lazyWithReload(() => import('./rebrand/pages/NotFound'))
 const RebrandBrowse = lazyWithReload(() => import('./rebrand/pages/Browse'))
 const RebrandTrustIndex = lazyWithReload(() => import('./rebrand/pages/TrustIndex'))
 const RebrandAdminDashboard = lazyWithReload(() => import('./rebrand/pages/AdminDashboard'))
@@ -288,7 +289,7 @@ function AppRoutes() {
           <Route path="sandbox" element={<RebrandSandbox />} />
           <Route path="legal" element={<RebrandLegal />} />
           <Route path="legal/:section" element={<RebrandLegal />} />
-          <Route path="*" element={<RebrandHome />} />
+          <Route path="*" element={<RebrandNotFound />} />
         </Route>
       </Routes>
     </Suspense>

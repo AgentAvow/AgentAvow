@@ -17,6 +17,8 @@ RUN pip install --no-cache-dir ".[prod]"
 COPY migrations/ migrations/
 COPY alembic.ini ./
 COPY docs/ docs/
+# Rebrand docs markdown — single source, rendered as SSR HTML by docs_content_router
+COPY web/src/rebrand/docs/ docpages_content/
 
 # Run migrations and start (migrations handled by entrypoint)
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
