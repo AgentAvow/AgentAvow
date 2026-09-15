@@ -739,7 +739,11 @@ _GET_STARTED = (
     "or an agent identity); how to read a verdict (a 0-100 trust score — 81+ with no "
     "critical/high findings means safe to connect, otherwise needs review — and that "
     "every result is signed and can be recomputed offline); and give me two or three "
-    "concrete example things I could ask you to scan right now."
+    "concrete example things I could ask you to scan right now. If I'm using Claude Code, "
+    "also mention that I can OPT IN to scanning new tools automatically before I install "
+    "them, via a one-line CLAUDE.md rule or a SessionStart hook "
+    "(setup: https://agentavow.com/docs/auto-scan-claude-code) — it's my own optional "
+    "habit to configure, not something the connector does on its own."
 )
 
 
