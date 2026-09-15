@@ -9,6 +9,7 @@ import runLocally from '../docs/run-locally.md?raw'
 import trustBadges from '../docs/trust-badges.md?raw'
 import verifyAttestations from '../docs/verify-attestations.md?raw'
 import autoScanClaudeCode from '../docs/auto-scan-claude-code.md?raw'
+import mcpConnector from '../docs/mcp-connector.md?raw'
 
 /**
  * Rebrand docs PREVIEW — renders the staged trust-first docs (web/src/rebrand/docs/*.md)
@@ -23,6 +24,7 @@ const DOCS = [
   { slug: 'run-locally', title: 'Run locally & in CI', body: runLocally },
   { slug: 'trust-badges', title: 'Add a trust badge', body: trustBadges },
   { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations },
+  { slug: 'mcp-connector', title: 'MCP connector', body: mcpConnector },
   { slug: 'auto-scan-claude-code', title: 'Auto-scan in Claude Code', body: autoScanClaudeCode },
 ]
 
