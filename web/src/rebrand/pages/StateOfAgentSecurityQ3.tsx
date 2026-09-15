@@ -18,9 +18,12 @@ export default function StateOfAgentSecurityQ3() {
     queryKey: ['flagged-stat-q3'],
     queryFn: async () => (await publicApi.get('/public/scan-catalog/flagged-stat')).data,
   })
-  const pct = stat.data?.pct ?? 43
-  const scanned = stat.data?.scanned ?? 24756
-  const flagged = stat.data?.flagged ?? 10652
+  // Fallbacks mirror the live flagged-stat endpoint (last synced 2026-09-15,
+  // post the scoring-integrity re-scan). The page renders the live figure; these
+  // only show if the endpoint is unreachable, so keep them near the live value.
+  const pct = stat.data?.pct ?? 29
+  const scanned = stat.data?.scanned ?? 25711
+  const flagged = stat.data?.flagged ?? 7529
 
   return (
     <div className="max-w-[820px] mx-auto px-6 py-16">
