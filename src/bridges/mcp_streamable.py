@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.15.1",
+    version="0.15.2",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -209,7 +209,15 @@ def _grouped_findings(items: list[dict], limit: int = 3) -> list[dict]:
             order.append(key)
         else:
             g["count"] += 1
-    return [groups[k] for k in order[:limit]]
+    # Surface the most important first: severity (critical > high > medium > low), then
+    # the highest-count pattern within a severity — so a big cluster (e.g. vulnerable
+    # deps) isn't dropped behind a single lower-priority finding. Stable within ties.
+    sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    ranked = sorted(
+        groups.values(),
+        key=lambda g: (sev_rank.get(g["severity"], 4), -g["count"]),
+    )
+    return ranked[:limit]
 
 
 def _scan_block(
@@ -634,6 +642,16 @@ _TOOLS: list[types.Tool] = [
 for _t in _TOOLS:
     if _t.name in ("scan_repo", "scan_package", "scan_mcp_server"):
         _t.meta = _CARD_META
+
+# Defensive length bounds on string inputs (hygiene — these are interpolated into API
+# paths; also what our own scanner flags on unconstrained params). Generous so no real
+# input is rejected; additive only (never changes an existing constraint).
+_MAXLEN = {"repo": 214, "owner": 214, "name": 214, "endpoint_url": 512,
+           "entity_id": 64, "target_entity_id": 64}
+for _t in _TOOLS:
+    for _k, _p in ((_t.inputSchema or {}).get("properties") or {}).items():
+        if _p.get("type") == "string" and "maxLength" not in _p and _k in _MAXLEN:
+            _p["maxLength"] = _MAXLEN[_k]
 
 
 @server.list_tools()
