@@ -7,21 +7,17 @@ protocol directly (no bundler/deps) so it renders under the host's strict defaul
 network: the scan result arrives via ui/notifications/tool-result and it reads our
 stable structuredContent contract.
 
-Best practices followed:
-- Additive + graceful: hosts without MCP Apps ignore the view and show the text card.
-- Theme-aware: honors hostContext.theme (light/dark) and prefers-color-scheme.
-- Sized to content: reports ui/notifications/size-changed so the host fits the iframe.
-- No external anything: brand mark is inline SVG, assets are data/inline — CSP-clean.
-- Robust transport: accepts the host's relayed messages (Claude nests the view in a
-  sandbox, so messages don't always originate from window.parent), decodes
-  string-encoded frames, and can't stall the data (initialized fires on the init
-  response, on first tool-result, and on a short fallback).
+Best practices: additive + graceful text fallback; theme-aware (hostContext.theme +
+prefers-color-scheme); sized to content (size-changed); inline/CSP-clean; accessible
+(focus-visible, aria); robust transport (source-agnostic — Claude nests the view in a
+sandbox that relays from a window other than window.parent; decodes string frames;
+non-stalling handshake). The resource URI is versioned in mcp_streamable (_CARD_URI)
+to bust host caches on change.
 
-Artwork MATCHES the live site's locked dual mark (web/src/rebrand/components/
-TrustMark.tsx): a vertical 10-segment trust bar tinted by trust tier + an adoption VU
-needle (teal->magenta). Kept as a plain string (not an f-string) so the JS/SVG braces
-are literal. The resource URI is versioned in mcp_streamable (_CARD_URI) to bust host
-caches on change.
+Artwork MATCHES the live site's locked marks (web/src/rebrand/components/TrustMark.tsx):
+vertical 10-segment trust bar (tier-tinted, or a teal->magenta gradient when Certified),
+the adoption VU needle, per-category subscores, top findings, and an install CTA for
+safe/certified packages. Plain string (not an f-string) so JS/SVG braces are literal.
 """
 
 TRUST_CARD_HTML = r"""<!DOCTYPE html>
@@ -38,15 +34,16 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   :root[data-theme="dark"]{ --bg:#0b0f17; --panel:#0f1522; --fg:#e6edf3; --muted:#9aa7b6; --track:#1e2733; --line:#1e2733; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-  .card { position:relative; max-width:460px; margin:0 auto; padding:18px 18px 15px; }
-  .accent { position:absolute; top:0; left:0; right:0; height:3px; border-radius:3px 3px 0 0; background:var(--muted); transition:background .2s; }
+  .card { position:relative; max-width:470px; margin:0 auto; padding:18px 18px 15px; }
+  .accent { position:absolute; top:0; left:0; right:0; height:3px; border-radius:3px 3px 0 0; background:var(--muted); }
   .hdr { display:flex; align-items:center; justify-content:space-between; gap:12px; }
   .brandwrap { display:flex; align-items:center; gap:7px; }
   .brand { font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
   .pill { font-size:11px; font-weight:800; padding:3px 11px; border-radius:999px; white-space:nowrap; letter-spacing:.02em; }
+  .pill.cert { color:#04201c; background:linear-gradient(120deg,#2dd4bf,#e879f9); }
   .target { font-weight:700; font-size:15.5px; margin:8px 0 2px; word-break:break-all; }
-  .posture { font-size:11.5px; color:var(--muted); margin-bottom:8px; }
-  .inst { display:flex; align-items:stretch; justify-content:center; gap:0; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 6px; margin-top:4px; }
+  .posture { font-size:11.5px; color:var(--muted); margin-bottom:8px; min-height:0; }
+  .inst { display:flex; align-items:stretch; justify-content:center; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 6px; margin-top:4px; }
   .col { flex:1; display:flex; flex-direction:column; align-items:center; padding:0 8px; }
   .divider { width:1px; background:var(--line); margin:2px 0; align-self:stretch; }
   .caplabel { font-size:9.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:9px; }
@@ -63,10 +60,19 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   .dot { flex:none; width:7px; height:7px; border-radius:50%; margin-top:4px; }
   .fwhat { font-weight:600; }
   .fwhere { color:var(--muted); font-family:ui-monospace,Menlo,Consolas,monospace; font-size:10.5px; }
-  .more { color:var(--muted); font-size:11.5px; margin-left:15px; }
+  .subs { margin:12px 0 0; display:grid; grid-template-columns:1fr 1fr; gap:5px 16px; }
+  .sub { display:flex; align-items:center; gap:7px; font-size:11px; }
+  .slabel { flex:1; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sbar { flex:none; width:34px; height:4px; border-radius:99px; background:var(--track); overflow:hidden; }
+  .sfill { height:100%; border-radius:99px; }
+  .sval { flex:none; width:22px; text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); }
+  .cta { margin:13px 0 0; display:flex; align-items:center; gap:8px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  .cmd { flex:1; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; color:var(--fg); overflow:auto; white-space:nowrap; user-select:all; }
   .foot { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
   .signed { font-size:11px; color:var(--muted); }
-  button { font:inherit; font-weight:700; font-size:12px; color:#04201c; background:linear-gradient(120deg,#2dd4bf,#5eead4); border:0; border-radius:8px; padding:7px 13px; cursor:pointer; }
+  .btns { display:flex; gap:8px; align-items:center; }
+  button { font:inherit; font-weight:700; font-size:12px; color:#04201c; background:linear-gradient(120deg,#2dd4bf,#5eead4); border:0; border-radius:8px; padding:7px 12px; cursor:pointer; white-space:nowrap; }
+  button.ghost { color:var(--muted); background:none; border:1px solid var(--line); }
   button:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
 </style>
 </head>
@@ -81,7 +87,7 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
       <span class="pill" id="pill" style="display:none"></span>
     </div>
     <div class="target" id="target">Loading trust card…</div>
-    <div class="posture mut" id="posture"></div>
+    <div class="posture" id="posture"></div>
     <div class="inst">
       <div class="col"><div class="caplabel">Trust</div><div id="trust"></div></div>
       <div class="divider"></div>
@@ -89,7 +95,9 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     </div>
     <div class="why" id="why"></div>
     <div class="finds" id="finds"></div>
-    <div class="foot"><span class="signed" id="signed"></span><button id="report" style="display:none">View full report ↗</button></div>
+    <div class="subs" id="subs" style="display:none"></div>
+    <div class="cta" id="cta" style="display:none"><code class="cmd" id="cmd"></code><button class="ghost" id="copy">Copy</button></div>
+    <div class="foot"><span class="signed" id="signed"></span><div class="btns"><button id="report" style="display:none">View full report ↗</button></div></div>
   </div>
 <script>
 (function () {
@@ -104,18 +112,22 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   function compact(n){ n=+n||0; var u=[[1e9,"B"],[1e6,"M"],[1e3,"k"]]; for(var i=0;i<u.length;i++){ if(n>=u[i][0]) return (n/u[i][0]).toFixed(1).replace(/\.0$/,"")+u[i][1]; } return ""+n; }
   function tier(s){ var T=[["Trusted",80,"#22C55E","Auto-approve within budget"],["Standard",60,"#5BBF3A","Standard rate + token limits"],["Caution",40,"#F59E0B","Confirm on sensitive calls"],["Restricted",20,"#F97316","Gated · manual approval"],["Blocked",0,"#EF4444","Do not connect"]]; for(var i=0;i<T.length;i++){ if(s>=T[i][1]) return {name:T[i][0],color:T[i][2],posture:T[i][3]}; } return {name:"Blocked",color:"#EF4444",posture:"Do not connect"}; }
   function sevColor(sev){ return {critical:"#EF4444",high:"#F97316",medium:"#F59E0B",low:"#94A3B8"}[sev]||"#94A3B8"; }
+  function axisLabel(k){ return {secret_hygiene:"Secrets",code_safety:"Code safety",data_handling:"Data handling",filesystem_access:"Filesystem",dependency_health:"Dependencies"}[k] || k.replace(/_/g," ").replace(/\b\w/g,function(c){return c.toUpperCase();}); }
+  function axisColor(v){ return v>=80?"#22C55E":v>=60?"#5BBF3A":v>=40?"#F59E0B":v>=20?"#F97316":"#EF4444"; }
   function P(cx,cy,r,d){ var a=d*Math.PI/180; return [cx+r*Math.cos(a), cy+r*Math.sin(a)]; }
   function ARC(cx,cy,r,a0,a1){ var s=P(cx,cy,r,a0),e=P(cx,cy,r,a1),lg=(a1-a0>180)?1:0; return "M"+s[0].toFixed(1)+" "+s[1].toFixed(1)+" A"+r+" "+r+" 0 "+lg+" 1 "+e[0].toFixed(1)+" "+e[1].toFixed(1); }
   function adoptionPct(c){ c=c||0; return c>0?Math.min(100,Math.round(Math.log10(c+1)/9*100)):0; }
   function adoptTier(p){ return p>=88?"Load-bearing":p>=65?"Widely relied":p>=40?"Established":p>=15?"Rising":"New"; }
 
-  function renderTrust(score){
+  function renderTrust(score, certified){
     var t=tier(score), lv=Math.round(score/10), segs="";
-    for(var i=9;i>=0;i--){ segs+='<div class="seg" style="background:'+(i<lv?t.color:"var(--track)")+'"></div>'; }
+    for(var i=9;i>=0;i--){ var on=certified||i<lv, bg=certified?"linear-gradient(90deg,#2dd4bf,#e879f9)":(on?t.color:"var(--track)"); segs+='<div class="seg" style="background:'+bg+'"></div>'; }
+    var numColor=certified?"#2dd4bf":t.color;
+    var label=certified?'<span class="grad">CERTIFIED</span>':'<span style="color:'+t.color+'">'+t.name+'</span>';
     document.getElementById("trust").innerHTML =
       '<div class="segs">'+segs+'</div>'
-      +'<div class="num" style="color:'+t.color+'">'+score+'<span class="unit">/100</span></div>'
-      +'<div class="tw" style="color:'+t.color+'">'+t.name+'</div>';
+      +'<div class="num" style="color:'+numColor+'">'+score+'<span class="unit">/100</span></div>'
+      +'<div class="tw">'+label+'</div>';
   }
   function renderAdopt(ad){
     var c=ad?(ad.count||0):0, pct=ad?(ad.score_0_100!=null?ad.score_0_100:adoptionPct(c)):0, has=(pct>0||c>0);
@@ -133,30 +145,44 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   }
   function renderFinds(list, mode){
     var el=document.getElementById("finds"); el.innerHTML="";
-    if(mode!=="risk" || !list || !list.length){ return; }
-    var html="";
-    for(var i=0;i<Math.min(list.length,3);i++){ var f=list[i];
+    if(mode!=="risk" || !list || !list.length) return;
+    var html=""; for(var i=0;i<Math.min(list.length,3);i++){ var f=list[i];
       html+='<div class="find"><span class="dot" style="background:'+sevColor(f.severity)+'"></span><span><span class="fwhat">'+esc(f.what||f.category||"finding")+'</span>'+(f.where?' <span class="fwhere">'+esc(f.where)+'</span>':'')+'</span></div>'; }
     el.innerHTML=html;
+  }
+  function renderSubs(subs){
+    var el=document.getElementById("subs"); var keys=subs?Object.keys(subs):[];
+    if(!keys.length){ el.style.display="none"; return; }
+    var html=""; for(var i=0;i<keys.length;i++){ var k=keys[i], v=+subs[k]||0;
+      html+='<div class="sub"><span class="slabel">'+esc(axisLabel(k))+'</span><span class="sbar"><span class="sfill" style="width:'+v+'%;background:'+axisColor(v)+'"></span></span><span class="sval">'+v+'</span></div>'; }
+    el.innerHTML=html; el.style.display="grid";
   }
 
   var reportUrl=null;
   function render(sc){
-    if(!sc){ return; }
-    var score=+(sc.trust_score||0), reason=sc.verdict_reason, t=tier(score);
+    if(!sc) return;
+    var score=+(sc.trust_score||0), reason=sc.verdict_reason, t=tier(score), certified=!!sc.certified;
     var mode=(sc.verdict==="safe")?"safe":(reason==="blocking_findings"?"risk":"limited");
     var conf={ safe:{label:"✓ SAFE",color:"#22C55E"}, risk:{label:"⚠ REVIEW",color:"#F59E0B"}, limited:{label:"◍ LIMITED",color:"#94A3B8"} }[mode];
-    document.getElementById("accent").style.background=conf.color;
+    document.getElementById("accent").style.background = certified?"linear-gradient(90deg,#2dd4bf,#e879f9)":conf.color;
     document.getElementById("target").textContent = sc.target + (sc.target_type?" · "+sc.target_type:"");
-    var pill=document.getElementById("pill"); pill.textContent=conf.label; pill.style.color=conf.color; pill.style.background=conf.color+"22"; pill.style.display="inline-block";
-    document.getElementById("posture").textContent = (mode==="safe")? ("Posture: "+t.posture) : "";
-    renderTrust(score); renderAdopt(sc.adoption); renderFinds(sc.top_findings, mode);
+    var pill=document.getElementById("pill"); pill.style.display="inline-block";
+    if(certified){ pill.className="pill cert"; pill.textContent="✓ CERTIFIED"; pill.style.color=""; pill.style.background=""; }
+    else { pill.className="pill"; pill.textContent=conf.label; pill.style.color=conf.color; pill.style.background=conf.color+"22"; }
+    document.getElementById("posture").textContent = (certified||mode==="safe") ? ("Posture: "+t.posture) : "";
+    renderTrust(score, certified); renderAdopt(sc.adoption); renderFinds(sc.top_findings, mode); renderSubs(sc.subscores);
     var whys={ clean:"No blocking issues found — signed and safe to connect.",
                blocking_findings:(sc.critical||0)+" critical · "+(sc.high||0)+" high — review these before you connect.",
                thin_coverage:"No risks found; score capped by limited coverage, not detected risk.",
                low_signals:"No risks found; below the bar on non-finding signals, not detected risk." };
-    document.getElementById("why").textContent = whys[reason]||"";
-    document.getElementById("signed").textContent = sc.signed?"signed ✔ Ed25519 · recomputable":"";
+    var why=whys[reason]||"";
+    if(certified) why="Certified — artifact scanned, provenance verified, no drift, signed & recomputable. "+why;
+    document.getElementById("why").textContent = why;
+    // Install CTA — only for a safe/certified PACKAGE (we have an install command).
+    var cta=document.getElementById("cta");
+    if(sc.install && (mode==="safe"||certified)){ document.getElementById("cmd").textContent=sc.install; cta.style.display="flex"; }
+    else { cta.style.display="none"; }
+    document.getElementById("signed").textContent = (sc.signed?"signed ✔ Ed25519":"unsigned") + " · " + (sc.cached?"cached ≤1h":"fresh scan");
     reportUrl=sc.report_url||null;
     if(reportUrl){ document.getElementById("report").style.display="inline-block"; }
     reportSize();
@@ -164,9 +190,13 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   function fromResult(r){ if(!r) return; var sc=r.structuredContent; if(!sc){ try{ sc=JSON.parse(r.content&&r.content[0]&&r.content[0].text); }catch(e){} } render(sc); }
 
   document.getElementById("report").addEventListener("click", function(){ if(reportUrl) request("ui/open-link",{url:reportUrl}); });
+  document.getElementById("copy").addEventListener("click", function(){
+    var txt=document.getElementById("cmd").textContent, btn=this;
+    function done(){ btn.textContent="Copied!"; setTimeout(function(){ btn.textContent="Copy"; },1400); }
+    try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done, fallback); } else { fallback(); } }catch(e){ fallback(); }
+    function fallback(){ try{ var r=document.createRange(); r.selectNode(document.getElementById("cmd")); var s=window.getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand("copy"); s.removeAllRanges(); done(); }catch(e){ btn.textContent="Select & copy"; } }
+  });
 
-  // Accept the host's messages regardless of source (Claude nests the view in a sandbox
-  // that can relay from a window other than window.parent); decode string frames too.
   window.addEventListener("message", function(ev){
     var raw=ev.data, m=raw;
     if(typeof raw==="string"){ try{ m=JSON.parse(raw); }catch(e){} }
