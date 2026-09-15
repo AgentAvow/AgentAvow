@@ -57,6 +57,7 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     </div>
     <div class="why" id="why"></div>
     <div class="foot"><span class="signed" id="signed"></span><button id="report" style="display:none">View full report ↗</button></div>
+    <pre id="dbg" style="margin:10px 0 0;padding:8px;background:var(--track);border-radius:6px;font:10px/1.4 ui-monospace,Menlo,Consolas,monospace;color:var(--muted);white-space:pre-wrap;max-height:130px;overflow:auto"></pre>
   </div>
 <script>
 (function () {
@@ -64,7 +65,8 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   function send(m){ target.postMessage(m, "*"); }
   function notify(method, params){ send({ jsonrpc:"2.0", method:method, params:params||{} }); }
   function request(method, params){ var id=nextId++; send({jsonrpc:"2.0",id:id,method:method,params:params||{}}); return new Promise(function(res,rej){pending[id]={res:res,rej:rej};}); }
-  function markInitialized(){ if(initialized) return; initialized=true; notify("ui/notifications/initialized", {}); }
+  function dbg(s){ try{ var el=document.getElementById("dbg"); el.textContent=((el.textContent?el.textContent+"\n":"")+s).split("\n").slice(-14).join("\n"); }catch(e){} }
+  function markInitialized(){ if(initialized) return; initialized=true; dbg("-> ui/notifications/initialized"); notify("ui/notifications/initialized", {}); }
   function reportSize(){ try{ notify("ui/notifications/size-changed",{width:document.body.scrollWidth,height:document.getElementById("card").scrollHeight+8}); }catch(e){} }
 
   function compact(n){ n=+n||0; var u=[[1e9,"B"],[1e6,"M"],[1e3,"k"]]; for(var i=0;i<u.length;i++){ if(n>=u[i][0]) return (n/u[i][0]).toFixed(1).replace(/\.0$/,"")+u[i][1]; } return ""+n; }
@@ -114,24 +116,38 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     if(reportUrl){ document.getElementById("report").style.display="inline-block"; }
     reportSize();
   }
-  function fromResult(r){ if(!r) return; var sc=r.structuredContent; if(!sc){ try{ sc=JSON.parse(r.content&&r.content[0]&&r.content[0].text); }catch(e){} } render(sc); }
+  function fromResult(r){
+    if(!r){ dbg("tool-result: empty params"); return; }
+    var sc=r.structuredContent;
+    if(!sc){ try{ sc=JSON.parse(r.content&&r.content[0]&&r.content[0].text); }catch(e){} }
+    dbg("tool-result keys=["+Object.keys(r).join(",")+"] sc="+(sc?"yes":"NO"));
+    render(sc);
+  }
 
   document.getElementById("report").addEventListener("click", function(){ if(reportUrl) request("ui/open-link",{url:reportUrl}); });
+
+  // Deliberately does NOT drop on source mismatch (Claude's nested sandbox can relay
+  // from a window other than window.parent). We log the source instead, and handle any
+  // JSON-RPC-shaped message. Also decodes string-encoded messages.
   window.addEventListener("message", function(ev){
-    if(ev.source!==target) return;
-    var m=ev.data; if(!m||m.jsonrpc!=="2.0") return;
+    var raw=ev.data, m=raw;
+    if(typeof raw==="string"){ try{ m=JSON.parse(raw); }catch(e){} }
+    if(!m || typeof m!=="object"){ dbg("< noise ("+(typeof raw)+")"); return; }
+    var src=(ev.source===target)?"parent":(ev.source===window.top?"top":"other");
+    var tag=m.method||(m.id!==undefined?("resp#"+m.id):("keys:"+Object.keys(m).slice(0,5).join(","))) ;
+    dbg("< "+src+" "+tag);
     if(m.id!==undefined && (("result" in m)||("error" in m))){ var p=pending[m.id]; if(p){ delete pending[m.id]; m.error?p.rej(m.error):p.res(m.result); } return; }
-    switch(m.method){
-      case "ui/notifications/tool-result": markInitialized(); fromResult(m.params); break;
-      case "ui/notifications/host-context-changed": if(m.params&&m.params.theme){ document.documentElement.dataset.theme=m.params.theme; } break;
-    }
+    if(!m.method) return;
+    if(m.method==="ui/notifications/tool-result"){ markInitialized(); fromResult(m.params); }
+    else if(m.method==="ui/notifications/tool-input"){ dbg("(tool-input received)"); }
+    else if(m.method==="ui/notifications/host-context-changed"){ if(m.params&&m.params.theme){ document.documentElement.dataset.theme=m.params.theme; } }
   });
 
+  dbg("view loaded → sending ui/initialize");
   request("ui/initialize", { appInfo:{name:"AgentAvow trust card",version:"0.2.0"}, appCapabilities:{availableDisplayModes:["inline"]}, protocolVersion:PROTO })
-    .then(function(init){ if(init&&init.hostContext&&init.hostContext.theme){ document.documentElement.dataset.theme=init.hostContext.theme; } markInitialized(); reportSize(); })
-    .catch(function(){ markInitialized(); });   // even if the init response isn't matched, signal ready so tool-result flows
-  // Belt-and-suspenders: never let a finicky init-response block the data.
-  setTimeout(markInitialized, 700);
+    .then(function(init){ dbg("ui/initialize OK"); if(init&&init.hostContext&&init.hostContext.theme){ document.documentElement.dataset.theme=init.hostContext.theme; } markInitialized(); reportSize(); })
+    .catch(function(){ dbg("ui/initialize no-response"); markInitialized(); });
+  setTimeout(function(){ if(!initialized){ dbg("700ms fallback"); markInitialized(); } }, 700);
 })();
 </script>
 </body>
