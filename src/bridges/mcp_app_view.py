@@ -201,7 +201,7 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     if(reportUrl){ document.getElementById("report").style.display="inline-block"; }
     reportSize();
   }
-  function fromResult(r){ if(!r) return; var sc=r.structuredContent; if(!sc){ try{ sc=JSON.parse(r.content&&r.content[0]&&r.content[0].text); }catch(e){} } render(sc); }
+  function fromResult(r){ if(r&&r.structuredContent) render(r.structuredContent); }
 
   document.getElementById("report").addEventListener("click", function(){ if(reportUrl) request("ui/open-link",{url:reportUrl}); });
   document.getElementById("copy").addEventListener("click", function(){
@@ -215,6 +215,9 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     var raw=ev.data, m=raw;
     if(typeof raw==="string"){ try{ m=JSON.parse(raw); }catch(e){} }
     if(!m || typeof m!=="object") return;
+    // Reply to whoever is actually talking to us: Claude nests this view in a sandbox and
+    // relays from a window other than window.parent, so lock onto ev.source for sends.
+    if(ev.source && ev.source!==window){ target = ev.source; }
     if(m.id!==undefined && (("result" in m)||("error" in m))){ var p=pending[m.id]; if(p){ delete pending[m.id]; m.error?p.rej(m.error):p.res(m.result); } return; }
     if(!m.method) return;
     if(m.method==="ui/notifications/tool-result"){ markInitialized(); fromResult(m.params); }
