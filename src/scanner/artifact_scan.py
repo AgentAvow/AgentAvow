@@ -265,6 +265,8 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     detector gains artifact-truth for free.
     """
     from src.scanner.scan import (
+        _is_git_config_file,
+        _is_git_hook_file,
         _is_source_file,
         _is_test_or_doc_file,
         _load_allowlist,
@@ -310,9 +312,11 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # package on its test suite (the repo scanner downgrades these; for
         # artifact-truth we skip them, since install hooks + drift are detected
         # separately above).
+        # A shipped .git/config or .git/hooks/* in a tarball is a GitSpawn autorun vector
+        # (a published artifact should never carry a .git/ dir) — scan it like the repo tree.
         if (
             af.text
-            and _is_source_file(path)
+            and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
             and not _should_skip_path(path)
             and not _is_test_or_doc_file(path)
         ):

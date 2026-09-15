@@ -211,9 +211,9 @@ class ScanResult:
 
 def _should_skip_path(path: str) -> bool:
     """Check if a file path should be skipped."""
-    # Never skip a git-config file — a shipped .git/config is the GitSpawn autorun vector,
-    # so we must inspect it even though .git/ is otherwise a skipped directory.
-    if _is_git_config_file(path):
+    # Never skip a shipped git-config or git hook — both are GitSpawn autorun vectors, so
+    # we must inspect them even though .git/ is otherwise a skipped directory.
+    if _is_git_config_file(path) or _is_git_hook_file(path):
         return False
     parts = Path(path).parts
     for part in parts:
@@ -925,7 +925,8 @@ def _select_scan_files(
     scannable = [
         it for it in tree
         if not _should_skip_path(it["path"])
-        and (_is_source_file(it["path"]) or _is_git_config_file(it["path"]))
+        and (_is_source_file(it["path"]) or _is_git_config_file(it["path"])
+             or _is_git_hook_file(it["path"]))
         and not _excluded(it["path"])
     ]
     total = len(scannable)
@@ -1485,6 +1486,8 @@ def _scan_content(
     # Git-config autorun (GitSpawn class) — a shipped .git/config or .gitconfig that
     # executes a command on routine git operations. Path-gated inside the scanner.
     findings.extend(_scan_git_autorun(content, file_path))
+    # Committed active git hooks (.git/hooks/<name>) — same autorun class. Path-gated.
+    findings.extend(_scan_git_hooks(content, file_path))
 
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
     findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
@@ -1640,6 +1643,52 @@ def _is_git_config_file(file_path: str) -> bool:
         return True
     # a `config` file living inside a (committed) .git directory
     return name == "config" and any(part.lower() == ".git" for part in p.parts)
+
+
+# Real git hook names. A committed `.git/hooks/<name>` (without the `.sample` suffix git
+# ships) auto-executes on the matching git event — so a repo/package that ships its own
+# `.git/hooks/pre-commit` turns a routine commit/checkout/merge into code execution.
+_GIT_HOOK_NAMES = frozenset({
+    "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit",
+    "pre-merge-commit", "prepare-commit-msg", "commit-msg", "post-commit", "pre-rebase",
+    "post-checkout", "post-merge", "pre-push", "pre-receive", "update", "proc-receive",
+    "post-receive", "post-update", "reference-transaction", "push-to-checkout",
+    "pre-auto-gc", "post-rewrite", "sendemail-validate", "fsmonitor-watchman",
+    "post-index-change",
+})
+
+
+def _is_git_hook_file(file_path: str) -> bool:
+    """True for a committed `.git/hooks/<real-hook>` script (not a `.sample` template)."""
+    p = Path(file_path)
+    parts = [x.lower() for x in p.parts]
+    if ".git" not in parts:
+        return False
+    gi = parts.index(".git")
+    if gi + 1 >= len(parts) or parts[gi + 1] != "hooks":
+        return False
+    name = p.name
+    return not name.endswith(".sample") and name.lower() in _GIT_HOOK_NAMES
+
+
+def _scan_git_hooks(content: str, file_path: str) -> list[Finding]:
+    """Flag a committed, active git hook — it runs on its git event with no opt-in. Its
+    script body is separately scanned by the normal pattern passes; this adds the
+    'this is a shipped autorun hook' finding. Path-gated."""
+    if not _is_git_hook_file(file_path) or not (content or "").strip():
+        return []
+    hook = Path(file_path).name
+    first = next((ln for ln in content.splitlines() if ln.strip()), "")
+    return [Finding(
+        category="git_autorun",
+        name=(f"Git-config autorun: committed .git/hooks/{hook} "
+              f"runs on git {hook.replace('-', ' ')}"),
+        severity="high",
+        file_path=file_path,
+        line_number=1,
+        snippet=first[:120],
+        remediation=_REMEDIATION_HINTS["git_autorun"],
+    )]
 
 
 # git-config keys that cause a command to run during ordinary git operations. These
