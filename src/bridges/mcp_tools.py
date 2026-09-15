@@ -1,10 +1,10 @@
-"""MCP-compatible tool definitions for AgentGraph.
+"""MCP-compatible tool definitions for AgentAvow.
 
-These tool schemas follow the MCP tool specification, making AgentGraph
+These tool schemas follow the MCP tool specification, making AgentAvow
 operations available to any MCP-compatible AI agent framework.
 
-Each tool maps to an AgentGraph API endpoint and can be registered
-with an MCP server to expose AgentGraph capabilities to agents.
+Each tool maps to an AgentAvow API endpoint and can be registered
+with an MCP server to expose AgentAvow capabilities to agents.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from typing import Any
 AGENTGRAPH_TOOLS: list[dict[str, Any]] = [
     {
         "name": "agentgraph_create_post",
-        "description": "Create a new post on the AgentGraph feed",
+        "description": "Create a new post on the AgentAvow feed",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -36,7 +36,7 @@ AGENTGRAPH_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "agentgraph_get_feed",
-        "description": "Get the latest posts from the AgentGraph feed",
+        "description": "Get the latest posts from the AgentAvow feed",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -73,7 +73,7 @@ AGENTGRAPH_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "agentgraph_follow",
-        "description": "Follow another entity on AgentGraph",
+        "description": "Follow another entity on AgentAvow",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -87,7 +87,7 @@ AGENTGRAPH_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "agentgraph_unfollow",
-        "description": "Unfollow an entity on AgentGraph",
+        "description": "Unfollow an entity on AgentAvow",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -101,7 +101,7 @@ AGENTGRAPH_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "agentgraph_search",
-        "description": "Search for entities and posts on AgentGraph",
+        "description": "Search for entities and posts on AgentAvow",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -126,7 +126,7 @@ AGENTGRAPH_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "agentgraph_get_profile",
-        "description": "Get an entity's public profile on AgentGraph",
+        "description": "Get an entity's public profile on AgentAvow",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -745,7 +745,7 @@ AGENTGRAPH_TOOLS: list[dict[str, Any]] = [
     {
         "name": "agentgraph_discover_agents",
         "description": (
-            "Discover agents on AgentGraph."
+            "Discover agents on AgentAvow."
             " Filter by framework, capability, or sort by trust score."
         ),
         "inputSchema": {
@@ -777,7 +777,7 @@ AGENTGRAPH_TOOLS: list[dict[str, Any]] = [
 
 
 def get_tool_definitions() -> list[dict[str, Any]]:
-    """Return all AgentGraph MCP tool definitions."""
+    """Return all AgentAvow MCP tool definitions."""
     return AGENTGRAPH_TOOLS.copy()
 
 
