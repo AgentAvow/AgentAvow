@@ -55,6 +55,17 @@ async def test_lookup_identity_empty_returns_guidance(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_lookup_identity_unresolvable_did_returns_guidance(monkeypatch):
+    """A did: that doesn't resolve must guide, not dead-end on 'Not found' (the DID
+    branch previously bypassed the guidance the name branch already had)."""
+    monkeypatch.setattr(mod, "_get", _get_404)
+    out = await mod._call_tool("lookup_identity", {"query": "did:web:example.com"})
+    text = _text_of(out)
+    assert "scan_repo" in text
+    assert text != "Not found — check the target coordinates and try again."
+
+
+@pytest.mark.asyncio
 async def test_entity_tool_non_404_error_still_raises_to_generic_handler(monkeypatch):
     """A 500 must NOT be swallowed as the friendly not-found message — it should fall
     through to the generic error handler (so real outages aren't masked as 'no entity')."""

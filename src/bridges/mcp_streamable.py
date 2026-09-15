@@ -917,7 +917,14 @@ async def _call_tool(
         if name == "lookup_identity":
             q = arguments["query"]
             if q.startswith("did:"):
-                d = await _get("/did/resolve", params={"uri": q})
+                try:
+                    d = await _get("/did/resolve", params={"uri": q})
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 404:
+                        return _text(_no_entity_help(f"DID '{q}'"))
+                    raise
+                if not d:
+                    return _text(_no_entity_help(f"DID '{q}'"))
                 return _text(json.dumps(d, indent=2)[:2000])
             d = await _get("/search", params={"q": q, "limit": 5})
             ents = d.get("entities") or []
