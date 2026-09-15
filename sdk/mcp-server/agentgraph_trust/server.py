@@ -173,11 +173,41 @@ def _error(msg: str) -> dict:
     return {"error": msg}
 
 
+# Registry words often sent to scan_repo by mistake ("npm chalk", "npm/chalk"). Mapped to
+# the scan_package registry so we nudge to the right tool instead of a format error.
+_REG_ALIAS = {
+    "npm": "npm", "pypi": "pypi", "pip": "pypi", "python": "pypi",
+    "crates": "crates", "cargo": "crates", "rust": "crates",
+    "docker": "docker", "oci": "docker", "image": "docker", "container": "docker",
+    "hf": "huggingface", "huggingface": "huggingface", "hugging_face": "huggingface",
+}
+
+
+def _package_nudge(owner: str, repo: str, raw: str) -> str | None:
+    """If a scan_repo input looks like a package coordinate, return a nudge toward
+    scan_package (normalized registry + name); else None. Mirrors the remote connector."""
+    if owner.lower() in _REG_ALIAS and repo:
+        reg, name = _REG_ALIAS[owner.lower()], repo
+    else:
+        toks = (raw or "").strip().replace(":", " ").split()
+        if len(toks) >= 2 and toks[0].lower() in _REG_ALIAS:
+            reg, name = _REG_ALIAS[toks[0].lower()], toks[-1]
+        else:
+            return None
+    return (f"That looks like a package, not a GitHub repo. Use scan_package with "
+            f"registry='{reg}', name='{name}' (e.g. the npm package chalk → "
+            f"scan_package registry='npm', name='chalk').")
+
+
 # --------------------------------------------------------------------------- #
 # tool handlers — all read-only, all first-party (agentavow.com)
 # --------------------------------------------------------------------------- #
 async def _handle_scan_repo(args: dict) -> dict[str, Any]:
     repo = (args.get("repo") or "").strip().strip("/")
+    owner_pre, _, name_pre = repo.partition("/")
+    nudge = _package_nudge(owner_pre, name_pre, repo)
+    if nudge:
+        return _error(nudge)
     if "/" not in repo:
         return _error("Pass the repo as 'owner/name' (e.g. 'modelcontextprotocol/servers').")
     owner, name = repo.split("/", 1)
@@ -187,7 +217,7 @@ async def _handle_scan_repo(args: dict) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         return _error(f"Could not scan {repo}: {_clean_err(e)}")
     return _scan_result(data, repo, "github",
-                        f"{_WEB_BASE}/check?target={quote(repo)}",
+                        f"{_WEB_BASE}/check/{owner}/{name}",
                         f"/api/v1/public/scan/{owner}/{name}")
 
 
@@ -209,7 +239,7 @@ async def _handle_scan_package(args: dict) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         return _error(f"Could not scan {surface}:{name}: {_clean_err(e)}")
     return _scan_result(data, f"{surface}:{name}", surface,
-                        f"{_WEB_BASE}/check?target={quote(f'{surface}:{name}')}",
+                        f"{_WEB_BASE}/check/pkg/{surface}/{pkg}",
                         f"/api/v1/public/scan/package/{surface}/{name}")
 
 
@@ -225,7 +255,7 @@ async def _handle_scan_mcp_server(args: dict) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         return _error(f"Could not scan MCP server {url}: {_clean_err(e)}")
     return _scan_result(data, url, "mcp",
-                        f"{_WEB_BASE}/check?target={quote(url)}",
+                        f"{_WEB_BASE}/check/mcp?endpoint={quote(url, safe='')}",
                         f"/api/v1/public/scan/mcp?endpoint={quote(url, safe='')}")
 
 

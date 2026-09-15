@@ -374,6 +374,33 @@ def _safe_verdict(data: dict) -> bool:
     return _shared_is_safe(data)
 
 
+# Registry words people commonly send to scan_repo by mistake ("npm chalk", "npm/chalk",
+# "pypi requests"). Mapped to the scan_package registry so we can nudge to the right tool
+# instead of a format error or a wasted GitHub 404. Only registries scan_package supports.
+_REG_ALIAS = {
+    "npm": "npm", "pypi": "pypi", "pip": "pypi", "python": "pypi",
+    "crates": "crates", "cargo": "crates", "rust": "crates",
+    "docker": "docker", "oci": "docker", "image": "docker", "container": "docker",
+    "hf": "hf", "huggingface": "hf", "hugging_face": "hf",
+}
+
+
+def _package_nudge(owner: str, repo: str, raw: str) -> str | None:
+    """If a scan_repo input looks like a package coordinate, return a nudge toward
+    scan_package (with the normalized registry + name); else None."""
+    if owner.lower() in _REG_ALIAS and repo:
+        reg, name = _REG_ALIAS[owner.lower()], repo
+    else:
+        toks = (raw or "").strip().replace(":", " ").split()
+        if len(toks) >= 2 and toks[0].lower() in _REG_ALIAS:
+            reg, name = _REG_ALIAS[toks[0].lower()], toks[-1]
+        else:
+            return None
+    return (f"That looks like a package, not a GitHub repo. Use scan_package with "
+            f"registry='{reg}', name='{name}' (e.g. the npm package chalk → "
+            f"scan_package registry='npm', name='chalk').")
+
+
 def _text(s: str) -> list[types.TextContent]:
     return [types.TextContent(type="text", text=s)]
 
@@ -756,6 +783,10 @@ async def _call_tool(
             owner = (arguments.get("owner") or "").strip()
             if not owner and "/" in repo:
                 owner, repo = repo.split("/", 1)
+            # Common confusion: a package ("npm chalk", "npm/chalk") sent to scan_repo.
+            nudge = _package_nudge(owner, repo, arguments.get("repo") or "")
+            if nudge:
+                return _text(nudge)
             if not owner or not repo:
                 return _text("Give the repo as 'owner/name' (e.g. 'vercel/next.js'), "
                              "or pass owner and repo separately.")
