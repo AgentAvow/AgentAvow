@@ -53,3 +53,24 @@ async def test_security_headers_on_error(client: AsyncClient):
 
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert resp.headers["X-Frame-Options"] == "DENY"
+
+
+@pytest.mark.asyncio
+async def test_security_headers_suppressed_behind_proxy(client: AsyncClient):
+    """B15: behind nginx (X-Forwarded-For present) the backend must NOT emit the
+    security headers — nginx owns them, and emitting here too produced duplicate
+    Content-Security-Policy / X-Frame-Options / etc. headers.
+    """
+    resp = await client.get("/api/v1/ping", headers={"X-Forwarded-For": "203.0.113.7"})
+    assert resp.status_code == 200
+
+    # None of the nginx-owned headers should be set by the backend now.
+    for header in (
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "X-XSS-Protection",
+        "Referrer-Policy",
+        "Permissions-Policy",
+        "Content-Security-Policy",
+    ):
+        assert header not in resp.headers, f"{header} should be left to nginx behind a proxy"

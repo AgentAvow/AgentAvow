@@ -522,12 +522,23 @@ async def cache_headers_middleware(request: Request, call_next) -> Response:
 async def security_headers_middleware(request: Request, call_next) -> Response:
     """Add security headers to API responses.
 
-    In production, nginx sets these headers for static assets and proxied
-    requests.  This middleware ensures they are present in dev (no nginx)
-    and adds the dynamic docs-page CSP variant that nginx cannot do.
-    Headers use setdefault so nginx values win when present.
+    In production, nginx sets all of these headers on every proxied location
+    (via ``add_header ... always``).  nginx *appends* to the upstream response
+    rather than replacing it, so if this middleware also emitted them the
+    browser would receive DUPLICATE headers — two Content-Security-Policy, two
+    X-Frame-Options, etc. (a real defect the scanner itself flags).  ``setdefault``
+    cannot prevent that: it only guards this response object, not nginx's later
+    append.  So when a reverse proxy is in front (nginx tags every proxied
+    request with X-Forwarded-For) we let nginx be the sole owner of these
+    headers; direct requests (dev/staging, no nginx) still get them from here,
+    including the dynamic docs-page CSP variant Swagger/ReDoc need.
     """
     response: Response = await call_next(request)
+
+    # Behind nginx: nginx owns the security headers — do not duplicate them.
+    if "x-forwarded-for" in request.headers:
+        return response
+
     h = response.headers
     h.setdefault("X-Content-Type-Options", "nosniff")
     h.setdefault("X-Frame-Options", "DENY")
