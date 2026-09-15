@@ -567,9 +567,8 @@ async def get_readme_badge(
     )
 
 
-@router.api_route(
+@router.get(
     "/badges/trust/{entity_id}.svg",
-    methods=["GET", "HEAD"],
     dependencies=[Depends(rate_limit_reads)],
     responses={
         200: {"content": {"image/svg+xml": {}}, "description": "SVG trust badge"},
@@ -656,3 +655,16 @@ async def get_trust_badge_svg(
         media_type="image/svg+xml",
         headers=dict(_CACHE_HEADERS),
     )
+
+
+# Serve HEAD for the badge SVG too (used by caches, link-checkers, and image
+# proxies that probe before fetching). Registered as a separate out-of-schema
+# route so it does not emit a second OpenAPI operation under the same
+# auto-generated operationId as GET (which broke client codegen).
+router.add_api_route(
+    "/badges/trust/{entity_id}.svg",
+    get_trust_badge_svg,
+    methods=["HEAD"],
+    dependencies=[Depends(rate_limit_reads)],
+    include_in_schema=False,
+)

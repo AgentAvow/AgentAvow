@@ -352,12 +352,15 @@ async def test_rapid_api_key_rotation(client: AsyncClient, db: AsyncSession):
         json={"display_name": "ConcAgent", "type": "agent"},
         headers=_auth(token_a),
     )
-    if resp.status_code not in (200, 201):
-        pytest.skip("Agent creation not available")
+    assert resp.status_code in (200, 201), (
+        f"agent creation failed: {resp.status_code} {resp.text}"
+    )
 
-    agent_id = resp.json().get("id")
-    if not agent_id:
-        pytest.skip("No agent id returned")
+    # POST /agents returns AgentCreatedResponse: {agent: {...}, api_key, claim_token}
+    # — the id is nested under "agent", not top-level.
+    body = resp.json()
+    agent_id = (body.get("agent") or {}).get("id") or body.get("id")
+    assert agent_id, f"no agent id in create response: {body}"
 
     resp1 = await client.post(
         f"/api/v1/agents/{agent_id}/rotate-key",
@@ -464,21 +467,23 @@ async def test_double_agent_claim(client: AsyncClient, db: AsyncSession):
     token_a, eid_a = await _setup_user(client, USER_A, db)
     token_b, eid_b = await _setup_user(client, USER_B, db)
 
+    # Bootstrap WITHOUT an authenticated operator so the bot stays provisional
+    # and gets a claim_token (an owned bot has claim_token=None). "general_purpose"
+    # is the real template key — "general" is not one, and would 400.
     resp = await client.post(
         "/api/v1/bots/bootstrap",
         json={
             "display_name": "ClaimBot",
-            "template": "general",
+            "template": "general_purpose",
         },
-        headers=_auth(token_a),
     )
-    if resp.status_code not in (200, 201):
-        pytest.skip("Bot bootstrap not available or requires different params")
+    assert resp.status_code in (200, 201), (
+        f"bot bootstrap failed: {resp.status_code} {resp.text}"
+    )
 
     data = resp.json()
     claim_token = data.get("claim_token")
-    if not claim_token:
-        pytest.skip("No claim_token in bootstrap response")
+    assert claim_token, f"no claim_token in bootstrap response: {data}"
 
     # First claim
     resp1 = await client.post(
