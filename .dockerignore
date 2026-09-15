@@ -9,7 +9,11 @@ __pycache__
 *.pyc
 .pytest_cache
 .ruff_cache
-web/
+web/**
+# …but keep the rebrand docs markdown: the backend SSRs it (docs_content_router).
+# Must exclude contents with web/** (not the bare dir) so these negations re-include.
+!web/src/rebrand/docs
+!web/src/rebrand/docs/**
 ios/
 tests/
 *.png
