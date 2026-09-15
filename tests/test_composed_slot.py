@@ -108,6 +108,25 @@ def test_evidence_hash_stable_on_bytes():
     assert h1 == h2
 
 
+def test_evidence_hash_uses_strict_jcs_not_legacy():
+    """B6: the slot advertises jcs-rfc8785+sha256, so a dict must be hashed with the
+    STRICT RFC 8785 canonicalizer (nulls preserved, non-ASCII emitted literally) —
+    not the legacy null-stripping/ASCII-escaping one — or an external verifier
+    following the advertised spec computes a different digest and rejects a valid sig."""
+    import hashlib
+
+    from src.signing import canonicalize, canonicalize_jcs_strict
+
+    # A payload that exercises exactly where the two canonicalizers diverge:
+    # a null value and a non-ASCII character.
+    payload = {"nullable": None, "name": "café", "score": 1}
+    got = compute_evidence_hash(payload)
+    strict = "sha256:" + hashlib.sha256(canonicalize_jcs_strict(payload)).hexdigest()
+    legacy = "sha256:" + hashlib.sha256(canonicalize(payload)).hexdigest()
+    assert got == strict, "evidence hash must use strict RFC 8785 JCS (the advertised spec)"
+    assert got != legacy, "strict and legacy must differ here — proves B6 is actually fixed"
+
+
 # ---------------------------------------------------------------------------
 # build_agentgraph_slot — full slot emission
 # ---------------------------------------------------------------------------

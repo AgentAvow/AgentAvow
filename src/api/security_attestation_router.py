@@ -313,7 +313,10 @@ async def get_composed_slot(
     # Evidence hash — canonical hash over the native attestation payload,
     # so the slot's evidence_hash references a replayable, signed artifact.
     native_payload = _build_payload(entity, scan, trust)
-    evidence_hash = compute_evidence_hash(canonicalize(native_payload))
+    # Pass the dict so compute_evidence_hash applies the STRICT RFC 8785 JCS the
+    # composed slot advertises (jcs-rfc8785+sha256). Do NOT pre-canonicalize with
+    # the legacy null-stripping canonicalize() here — that was the B6 mismatch.
+    evidence_hash = compute_evidence_hash(native_payload)
     evidence_url = (
         f"https://agentgraph.co/api/v1/entities/{entity.id}/attestation/security"
     )

@@ -158,17 +158,20 @@ def _gate_dependency_audit(
 def compute_evidence_hash(evidence_payload: dict[str, Any] | bytes) -> str:
     """Return ``sha256:<hex>`` over the canonical evidence payload.
 
-    Callers pass either the already-canonicalized JCS bytes or a dict
-    that will be canonicalized via src.signing.canonicalize. The returned
-    hash is stable across serializations.
+    Callers pass either already-canonicalized JCS bytes or a dict that will be
+    canonicalized here. The slot advertises ``jcs-rfc8785+sha256`` (see
+    CANONICALIZATION_SPEC), so a dict is canonicalized with the STRICT RFC 8785
+    JCS canonicalizer — NOT the legacy null-stripping one — so an external
+    verifier following the advertised spec recomputes the same digest. Prefer
+    passing the dict; callers that pre-canonicalize must use JCS-strict too.
     """
     if isinstance(evidence_payload, (bytes, bytearray)):
         data = bytes(evidence_payload)
     else:
         # Lazy import to keep this module test-friendly without the
         # signing module side effects.
-        from src.signing import canonicalize
-        data = canonicalize(evidence_payload)
+        from src.signing import canonicalize_jcs_strict
+        data = canonicalize_jcs_strict(evidence_payload)
     digest = hashlib.sha256(data).hexdigest()
     return f"sha256:{digest}"
 
@@ -283,11 +286,13 @@ def sign_slot_v2(slot: dict[str, Any]) -> dict[str, Any]:
     Not used in v1-structural emission, but tested here so the shape
     stays honest when v2 activates across all three slots in lockstep.
     """
-    from src.signing import canonicalize, create_jws
+    from src.signing import canonicalize_jcs_strict, create_jws
 
-    # Signed bytes = canonical slot with signature field removed.
+    # Signed bytes = canonical slot with signature field removed. Use STRICT
+    # RFC 8785 JCS to match the advertised CANONICALIZATION_SPEC, so the signed
+    # bytes are reproducible by an external verifier following the spec.
     unsigned = {k: v for k, v in slot.items() if k != "signature"}
-    canonical = canonicalize(unsigned)
+    canonical = canonicalize_jcs_strict(unsigned)
     # Compact JWS — reuse existing signer. v2-slot field convention uses
     # detached signature, but for v2-structural we return the compact JWS
     # so consumers can verify without a separate canonical replay.
