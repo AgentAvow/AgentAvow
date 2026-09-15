@@ -621,7 +621,7 @@ const _CERT_LABELS: Array<[string, string]> = [
   ['no_drift', 'No artifact-vs-source drift and no install-time hooks'],
   ['no_critical_or_high', 'Zero critical/high findings · no known-malicious dependencies'],
   ['recompute_ready', 'Signed verdict recomputes offline against pinned snapshots'],
-  ['full_coverage', 'Full coverage — not a sampled/truncated scan'],
+  ['full_coverage', 'Complete scan — the whole tree was read, nothing sampled or truncated'],
 ]
 function CertifiedPanel({ certified }: { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }) {
   const checks = certified?.checks

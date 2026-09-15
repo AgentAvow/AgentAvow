@@ -34,7 +34,7 @@ A **Blocked** score and any **known-malicious (MAL)** dependency block execution
 3. **No drift** — the artifact matches its source; no install-time hooks.
 4. **Zero critical/high** findings, and no known-malicious dependency.
 5. The signed verdict **recomputes offline** against its pinned snapshots.
-6. **No coverage gaps** — not a sampled scan.
+6. **Complete scan** — the whole tree was read, not sampled or truncated.
 
 Certification is **re-checked every scan and is revocable**: if provenance expires, drift appears, or a new critical lands, certification is revoked automatically. "Certified" means *currently, verifiably true* — not "was true once." It is not buyable, not self-attested, and not reachable by a repo-only scan no matter how clean.
 
