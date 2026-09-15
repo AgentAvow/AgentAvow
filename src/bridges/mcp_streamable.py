@@ -33,7 +33,7 @@ from src.bridges.mcp_app_view import TRUST_CARD_HTML
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v7.html"
+_CARD_URI = "ui://agentavow/trust-card-v8.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 _CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
 
@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.14.3",
+    version="0.15.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -409,10 +409,13 @@ def _scan_struct(
         "critical": crit,
         "high": high,
         "findings_total": int((data.get("findings") or {}).get("total") or len(items)),
-        # Certified = the earned top-tier MARK: passes the 6 cryptographic gates AND is
-        # actually safe (>=81, no crit/high). Gated on safe so the badge never appears on
-        # a needs-review result. Raw gate detail lives in the full report's certified.checks.
-        "certified": bool((data.get("certified") or {}).get("eligible")) and safe,
+        # MUST match the signed attestation's certified.eligible (the 6 crypto gates) — a
+        # trust product cannot have its MCP field disagree with its own signed report.
+        # The "only render the Certified MARK when also safe" rule is a DISPLAY gate applied
+        # in the card/site, NOT here. `certified_mark` carries that display value for
+        # consumers who want the badge rule without re-deriving it.
+        "certified": bool((data.get("certified") or {}).get("eligible")),
+        "certified_mark": bool((data.get("certified") or {}).get("eligible")) and safe,
         # top findings, repeats collapsed to one row + count — for the card + CI triage
         "top_findings": _grouped_findings(items, 3),
         # per-category 0-100 axes — explains WHY the score is what it is

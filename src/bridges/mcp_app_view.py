@@ -165,8 +165,12 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
   var reportUrl=null;
   function render(sc){
     if(!sc) return;
-    var score=+(sc.trust_score||0), reason=sc.verdict_reason, t=tier(score), certified=!!sc.certified;
+    var score=+(sc.trust_score||0), reason=sc.verdict_reason, t=tier(score);
     var mode=(sc.verdict==="safe")?"safe":(reason==="blocking_findings"?"risk":"limited");
+    // Render the Certified MARK only when the crypto gates pass AND it's actually safe
+    // (the display gate). The raw sc.certified matches the signed attestation and may be
+    // true on a needs-review result; certified_mark is the display value.
+    var certified=(sc.certified_mark!=null)?!!sc.certified_mark:(!!sc.certified&&mode==="safe");
     var conf={ safe:{label:"✓ SAFE",color:"#22C55E"}, risk:{label:"⚠ REVIEW",color:"#F59E0B"}, limited:{label:"◍ LIMITED",color:"#94A3B8"} }[mode];
     document.getElementById("accent").style.background = certified?"linear-gradient(90deg,#2dd4bf,#e879f9)":conf.color;
     document.getElementById("target").textContent = sc.target + (sc.target_type?" · "+sc.target_type:"");
