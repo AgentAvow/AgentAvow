@@ -305,14 +305,17 @@ function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified
   const h = data?.headline
   const has = !!(h && h.count && h.count > 0)
   const big = useIsDesktop() ? 1.5 : 1  // scale the marks up on desktop; spec size on mobile
+  // Certified is the earned top-tier mark: show it only when the crypto gates pass AND
+  // the result is actually safe (>=81), so it never sits on a needs-review score.
+  const showCert = certified && trustScore >= 81
   return (
     <div className="relative px-4 sm:px-7 py-6">
       <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
         <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
         <div className="relative grid grid-cols-2">
           <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-            <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{certified ? <CertifiedMark score={trustScore} scale={big} /> : <TrustBar score={trustScore} scale={big} />}</div>
-            <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: certified ? undefined : t.color }}>{trustLabel}</div>
+            <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{showCert ? <CertifiedMark score={trustScore} scale={big} /> : <TrustBar score={trustScore} scale={big} />}</div>
+            <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: showCert ? undefined : t.color }}>{trustLabel}</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
             <Percentile score={trustScore} />
           </div>
@@ -1614,7 +1617,7 @@ function Result({ owner, repo, privateResult }: {
             <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
             <div className="relative grid grid-cols-2">
               <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-                <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{(scan as { certified?: { eligible?: boolean } }).certified?.eligible ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
+                <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{((scan as { certified?: { eligible?: boolean } }).certified?.eligible && scan.trust_score >= 81) ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
                 <Percentile score={scan.trust_score} />

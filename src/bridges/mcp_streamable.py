@@ -100,7 +100,7 @@ _ABOUT = (
 
 server: Server = Server(
     "agentavow-trust",
-    version="0.14.0",
+    version="0.14.1",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
@@ -395,7 +395,10 @@ def _scan_struct(
         "critical": crit,
         "high": high,
         "findings_total": int((data.get("findings") or {}).get("total") or len(items)),
-        "certified": bool((data.get("certified") or {}).get("eligible")),
+        # Certified = the earned top-tier MARK: passes the 6 cryptographic gates AND is
+        # actually safe (>=81, no crit/high). Gated on safe so the badge never appears on
+        # a needs-review result. Raw gate detail lives in the full report's certified.checks.
+        "certified": bool((data.get("certified") or {}).get("eligible")) and safe,
         # top findings, repeats collapsed to one row + count — for the card + CI triage
         "top_findings": _grouped_findings(items, 3),
         # per-category 0-100 axes — explains WHY the score is what it is
