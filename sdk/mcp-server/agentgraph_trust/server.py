@@ -35,7 +35,7 @@ _BASE_URL = (
 ).rstrip("/")
 _WEB_BASE = _BASE_URL
 
-_VERSION = "0.6.0"
+_VERSION = "0.6.1"
 
 # Package-surface aliases, mirroring the public API + the remote connector.
 _SURFACE_ALIASES = {
@@ -276,9 +276,19 @@ async def _handle_verify_trust(args: dict) -> dict[str, Any]:
     }
 
 
+# Per-interaction-type trust thresholds (0-100). MUST stay identical to
+# src/interaction_safety.py in the main repo — the remote connector imports that module;
+# this standalone package vendors the same values so the two MCP servers never disagree
+# about the same interaction (the old flat >=61 cutoff here contradicted the remote MCP).
+_INTERACTION_THRESHOLDS = {
+    "discover": 0, "follow": 10, "capability_exchange": 10, "collaborate": 40,
+    "negotiate": 50, "trade": 50, "delegate": 60, "data_transfer": 70, "financial": 80,
+}
+
+
 async def _handle_check_interaction_safety(args: dict) -> dict[str, Any]:
     eid = (args.get("target_entity_id") or args.get("entity_id") or "").strip()
-    interaction = (args.get("interaction_type") or "delegate").strip()
+    interaction = (args.get("interaction_type") or "delegate").strip().lower()
     if not eid:
         return _error("Pass the 'target_entity_id' you want to interact with.")
     try:
@@ -286,13 +296,15 @@ async def _handle_check_interaction_safety(args: dict) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         return _error(f"Could not resolve entity {eid}: {_clean_err(e)}")
     pct = _score_pct(d)
-    # A plain recommendation band; the trust score itself is the authoritative signal.
-    recommend = "proceed" if (pct is not None and pct >= 61) else "caution"
+    thr = _INTERACTION_THRESHOLDS.get(interaction, 60)
+    safe = pct is not None and pct >= thr
     return {
         "target_entity_id": eid,
         "interaction_type": interaction,
         "trust_score": pct,
-        "recommendation": recommend,
+        "threshold": thr,
+        "safe": safe,
+        "recommendation": "proceed" if safe else "caution",
         "report_url": f"{_WEB_BASE}/entities/{eid}/trust",
     }
 

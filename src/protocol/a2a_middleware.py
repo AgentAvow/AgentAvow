@@ -26,21 +26,21 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from src.interaction_safety import INTERACTION_THRESHOLDS as _SHARED_THRESHOLDS
+
 logger = logging.getLogger(__name__)
 
 
 # --- Trust Thresholds per Interaction Type ---
 
-# Minimum trust scores required to initiate each A2A interaction type.
-# These can be overridden via config or per-entity settings.
+# Minimum trust scores required to initiate each A2A interaction type (0-1 scale for the
+# protocol layer). Derived from the shared 0-100 source of truth
+# (src/interaction_safety.py) so this map can never drift from the MCP surfaces.
+# Still overridable via config or per-entity settings.
 DEFAULT_TRUST_THRESHOLDS: dict[str, float] = {
-    "delegate": 0.6,       # Delegating a task requires high trust
-    "negotiate": 0.5,      # Negotiation needs moderate trust
-    "collaborate": 0.4,    # Collaboration is lower-risk
-    "discover": 0.0,       # Discovery is open (no trust required)
-    "capability_exchange": 0.1,  # Sharing capabilities is low-risk
-    "data_transfer": 0.7,  # Data sharing needs high trust
-    "financial": 0.8,      # Financial transactions need highest trust
+    k: _SHARED_THRESHOLDS[k] / 100
+    for k in ("delegate", "negotiate", "collaborate", "discover",
+              "capability_exchange", "data_transfer", "financial")
 }
 
 

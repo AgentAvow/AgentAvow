@@ -73,18 +73,9 @@ def _render_og_html(
 
 
 def _grade_from_score(score: int) -> str:
-    """Return letter grade from a 0-100 score."""
-    if score >= 96:
-        return "A+"
-    if score >= 81:
-        return "A"
-    if score >= 61:
-        return "B"
-    if score >= 41:
-        return "C"
-    if score >= 21:
-        return "D"
-    return "F"
+    """Return letter grade from a 0-100 score (canonical bands — src/scoring.py)."""
+    from src.scoring import grade_from_score
+    return grade_from_score(score)
 
 
 def _verdict_text(grade: str) -> str:

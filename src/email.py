@@ -15,19 +15,12 @@ _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
 def _grade_and_color(score: int | None) -> tuple[str, str]:
-    """Letter grade + hex color for a 0-100 score (mirrors the app's grade bands)."""
-    s = score if score is not None else 0
-    if s >= 97:
-        return "A+", "#22c55e"
-    if s >= 90:
-        return "A", "#22c55e"
-    if s >= 80:
-        return "B", "#3b82f6"
-    if s >= 70:
-        return "C", "#eab308"
-    if s >= 50:
-        return "D", "#f97316"
-    return "F", "#ef4444"
+    """Letter grade + hex color for a 0-100 score, using the CANONICAL bands shared with
+    every other surface (src/scoring.py) — previously this had drifted to its own cutoffs,
+    so an email could show a different grade than the site it linked to."""
+    from src.scoring import grade_color, grade_from_score
+    g = grade_from_score(score)
+    return g, grade_color(g)
 
 
 def render_watch_notification(

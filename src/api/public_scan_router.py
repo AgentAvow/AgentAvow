@@ -279,11 +279,7 @@ async def _get_entity_trust(repo: str, db: AsyncSession) -> dict | None:
         return {"imported": True, "entity_id": str(entity.id), "score": None}
 
     score100 = round(ts.score * 100)
-    grade = (
-        "A+" if score100 >= 96 else "A" if score100 >= 81
-        else "B" if score100 >= 61 else "C" if score100 >= 41
-        else "D" if score100 >= 21 else "F"
-    )
+    grade = _grade_from_score(score100)  # canonical bands — src/scoring.py
 
     return {
         "imported": True,
@@ -1662,18 +1658,9 @@ async def public_scan_history(
 
 
 def _grade_from_score(score: int) -> str:
-    """Return letter grade from a 0-100 score."""
-    if score >= 96:
-        return "A+"
-    if score >= 81:
-        return "A"
-    if score >= 61:
-        return "B"
-    if score >= 41:
-        return "C"
-    if score >= 21:
-        return "D"
-    return "F"
+    """Return letter grade from a 0-100 score (canonical bands — src/scoring.py)."""
+    from src.scoring import grade_from_score
+    return grade_from_score(score)
 
 
 def _display_grade(

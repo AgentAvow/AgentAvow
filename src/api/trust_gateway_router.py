@@ -129,17 +129,9 @@ GRADE_MAP = {
 
 
 def _score_to_grade(score: int) -> str:
-    if score >= 96:
-        return "A+"
-    if score >= 81:
-        return "A"
-    if score >= 61:
-        return "B"
-    if score >= 41:
-        return "C"
-    if score >= 21:
-        return "D"
-    return "F"
+    """Canonical bands — src/scoring.py (single source of truth)."""
+    from src.scoring import grade_from_score
+    return grade_from_score(score)
 
 
 def _tier_meets_minimum(actual_tier: str, min_tier: str) -> bool:

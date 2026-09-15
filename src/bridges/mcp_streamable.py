@@ -861,13 +861,14 @@ async def _call_tool(
             itype = arguments["interaction_type"]
             d = await _get(f"/entities/{eid}/trust")
             score = float(d.get("score") or 0.0)
-            thresholds = {"delegate": 0.6, "trade": 0.5, "collaborate": 0.4, "follow": 0.1}
-            thr = thresholds.get(itype, 0.5)
-            safe = score >= thr
+            # Shared per-type thresholds (src/interaction_safety.py) so the remote MCP,
+            # the stdio MCP, and the A2A layer never disagree about the same interaction.
+            from src.interaction_safety import interaction_recommendation
+            rec = interaction_recommendation(round(score * 100), itype)
             report = f"{_WEB_BASE}/entities/{eid}/trust"
             return _text(
-                f"{'Safe' if safe else 'Not recommended'} for '{itype}' — "
-                f"trust {round(score * 100)}/100 vs the {round(thr * 100)}/100 bar for this "
+                f"{'Safe' if rec['safe'] else 'Not recommended'} for '{rec['interaction_type']}' "
+                f"— trust {round(score * 100)}/100 vs the {rec['threshold']}/100 bar for this "
                 f"interaction.\nFull trust report: {report}"
             )
         if name == "lookup_identity":
