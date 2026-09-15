@@ -39,8 +39,8 @@ const CHECKS: [string, string][] = [
 ]
 
 const DISQUALIFIERS: [string, string][] = [
-  ['Any critical finding', 'A single unresolved critical caps the grade at B — Certified is off the table until it’s fixed.'],
-  ['A known-malicious dependency', 'A dependency flagged malicious (MAL) forces the score to F. No exceptions.'],
+  ['Any critical finding', 'A single unresolved critical floors the score to 45 or below — Certified is off the table until it’s fixed.'],
+  ['A known-malicious dependency', 'A dependency flagged malicious (MAL) forces the score to 20 or below. No exceptions.'],
   ['Unverified build provenance', 'The most common reason a good tool isn’t Certified: it publishes no cryptographic build attestation, so we can’t prove the artifact came from the source you claim.'],
   ['Sampled or partial coverage', 'If we couldn’t scan the whole tree, we won’t certify what we didn’t see.'],
 ]
