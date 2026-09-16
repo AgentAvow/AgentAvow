@@ -249,6 +249,22 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
     else if(m.method==="ui/notifications/host-context-changed"){ if(m.params&&m.params.theme){ document.documentElement.dataset.theme=m.params.theme; } }
   });
 
+  // ChatGPT native path: the desktop/mobile apps hydrate the iframe via
+  // window.openai.toolOutput + the openai:set_globals event, NOT the
+  // ui/notifications/tool-result postMessage above (that's how Claude + ChatGPT-web
+  // deliver it). Read both so the card renders on every host. Additive and harmless
+  // where window.openai is absent; render()/markInitialized() are idempotent.
+  function hydrateFromOpenAI(){
+    try{
+      if(!window.openai) return;
+      if(window.openai.toolOutput){ render(window.openai.toolOutput); markInitialized(); }
+      var th=window.openai.theme;
+      if(th==="light"||th==="dark"){ document.documentElement.dataset.theme=th; }
+    }catch(e){}
+  }
+  window.addEventListener("openai:set_globals", hydrateFromOpenAI);
+  hydrateFromOpenAI();
+
   request("ui/initialize", { appInfo:{name:"AgentAvow trust card",version:"1.0.0"}, appCapabilities:{availableDisplayModes:["inline"]}, protocolVersion:PROTO })
     .then(function(init){ if(init&&init.hostContext&&init.hostContext.theme){ document.documentElement.dataset.theme=init.hostContext.theme; } markInitialized(); reportSize(); })
     .catch(function(){ markInitialized(); });

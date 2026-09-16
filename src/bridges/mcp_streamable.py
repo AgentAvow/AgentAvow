@@ -36,7 +36,7 @@ from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v12.html"
+_CARD_URI = "ui://agentavow/trust-card-v13.html"
 _CARD_MIME = "text/html;profile=mcp-app"
 # Shared MCP-Apps standard (Claude + ChatGPT both use it): ui.resourceUri + the
 # ui/notifications/tool-result postMessage (which TRUST_CARD_HTML already reads) +
@@ -52,6 +52,10 @@ _CARD_META = {
     },
     "ui/resourceUri": _CARD_URI,
     "openai/outputTemplate": _CARD_URI,
+    # Legacy OpenAI mirrors (snake_case) — some native ChatGPT builds read these
+    # instead of the ui.* fields; declaring both is belt-and-suspenders for review.
+    "openai/widgetDomain": "https://agentavow.com",
+    "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
 }
 
 # Where to reach our own public API from inside the container, and the public web
@@ -540,7 +544,14 @@ def _scan_struct(
 # --------------------------------------------------------------------------- #
 # tool definitions (all read-only, unauthenticated)
 # --------------------------------------------------------------------------- #
-_RO = types.ToolAnnotations  # shorthand
+def _RO(title: str, readOnlyHint: bool = True) -> types.ToolAnnotations:  # noqa: N802, N803 — mirrors MCP field names + existing call sites
+    """Read-only tool annotation with the full hint set ChatGPT app-review checks:
+    readOnlyHint (never mutates), destructiveHint=False (nothing is destroyed),
+    openWorldHint=True (the scan/lookup tools reach arbitrary external targets)."""
+    return types.ToolAnnotations(
+        title=title, readOnlyHint=readOnlyHint,
+        destructiveHint=False, openWorldHint=True,
+    )
 
 _TOOLS: list[types.Tool] = [
     types.Tool(
@@ -776,7 +787,9 @@ async def _list_resources() -> list[types.Resource]:
         "ui": {
             "domain": "https://agentavow.com",
             "csp": {"connectDomains": [], "resourceDomains": []},
-        }
+        },
+        "openai/widgetDomain": "https://agentavow.com",
+        "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
     }
     return [_r]
 
