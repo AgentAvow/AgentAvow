@@ -45,15 +45,13 @@ _CARD_MIME = "text/html;profile=mcp-app"
 # the card is fully self-contained (inline HTML/CSS/SVG, no external fetches), so
 # both allow-lists are empty.
 _CARD_META = {
-    "ui": {
-        "resourceUri": _CARD_URI,
-        "domain": "https://agentavow.com",
-        "csp": {"connectDomains": [], "resourceDomains": []},
-    },
+    # Shared MCP-Apps standard — Claude reads this; keep `ui` MINIMAL (just the
+    # resourceUri) so a strict SEP-1865 host never chokes on extra fields. (Putting
+    # domain/csp inside `ui` broke Claude's card render — "Unable to reach AgentAvow".)
+    "ui": {"resourceUri": _CARD_URI},
     "ui/resourceUri": _CARD_URI,
+    # ChatGPT/OpenAI-namespaced fields live OUTSIDE `ui` so only ChatGPT reads them.
     "openai/outputTemplate": _CARD_URI,
-    # Legacy OpenAI mirrors (snake_case) — some native ChatGPT builds read these
-    # instead of the ui.* fields; declaring both is belt-and-suspenders for review.
     "openai/widgetDomain": "https://agentavow.com",
     "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
 }
@@ -783,11 +781,9 @@ async def _list_resources() -> list[types.Resource]:
     # (not just the tool). The card is fully self-contained (inline HTML/CSS/SVG, no
     # external fetches), so both allow-lists are empty — but they must be *declared*.
     # Set via .meta after construction (the constructor drops an unknown meta= kwarg).
+    # ChatGPT-namespaced widget domain/CSP only — no `ui` object here (Claude reads
+    # the resource content, and an unexpected ui.* on the resource can break its render).
     _r.meta = {
-        "ui": {
-            "domain": "https://agentavow.com",
-            "csp": {"connectDomains": [], "resourceDomains": []},
-        },
         "openai/widgetDomain": "https://agentavow.com",
         "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
     }
