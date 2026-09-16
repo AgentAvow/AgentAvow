@@ -38,7 +38,21 @@ from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 # new card (bump the suffix on each card change during the render-debug phase).
 _CARD_URI = "ui://agentavow/trust-card-v12.html"
 _CARD_MIME = "text/html;profile=mcp-app"
-_CARD_META = {"ui": {"resourceUri": _CARD_URI}, "ui/resourceUri": _CARD_URI}
+# Shared MCP-Apps standard (Claude + ChatGPT both use it): ui.resourceUri + the
+# ui/notifications/tool-result postMessage (which TRUST_CARD_HTML already reads) +
+# the text/html;profile=mcp-app mime. `openai/outputTemplate` is OpenAI's compat
+# alias for the same resource. `domain`/`csp` are declared for ChatGPT app review;
+# the card is fully self-contained (inline HTML/CSS/SVG, no external fetches), so
+# both allow-lists are empty.
+_CARD_META = {
+    "ui": {
+        "resourceUri": _CARD_URI,
+        "domain": "https://agentavow.com",
+        "csp": {"connectDomains": [], "resourceDomains": []},
+    },
+    "ui/resourceUri": _CARD_URI,
+    "openai/outputTemplate": _CARD_URI,
+}
 
 # Where to reach our own public API from inside the container, and the public web
 # base for user-facing links. Overridable for staging/local preview.
@@ -748,12 +762,23 @@ async def _list_tools() -> list[types.Tool]:
 
 @server.list_resources()
 async def _list_resources() -> list[types.Resource]:
-    return [types.Resource(
+    _r = types.Resource(
         uri=_CARD_URI,
         name="AgentAvow trust card",
         description="Interactive trust card rendered from a scan result.",
         mimeType=_CARD_MIME,
-    )]
+    )
+    # ChatGPT's app review reads the widget domain + CSP off the TEMPLATE resource
+    # (not just the tool). The card is fully self-contained (inline HTML/CSS/SVG, no
+    # external fetches), so both allow-lists are empty — but they must be *declared*.
+    # Set via .meta after construction (the constructor drops an unknown meta= kwarg).
+    _r.meta = {
+        "ui": {
+            "domain": "https://agentavow.com",
+            "csp": {"connectDomains": [], "resourceDomains": []},
+        }
+    }
+    return [_r]
 
 
 @server.read_resource()
