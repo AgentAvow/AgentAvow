@@ -1,0 +1,13 @@
+{
+  "name": "agentavow-trust",
+  "displayName": "AgentAvow Trust",
+  "version": "0.1.0",
+  "description": "Signed, verifiable safety grades for the tools your agent connects to. Bundles the AgentAvow MCP connector (scan any MCP server, package, or repo for a signed 0-100 trust score), a /scan command, and an opt-in pre-connect auto-scan hook that grades newly-added MCP servers on session start (warn-only, fail-open).",
+  "author": { "name": "AgentAvow", "url": "https://agentavow.com" },
+  "homepage": "https://agentavow.com",
+  "repository": "https://github.com/AgentAvow/AgentAvow",
+  "keywords": ["security", "trust", "mcp", "supply-chain", "code-scanning", "attestation"],
+  "commands": ["./commands/"],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
+}

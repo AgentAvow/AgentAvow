@@ -1,0 +1,15 @@
+{
+  "name": "agentavow",
+  "owner": { "name": "AgentAvow", "url": "https://agentavow.com" },
+  "metadata": {
+    "description": "AgentAvow — signed, verifiable safety grades for the tools your AI agent connects to."
+  },
+  "plugins": [
+    {
+      "name": "agentavow-trust",
+      "source": "./plugins/agentavow-trust",
+      "description": "Scan any MCP server, package, or repo for a signed 0-100 trust score before you trust it. Bundles the AgentAvow MCP connector, a /scan command, and an opt-in pre-connect auto-scan hook.",
+      "version": "0.1.0"
+    }
+  ]
+}
