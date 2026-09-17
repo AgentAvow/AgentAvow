@@ -29,7 +29,7 @@ interface Metrics {
   badges?: { readme_renders_window?: number; leaderboard?: { repo: string; renders: number }[] }
   catalog?: { by_surface?: Record<string, number>; by_category?: Record<string, number>; size_total?: number }
   funnel?: { scanned?: number; watched?: number; claimed?: number; installs?: number }
-  mcp?: { calls_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; by_tool?: Record<string, number> }
+  mcp?: { calls_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; by_tool?: Record<string, number>; by_surface?: Record<string, { calls?: number; errors?: number; safe?: number; needs_review?: number }> }
   private_repos?: { app_scans?: number; published_to_search?: number; app_installs_active?: number; onetime_scans_window?: number }
   alert_webhooks?: { active?: number }
 }
@@ -178,8 +178,16 @@ function MetricsTab() {
         const safePct = scans ? Math.round((safe * 100) / scans) : 0
         const tools = Object.entries(mcp.by_tool || {}).sort((a, b) => b[1] - a[1])
         const anyTool = tools.some(([, n]) => n > 0)
+        const surfaceLabels: Record<string, string> = {
+          claude: 'Claude Directory', chatgpt: 'ChatGPT', 'claude-code': 'Claude Code',
+          cursor: 'Cursor', vscode: 'VS Code', other: 'Other / dev',
+        }
+        const surfaces = Object.entries(mcp.by_surface || {})
+          .map(([s, d]) => ({ s, label: surfaceLabels[s] || s, ...d, calls: d.calls ?? 0 }))
+          .sort((a, b) => b.calls - a.calls)
+        const anySurface = surfaces.some((r) => r.calls > 0)
         return (
-          <Section title="MCP connector (Claude Directory)" note="Usage of the remote MCP server at agentavow.com/mcp — the tools an agent calls to check a target before it connects. Fail-open counters; zero means no connector traffic yet.">
+          <Section title="MCP connector — usage by surface" note="Usage of the remote MCP server at agentavow.com/mcp across every place it's installed (Claude Directory, ChatGPT, the Claude Code plugin, Cursor, VS Code). Surface is derived from the request User-Agent and sums back to the total. Fail-open counters; zero means no traffic yet.">
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <Stat label="Total calls" value={fmt(calls)} />
               <Stat label="Ok" value={fmt(ok)} sub={`${errRate}% error rate`} />
@@ -200,6 +208,29 @@ function MetricsTab() {
                 </div>
               ) : (
                 <p className="text-[12.5px] text-text-muted/70">No connector calls recorded yet. Counts start once the connector is live and used in Claude.</p>
+              )}
+            </div>
+            <div className="glass rounded-2xl p-5 mt-3">
+              <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Calls by surface</div>
+              {anySurface ? (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] font-mono uppercase tracking-wide text-text-muted/60 pb-1">
+                    <span>Surface</span>
+                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-16 text-right">Errors</span><span className="w-20 text-right">Safe/Rev</span></span>
+                  </div>
+                  {surfaces.filter((r) => r.calls > 0).map((r) => (
+                    <div key={r.s} className="flex justify-between text-[12.5px] py-0.5">
+                      <span className="text-text-muted truncate">{r.label}</span>
+                      <span className="flex gap-4 tabular-nums text-text-muted/70">
+                        <span className="w-16 text-right">{fmt(r.calls)}</span>
+                        <span className="w-16 text-right">{fmt(r.errors ?? 0)}</span>
+                        <span className="w-20 text-right">{fmt(r.safe ?? 0)}/{fmt(r.needs_review ?? 0)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[12.5px] text-text-muted/70">No per-surface traffic yet. Once the connector is used from Claude, ChatGPT, or the plugin, each surface shows here.</p>
               )}
             </div>
           </Section>

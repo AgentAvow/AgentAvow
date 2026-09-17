@@ -15,6 +15,7 @@ Design (see docs/internal/claude-directory-listing-plan.md):
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 from urllib.parse import quote
@@ -145,6 +146,45 @@ async def _bump(metric: str) -> None:
         await bump_metric(f"mcp:{metric}")
     except Exception:
         pass
+
+
+# Per-surface attribution. The server is stateless, so clientInfo (which only
+# rides the initialize handshake) can't be tied to later tool calls; the reliable
+# per-request signal is the User-Agent header, captured in mcp_asgi_app below and
+# stashed in this contextvar for the tool handler to read. Fail-open to "other".
+_SURFACE: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "agentavow_mcp_surface", default="other"
+)
+
+# Order matters: "claude-code" must be tested before "claude" (it contains it).
+_SURFACE_MATCHERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("chatgpt", ("openai", "chatgpt")),
+    ("claude-code", ("claude-code", "claude code", "claudecode")),
+    ("cursor", ("cursor",)),
+    ("vscode", ("vscode", "visual studio code")),
+    ("claude", ("claude", "anthropic")),
+)
+
+
+def _surface_from_ua(ua: str) -> str:
+    """Bucket a request's User-Agent into a known distribution surface. Best-effort;
+    unknown/dev traffic → 'other'."""
+    u = (ua or "").lower()
+    for surface, needles in _SURFACE_MATCHERS:
+        if any(n in u for n in needles):
+            return surface
+    return "other"
+
+
+async def _bump_s(metric: str) -> None:
+    """Bump the aggregate counter AND its per-surface variant (best-effort). The
+    per-surface keys sum back to the aggregate (every request lands in one bucket)."""
+    await _bump(metric)
+    try:
+        surface = _SURFACE.get()
+    except Exception:
+        surface = "other"
+    await _bump(f"{metric}:{surface}")
 
 
 def _trust_bar(score: int) -> str:
@@ -842,7 +882,7 @@ async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResul
 async def _call_tool(
     name: str, arguments: dict
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
-    await _bump("calls:total")
+    await _bump_s("calls:total")
     await _bump(f"tool:{name}")
     try:
         if name == "about_agentavow":
@@ -862,7 +902,7 @@ async def _call_tool(
                 return _text("Give the repo as 'owner/name' (e.g. 'vercel/next.js'), "
                              "or pass owner and repo separately.")
             data = await _get(f"/public/scan/{owner}/{repo}", params=fp)
-            await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+            await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption("github", owner, repo)
             rp = f"/check/{owner}/{repo}"
             api = f"/api/v1/public/scan/{owner}/{repo}"
@@ -881,7 +921,7 @@ async def _call_tool(
                 return _text("Give a registry (npm, pypi, crates, docker, or hf) and a package "
                              "name, e.g. registry='npm', name='chalk'.")
             data = await _get(f"/public/scan/package/{surface}/{pkg}", params=fp)
-            await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+            await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption(surface, surface, pkg)
             rp = f"/check/pkg/{surface}/{pkg}"
             api = f"/api/v1/public/scan/package/{surface}/{pkg}"
@@ -900,7 +940,7 @@ async def _call_tool(
             if force:
                 params["force"] = "true"
             data = await _get("/public/scan/mcp", params=params)
-            await _bump("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+            await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             # A bare MCP endpoint has no registry/stars adoption signal — omit it rather
             # than fabricate one.
             label = url.split("://", 1)[-1].split("/", 1)[0] or "MCP server"
@@ -991,11 +1031,11 @@ async def _call_tool(
             )
         return _text(f"Unknown tool: {name}")
     except httpx.TimeoutException:
-        await _bump("result:error")
+        await _bump_s("result:error")
         return _text("That scan is taking longer than usual (large target). AgentAvow caps and "
                      "caches scans — try again in a moment and it should come back quickly.")
     except httpx.HTTPStatusError as e:
-        await _bump("result:error")
+        await _bump_s("result:error")
         code = e.response.status_code
         if code == 404:
             return _text("Not found — check the target coordinates and try again.")
@@ -1005,7 +1045,7 @@ async def _call_tool(
         return _text(f"AgentAvow returned an error ({code}). "
                      "Try again shortly, or check the target.")
     except Exception:  # noqa: BLE001 — actionable message; never a stack trace or internal detail
-        await _bump("result:error")
+        await _bump_s("result:error")
         return _text("Could not complete the check right now. Please try again shortly.")
 
 
@@ -1016,4 +1056,15 @@ session_manager = StreamableHTTPSessionManager(app=server, json_response=True, s
 
 
 async def mcp_asgi_app(scope, receive, send) -> None:
+    # Capture the request's User-Agent → distribution surface for per-surface
+    # metrics. Fail-open: any hiccup leaves the contextvar at its "other" default.
+    try:
+        ua = ""
+        for k, v in scope.get("headers") or []:
+            if k == b"user-agent":
+                ua = v.decode("latin-1", "replace")
+                break
+        _SURFACE.set(_surface_from_ua(ua))
+    except Exception:
+        pass
     await session_manager.handle_request(scope, receive, send)

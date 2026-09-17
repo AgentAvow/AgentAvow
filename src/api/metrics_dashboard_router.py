@@ -267,6 +267,26 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         t: sum((await _read_daily_counter(f"mcp:tool:{t}", day_strs)).values())
         for t in mcp_tools
     }
+    # Per-surface attribution (from the request User-Agent, tagged in
+    # src/bridges/mcp_streamable._bump_s). Surfaces sum back to the aggregate.
+    mcp_surfaces = ["claude", "chatgpt", "claude-code", "cursor", "vscode", "other"]
+    mcp_by_surface = {
+        s: {
+            "calls": sum(
+                (await _read_daily_counter(f"mcp:calls:total:{s}", day_strs)).values()
+            ),
+            "errors": sum(
+                (await _read_daily_counter(f"mcp:result:error:{s}", day_strs)).values()
+            ),
+            "safe": sum(
+                (await _read_daily_counter(f"mcp:verdict:safe:{s}", day_strs)).values()
+            ),
+            "needs_review": sum(
+                (await _read_daily_counter(f"mcp:verdict:needs_review:{s}", day_strs)).values()
+            ),
+        }
+        for s in mcp_surfaces
+    }
 
     # --- Daily time-series (grouped queries, then aligned to day_strs) ---
     async def _series_by_date(date_col) -> dict[str, int]:
@@ -398,6 +418,9 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "safe_window": int(mcp_safe_window),
             "needs_review_window": int(mcp_review_window),
             "by_tool": {t: int(n) for t, n in mcp_by_tool.items()},
+            "by_surface": {
+                s: {k: int(v) for k, v in d.items()} for s, d in mcp_by_surface.items()
+            },
         },
         "alert_webhooks": {"active": int(alert_webhooks_active)},
         "badges": {
