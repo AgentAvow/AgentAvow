@@ -582,9 +582,7 @@ def _scan_struct(
 # --------------------------------------------------------------------------- #
 # tool definitions (all read-only, unauthenticated)
 # --------------------------------------------------------------------------- #
-def _RO(  # noqa: N802, N803 — mirrors MCP field names + existing call sites
-    title: str, readOnlyHint: bool = True, openWorldHint: bool = True
-) -> types.ToolAnnotations:
+def _RO(title: str, readOnlyHint: bool = True, openWorldHint: bool = True) -> types.ToolAnnotations:  # noqa: N802, N803, E501 — mirrors MCP field names + existing call sites
     """Read-only tool annotation with EVERY behavioral hint set explicitly (never
     null) so it matches the tool's actual behavior — the four hints app-review checks:
     readOnlyHint (never mutates), destructiveHint=False (nothing is destroyed),
