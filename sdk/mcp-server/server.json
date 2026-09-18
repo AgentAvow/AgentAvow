@@ -3,7 +3,7 @@
   "name": "com.agentavow/agentavow-trust",
   "title": "AgentAvow Trust",
   "description": "Signed, offline-verifiable safety scores for the MCP servers, packages & tools an agent connects to",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "packages": [
     {
       "registryType": "pypi",
@@ -12,6 +12,12 @@
       "transport": {
         "type": "stdio"
       }
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://agentavow.com/mcp"
     }
   ]
 }
