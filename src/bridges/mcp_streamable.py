@@ -582,13 +582,19 @@ def _scan_struct(
 # --------------------------------------------------------------------------- #
 # tool definitions (all read-only, unauthenticated)
 # --------------------------------------------------------------------------- #
-def _RO(title: str, readOnlyHint: bool = True) -> types.ToolAnnotations:  # noqa: N802, N803 — mirrors MCP field names + existing call sites
-    """Read-only tool annotation with the full hint set ChatGPT app-review checks:
+def _RO(  # noqa: N802, N803 — mirrors MCP field names + existing call sites
+    title: str, readOnlyHint: bool = True, openWorldHint: bool = True
+) -> types.ToolAnnotations:
+    """Read-only tool annotation with EVERY behavioral hint set explicitly (never
+    null) so it matches the tool's actual behavior — the four hints app-review checks:
     readOnlyHint (never mutates), destructiveHint=False (nothing is destroyed),
-    openWorldHint=True (the scan/lookup tools reach arbitrary external targets)."""
+    idempotentHint=True (read-only → repeating a call has no additional effect),
+    openWorldHint (True for the scan/lookup tools that reach arbitrary external
+    targets; False for a self-contained tool like about_agentavow that reaches
+    nothing external)."""
     return types.ToolAnnotations(
         title=title, readOnlyHint=readOnlyHint,
-        destructiveHint=False, openWorldHint=True,
+        destructiveHint=False, idempotentHint=True, openWorldHint=openWorldHint,
     )
 
 _TOOLS: list[types.Tool] = [
@@ -783,7 +789,7 @@ _TOOLS: list[types.Tool] = [
             "read-only."
         ),
         inputSchema={"type": "object", "properties": {}},
-        annotations=_RO(title="About AgentAvow", readOnlyHint=True),
+        annotations=_RO(title="About AgentAvow", readOnlyHint=True, openWorldHint=False),
     ),
 ]
 
