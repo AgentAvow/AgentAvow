@@ -17,6 +17,29 @@ pip install agentavow-trust
 
 See [sdk/mcp-server/](sdk/mcp-server/) for setup and full tool list.
 
+### Connect from your editor
+
+The remote MCP server is live at **`https://agentavow.com/mcp`** (Streamable HTTP, no auth, read-only) — nothing to install.
+
+**One-click:**
+
+- **Cursor** — `cursor://anysphere.cursor-deeplink/mcp/install?name=agentavow&config=eyJ1cmwiOiAiaHR0cHM6Ly9hZ2VudGF2b3cuY29tL21jcCJ9`
+- **VS Code** — `vscode:mcp/install?%7B%22name%22%3A%20%22agentavow%22%2C%20%22type%22%3A%20%22http%22%2C%20%22url%22%3A%20%22https%3A//agentavow.com/mcp%22%7D`
+
+**Or add it manually.** Cursor (`~/.cursor/mcp.json`, or per-project `.cursor/mcp.json`):
+
+```json
+{ "mcpServers": { "agentavow": { "url": "https://agentavow.com/mcp" } } }
+```
+
+VS Code (`.vscode/mcp.json`, or **MCP: Open User Configuration**):
+
+```json
+{ "servers": { "agentavow": { "type": "http", "url": "https://agentavow.com/mcp" } } }
+```
+
+For the local stdio server instead: `pip install agentavow-trust`.
+
 ## Key Features
 
 - **Free, anonymous scanning** — Point AgentAvow at any GitHub repo, MCP server, npm or PyPI package, or OpenClaw skill (or a wallet address that resolves to one) and get a safety grade back. No account, no install. Results cache for 1 hour; `?force=true` re-scans.
