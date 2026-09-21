@@ -1,0 +1,211 @@
+{
+  "suite": "execution-coverage-v0",
+  "spec": "OpenSecureAIAlliance/RFCs#6 — pre-connection tool-trust attestation",
+  "status": "proposed — a report shape for the RFC to refine, not a finalized schema",
+  "derivation": "signature = Ed25519 (RFC 8032) over jcs(report) minus the signature field; RFC 8785 JCS. digests are sha-256.",
+  "author_set": "agentgraph (AgentAvow attestation layer, did:web:agentgraph.co).",
+  "axes": {
+    "signature_valid": "the report's signature verifies; binds the signer to what it signed and no further",
+    "coverage_consistent": "declared coverage and aggregation are internally consistent; a required check is not both skipped and counted as passed",
+    "digest_binds": "the report is about the definition admission observes (subject_digest == observed_digest)",
+    "execution_state": "established (every required check receipted or reproduced) | unestablished (no such evidence) | unavailable (cannot be receipted or reproduced); never inferred from the signature"
+  },
+  "public_key_spki_b64": "MCowBQYDK2VwAyEAhPM5NzeYwjqfOZM08QkoNluWgvHBF7t3cmQl7YhfPUM=",
+  "vectors": [
+    {
+      "name": "skipped-required-check",
+      "mode": "coverage-inconsistent",
+      "note": "Valid signature over a report whose aggregate claims all required checks passed, while a required check is declared skipped. The coverage-reading consumer catches the contradiction; the signature does not.",
+      "observed_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+      "report": {
+        "report_id": "r-skip",
+        "subject_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+        "checks": [
+          {
+            "id": "secret-scan",
+            "required": true,
+            "state": "pass",
+            "execution": "receipt"
+          },
+          {
+            "id": "exec-sandbox",
+            "required": true,
+            "state": "skipped",
+            "execution": "none"
+          }
+        ],
+        "aggregate": {
+          "required": 2,
+          "passed": 1,
+          "required_passed": 2
+        },
+        "signature": {
+          "alg": "EdDSA",
+          "value": "0znFOQIL+VrOcIixR984Qs+dpmughOlSuT3WYsHvbOFovOLa0Kk6oETHqTECClWPxxC5JNA12yLcJDS6pMSpCg=="
+        }
+      },
+      "expect": {
+        "signature_valid": true,
+        "coverage_consistent": false,
+        "digest_binds": true,
+        "execution_state": "established"
+      }
+    },
+    {
+      "name": "completion-without-execution-evidence",
+      "mode": "distinguishing-control",
+      "note": "THE control. Valid signature, internally consistent coverage, correct arithmetic, and it binds the observed digest — but no required check carries a receipt or reproduction. Signature and arithmetic pass while execution is unestablished. A coverage-only reader passes this false-green.",
+      "observed_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+      "report": {
+        "report_id": "r-noev",
+        "subject_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+        "checks": [
+          {
+            "id": "secret-scan",
+            "required": true,
+            "state": "pass",
+            "execution": "none"
+          },
+          {
+            "id": "exec-sandbox",
+            "required": true,
+            "state": "pass",
+            "execution": "none"
+          }
+        ],
+        "aggregate": {
+          "required": 2,
+          "passed": 2,
+          "required_passed": 2
+        },
+        "signature": {
+          "alg": "EdDSA",
+          "value": "KIvJ0TdO4qB5MxkXilgEGV7S5fGZGDbNSQUSFF2oNvt+z/pxj3x+AGcfGkE2FClWk5o4UOKD62s19cx8ABleAA=="
+        }
+      },
+      "expect": {
+        "signature_valid": true,
+        "coverage_consistent": true,
+        "digest_binds": true,
+        "execution_state": "unestablished"
+      }
+    },
+    {
+      "name": "digest-mismatch",
+      "mode": "wrong-subject",
+      "note": "A valid, fully-evidenced report for definition digest A, presented when admission observes digest B. Every other axis passes; the report is simply not about the artefact being admitted.",
+      "observed_digest": "d925637304b26da948fcc0efe196a08a21c83d75ae9649b904fe2c7a7ca9cf84",
+      "report": {
+        "report_id": "r-mismatch",
+        "subject_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+        "checks": [
+          {
+            "id": "secret-scan",
+            "required": true,
+            "state": "pass",
+            "execution": "receipt"
+          },
+          {
+            "id": "exec-sandbox",
+            "required": true,
+            "state": "pass",
+            "execution": "reproduced"
+          }
+        ],
+        "aggregate": {
+          "required": 2,
+          "passed": 2,
+          "required_passed": 2
+        },
+        "signature": {
+          "alg": "EdDSA",
+          "value": "Oo9M21n1g6yWa/Ae5+2rRDSHCAJuBr60TCaWA0pZq4Z7yTDxdBpW5uBCBdakCI/3qdmzTxoIPf0asVdLfueIDw=="
+        }
+      },
+      "expect": {
+        "signature_valid": true,
+        "coverage_consistent": true,
+        "digest_binds": false,
+        "execution_state": "established"
+      }
+    },
+    {
+      "name": "reproduction-unavailable",
+      "mode": "unavailable-not-false",
+      "note": "A required check whose inputs or dependencies cannot be disclosed, so it can be neither receipted nor independently reproduced. Execution is unavailable, which is a distinct state from unestablished: nothing claims it ran, and nothing can check that it did.",
+      "observed_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+      "report": {
+        "report_id": "r-unavail",
+        "subject_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+        "checks": [
+          {
+            "id": "secret-scan",
+            "required": true,
+            "state": "pass",
+            "execution": "receipt"
+          },
+          {
+            "id": "license-audit",
+            "required": true,
+            "state": "pass",
+            "execution": "unavailable"
+          }
+        ],
+        "aggregate": {
+          "required": 2,
+          "passed": 2,
+          "required_passed": 2
+        },
+        "signature": {
+          "alg": "EdDSA",
+          "value": "/VlcCfk8cc1zH0/30GzlyU+6L7m3b38xLKs4z8wHCK+fExfG0Zm3L9NC4fS+rypjvzxualNrEZHZ3kA5RZx7CQ=="
+        }
+      },
+      "expect": {
+        "signature_valid": true,
+        "coverage_consistent": true,
+        "digest_binds": true,
+        "execution_state": "unavailable"
+      }
+    },
+    {
+      "name": "positive-continuation",
+      "mode": "admissible",
+      "note": "Matching definitions, every required check passed and evidenced by a receipt or independent reproduction, and the report binds the observed digest. All four axes hold; whether to proceed is then the admission policy, versioned separately from this verdict.",
+      "observed_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+      "report": {
+        "report_id": "r-ok",
+        "subject_digest": "bd4b321502efaa38b8b91e143b55cff131db918d89dd79fc735f32ee39c57fe2",
+        "checks": [
+          {
+            "id": "secret-scan",
+            "required": true,
+            "state": "pass",
+            "execution": "receipt"
+          },
+          {
+            "id": "exec-sandbox",
+            "required": true,
+            "state": "pass",
+            "execution": "reproduced"
+          }
+        ],
+        "aggregate": {
+          "required": 2,
+          "passed": 2,
+          "required_passed": 2
+        },
+        "signature": {
+          "alg": "EdDSA",
+          "value": "16pD9oM7AEAy8NnlxI19VnEn18AfY9BrgSytF9CZg0XtnvBLhUDSWti0C5QmliS+RbeYJiHJRnymMLjTUhfxCw=="
+        }
+      },
+      "expect": {
+        "signature_valid": true,
+        "coverage_consistent": true,
+        "digest_binds": true,
+        "execution_state": "established"
+      }
+    }
+  ]
+}
