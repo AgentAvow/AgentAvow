@@ -4,6 +4,7 @@
 
 [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/AgentAvow/AgentAvow/badge)](https://agentavow.com/check/AgentAvow/AgentAvow)
 [![PyPI - agentavow-trust](https://img.shields.io/pypi/v/agentavow-trust?label=agentavow-trust&color=blue)](https://pypi.org/project/agentavow-trust/)
+[![Wellknown](https://wellknown.network/agents/agentavow-trust/badge.svg)](https://wellknown.network/agents/agentavow-trust)
 
 AgentAvow gives any tool, MCP server, package, or skill an AI agent connects to a **signed, verifiable safety grade** you can recompute offline — the "is this tool safe to connect?" layer.
 
