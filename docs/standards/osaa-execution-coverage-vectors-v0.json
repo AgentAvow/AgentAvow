@@ -1,0 +1,108 @@
+{
+  "suite": "safe-tool-trust-execution-coverage-v0",
+  "context": "OpenSecureAIAlliance/RFCs#6 — pre-connection tool-trust attestation as SAFE evidence. These vectors exercise the reviewer's correction: a signed coverage block binds the signer to the coverage assertion, not to the fact that the checks ran. Signature validity, coverage/aggregation consistency, and execution-evidence status are three separate properties, and none inherits another's result.",
+  "status": "proposed for discussion (schema not yet fixed upstream). Signature validity is assumed valid in every vector, because the property under test is coverage and execution, not the signature.",
+  "report_shape": {
+    "target_ref": "stable identity of the graded artifact (MCP URL / package coordinate / repo + content digest)",
+    "definition_digest": "sha-256 of the tool definition this report was produced against",
+    "verdict": "{ grade, score, verdict_digest, attestation } — the signed, offline-recomputable verdict (RFC 8785 JCS + RFC 7515 JWS)",
+    "coverage": {
+      "checks": "[ { id, required: bool, state: pass|fail|skipped|not-run, execution_evidence: reproduced|referenced|none } ]",
+      "aggregation": "{ required_total, required_passed, required_with_execution_evidence }"
+    }
+  },
+  "consumer_dimensions": {
+    "signature": "valid | invalid — under the consumer's trust policy",
+    "coverage_consistency": "consistent | inconsistent — declared checks vs the aggregation, and whether a required check was skipped or not-run",
+    "execution": "verified | reproduced | unavailable | insufficient — was execution evidence for the required checks independently checkable",
+    "admission": "proceed | hold — a SEPARATELY VERSIONED policy, not a change to the evidence verdict"
+  },
+  "vectors": [
+    {
+      "name": "skipped-required-check",
+      "property": "A valid signature over a report that explicitly records a required check as skipped.",
+      "report": {
+        "target_ref": "https://mcp.example.com/mcp",
+        "definition_digest": "sha-256:aaaa...",
+        "verdict": { "grade": "B", "score": 74, "verdict_digest": "sha-256:v1...", "attestation": "<JWS, assumed valid>" },
+        "coverage": {
+          "checks": [
+            { "id": "secret-hygiene", "required": true, "state": "pass", "execution_evidence": "reproduced" },
+            { "id": "unsafe-exec", "required": true, "state": "skipped", "execution_evidence": "none" }
+          ],
+          "aggregation": { "required_total": 2, "required_passed": 1, "required_with_execution_evidence": 1 }
+        }
+      },
+      "expected": { "signature": "valid", "coverage_consistency": "inconsistent", "execution": "insufficient", "admission": "hold" },
+      "why": "The signature binds the assertion that one required check was skipped; it does not make the skip go away. A coverage reader sees required_passed < required_total with a skipped required check and reports inconsistent. Admission holds under any policy that requires all required checks to run."
+    },
+    {
+      "name": "completion-without-execution-evidence",
+      "property": "A valid signature claiming completion, with correct arithmetic, but no independently checkable execution evidence for the required checks. THE DISTINGUISHING CONTROL.",
+      "report": {
+        "target_ref": "npm:left-pad",
+        "definition_digest": "sha-256:bbbb...",
+        "verdict": { "grade": "A", "score": 91, "verdict_digest": "sha-256:v2...", "attestation": "<JWS, assumed valid>" },
+        "coverage": {
+          "checks": [
+            { "id": "secret-hygiene", "required": true, "state": "pass", "execution_evidence": "none" },
+            { "id": "unsafe-exec", "required": true, "state": "pass", "execution_evidence": "none" }
+          ],
+          "aggregation": { "required_total": 2, "required_passed": 2, "required_with_execution_evidence": 0 }
+        }
+      },
+      "expected": { "signature": "valid", "coverage_consistency": "consistent", "execution": "insufficient", "admission": "hold" },
+      "why": "Signature and arithmetic both pass — a coverage-only reader passes this. The false green: every required check reads pass, but none carries execution evidence, so nothing establishes the checks actually ran. Only the execution dimension catches it. Whether a consumer may proceed on a signed-but-unevidenced report is a separately versioned admission policy, not a change to the evidence verdict."
+    },
+    {
+      "name": "definition-digest-mismatch",
+      "property": "A report produced for definition digest A, presented when admission observes digest B.",
+      "report": {
+        "target_ref": "modelcontextprotocol/servers",
+        "definition_digest": "sha-256:AAAA-report-was-for-this",
+        "verdict": { "grade": "A", "score": 88, "verdict_digest": "sha-256:v3...", "attestation": "<JWS, assumed valid>" },
+        "coverage": {
+          "checks": [ { "id": "unsafe-exec", "required": true, "state": "pass", "execution_evidence": "reproduced" } ],
+          "aggregation": { "required_total": 1, "required_passed": 1, "required_with_execution_evidence": 1 }
+        }
+      },
+      "observed_definition_digest": "sha-256:BBBB-admission-sees-this",
+      "expected": { "signature": "valid", "coverage_consistency": "consistent", "execution": "verified", "admission": "hold" },
+      "why": "Everything about the report is sound — for the wrong subject. The report's definition_digest (A) does not match what admission observes (B), so a valid, fully-evidenced report about definition A says nothing about the definition being connected. Binding the subject inside the signed report is what lets the consumer catch this."
+    },
+    {
+      "name": "reproduction-unavailable",
+      "property": "A required check whose execution evidence is referenced, but the inputs or dependencies cannot be disclosed, so the reference does not resolve.",
+      "report": {
+        "target_ref": "https://mcp.private.example/mcp",
+        "definition_digest": "sha-256:cccc...",
+        "verdict": { "grade": "B", "score": 70, "verdict_digest": "sha-256:v4...", "attestation": "<JWS, assumed valid>" },
+        "coverage": {
+          "checks": [ { "id": "unsafe-exec", "required": true, "state": "pass", "execution_evidence": "referenced" } ],
+          "aggregation": { "required_total": 1, "required_passed": 1, "required_with_execution_evidence": 1 }
+        }
+      },
+      "expected": { "signature": "valid", "coverage_consistency": "consistent", "execution": "unavailable", "admission": "hold" },
+      "why": "Distinct from completion-without-execution-evidence: here evidence IS referenced, but the reference does not resolve because inputs or dependencies cannot be disclosed. The consumer cannot reproduce, so execution is unavailable rather than insufficient — a different outcome the reader must keep separate, exactly as an unresolvable reference is distinct from a missing one."
+    },
+    {
+      "name": "positive-continuation",
+      "property": "Matching definition, all required checks pass with reproduced execution evidence, declared policy satisfied.",
+      "report": {
+        "target_ref": "pypi:requests",
+        "definition_digest": "sha-256:dddd-matches-observed",
+        "verdict": { "grade": "A", "score": 93, "verdict_digest": "sha-256:v5...", "attestation": "<JWS, assumed valid>" },
+        "coverage": {
+          "checks": [
+            { "id": "secret-hygiene", "required": true, "state": "pass", "execution_evidence": "reproduced" },
+            { "id": "unsafe-exec", "required": true, "state": "pass", "execution_evidence": "reproduced" }
+          ],
+          "aggregation": { "required_total": 2, "required_passed": 2, "required_with_execution_evidence": 2 }
+        }
+      },
+      "observed_definition_digest": "sha-256:dddd-matches-observed",
+      "expected": { "signature": "valid", "coverage_consistency": "consistent", "execution": "verified", "admission": "proceed" },
+      "why": "All three dimensions pass on their own — signature valid, coverage consistent, execution reproduced — against the definition being connected. This is the only vector where admission proceeds, and it proceeds because every dimension was checked independently, not because any one inherited another's result."
+    }
+  ]
+}
