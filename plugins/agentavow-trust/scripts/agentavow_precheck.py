@@ -68,11 +68,27 @@ def _pkg_from_args(args: list[str], flag_takes_pkg: tuple[str, ...]) -> str | No
     return None
 
 
+def _sanitize_url(url: str) -> str:
+    """Strip any embedded credential (user:pass@) and the query/fragment before a URL
+    leaves the machine. A scan needs only scheme+host+path, never a '?token=' or a
+    'user:pass@' a server config might carry, so the precheck can't forward a secret
+    to the scan API."""
+    try:
+        p = urllib.parse.urlsplit(url)
+        host = p.hostname or ""
+        if p.port:
+            host = f"{host}:{p.port}"
+        return urllib.parse.urlunsplit((p.scheme, host, p.path, "", ""))
+    except Exception:
+        return url.split("?", 1)[0].split("#", 1)[0]
+
+
 def _resolve_target(name: str, cfg: dict) -> dict | None:
     """Classify one MCP server config into a scannable target, or None to skip."""
     url = cfg.get("url") or cfg.get("endpoint")
     if isinstance(url, str) and url.startswith("http"):
-        return {"name": name, "kind": "mcp", "id": url, "url": url}
+        safe = _sanitize_url(url)
+        return {"name": name, "kind": "mcp", "id": safe, "url": safe}
 
     cmd = cfg.get("command")
     if not isinstance(cmd, str):
