@@ -110,3 +110,9 @@ sdk/js/*.tgz
 
 # local venv pin (kept out of the public repo)
 requirements.lock.txt
+
+# Session handoff (internal launch/strategy state — never publish)
+HANDOFF.md
+
+# stray local venv
+.venv312/
