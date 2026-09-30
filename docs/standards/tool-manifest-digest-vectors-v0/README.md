@@ -15,7 +15,7 @@ Zero dependencies, Node 18+. Nothing is fetched. Exits non-zero on any failure.
 One real, pinned AgentAvow scan attestation for `github/github-mcp-server`: a compact JWS
 (RFC 7515, EdDSA/Ed25519) whose payload is the RFC 8785 canonical bytes of the verdict.
 Inside the signed payload: the issuer (`did:web:agentgraph.co`), the subject, `issuedAt`,
-`expiresAt`, the grade, the findings, and `scan.toolManifestDigest`, a SHA-256 folded over
+`expiresAt`, the score and tier, the findings, and `scan.toolManifestDigest`, a SHA-256 folded over
 the per-file digests of every tool definition the scan observed (`scan.toolDigests`).
 
 The JWK is pinned in the vector file, matched by `kid` to the JWS header. The `jwks_url`
@@ -89,6 +89,16 @@ Both are limits of the artifact, not of the consumer.
 - **The digest is not a per-tool metadata pin.** `scan.toolManifestDigest` is folded over
   the per-file digests of every definition the scan observed. It has a different preimage
   from a digest over one tool's declared metadata, and neither is evidence for the other.
+
+## Consumers
+
+- **APS-side consumer** (`agent-passport-system` 7.2.0 primitives), owned by APS:
+  [`examples/interop/agentavow/` at `fd47f34`](https://github.com/aeoess/agent-passport-system/tree/fd47f34cc36fce060d092fe1216aff3f89fb8d88/examples/interop/agentavow).
+  It reads the vector file at `4404df2c` unchanged and reports 30 of 30 expected axis
+  results, each negative failing exactly its own axis. By its author's label, a second
+  implementation run by the consuming project: a reproduction, not an independent
+  verification record. It reports the tool-to-subject binding as not evaluated and keeps
+  the manifest digest separate from an APS metadata pin, the two boundaries above.
 
 ## Derivation
 
