@@ -18,7 +18,6 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -68,21 +67,15 @@ class X402ExplorerResponse(BaseModel):
 
 
 def _safe_endpoint(url: str) -> str:
-    """SSRF-safe validation — no file://, no internal IPs, https preferred."""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(400, "endpoint must be http or https")
-    host = (parsed.hostname or "").lower()
-    if not host:
-        raise HTTPException(400, "endpoint must include a hostname")
-    if host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
-        raise HTTPException(400, "endpoint may not target loopback")
-    # Coarse private range check — SSRF helper in src/ssrf.py is preferred
-    # when available, but keeping this router standalone.
-    forbidden_prefixes = ("10.", "192.168.", "169.254.")
-    if any(host.startswith(p) for p in forbidden_prefixes):
-        raise HTTPException(400, "endpoint may not target a private address")
-    return url
+    """The caller supplies this URL and nobody is logged in, so it goes through the
+    shared guard: http(s) only, no internal address, including one a hostname
+    resolves to."""
+    from src.ssrf import validate_url
+
+    try:
+        return validate_url(url, field_name="endpoint")
+    except ValueError:
+        raise HTTPException(400, "endpoint must be a public http(s) URL")
 
 
 def _read_results_file() -> list[dict[str, Any]]:
@@ -114,10 +107,14 @@ async def rescan_x402_endpoint(
     a letter grade — the grade is derived server-side and published at /x402.
     """
     url = _safe_endpoint(endpoint)
+    from src.ssrf import ssrf_safe_async_client, ssrf_safe_follow
+
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            head = await client.head(url)
-            probe = await client.get(url, headers={"Accept": "application/json"})
+        # Pinned to the validated address; every redirect hop is validated too.
+        async with ssrf_safe_async_client(timeout=10.0, follow_redirects=False) as client:
+            head, _ = await ssrf_safe_follow(client, "HEAD", url)
+            probe, final_url = await ssrf_safe_follow(
+                client, "GET", url, headers={"Accept": "application/json"})
         lowered = {k.lower() for k in probe.headers}
         has_x402 = (
             "x-402-payment" in lowered or "www-authenticate" in lowered
@@ -129,8 +126,10 @@ async def rescan_x402_endpoint(
             has_x402_header=has_x402,
             content_type=probe.headers.get("content-type", ""),
             content_length=int(probe.headers.get("content-length", 0) or 0),
-            final_url=str(probe.url),
+            final_url=final_url,
         )
+    except ValueError:
+        return X402RescanResponse(endpoint_url=url, error="blocked")
     except httpx.TimeoutException:
         return X402RescanResponse(endpoint_url=url, error="timeout")
     except httpx.RequestError as exc:

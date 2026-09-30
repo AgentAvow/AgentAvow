@@ -249,7 +249,11 @@ async def process_event(
 
         delivered = 0
         failed = 0
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        from src.ssrf import ssrf_safe_async_client
+
+        async with ssrf_safe_async_client(
+            timeout=REQUEST_TIMEOUT, follow_redirects=False,
+        ) as client:
             for sub in subs:
                 ok = await deliver_with_retries(
                     client, sub, event_type, payload, db,

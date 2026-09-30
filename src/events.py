@@ -111,7 +111,11 @@ async def dispatch_webhooks(
         return 0
 
     delivered = 0
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    from src.ssrf import ssrf_safe_async_client
+
+    # callback_url is user-supplied and was only checked when it was saved; the
+    # pinned client re-validates the address it actually connects to.
+    async with ssrf_safe_async_client(timeout=10.0, follow_redirects=False) as client:
         for sub in matching:
             success = await _deliver_webhook(client, sub, event_type, payload)
             if success:

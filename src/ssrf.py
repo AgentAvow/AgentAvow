@@ -198,7 +198,10 @@ def build_ssrf_safe_transport(**transport_kwargs):
                 # not an IP literal → resolve, validate, and PIN to the safe IP.
             ips = resolve_and_validate(host, field_name="url")
             if not ips:
-                return await super().handle_async_request(request)  # DNS failed; let httpx error
+                # Fail closed. Handing the request on would let httpx do its own,
+                # unvalidated lookup: a DNS server that fails the guard's lookups and
+                # then answers with an internal address would get an unpinned connection.
+                raise httpx.ConnectError(f"could not resolve host: {host}", request=request)
             # Connect to the validated IP; keep the original Host header (set at Request
             # creation) and force TLS SNI + cert verification against the real hostname.
             request.url = request.url.copy_with(host=ips[0])
@@ -214,6 +217,33 @@ def ssrf_safe_async_client(**client_kwargs):
     import httpx
 
     return httpx.AsyncClient(transport=build_ssrf_safe_transport(), **client_kwargs)
+
+
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
+
+async def ssrf_safe_follow(
+    client, method: str, url: str, *, max_redirects: int = 3, **kwargs,
+):
+    """Send a request to a user-influenced URL and follow redirects by hand,
+    validating every hop. Returns ``(response, final_url)``.
+
+    ``client`` must come from ``ssrf_safe_async_client`` with redirects off. The
+    pinned transport rewrites a request's host to the validated IP, so httpx's own
+    redirect handling would resolve a relative ``Location`` against that IP;
+    following here keeps the original hostname and re-checks each new one.
+    Raises ``ValueError`` for a blocked hop or too many redirects.
+    """
+    from urllib.parse import urljoin
+
+    for _ in range(max_redirects + 1):
+        validate_url(url, field_name="url")
+        resp = await client.request(method, url, **kwargs)
+        location = resp.headers.get("location")
+        if resp.status_code not in _REDIRECT_STATUSES or not location:
+            return resp, url
+        url = urljoin(url, location)
+    raise ValueError("url redirected too many times")
 
 
 def validate_url_optional(

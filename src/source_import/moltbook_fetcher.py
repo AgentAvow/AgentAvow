@@ -28,8 +28,14 @@ async def fetch_moltbook(profile_url: str) -> SourceImportResult:
     Raises:
         ValueError: If the profile cannot be fetched.
     """
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        resp = await client.get(profile_url)
+    from src.ssrf import ssrf_safe_async_client, ssrf_safe_follow
+
+    # The URL comes from the caller: pin it, and validate each redirect hop.
+    async with ssrf_safe_async_client(timeout=10, follow_redirects=False) as client:
+        try:
+            resp, _ = await ssrf_safe_follow(client, "GET", profile_url)
+        except httpx.HTTPError as exc:
+            raise ValueError("Failed to fetch Moltbook profile") from exc
         if resp.status_code != 200:
             raise ValueError(
                 f"Failed to fetch Moltbook profile: HTTP {resp.status_code}"

@@ -274,9 +274,7 @@ async def _mcp_challenge_ok(url: str, code: str) -> bool:
     on a fresh initialize handshake. SSRF-guarded; fail-closed."""
     token = f"agentavow-verify-{code}"
     try:
-        import httpx
-
-        from src.ssrf import validate_url_https
+        from src.ssrf import ssrf_safe_async_client, validate_url_https
 
         safe = validate_url_https(url, field_name="endpoint")
         headers = {
@@ -291,7 +289,7 @@ async def _mcp_challenge_ok(url: str, code: str) -> bool:
                 "clientInfo": {"name": "AgentAvow", "version": "1.0"},
             },
         }
-        async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
+        async with ssrf_safe_async_client(timeout=8, follow_redirects=False) as client:
             resp = await client.post(safe, headers=headers, json=body)
         hv = resp.headers.get("x-agentavow-verify")
         if hv and hv.strip() == token:
