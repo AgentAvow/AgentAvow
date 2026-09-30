@@ -62,11 +62,21 @@ log() {
 # ---------------------------------------------------------------------------
 # Failure email notification
 # ---------------------------------------------------------------------------
-ADMIN_EMAIL="${ADMIN_EMAIL:-kenne@agentgraph.co}"
 ENV_FILE="/home/ec2-user/agentgraph/.env.production"
+# Recipient for failure mail. Cron does not load .env.production, so read it from
+# the file when the environment does not set it. This is the backup alert address,
+# separate from the app's ADMIN_EMAIL (which names the admin account).
+BACKUP_ALERT_EMAIL="${BACKUP_ALERT_EMAIL:-$(grep '^BACKUP_ALERT_EMAIL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2-)}"
+BACKUP_ALERT_EMAIL="${BACKUP_ALERT_EMAIL:-admin@agentavow.com}"
 
 send_failure_email() {
     local error_line="$1"
+    local subject="[AgentAvow] Backup FAILED"
+    local body="AgentAvow backup FAILED at line ${error_line} on $(date).\n\nCheck logs: /home/ec2-user/backups/backup.log"
+    if [ "${error_line}" = "test" ]; then
+        subject="[AgentAvow] Backup alert test"
+        body="Test message from scripts/backup.sh on $(hostname) at $(date). If you can read this, backup failure alerts reach this address."
+    fi
     # Source SMTP creds from .env.production if available
     if [ -f "${ENV_FILE}" ]; then
         local smtp_host smtp_port smtp_user smtp_pass from_email
@@ -77,26 +87,42 @@ send_failure_email() {
         from_email="$(grep '^FROM_EMAIL=' "${ENV_FILE}" | cut -d= -f2-)"
 
         if [ -n "${smtp_host}" ] && [ -n "${smtp_user}" ]; then
-            python3 -c "
+            # The send result is logged either way: a silent send failure looked
+            # like a delivered alert for months.
+            local result
+            result="$(python3 -c "
 import smtplib
 from email.mime.text import MIMEText
-msg = MIMEText('AgentGraph backup FAILED at line ${error_line} on $(date).\n\nCheck logs: /home/ec2-user/backups/backup.log')
-msg['Subject'] = '[AgentGraph] Backup FAILED'
+msg = MIMEText('${body}'.replace('\\\\n', '\\n'))
+msg['Subject'] = '${subject}'
 msg['From'] = '${from_email}'
-msg['To'] = '${ADMIN_EMAIL}'
+msg['To'] = '${BACKUP_ALERT_EMAIL}'
 try:
-    s = smtplib.SMTP('${smtp_host}', ${smtp_port})
+    s = smtplib.SMTP('${smtp_host}', ${smtp_port:-587}, timeout=20)
     s.starttls()
     s.login('${smtp_user}', '${smtp_pass}')
     s.send_message(msg)
     s.quit()
+    print('SENT')
 except Exception as e:
-    print(f'Email send failed: {e}')
-" 2>/dev/null || true
-            log "INFO" "Failure notification sent to ${ADMIN_EMAIL}"
+    print(f'FAILED: {e}')
+" 2>&1 || true)"
+            if [ "${result}" = "SENT" ]; then
+                log "INFO" "Alert email sent to ${BACKUP_ALERT_EMAIL}"
+            else
+                log "ERROR" "Alert email to ${BACKUP_ALERT_EMAIL} not sent: ${result}"
+            fi
+        else
+            log "ERROR" "Alert email not sent: SMTP_HOST/SMTP_USER missing in ${ENV_FILE}"
         fi
     fi
 }
+
+# `backup.sh --test-email` sends one test message to the alert address and exits.
+if [ "${1:-}" = "--test-email" ]; then
+    send_failure_email "test"
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Error handler
