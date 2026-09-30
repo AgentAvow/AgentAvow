@@ -18,6 +18,10 @@ EC2_USER="ec2-user"
 SSH_KEY="${AG_SSH_KEY:?Set AG_SSH_KEY env var (path to your SSH key)}"
 PROJECT_DIR="agentgraph"
 COMPOSE_FILE="docker-compose.prod.yml"
+# Branch to deploy. Always checked out explicitly: the host can be left on a hotfix
+# branch, and a bare `git pull` there would report "up to date" and rebuild the old
+# code. Override with AG_DEPLOY_BRANCH to ship a hotfix branch.
+DEPLOY_BRANCH="${AG_DEPLOY_BRANCH:-main}"
 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 
 # Load prod secrets (POSTGRES_PASSWORD, REDIS_PASSWORD, JWT_SECRET, …) into the
@@ -94,6 +98,7 @@ remote() {
 echo -e "${BOLD}=== AgentGraph Production Deploy ===${NC}"
 echo ""
 echo -e "  Host:     ${EC2_USER}@${EC2_HOST}"
+echo -e "  Branch:   ${DEPLOY_BRANCH}"
 echo -e "  Backend:  ${BACKEND}"
 echo -e "  Frontend: ${FRONTEND}"
 echo -e "  Dry run:  ${DRY_RUN}"
@@ -123,11 +128,12 @@ fi
 # --- Step 2: Git pull ---
 step "Pulling latest code"
 if $DRY_RUN; then
-  echo "    Would run: cd ~/${PROJECT_DIR} && git pull"
+  echo "    Would run: cd ~/${PROJECT_DIR} && git fetch origin && git checkout ${DEPLOY_BRANCH} && git pull --ff-only origin ${DEPLOY_BRANCH}"
 else
-  OUTPUT=$(remote "cd ~/${PROJECT_DIR} && git pull" 2>&1)
+  OUTPUT=$(remote "cd ~/${PROJECT_DIR} && git fetch origin && git checkout ${DEPLOY_BRANCH} && git pull --ff-only origin ${DEPLOY_BRANCH}" 2>&1) \
+    || { echo "    $OUTPUT"; fail "Could not check out ${DEPLOY_BRANCH} on the host."; }
   echo "    $OUTPUT"
-  ok "Git pull complete"
+  ok "On ${DEPLOY_BRANCH}: $(remote "cd ~/${PROJECT_DIR} && git log --oneline -1")"
 fi
 
 # --- Step 3: Build backend ---
