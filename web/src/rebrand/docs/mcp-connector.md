@@ -41,11 +41,16 @@ JWKS — you don't have to trust AgentAvow. See [Verify an attestation](/docs/ve
 
 ## Add it
 
-- **Claude Desktop / claude.ai:** Settings → Connectors → Add custom connector →
-  `https://agentavow.com/mcp` (no authentication).
-- **Claude Code:** `claude mcp add --transport http agentavow https://agentavow.com/mcp`
-- To scan new tools automatically before you use them, see
+- **Claude Desktop / claude.ai:** add it from the
+  [connector directory](https://claude.ai/directory/connectors/agentavow), or go to
+  Settings → Connectors → Add custom connector → `https://agentavow.com/mcp`
+  (no authentication).
+- **Claude Code:** `claude mcp add --transport http agentavow https://agentavow.com/mcp`,
+  or install the AgentAvow Trust plugin, which adds a `/scan` command and scans each
+  new MCP server at session start. See
   [Auto-scan in Claude Code](/docs/auto-scan-claude-code).
+- **Cursor:** [Add to Cursor](https://cursor.com/install-mcp?name=agentavow&config=eyJ1cmwiOiJodHRwczovL2FnZW50YXZvdy5jb20vbWNwIn0%3D)
+- **VS Code:** [Install in VS Code](https://insiders.vscode.dev/redirect/mcp/install?name=agentavow&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fagentavow.com%2Fmcp%22%7D)
 
 ## Support
 

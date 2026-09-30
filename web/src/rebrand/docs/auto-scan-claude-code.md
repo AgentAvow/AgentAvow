@@ -1,14 +1,33 @@
 # Scan tools automatically in Claude Code
 
-Make "check it before you connect it" automatic. Two opt-in ways, both your own
+Make "check it before you connect it" automatic. Three opt-in ways, all your own
 configuration. AgentAvow's MCP server never forces a scan, so nothing here can flag
 your setup in a directory review. You opt in; you stay in control.
 
-> **Claude Code, not Claude Desktop.** These use `CLAUDE.md` and hooks, which are
-> Claude Code (CLI) features. Claude Desktop has no user `CLAUDE.md` or hooks, so in
-> Desktop you invoke AgentAvow on request rather than automatically.
+> **Where this works.** Plugins, `CLAUDE.md` and hooks are Claude Code features, so
+> this covers the Claude Code CLI and the Code tab in the Claude desktop app. In a
+> regular Claude chat you ask for a scan rather than getting one automatically.
 
-First, add the connector:
+## The plugin (easiest)
+
+The **AgentAvow Trust** plugin bundles the connector, a `/scan` command, and the
+SessionStart hook described under Option 2. Find it in the Anthropic plugin
+directory, or install it from the repo:
+
+```
+/plugin marketplace add AgentAvow/AgentAvow
+/plugin install agentavow-trust@agentavow
+```
+
+**Test it:** run `/scan npm chalk`. Then add an MCP server and start a new session;
+its verdict appears in context.
+
+If you install the plugin, skip Option 2. It is the same hook, and running both
+scans everything twice.
+
+## Without the plugin
+
+Add the connector:
 
 ```
 claude mcp add --transport http agentavow https://agentavow.com/mcp
@@ -79,6 +98,11 @@ end: add a new server, then start a new session and the verdict appears in conte
 - **Warn, never block.** A low score adds context; it never stops your session.
 - **Fail-open.** A network hiccup or an unrecognized config stays silent and exits
   cleanly. It cannot break session startup.
+- **Nothing local leaves your machine.** Servers on localhost or a private network
+  are skipped. Credentials and query strings are stripped from a URL before it is
+  sent.
+- **Quiet.** Each server is scanned once. One AgentAvow can't read (it needs
+  sign-in, for example) is reported once as "not scanned" and left alone for a week.
 
 The hook and the rule live in the repo at
 [`integrations/claude-code`](https://github.com/AgentAvow/AgentAvow/tree/main/integrations/claude-code).

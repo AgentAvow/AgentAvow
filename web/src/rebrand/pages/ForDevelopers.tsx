@@ -172,11 +172,13 @@ export default function RebrandForDevelopers() {
           </p>
           <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-2">One click →</div>
           <div className="flex gap-2.5 flex-wrap">
-            <a href={cursorStdio(AA_MCP)} className="inline-flex items-center gap-2 font-semibold text-[13.5px] px-4 py-2 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Add to Cursor →</a>
+            <a href="https://claude.ai/directory/connectors/agentavow" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 font-semibold text-[13.5px] px-4 py-2 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Add to Claude ↗</a>
+            <a href={cursorStdio(AA_MCP)} className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to Cursor →</a>
             <a href={vscodeStdio(AA_MCP)} className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to VS Code →</a>
             <a href="https://pypi.org/project/agentavow-trust/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">PyPI ↗</a>
           </div>
           <p className="mt-3 text-[13px] text-text-muted">Claude Code: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">{claudeCodeStdio(AA_MCP)}</code></p>
+          <p className="mt-2 text-[13px] text-text-muted">Or install the Claude Code plugin, which also scans each new MCP server at session start: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin marketplace add AgentAvow/AgentAvow</code> then <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin install agentavow-trust@agentavow</code>. <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="text-primary-light hover:underline">How it works</Link>.</p>
           <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Or add it by hand (any MCP client)</div>
           <div className="relative">
             <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto">{MCP_CONFIG}</pre>
