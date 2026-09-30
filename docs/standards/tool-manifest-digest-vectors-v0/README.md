@@ -28,7 +28,7 @@ A gate supplies three things about the action it is about to authorize:
 
 ```jsonc
 "gate": {
-  "subject_id": "github:github/github-mcp-server",          // the tool being authorized
+  "subject_id": "github:github/github-mcp-server",          // the repo or server being authorized
   "observed_manifest_digest": "sha256:38027bb3…",           // digest of the definitions it sees now
   "evaluation_time": "2026-09-29T18:27:13.430Z"             // pinned, so verdicts are reproducible
 }
@@ -46,7 +46,7 @@ A consumer reports these separately. None is derived from another.
   signed, and no further.
 - **canonical_bytes**: `jcs(JSON.parse(payload))` equals the payload bytes. Recomputability,
   independent of authenticity.
-- **subject_binds**: the attestation names the tool the gate is authorizing.
+- **subject_binds**: the attestation's subject is the repo or server the gate is authorizing.
 - **digest_binds**: the definitions the scan graded are the definitions the gate observes.
 - **fresh**: `evaluation_time` is inside `[issuedAt, expiresAt)`.
 
@@ -60,7 +60,7 @@ admission policy, not part of this set.
    subject and freshness all pass. The attestation is simply not about this definition.
 3. **past-expiry**: same attestation, evaluated after `expiresAt`. A signed "safe" verdict
    must not verify forever; a grade issued before a tool was trojaned has to stop counting.
-4. **wrong-subject**: a valid grade for one tool presented for another.
+4. **wrong-subject**: a valid grade for one subject presented for another.
 5. **tampered-payload**: score raised after signing, payload re-canonicalized, original
    signature kept. Canonical bytes still check. Signature does not. Canonical form is not
    authenticity.
@@ -75,6 +75,20 @@ static-analysis grade for this subject over this tool-definition digest, and sig
 subject, digest and window all check. It establishes nothing about runtime behavior,
 nothing about what the tool does when invoked, and nothing about definitions the scan did
 not observe. A behavioral axis is a separate artifact with its own ceiling.
+
+## What the subject and the digest are not
+
+Two boundaries recorded from the first consumer run (an APS-side consumer, reported on
+[#177](https://github.com/aeoess/agent-governance-vocabulary/issues/177#issuecomment-5899072203)).
+Both are limits of the artifact, not of the consumer.
+
+- **The subject is a repo or server, not a named tool.** `subject.id` identifies what was
+  scanned, and `scan.toolDigests` is keyed by definition file path. The attestation carries
+  no tool name, so it cannot by itself say which tool inside the server a gate is
+  authorizing. A consumer that needs that binding reports it as not evaluated.
+- **The digest is not a per-tool metadata pin.** `scan.toolManifestDigest` is folded over
+  the per-file digests of every definition the scan observed. It has a different preimage
+  from a digest over one tool's declared metadata, and neither is evidence for the other.
 
 ## Derivation
 
