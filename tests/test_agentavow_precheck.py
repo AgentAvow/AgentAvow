@@ -73,6 +73,53 @@ def test_local_and_private_urls_never_become_targets(hook, url):
     assert hook._resolve_target("srv", {"url": url}) is None
 
 
+@pytest.mark.parametrize("url", [
+    "https://mcp.example.com/api/mcp/s/QmFzZTY0VG9rZW5Mb29raW5nU2VnbWVudEZvclRlc3Rz/mcp",
+    "https://mcp.example.com/v3/mcp/550e8400-e29b-41d4-a716-446655440000/mcp",
+    "https://mcp.example.com/u/k7Qp2mX9vT4bN8wR3zL6/mcp",
+    "https://mcp.example.com/functions/v1/a1b2c3d4e5f6a7b8c9d0/mcp",
+    "https://mcp.example.com/mcp/%35%35%30e8400-e29b-41d4-a716-446655440000",
+])
+def test_url_with_a_secret_looking_path_is_withheld(hook, url):
+    t = hook._resolve_target("srv", {"url": url + "?api_key=x"})
+    assert t == {"name": "srv", "kind": "withheld",
+                 "id": "withheld:mcp.example.com", "host": "mcp.example.com"}
+
+
+@pytest.mark.parametrize("url", [
+    "https://mcp.context7.com/mcp",
+    "https://api.githubcopilot.com/mcp/",
+    "https://learn.microsoft.com/api/mcp",
+    "https://mcp.example.com/v1alpha2/mcp",
+    "https://mcp.example.com/release-2026-09-30/model-context-protocol-v2/mcp",
+    "https://mcp.example.com/org/12345678901234567890/mcp",
+    "https://mcp.example.com/workspaces/my-team-workspace-production/mcp",
+])
+def test_ordinary_paths_are_not_mistaken_for_secrets(hook, url):
+    assert hook._resolve_target("srv", {"url": url})["kind"] == "mcp"
+
+
+def test_withheld_url_is_never_scanned_and_is_reported_once(hook, monkeypatch, capsys):
+    calls = []
+    target = hook._resolve_target(
+        "zap", {"url": "https://mcp.example.com/s/QmFzZTY0VG9rZW5Mb29raW5nU2VnbWVudEZvclRlc3Rz/mcp"})
+    first = _run(hook, monkeypatch, capsys, [target], lambda t: calls.append(t))
+    second = _run(hook, monkeypatch, capsys, [target], lambda t: calls.append(t))
+    assert "not scanned" in first and "mcp.example.com" in first
+    assert "QmFzZTY0" not in first and "QmFzZTY0" not in hook.CACHE.read_text()
+    assert second == ""
+    assert calls == []
+
+
+def test_plugin_ships_a_readable_readme_and_the_skill():
+    readme = (PLUGIN_DIR / "README.md").read_text()
+    assert len(readme.split()) >= 40  # the directory blocks a shorter README
+    assert "What the hook reads and what leaves your machine" in readme
+    skill = (PLUGIN_DIR / "skills" / "scan-before-connect" / "SKILL.md").read_text()
+    front = skill.split("---")[1]
+    assert "name: scan-before-connect" in front and "description: " in front
+
+
 def test_public_url_is_sanitized_before_it_leaves_the_machine(hook):
     t = hook._resolve_target("srv", {"url": "https://user:pw@mcp.example.com/mcp?token=abc#x"})
     assert t == {"name": "srv", "kind": "mcp",

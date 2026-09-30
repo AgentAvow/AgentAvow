@@ -20,14 +20,14 @@ See [sdk/mcp-server/](sdk/mcp-server/) for setup and full tool list.
 
 ### Connect from Claude
 
-**Claude Code plugin (recommended).** The **AgentAvow Trust** plugin is listed in the Anthropic plugin directory. It bundles the MCP connector, a `/scan` command, and a SessionStart hook that grades each MCP server you have configured the first time it sees it (warn-only, fail-open). You can also install it straight from this repo:
+**Claude Code plugin (recommended).** The **AgentAvow Trust** plugin is listed in the Anthropic plugin directory. It bundles the MCP connector, a `/scan` command, a skill that scans a server or package before Claude adds or installs it, and a SessionStart hook that grades each MCP server you have configured the first time it sees it (warn-only, fail-open). You can also install it straight from this repo:
 
 ```
 /plugin marketplace add AgentAvow/AgentAvow
 /plugin install agentavow-trust@agentavow
 ```
 
-Then try `/scan npm chalk`. The hook skips servers on localhost or a private network, and strips credentials and query strings from a URL before it leaves your machine. Source: [plugins/agentavow-trust/](plugins/agentavow-trust/).
+Then try `/scan npm chalk`. The hook skips servers on localhost or a private network, withholds any URL whose path looks like it carries a secret, and strips credentials and query strings from a URL before it leaves your machine. [What it reads and sends](plugins/agentavow-trust/README.md#what-the-hook-reads-and-what-leaves-your-machine). Source: [plugins/agentavow-trust/](plugins/agentavow-trust/).
 
 **Connector only.** In Claude (web or desktop), add AgentAvow from the [connector directory](https://claude.ai/directory/connectors/agentavow). In Claude Code without the plugin:
 

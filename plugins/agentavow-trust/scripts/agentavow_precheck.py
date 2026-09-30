@@ -10,6 +10,8 @@ you rely on a newly added tool. Covers both:
 Local servers that run a hand-written script (node foo.js, python foo.py) have no
 published package to grade and are skipped. So are MCP URLs on localhost or a
 private network: AgentAvow can't reach them, so they never leave your machine.
+A URL whose path looks like it carries a secret (a long token or a UUID) is not
+sent either; it is reported as not scanned.
 
 Design guarantees (deliberate):
   • OPT-IN — nothing runs unless YOU install this hook. AgentAvow's MCP server never
@@ -33,7 +35,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 API = "https://agentavow.com/api/v1/public/scan"
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
@@ -116,6 +118,31 @@ def _is_local_host(url: str) -> bool:
     return not ip.is_global
 
 
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+def _has_secret_path(url: str) -> bool:
+    """True when a URL path segment looks like a credential rather than a route: a
+    UUID, a 32+ character unbroken run, or a 16+ character run mixing letters with
+    several digits. Some hosted MCP servers put the user's key in the path, and a
+    path is sent as-is, so these are withheld. Words, versions and dates (split on
+    - _ . ~) pass."""
+    try:
+        path = urllib.parse.unquote(urllib.parse.urlsplit(url).path)
+    except Exception:
+        return True
+    for segment in path.split("/"):
+        if _UUID.search(segment):
+            return True
+        for run in re.split(r"[-_.~]", segment):
+            if len(run) >= 32 and run.isalnum():
+                return True
+            if (len(run) >= 16 and re.search(r"[A-Za-z]", run)
+                    and len(re.findall(r"\d", run)) >= 3):
+                return True
+    return False
+
+
 def _resolve_target(name: str, cfg: dict) -> dict | None:
     """Classify one MCP server config into a scannable target, or None to skip."""
     url = cfg.get("url") or cfg.get("endpoint")
@@ -123,6 +150,9 @@ def _resolve_target(name: str, cfg: dict) -> dict | None:
         if _is_local_host(url):
             return None
         safe = _sanitize_url(url)
+        if _has_secret_path(safe):
+            host = urllib.parse.urlsplit(safe).hostname or ""
+            return {"name": name, "kind": "withheld", "id": f"withheld:{host}", "host": host}
         return {"name": name, "kind": "mcp", "id": safe, "url": safe}
 
     cmd = cfg.get("command")
@@ -263,6 +293,11 @@ def main() -> None:
     lines: list[str] = []
     for t in targets:
         if _is_cached(cache.get(t["name"]), t["id"], now):
+            continue
+        if t["kind"] == "withheld":
+            cache[t["name"]] = t["id"]
+            lines.append(f"➖ MCP '{t['name']}' ({t['host']}): not scanned — its URL looks "
+                         "like it contains a secret, so it was not sent to AgentAvow.")
             continue
         if t["id"] not in results:  # the same coordinate under two names scans once
             if time.monotonic() - started > BUDGET:

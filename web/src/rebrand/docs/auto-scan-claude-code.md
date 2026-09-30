@@ -10,8 +10,9 @@ your setup in a directory review. You opt in; you stay in control.
 
 ## The plugin (easiest)
 
-The **AgentAvow Trust** plugin bundles the connector, a `/scan` command, and the
-SessionStart hook described under Option 2. Find it in the Anthropic plugin
+The **AgentAvow Trust** plugin bundles the connector, a `/scan` command, a skill
+that scans a server or package before Claude adds it (the same idea as Option 1),
+and the SessionStart hook described under Option 2. Find it in the Anthropic plugin
 directory, or install it from the repo:
 
 ```
@@ -99,8 +100,9 @@ end: add a new server, then start a new session and the verdict appears in conte
 - **Fail-open.** A network hiccup or an unrecognized config stays silent and exits
   cleanly. It cannot break session startup.
 - **Nothing local leaves your machine.** Servers on localhost or a private network
-  are skipped. Credentials and query strings are stripped from a URL before it is
-  sent.
+  are skipped. A URL whose path looks like it carries a secret is withheld and
+  reported as not scanned. Credentials and query strings are stripped from a URL
+  before it is sent.
 - **Quiet.** Each server is scanned once. One AgentAvow can't read (it needs
   sign-in, for example) is reported once as "not scanned" and left alone for a week.
 
