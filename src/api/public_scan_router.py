@@ -657,6 +657,20 @@ async def _build_scan_envelope(
     return sign_envelope(unsigned, get_trust_v2_signing_key(), vm)
 
 
+# Coordinates that already name their surface: "npm:left-pad", "skill:owner/repo",
+# "mcp:https://…". Anything else is a bare GitHub "owner/repo".
+_SURFACED_COORDINATE_PREFIXES = (
+    "npm:", "pypi:", "crates:", "huggingface:", "docker:", "skill:", "mcp:",
+)
+
+
+def _subject_id(repo: str) -> str:
+    """The signed ``subject.id``. Only a bare ``owner/repo`` is a GitHub repository;
+    a package, skill or MCP coordinate carries its own surface and is used as is,
+    so a verifier's subject check compares against what was actually scanned."""
+    return repo if repo.startswith(_SURFACED_COORDINATE_PREFIXES) else f"github:{repo}"
+
+
 def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None) -> dict:
     """Build the JWS attestation payload for a public scan.
 
@@ -710,7 +724,7 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
             "url": "https://agentgraph.co",
         },
         "subject": {
-            "id": f"github:{repo}",
+            "id": _subject_id(repo),
             "repo": repo,
         },
         "scannedAt": result_data.get("scanned_at", now.isoformat()),
