@@ -914,6 +914,17 @@ async def _lock_refresh_loop() -> None:
 WATCH_RESCAN_INTERVAL = 24 * 60 * 60
 
 
+def _watch_digest_state(last: str | None, new: str | None) -> tuple[bool, str | None]:
+    """(definition drifted, baseline digest to store) for one watch re-scan.
+
+    A scan that observed no tool definitions is not drift, and it must not erase
+    the baseline either. A live server's failed or empty ``tools/list`` would
+    otherwise reset it, and changed definitions served on the next cycle would
+    go unalerted.
+    """
+    return bool(last and new and new != last), (new or last)
+
+
 async def _run_watch_rescan(limit: int = 200) -> None:
     from datetime import datetime, timezone
 
@@ -942,9 +953,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             dropped = (
                 w.last_score is not None and new_score is not None and new_score < w.last_score - 5
             )
-            drift = bool(
-                w.last_manifest_digest and new_digest and new_digest != w.last_manifest_digest
-            )
+            drift, baseline_digest = _watch_digest_state(w.last_manifest_digest, new_digest)
             improved = (
                 w.last_score is not None and new_score is not None
                 and new_score > w.last_score + 5
@@ -1029,7 +1038,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             fresh = await db.get(ToolWatch, w.id)
             if fresh is not None:
                 fresh.last_score = new_score
-                fresh.last_manifest_digest = new_digest
+                fresh.last_manifest_digest = baseline_digest
                 fresh.last_checked_at = datetime.now(timezone.utc)
                 await db.commit()
 

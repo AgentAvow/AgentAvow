@@ -41,14 +41,29 @@ async def test_mcp_dispatches_to_scan_mcp(monkeypatch):
 
     async def fake_scan_mcp(endpoint):
         called["endpoint"] = endpoint
-        return SimpleNamespace(error=None, trust_score=70)
+        return SimpleNamespace(error=None, trust_score=70, tool_manifest_digest="sha256:abc")
 
     monkeypatch.setattr("src.scanner.scan.scan_mcp", fake_scan_mcp)
-    score, _ = await watch_router.scan_watch_target(
+    score, digest = await watch_router.scan_watch_target(
         "mcp", "mcp", "https://mcp.example.com/sse", db=None,
     )
     assert called["endpoint"] == "https://mcp.example.com/sse"
     assert score == 70
+    # The served tool-definition digest reaches the watch loop, so a changed
+    # definition on a live endpoint can fire the drift alert.
+    assert digest == "sha256:abc"
+
+
+@pytest.mark.asyncio
+async def test_mcp_without_tools_reports_no_digest(monkeypatch):
+    async def fake_scan_mcp(endpoint):
+        return SimpleNamespace(error=None, trust_score=70, tool_manifest_digest=None)
+
+    monkeypatch.setattr("src.scanner.scan.scan_mcp", fake_scan_mcp)
+    score, digest = await watch_router.scan_watch_target(
+        "mcp", "mcp", "https://mcp.example.com/sse", db=None,
+    )
+    assert score == 70 and digest is None
 
 
 @pytest.mark.asyncio
@@ -99,3 +114,26 @@ async def test_unknown_surface_falls_back_to_github(monkeypatch):
     assert called["args"] == ("torvalds", "linux")
     assert score == 55
     assert digest == "ghdigest"
+
+
+# ── re-scan loop: drift decision + baseline ──────────────────────────────────
+def test_changed_digest_is_drift_and_becomes_the_baseline():
+    from src.jobs.scheduler import _watch_digest_state
+
+    assert _watch_digest_state("sha256:a", "sha256:b") == (True, "sha256:b")
+    assert _watch_digest_state("sha256:a", "sha256:a") == (False, "sha256:a")
+
+
+def test_first_digest_sets_the_baseline_without_alerting():
+    from src.jobs.scheduler import _watch_digest_state
+
+    assert _watch_digest_state(None, "sha256:a") == (False, "sha256:a")
+
+
+def test_empty_scan_keeps_the_baseline_so_a_later_change_still_alerts():
+    """A live server that serves no tools for one cycle must not reset the baseline."""
+    from src.jobs.scheduler import _watch_digest_state
+
+    drift, baseline = _watch_digest_state("sha256:a", None)
+    assert (drift, baseline) == (False, "sha256:a")
+    assert _watch_digest_state(baseline, "sha256:b") == (True, "sha256:b")
