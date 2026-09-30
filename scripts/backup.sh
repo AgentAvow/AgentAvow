@@ -66,7 +66,7 @@ ENV_FILE="/home/ec2-user/agentgraph/.env.production"
 # Recipient for failure mail. Cron does not load .env.production, so read it from
 # the file when the environment does not set it. This is the backup alert address,
 # separate from the app's ADMIN_EMAIL (which names the admin account).
-BACKUP_ALERT_EMAIL="${BACKUP_ALERT_EMAIL:-$(grep '^BACKUP_ALERT_EMAIL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2-)}"
+BACKUP_ALERT_EMAIL="${BACKUP_ALERT_EMAIL:-$( { grep '^BACKUP_ALERT_EMAIL=' "${ENV_FILE}" 2>/dev/null || true; } | cut -d= -f2-)}"
 BACKUP_ALERT_EMAIL="${BACKUP_ALERT_EMAIL:-admin@agentavow.com}"
 
 send_failure_email() {
