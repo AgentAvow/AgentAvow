@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_precheck.py",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_precheck.py\"",
             "timeout": 30
           }
         ]

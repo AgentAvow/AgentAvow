@@ -52,7 +52,15 @@ Then merge the contents of `settings.hooks.json` into `~/.claude/settings.json`
    `⚠️ MCP 'foo' (<url>): AgentAvow 66/100 — needs review, 1 blocking finding(s).`
 
 **Guarantees:** warn-only (never blocks a session), fail-open (a scan error or an
-unrecognized config just stays silent), and it only scans each endpoint once.
+unrecognized config just stays silent), and it only scans each endpoint once. A
+server AgentAvow can't read (one that needs sign-in, for example) is reported once
+as "not scanned" and left alone for a week. Servers on localhost or a private
+network are never sent anywhere, and credentials and query strings are stripped from
+a URL before it leaves your machine.
+
+**Prefer a plugin?** The same hook ships in the AgentAvow Trust plugin, with the
+connector and a `/scan` command: `/plugin marketplace add AgentAvow/AgentAvow`, then
+`/plugin install agentavow-trust@agentavow`. Use one or the other, not both.
 
 **Scope:** covers both remote HTTP(S) MCP servers (scanned as a live endpoint) and
 local stdio servers launched from a published package — `npx` / `bunx` (npm) and

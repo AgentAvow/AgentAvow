@@ -8,7 +8,8 @@ you rely on a newly added tool. Covers both:
   • Local stdio servers run from an npm or PyPI package (npx / uvx / pipx / bunx)
     -> scan_package on the resolved package coordinate.
 Local servers that run a hand-written script (node foo.js, python foo.py) have no
-published package to grade and are skipped.
+published package to grade and are skipped. So are MCP URLs on localhost or a
+private network: AgentAvow can't reach them, so they never leave your machine.
 
 Design guarantees (deliberate):
   • OPT-IN — nothing runs unless YOU install this hook. AgentAvow's MCP server never
@@ -17,26 +18,38 @@ Design guarantees (deliberate):
   • FAIL-OPEN — a network hiccup, an unknown config shape, anything unexpected: the
     hook stays silent and exits 0. It can never break session startup.
 
-Install / test: see README.md in this directory.
+Install / test: https://agentavow.com/docs/auto-scan-claude-code
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import pathlib
 import re
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
+
+__version__ = "0.1.2"
 
 API = "https://agentavow.com/api/v1/public/scan"
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 TIMEOUT = 8  # seconds per scan; short so startup is never held up
+BUDGET = 20  # seconds for the whole run; stays inside the hook's 30s timeout
+RETRY_UNSCANNABLE = 7 * 24 * 3600  # re-try a server the API refused after a week
 
 # stdio runners we can map to a package registry. node/python/etc. are hand-written
 # scripts with no published package to grade, so they're intentionally absent.
 _NPM_RUNNERS = {"npx", "bunx", "pnpm-dlx"}
 _PYPI_RUNNERS = {"uvx", "pipx"}
+
+
+class _UnscannableError(Exception):
+    """The API refused this target (needs sign-in, not publicly reachable, unknown
+    coordinate). Retrying every session can't change that, so it is cached."""
 
 
 def _strip_npm_version(spec: str) -> str:
@@ -83,10 +96,32 @@ def _sanitize_url(url: str) -> str:
         return url.split("?", 1)[0].split("#", 1)[0]
 
 
+def _is_local_host(url: str) -> bool:
+    """True for a URL AgentAvow could never reach from outside: localhost, a
+    single-label or .local/.internal name, or a loopback/private/link-local IP.
+    Unparseable URLs count as local, so they are skipped rather than sent."""
+    try:
+        host = (urllib.parse.urlsplit(url).hostname or "").lower().rstrip(".")
+    except Exception:
+        return True
+    if not host:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return (
+            "." not in host
+            or host.endswith((".localhost", ".local", ".internal", ".lan", ".home.arpa"))
+        )
+    return not ip.is_global
+
+
 def _resolve_target(name: str, cfg: dict) -> dict | None:
     """Classify one MCP server config into a scannable target, or None to skip."""
     url = cfg.get("url") or cfg.get("endpoint")
     if isinstance(url, str) and url.startswith("http"):
+        if _is_local_host(url):
+            return None
         safe = _sanitize_url(url)
         return {"name": name, "kind": "mcp", "id": safe, "url": safe}
 
@@ -153,11 +188,24 @@ def _verdict(data: dict) -> tuple[int, str, int]:
     return score, ("safe" if (score >= 81 and blocking == 0) else "needs review"), blocking
 
 
+def _user_agent() -> str:
+    # Installed as a plugin, this file sits at <plugin>/scripts/ beside .claude-plugin/.
+    plugin_root = pathlib.Path(__file__).resolve().parent.parent
+    source = "plugin" if (plugin_root / ".claude-plugin").is_dir() else "manual"
+    return f"agentavow-precheck/{__version__} ({source})"
+
+
 def _fetch(path: str, params: dict) -> dict:
     url = f"{API}{path}?{urllib.parse.urlencode(params)}" if params else f"{API}{path}"
-    req = urllib.request.Request(url, headers={"User-Agent": "agentavow-precheck"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:  # noqa: S310 (https only)
-        return json.load(resp)
+    req = urllib.request.Request(url, headers={"User-Agent": _user_agent()})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:  # noqa: S310 (https only)
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        # 4xx (bar rate limiting) is the API's answer about the target, not a hiccup.
+        if 400 <= e.code < 500 and e.code not in (408, 429):
+            raise _UnscannableError(str(e.code)) from e
+        raise
 
 
 def _scan(target: dict) -> tuple[int, str, int]:
@@ -166,19 +214,33 @@ def _scan(target: dict) -> tuple[int, str, int]:
     return _verdict(_fetch(f"/package/{target['registry']}/{target['pkg']}", {}))
 
 
-def _load_cache() -> dict[str, str]:
+def _load_cache() -> dict:
     try:
-        return json.loads(CACHE.read_text())
+        data = json.loads(CACHE.read_text())
+        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 
-def _save_cache(cache: dict[str, str]) -> None:
+def _save_cache(cache: dict) -> None:
     try:
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         CACHE.write_text(json.dumps(cache))
     except Exception:
         pass
+
+
+def _is_cached(entry: object, target_id: str, now: float) -> bool:
+    """A scanned target is cached as its id (a string). An unscannable one is cached
+    as {"id", "retry_after"} and counts as cached until that time passes."""
+    if isinstance(entry, str):
+        return entry == target_id
+    if isinstance(entry, dict):
+        try:
+            return entry.get("id") == target_id and now < float(entry.get("retry_after") or 0)
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def main() -> None:
@@ -195,18 +257,33 @@ def main() -> None:
         return
 
     cache = _load_cache()
+    started = time.monotonic()
+    now = time.time()
+    results: dict[str, tuple[int, str, int] | None] = {}  # id -> verdict, None = unscannable
     lines: list[str] = []
     for t in targets:
-        if cache.get(t["name"]) == t["id"]:  # already scanned this exact coordinate
+        if _is_cached(cache.get(t["name"]), t["id"], now):
             continue
-        try:
-            score, verdict, blocking = _scan(t)
-        except Exception:
-            continue  # fail-open
+        if t["id"] not in results:  # the same coordinate under two names scans once
+            if time.monotonic() - started > BUDGET:
+                break  # out of time; the rest are picked up next session
+            try:
+                results[t["id"]] = _scan(t)
+            except _UnscannableError:
+                results[t["id"]] = None
+            except Exception:
+                continue  # fail-open; transient, so not cached
+        coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
+        result = results[t["id"]]
+        if result is None:
+            cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_UNSCANNABLE}
+            lines.append(f"➖ MCP '{t['name']}' ({coord}): not scanned — AgentAvow "
+                         "couldn't read it (it may need sign-in).")
+            continue
+        score, verdict, blocking = result
         cache[t["name"]] = t["id"]
         flag = "✅" if verdict == "safe" else "⚠️"
         extra = f", {blocking} blocking finding(s)" if blocking else ""
-        coord = t["url"] if t["kind"] == "mcp" else f"{t['registry']}:{t['pkg']}"
         lines.append(f"{flag} MCP '{t['name']}' ({coord}): AgentAvow {score}/100 — "
                      f"{verdict}{extra}.")
 
