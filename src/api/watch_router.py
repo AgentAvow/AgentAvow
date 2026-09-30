@@ -51,7 +51,10 @@ async def scan_watch_target(
         if surface == "mcp":
             from src.scanner.scan import scan_mcp
             r = await scan_mcp(repo)
-            return (None if r.error else r.trust_score), None
+            return (
+                (None if r.error else r.trust_score),
+                (getattr(r, "tool_manifest_digest", None) or None),
+            )
         if surface == "openclaw":
             from src.scanner.scan import scan_skill
             r = await scan_skill(owner, repo)

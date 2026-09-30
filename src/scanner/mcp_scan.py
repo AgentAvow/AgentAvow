@@ -17,9 +17,13 @@ Detectors (all deterministic from the JSON alone):
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+import rfc8785
 
 # Capability keyword taxonomy — classify a tool from its name + description.
 _CAP_PATTERNS: dict[str, re.Pattern] = {
@@ -242,6 +246,120 @@ def analyze_mcp(
     result.capabilities = cap_counts
     result.blast_radius = compute_blast_radius(cap_counts, result.lethal_trifecta)
     return result
+
+
+# ── tool-definition digests (rug-pull detection + gate binding) ──────────────
+
+# Version label folded into every per-tool preimage. Changing which fields are
+# hashed, or how, means a new label, so an old digest is never read as a new one.
+MCP_TOOL_DIGEST_PROFILE = "agentavow.mcp-tool-definition.v1"
+
+# The parts of an MCP tool definition a client or model acts on. ``_meta`` and
+# unknown fields are left out: they are not part of the contract, and hashing them
+# would report drift on changes that alter nothing an agent sees.
+_TOOL_DIGEST_FIELDS = (
+    "name", "title", "description", "inputSchema", "outputSchema", "annotations",
+)
+
+_MAX_SAFE_INT = 2**53 - 1
+_MAX_TOOL_KEY_NAME = 128
+# The per-tool map is signed into the attestation. Beyond this many tools the rest
+# fold into one entry, so a server cannot inflate the signed payload without bound.
+_MAX_TOOL_DIGESTS = 500
+TOOL_DIGEST_OVERFLOW_KEY = "tools:overflow"
+
+_KEY_UNSAFE = re.compile(r"[^\x21-\x7e]|[%=]")
+
+
+def _sha256(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _as_ijson(obj: Any) -> Any:
+    """Read numbers the way an ECMAScript ``JSON.parse`` does: every number is an
+    IEEE 754 double. Integers outside the safe range become floats, so the canonical
+    bytes match what a JS verifier computes from the same ``tools/list`` response."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, int):
+        return obj if -_MAX_SAFE_INT <= obj <= _MAX_SAFE_INT else float(obj)
+    if isinstance(obj, dict):
+        return {str(k): _as_ijson(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_as_ijson(v) for v in obj]
+    return obj
+
+
+def tool_digest_key(name: str) -> str:
+    """``tool:<name>`` key for the digest map, in printable ASCII.
+
+    Everything outside printable ASCII, plus ``%`` and ``=``, is percent-encoded as
+    UTF-8 bytes. A key therefore cannot forge a line in the manifest fold, and the
+    signed payload's keys canonicalize the same under any JSON canonicalizer. An
+    overlong key is cut and suffixed with a hash of the full name.
+    """
+    enc = _KEY_UNSAFE.sub(
+        lambda m: "".join(f"%{b:02X}" for b in m.group().encode("utf-8", "surrogatepass")),
+        name,
+    )
+    if len(enc) > _MAX_TOOL_KEY_NAME:
+        full = hashlib.sha256(name.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+        enc = enc[:96] + "~" + full
+    return "tool:" + enc
+
+
+def tool_definition_digest(tool: dict) -> str:
+    """SHA-256 over the RFC 8785 canonical bytes of one tool's definition.
+
+    Preimage: ``{"profile": MCP_TOOL_DIGEST_PROFILE, "tool": {...}}`` with ``tool``
+    restricted to ``_TOOL_DIGEST_FIELDS``; a missing or null field is omitted.
+
+    Never raises. A definition JCS cannot represent (NaN/Infinity, which Python's
+    JSON parser accepts) gets a digest over sorted-key JSON under a distinct
+    profile label: still stable for drift detection, but not reproducible by an
+    independent verifier, and never equal to a portable digest.
+    """
+    body = {f: tool[f] for f in _TOOL_DIGEST_FIELDS if tool.get(f) is not None}
+    try:
+        canon = rfc8785.dumps(
+            {"profile": MCP_TOOL_DIGEST_PROFILE, "tool": _as_ijson(body)})
+        return "sha256:" + hashlib.sha256(canon).hexdigest()
+    except Exception:
+        pass
+    try:
+        return _sha256(MCP_TOOL_DIGEST_PROFILE + ".noncanonical\n" + json.dumps(
+            body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str))
+    except Exception:
+        return _sha256(MCP_TOOL_DIGEST_PROFILE + ".unhashable")
+
+
+def compute_tool_digests(tools: list | None) -> dict[str, str]:
+    """``{"tool:<name>": "sha256:…"}`` for a live server's ``tools/list``.
+
+    Keyed by tool name, not list position, so reordering is not drift. Tools that
+    share a name fold into one entry over their sorted digests. Pure and
+    deterministic; entries that are not objects are skipped, as in ``analyze_mcp``.
+    """
+    by_key: dict[str, list[str]] = {}
+    for t in tools or []:
+        if not isinstance(t, dict):
+            continue
+        key = tool_digest_key(str(t.get("name", "") or "unnamed"))
+        by_key.setdefault(key, []).append(tool_definition_digest(t))
+
+    digests = {
+        key: ds[0] if len(ds) == 1 else _sha256(
+            MCP_TOOL_DIGEST_PROFILE + ".duplicates\n" + "\n".join(sorted(ds)))
+        for key, ds in by_key.items()
+    }
+    if len(digests) <= _MAX_TOOL_DIGESTS:
+        return digests
+    keys = sorted(digests)
+    kept = {k: digests[k] for k in keys[:_MAX_TOOL_DIGESTS]}
+    kept[TOOL_DIGEST_OVERFLOW_KEY] = _sha256(
+        MCP_TOOL_DIGEST_PROFILE + ".overflow\n"
+        + "\n".join(f"{k}={digests[k]}" for k in keys[_MAX_TOOL_DIGESTS:]))
+    return kept
 
 
 # ── live handshake (Streamable HTTP MCP) — fail-open ─────────────────────────

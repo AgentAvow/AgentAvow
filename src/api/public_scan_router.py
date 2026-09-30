@@ -1117,6 +1117,9 @@ async def scan_mcp_endpoint(
         await enforce_fresh_scan_limit(request)
         await _track_checker(request)
 
+    # The previous scan of this endpoint, for tool-definition drift.
+    old_cached = await _get_cached("mcp", key) or await _get_stale_cached("mcp", key)
+
     from src.scanner.scan import scan_mcp
 
     try:
@@ -1133,8 +1136,14 @@ async def scan_mcp_endpoint(
 
     data = _scan_result_to_dict(result)
     await _set_cached("mcp", key, data)
-    jws = create_jws(canonicalize(_build_scan_payload(full, data)))
-    return _package_response(full, data, jws, cached=False)
+    # Only diff against a scan that pinned digests: a copy cached before live-MCP
+    # digests existed has none, and every tool would read as newly added.
+    drift = (
+        _compute_tool_drift(old_cached, data)
+        if (old_cached or {}).get("tool_manifest_digest") else None
+    )
+    jws = create_jws(canonicalize(_build_scan_payload(full, data, drift)))
+    return _package_response(full, data, jws, cached=False, tool_drift=drift)
 
 
 class SubmitRequest(BaseModel):

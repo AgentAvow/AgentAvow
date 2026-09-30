@@ -143,7 +143,8 @@ class ScanResult:
     is_media_tool: bool = False  # context-aware: audio/TTS/video tools have expected fs patterns
     # #8 tool-definition pinning: canonical digest per agent/tool manifest, so a re-scan
     # can prove a tool definition drifted (rug-pull) even if the code still scans clean.
-    tool_digests: dict[str, str] = field(default_factory=dict)  # path -> "sha256:..."
+    # path -> "sha256:..."; on the live MCP surface the key is "tool:<name>"
+    tool_digests: dict[str, str] = field(default_factory=dict)
     tool_manifest_digest: str | None = None  # combined digest folded into the attestation
     # Phase 0/1 supply-chain: the recompute-discipline coverage block (surface,
     # scan_depth, db_snapshots, point_in_time) and the OSV/deps.dev summary. Both
@@ -3064,7 +3065,7 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     anchored). Fail-open: a handshake failure returns a ScanResult with ``.error``.
     """
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT_LIVE, build_coverage
-    from src.scanner.mcp_scan import analyze_mcp, fetch_mcp_tools
+    from src.scanner.mcp_scan import analyze_mcp, compute_tool_digests, fetch_mcp_tools
 
     result = ScanResult(repo=f"mcp:{endpoint_url}", stars=0, description="", framework="")
     result.is_mcp_server = True
@@ -3083,6 +3084,11 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         server_info=data.get("server_info"),
     )
     result.findings = mcp.findings
+    # Pin the served tool definitions, one digest per tool name. A later scan whose
+    # digest differs proves the server changed what it serves (the rug-pull), and a
+    # gate can bind an authorization to the named tool that was graded.
+    result.tool_digests = compute_tool_digests(data.get("tools"))
+    result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
     result.files_scanned = mcp.tool_count
     result.total_scannable_files = mcp.tool_count
     result.primary_language = "MCP"
