@@ -2485,6 +2485,9 @@ class AlertWebhook(Base):
         unique=True,
     )
     url = Column(String(512), nullable=False)
+    # HMAC signing secret, encrypted at rest (src/encryption.py). Null on a row saved
+    # before signing existed; such a webhook is delivered unsigned until rotated.
+    signing_key = Column(Text, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_delivery_at = Column(DateTime(timezone=True), nullable=True)
