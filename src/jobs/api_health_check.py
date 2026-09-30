@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.ssrf import validate_url
+from src.ssrf import ssrf_safe_async_client, validate_url
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +69,13 @@ async def _ping(check) -> tuple[bool, int | None, int | None]:
         return False, None, None
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with ssrf_safe_async_client(timeout=_TIMEOUT, follow_redirects=False) as client:
             start = asyncio.get_event_loop().time()
             resp = await client.head(check.endpoint_url)
             elapsed_ms = int((asyncio.get_event_loop().time() - start) * 1000)
             success = 200 <= resp.status_code < 500
             return success, resp.status_code, elapsed_ms
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         return False, None, None
 
 

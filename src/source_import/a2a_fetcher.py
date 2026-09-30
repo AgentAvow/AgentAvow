@@ -50,10 +50,12 @@ async def fetch_a2a(card_url: str) -> SourceImportResult:
     except ValueError as exc:
         raise SourceFetchError(str(exc)) from exc
 
+    from src.ssrf import ssrf_safe_async_client
+
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with ssrf_safe_async_client(timeout=10, follow_redirects=False) as client:
             resp = await client.get(resolved_url)
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         raise SourceFetchError(
             f"Failed to fetch A2A agent card: {exc}"
         ) from exc

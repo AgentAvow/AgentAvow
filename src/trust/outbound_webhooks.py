@@ -162,7 +162,10 @@ async def notify_scan_change(
             headers["X-Partner-Timestamp"] = now
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            from src.ssrf import ssrf_safe_async_client, validate_url_https
+
+            validate_url_https(callback_url, field_name="callback_url")
+            async with ssrf_safe_async_client(timeout=10.0, follow_redirects=False) as client:
                 resp = await client.post(
                     callback_url,
                     content=body_bytes,

@@ -44,6 +44,10 @@ EXPLORER_URL = "/api/v1/x402/explorer"
     "http://192.168.1.1/",
     "http://169.254.169.254/",   # AWS metadata
     "ftp://example.com/",
+    "http://172.17.0.1/",        # Docker bridge: the old prefix check let this through
+    "http://100.64.0.1/",        # CGNAT
+    "http://[::ffff:127.0.0.1]/",
+    "http://[fd00::1]/",
 ])
 async def test_rescan_rejects_unsafe_endpoints(client, bad_url):
     r = await client.post(RESCAN_URL, params={"endpoint": bad_url})
@@ -72,11 +76,14 @@ async def test_rescan_happy_path_returns_surface(client):
     fake_client = MagicMock()
     fake_client.__aenter__.return_value = fake_client
     fake_client.__aexit__.return_value = False
-    fake_client.head = AsyncMock(return_value=head_resp)
-    fake_client.get = AsyncMock(return_value=probe_resp)
+    fake_client.request = AsyncMock(
+        side_effect=lambda method, _url, **kw: head_resp if method == "HEAD" else probe_resp)
 
-    with patch("src.api.x402_router.httpx.AsyncClient", return_value=fake_client):
+    with patch("src.ssrf._check_resolved_ips"), \
+            patch("src.ssrf.ssrf_safe_async_client", return_value=fake_client) as factory:
         r = await client.post(RESCAN_URL, params={"endpoint": url})
+    # The probe goes out through the pinned client, with redirects handled by hand.
+    assert factory.call_args.kwargs["follow_redirects"] is False
 
     assert r.status_code == 200
     body = r.json()
@@ -138,3 +145,25 @@ async def test_explorer_handles_malformed_json(client, tmp_path, monkeypatch):
     r = await client.get(EXPLORER_URL)
     assert r.status_code == 200
     assert r.json() == {"count": 0, "results": []}
+
+
+@pytest.mark.asyncio
+async def test_rescan_does_not_follow_a_redirect_to_an_internal_address(client):
+    """A public endpoint that answers 302 -> cloud metadata must not be followed."""
+    url = "https://api.example.com/x402/paid"
+    redirect = MagicMock(
+        status_code=302, headers={"location": "http://169.254.169.254/latest/meta-data/"})
+    fake_client = MagicMock()
+    fake_client.__aenter__.return_value = fake_client
+    fake_client.__aexit__.return_value = False
+    fake_client.request = AsyncMock(return_value=redirect)
+
+    with patch("src.ssrf._check_resolved_ips"), \
+            patch("src.ssrf.ssrf_safe_async_client", return_value=fake_client):
+        r = await client.post(RESCAN_URL, params={"endpoint": url})
+
+    assert r.status_code == 200
+    assert r.json()["error"] == "blocked"
+    assert r.json()["http_status"] is None
+    # Only the first hop was requested; the internal target never was.
+    assert [c.args[1] for c in fake_client.request.call_args_list] == [url]

@@ -615,13 +615,17 @@ async def webhook_subscribe(
             message="repo must be in owner/repo format",
         )
 
-    if not request.callback_url.startswith("https://"):
+    from src.ssrf import validate_url_https
+
+    try:
+        validate_url_https(request.callback_url, field_name="callback_url")
+    except ValueError:
         return WebhookSubscribeResponse(
             subscribed=False,
             repo=request.repo,
             callback_url=request.callback_url,
             provider=request.provider,
-            message="callback_url must use HTTPS",
+            message="callback_url must be a public https:// URL",
         )
 
     from src.trust.outbound_webhooks import register_subscription

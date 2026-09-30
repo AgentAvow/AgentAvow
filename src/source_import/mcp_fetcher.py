@@ -35,10 +35,12 @@ async def fetch_mcp(manifest_url: str) -> SourceImportResult:
     except ValueError as exc:
         raise SourceFetchError(str(exc)) from exc
 
+    from src.ssrf import ssrf_safe_async_client
+
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with ssrf_safe_async_client(timeout=10, follow_redirects=False) as client:
             resp = await client.get(manifest_url)
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         raise SourceFetchError(
             f"Failed to fetch MCP manifest: {exc}"
         ) from exc
