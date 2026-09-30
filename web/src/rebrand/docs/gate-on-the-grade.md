@@ -60,6 +60,8 @@ Read `trust_score` / `trust_tier` to decide, and `attestation` to prove the deci
 
 A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** the moment either its score drops **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
 
+Definition-change alerts cover GitHub repos, OpenClaw skills and live MCP servers, where the scan pins the tool definitions. For a live MCP server the digest is per tool name, taken from the `tools/list` the server actually serves. npm and PyPI package watches alert on score only.
+
 ## Put it together
 
 1. **CI:** the GitHub Action blocks a merge that pulls in a below-threshold dependency.
