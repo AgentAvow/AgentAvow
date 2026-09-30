@@ -55,6 +55,38 @@ async def test_lookup_identity_empty_returns_guidance(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_lookup_identity_bio_only_match_returns_guidance(monkeypatch):
+    """/search also matches bio text; 'requests' must not resolve to an agent whose
+    bio says 'feature requests'."""
+    async def _bio_hit(path, params=None):
+        return {"entities": [{"id": "e1", "display_name": "FeatureBot",
+                              "did_web": "did:web:agentgraph.co:featurebot",
+                              "bio_markdown": "Triages feature requests.", "trust_score": 0.4}]}
+
+    monkeypatch.setattr(mod, "_get", _bio_hit)
+    text = _text_of(await mod._call_tool("lookup_identity", {"query": "requests"}))
+    assert "FeatureBot" not in text
+    assert "No AgentAvow entity" in text and "scan_package" in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["featurebot", "Feature", "agentgraph.co:featurebot"])
+async def test_lookup_identity_name_or_did_match_is_listed(monkeypatch, query):
+    async def _hits(path, params=None):
+        return {"entities": [
+            {"id": "e1", "display_name": "FeatureBot",
+             "did_web": "did:web:agentgraph.co:featurebot", "trust_score": 0.4},
+            {"id": "e2", "display_name": "Unrelated", "did_web": "did:web:agentgraph.co:other",
+             "bio_markdown": "mentions featurebot in passing", "trust_score": 0.9},
+        ]}
+
+    monkeypatch.setattr(mod, "_get", _hits)
+    text = _text_of(await mod._call_tool("lookup_identity", {"query": query}))
+    assert "FeatureBot" in text and "trust 40/100" in text
+    assert "Unrelated" not in text
+
+
+@pytest.mark.asyncio
 async def test_lookup_identity_unresolvable_did_returns_guidance(monkeypatch):
     """A did: that doesn't resolve must guide, not dead-end on 'Not found' (the DID
     branch previously bypassed the guidance the name branch already had)."""

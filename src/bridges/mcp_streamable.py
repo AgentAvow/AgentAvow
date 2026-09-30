@@ -249,6 +249,13 @@ def _no_entity_help(what: str) -> str:
     )
 
 
+def _identity_matches(query: str, entity: dict) -> bool:
+    """True when every word of *query* appears in the entity's name or DID."""
+    haystack = f"{entity.get('display_name') or ''} {entity.get('did_web') or ''}".lower()
+    words = query.lower().split()
+    return bool(words) and all(w in haystack for w in words)
+
+
 def _loc(it: dict) -> str:
     where = it.get("file_path") or ""
     if it.get("line_number"):
@@ -1005,7 +1012,9 @@ async def _call_tool(
                     return _text(_no_entity_help(f"DID '{q}'"))
                 return _text(json.dumps(d, indent=2)[:2000])
             d = await _get("/search", params={"q": q, "limit": 5})
-            ents = d.get("entities") or []
+            # /search also matches bio text, so "requests" would surface an agent whose
+            # bio mentions "feature requests". An identity lookup is by name or DID only.
+            ents = [e for e in (d.get("entities") or []) if _identity_matches(q, e)]
             if not ents:
                 return _text(_no_entity_help(f"'{q}'"))
             lines = [f"Identities matching '{q}':", ""]

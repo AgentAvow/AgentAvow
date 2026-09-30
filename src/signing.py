@@ -17,6 +17,7 @@ import json
 import logging
 import math
 
+import rfc8785
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -160,17 +161,21 @@ def canonicalize_jcs_strict(payload: object) -> bytes:
     """Serialize *payload* to RFC 8785 (JCS) canonical JSON bytes.
 
     Unlike ``canonicalize()`` (legacy AgentGraph path that strips nulls
-    and uses ASCII-only escapes), this function is byte-identical to
-    RFC 8785 JCS on the subset exercised by the APS bilateral-delegation
-    fixture at ``aeoess/agent-passport-system/fixtures/bilateral-delegation``:
+    and uses ASCII-only escapes), this is RFC 8785 as written, delegated
+    to the ``rfc8785`` library (the same canonicalizer the v2 envelope
+    path signs with):
 
-    - Keys sorted by Unicode code point (``sort_keys=True``).
+    - Keys sorted by UTF-16 code unit (§3.2.3), so non-BMP keys order the
+      way an ECMAScript verifier orders them.
+    - Numbers serialized per ECMA-262 (§3.2.2.3): ``1.0`` → ``1``,
+      ``1e30`` → ``1e+30``, ``1e-7`` → ``1e-7``.
     - ``None`` values **preserved** (not stripped) at every depth.
-    - Non-ASCII characters emitted as literal UTF-8 bytes
-      (``ensure_ascii=False``), not ``\\uXXXX`` escapes.
-    - Integer-valued floats normalized to int (``1.0`` → ``1``) to match
-      ECMA-262 number serialization.
-    - Inf/NaN rejected.
+    - Non-ASCII characters emitted as literal UTF-8 bytes.
+
+    Raises ``ValueError`` (``rfc8785.CanonicalizationError``) for input JCS
+    cannot represent: Inf/NaN, integers beyond ±(2**53 - 1), non-string
+    object keys. Refusing is deliberate — a value that an IEEE 754 verifier
+    would read back differently must not be signed.
 
     Used by CTEF (Composable Trust Evidence Format, A2A#1734) envelopes
     where ``delegation_chain_root`` composition requires byte-for-byte
@@ -178,28 +183,7 @@ def canonicalize_jcs_strict(payload: object) -> bytes:
     the original ``canonicalize()`` is preserved verbatim so previously
     signed payloads keep verifying.
     """
-    cleaned = _normalize_for_jcs_strict(payload)
-    return json.dumps(
-        cleaned, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-    ).encode("utf-8")
-
-
-def _normalize_for_jcs_strict(obj: object) -> object:
-    """Like ``_normalize_for_jcs`` but preserves ``None`` values.
-
-    RFC 8785 §3.2.1 makes no provision for stripping null; ``null`` is a
-    valid JSON primitive and must survive canonicalization.
-    """
-    if isinstance(obj, dict):
-        return {k: _normalize_for_jcs_strict(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_normalize_for_jcs_strict(item) for item in obj]
-    if isinstance(obj, float):
-        if math.isinf(obj) or math.isnan(obj):
-            raise ValueError(f"Cannot canonicalize {obj}")
-        if obj == int(obj):
-            return int(obj)
-    return obj
+    return rfc8785.dumps(payload)
 
 
 def create_jws(payload_bytes: bytes) -> str:
