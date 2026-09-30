@@ -19,6 +19,27 @@ class SetWebhookRequest(BaseModel):
     url: HttpUrl
 
 
+async def deliver_alert_webhook(url: str, payload: dict) -> int:
+    """POST an alert to an account's webhook URL. Returns the HTTP status, or 0 when
+    the request was refused or failed.
+
+    The URL is supplied by the account holder, so it is never fetched with a plain
+    client: it must be a public https:// address, the connection is pinned to the
+    address that was validated (no DNS rebind), and redirects are not followed.
+    Validation happens here as well as when the URL is saved, because a hostname
+    that was public then can point somewhere internal now.
+    """
+    from src.ssrf import ssrf_safe_async_client, validate_url_https
+
+    try:
+        validate_url_https(url, field_name="url")
+        async with ssrf_safe_async_client(timeout=6, follow_redirects=False) as client:
+            resp = await client.post(url, json=payload)
+        return resp.status_code
+    except Exception:
+        return 0
+
+
 def _serialize(w: AlertWebhook | None) -> dict:
     if w is None:
         return {"url": None, "active": False, "last_status": None}
@@ -51,12 +72,18 @@ async def set_webhook(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(rate_limit_writes),
 ):
+    from src.ssrf import validate_url_https
+
+    try:
+        url = validate_url_https(str(body.url), field_name="url")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="url must be a public https:// address")
     existing = await _get(entity.id, db)
     if existing is None:
-        existing = AlertWebhook(entity_id=entity.id, url=str(body.url), active=True)
+        existing = AlertWebhook(entity_id=entity.id, url=url, active=True)
         db.add(existing)
     else:
-        existing.url = str(body.url)
+        existing.url = url
         existing.active = True
     await db.flush()
     await db.refresh(existing)
@@ -94,19 +121,10 @@ async def test_webhook(
         "new_score": 74,
         "reason": "score dropped",
     }
-    status = None
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=6) as client:
-            resp = await client.post(hook.url, json=payload)
-        status = resp.status_code
-    except Exception:
-        status = 0
+    status = await deliver_alert_webhook(hook.url, payload)
     from sqlalchemy import func as safunc
 
     hook.last_status = status
     hook.last_delivery_at = safunc.now()
     await db.flush()
-    ok = status is not None and 200 <= status < 300
-    return {"delivered": ok, "status": status}
+    return {"delivered": 200 <= status < 300, "status": status}

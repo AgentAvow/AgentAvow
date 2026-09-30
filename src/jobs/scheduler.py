@@ -998,18 +998,16 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                         )
                     )).scalar_one_or_none()
                     if hook is not None:
-                        import httpx
+                        from src.api.account_webhook_router import deliver_alert_webhook
 
-                        async with httpx.AsyncClient(timeout=6) as client:
-                            resp = await client.post(hook.url, json={
-                                "type": "agentavow.alert.grade_change",
-                                "owner": w.owner,
-                                "repo": w.repo,
-                                "old_score": w.last_score,
-                                "new_score": new_score,
-                                "reason": reason,
-                            })
-                        hook.last_status = resp.status_code
+                        hook.last_status = await deliver_alert_webhook(hook.url, {
+                            "type": "agentavow.alert.grade_change",
+                            "owner": w.owner,
+                            "repo": w.repo,
+                            "old_score": w.last_score,
+                            "new_score": new_score,
+                            "reason": reason,
+                        })
                         hook.last_delivery_at = datetime.now(timezone.utc)
                 except Exception:
                     logger.debug("webhook alert delivery failed for %s/%s", w.owner, w.repo)
