@@ -1,0 +1,39 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "app-6aac4159c8a88191b820a458ef455b03",
+  "version": "1.1.0",
+  "description": "Scan an MCP server, package, or GitHub repo for a signed 0-100 trust score before your agent connects to it.",
+  "author": {
+    "name": "AgentAvow",
+    "url": "https://agentavow.com"
+  },
+  "homepage": "https://agentavow.com",
+  "repository": "https://github.com/AgentAvow/AgentAvow",
+  "keywords": ["security", "trust", "mcp", "supply-chain", "code-scanning", "attestation"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "AgentAvow",
+        "shortDescription": "Scan tools for a safety score",
+        "longDescription": "AgentAvow tells you whether a tool is safe before your agent connects to it. Give it an MCP server, a package (npm, PyPI, crates, Docker, or Hugging Face), or a GitHub repo, and it returns a 0–100 trust score and a letter grade backed by a signed attestation anyone can recompute offline. It checks for known-malicious versions, supply-chain and dependency risk, and code-safety issues, then shows an interactive trust card. Eight read-only tools cover scanning a repo, package, or live MCP server; verifying a score; checking interaction safety before you connect; looking up an identity; and getting an embeddable badge. No account, no sign-in, and nothing is modified — every call is anonymous and read-only.",
+        "developerName": "Kenne Ives",
+        "category": "Developer Tools",
+        "capabilities": ["Interactive", "Read"],
+        "websiteURL": "https://agentavow.com",
+        "supportURL": "https://github.com/AgentAvow/AgentAvow/issues",
+        "privacyPolicyURL": "https://agentavow.com/legal/privacy",
+        "termsOfServiceURL": "https://agentavow.com/legal/terms",
+        "defaultPrompt": [
+          "Scan the npm package chalk for safety",
+          "Is the MCP server at https://agentavow.com/mcp safe to connect?",
+          "Check the trust score for the GitHub repo modelcontextprotocol/servers"
+        ],
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      },
+      "publication": {
+        "release_notes": "Adds a bundled skill, scan-before-connect, that picks the right scan tool for a repo, package, or MCP server and reports the verdict without overstating it. Adds capability labels and starter prompts. No tools were added or removed."
+      }
+    }
+  }
+}
