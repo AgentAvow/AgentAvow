@@ -60,6 +60,10 @@ containing either:
 once. A server AgentAvow cannot read (one that needs sign-in, for example) is reported
 once and retried after a week. Delete the file to scan everything again.
 
+The first time the hook finds nothing to scan (no remote MCP servers configured), it
+shows one line saying so and how to scan a tool on demand. That line is shown once per
+machine, is recorded in the same file, and makes no request.
+
 If the network is down or anything unexpected happens, the hook prints nothing and
 exits cleanly. It cannot stop a session from starting.
 

@@ -35,7 +35,17 @@ def _run(hook, monkeypatch, capsys, targets, scan):
     monkeypatch.setattr(hook, "_scan", scan)
     hook.main()
     out = capsys.readouterr().out
-    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+    if not out:
+        return ""
+    return json.loads(out).get("hookSpecificOutput", {}).get("additionalContext", "")
+
+
+def _run_raw(hook, monkeypatch, capsys, targets, scan) -> dict:
+    monkeypatch.setattr(hook, "_targets", lambda: targets)
+    monkeypatch.setattr(hook, "_scan", scan)
+    hook.main()
+    out = capsys.readouterr().out
+    return json.loads(out) if out else {}
 
 
 def _mcp(name: str, url: str) -> dict:
@@ -225,3 +235,47 @@ def test_cache_written_by_the_previous_version_still_counts(hook, monkeypatch, c
     calls = []
     assert _run(hook, monkeypatch, capsys, [_mcp("a", url)], lambda t: calls.append(t)) == ""
     assert calls == []
+
+
+def test_nothing_to_scan_shows_the_intro_once_and_makes_no_request(hook, monkeypatch, capsys):
+    calls = []
+    first = _run_raw(hook, monkeypatch, capsys, [], lambda t: calls.append(t))
+    second = _run_raw(hook, monkeypatch, capsys, [], lambda t: calls.append(t))
+    assert "no remote MCP servers to scan yet" in first["systemMessage"]
+    assert "/agentavow-trust:scan" in first["systemMessage"]  # the plugin copy names the command
+    assert "hookSpecificOutput" not in first  # user-facing only; nothing enters Claude's context
+    assert second == {}
+    assert calls == []
+    assert json.loads(hook.CACHE.read_text())[hook.META_KEY]["intro_shown"] == hook.__version__
+
+
+def test_manual_copy_intro_points_at_the_site_not_the_plugin_command(tmp_path, monkeypatch):
+    manual = _load(MANUAL_COPY)
+    msg = manual._intro_message()
+    assert "agentavow.com/check" in msg
+    assert "/agentavow-trust:scan" not in msg
+
+
+def test_intro_is_not_shown_when_there_are_targets(hook, monkeypatch, capsys):
+    out = _run_raw(hook, monkeypatch, capsys,
+                   [_mcp("a", "https://mcp.example.com/mcp")], lambda t: (92, "safe", 0))
+    assert "systemMessage" not in out
+    assert "92/100" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def test_intro_is_skipped_rather_than_repeated_when_the_cache_is_unwritable(
+        hook, monkeypatch, capsys, tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    monkeypatch.setattr(hook, "CACHE", blocker / "scanned.json")  # parent is a file
+    assert _run_raw(hook, monkeypatch, capsys, [], lambda t: None) == {}
+    assert _run_raw(hook, monkeypatch, capsys, [], lambda t: None) == {}
+
+
+def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_path):
+    cfg = {"mcpServers": {hook.META_KEY: {"url": "https://mcp.example.com/mcp"},
+                          "real": {"url": "https://mcp.example.com/mcp"}}}
+    monkeypatch.setattr(hook.pathlib.Path, "home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".claude.json").write_text(json.dumps(cfg))
+    assert [t["name"] for t in hook._targets()] == ["real"]

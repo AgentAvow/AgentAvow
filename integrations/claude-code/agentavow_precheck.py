@@ -12,6 +12,8 @@ published package to grade and are skipped. So are MCP URLs on localhost or a
 private network: AgentAvow can't reach them, so they never leave your machine.
 A URL whose path looks like it carries a secret (a long token or a UUID) is not
 sent either; it is reported as not scanned.
+The first time there is nothing to scan at all, the hook shows one line saying so
+(and how to scan a tool on demand), then never repeats it. That line makes no request.
 
 Design guarantees (deliberate):
   • OPT-IN — nothing runs unless YOU install this hook. AgentAvow's MCP server never
@@ -35,13 +37,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 API = "https://agentavow.com/api/v1/public/scan"
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 TIMEOUT = 8  # seconds per scan; short so startup is never held up
 BUDGET = 20  # seconds for the whole run; stays inside the hook's 30s timeout
 RETRY_UNSCANNABLE = 7 * 24 * 3600  # re-try a server the API refused after a week
+META_KEY = "_agentavow"  # cache entry holding hook state; never treated as a server name
 
 # stdio runners we can map to a package registry. node/python/etc. are hand-written
 # scripts with no published package to grade, so they're intentionally absent.
@@ -200,7 +203,7 @@ def _targets() -> list[dict]:
                 servers = node.get("mcpServers")
                 if isinstance(servers, dict):
                     for sname, cfg in servers.items():
-                        if sname in seen or not isinstance(cfg, dict):
+                        if sname in seen or sname == META_KEY or not isinstance(cfg, dict):
                             continue
                         t = _resolve_target(sname, cfg)
                         if t:
@@ -218,11 +221,14 @@ def _verdict(data: dict) -> tuple[int, str, int]:
     return score, ("safe" if (score >= 81 and blocking == 0) else "needs review"), blocking
 
 
-def _user_agent() -> str:
+def _install_source() -> str:
     # Installed as a plugin, this file sits at <plugin>/scripts/ beside .claude-plugin/.
     plugin_root = pathlib.Path(__file__).resolve().parent.parent
-    source = "plugin" if (plugin_root / ".claude-plugin").is_dir() else "manual"
-    return f"agentavow-precheck/{__version__} ({source})"
+    return "plugin" if (plugin_root / ".claude-plugin").is_dir() else "manual"
+
+
+def _user_agent() -> str:
+    return f"agentavow-precheck/{__version__} ({_install_source()})"
 
 
 def _fetch(path: str, params: dict) -> dict:
@@ -252,12 +258,37 @@ def _load_cache() -> dict:
         return {}
 
 
-def _save_cache(cache: dict) -> None:
+def _save_cache(cache: dict) -> bool:
     try:
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         CACHE.write_text(json.dumps(cache))
+        return True
     except Exception:
-        pass
+        return False
+
+
+def _intro_message() -> str:
+    how = (
+        "run /agentavow-trust:scan <MCP URL | npm or pypi package | owner/repo>"
+        if _install_source() == "plugin"
+        else 'ask Claude "is <tool> safe?" or open https://agentavow.com/check'
+    )
+    return ("AgentAvow: no remote MCP servers to scan yet; new ones are graded at your next "
+            f"session start. To check a tool before you connect it, {how}.")
+
+
+def _show_intro_once() -> None:
+    """On the first session with nothing to scan, tell the user so (a silent hook
+    looks broken) and how to scan on demand. Shown once per machine, recorded in
+    the cache; if the cache can't be written it is not shown, so it can never nag.
+    No request is made."""
+    cache = _load_cache()
+    meta = cache.get(META_KEY)
+    if isinstance(meta, dict) and meta.get("intro_shown"):
+        return
+    cache[META_KEY] = {"intro_shown": __version__}
+    if _save_cache(cache):
+        print(json.dumps({"systemMessage": _intro_message()}))
 
 
 def _is_cached(entry: object, target_id: str, now: float) -> bool:
@@ -284,6 +315,7 @@ def main() -> None:
     except Exception:
         return
     if not targets:
+        _show_intro_once()
         return
 
     cache = _load_cache()

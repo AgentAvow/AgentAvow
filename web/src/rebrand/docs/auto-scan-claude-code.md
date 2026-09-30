@@ -93,6 +93,10 @@ You should see a verdict line per new MCP server. Run it again and it stays sile
 (already-scanned servers are cached in `~/.cache/agentavow/scanned.json`). End to
 end: add a new server, then start a new session and the verdict appears in context.
 
+If you have no remote MCP servers configured yet, the hook instead shows a single line
+saying there is nothing to scan and how to scan a tool on demand. It shows that line once
+per machine and makes no request for it.
+
 ## Guarantees
 
 - **Opt-in.** Nothing runs unless you install it.
