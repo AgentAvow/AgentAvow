@@ -998,9 +998,9 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                         )
                     )).scalar_one_or_none()
                     if hook is not None:
-                        from src.api.account_webhook_router import deliver_alert_webhook
+                        from src.api.account_webhook_router import deliver_to_hook
 
-                        hook.last_status = await deliver_alert_webhook(hook.url, {
+                        hook.last_status = await deliver_to_hook(hook, {
                             "type": "agentavow.alert.grade_change",
                             "owner": w.owner,
                             "repo": w.repo,

@@ -48,24 +48,29 @@ interface Notif {
   created_at: string
 }
 
-interface WebhookState { url: string | null; active: boolean; last_status: number | null }
+interface WebhookState { url: string | null; active: boolean; signed?: boolean; last_status: number | null }
 
 /** Alert webhook — POST score-change alerts to a URL (Slack/CI/your app). */
 function AlertWebhook() {
   const qc = useQueryClient()
   const [url, setUrl] = useState('')
   const [testResult, setTestResult] = useState<string | null>(null)
+  const [freshSecret, setFreshSecret] = useState<string | null>(null)
   const { data } = useQuery({
     queryKey: ['rebrand-webhook'],
     queryFn: async () => (await api.get<WebhookState>('/account/alert-webhook')).data,
   })
   const save = useMutation({
-    mutationFn: async () => (await api.put('/account/alert-webhook', { url: url.trim() })).data,
-    onSuccess: () => { setUrl(''); qc.invalidateQueries({ queryKey: ['rebrand-webhook'] }) },
+    mutationFn: async () => (await api.put<{ signing_secret?: string }>('/account/alert-webhook', { url: url.trim() })).data,
+    onSuccess: (d) => { setFreshSecret(d.signing_secret ?? null); setUrl(''); qc.invalidateQueries({ queryKey: ['rebrand-webhook'] }) },
+  })
+  const rotate = useMutation({
+    mutationFn: async () => (await api.post<{ signing_secret: string }>('/account/alert-webhook/rotate-secret')).data,
+    onSuccess: (d) => { setFreshSecret(d.signing_secret); qc.invalidateQueries({ queryKey: ['rebrand-webhook'] }) },
   })
   const remove = useMutation({
     mutationFn: () => api.delete('/account/alert-webhook'),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['rebrand-webhook'] }),
+    onSuccess: () => { setFreshSecret(null); qc.invalidateQueries({ queryKey: ['rebrand-webhook'] }) },
   })
   const test = useMutation({
     mutationFn: async () => (await api.post<{ delivered: boolean; status: number }>('/account/alert-webhook/test')).data,
@@ -75,14 +80,22 @@ function AlertWebhook() {
   return (
     <div className="mt-10">
       <h2 className="text-[13px] font-mono uppercase tracking-wide text-text-muted mb-1">Alert webhook</h2>
-      <p className="text-text-muted text-[13px] mb-3">Get score-change alerts POSTed to a URL — Slack, your CI, your app — in addition to email.</p>
+      <p className="text-text-muted text-[13px] mb-3">Get score-change alerts POSTed to a URL — Slack, your CI, your app — in addition to email. Each delivery is HMAC-signed with your webhook's secret.</p>
+      {freshSecret && (
+        <div className="glass rounded-xl p-4 mb-3 border-l-4 border-success/60">
+          <div className="text-[12.5px] text-success font-semibold mb-1">Copy this signing secret now — it won't be shown again.</div>
+          <code className="font-mono text-[12px] break-all bg-surface px-2 py-1 rounded">{freshSecret}</code>
+        </div>
+      )}
       {current ? (
         <div className="glass rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <div className="font-mono text-[13px] break-all">{current}</div>
             {data?.last_status != null && <div className="text-[11.5px] text-text-muted">last delivery: HTTP {data.last_status}</div>}
+            {data?.signed === false && <div className="text-[11.5px] text-text-muted">Not signed yet. Rotate the secret to start signing.</div>}
           </div>
           <div className="flex gap-2 shrink-0">
+            <button onClick={() => rotate.mutate()} disabled={rotate.isPending} className="text-[12px] text-text-muted hover:text-primary-light">Rotate secret</button>
             <button onClick={() => { setTestResult(null); test.mutate() }} disabled={test.isPending} className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light">{test.isPending ? 'Testing…' : 'Send test'}</button>
             <button onClick={() => remove.mutate()} className="text-[12px] text-text-muted hover:text-danger">Remove</button>
           </div>

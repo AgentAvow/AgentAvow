@@ -477,6 +477,9 @@ async def _clean_db_once():
             ")"
         ))
         await conn.execute(text(
+            "ALTER TABLE alert_webhooks ADD COLUMN IF NOT EXISTS signing_key TEXT"
+        ))
+        await conn.execute(text(
             "CREATE TABLE IF NOT EXISTS tool_watches ("
             "  id UUID PRIMARY KEY,"
             "  watcher_id UUID NOT NULL,"
