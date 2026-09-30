@@ -17,10 +17,12 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import logging
 import os
 from urllib.parse import quote
 
 import httpx
+import jsonschema
 import mcp.types as types
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
@@ -30,6 +32,8 @@ from src.bridges.mcp_app_view import TRUST_CARD_HTML
 from src.scanner.verdict import SAFE_BAR as _SHARED_SAFE_BAR
 from src.scanner.verdict import is_safe as _shared_is_safe
 from src.scanner.verdict import verdict_reason as _shared_verdict_reason
+
+logger = logging.getLogger(__name__)
 
 # MCP Apps (SEP-1865): an interactive trust card the host renders natively (vs. the
 # model paraphrasing our text). ui:// resource + _meta.ui.resourceUri on scan tools;
@@ -579,6 +583,124 @@ def _scan_struct(
     }
 
 
+def _nullable(json_type: str, description: str) -> dict:
+    return {"type": [json_type, "null"], "description": description}
+
+
+# The outputSchema the three scan tools advertise: the shape of _scan_struct above. Keep
+# the two in step — every successful scan is validated against this before it leaves.
+# Deliberately loose where the value comes straight from the scan API (tier, findings
+# text, sub-score names): those can grow without breaking the contract. Extra keys are
+# allowed for the same reason.
+_SCAN_OUTPUT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "target": {"type": "string", "description": "What was scanned, as given."},
+        "target_type": {
+            "type": "string",
+            "description": "Kind of target: github, npm, pypi, crates, docker, hf, or mcp.",
+        },
+        "trust_score": {
+            "type": "integer", "minimum": 0, "maximum": 100,
+            "description": "Trust score, 0-100. Higher is safer.",
+        },
+        "tier": _nullable("string", "Trust tier for the score, e.g. trusted or standard."),
+        "verdict": {
+            "type": "string", "enum": ["safe", "needs_review"],
+            "description": "safe = score >=81 with no critical/high findings; "
+                           "otherwise needs_review.",
+        },
+        "verdict_reason": {
+            "type": "string",
+            "enum": ["clean", "blocking_findings", "thin_coverage", "low_signals"],
+            "description": "Why: clean (safe); blocking_findings (a critical/high finding — "
+                           "real risk); thin_coverage (no risk found, too little code to "
+                           "inspect); low_signals (no risk found, held down by maintainer/"
+                           "provenance/adoption signals).",
+        },
+        "critical": {"type": "integer", "minimum": 0,
+                     "description": "Number of critical findings."},
+        "high": {"type": "integer", "minimum": 0, "description": "Number of high findings."},
+        "findings_total": {"type": "integer", "minimum": 0,
+                           "description": "All findings, every severity."},
+        "certified": {
+            "type": "boolean",
+            "description": "Matches the signed attestation's certified.eligible.",
+        },
+        "certified_mark": {
+            "type": "boolean",
+            "description": "True when certified and the verdict is safe (the display rule).",
+        },
+        "top_findings": {
+            "type": "array",
+            "description": "Up to three most important findings, repeats collapsed.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "severity": _nullable("string", "critical, high, medium, or low."),
+                    "category": _nullable("string", "Detection category."),
+                    "what": _nullable("string", "What was found."),
+                    "where": {"type": "string",
+                              "description": "File and line, or empty when not file-based."},
+                    "remediation": _nullable("string", "How to fix it."),
+                    "count": {"type": "integer", "minimum": 1,
+                              "description": "How many times this finding occurs."},
+                },
+            },
+        },
+        "incident": {
+            "type": ["object", "null"],
+            "description": "Known past compromise of this package, or null. Context only — "
+                           "never part of the score or verdict.",
+            "properties": {
+                "known_compromise": {"type": "boolean"},
+                "current_version_affected": {"type": "boolean"},
+                "count": {"type": "integer"},
+                "latest": {
+                    "type": "object",
+                    "properties": {
+                        "id": _nullable("string", "Advisory id."),
+                        "summary": _nullable("string", "Advisory summary."),
+                        "published": _nullable("string", "Publication date."),
+                    },
+                },
+            },
+        },
+        "subscores": {
+            "type": "object",
+            "description": "Per-category 0-100 scores that explain the trust score.",
+            "additionalProperties": {"type": ["number", "null"]},
+        },
+        "install": _nullable(
+            "string",
+            "Install command for a package with no critical/high findings; null otherwise.",
+        ),
+        "adoption": {
+            "type": ["object", "null"],
+            "description": "Usage signal (downloads per week or stars), or null when unknown.",
+            "properties": {
+                "count": {"type": "integer"},
+                "unit": {"type": "string"},
+                "score_0_100": {"type": "integer"},
+            },
+        },
+        "signed": {"type": "boolean",
+                   "description": "True when a signed (Ed25519/JWS) attestation backs this."},
+        "cached": {"type": "boolean",
+                   "description": "True when served from the ~1h cache rather than re-scanned."},
+        "report_url": {"type": "string", "description": "Full report page for a person."},
+        "report_json_url": {"type": "string",
+                            "description": "The full verdict as JSON, for agents and CI."},
+        "verify_url": {"type": "string",
+                       "description": "How to verify the attestation offline."},
+    },
+    "required": [
+        "target", "target_type", "trust_score", "verdict", "verdict_reason", "critical",
+        "high", "findings_total", "certified", "signed", "report_url",
+    ],
+}
+
+
 # --------------------------------------------------------------------------- #
 # tool definitions (all read-only, unauthenticated)
 # --------------------------------------------------------------------------- #
@@ -791,11 +913,15 @@ _TOOLS: list[types.Tool] = [
     ),
 ]
 
+_SCAN_TOOLS = ("scan_repo", "scan_package", "scan_mcp_server")
+
 # Attach the MCP Apps trust-card view to the scan tools. Set on the field (the
 # constructor silently drops an unknown `meta=` kwarg; the field alias is _meta).
+# The same three return structuredContent, so they also declare its schema.
 for _t in _TOOLS:
-    if _t.name in ("scan_repo", "scan_package", "scan_mcp_server"):
+    if _t.name in _SCAN_TOOLS:
         _t.meta = _CARD_META
+        _t.outputSchema = _SCAN_OUTPUT_SCHEMA
 
 # Defensive length bounds on string inputs (hygiene — these are interpolated into API
 # paths; also what our own scanner flags on unconstrained params). Generous so no real
@@ -884,6 +1010,30 @@ async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResul
 
 @server.call_tool()
 async def _call_tool(
+    name: str, arguments: dict
+) -> list[types.TextContent] | tuple[list[types.TextContent], dict] | types.CallToolResult:
+    out = await _run_tool(name, arguments)
+    if name not in _SCAN_TOOLS:
+        return out
+    if not isinstance(out, tuple):
+        # A scan tool declares an outputSchema, so a reply with no structuredContent (bad
+        # input, not found, timeout) can't go back as a success: the SDK and spec-following
+        # clients reject that. Return the same guidance as a tool-execution error, which
+        # also keeps a model from reading "not scanned" as a verdict.
+        return types.CallToolResult(content=out, isError=True)
+    content, struct = out
+    try:
+        jsonschema.validate(instance=struct, schema=_SCAN_OUTPUT_SCHEMA)
+    except jsonschema.ValidationError as e:
+        # Our schema drifted from _scan_struct. Don't fail a good scan over it: send the
+        # result as-is (a CallToolResult skips the SDK's own check) and log loudly.
+        logger.error("scan structuredContent does not match its outputSchema (%s): %s",
+                     name, e.message)
+        return types.CallToolResult(content=content, structuredContent=struct)
+    return out
+
+
+async def _run_tool(
     name: str, arguments: dict
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
     await _bump_s("calls:total")
