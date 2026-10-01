@@ -11,8 +11,15 @@ export interface CatalogSummary {
   by_surface: Record<string, number>
   by_category?: Record<string, number>
   by_surface_critical?: Record<string, number>
+  /** high-only: rows with a high finding and no critical (exclusive of by_surface_critical) */
   by_surface_high?: Record<string, number>
+  by_surface_scanned?: Record<string, number>
+  by_surface_skipped?: Record<string, number>
+  /** every non-x402 row, graded or not */
   repo_scans_total?: number
+  /** rows with a verdict; the honest "repos graded" count */
+  repo_scans_scanned?: number
+  repo_scans_skipped?: number
   x402_endpoints_total?: number
   x402_compliant?: number
 }
@@ -81,10 +88,31 @@ export function rowIdentity(row: CatalogRow): { display: string; repoPath: strin
   return { display, repoPath }
 }
 
-/** The headline stat (% of scanned tools with a high/critical finding), server-computed so
- * the homepage and the Index always show the same number. */
-export async function fetchFlaggedStat(): Promise<{ pct: number | null; flagged: number; scanned: number }> {
-  const { data } = await publicApi.get<{ pct: number | null; flagged: number; scanned: number }>(
-    '/public/scan-catalog/flagged-stat')
+/** Exclusive severity counts over tools that received a verdict. A tool is in exactly one of
+ * critical / high_only / clean; `flagged` = critical + high_only; `skipped` rows (never
+ * graded) are NOT in `scanned_total`, which is the denominator of every pct. */
+export interface FlaggedCounts {
+  scanned_total: number
+  critical: number
+  high_only: number
+  flagged: number
+  clean: number
+  skipped: number
+  total: number
+  pct: number | null
+  flagged_pct: number | null
+  critical_pct: number | null
+}
+
+export interface FlaggedStat extends FlaggedCounts {
+  /** legacy alias of scanned_total */
+  scanned: number
+  by_surface: Record<string, FlaggedCounts>
+}
+
+/** The headline stat (% of SCANNED tools with a high/critical finding), server-computed so
+ * the homepage, the Index and the research report always show the same number. */
+export async function fetchFlaggedStat(): Promise<FlaggedStat> {
+  const { data } = await publicApi.get<FlaggedStat>('/public/scan-catalog/flagged-stat')
   return data
 }

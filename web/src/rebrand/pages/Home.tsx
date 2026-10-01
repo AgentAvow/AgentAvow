@@ -224,7 +224,7 @@ export default function RebrandHome() {
               [s?.total_scans ?? 0, 'tools scanned'],
               [s?.by_surface?.mcp ?? 0, 'MCP servers'],
               [s?.by_surface?.x402 ?? 0, 'x402 endpoints'],
-              [s?.repo_scans_total ?? 0, 'repos scanned'],
+              [s?.repo_scans_scanned ?? s?.repo_scans_total ?? 0, 'repos graded'],
               [12, 'detection categories'],
             ].map(([n, l]) => (
               <div key={l as string}>
