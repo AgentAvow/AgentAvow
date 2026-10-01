@@ -62,6 +62,27 @@ A one-time gate misses the tool that was clean when you adopted it and turned ma
 
 Definition-change alerts cover GitHub repos, OpenClaw skills and live MCP servers, where the scan pins the tool definitions. For a live MCP server the digest is per tool name, taken from the `tools/list` the server actually serves. npm and PyPI package watches alert on score only.
 
+Set the webhook under **Account → Alert webhook**. The URL must be a public `https://` address. Saving it shows a signing secret once. Every delivery then carries two headers, and the signature covers the exact bytes of the body:
+
+```
+X-AgentAvow-Timestamp: 1790812800
+X-AgentAvow-Signature: sha256=<hex>
+```
+
+Verify before you act on an alert:
+
+```python
+import hashlib, hmac
+
+def verify(secret: str, timestamp: str, body: bytes, signature: str) -> bool:
+    expected = "sha256=" + hmac.new(
+        secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+```
+
+Reject a delivery whose timestamp is more than a few minutes old. Rotating the secret on the account page stops the old one verifying immediately.
+
 ## Put it together
 
 1. **CI:** the GitHub Action blocks a merge that pulls in a below-threshold dependency.
