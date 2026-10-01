@@ -965,6 +965,7 @@ type BehavioralData = {
   egress_hosts?: string[]; unexpected_egress?: string[]; declared_egress?: string[]; vendor_egress?: string[]; fs_writes_sample?: string[]
   error?: string | null
   plan?: string
+  exit_code?: number | null
   canary_exfil?: { via: string; host?: string }[]
   exercise?: ExerciseData | null
   findings?: { category: string; name: string; severity: string; remediation?: string }[]
@@ -1023,6 +1024,9 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
               <div className="flex items-center gap-2 text-[13.5px] font-semibold text-danger"><span>⚠</span> Contacted {undeclared.length} undeclared host{undeclared.length > 1 ? 's' : ''} at install/run time.</div>
             ) : (
               <div className="flex items-center gap-2 text-[13.5px] font-semibold text-success"><span>✓</span> No unexpected network egress observed.</div>
+            )}
+            {isMcpRun && !ex && typeof b.exit_code === 'number' && b.exit_code !== 0 && (
+              <p className="text-[12.5px] text-text-muted">The package could not be installed in the sandbox (install step exited {b.exit_code}), so its MCP server was not started.</p>
             )}
             {isMcpRun && ex && (
               <div>

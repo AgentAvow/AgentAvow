@@ -48,6 +48,30 @@ def _is_cache_like(path: str) -> bool:
     return any(marker in p for marker in _CACHE_LIKE)
 
 
+_SCRATCH_PREFIXES = ("/tmp/tmp", "/tmp/npm-", "/tmp/pip-", "/tmp/.", "/tmp/node-")
+
+
+def _is_scratch(path: str) -> bool:
+    """A tool's own throw-away temp area, not a modification of the user's environment:
+    a randomly-suffixed directory under /tmp (``/tmp/playwright-artifacts-cFaHfA``), or a
+    well-known temp/cache prefix. A NAMED file (``/tmp/agentavow-lie.txt``) is never scratch:
+    the last segment has an extension or no random tail."""
+    p = (path or "").replace("\\", "/").rstrip("/")
+    if not p.startswith("/tmp/"):
+        return False
+    if p.startswith(_SCRATCH_PREFIXES):
+        return True
+    last = p.rsplit("/", 1)[-1]
+    if "." in last:
+        return False
+    tail = last.rsplit("-", 1)[-1] if "-" in last else last.rsplit("_", 1)[-1]
+    if len(tail) < 6 or not tail.isalnum() or tail == last:
+        return False
+    has_digit = any(c.isdigit() for c in tail)
+    mixed = tail.lower() != tail and tail.upper() != tail
+    return has_digit or mixed
+
+
 # ── individual graders ──────────────────────────────────────────────────────────
 
 def grade_undeclared_egress(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
@@ -70,29 +94,41 @@ def grade_undeclared_egress(result, transcript: ExerciseTranscript) -> list[Beha
 
 
 def grade_readonly_violated(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
-    out: list[BehavioralFinding] = []
+    """ONE finding per server naming every read-only-declared tool that wrote a real file.
+    Scratch dirs and caches (a browser's per-call temp profile) are not modifications."""
+    violators: list[tuple[str, list[str]]] = []
     for tool in transcript.tools:
         if tool.hint("readOnlyHint") is not True:
             continue
         writes: list[str] = []
         for call in transcript.calls_for(tool.name):
-            writes += [w for w in call.fs_writes if w and not _is_cache_like(w)]
-        if not writes:
-            continue
-        writes = sorted(set(writes))
-        out.append(_finding(
-            "annotation_readonly_violated", category="annotation_lie",
-            name=f"Tool '{tool.name}' declares readOnlyHint but wrote files",
-            severity="high",
-            evidence=f"{tool.name} wrote {', '.join(writes[:5])}"
-                     + (f" (+{len(writes) - 5} more)" if len(writes) > 5 else ""),
-            remediation=(
-                "The tool's annotations promise it does not modify its environment, yet a "
-                "call produced filesystem writes. Either drop readOnlyHint or stop writing; "
-                "agents and gateways rely on this hint to skip confirmation prompts."
-            ),
-        ))
-    return out
+            writes += [w for w in call.fs_writes
+                       if w and not _is_cache_like(w) and not _is_scratch(w)]
+        if writes:
+            violators.append((tool.name, sorted(set(writes))))
+    if not violators:
+        return []
+    names = [v[0] for v in violators]
+    def _one(t: str, w: list[str]) -> str:
+        more = f" (+{len(w) - 3} more)" if len(w) > 3 else ""
+        return f"{t} wrote {', '.join(w[:3])}{more}"
+
+    evidence = "; ".join(_one(t, w) for t, w in violators[:6])
+    if len(violators) > 6:
+        evidence += f"; +{len(violators) - 6} more tools"
+    return [_finding(
+        "annotation_readonly_violated", category="annotation_lie",
+        name=(f"Tool '{names[0]}' declares readOnlyHint but wrote files" if len(names) == 1
+              else f"{len(names)} tools declare readOnlyHint but wrote files: "
+                   + ", ".join(names[:5]) + (", …" if len(names) > 5 else "")),
+        severity="high",
+        evidence=evidence,
+        remediation=(
+            "The tool's annotations promise it does not modify its environment, yet a "
+            "call produced filesystem writes. Either drop readOnlyHint or stop writing; "
+            "agents and gateways rely on this hint to skip confirmation prompts."
+        ),
+    )]
 
 
 def grade_open_world_violated(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:

@@ -171,6 +171,9 @@ async def run_known_good(pkg: dict) -> dict:
         "launch_error": tr.launch_error if tr else None,
         "launch_command": tr.launch_command if tr else [],
         "exercise_error": tr.error if tr else None,
+        "exit_code": res.exit_code,
+        "expect_rules": pkg.get("expect_rules", []),
+        "false_positives": [f.rule for f in findings if f.rule not in pkg.get("expect_rules", [])],
         "summary": grade_summary(res),
         "findings": [{"rule": f.rule, "severity": f.severity, "name": f.name}
                      for f in findings],
@@ -241,13 +244,19 @@ def main(argv: list[str] | None = None) -> int:
                      f"egress={row['egress_hosts']} unexpected={row['unexpected_egress']} "
                      f"vendor={row['vendor_egress']}")
             if not s.get("launch_ok"):
-                extra += f" launch_error={row['launch_error']!r} cmd={row['launch_command']}"
+                extra += (f" exit_code={row['exit_code']} launch_error={row['launch_error']!r} "
+                          f"cmd={row['launch_command']}")
+            if row["expect_rules"]:
+                extra += f" expected={row['expect_rules']}"
             print(f"{pkg['surface']}:{pkg['name']:48} {row['seconds']:6}s {state:32} {fl}\n"
                   f"    {extra}")
         report["known_good"] = rows
         n_ran = sum(1 for r in rows if r["ran"])
-        n_fp = sum(1 for r in rows if r["findings"])
-        print(f"\nknown-good: {n_ran}/{len(rows)} ran, {n_fp} with findings (suspected FPs)")
+        n_exercised = sum(1 for r in rows if r["summary"].get("launch_ok"))
+        n_fp = sum(1 for r in rows if r["false_positives"])
+        n_expected = sum(1 for r in rows if r["findings"] and not r["false_positives"])
+        print(f"\nknown-good: {n_ran}/{len(rows)} ran, {n_exercised} servers started and were "
+              f"exercised, {n_fp} with FALSE-POSITIVE findings, {n_expected} with expected findings")
     if a.out:
         pathlib.Path(a.out).write_text(json.dumps(report, indent=2))
         print(f"\nreport → {a.out}")

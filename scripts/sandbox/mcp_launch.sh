@@ -87,14 +87,14 @@ sys.exit(0 if (d.get("launch") or {}).get("ok") else 1)
 }
 
 N=0
-LAST=""
+FIRST=""
 while IFS= read -r CAND; do
   [ -n "$CAND" ] || continue
   N=$((N + 1))
   OUT="/work/.exercise.$N"
   # shellcheck disable=SC2086 — the candidate is a space-separated command, split on purpose
   "$@" -- $CAND > "$OUT" 2>/dev/null || true
-  LAST="$OUT"
+  [ -n "$FIRST" ] || FIRST="$OUT"
   if ok_transcript "$OUT"; then
     cat "$OUT"
     exit 0
@@ -102,5 +102,7 @@ while IFS= read -r CAND; do
   [ "$N" -ge 3 ] && break
 done < "$CANDS"
 
-[ -n "$LAST" ] && cat "$LAST"
+# Nothing initialized: report the FIRST (bare) candidate's failure — that is the real
+# reason (missing API key, needs a URL…), not the fallback variant's usage error.
+[ -n "$FIRST" ] && cat "$FIRST"
 exit 0

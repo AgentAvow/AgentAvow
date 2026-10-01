@@ -147,6 +147,9 @@ class BehavioralResult:
             "exercise": self.transcript.to_public_dict() if self.transcript else None,
             "notes": self.notes,
             "vendor_egress": self.vendor_egress,
+            # the container command's exit status: for install plans a non-zero value
+            # means the install/import step itself failed (the MCP launcher always exits 0)
+            "exit_code": self.exit_code,
         }
 
 

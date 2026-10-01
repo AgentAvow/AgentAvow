@@ -1,47 +1,169 @@
 {
-  "_doc": "Behavioral-tier eval corpus. 'known_good' = widely used, maintained MCP servers shipped as packages; a behavioral finding on one of these is a false positive until a human says otherwise. 'fixtures' = synthetic servers in tests/fixtures/behavioral shipped INTO the sandbox via --files-b64 (nothing malicious is ever published); each has the exact findings the graders must and must not raise. Run scripts/sandbox/eval/run_eval.py.",
+  "_doc": "Behavioral-tier eval corpus. 'known_good' = widely used, maintained MCP servers shipped as packages; a behavioral finding on one of these is a false positive until a human says otherwise. 'fixtures' = synthetic servers in tests/fixtures/behavioral shipped INTO the sandbox via --files-b64 (nothing malicious is ever published); each has the exact findings the graders must and must not raise. Run scripts/sandbox/eval/run_eval.py. A known_good entry may carry expect_rules: findings with those rules are correct, not false positives (e.g. a server that ships third-party telemetry).",
   "known_good": [
-    {"surface": "npm", "name": "@modelcontextprotocol/server-filesystem"},
-    {"surface": "npm", "name": "@modelcontextprotocol/server-memory"},
-    {"surface": "npm", "name": "@modelcontextprotocol/server-sequential-thinking"},
-    {"surface": "npm", "name": "@modelcontextprotocol/server-everything"},
-    {"surface": "npm", "name": "@playwright/mcp"},
-    {"surface": "npm", "name": "@upstash/context7-mcp"},
-    {"surface": "npm", "name": "@notionhq/notion-mcp-server"},
-    {"surface": "npm", "name": "@supabase/mcp-server-supabase"},
-    {"surface": "npm", "name": "firecrawl-mcp"},
-    {"surface": "npm", "name": "tavily-mcp"},
-    {"surface": "npm", "name": "exa-mcp-server"},
-    {"surface": "npm", "name": "@brave/brave-search-mcp-server"},
-    {"surface": "npm", "name": "mcp-remote"},
-    {"surface": "pypi", "name": "mcp-server-fetch"},
-    {"surface": "pypi", "name": "mcp-server-git"},
-    {"surface": "pypi", "name": "mcp-server-time"},
-    {"surface": "pypi", "name": "mcp-server-sqlite"},
-    {"surface": "pypi", "name": "fastmcp"},
-    {"surface": "pypi", "name": "mcp"},
-    {"surface": "pypi", "name": "markitdown-mcp"}
+    {
+      "surface": "npm",
+      "name": "@modelcontextprotocol/server-filesystem"
+    },
+    {
+      "surface": "npm",
+      "name": "@modelcontextprotocol/server-memory"
+    },
+    {
+      "surface": "npm",
+      "name": "@modelcontextprotocol/server-sequential-thinking"
+    },
+    {
+      "surface": "npm",
+      "name": "@modelcontextprotocol/server-everything",
+      "expect_rules": [
+        "behavioral_undeclared_egress"
+      ],
+      "note": "demo server; a tool fetches raw.githubusercontent.com \u2014 true undeclared egress"
+    },
+    {
+      "surface": "npm",
+      "name": "@playwright/mcp"
+    },
+    {
+      "surface": "npm",
+      "name": "@upstash/context7-mcp"
+    },
+    {
+      "surface": "npm",
+      "name": "@notionhq/notion-mcp-server"
+    },
+    {
+      "surface": "npm",
+      "name": "@supabase/mcp-server-supabase"
+    },
+    {
+      "surface": "npm",
+      "name": "firecrawl-mcp"
+    },
+    {
+      "surface": "npm",
+      "name": "tavily-mcp"
+    },
+    {
+      "surface": "npm",
+      "name": "exa-mcp-server",
+      "expect_rules": [
+        "behavioral_undeclared_egress"
+      ],
+      "note": "ships third-party telemetry to api.agnost.ai \u2014 a TRUE undeclared-egress finding"
+    },
+    {
+      "surface": "npm",
+      "name": "@brave/brave-search-mcp-server"
+    },
+    {
+      "surface": "npm",
+      "name": "mcp-remote"
+    },
+    {
+      "surface": "pypi",
+      "name": "mcp-server-fetch"
+    },
+    {
+      "surface": "pypi",
+      "name": "mcp-server-git"
+    },
+    {
+      "surface": "pypi",
+      "name": "mcp-server-time"
+    },
+    {
+      "surface": "pypi",
+      "name": "mcp-server-sqlite"
+    },
+    {
+      "surface": "pypi",
+      "name": "markitdown-mcp"
+    },
+    {
+      "surface": "npm",
+      "name": "@wonderwhy-er/desktop-commander"
+    },
+    {
+      "surface": "npm",
+      "name": "@modelcontextprotocol/server-puppeteer"
+    }
   ],
   "fixtures": [
-    {"file": "benign_server.py", "label": "benign",
-     "must_not_raise": ["annotation_readonly_violated", "credential_canary_exfiltrated", "canary_echoed_in_result", "behavioral_undeclared_egress"],
-     "expect": {"launch_ok": true, "min_calls": 2}},
-    {"file": "lies_readonly_server.py", "label": "lies_about_readonly",
-     "must_raise": ["annotation_readonly_violated"],
-     "must_not_raise": ["credential_canary_exfiltrated"],
-     "expect": {"launch_ok": true}},
-    {"file": "canary_echo_server.py", "label": "echoes_secret",
-     "env_names": ["GITHUB_TOKEN"],
-     "must_raise": ["canary_echoed_in_result"],
-     "expect": {"launch_ok": true}},
-    {"file": "slow_server.py", "label": "hangs_on_call",
-     "must_not_raise": ["annotation_readonly_violated"],
-     "expect": {"launch_ok": true, "call_errors_include": ["call_timeout"]}},
-    {"file": "crash_on_call_server.py", "label": "crashes",
-     "must_raise": ["tool_call_crashed_server"],
-     "expect": {"launch_ok": true}},
-    {"file": "never_initializes_server.py", "label": "never_initializes",
-     "must_not_raise": ["annotation_readonly_violated", "credential_canary_exfiltrated"],
-     "expect": {"launch_ok": false}}
+    {
+      "file": "benign_server.py",
+      "label": "benign",
+      "must_not_raise": [
+        "annotation_readonly_violated",
+        "credential_canary_exfiltrated",
+        "canary_echoed_in_result",
+        "behavioral_undeclared_egress"
+      ],
+      "expect": {
+        "launch_ok": true,
+        "min_calls": 2
+      }
+    },
+    {
+      "file": "lies_readonly_server.py",
+      "label": "lies_about_readonly",
+      "must_raise": [
+        "annotation_readonly_violated"
+      ],
+      "must_not_raise": [
+        "credential_canary_exfiltrated"
+      ],
+      "expect": {
+        "launch_ok": true
+      }
+    },
+    {
+      "file": "canary_echo_server.py",
+      "label": "echoes_secret",
+      "env_names": [
+        "GITHUB_TOKEN"
+      ],
+      "must_raise": [
+        "canary_echoed_in_result"
+      ],
+      "expect": {
+        "launch_ok": true
+      }
+    },
+    {
+      "file": "slow_server.py",
+      "label": "hangs_on_call",
+      "must_not_raise": [
+        "annotation_readonly_violated"
+      ],
+      "expect": {
+        "launch_ok": true,
+        "call_errors_include": [
+          "call_timeout"
+        ]
+      }
+    },
+    {
+      "file": "crash_on_call_server.py",
+      "label": "crashes",
+      "must_raise": [
+        "tool_call_crashed_server"
+      ],
+      "expect": {
+        "launch_ok": true
+      }
+    },
+    {
+      "file": "never_initializes_server.py",
+      "label": "never_initializes",
+      "must_not_raise": [
+        "annotation_readonly_violated",
+        "credential_canary_exfiltrated"
+      ],
+      "expect": {
+        "launch_ok": false
+      }
+    }
   ]
 }

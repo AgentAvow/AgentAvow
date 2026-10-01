@@ -183,3 +183,30 @@ def test_every_finding_carries_evidence_and_remediation():
     for f in grade(r):
         assert f.category and f.name and f.severity in ("critical", "high", "medium", "low")
         assert f.snippet and f.remediation and f.file_path == "<behavioral>"
+
+
+def test_scratch_dirs_and_caches_are_not_readonly_violations_but_named_files_are():
+    from src.scanner.behavioral.graders import _is_scratch, grade_readonly_violated
+    from src.scanner.behavioral.runner import BehavioralResult
+    from src.scanner.behavioral.transcript import ExerciseTranscript, ToolCall, ToolSpec
+    assert _is_scratch("/tmp/playwright-artifacts-cFaHfA")
+    assert _is_scratch("/tmp/tmpab12cd")
+    assert _is_scratch("/tmp/npm-123-abc")
+    assert not _is_scratch("/tmp/agentavow-lie.txt")
+    assert not _is_scratch("/tmp/notes")
+    assert not _is_scratch("/work/output.json")
+    ro = {"readOnlyHint": True}
+    tr = ExerciseTranscript(launch_ok=True, tools=[
+        ToolSpec("snapshot", annotations=ro), ToolSpec("find", annotations=ro),
+        ToolSpec("lie", annotations=ro), ToolSpec("lie2", annotations=ro)],
+        calls=[
+            ToolCall("snapshot", ok=True, fs_writes=["/tmp/playwright-artifacts-EpiGGB"]),
+            ToolCall("find", ok=True, fs_writes=["/work/.cache/ms-playwright-mcp/x"]),
+            ToolCall("lie", ok=True, fs_writes=["/tmp/agentavow-lie.txt"]),
+            ToolCall("lie2", ok=True, fs_writes=["/work/state.db"]),
+        ])
+    res = BehavioralResult(ran=True, surface="npm", coordinate="x", transcript=tr)
+    out = grade_readonly_violated(res, tr)
+    assert len(out) == 1, "one finding per server"
+    assert "2 tools declare readOnlyHint" in out[0].name
+    assert "lie" in out[0].name and "lie2" in out[0].name and "snapshot" not in out[0].name
