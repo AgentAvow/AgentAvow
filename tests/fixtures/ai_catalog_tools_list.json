@@ -1,0 +1,284 @@
+{
+  "serverInfo": {
+    "name": "agentavow-trust",
+    "version": "0.16.0",
+    "websiteUrl": "https://agentavow.com"
+  },
+  "tools": [
+    {
+      "name": "scan_repo",
+      "title": "Scan a GitHub repo",
+      "description": "Scan a public GitHub repository with AgentAvow and return whether it is safe for an agent to connect to: a 0-100 trust score, a plain safe / needs-review verdict, the findings behind it (with where and how to fix), and a signed, offline-verifiable attestation. Read-only, no account. Calls the AgentAvow public API at agentavow.com.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string",
+            "description": "Repo as 'owner/name' (e.g. 'vercel/next.js'), or just the name when 'owner' is given separately.",
+            "maxLength": 214
+          },
+          "owner": {
+            "type": "string",
+            "description": "Repo owner (optional if 'repo' is already 'owner/name').",
+            "maxLength": 214
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Re-scan now instead of returning the cached verdict (results cache ~1h). Use after the target has changed."
+          }
+        },
+        "required": [
+          "repo"
+        ]
+      },
+      "annotations": {
+        "title": "Scan a GitHub repo",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://agentavow/trust-card-v13.html"
+        },
+        "ui/resourceUri": "ui://agentavow/trust-card-v13.html",
+        "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+        "openai/widgetDomain": "https://agentavow.com",
+        "openai/widgetCSP": {
+          "connect_domains": [],
+          "resource_domains": [],
+          "redirect_domains": []
+        }
+      }
+    },
+    {
+      "name": "scan_package",
+      "title": "Scan a package",
+      "description": "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with AgentAvow. Returns a 0-100 trust score, a safe / needs-review verdict, findings with remediation, and a signed attestation. Also reports repo-vs-artifact drift (files shipped that aren't in the source). Read-only; calls agentavow.com.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "registry": {
+            "type": "string",
+            "description": "Package registry: npm, pypi, crates, docker, or hf."
+          },
+          "surface": {
+            "type": "string",
+            "description": "Alias for registry."
+          },
+          "ecosystem": {
+            "type": "string",
+            "description": "Alias for registry."
+          },
+          "name": {
+            "type": "string",
+            "description": "Package name, e.g. 'chalk' (or 'org/model' for hf).",
+            "maxLength": 214
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Re-scan now instead of returning the cached verdict (results cache ~1h). Use after a new version ships."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "annotations": {
+        "title": "Scan a package",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://agentavow/trust-card-v13.html"
+        },
+        "ui/resourceUri": "ui://agentavow/trust-card-v13.html",
+        "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+        "openai/widgetDomain": "https://agentavow.com",
+        "openai/widgetCSP": {
+          "connect_domains": [],
+          "resource_domains": [],
+          "redirect_domains": []
+        }
+      }
+    },
+    {
+      "name": "scan_mcp_server",
+      "title": "Scan an MCP server",
+      "description": "Scan a live MCP server's tool definitions for tool-poisoning, prompt-injection, invisible-unicode, and manifest-execution risks before your agent connects to it. Returns a 0-100 trust score, a safe / needs-review verdict, findings, and a signed attestation. Read-only; calls the agentavow.com public API.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "endpoint_url": {
+            "type": "string",
+            "description": "The MCP server's https:// URL.",
+            "maxLength": 512
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Re-scan now instead of returning the cached verdict (results cache ~1h)."
+          }
+        },
+        "required": [
+          "endpoint_url"
+        ]
+      },
+      "annotations": {
+        "title": "Scan an MCP server",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      },
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://agentavow/trust-card-v13.html"
+        },
+        "ui/resourceUri": "ui://agentavow/trust-card-v13.html",
+        "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+        "openai/widgetDomain": "https://agentavow.com",
+        "openai/widgetCSP": {
+          "connect_domains": [],
+          "resource_domains": [],
+          "redirect_domains": []
+        }
+      }
+    },
+    {
+      "name": "verify_trust",
+      "title": "Verify an entity's trust score",
+      "description": "Verify an AgentAvow entity's trust score. Returns trust_score (0-1), trust_score_pct (0-100), trust_tier, and whether it meets a minimum threshold. Read-only, no auth. Use before interacting with an unknown agent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entity_id": {
+            "type": "string",
+            "description": "UUID of a registered AgentAvow entity (resolve one with lookup_identity; unknown ids return guidance, not an error).",
+            "maxLength": 64
+          },
+          "min_trust": {
+            "type": "number",
+            "description": "Min score, 0-1.",
+            "default": 0.3
+          }
+        },
+        "required": [
+          "entity_id"
+        ]
+      },
+      "annotations": {
+        "title": "Verify an entity's trust score",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "check_interaction_safety",
+      "title": "Check interaction safety",
+      "description": "Check whether it is safe to interact with another agent by trust threshold. Thresholds: delegate 0.6, trade 0.5, collaborate 0.4, follow 0.1. Returns is_safe, risk_level, the score, and a recommendation. Read-only, no auth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target_entity_id": {
+            "type": "string",
+            "description": "UUID of a registered target entity (resolve one with lookup_identity).",
+            "maxLength": 64
+          },
+          "interaction_type": {
+            "type": "string",
+            "enum": [
+              "delegate",
+              "trade",
+              "collaborate",
+              "follow"
+            ]
+          }
+        },
+        "required": [
+          "target_entity_id",
+          "interaction_type"
+        ]
+      },
+      "annotations": {
+        "title": "Check interaction safety",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "lookup_identity",
+      "title": "Look up an agent or tool",
+      "description": "Look up an AgentAvow entity by W3C DID or display name. Returns the entity's id, name, type, trust score and tier. Read-only, no auth. Use to resolve an identity before checking its trust.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "A did:web:... or a display name.",
+            "maxLength": 200,
+            "pattern": "^[\\w .:/@#+-]{1,200}$"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Look up an agent or tool",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_trust_badge",
+      "title": "Get a trust badge",
+      "description": "Get an embeddable AgentAvow trust badge (SVG) for an entity, with ready-to-paste Markdown and HTML. The badge auto-updates as the score changes. Read-only, no auth.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "entity_id": {
+            "type": "string",
+            "description": "UUID of a registered AgentAvow entity (resolve one with lookup_identity).",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "entity_id"
+        ]
+      },
+      "annotations": {
+        "title": "Get a trust badge",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "about_agentavow",
+      "title": "About AgentAvow",
+      "description": "What AgentAvow is, which tool to use for what, how to read a verdict, and example scans. Call this for an overview or when getting started. No input, read-only.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "About AgentAvow",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}
