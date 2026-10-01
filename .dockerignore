@@ -15,7 +15,10 @@ web/**
 !web/src/rebrand/docs
 !web/src/rebrand/docs/**
 ios/
-tests/
+tests/**
+# …but keep the behavioral fixture servers: the eval runner ships them into the sandbox.
+!tests/fixtures/behavioral
+!tests/fixtures/behavioral/**
 *.png
 *.jpg
 *.jpeg
