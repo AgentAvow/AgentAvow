@@ -348,8 +348,10 @@
       "status": "draft-unsigned",
       "generator": "scripts/ai_catalog_wellknown.py",
       "specTarget": "Agent-Card/ai-catalog main @ 2026-10-01 (post #108/#109/#110)",
-      "signatureAlg": "EdDSA (Ed25519) — deviates from the did:web profile's ES256",
+      "signatureAlg": "ES256 (P-256) per the did:web Publisher Profile",
       "signerDid": "did:web:agentavow.com",
+      "signerKid": "did:web:agentavow.com#catalog-es256-v1",
+      "didDocument": "https://agentavow.com/.well-known/did.json",
       "jwks": "https://agentgraph.co/.well-known/jwks.json"
     }
   }

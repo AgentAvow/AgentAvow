@@ -18,28 +18,34 @@ Subcommands
             self-scan verdict (``--self-scan`` / ``--scan-json``), and write
             an UNSIGNED draft with a placeholder ``signature``.
 ``sign``    canonicalize the Trust Manifest with RFC 8785 JCS and attach a
-            detached compact JWS (RFC 7515 Appendix F). ``--prod`` loads the
-            platform Ed25519 key through ``src.signing.get_signing_key``;
-            ``--test-key`` generates a throwaway key and writes a matching DID
-            document next to the output so the result can be verified offline.
-            Test-key output is marked ``signed-test-key`` and is not publishable.
+            detached compact JWS (RFC 7515 Appendix F), ``alg`` ES256, ``kid``
+            ``did:web:agentavow.com#catalog-es256-v1``. ``--prod`` loads the
+            P-256 catalog key from ``CATALOG_SIGNING_KEY_P256`` through
+            ``src.signing.get_catalog_es256_key`` (generate one with
+            ``scripts/gen_catalog_key.py``); ``--test-key`` generates a
+            throwaway P-256 key and writes a matching DID document next to the
+            output so the result can be verified offline. Test-key output is
+            marked ``signed-test-key`` and is not publishable.
 ``verify``  run the spec's Level 3 checks offline against a DID document file
             (or ``--resolve`` the ``did:web`` document over HTTPS).
 
-Known deviation from the merged profile
----------------------------------------
-The ``did:web`` Publisher Profile mandates ``ES256`` with a P-256 key. AgentAvow
-signs with Ed25519 (``EdDSA``), the same key that signs every attestation.
-``verify`` reports this as ``alg-profile`` and fails unless ``--allow-eddsa``
-is passed. PR #117's signed ``profile`` field is the path to expressing an
-EdDSA profile without forking the spec.
+Signing profile
+---------------
+The ``did:web`` Publisher Profile mandates ``ES256`` with a P-256 key, so the
+catalog is signed with a dedicated P-256 key rather than the Ed25519 platform
+key that signs attestations. The P-256 public key is published under both
+``did:web:agentavow.com`` and ``did:web:agentgraph.co`` (``#catalog-es256-v1``,
+``assertionMethod`` only) and in ``/.well-known/jwks.json``. ``verify`` still
+accepts EdDSA-signed manifests behind ``--allow-eddsa`` for older drafts.
 
 Examples
 --------
     .venv/bin/python3 scripts/ai_catalog_wellknown.py build --self-scan
     .venv/bin/python3 scripts/ai_catalog_wellknown.py sign --test-key
-    .venv/bin/python3 scripts/ai_catalog_wellknown.py verify --allow-eddsa \\
+    .venv/bin/python3 scripts/ai_catalog_wellknown.py verify \\
         --did-document web/public/.well-known/ai-catalog.test-did.json
+    .venv/bin/python3 scripts/ai_catalog_wellknown.py sign --prod     # on the host
+    .venv/bin/python3 scripts/ai_catalog_wellknown.py verify --resolve
 """
 from __future__ import annotations
 
@@ -52,7 +58,7 @@ import sys
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -60,6 +66,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import rfc8785  # noqa: E402
 from cryptography.exceptions import InvalidSignature  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: E402
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -69,6 +76,17 @@ from src.scanner.mcp_scan import (  # noqa: E402
     MCP_TOOL_DIGEST_PROFILE,
     compute_tool_digests,
 )
+from src.signing import (  # noqa: E402
+    CATALOG_ES256_KID,
+    p256_jwk_for,
+    p256_public_key_from_jwk,
+    sign_es256,
+    verify_es256,
+)
+
+if TYPE_CHECKING:  # annotation-only aliases (kept out of runtime for Python 3.9 venvs)
+    SigningKey = Ed25519PrivateKey | ec.EllipticCurvePrivateKey
+    PublicKey = Ed25519PublicKey | ec.EllipticCurvePublicKey
 
 # ── constants ────────────────────────────────────────────────────────────────
 
@@ -78,7 +96,8 @@ SERVER_CARD_SCHEMA = "https://static.modelcontextprotocol.io/schemas/v1/server-c
 
 DEFAULT_PUBLISHER_DOMAIN = "agentavow.com"
 DEFAULT_MCP_ENDPOINT = "https://agentavow.com/mcp"
-DEFAULT_KID_FRAGMENT = "agentgraph-security-v1"
+DEFAULT_KID_FRAGMENT = CATALOG_ES256_KID  # catalog-es256-v1
+JWKS_URL = "https://agentgraph.co/.well-known/jwks.json"
 DEFAULT_OUT = REPO_ROOT / "web" / "public" / ".well-known" / "ai-catalog.json"
 SCAN_API = "https://agentavow.com/api/v1/public/scan/mcp?endpoint="
 MCP_PROTOCOL_VERSION = "2025-03-26"
@@ -330,9 +349,11 @@ def build_catalog(
                 "status": "draft-unsigned",
                 "generator": "scripts/ai_catalog_wellknown.py",
                 "specTarget": "Agent-Card/ai-catalog main @ 2026-10-01 (post #108/#109/#110)",
-                "signatureAlg": "EdDSA (Ed25519) — deviates from the did:web profile's ES256",
+                "signatureAlg": "ES256 (P-256) per the did:web Publisher Profile",
                 "signerDid": identity,
-                "jwks": "https://agentgraph.co/.well-known/jwks.json",
+                "signerKid": f"{identity}#{CATALOG_ES256_KID}",
+                "didDocument": f"https://{publisher}/.well-known/did.json",
+                "jwks": JWKS_URL,
             },
         },
     }
@@ -346,15 +367,38 @@ def manifest_payload(manifest: dict) -> bytes:
     return jcs({k: v for k, v in manifest.items() if k != "signature"})
 
 
-def detached_jws(payload: bytes, key: Ed25519PrivateKey, kid: str) -> str:
-    header = jcs({"alg": "EdDSA", "kid": kid})
+def alg_for(key: SigningKey | PublicKey) -> str:
+    """JWS ``alg`` for a key: ES256 for P-256, EdDSA for Ed25519."""
+    if isinstance(key, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)):
+        if not isinstance(key.curve, ec.SECP256R1):
+            raise ValueError("only P-256 EC keys are supported (ES256)")
+        return "ES256"
+    if isinstance(key, (Ed25519PrivateKey, Ed25519PublicKey)):
+        return "EdDSA"
+    raise TypeError(f"unsupported key type {type(key).__name__}")
+
+
+def detached_jws(payload: bytes, key: SigningKey, kid: str) -> str:
+    """Detached compact JWS (RFC 7515 Appendix F): ``header..signature``.
+
+    ES256 signatures are the 64-byte ``r || s`` form JWS requires (RFC 7518
+    §3.4), not DER.
+    """
+    alg = alg_for(key)
+    header = jcs({"alg": alg, "kid": kid})
     h, p = b64url(header), b64url(payload)
-    sig = key.sign(f"{h}.{p}".encode("ascii"))
+    signing_input = f"{h}.{p}".encode("ascii")
+    if alg == "ES256":
+        sig = sign_es256(signing_input, key)  # type: ignore[arg-type]
+    else:
+        sig = key.sign(signing_input)  # type: ignore[union-attr]
     return f"{h}..{b64url(sig)}"
 
 
-def sign_catalog(catalog: dict, key: Ed25519PrivateKey, kid_fragment: str, status: str) -> dict:
+def sign_catalog(catalog: dict, key: SigningKey, kid_fragment: str, status: str) -> dict:
     """Sign every entry Trust Manifest in place; returns the catalog."""
+    alg = alg_for(key)
+    kid = None
     for entry in catalog.get("entries", []):
         tm = entry.get("trustManifest")
         if not tm:
@@ -364,14 +408,29 @@ def sign_catalog(catalog: dict, key: Ed25519PrivateKey, kid_fragment: str, statu
     build = catalog.setdefault("extensions", {}).setdefault(BUILD_EXT_KEY, {})
     build["status"] = status
     build["signedAt"] = rfc3339(now_utc())
+    build["signatureAlg"] = (
+        "ES256 (P-256) per the did:web Publisher Profile" if alg == "ES256"
+        else "EdDSA (Ed25519) — deviates from the did:web profile's ES256"
+    )
+    if kid:
+        build["signerKid"] = kid
     return catalog
 
 
-def test_did_document(identity: str, kid_fragment: str, pub: Ed25519PublicKey) -> dict:
-    """A DID document shaped like ``src/feeds/bluesky/feed_router.py`` serves."""
+def test_did_document(identity: str, kid_fragment: str, pub: PublicKey) -> dict:
+    """A DID document shaped like ``src/feeds/bluesky/feed_router.py`` serves.
+
+    ES256 keys are listed under ``assertionMethod`` only, exactly as the live
+    document publishes ``#catalog-es256-v1``; Ed25519 keys also authenticate.
+    """
     vm_id = f"{identity}#{kid_fragment}"
-    jwk = {"kty": "OKP", "crv": "Ed25519", "x": b64url(pub.public_bytes_raw()),
-           "kid": kid_fragment, "use": "sig", "alg": "EdDSA"}
+    if alg_for(pub) == "ES256":
+        jwk = p256_jwk_for(pub, kid_fragment)  # type: ignore[arg-type]
+        authentication: list[str] = []
+    else:
+        jwk = {"kty": "OKP", "crv": "Ed25519", "x": b64url(pub.public_bytes_raw()),  # type: ignore[union-attr]
+               "kid": kid_fragment, "use": "sig", "alg": "EdDSA"}
+        authentication = [vm_id]
     return {
         "@context": ["https://www.w3.org/ns/did/v1",
                      "https://w3id.org/security/suites/jws-2020/v1"],
@@ -379,7 +438,7 @@ def test_did_document(identity: str, kid_fragment: str, pub: Ed25519PublicKey) -
         "verificationMethod": [{"id": vm_id, "type": "JsonWebKey2020",
                                 "controller": identity, "publicKeyJwk": jwk}],
         "assertionMethod": [vm_id],
-        "authentication": [vm_id],
+        "authentication": authentication,
     }
 
 
@@ -568,20 +627,41 @@ def verify_entry(
     if jwk is None:
         return r
     r.add("jwk-no-private-material", "d" not in jwk)
+    if "alg" in jwk:
+        r.add("jwk-alg-matches-header", jwk["alg"] == alg,
+              f"jwk.alg={jwk['alg']!r} header.alg={alg!r}")
+    signing_input = f"{parts[0]}.{b64url(manifest_payload(tm))}".encode("ascii")
+    try:
+        raw_sig = b64url_decode(parts[2])
+    except (ValueError, TypeError) as exc:
+        r.add("signature-verifies", False, f"signature segment not base64url: {exc}")
+        return r
     if alg == "EdDSA":
         r.add("jwk-is-ed25519", jwk.get("kty") == "OKP" and jwk.get("crv") == "Ed25519")
         if not (jwk.get("kty") == "OKP" and jwk.get("crv") == "Ed25519"):
             return r
         pub = Ed25519PublicKey.from_public_bytes(b64url_decode(jwk["x"]))
-        signing_input = f"{parts[0]}.{b64url(manifest_payload(tm))}".encode("ascii")
         try:
-            pub.verify(b64url_decode(parts[2]), signing_input)
+            pub.verify(raw_sig, signing_input)
             r.add("signature-verifies", True)
         except InvalidSignature:
             r.add("signature-verifies", False, "Ed25519 verification failed")
-    else:
-        r.add("jwk-is-p256", jwk.get("kty") == "EC" and jwk.get("crv") == "P-256")
-        r.add("signature-verifies", False, "ES256 verification not implemented in this script")
+    elif alg == "ES256":
+        is_p256 = jwk.get("kty") == "EC" and jwk.get("crv") == "P-256"
+        r.add("jwk-is-p256", is_p256, f"kty={jwk.get('kty')!r} crv={jwk.get('crv')!r}")
+        if not is_p256:
+            return r
+        try:
+            pub = p256_public_key_from_jwk(jwk)
+        except (ValueError, KeyError) as exc:
+            r.add("jwk-p256-point-valid", False, str(exc))
+            return r
+        r.add("jwk-p256-point-valid", True)
+        try:
+            verify_es256(signing_input, raw_sig, pub)
+            r.add("signature-verifies", True, "ES256 (P-256/SHA-256)")
+        except InvalidSignature:
+            r.add("signature-verifies", False, "ES256 verification failed")
     return r
 
 
@@ -635,14 +715,22 @@ def cmd_sign(args: argparse.Namespace) -> int:
     catalog = _load(out)
     identity = catalog["entries"][0]["trustManifest"]["identity"]
     if args.prod:
-        from src.signing import KID, get_signing_key  # platform key; raises if unset
-        if args.kid_fragment != KID:
-            print(f"refusing: --kid-fragment {args.kid_fragment!r} != platform KID {KID!r}")
+        # P-256 catalog key from CATALOG_SIGNING_KEY_P256; its public half is what
+        # the live DID documents publish as #catalog-es256-v1.
+        from src.signing import get_catalog_es256_key, has_catalog_es256_key
+
+        if args.kid_fragment != CATALOG_ES256_KID:
+            print(f"refusing: --kid-fragment {args.kid_fragment!r} != catalog KID "
+                  f"{CATALOG_ES256_KID!r} (the fragment the DID document publishes)")
             return 2
-        key = get_signing_key()
+        if not has_catalog_es256_key():
+            print("refusing: CATALOG_SIGNING_KEY_P256 is not set on this host "
+                  "(generate with scripts/gen_catalog_key.py, add to .env.secrets)")
+            return 2
+        key: SigningKey = get_catalog_es256_key()  # raises on a malformed secret
         sign_catalog(catalog, key, args.kid_fragment, "signed")
     else:
-        key = Ed25519PrivateKey.generate()
+        key = ec.generate_private_key(ec.SECP256R1())
         sign_catalog(catalog, key, args.kid_fragment, "signed-test-key")
         did_path = out.with_name(out.stem + ".test-did.json")
         _dump(did_path, test_did_document(identity, args.kid_fragment, key.public_key()))
@@ -677,9 +765,12 @@ def main(argv: list | None = None) -> int:
 
     s = sub.add_parser("sign", help="attach the detached JWS")
     g = s.add_mutually_exclusive_group(required=True)
-    g.add_argument("--prod", action="store_true", help="use the platform key via src.signing")
-    g.add_argument("--test-key", action="store_true", help="ephemeral key; output marked signed-test-key")
-    s.add_argument("--kid-fragment", default=DEFAULT_KID_FRAGMENT)
+    g.add_argument("--prod", action="store_true",
+                   help="ES256 with the P-256 key from CATALOG_SIGNING_KEY_P256 (src.signing)")
+    g.add_argument("--test-key", action="store_true",
+                   help="ephemeral P-256 key; output marked signed-test-key")
+    s.add_argument("--kid-fragment", default=DEFAULT_KID_FRAGMENT,
+                   help=f"DID URL fragment of the signing key (default {DEFAULT_KID_FRAGMENT})")
     s.set_defaults(func=cmd_sign)
 
     v = sub.add_parser("verify", help="offline Level 3 checks")

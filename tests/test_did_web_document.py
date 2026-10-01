@@ -7,15 +7,16 @@ schema regression would break cross-provider verification.
 """
 from __future__ import annotations
 
-import asyncio
-import json
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
-def test_did_document_has_verification_and_gateway_service():
-    from src.feeds.bluesky.feed_router import did_document
+def test_did_document_has_verification_and_gateway_service(monkeypatch):
+    from src import signing
+    from src.feeds.bluesky.feed_router import build_did_document
 
-    resp = asyncio.run(did_document())
-    doc = json.loads(resp.body)
+    # Transient platform key so the test does not depend on .env / DEBUG.
+    monkeypatch.setattr(signing, "_private_key", Ed25519PrivateKey.generate())
+    doc = build_did_document("agentgraph.co")  # the default (non-agentavow) host
 
     assert doc["id"].startswith("did:web:")
 

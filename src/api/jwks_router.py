@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.signing import (
     canonicalize_jcs_strict,
+    get_catalog_es256_jwk,
     get_jwk,
     get_trust_v2_jwks,
     has_dedicated_trust_v2_key,
@@ -52,11 +53,15 @@ async def jwks() -> JSONResponse:
 
     Includes the dedicated Trust Score v2 key when one is configured; otherwise
     v2 envelopes are signed with (and verify against) the platform key already
-    published here.
+    published here. Includes the ES256 catalog key (kid ``catalog-es256-v1``,
+    signs /.well-known/ai-catalog.json) iff CATALOG_SIGNING_KEY_P256 is set.
     """
     keys = [get_jwk()]
     if has_dedicated_trust_v2_key():
         keys.extend(get_trust_v2_jwks())
+    catalog_jwk = get_catalog_es256_jwk()
+    if catalog_jwk is not None:
+        keys.append(catalog_jwk)
     return JSONResponse(
         content={"keys": keys},
         headers={
