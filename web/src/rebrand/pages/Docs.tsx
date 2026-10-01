@@ -10,6 +10,7 @@ import trustBadges from '../docs/trust-badges.md?raw'
 import verifyAttestations from '../docs/verify-attestations.md?raw'
 import autoScanClaudeCode from '../docs/auto-scan-claude-code.md?raw'
 import mcpConnector from '../docs/mcp-connector.md?raw'
+import behavioralSandbox from '../docs/behavioral-sandbox.md?raw'
 
 /**
  * Rebrand docs PREVIEW — renders the staged trust-first docs (web/src/rebrand/docs/*.md)
@@ -21,6 +22,7 @@ const DOCS = [
   { slug: 'how-grading-works', title: 'How scoring works', body: howGradingWorks },
   { slug: 'gate-on-the-grade', title: 'Gate on the score', body: gateOnTheGrade },
   { slug: 'check-guide', title: 'Reading your scan score', body: checkGuide },
+  { slug: 'behavioral-sandbox', title: 'Behavioral sandbox', body: behavioralSandbox },
   { slug: 'run-locally', title: 'Run locally & in CI', body: runLocally },
   { slug: 'trust-badges', title: 'Add a trust badge', body: trustBadges },
   { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations },

@@ -950,14 +950,38 @@ function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; i
  * and report what it actually did (network egress, filesystem writes). Only shown
  * for npm/PyPI coordinates (the surfaces the sandbox can exercise). The result is
  * a runtime observation, kept SEPARATE from the signed score. */
-type BehavioralData = { ran: boolean; pending?: boolean; timed_out?: boolean; reason?: string; egress_hosts?: string[]; unexpected_egress?: string[]; fs_writes_sample?: string[]; error?: string | null; findings?: { category: string; name: string; severity: string; remediation?: string }[] }
+type ExerciseCall = { tool: string; ok: boolean; is_error?: boolean; duration_ms?: number; fs_writes?: string[]; error?: string | null }
+type ExerciseData = {
+  launch_ok: boolean
+  server?: { name?: string; version?: string }
+  tools?: { name: string; annotations?: Record<string, unknown> }[]
+  calls?: ExerciseCall[]
+  canary?: { env_names?: string[]; seen_in_result?: string[] }
+  timed_out?: boolean
+  error?: string | null
+}
+type BehavioralData = {
+  ran: boolean; pending?: boolean; timed_out?: boolean; reason?: string
+  egress_hosts?: string[]; unexpected_egress?: string[]; declared_egress?: string[]; fs_writes_sample?: string[]
+  error?: string | null
+  plan?: string
+  canary_exfil?: { via: string; host?: string }[]
+  exercise?: ExerciseData | null
+  findings?: { category: string; name: string; severity: string; remediation?: string }[]
+}
+const SANDBOX_SURFACES = new Set(['npm', 'pypi', 'docker'])
 
 function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string } }) {
   const mut = useMutation({ mutationFn: () => pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
   const b: BehavioralData | null | undefined = mut.data?.behavioral ?? auto
-  if (surface !== 'npm' && surface !== 'pypi') return null
+  if (!surface || !SANDBOX_SURFACES.has(surface)) return null
   const pending = !!b?.pending
   const undeclared = b?.unexpected_egress ?? []
+  const ex = b?.exercise ?? null
+  const exercised = ex ? (ex.calls ?? []).length : 0
+  const listed = ex ? (ex.tools ?? []).length : 0
+  const canaryLeaked = (b?.canary_exfil?.length ?? 0) > 0
+  const isMcpRun = !!b?.plan && b.plan.endsWith('-mcp')
   return (
     <Reveal>
       <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
@@ -966,9 +990,13 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
           <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/15 text-primary-light">sandbox · gVisor</span>
         </div>
         <p className="mt-1.5 text-text-muted text-[13px] max-w-[64ch]">
-          Install and run the package in an isolated sandbox and watch what it actually does —
-          the hosts it contacts, the files it writes. Any egress beyond the package registry and
-          its declared hosts is flagged. Takes ~45s and never changes the signed score.
+          Install and run the tool in an isolated sandbox and watch what it actually does —
+          the hosts it contacts, the files it writes. An MCP server is started and each of its
+          tools is called with synthetic arguments, so a tool that claims to be read-only but
+          writes, or that leaks a credential, is caught in the act. Nothing real is given to it:
+          credentials are canaries, and the sandbox is destroyed after the run. Any egress beyond
+          the registry and the tool&apos;s declared hosts is flagged. This is an observation, kept
+          separate from the signed score — it never changes the grade.
         </p>
 
         <button
@@ -988,10 +1016,45 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
         )}
         {b && b.ran && (
           <div className="mt-4 space-y-3">
+            {canaryLeaked && (
+              <div className="flex items-center gap-2 text-[13.5px] font-semibold text-danger"><span>⚠</span> Sent a canary credential off the machine ({b.canary_exfil!.map((c) => `${c.via}${c.host ? ` → ${c.host}` : ''}`).join(', ')}).</div>
+            )}
             {undeclared.length > 0 ? (
               <div className="flex items-center gap-2 text-[13.5px] font-semibold text-danger"><span>⚠</span> Contacted {undeclared.length} undeclared host{undeclared.length > 1 ? 's' : ''} at install/run time.</div>
             ) : (
               <div className="flex items-center gap-2 text-[13.5px] font-semibold text-success"><span>✓</span> No unexpected network egress observed.</div>
+            )}
+            {isMcpRun && ex && (
+              <div>
+                <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">
+                  MCP server {ex.launch_ok ? `started${ex.server?.name ? ` (${ex.server.name}${ex.server.version ? ` ${ex.server.version}` : ''})` : ''} · ${exercised} of ${listed} tool${listed === 1 ? '' : 's'} exercised` : 'did not start'}
+                </div>
+                {!ex.launch_ok && <p className="text-[12.5px] text-text-muted">{ex.error || 'The server never completed the MCP handshake in the sandbox, so its tools were not exercised.'}</p>}
+                {ex.launch_ok && (ex.calls ?? []).length > 0 && (
+                  <ul className="space-y-1">
+                    {(ex.calls ?? []).map((c, i) => {
+                      const spec = (ex.tools ?? []).find((t) => t.name === c.tool)
+                      const readOnly = spec?.annotations?.readOnlyHint === true
+                      const wrote = (c.fs_writes?.length ?? 0) > 0
+                      const lied = readOnly && wrote
+                      return (
+                        <li key={i} className="text-[12.5px] flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span className={`font-mono ${lied ? 'text-danger' : 'text-text'}`}>{c.tool}</span>
+                          {readOnly && <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${lied ? 'bg-danger/15 text-danger' : 'bg-surface border border-border text-text-muted'}`}>declares read-only</span>}
+                          <span className="text-text-muted">{c.ok && !c.is_error ? 'ok' : c.is_error ? 'returned an error' : (c.error || 'failed')}{typeof c.duration_ms === 'number' ? ` · ${c.duration_ms} ms` : ''}</span>
+                          {wrote && <span className={`font-mono text-[11px] ${lied ? 'text-danger' : 'text-text-muted'}`}>wrote {c.fs_writes!.length} file{c.fs_writes!.length > 1 ? 's' : ''}{lied ? ' ⚠' : ''}</span>}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                {(ex.canary?.seen_in_result?.length ?? 0) > 0 && (
+                  <p className="mt-1 text-[12.5px] text-warning">A tool returned the value of {ex.canary!.seen_in_result!.join(', ')} from its environment in a result.</p>
+                )}
+                {(ex.canary?.env_names?.length ?? 0) > 0 && (
+                  <p className="mt-1 text-[11.5px] text-text-muted">Canary credentials supplied for: {ex.canary!.env_names!.join(', ')}. No real secret was used.</p>
+                )}
+              </div>
             )}
             <div className="grid sm:grid-cols-2 gap-4">
               <div>

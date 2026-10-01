@@ -69,6 +69,8 @@ Own the tool? Drop an [`.agentavow.yml`](https://github.com/AgentAvow/AgentAvow/
 repo root declaring the hosts it contacts and the capabilities it uses — AgentAvow surfaces it on your score page
 as **Declared scope**, and the behavioral tier holds the tool to it: any egress it didn't declare becomes a finding.
 
+See [Behavioral sandbox](./behavioral-sandbox.md) for what the sandbox runs, observes, and never does.
+
 ## Shareable results & the signature
 
 Every result lives at a shareable URL — `agentavow.com/check/{owner}/{repo}` — and ships with a **signed JWS
