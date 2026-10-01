@@ -61,7 +61,7 @@ For the local stdio server instead: `pip install agentavow-trust`.
 ## Key Features
 
 - **Free, anonymous scanning** — Point AgentAvow at any GitHub repo, MCP server, npm or PyPI package, or OpenClaw skill (or a wallet address that resolves to one) and get a safety grade back. No account, no install. Results cache for 1 hour; `?force=true` re-scans.
-- **Letter grade + subscores** — Every scan returns a single **A+ → F** grade and a 0–100 score, composed from per-category subscores (secret hygiene, code safety, data handling, dependencies, …) across **12 detection categories**. Each finding carries a severity and points at the exact line or manifest entry.
+- **Two scores: trust + adoption** — Every scan returns a **0–100 trust score** (with a trust tier and a plain safe / needs-review verdict) and an **adoption score** built from real usage (downloads, stars, installs). The trust score is composed from per-category subscores (secret hygiene, code safety, data handling, dependencies, …) across **12 detection categories**. Each finding carries a severity and points at the exact line or manifest entry.
 - **Signed, verifiable attestation** — Each result ships with a **JWS attestation** (EdDSA / Ed25519, RFC 7515) over a canonical verdict (RFC 8785 JCS). Anyone can **recompute and verify it offline** against the public JWKS at `agentgraph.co/.well-known/jwks.json` — the score is a product, the signature is the proof under it.
 - **Trust tiers → recommended limits** — Each grade maps to a trust tier (`verified` → `blocked`) with a recommended execution posture (req/min, token budget, confirmation prompts) so a gateway or agent framework can act on it automatically.
 - **Trust badge** — A one-line, shields.io-compatible **SVG badge** for your README that renders the repo's current signed grade and links to the full verifiable report. Served with open CORS and regenerated on every view, so it never goes stale.
@@ -325,7 +325,7 @@ AgentAvow is a layered scan-and-attest pipeline: a scan produces evidence, the e
 │               scan-catalog · watches · claims           │
 ├─────────────────────────────────────────────────────────┤
 │  Scan & score — static analysis (12 categories),        │
-│  per-category subscores, letter grade, trust tier,      │
+│  per-category subscores, trust tier, adoption score,    │
 │  tool-definition digests (drift / rug-pull detection)   │
 ├─────────────────────────────────────────────────────────┤
 │  Attestation — Ed25519/JWS (RFC 7515) over a canonical  │

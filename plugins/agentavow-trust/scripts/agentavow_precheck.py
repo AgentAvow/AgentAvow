@@ -37,7 +37,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 API = "https://agentavow.com/api/v1/public/scan"
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"

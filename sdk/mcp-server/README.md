@@ -44,7 +44,7 @@ All read-only and anonymous — no account or API key required.
 
 | Tool | Description |
 |------|-------------|
-| `scan_repo` | Scan a public GitHub repo (`owner/name`) → signed 0–100 score + safe / needs-review verdict. |
+| `scan_repo` | Scan a public GitHub repo (`owner/name`) → signed 0–100 trust score + safe / needs-review verdict + adoption score. |
 | `scan_package` | Scan an npm / PyPI / crates / Docker / Hugging Face package. |
 | `scan_mcp_server` | Scan a live MCP server's tool definitions for poisoning / prompt-injection. |
 | `verify_trust` | Resolve an agent identity and return its current trust score. |
@@ -55,7 +55,7 @@ All read-only and anonymous — no account or API key required.
 
 Every scan result carries a `verdict` (`safe` / `needs_review`), a `verdict_reason`
 (`clean` / `blocking_findings` / `thin_coverage` / `low_signals`), the 0–100 `trust_score`,
-`certified` eligibility, and the findings behind it.
+`certified` eligibility, the `adoption` score (count + unit), and the findings behind it.
 
 ## Signed attestations
 

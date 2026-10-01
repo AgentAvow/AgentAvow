@@ -9,7 +9,7 @@
       "name": "agentavow-trust",
       "source": "./plugins/agentavow-trust",
       "description": "Scan any MCP server, package, or repo for a signed 0-100 trust score before you trust it. Bundles the AgentAvow MCP connector, a /scan command, a scan-before-connect skill, and a session-start hook that grades newly added MCP servers.",
-      "version": "0.1.4"
+      "version": "0.1.5"
     }
   ]
 }
