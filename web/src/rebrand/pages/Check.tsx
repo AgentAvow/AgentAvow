@@ -210,7 +210,7 @@ function scanReviewJsonLd(name: string, grade: string, score: number): Record<st
     itemReviewed: { '@type': 'SoftwareApplication', name, applicationCategory: 'DeveloperApplication' },
     reviewRating: { '@type': 'Rating', ratingValue: score, bestRating: 100, worstRating: 0 },
     author: { '@type': 'Organization', name: 'AgentAvow' },
-    reviewBody: `Signed, offline-verifiable safety score ${grade} (${score}/100).`,
+    reviewBody: `Signed, offline-verifiable trust score ${score}/100.`,
   }
 }
 
@@ -424,7 +424,7 @@ function DefinitionDrift({ owner, repo }: { owner: string; repo: string }) {
 function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; score: number; grade: string }) {
   const [copied, setCopied] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href : ''
-  const text = `${owner}/${repo} scored ${grade} (${score}/100) on AgentAvow — a signed, verifiable trust score.`
+  const text = `${owner}/${repo} scored ${score}/100 on AgentAvow — a signed, verifiable trust score.`
   const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) }
   const icon = 'grid place-items-center w-8 h-8 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors'
   return (
