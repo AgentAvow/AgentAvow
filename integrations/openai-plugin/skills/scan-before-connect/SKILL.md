@@ -1,6 +1,6 @@
 ---
 name: scan-before-connect
-description: Check whether an MCP server, a package (npm, PyPI, crates, Docker, or Hugging Face), or a GitHub repo is safe to connect to or install, using AgentAvow's signed trust score. Use when the user asks whether a specific tool, package, repo, or MCP server is safe or trustworthy, or asks to vet one before installing or connecting it.
+description: Check whether an MCP server, a package (npm, PyPI, crates, Docker, or Hugging Face), or a GitHub repo is safe to connect to or install, using AgentAvow's signed 0-100 trust score and adoption score. Use when the user asks whether a specific tool, package, repo, or MCP server is safe or trustworthy, or asks to vet one before installing or connecting it.
 ---
 
 Use this skill when the user wants to know whether one specific tool is safe before
@@ -30,7 +30,15 @@ such as the target's dependencies or related repos.
 
 ## 3. Report what came back
 
-Lead with the verdict and the score, then say why. Use the `verdict_reason` field:
+Every result carries two scores. Report both:
+
+- **Trust** (`trust_score`, 0–100, with `verdict` and `verdict_reason`): is it safe to
+  connect?
+- **Adoption** (`adoption`: a count and a unit, such as downloads per week or stars): do
+  real, independent parties rely on it? Adoption never changes the trust verdict; say
+  it alongside, not instead. If `adoption` is null, say no usage signal was available.
+
+Lead with the trust verdict and score, then say why. Use the `verdict_reason` field:
 
 - `clean`: the verdict is `safe`. Say it is safe to connect or use, and give the score.
 - `blocking_findings`: there is a critical or high finding. Give the counts, then each
