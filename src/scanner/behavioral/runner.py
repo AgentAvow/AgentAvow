@@ -29,6 +29,7 @@ import asyncio
 import base64
 import gzip
 import json
+import re
 import secrets
 import shlex
 from dataclasses import dataclass, field
@@ -40,6 +41,7 @@ from src.scanner.scan import Finding
 _SANDBOX_DIR = Path(__file__).resolve().parents[3] / "scripts" / "sandbox"
 _RUNNER = _SANDBOX_DIR / "behavioral_run.sh"
 _RUNNER_V2 = _SANDBOX_DIR / "behavioral_run_v2.sh"
+_SSM_STDOUT_CAP = 24000  # AWS SSM GetCommandInvocation StandardOutputContent limit (chars)
 
 # The sandbox container's root filesystem is READ-ONLY; only /tmp, /run and /work (the
 # working dir) are writable tmpfs. npm and pip both write under $HOME by default
@@ -129,6 +131,8 @@ class BehavioralResult:
     transcript: ExerciseTranscript | None = None
     canary_exfil: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Hosts reached that belong to the tool's own vendor by name (observed, not a finding).
+    vendor_egress: list[str] = field(default_factory=list)
 
     def to_public_dict(self) -> dict:
         return {
@@ -142,6 +146,7 @@ class BehavioralResult:
             "canary_exfil": self.canary_exfil,
             "exercise": self.transcript.to_public_dict() if self.transcript else None,
             "notes": self.notes,
+            "vendor_egress": self.vendor_egress,
         }
 
 
@@ -160,6 +165,56 @@ def _dist_name(coordinate: str) -> str:
     for sep in ("[", "==", ">", "<", "~", "!"):
         body = body.split(sep)[0]
     return ("@" if scoped else "") + body.strip()
+
+
+# Hosts our OWN synthetic arguments point a tool at (synthetic_args.SAMPLE_URL etc.).
+# A fetch tool contacting example.com did exactly what we asked; never a finding.
+_SYNTHETIC_HOSTS = {"example.com"}
+
+# Name tokens too generic to identify a vendor: "mcp-server" must not vouch for mcp.io.
+_GENERIC_TOKENS = {
+    "mcp", "server", "servers", "modelcontextprotocol", "api", "www", "com", "io", "dev",
+    "ai", "app", "cli", "sdk", "tool", "tools", "plugin", "plugins", "agent", "agents",
+    "node", "python", "py", "js", "ts", "lib", "core", "client", "service", "the", "for",
+}
+
+
+_SECOND_LEVEL_SUFFIXES = {"co", "com", "org", "net", "ac", "gov", "edu", "ne", "or"}
+
+
+def _name_tokens(coordinate: str) -> set[str]:
+    """Identifying tokens of a package coordinate: '@upstash/context7-mcp@1.2' →
+    {'upstash', 'context7'}; 'tavily-mcp' → {'tavily'}; 'exa-mcp-server' → {'exa'}."""
+    base = coordinate.split("==")[0].split("[")[0].strip().lower()
+    if base.startswith("@"):
+        base = base[1:]
+    elif "@" in base:
+        base = base.split("@", 1)[0]
+    toks = {t for t in re.split(r"[^a-z0-9]+", base) if len(t) >= 3}
+    return {t for t in toks if t not in _GENERIC_TOKENS}
+
+
+def _vendor_hosts(coordinate: str, hosts: list[str]) -> list[str]:
+    """Hosts that belong to the tool's own vendor by name: a label of the host's
+    registrable domain equals an identifying token of the package name. tavily-mcp →
+    api.tavily.com is expected; the same host from a package named 'leftpad-helper' is
+    not. Deterministic, no network."""
+    toks = _name_tokens(coordinate)
+    if not toks:
+        return []
+    out = []
+    for h in hosts:
+        labels = [x for x in (h or "").lower().rstrip(".").split(".") if x]
+        if len(labels) < 2:
+            continue
+        # The registrable label is the one just before the public suffix; a subdomain
+        # (fetch.evil.net) must never vouch. Handle two-part suffixes like co.uk / com.au.
+        registrable = labels[-2]
+        if registrable in _SECOND_LEVEL_SUFFIXES and len(labels) >= 3:
+            registrable = labels[-3]
+        if registrable in toks:
+            out.append(h)
+    return out
 
 
 def _classify_egress(hosts: list[str], expected: set[str]) -> list[str]:
@@ -397,14 +452,23 @@ async def run_behavioral(
     try:
         data = json.loads(stdout_text or "{}")
     except json.JSONDecodeError:
-        return _fail("runner_bad_output")
+        notes.append(f"runner_output_len={len(stdout_text)}")
+        # SSM caps a command's stdout at 24,000 chars; a cut-off JSON is this, not junk.
+        return _fail("runner_output_truncated" if len(stdout_text) >= _SSM_STDOUT_CAP - 200
+                     else "runner_bad_output")
+    if isinstance(data, dict) and isinstance(data.get("gz"), str):
+        try:
+            data = json.loads(gzip.decompress(base64.b64decode(data["gz"])).decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            return _fail("runner_bad_output")
     if not isinstance(data, dict):
         return _fail("runner_bad_output")
     if data.get("error"):
         return _fail(str(data["error"]))
     hosts = [str(h) for h in (data.get("egress_hosts") or [])]
-    allow = expected | (_IMAGE_ALLOW if mode == "image" else set())
-    unexpected = _classify_egress(hosts, allow)
+    allow = expected | _SYNTHETIC_HOSTS | (_IMAGE_ALLOW if mode == "image" else set())
+    vendor = _vendor_hosts(coordinate, hosts)
+    unexpected = [h for h in _classify_egress(hosts, allow) if h not in vendor]
     exercise = data.get("exercise")
     transcript = parse_transcript(exercise) if isinstance(exercise, (dict, str)) else None
     canary_exfil = [
@@ -419,6 +483,7 @@ async def run_behavioral(
         unexpected_egress=unexpected,
         fs_writes=[str(f) for f in (data.get("fs_writes") or [])],
         plan=plan, transcript=transcript, canary_exfil=canary_exfil, notes=notes,
+        vendor_egress=[h for h in vendor if h not in allow],
     )
 
 

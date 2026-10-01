@@ -30,7 +30,9 @@ let p;try{p=JSON.parse(fs.readFileSync(path.join("node_modules",pkg,"package.jso
 let b=p.bin;if(typeof b==="string")b={[p.name||pkg]:b};
 const out=[];for(const k of Object.keys(b||{}))out.push(path.resolve("node_modules",pkg,String(b[k])));
 if(!out.length&&p.main)out.push(path.resolve("node_modules",pkg,String(p.main)));
-for(const o of out.slice(0,3))console.log("node "+o);
+// Many servers take one positional path (filesystem, git, sqlite…): try bare, then "/work".
+const cands=[];for(const o of out.slice(0,2)){cands.push("node "+o);cands.push("node "+o+" /work");}
+for(const c of cands.slice(0,3))console.log(c);
 ' "$PKG" > "$CANDS" 2>/dev/null || true
 else
   python3 -c '
@@ -41,10 +43,14 @@ try:
 except Exception:
     eps = []
 names = [e.name for e in eps if getattr(e, "group", "") == "console_scripts"]
-for n in names[:3]:
-    print(n)
+# Many servers take one positional path (git, sqlite, filesystem…): try bare, then /work.
+cands = []
+for n in names[:2]:
+    cands += [n, n + " /work"]
 if not names:
-    print("python3 -m " + pkg.split("[")[0].replace("-", "_"))
+    cands.append("python3 -m " + pkg.split("[")[0].replace("-", "_"))
+for c in cands[:3]:
+    print(c)
 ' "$PKG" > "$CANDS" 2>/dev/null || true
 fi
 

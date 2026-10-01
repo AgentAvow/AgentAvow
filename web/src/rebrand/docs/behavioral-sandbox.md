@@ -22,7 +22,10 @@ reach the next, and nothing in the sandbox can reach a private network.
 ## What is observed
 
 - **Network egress**: every DNS lookup and TLS server name, plus plaintext HTTP. Hosts outside the
-  package registry and the tool's [declared scope](./check-guide.md#declare-your-tools-scope-optional) are flagged.
+  package registry and the tool's [declared scope](./check-guide.md#declare-your-tools-scope-optional) are flagged,
+  with two deterministic exceptions: a host that belongs to the tool's own vendor by name (a search tool
+  named after its vendor calling that vendor's API is shown as "vendor", not flagged), and `example.com`,
+  which is where the synthetic arguments point a URL-taking tool.
 - **Filesystem writes**: new files under the writable mounts, attributed to the tool call that made them.
 - **Tool transcript** (MCP servers): the tools the server advertised with their annotations, the
   arguments each was called with, whether the call succeeded, how long it took, and what it wrote.

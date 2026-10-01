@@ -392,3 +392,49 @@ def test_every_plan_command_makes_home_and_caches_writable():
         assert "HOME=/work" in cmd and "PATH=/work/.local/bin:$PATH" in cmd, plan
         if "pip install" in cmd:
             assert "pip install --no-input --user " in cmd, plan
+
+
+def test_vendor_hosts_match_identifying_name_tokens_only():
+    from src.scanner.behavioral import runner as r
+    assert r._vendor_hosts("tavily-mcp", ["api.tavily.com", "evil.net"]) == ["api.tavily.com"]
+    assert r._vendor_hosts("exa-mcp-server", ["api.exa.ai"]) == ["api.exa.ai"]
+    assert r._vendor_hosts("@upstash/context7-mcp@1.0.0", ["context7.com", "x.upstash.io"]) == [
+        "context7.com", "x.upstash.io"]
+    # generic tokens never vouch for a host
+    assert r._vendor_hosts("mcp-server-fetch", ["mcp.io", "server.com", "fetch.evil.net"]) == []
+    assert r._vendor_hosts("@modelcontextprotocol/server-everything", ["modelcontextprotocol.io"]) == []
+    assert r._vendor_hosts("left-pad", ["leftpad.com"]) == []  # 'left' alone is not the vendor
+
+
+def test_gz_envelope_is_unwrapped_and_truncated_output_is_labelled(monkeypatch, tmp_path):
+    import asyncio
+    import base64
+    import gzip
+
+    from src.scanner.behavioral import runner as r
+    monkeypatch.setattr(config.settings, "scanner_behavioral_sandbox_runner_v2", "/x/v2.sh",
+                        raising=False)
+    payload = {"image": "node:20-alpine", "mode": "mcp", "exit_code": 0, "timed_out": False,
+               "egress_hosts": ["registry.npmjs.org", "api.tavily.com", "example.com", "evil.net"],
+               "fs_writes": [], "canary_exfil": [],
+               "exercise": {"version": 1, "launch": {"ok": True, "command": ["node", "x"]},
+                            "tools": [{"name": "search"}], "calls": [{"tool": "search", "ok": True}]},
+               "schema": "behavioral-v2"}
+    wrapped = json.dumps({"schema": "behavioral-v2", "gz": base64.b64encode(
+        gzip.compress(json.dumps(payload).encode())).decode()})
+
+    async def fake(args, timeout, *, v2=False):
+        return wrapped, None
+    monkeypatch.setattr(r, "_execute", fake)
+    res = asyncio.run(r.run_behavioral("npm", "tavily-mcp", plan="npm-mcp"))
+    assert res.ran and res.transcript and res.transcript.launch_ok
+    assert res.vendor_egress == ["api.tavily.com"]
+    assert res.unexpected_egress == ["evil.net"]  # example.com = our synthetic URL; tavily = vendor
+    assert res.to_public_dict()["vendor_egress"] == ["api.tavily.com"]
+
+    async def truncated(args, timeout, *, v2=False):
+        return json.dumps(payload)[:100] + "x" * 24000, None
+    monkeypatch.setattr(r, "_execute", truncated)
+    res = asyncio.run(r.run_behavioral("npm", "tavily-mcp", plan="npm-mcp"))
+    assert res.ran is False and res.error == "runner_output_truncated"
+    assert any(n.startswith("runner_output_len=") for n in res.notes)

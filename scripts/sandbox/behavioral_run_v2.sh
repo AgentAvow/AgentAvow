@@ -37,7 +37,10 @@
 #     "egress_hosts": [str],             # DNS names + TLS SNI + HTTP Host, lower-cased, unique
 #     "fs_writes": [str],                # added/changed paths outside the tmpfs mounts (≤100)
 #     "canary_exfil": [{"via": "dns"|"http", "host": str}],   # [] when no canary / clean
-#     "exercise": {...} | null,          # the exerciser's transcript JSON, verbatim
+#     "exercise": {...} | null,          # the exerciser's transcript, slimmed (no input
+#                                        # schemas, capped strings); if the whole result
+#                                        # exceeds 20,000 chars it is emitted instead as
+#                                        # {"schema": "behavioral-v2", "gz": "<base64 gzip of the JSON>"}
 #                                        # (text between AGENTAVOW_TRANSCRIPT_BEGIN/END on
 #                                        # the container's stdout), null when absent
 #     "image_pulled": bool,              # image mode: this run pulled (and removed) the image
@@ -260,7 +263,27 @@ if len(needle) >= 8:
         if ("http", host) not in seen:
             seen.add(("http", host)); canary_exfil.append({"via": "http", "host": host})
 
-print(json.dumps({
+# The result travels back through SSM, whose stdout is capped at 24,000 characters.
+# Slim the transcript (the graders never read input schemas or long descriptions) and,
+# if it is still large, wrap it as gzip+base64 (the runner unwraps "gz").
+def _slim(ex):
+    if not isinstance(ex, dict):
+        return ex
+    for t in ex.get("tools") or []:
+        if isinstance(t, dict):
+            t.pop("input_schema", None)
+            if isinstance(t.get("description"), str):
+                t["description"] = t["description"][:200]
+    for c in ex.get("calls") or []:
+        if isinstance(c, dict):
+            if isinstance(c.get("result_sample"), str):
+                c["result_sample"] = c["result_sample"][:120]
+            a = c.get("args")
+            if isinstance(a, dict):
+                c["args"] = {k: (v[:80] if isinstance(v, str) else v) for k, v in list(a.items())[:16]}
+    return ex
+
+result = {
     "image": image,
     "mode": mode,
     "exit_code": int(exit_code) if str(exit_code).lstrip("-").isdigit() else None,
@@ -268,9 +291,15 @@ print(json.dumps({
     "egress_hosts": _arr(hosts),
     "fs_writes": _arr(fs),
     "canary_exfil": canary_exfil[:32],
-    "exercise": exercise,
+    "exercise": _slim(exercise),
     "image_pulled": image_pulled == "true",
     "files_materialized": _arr(files_json),
     "schema": "behavioral-v2",
-}))
+}
+text = json.dumps(result, separators=(",", ":"))
+if len(text) > 20000:
+    import base64, gzip
+    text = json.dumps({"schema": "behavioral-v2",
+                       "gz": base64.b64encode(gzip.compress(text.encode("utf-8"), 9)).decode("ascii")})
+print(text)
 PY

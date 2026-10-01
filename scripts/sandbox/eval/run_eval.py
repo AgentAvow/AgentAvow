@@ -162,9 +162,15 @@ async def run_known_good(pkg: dict) -> dict:
     started = time.monotonic()
     res = await run_behavioral(pkg["surface"], pkg["name"], plan=f"{pkg['surface']}-mcp")
     findings = grade(res)
+    tr = res.transcript
     return {
         "surface": pkg["surface"], "name": pkg["name"], "ran": res.ran, "error": res.error,
         "plan": res.plan, "seconds": round(time.monotonic() - started, 1),
+        "egress_hosts": res.egress_hosts, "unexpected_egress": res.unexpected_egress,
+        "vendor_egress": res.vendor_egress, "notes": res.notes,
+        "launch_error": tr.launch_error if tr else None,
+        "launch_command": tr.launch_command if tr else [],
+        "exercise_error": tr.error if tr else None,
         "summary": grade_summary(res),
         "findings": [{"rule": f.rule, "severity": f.severity, "name": f.name}
                      for f in findings],
@@ -230,7 +236,14 @@ def main(argv: list[str] | None = None) -> int:
             rows.append(row)
             fl = ", ".join(f"{f['rule']}({f['severity']})" for f in row["findings"]) or "clean"
             state = "ran" if row["ran"] else f"did not run: {row['error']}"
-            print(f"{pkg['surface']}:{pkg['name']:48} {row['seconds']:6}s {state:40} {fl}")
+            s = row["summary"]
+            extra = (f"tools={s.get('tools_listed')} called={s.get('tools_called')} "
+                     f"egress={row['egress_hosts']} unexpected={row['unexpected_egress']} "
+                     f"vendor={row['vendor_egress']}")
+            if not s.get("launch_ok"):
+                extra += f" launch_error={row['launch_error']!r} cmd={row['launch_command']}"
+            print(f"{pkg['surface']}:{pkg['name']:48} {row['seconds']:6}s {state:32} {fl}\n"
+                  f"    {extra}")
         report["known_good"] = rows
         n_ran = sum(1 for r in rows if r["ran"])
         n_fp = sum(1 for r in rows if r["findings"])

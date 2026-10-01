@@ -962,7 +962,7 @@ type ExerciseData = {
 }
 type BehavioralData = {
   ran: boolean; pending?: boolean; timed_out?: boolean; reason?: string
-  egress_hosts?: string[]; unexpected_egress?: string[]; declared_egress?: string[]; fs_writes_sample?: string[]
+  egress_hosts?: string[]; unexpected_egress?: string[]; declared_egress?: string[]; vendor_egress?: string[]; fs_writes_sample?: string[]
   error?: string | null
   plan?: string
   canary_exfil?: { via: string; host?: string }[]
@@ -1062,7 +1062,8 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
                 <div className="flex flex-wrap gap-1.5">
                   {b.egress_hosts?.length ? b.egress_hosts.map((h) => {
                     const bad = undeclared.includes(h)
-                    return <span key={h} className={`font-mono text-[11.5px] px-2 py-1 rounded-md border ${bad ? 'bg-danger/10 border-danger/40 text-danger' : 'bg-surface border-border text-text'}`}>{h}{bad ? ' ⚠' : ''}</span>
+                    const vendor = (b.vendor_egress ?? []).includes(h)
+                    return <span key={h} title={vendor ? "the tool's own vendor, by name" : undefined} className={`font-mono text-[11.5px] px-2 py-1 rounded-md border ${bad ? 'bg-danger/10 border-danger/40 text-danger' : 'bg-surface border-border text-text'}`}>{h}{bad ? ' ⚠' : vendor ? ' · vendor' : ''}</span>
                   }) : <span className="text-text-muted text-[12.5px]">none</span>}
                 </div>
               </div>
