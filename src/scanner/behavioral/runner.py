@@ -2,14 +2,23 @@
 the observed behavior to findings.
 
 Flow:
-  run_behavioral(surface, coordinate)
-    → pick a base image + a run command for the surface (npm install+require, pip
-      install+import, MCP stdio + list-tools)
-    → invoke scripts/sandbox/behavioral_run.sh (gVisor container behind a transparent
-      egress logger; returns JSON: egress_hosts, fs_writes, exit_code, timed_out)
+  run_behavioral(surface, coordinate, plan=...)
+    → pick a PLAN: a base image + a run command (npm install+require, pip install+import,
+      an MCP exerciser plan that installs the package then launches its server over stdio
+      and calls every tool, or a docker image run with the image's own entrypoint)
+    → invoke the sandbox runner script (gVisor container behind a passive egress capture;
+      returns JSON: egress_hosts, fs_writes, exit_code, timed_out, and — v2 only —
+      exercise (the exerciser transcript) + canary_exfil)
     → parse into a BehavioralResult, diffing observed egress against an allowlist / the
       tool's declared hosts
-  behavioral_findings(result) → list[Finding] a scan can fold in as a signed BEHAVIORAL axis
+  behavioral_findings(result) → list[Finding] (thin wrapper over graders.grade)
+
+Runner versions. v1 (``scripts/sandbox/behavioral_run.sh``, LIVE on the sandbox box) takes
+``<image> '<cmd>' [timeout]``. v2 (``behavioral_run_v2.sh``) adds ``--mode exec|mcp|image``,
+``--files-b64`` (the exerciser sources shipped per run — the sandbox host never needs files
+from us) and ``--canary``. v2 is selected ONLY by the ``scanner_behavioral_sandbox_runner_v2``
+setting; while it is empty the v1 script is called with exactly the old command line and
+MCP/docker plans degrade (mcp → the plain exec plan, docker → not run).
 
 The sandbox call is guarded by a feature flag and fails OPEN (never blocks a static scan):
 if the runner or a sandbox host is unavailable, run_behavioral returns ran=False.
@@ -17,22 +26,51 @@ if the runner or a sandbox host is unavailable, run_behavioral returns ran=False
 from __future__ import annotations
 
 import asyncio
+import base64
+import gzip
 import json
+import secrets
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.scanner.behavioral.transcript import CANARY_PREFIX, ExerciseTranscript, parse_transcript
 from src.scanner.scan import Finding
 
-_RUNNER = Path(__file__).resolve().parents[3] / "scripts" / "sandbox" / "behavioral_run.sh"
+_SANDBOX_DIR = Path(__file__).resolve().parents[3] / "scripts" / "sandbox"
+_RUNNER = _SANDBOX_DIR / "behavioral_run.sh"
+_RUNNER_V2 = _SANDBOX_DIR / "behavioral_run_v2.sh"
 
-# Base image + how to exercise a target per surface. The command installs/loads the target
+# Base image + how to exercise a target per plan. The command installs/loads the target
 # so its install hook + import-time code actually execute inside the sandbox.
 _NPM_CMD = "npm install --no-audit --no-fund {name} && node -e 'require(\"{name}\")'"
 _PIP_CMD = "pip install --no-input {name} && python -c 'import {import_name}'"
-_SURFACE_PLAN: dict[str, tuple[str, str]] = {
-    "npm": ("node:20-alpine", _NPM_CMD),
-    "pypi": ("python:3.12-alpine", _PIP_CMD),
+# MCP plans: install, then the shipped launcher discovers the package's bin(s) and runs
+# the shipped exerciser against up to 3 candidates (first that initializes wins).
+_NPM_MCP_CMD = (
+    "npm install --no-audit --no-fund {name} && "
+    "sh /work/mcp_launch.sh npm {dist} -- node /work/mcp_exercise.js {exerciser_args}"
+)
+_PIP_MCP_CMD = (
+    "pip install --no-input {name} && "
+    "sh /work/mcp_launch.sh pypi {dist} -- python /work/mcp_exercise.py {exerciser_args}"
+)
+# plan → (image, command template, runner mode). "{name}" in the image = the coordinate.
+_SURFACE_PLAN: dict[str, tuple[str, str, str]] = {
+    "npm": ("node:20-alpine", _NPM_CMD, "exec"),
+    "pypi": ("python:3.12-alpine", _PIP_CMD, "exec"),
+    "npm-mcp": ("node:20-alpine", _NPM_MCP_CMD, "mcp"),
+    "pypi-mcp": ("python:3.12-alpine", _PIP_MCP_CMD, "mcp"),
+    "docker": ("{name}", "", "image"),
 }
+# Files from scripts/sandbox/ shipped into /work for a plan (via --files-b64).
+_PLAN_FILES: dict[str, tuple[str, ...]] = {
+    "npm-mcp": ("mcp_launch.sh", "mcp_exercise.js"),
+    "pypi-mcp": ("mcp_launch.sh", "mcp_exercise.py", "synthetic_args.py"),
+}
+# What an MCP plan degrades to when the exerciser can't be shipped / v2 is off.
+_EXEC_FALLBACK = {"npm-mcp": "npm", "pypi-mcp": "pypi"}
+_README_LIMIT = 64_000
 
 # Hosts a benign install legitimately reaches. Egress OUTSIDE this set (and outside any
 # host the tool declares) is the signal we care about.
@@ -40,6 +78,11 @@ _REGISTRY_ALLOW = {
     "registry.npmjs.org", "registry.yarnpkg.com",
     "pypi.org", "files.pythonhosted.org",
     "github.com", "codeload.github.com", "objects.githubusercontent.com",
+}
+# Image mode pulls from a registry too.
+_IMAGE_ALLOW = {
+    "registry-1.docker.io", "auth.docker.io", "production.cloudflare.docker.com",
+    "index.docker.io", "ghcr.io", "pkg-containers.githubusercontent.com",
 }
 
 
@@ -55,6 +98,12 @@ class BehavioralResult:
     unexpected_egress: list[str] = field(default_factory=list)
     fs_writes: list[str] = field(default_factory=list)
     error: str | None = None
+    # v2: which plan ran, the exerciser transcript (MCP plans), canary hits, and notes
+    # about degradations (e.g. "exerciser_missing" → fell back to the exec plan).
+    plan: str = ""
+    transcript: ExerciseTranscript | None = None
+    canary_exfil: list[dict] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     def to_public_dict(self) -> dict:
         return {
@@ -64,6 +113,10 @@ class BehavioralResult:
             "unexpected_egress": self.unexpected_egress,
             "fs_writes_sample": self.fs_writes[:20],
             "error": self.error,
+            "plan": self.plan,
+            "canary_exfil": self.canary_exfil,
+            "exercise": self.transcript.to_public_dict() if self.transcript else None,
+            "notes": self.notes,
         }
 
 
@@ -71,6 +124,17 @@ def _import_name(coordinate: str) -> str:
     """Best-effort python import name from a pip coordinate (dashes → underscores, drop extras)."""
     base = coordinate.split("[")[0].split("==")[0].split(">")[0].split("<")[0].strip()
     return base.replace("-", "_")
+
+
+def _dist_name(coordinate: str) -> str:
+    """The bare distribution/package name: npm ``@scope/name@1.2`` → ``@scope/name``,
+    pip ``name[extra]==1.0`` → ``name``."""
+    c = (coordinate or "").strip()
+    scoped = c.startswith("@")
+    body = (c[1:] if scoped else c).split("@", 1)[0]
+    for sep in ("[", "==", ">", "<", "~", "!"):
+        body = body.split(sep)[0]
+    return ("@" if scoped else "") + body.strip()
 
 
 def _classify_egress(hosts: list[str], expected: set[str]) -> list[str]:
@@ -130,6 +194,108 @@ def _run_via_ssm(instance_id: str, region: str, command: str, timeout: int) -> s
     return None
 
 
+async def _execute(runner_args: list[str], timeout: int, *, v2: bool = False,
+                   ) -> tuple[str | None, str | None]:
+    """Run the sandbox runner script with ``runner_args`` and return (stdout, error).
+
+    The single seam between orchestration and execution (tests monkeypatch this). A
+    behavioral scan runs UNTRUSTED code, so it must never run on the app/prod host.
+    Three exec paths, in priority order:
+      - SSM  (mode="ssm" + instance_id): prod sends the runner to the sandbox via AWS
+        Systems Manager — NO SSH key on prod. Preferred.
+      - SSH  (sandbox_host set): SSH the runner to the sandbox box.
+      - local: run the runner here (dev/test on a machine that IS the sandbox).
+    ``v2`` picks the v2 script path (setting / bundled file) over the v1 one."""
+    from src.config import settings
+    if v2:
+        remote_runner = ((getattr(settings, "scanner_behavioral_sandbox_runner_v2", "") or "")
+                         .strip() or "/home/ec2-user/behavioral_run_v2.sh")
+        local_runner = _RUNNER_V2
+    else:
+        remote_runner = (getattr(settings, "scanner_behavioral_sandbox_runner", "")
+                         or "/home/ec2-user/behavioral_run.sh")
+        local_runner = _RUNNER
+    mode = (getattr(settings, "scanner_behavioral_sandbox_mode", "") or "").strip().lower()
+    instance_id = (getattr(settings, "scanner_behavioral_sandbox_instance_id", "") or "").strip()
+    host = (getattr(settings, "scanner_behavioral_sandbox_host", "") or "").strip()
+    quoted = " ".join(shlex.quote(a) for a in runner_args)
+
+    if mode == "ssm" and instance_id:
+        region = (getattr(settings, "scanner_behavioral_sandbox_region", "")
+                  or "us-east-1").strip()
+        # SSM runs the command as root on the target, so no sudo wrapper is needed.
+        command = f"bash {shlex.quote(remote_runner)} {quoted}"
+        out = await asyncio.to_thread(_run_via_ssm, instance_id, region, command, timeout)
+        return (out, None) if out is not None else (None, "ssm_unavailable")
+
+    if host:
+        user = getattr(settings, "scanner_behavioral_sandbox_user", "ec2-user") or "ec2-user"
+        key = (getattr(settings, "scanner_behavioral_sandbox_key", "") or "").strip()
+        remote = f"sudo {shlex.quote(remote_runner)} {quoted}"
+        argv = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
+                "-o", "BatchMode=yes"]
+        if key:
+            argv += ["-i", key]
+        argv += [f"{user}@{host}", remote]
+    else:
+        # Local exec needs the bundled runner script present (dev/test only);
+        # the SSM/SSH paths use the runner that lives on the remote sandbox.
+        if not local_runner.exists():
+            return None, "local_runner_missing"
+        argv = ["bash", str(local_runner), *runner_args]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        # generous outer timeout — the runner has its own wall-clock kill.
+        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 60)
+    except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
+        return None, f"runner_unavailable:{type(exc).__name__}"
+    return stdout.decode("utf-8", "replace"), None
+
+
+def _new_canary() -> str:
+    return CANARY_PREFIX + secrets.token_hex(6)
+
+
+def _files_payload(plan: str, readme_text: str | None) -> str | None:
+    """``--files-b64`` payload for a plan: base64(gzip(JSON {name: base64(bytes)})) of the
+    exerciser sources read from scripts/sandbox/ at call time (+ README.md when given).
+    None when a required source file is missing (→ the caller falls back to exec)."""
+    names = _PLAN_FILES.get(plan)
+    if not names:
+        return None
+    files: dict[str, str] = {}
+    for name in names:
+        path = _SANDBOX_DIR / name
+        try:
+            files[name] = base64.b64encode(path.read_bytes()).decode("ascii")
+        except OSError:
+            return None
+    if readme_text:
+        files["README.md"] = base64.b64encode(
+            readme_text[:_README_LIMIT].encode("utf-8", "replace")).decode("ascii")
+    raw = json.dumps(files, separators=(",", ":")).encode("utf-8")
+    return base64.b64encode(gzip.compress(raw, compresslevel=6)).decode("ascii")
+
+
+def _exerciser_args(*, timeout: int, max_tools: int, canary: str, env_names: list[str],
+                    readme: bool) -> str:
+    args = ["--timeout", str(timeout), "--per-call-timeout", "10", "--max-tools",
+            str(max_tools), "--canary-value", canary]
+    names = [n for n in env_names if n and n.replace("_", "").isalnum()]
+    if names:
+        args += ["--canary-env", ",".join(names[:32])]
+    if readme:
+        args += ["--readme", "/work/README.md"]
+    return " ".join(shlex.quote(a) for a in args)
+
+
+def _default_plan(surface: str) -> str | None:
+    return surface if surface in ("npm", "pypi", "docker") else None
+
+
 async def run_behavioral(
     surface: str,
     coordinate: str,
@@ -137,90 +303,89 @@ async def run_behavioral(
     expected_hosts: set[str] | None = None,
     manifest: str | None = None,
     timeout: int = 45,
+    env_names: list[str] | None = None,
+    readme_text: str | None = None,
+    plan: str | None = None,
 ) -> BehavioralResult:
     """Run the target in the sandbox and return observed behavior. Fails OPEN.
 
     ``manifest`` is the tool's optional ``.agentavow.yml`` text; its declared egress hosts
-    are added to ``expected_hosts`` so a tool is judged against what its author declared."""
+    are added to ``expected_hosts`` so a tool is judged against what its author declared.
+    ``plan`` overrides the surface→plan choice ("npm-mcp" / "pypi-mcp" when the package
+    looks like an MCP server, "docker" for an image). ``env_names`` are the env vars the
+    package reads (canary targets); ``readme_text`` helps the exerciser pick arguments."""
+    from src.config import settings
     from src.scanner.behavioral.manifest import parse_manifest
     expected = set(expected_hosts or set()) | parse_manifest(manifest).egress_set()
-    expected_hosts = expected
     surface = (surface or "").lower()
-    plan = _SURFACE_PLAN.get(surface)
-    if not plan:
+    plan = (plan or "").strip().lower() or _default_plan(surface) or ""
+    notes: list[str] = []
+
+    def _fail(error: str) -> BehavioralResult:
         return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
-                                error="unsupported_surface")
-    image, cmd_tmpl = plan
-    cmd = cmd_tmpl.format(name=coordinate, import_name=_import_name(coordinate))
+                                error=error, plan=plan, notes=notes)
 
-    # Where the runner executes. A behavioral scan runs UNTRUSTED code, so it must never
-    # run on the app/prod host. Three exec paths, in priority order:
-    #   - SSM  (mode="ssm" + instance_id): prod sends the runner to the sandbox via AWS
-    #     Systems Manager — NO SSH key on prod. Preferred.
-    #   - SSH  (sandbox_host set): SSH the runner to the sandbox box.
-    #   - local: run the runner here (dev/test on a machine that IS the sandbox).
-    import shlex
+    if plan not in _SURFACE_PLAN:
+        return _fail("unsupported_surface")
 
-    from src.config import settings
-    remote_runner = (getattr(settings, "scanner_behavioral_sandbox_runner", "")
-                     or "/home/ec2-user/behavioral_run.sh")
-    mode = (getattr(settings, "scanner_behavioral_sandbox_mode", "") or "").strip().lower()
-    instance_id = (getattr(settings, "scanner_behavioral_sandbox_instance_id", "") or "").strip()
-    host = (getattr(settings, "scanner_behavioral_sandbox_host", "") or "").strip()
+    v2 = bool((getattr(settings, "scanner_behavioral_sandbox_runner_v2", "") or "").strip())
+    if not v2 and plan in _EXEC_FALLBACK:
+        notes.append("v2_runner_off")
+        plan = _EXEC_FALLBACK[plan]
+    if not v2 and plan == "docker":
+        return _fail("v2_runner_off")
 
-    stdout_text: str | None
-    if mode == "ssm" and instance_id:
-        region = (getattr(settings, "scanner_behavioral_sandbox_region", "")
-                  or "us-east-1").strip()
-        # SSM runs the command as root on the target, so no sudo wrapper is needed.
-        command = (f"bash {shlex.quote(remote_runner)} {shlex.quote(image)} "
-                   f"{shlex.quote(cmd)} {shlex.quote(str(timeout))}")
-        stdout_text = await asyncio.to_thread(
-            _run_via_ssm, instance_id, region, command, timeout)
-        if stdout_text is None:
-            return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
-                                    error="ssm_unavailable")
+    canary = _new_canary()
+    files_b64: str | None = None
+    if plan in _PLAN_FILES:
+        files_b64 = _files_payload(plan, readme_text)
+        if files_b64 is None:
+            notes.append("exerciser_missing")
+            plan = _EXEC_FALLBACK[plan]
+
+    image_tmpl, cmd_tmpl, mode = _SURFACE_PLAN[plan]
+    image = image_tmpl.format(name=coordinate)
+    if mode == "mcp":
+        mcp_timeout = int(getattr(settings, "scanner_behavioral_mcp_timeout", 90) or 90)
+        max_tools = int(getattr(settings, "scanner_behavioral_max_tools", 25) or 25)
+        timeout = max(int(timeout), mcp_timeout + 45)  # install + exercise budget
+        cmd = cmd_tmpl.format(
+            name=shlex.quote(coordinate), dist=shlex.quote(_dist_name(coordinate)),
+            exerciser_args=_exerciser_args(
+                timeout=mcp_timeout, max_tools=max_tools, canary=canary,
+                env_names=list(env_names or []), readme=bool(readme_text)),
+        )
     else:
-        if host:
-            user = getattr(settings, "scanner_behavioral_sandbox_user", "ec2-user") or "ec2-user"
-            key = (getattr(settings, "scanner_behavioral_sandbox_key", "") or "").strip()
-            remote = (f"sudo {shlex.quote(remote_runner)} {shlex.quote(image)} "
-                      f"{shlex.quote(cmd)} {shlex.quote(str(timeout))}")
-            argv = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
-                    "-o", "BatchMode=yes"]
-            if key:
-                argv += ["-i", key]
-            argv += [f"{user}@{host}", remote]
-        else:
-            # Local exec needs the bundled runner script present (dev/test only);
-            # the SSM/SSH paths use the runner that lives on the remote sandbox.
-            if not _RUNNER.exists():
-                return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
-                                        error="local_runner_missing")
-            argv = ["bash", str(_RUNNER), image, cmd, str(timeout)]
+        cmd = cmd_tmpl.format(name=coordinate, import_name=_import_name(coordinate))
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *argv,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
-            # generous outer timeout — the runner has its own wall-clock kill.
-            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 60)
-        except (FileNotFoundError, asyncio.TimeoutError, OSError) as exc:
-            return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
-                                    error=f"runner_unavailable:{type(exc).__name__}")
-        stdout_text = stdout.decode("utf-8", "replace")
+    runner_args: list[str] = []
+    if v2:
+        runner_args += ["--mode", mode, "--canary", canary]
+        if files_b64:
+            runner_args += ["--files-b64", files_b64]
+    runner_args += [image, cmd, str(timeout)]
+
+    stdout_text, exec_error = await _execute(runner_args, timeout, v2=v2)
+    if exec_error or stdout_text is None:
+        return _fail(exec_error or "runner_unavailable")
 
     try:
         data = json.loads(stdout_text or "{}")
     except json.JSONDecodeError:
-        return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
-                                error="runner_bad_output")
+        return _fail("runner_bad_output")
+    if not isinstance(data, dict):
+        return _fail("runner_bad_output")
     if data.get("error"):
-        return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
-                                error=str(data["error"]))
+        return _fail(str(data["error"]))
     hosts = [str(h) for h in (data.get("egress_hosts") or [])]
-    unexpected = _classify_egress(hosts, expected_hosts or set())
+    allow = expected | (_IMAGE_ALLOW if mode == "image" else set())
+    unexpected = _classify_egress(hosts, allow)
+    exercise = data.get("exercise")
+    transcript = parse_transcript(exercise) if isinstance(exercise, (dict, str)) else None
+    canary_exfil = [
+        {"via": str(h.get("via") or ""), "host": str(h.get("host") or "")}
+        for h in (data.get("canary_exfil") or []) if isinstance(h, dict)
+    ][:32]
     return BehavioralResult(
         ran=True, surface=surface, coordinate=coordinate,
         timed_out=bool(data.get("timed_out")),
@@ -228,28 +393,12 @@ async def run_behavioral(
         egress_hosts=hosts,
         unexpected_egress=unexpected,
         fs_writes=[str(f) for f in (data.get("fs_writes") or [])],
+        plan=plan, transcript=transcript, canary_exfil=canary_exfil, notes=notes,
     )
 
 
 def behavioral_findings(result: BehavioralResult) -> list[Finding]:
-    """Map observed behavior to findings for the BEHAVIORAL axis. Empty if it didn't run."""
-    findings: list[Finding] = []
-    if not result.ran:
-        return findings
-    if result.unexpected_egress:
-        hosts = ", ".join(result.unexpected_egress[:8])
-        findings.append(Finding(
-            category="exfiltration",
-            name="Unexpected network egress during install/run",
-            severity="high" if len(result.unexpected_egress) < 3 else "critical",
-            file_path="<behavioral>",
-            line_number=0,
-            snippet=f"egress to {hosts}",
-            remediation=(
-                "The tool contacted host(s) outside the package registry and its declared "
-                "endpoints while installing/running in isolation. Review why it phones home; "
-                "unexpected egress at install time is a common exfiltration pattern."
-            ),
-            reachability="direct",
-        ))
-    return findings
+    """Map observed behavior to findings for the BEHAVIORAL axis. Empty if it didn't run.
+    Thin compatibility wrapper over :func:`graders.grade`."""
+    from src.scanner.behavioral.graders import grade
+    return list(grade(result))

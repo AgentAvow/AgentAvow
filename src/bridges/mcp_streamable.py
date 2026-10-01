@@ -441,6 +441,9 @@ def _scan_block(
             f"no risks found — the score is {reason}, a confidence limit rather than "
             f"detected risk. Adoption and the signed report can help you decide."
         )
+    _sb = _sandbox_line(data)
+    if _sb:
+        lines.append(_sb)
     lines.append(f"**Next:** {action}")
     lines.append(
         f"Full report: {_WEB_BASE}{report_path} · "
@@ -450,6 +453,40 @@ def _scan_block(
     #  emitted per-scan — a reviewer could read config-changing suggestions in tool output
     #  as friction. It lives in about_agentavow + the docs page instead.)
     return "\n".join(lines)
+
+
+def _sandbox_line(data: dict) -> str | None:
+    """ONE compact line about the behavioral sandbox tier, when the scan carries it:
+    what ran (tools exercised in gVisor) and what it found, or that the run is still
+    pending. None when the scan has no ``behavioral`` block (never invented)."""
+    b = data.get("behavioral")
+    if not isinstance(b, dict):
+        return None
+    if b.get("pending"):
+        return "Sandbox: behavioral run still in progress — re-check in about a minute."
+    if not b.get("ran"):
+        return None
+    findings = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
+    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else None
+    n_tools = len({c.get("tool") for c in (ex or {}).get("calls") or []
+                   if isinstance(c, dict) and c.get("tool")}) if ex else 0
+    if ex and not ex.get("launch_ok"):
+        what = "the MCP server failed to start in gVisor"
+    elif n_tools:
+        what = f"ran {n_tools} tool{'' if n_tools == 1 else 's'} in gVisor"
+    else:
+        what = "install/run observed in gVisor"
+    if findings:
+        names = ", ".join(str(f.get("name") or f.get("rule") or "finding")
+                          for f in findings[:3])
+        more = f" (+{len(findings) - 3} more)" if len(findings) > 3 else ""
+        n = len(findings)
+        return f"Sandbox: {what}; {n} behavioral finding{'' if n == 1 else 's'}: {names}{more}"
+    hosts = [str(h) for h in (b.get("egress_hosts") or []) if h]
+    if hosts:
+        shown = ", ".join(hosts[:4]) + (" …" if len(hosts) > 4 else "")
+        return f"Sandbox: clean run ({what}), egress only to {shown}"
+    return f"Sandbox: clean run ({what}), no network egress"
 
 
 def _safe_verdict(data: dict) -> bool:

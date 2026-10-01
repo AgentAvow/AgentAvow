@@ -182,6 +182,9 @@ class ScanResult:
     # Declared-scope manifest (.agentavow.yml): the tool's own declaration of intended
     # egress/capabilities. Surfaced on the score page; the behavioral tier verifies it.
     declared_scope: dict = field(default_factory=dict)
+    # Env var names the package reads (process.env.X / os.environ["X"]); canary targets
+    # for the behavioral tier. Package scans only; empty elsewhere.
+    env_reads: list[str] = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -2932,6 +2935,15 @@ def _declared_scope_from_artifact(files: dict) -> dict:
     return {}
 
 
+def _env_reads_from_artifact(files: dict) -> list[str]:
+    """Env var names the artifact's sources read (behavioral canary targets). Fail-open."""
+    try:
+        from src.scanner.behavioral.env_reads import env_names_from_files
+        return env_names_from_files(files)
+    except Exception:  # noqa: BLE001 — never break a scan
+        return []
+
+
 async def scan_package(surface: str, name: str, version: str | None = None) -> ScanResult:
     """Grade a PUBLISHED npm / PyPI package directly by coordinate — no GitHub repo
     required. Fetches + STATICALLY scans the real artifact tree (the same 12-category
@@ -3015,6 +3027,7 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
     # tier judges observed egress against these declared hosts.
     result.declared_scope = _declared_scope_from_artifact(fetched.files)
+    result.env_reads = _env_reads_from_artifact(fetched.files)
     result.primary_language = (
         "JavaScript/TypeScript" if eco == "npm"
         else "Rust" if eco == "crates"

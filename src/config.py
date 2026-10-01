@@ -241,6 +241,16 @@ class Settings(BaseSettings):
     scanner_behavioral_sandbox_mode: str = ""      # "ssm" | "ssh" | "" (local)
     scanner_behavioral_sandbox_instance_id: str = ""   # e.g. i-01f112e173bdcfdb6
     scanner_behavioral_sandbox_region: str = "us-east-1"
+    # v2 runner (scripts/sandbox/behavioral_run_v2.sh): MCP exerciser plans (npm-mcp /
+    # pypi-mcp — install, launch the server over stdio, call every tool with synthetic
+    # args), docker image mode, credential canary, plaintext-HTTP capture. EMPTY = v2
+    # off: the v1 script at scanner_behavioral_sandbox_runner is used with exactly the
+    # old command line, so prod keeps working until the v2 script is placed on the
+    # sandbox box. Set to the v2 script's path on the sandbox host to turn it on (in
+    # local mode any non-empty value selects the bundled v2 script).
+    scanner_behavioral_sandbox_runner_v2: str = ""  # e.g. /home/ec2-user/behavioral_run_v2.sh
+    scanner_behavioral_max_tools: int = 25     # exerciser: max tools called per server
+    scanner_behavioral_mcp_timeout: int = 90   # exerciser: overall budget (s) per server
 
     # --- Phase 5: maintainer / behavioral trust signals -----------------------
     # Cheap GitHub-METADATA maintainer signals (NO code execution, NO sandbox):

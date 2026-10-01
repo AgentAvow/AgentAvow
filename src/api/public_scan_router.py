@@ -186,6 +186,8 @@ class PublicScanResponse(BaseModel):
     surface_detail: dict = {}  # per-surface detail (skill allowed_tools, MCP capabilities, …)
     # the tool's .agentavow.yml declaration ({present, egress, capabilities, note})
     declared_scope: dict = {}
+    # env var names the package reads (behavioral canary targets; package scans only)
+    env_reads: list[str] = []
     package_coordinate: dict = {}  # {surface, name} the repo maps to (for 1-click install)
     tool_description: str = ""  # one-line "what this tool does" from registry/repo metadata
     long_description: str = ""  # optional fuller second line (README-mined), when distinct
@@ -384,22 +386,50 @@ def _declared_egress(data: dict) -> set[str]:
     return {str(h).strip().lower() for h in (hosts or []) if str(h).strip()}
 
 
-def _behavioral_cache_key(surface: str, name: str, expected_hosts: set[str] | None = None) -> str:
+def _behavioral_cache_key(surface: str, name: str, expected_hosts: set[str] | None = None,
+                          plan: str | None = None) -> str:
     key = f"behavioral:{surface}:{str(name).lower()}"
     if expected_hosts:
         # The verdict depends on what was declared, so a declaration gets its own entry.
         import hashlib
         digest = hashlib.sha256("\n".join(sorted(expected_hosts)).encode()).hexdigest()[:12]
         key += f":{digest}"
+    if plan and plan != surface:
+        # An MCP-exerciser run observes more than the plain install plan — own entry.
+        key += f":{plan}"
     return key
+
+
+def _behavioral_plan(data: dict, surface: str) -> str | None:
+    """Which sandbox plan a scan's coordinate gets: the MCP exerciser plan when the static
+    scan says the package is a runnable MCP server, image mode for docker, else the
+    surface default (None = let the runner choose)."""
+    art = (data or {}).get("artifact_scan") or (data or {}).get("surface_detail") or {}
+    is_mcp = isinstance(art, dict) and bool(art.get("is_mcp_server"))
+    if surface == "docker":
+        return "docker"
+    if surface in ("npm", "pypi") and is_mcp:
+        return f"{surface}-mcp"
+    return None
+
+
+def _behavioral_env_names(data: dict) -> list[str]:
+    raw = (data or {}).get("env_reads") or []
+    return [str(n) for n in raw if isinstance(n, str) and n][:32] if isinstance(raw, list) else []
+
+
+def _behavioral_readme(data: dict) -> str | None:
+    text = (data or {}).get("readme_text")
+    return text if isinstance(text, str) and text.strip() else None
 
 
 async def _get_cached_behavioral(
     surface: str, name: str, expected_hosts: set[str] | None = None,
+    plan: str | None = None,
 ) -> dict | None:
     try:
         from src.redis_client import get_redis
-        raw = await get_redis().get(_behavioral_cache_key(surface, name, expected_hosts))
+        raw = await get_redis().get(_behavioral_cache_key(surface, name, expected_hosts, plan))
         return json.loads(raw) if raw else None
     except Exception:
         return None
@@ -407,27 +437,45 @@ async def _get_cached_behavioral(
 
 async def _run_and_cache_behavioral(
     surface: str, name: str, expected_hosts: set[str] | None = None,
+    *, plan: str | None = None, env_names: list[str] | None = None,
+    readme_text: str | None = None,
 ) -> dict | None:
     """Run the sandbox tier once and cache the result (24h). Returns the block.
     ``expected_hosts`` = the tool's declared egress (see ``_declared_egress``); without
-    it the run is judged against the generic registry allowlist only."""
+    it the run is judged against the generic registry allowlist only. ``plan`` /
+    ``env_names`` / ``readme_text`` are only forwarded when set, so the call shape for
+    a plain install plan is unchanged."""
+    from src.scanner.behavioral.graders import grade_summary
     from src.scanner.behavioral.runner import behavioral_findings, run_behavioral
+    kwargs: dict = {}
+    if plan:
+        kwargs["plan"] = plan
+    if env_names:
+        kwargs["env_names"] = list(env_names)
+    if readme_text:
+        kwargs["readme_text"] = readme_text
     try:
-        res = await run_behavioral(surface, str(name), expected_hosts=expected_hosts or None)
+        res = await run_behavioral(surface, str(name), expected_hosts=expected_hosts or None,
+                                   **kwargs)
     except Exception:
         logger.exception("behavioral tier failed for %s", name)
         return {"ran": False, "reason": "behavioral tier error"}
     block = res.to_public_dict()
     block["findings"] = [
         {"category": f.category, "name": f.name, "severity": f.severity,
-         "remediation": f.remediation}
+         "evidence": getattr(f, "snippet", ""), "remediation": f.remediation,
+         "rule": getattr(f, "rule", "")}
         for f in behavioral_findings(res)
     ]
     block["declared_egress"] = sorted(expected_hosts or [])
     try:
+        block["grade_summary"] = grade_summary(res)
+    except Exception:  # noqa: BLE001 — a UI summary must never fail the block
+        block["grade_summary"] = {}
+    try:
         from src.redis_client import get_redis
         await get_redis().set(
-            _behavioral_cache_key(surface, name, expected_hosts), json.dumps(block),
+            _behavioral_cache_key(surface, name, expected_hosts, plan), json.dumps(block),
             ex=_BEHAVIORAL_CACHE_TTL,
         )
     except Exception:
@@ -436,29 +484,34 @@ async def _run_and_cache_behavioral(
 
 
 async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
-    """Behavioral tier for a scan's npm/pypi coordinate, kept SEPARATE from the signed
-    score (a runtime observation isn't offline-recomputable).
+    """Behavioral tier for a scan's npm/pypi/docker coordinate, kept SEPARATE from the
+    signed score (a runtime observation isn't offline-recomputable).
 
     AUTOMATIC + non-blocking: returns the cached result if present; if not, kicks off a
     background run (so the scorecard fills in on the next load) and returns a ``pending``
-    marker. ``force=True`` (the manual "re-run" button) runs a fresh one inline."""
+    marker. ``force=True`` (the manual "re-run" button) runs a fresh one inline.
+    A package the static scan flagged as an MCP server gets the exerciser plan
+    (``npm-mcp`` / ``pypi-mcp``); a docker coordinate runs the image itself."""
     from src.config import settings
     if not getattr(settings, "scanner_behavioral_enabled", False):
         return None
     pkg = data.get("package_coordinate") or {}
     surface = (pkg.get("surface") or "").lower()
     name = pkg.get("name")
-    if surface not in ("npm", "pypi") or not name:
-        return {"ran": False, "reason": "no npm/pypi package to exercise"} if force else None
+    if surface not in ("npm", "pypi", "docker") or not name:
+        return {"ran": False, "reason": "no npm/pypi/docker package to exercise"} if force else None
     declared = _declared_egress(data)
+    plan = _behavioral_plan(data, surface)
+    run_kwargs = {"plan": plan, "env_names": _behavioral_env_names(data),
+                  "readme_text": _behavioral_readme(data)}
     if force:
-        return await _run_and_cache_behavioral(surface, str(name), declared) or {
+        return await _run_and_cache_behavioral(surface, str(name), declared, **run_kwargs) or {
             "ran": False, "reason": "behavioral tier error"}
-    cached = await _get_cached_behavioral(surface, str(name), declared)
+    cached = await _get_cached_behavioral(surface, str(name), declared, plan)
     if cached:
         return cached
     # Not cached — run it in the background so it's ready next time, return pending now.
-    asyncio.create_task(_run_and_cache_behavioral(surface, str(name), declared))
+    asyncio.create_task(_run_and_cache_behavioral(surface, str(name), declared, **run_kwargs))
     return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
 
 
@@ -855,6 +908,7 @@ def _scan_result_to_dict(result: object) -> dict:
         },
         "certified": _certified,
         "declared_scope": getattr(result, "declared_scope", {}) or {},
+        "env_reads": list(getattr(result, "env_reads", []) or []),
         "provenance": getattr(result, "provenance", {}) or {},
         # Per-surface detail (npm/pypi digest; MCP tool_count/capabilities; skill
         # allowed_tools/hooks) so a surface view can show what it actually graded.
@@ -971,6 +1025,7 @@ def _package_response(
         provenance=data.get("provenance", {}),
         surface_detail=data.get("surface_detail", {}),
         declared_scope=data.get("declared_scope", {}),
+        env_reads=data.get("env_reads", []) or [],
         positive_signals=data.get("positive_signals", []),
         package_coordinate=data.get("package_coordinate", {}),
         tool_description=data.get("tool_description", ""),
@@ -1028,10 +1083,12 @@ async def scan_package_endpoint(
     cache_repo = f"{name}@{version}" if version else name
 
     async def _with_behavioral(resp: PublicScanResponse) -> PublicScanResponse:
-        if surface in ("npm", "pypi"):
+        if surface in ("npm", "pypi", "docker"):
             resp.behavioral = await _behavioral_block(
                 {"package_coordinate": {"surface": surface, "name": name},
-                 "declared_scope": getattr(resp, "declared_scope", {}) or {}},
+                 "declared_scope": getattr(resp, "declared_scope", {}) or {},
+                 "artifact_scan": getattr(resp, "surface_detail", {}) or {},
+                 "env_reads": getattr(resp, "env_reads", []) or []},
                 force=behavioral)
         return resp
 
