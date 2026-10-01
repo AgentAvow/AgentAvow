@@ -226,7 +226,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             from sqlalchemy import select
 
             from src.models import Entity
+            from src.worker_lock import try_acquire
 
+            # One worker per deploy does this, not one per uvicorn worker.
+            if not await try_acquire("ag:lock:startup-trust-recompute", ttl=600):
+                return
             async with _as() as db:
                 eids = (await db.execute(
                     select(Entity.id).where(Entity.is_active.is_(True))
@@ -255,9 +259,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         import asyncio
 
         from src.feeds.bluesky.subscriber import run_subscriber
+        from src.worker_lock import run_exclusively
 
-        asyncio.create_task(run_subscriber())
-        logging.getLogger(__name__).info("Bluesky Jetstream subscriber started")
+        # The firehose is consumed by ONE worker; the others wait on the lock and
+        # take over if it dies. Without this every uvicorn worker ran its own copy.
+        asyncio.create_task(
+            run_exclusively("ag:lock:bluesky-jetstream", 60, run_subscriber, retry=30),
+            name="bluesky-jetstream",
+        )
+        logging.getLogger(__name__).info(
+            "Bluesky Jetstream subscriber scheduled (single-worker lock)"
+        )
 
     # Warn if JWT secret is still the default placeholder (non-debug mode
     # already crashes, but staging / misconfigured prod should be visible).
