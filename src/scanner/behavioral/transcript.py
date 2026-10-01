@@ -33,9 +33,19 @@ JSON shape (version 1):
                                                                   # writable mounts, per call
                   "result_sample": "first 300 chars of text content"} ],
       "canary": {"env_names": ["GITHUB_TOKEN"], "seen_in_result": ["GITHUB_TOKEN"]},
-      "timed_out": false,
+      "timed_out": false,                                            # global wall clock hit
       "error": null
     }
+
+Value vocabularies (set by the exerciser, matched by the graders):
+  call.ok          a JSON-RPC *result* arrived (transport level), independent of is_error
+  call.error       "call_timeout" | "server_exited" | "rpc_error: <msg>"
+  error            "server_exited" | "tools_list_failed: …" | "exerciser_crash: …"
+                   | "exerciser_watchdog"
+  launch.error     "spawn_failed: …" | "initialize_timeout" | "server_exited"
+                   | "initialize_error: …" | "no_command"   (each may end ": <stderr tail>")
+  canary.seen_in_result lists EVERY injected name on a sighting (one shared canary value),
+                   so read it as "a canary leaked", not "this exact variable leaked".
 """
 from __future__ import annotations
 
@@ -102,7 +112,10 @@ class ExerciseTranscript:
 
     @property
     def present(self) -> bool:
-        return self.launch_ok or bool(self.tools) or bool(self.error)
+        """True when the exerciser actually ran and reported something — a launch that
+        failed (``launch_error`` set) is still a present, meaningful transcript."""
+        return (self.launch_ok or bool(self.tools) or bool(self.error)
+                or bool(self.launch_error))
 
     def tool(self, name: str) -> ToolSpec | None:
         return next((t for t in self.tools if t.name == name), None)
