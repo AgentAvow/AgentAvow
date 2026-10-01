@@ -597,3 +597,23 @@ async def test_mcp_signals_fail_open_when_no_entity():
         return_value=_FakeSession([None]),
     ):
         assert await srcs.get_mcp_registry_signals("o", "r") is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_signals_pulsemcp_unavailable_is_fail_open():
+    """fetch_pulsemcp returns None without an API key (v0.1 is keyed); the
+    live re-fetch path must treat that as "no signal", not crash."""
+    from unittest.mock import AsyncMock, patch
+
+    from src.scanner import adoption_sources as srcs
+
+    entity = _FakeEntity(
+        onboarding_data={},
+        source_type="pulsemcp",
+        source_url="https://www.pulsemcp.com/servers/acme-widget",
+    )
+    with patch("src.database.async_session", return_value=_FakeSession([entity])), patch(
+        "src.source_import.pulsemcp_fetcher.fetch_pulsemcp", new=AsyncMock(return_value=None),
+    ) as fetch:
+        assert await srcs.get_mcp_registry_signals("o", "r") is None
+    fetch.assert_awaited_once()

@@ -508,7 +508,8 @@ async def get_mcp_registry_signals(owner: str, repo: str) -> dict | None:
             )
 
             res = await fetch_pulsemcp(parse_pulsemcp_url(source_url), source_url)
-            return _extract_mcp_signals(res.community_signals)
+            # None = PulseMCP unavailable (no API key) — axis E simply stays absent.
+            return _extract_mcp_signals(res.community_signals) if res else None
     except Exception:
         logger.debug(
             "live MCP-registry fetch failed for %s/%s", owner, repo, exc_info=True,
