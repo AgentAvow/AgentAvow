@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -107,12 +108,28 @@ def _categorize(row: CatalogRow) -> str:
 
 
 class CatalogSummary(BaseModel):
+    """Corpus-wide counts. Severity counters use the EXCLUSIVE buckets from
+    `_severity_bucket` (the same partition the list's `severity=` filter applies):
+
+    - `by_surface_critical` / `repo_scans_with_critical`: rows with >=1 critical finding.
+    - `by_surface_high` / `repo_scans_with_high`: rows with >=1 high finding and NO
+      critical ("high-only"). A row with both is counted under critical only.
+    - `by_surface_scanned` / `repo_scans_scanned`: rows that have a verdict (a trust
+      score; not skipped / errored). This is the honest denominator for any "% of
+      scanned tools" figure.
+    - `by_surface_skipped` / `repo_scans_skipped`: rows the scanner never graded.
+    - `repo_scans_total` / `by_surface`: every row in the corpus, graded or not.
+    """
     total_scans: int
     by_surface: dict[str, int]
     by_category: dict[str, int] = {}
     by_surface_critical: dict[str, int] = {}
     by_surface_high: dict[str, int] = {}
+    by_surface_scanned: dict[str, int] = {}
+    by_surface_skipped: dict[str, int] = {}
     repo_scans_total: int
+    repo_scans_scanned: int = 0
+    repo_scans_skipped: int = 0
     repo_scans_with_critical: int
     repo_scans_with_high: int
     x402_endpoints_total: int
@@ -151,6 +168,79 @@ def _guard_stale_score(score: int | None, critical: int | None) -> int | None:
     if score is not None and (critical or 0) > 0 and score >= 81:
         return 45
     return score
+
+
+# Exclusive severity buckets. ONE definition, shared by the summary counters, the
+# list's `severity=` filter and the /flagged-stat headline, so no two numbers on the
+# site can disagree about what "flagged" means.
+BUCKET_NA = "n/a"          # x402 compliance probe: not a code scan, no severity
+BUCKET_SKIPPED = "skipped"  # no verdict: fetch skipped, scan error, or never scored
+BUCKET_CRITICAL = "critical"
+BUCKET_HIGH = "high"       # >=1 high finding and NO critical ("high-only")
+BUCKET_CLEAN = "clean"     # a verdict with no high or critical finding
+_VERDICT_BUCKETS = (BUCKET_CRITICAL, BUCKET_HIGH, BUCKET_CLEAN)
+
+
+def _is_skipped(r: CatalogRow) -> bool:
+    """The scanner never graded this row (fetch skipped or scan error)."""
+    return bool(r.skipped or r.scan_error)
+
+
+def _severity_bucket(r: CatalogRow) -> str:
+    """Put a row in exactly one bucket.
+
+    A row with both a critical and a high finding lands in `critical` only. Counting
+    `critical` and `high` as two independent `if` branches double-counted every such
+    row in the headline stat (969 rows on 2026-10-01); this partition is what fixes it.
+    Rows without a verdict (skipped / errored / no trust score) are `skipped` and must
+    never sit in a "% of scanned" denominator.
+    """
+    if r.surface == "x402":
+        return BUCKET_NA
+    if _is_skipped(r) or r.trust_score is None:
+        return BUCKET_SKIPPED
+    if (r.critical or 0) > 0:
+        return BUCKET_CRITICAL
+    if (r.high or 0) > 0:
+        return BUCKET_HIGH
+    return BUCKET_CLEAN
+
+
+def _flagged_counts(rows: Iterable[CatalogRow]) -> dict[str, Any]:
+    """Exclusive severity counts over `rows` (x402 rows are ignored). Pure, so the
+    endpoint and its tests share one implementation. Keys:
+
+    - `scanned_total`: rows with a verdict (the denominator of every pct here)
+    - `critical`: >=1 critical finding
+    - `high_only`: >=1 high finding, no critical
+    - `flagged`: critical + high_only (every row with a high-or-critical, counted once)
+    - `clean`: a verdict with no high or critical finding (scanned_total - flagged)
+    - `skipped`: rows with no verdict; `total` = scanned_total + skipped
+    - `pct`: flagged / scanned_total as a whole percent (None when nothing scanned);
+      `flagged_pct` / `critical_pct` carry one decimal
+    """
+    c = {"scanned_total": 0, "critical": 0, "high_only": 0, "clean": 0, "skipped": 0}
+    for r in rows:
+        b = _severity_bucket(r)
+        if b == BUCKET_NA:
+            continue
+        if b == BUCKET_SKIPPED:
+            c["skipped"] += 1
+            continue
+        c["scanned_total"] += 1
+        if b == BUCKET_CRITICAL:
+            c["critical"] += 1
+        elif b == BUCKET_HIGH:
+            c["high_only"] += 1
+        else:
+            c["clean"] += 1
+    n = c["scanned_total"]
+    c["flagged"] = c["critical"] + c["high_only"]
+    c["total"] = n + c["skipped"]
+    c["pct"] = round(c["flagged"] / n * 100) if n else None
+    c["flagged_pct"] = round(c["flagged"] / n * 100, 1) if n else None
+    c["critical_pct"] = round(c["critical"] / n * 100, 1) if n else None
+    return c
 
 
 def _normalize_row(surface: str, raw: dict) -> CatalogRow:
@@ -234,7 +324,7 @@ def _load_surface(surface: str, path: Path, results_key: str = "results") -> lis
     return [_normalize_row(surface, r) for r in results if isinstance(r, dict)]
 
 
-def _build_catalog() -> dict[str, Any]:
+def _load_rows() -> list[CatalogRow]:
     rows: list[CatalogRow] = []
     rows += _load_surface("x402", _DATA_DIR / "x402-results.json")
     rows += _load_surface("mcp", _DATA_DIR / "mcp-registry-results.json")
@@ -245,6 +335,14 @@ def _build_catalog() -> dict[str, Any]:
     rows += _load_surface(
         "openclaw", _DATA_DIR / "openclaw-results.json", results_key="repos"
     )
+    return rows
+
+
+def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
+    """Assemble the cached catalog (rows + summary + facets). `rows` defaults to the
+    launch-scan files on disk; tests pass fixture rows directly."""
+    if rows is None:
+        rows = _load_rows()
 
     # Categorize the static corpus ONCE at build time (cached) — doing it per request
     # over ~37k rows was a real CPU cost. Community rows (small, fresh) categorize per
@@ -258,16 +356,24 @@ def _build_catalog() -> dict[str, Any]:
     by_surface = {s: 0 for s in surfaces}
     by_surface_critical = {s: 0 for s in surfaces}
     by_surface_high = {s: 0 for s in surfaces}
+    by_surface_scanned = {s: 0 for s in surfaces}
+    by_surface_skipped = {s: 0 for s in surfaces}
+    # Exclusive buckets (see _severity_bucket): a row counts under critical OR high,
+    # never both, and only rows with a verdict count as scanned.
     for r in rows:
         by_surface[r.surface] = by_surface.get(r.surface, 0) + 1
-        if (r.critical or 0) > 0:
+        b = _severity_bucket(r)
+        if b == BUCKET_CRITICAL:
             by_surface_critical[r.surface] = by_surface_critical.get(r.surface, 0) + 1
-        if (r.high or 0) > 0:
+        elif b == BUCKET_HIGH:
             by_surface_high[r.surface] = by_surface_high.get(r.surface, 0) + 1
+        if b in _VERDICT_BUCKETS:
+            by_surface_scanned[r.surface] = by_surface_scanned.get(r.surface, 0) + 1
+        elif b == BUCKET_SKIPPED:
+            by_surface_skipped[r.surface] = by_surface_skipped.get(r.surface, 0) + 1
 
     repo_rows = [r for r in rows if r.surface != "x402"]
-    repo_with_critical = sum(1 for r in repo_rows if (r.critical or 0) > 0)
-    repo_with_high = sum(1 for r in repo_rows if (r.high or 0) > 0)
+    repo_counts = _flagged_counts(repo_rows)
     x402_rows = [r for r in rows if r.surface == "x402"]
     x402_compliant = sum(1 for r in x402_rows if r.has_x402_header)
 
@@ -276,9 +382,13 @@ def _build_catalog() -> dict[str, Any]:
         by_surface=by_surface,
         by_surface_critical=by_surface_critical,
         by_surface_high=by_surface_high,
+        by_surface_scanned=by_surface_scanned,
+        by_surface_skipped=by_surface_skipped,
         repo_scans_total=len(repo_rows),
-        repo_scans_with_critical=repo_with_critical,
-        repo_scans_with_high=repo_with_high,
+        repo_scans_scanned=repo_counts["scanned_total"],
+        repo_scans_skipped=repo_counts["skipped"],
+        repo_scans_with_critical=repo_counts["critical"],
+        repo_scans_with_high=repo_counts["high_only"],
         x402_endpoints_total=len(x402_rows),
         x402_compliant=x402_compliant,
     )
@@ -411,19 +521,21 @@ async def scan_catalog(
             or needle in _norm(getattr(r, "full_name", ""))
             or needle in _norm(getattr(r, "owner", ""))
         ]
+    # Severity = the exclusive buckets from _severity_bucket, so these totals are the
+    # same numbers /flagged-stat reports. "clean" is stricter than the stat's clean
+    # bucket: it also requires a Trusted-band score (>= 80), i.e. "safe to connect",
+    # not merely "no high or critical finding".
     if severity == "critical":
-        filtered = [r for r in filtered if (r.critical or 0) > 0]
+        filtered = [r for r in filtered if _severity_bucket(r) == BUCKET_CRITICAL]
     elif severity == "high":
-        filtered = [r for r in filtered if (r.high or 0) > 0 and (r.critical or 0) == 0]
+        filtered = [r for r in filtered if _severity_bucket(r) == BUCKET_HIGH]
     elif severity == "clean":
         filtered = [
             r for r in filtered
-            if (r.critical or 0) == 0
-            and (r.high or 0) == 0
-            and (r.trust_score or 0) >= 80
+            if _severity_bucket(r) == BUCKET_CLEAN and (r.trust_score or 0) >= 80
         ]
     elif severity == "skipped":
-        filtered = [r for r in filtered if r.skipped or r.scan_error]
+        filtered = [r for r in filtered if _severity_bucket(r) == BUCKET_SKIPPED]
 
     # Grade filter (curation): "certified" = A+ only; A/B/C = that band and above.
     if grade:
@@ -488,22 +600,60 @@ async def refresh_catalog() -> dict[str, Any]:
 
 @router.get("/flagged-stat", dependencies=[Depends(rate_limit_reads)])
 async def flagged_stat(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """Single source of truth for the headline stat: % of scanned tools with a high/critical
-    finding. Both the homepage and the Index read THIS so they always show the same number
-    (computed server-side over the same merged catalog + community rows)."""
+    """Single source of truth for the headline stat: the share of SCANNED tools that carry
+    a high or critical finding. The homepage, the Index and the State of Agent Security
+    report all read this, computed server-side over the launch corpus + community rows.
+
+    Every count is an exclusive bucket (see `_severity_bucket`), so a tool is counted
+    once no matter how many findings it has, and the denominator is only tools that
+    actually received a verdict. x402 endpoints are compliance probes, not code scans,
+    and are excluded entirely.
+
+    Response:
+    - `scanned_total`: tools with a verdict (the denominator). Alias: `scanned`.
+    - `critical`: tools with >=1 critical finding.
+    - `high_only`: tools with >=1 high finding and no critical.
+    - `flagged`: critical + high_only. Every flagged tool counted exactly once.
+    - `clean`: scanned tools with no high or critical finding.
+    - `skipped`: catalog rows with no verdict (fetch skipped / scan error). NOT in the
+      denominator. `total` = scanned_total + skipped.
+    - `pct`: flagged / scanned_total, whole percent (None if nothing scanned);
+      `flagged_pct` and `critical_pct` carry one decimal.
+    - `by_surface`: the same keys per surface (mcp, npm, pypi, openclaw, github, ...).
+
+    `pct`, `flagged` and `scanned` are kept for existing callers. Before 2026-10-01 they
+    double-counted tools with both a critical and a high finding and divided by every
+    catalog row including never-scanned ones; they are now the honest figures.
+
+    Agreement guarantee: `critical`, `high_only` and `skipped` (overall and per surface)
+    equal the `total` of `GET /public/scan-catalog?severity=critical|high|skipped`. The
+    list's `severity=clean` additionally requires a score >= 80, so it is a subset of
+    `clean` here.
+    """
     catalog = _get_catalog()
-    summary = catalog["summary"]
-    community = await _community_rows(db)
-    by_c = dict(summary.by_surface_critical or {})
-    by_h = dict(summary.by_surface_high or {})
-    crit = sum(by_c.values()) + sum(1 for r in community if (r.critical or 0) > 0)
-    high = sum(by_h.values()) + sum(1 for r in community if (r.high or 0) > 0)
-    scanned = (summary.repo_scans_total or 0) + sum(
-        1 for r in community if r.surface != "x402" and r.trust_score is not None
-    )
-    flagged = crit + high
-    pct = round((flagged / scanned) * 100) if scanned else None
-    return {"pct": pct, "flagged": flagged, "scanned": scanned}
+    rows: list[CatalogRow] = list(catalog["rows"]) + await _community_rows(db)
+    totals = _flagged_counts(rows)
+    grouped: dict[str, list[CatalogRow]] = {}
+    for r in rows:
+        if r.surface != "x402":
+            grouped.setdefault(r.surface, []).append(r)
+    by_surface = {s: _flagged_counts(grouped[s]) for s in sorted(grouped)}
+    return {
+        # legacy keys (same meaning as the new ones, now computed honestly)
+        "pct": totals["pct"],
+        "flagged": totals["flagged"],
+        "scanned": totals["scanned_total"],
+        # explicit, exclusive counts
+        "scanned_total": totals["scanned_total"],
+        "critical": totals["critical"],
+        "high_only": totals["high_only"],
+        "clean": totals["clean"],
+        "skipped": totals["skipped"],
+        "total": totals["total"],
+        "flagged_pct": totals["flagged_pct"],
+        "critical_pct": totals["critical_pct"],
+        "by_surface": by_surface,
+    }
 
 
 @router.get("/percentile", dependencies=[Depends(rate_limit_reads)])
