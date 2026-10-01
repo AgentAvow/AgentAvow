@@ -14,6 +14,10 @@ A URL whose path looks like it carries a secret (a long token or a UUID) is not
 sent either; it is reported as not scanned.
 The first time there is nothing to scan at all, the hook shows one line saying so
 (and how to scan a tool on demand), then never repeats it. That line makes no request.
+Each verdict (score, tier, grade, the signed per-tool digests) is kept in the cache
+file so the per-call gate (agentavow_pretool_gate.py) can act on it without a request.
+A server whose tool definitions the gate saw change since the grade is re-graded here
+at the next session start, and reported again.
 
 Design guarantees (deliberate):
   • OPT-IN — nothing runs unless YOU install this hook. AgentAvow's MCP server never
@@ -37,9 +41,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 API = "https://agentavow.com/api/v1/public/scan"
+WEB = "https://agentavow.com"
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 TIMEOUT = 8  # seconds per scan; short so startup is never held up
 BUDGET = 20  # seconds for the whole run; stays inside the hook's 30s timeout
@@ -214,11 +219,54 @@ def _targets() -> list[dict]:
     return list(seen.values())
 
 
-def _verdict(data: dict) -> tuple[int, str, int]:
+def _verdict(data: dict) -> dict:
+    """The parts of a scan response the hook reports and the gate acts on."""
     score = int(data.get("trust_score") or 0)
     items = (data.get("findings") or {}).get("items") or []
     blocking = sum(1 for i in items if i.get("severity") in ("critical", "high"))
-    return score, ("safe" if (score >= 81 and blocking == 0) else "needs review"), blocking
+    digests = data.get("tool_digests")
+    return {
+        "score": score,
+        "verdict": "safe" if (score >= 81 and blocking == 0) else "needs review",
+        "blocking": blocking,
+        "tier": str(data.get("trust_tier") or ""),
+        "grade": str(data.get("grade") or ""),
+        "tool_digests": digests if isinstance(digests, dict) else {},
+        "tool_manifest_digest": data.get("tool_manifest_digest") or None,
+    }
+
+
+def _record(target: dict, result: dict, now: float) -> dict:
+    """The cache entry for a graded server: the target's identity (name is the key,
+    id is the sanitized URL or package coordinate), the verdict, the signed per-tool
+    digests, the report link, and when it was approved. The gate reads this."""
+    rec = {"id": target["id"], "kind": target["kind"], "approved_at": now}
+    if target["kind"] == "mcp":
+        rec["url"] = target["url"]
+        rec["report_url"] = (
+            f"{WEB}/check/mcp?endpoint={urllib.parse.quote(target['url'], safe='')}")
+    else:
+        rec["registry"] = target["registry"]
+        rec["pkg"] = target["pkg"]
+        rec["report_url"] = f"{WEB}/check/pkg/{target['registry']}/{target['pkg']}"
+        result = dict(result, tool_digests={}, tool_manifest_digest=None)  # not live-served
+    rec.update(result)
+    return rec
+
+
+def _drifted(entry: dict) -> bool:
+    """True when the gate saw this server serve tool definitions that differ from
+    the ones its grade signed. Tools the gate could not hash are left out."""
+    seen = entry.get("last_seen")
+    approved = entry.get("tool_digests")
+    if not isinstance(seen, dict) or not isinstance(approved, dict) or not approved:
+        return False
+    live = seen.get("tool_digests")
+    if not isinstance(live, dict) or not live:
+        return False
+    skip = set(seen.get("unhashable") or [])
+    return {k: v for k, v in approved.items() if k not in skip} != {
+        k: v for k, v in live.items() if k not in skip}
 
 
 def _install_source() -> str:
@@ -244,9 +292,12 @@ def _fetch(path: str, params: dict) -> dict:
         raise
 
 
-def _scan(target: dict) -> tuple[int, str, int]:
+def _scan(target: dict, force: bool = False) -> dict:
     if target["kind"] == "mcp":
-        return _verdict(_fetch("/mcp", {"endpoint": target["url"]}))
+        params = {"endpoint": target["url"]}
+        if force:
+            params["force"] = "true"  # the definitions changed; a cached grade is stale
+        return _verdict(_fetch("/mcp", params))
     return _verdict(_fetch(f"/package/{target['registry']}/{target['pkg']}", {}))
 
 
@@ -259,9 +310,13 @@ def _load_cache() -> dict:
 
 
 def _save_cache(cache: dict) -> bool:
+    """Write the whole file at once (temp file + rename) so a gate call running at
+    the same moment never reads a half-written file."""
     try:
         CACHE.parent.mkdir(parents=True, exist_ok=True)
-        CACHE.write_text(json.dumps(cache))
+        tmp = CACHE.with_name(f"{CACHE.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(cache))
+        os.replace(tmp, CACHE)
         return True
     except Exception:
         return False
@@ -292,16 +347,21 @@ def _show_intro_once() -> None:
 
 
 def _is_cached(entry: object, target_id: str, now: float) -> bool:
-    """A scanned target is cached as its id (a string). An unscannable one is cached
-    as {"id", "retry_after"} and counts as cached until that time passes."""
+    """A graded target is cached as a record ({"id", "approved_at", verdict, ...})
+    and stays cached until the gate reports its definitions drifted. An unscannable
+    one is cached as {"id", "retry_after"} until that time passes. A withheld URL is
+    cached as its id string. A bare id string for a graded target was written by a
+    version before the gate existed and carries no verdict, so it is graded once more."""
     if isinstance(entry, str):
-        return entry == target_id
-    if isinstance(entry, dict):
-        try:
-            return entry.get("id") == target_id and now < float(entry.get("retry_after") or 0)
-        except (TypeError, ValueError):
-            return False
-    return False
+        return entry == target_id and target_id.startswith("withheld:")
+    if not isinstance(entry, dict) or entry.get("id") != target_id:
+        return False
+    if "approved_at" in entry:
+        return not _drifted(entry)
+    try:
+        return now < float(entry.get("retry_after") or 0)
+    except (TypeError, ValueError):
+        return False
 
 
 def main() -> None:
@@ -321,11 +381,13 @@ def main() -> None:
     cache = _load_cache()
     started = time.monotonic()
     now = time.time()
-    results: dict[str, tuple[int, str, int] | None] = {}  # id -> verdict, None = unscannable
+    results: dict[str, dict | None] = {}  # id -> verdict, None = unscannable
     lines: list[str] = []
     for t in targets:
-        if _is_cached(cache.get(t["name"]), t["id"], now):
+        entry = cache.get(t["name"])
+        if _is_cached(entry, t["id"], now):
             continue
+        regraded = isinstance(entry, dict) and _drifted(entry)
         if t["kind"] == "withheld":
             cache[t["name"]] = t["id"]
             lines.append(f"➖ MCP '{t['name']}' ({t['host']}): not scanned — its URL looks "
@@ -335,7 +397,7 @@ def main() -> None:
             if time.monotonic() - started > BUDGET:
                 break  # out of time; the rest are picked up next session
             try:
-                results[t["id"]] = _scan(t)
+                results[t["id"]] = _scan(t, force=regraded)
             except _UnscannableError:
                 results[t["id"]] = None
             except Exception:
@@ -347,11 +409,13 @@ def main() -> None:
             lines.append(f"➖ MCP '{t['name']}' ({coord}): not scanned — AgentAvow "
                          "couldn't read it (it may need sign-in).")
             continue
-        score, verdict, blocking = result
-        cache[t["name"]] = t["id"]
+        cache[t["name"]] = _record(t, result, now)
+        score, verdict, blocking = result["score"], result["verdict"], result["blocking"]
         flag = "✅" if verdict == "safe" else "⚠️"
         extra = f", {blocking} blocking finding(s)" if blocking else ""
-        lines.append(f"{flag} MCP '{t['name']}' ({coord}): AgentAvow {score}/100 — "
+        changed = ("its tool definitions changed since the last grade; re-graded: "
+                   if regraded else "")
+        lines.append(f"{flag} MCP '{t['name']}' ({coord}): {changed}AgentAvow {score}/100 — "
                      f"{verdict}{extra}.")
 
     _save_cache(cache)

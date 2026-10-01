@@ -12,8 +12,8 @@ your setup in a directory review. You opt in; you stay in control.
 
 The **AgentAvow Trust** plugin bundles the connector, a `/scan` command, a skill
 that scans a server or package before Claude adds it (the same idea as Option 1),
-and the SessionStart hook described under Option 2. Find it in the Anthropic plugin
-directory, or install it from the repo:
+the SessionStart hook described under Option 2, and the per-call gate described
+below it. Find it in the Anthropic plugin directory, or install it from the repo:
 
 ```
 /plugin marketplace add AgentAvow/AgentAvow
@@ -23,8 +23,8 @@ directory, or install it from the repo:
 **Test it:** run `/scan npm chalk`. Then add an MCP server and start a new session;
 its verdict appears in context.
 
-If you install the plugin, skip Option 2. It is the same hook, and running both
-scans everything twice.
+If you install the plugin, skip Option 2. It is the same pair of hooks, and running
+both scans everything twice.
 
 ## Without the plugin
 
@@ -66,10 +66,13 @@ directly, so it works at startup before MCP servers connect.
 mkdir -p ~/.claude/hooks
 curl -fsSL https://raw.githubusercontent.com/AgentAvow/AgentAvow/main/integrations/claude-code/agentavow_precheck.py \
   -o ~/.claude/hooks/agentavow_precheck.py
+curl -fsSL https://raw.githubusercontent.com/AgentAvow/AgentAvow/main/integrations/claude-code/agentavow_pretool_gate.py \
+  -o ~/.claude/hooks/agentavow_pretool_gate.py
 ```
 
 Then add this to `~/.claude/settings.json` (merge under `hooks`, keeping anything
-you already have):
+you already have). The second block is the per-call gate; leave it out if you want
+the session-start verdicts only:
 
 ```
 {
@@ -77,6 +80,10 @@ you already have):
     "SessionStart": [
       { "matcher": "startup|resume",
         "hooks": [ { "type": "command", "command": "python3 ~/.claude/hooks/agentavow_precheck.py", "timeout": 30 } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "mcp__.*",
+        "hooks": [ { "type": "command", "command": "python3 ~/.claude/hooks/agentavow_pretool_gate.py", "timeout": 8 } ] }
     ]
   }
 }
@@ -97,18 +104,63 @@ If you have no remote MCP servers configured yet, the hook instead shows a singl
 saying there is nothing to scan and how to scan a tool on demand. It shows that line once
 per machine and makes no request for it.
 
+## The per-call gate
+
+The session-start hook grades a server once. The gate acts on that grade every time
+Claude is about to call one of the server's tools (tool names look like
+`mcp__<server>__<tool>`). It makes no call to AgentAvow.
+
+- **Deny:** the server's grade is in the `blocked` tier (0 to 10 out of 100). The
+  reason Claude sees gives the score and the report link.
+- **Ask:** a remote server now serves a definition for this tool that differs from
+  the one AgentAvow graded, or a tool the grade never saw. The gate fetches
+  `tools/list` from the server itself (at most once per server per 15 minutes) and
+  recomputes the per-tool digest the signed attestation carries, the same derivation
+  anyone can run offline. You decide; the server is re-graded at your next session
+  start.
+- **Allow, silently:** everything else. A server with no grade on file, a stdio
+  server (nothing served to re-fetch, so only its grade applies), a network error, a
+  timeout, a definition the gate cannot canonicalize.
+
+Settings, all optional, read from the environment and never sent anywhere:
+
+- `AGENTAVOW_GATE_DENY_BELOW` (default: deny only the `blocked` tier). A number
+  such as `51` denies any server graded below it. A tier name (`restricted`,
+  `minimal`, `standard`, `trusted`, `verified`) denies anything below that tier's
+  floor. `off` never denies; a changed definition still asks.
+- `AGENTAVOW_GATE_RECHECK_SECONDS` (default `900`). How often a remote server's
+  `tools/list` is re-fetched.
+- `AGENTAVOW_GATE=off` turns the gate off. With the manual install, removing the
+  `PreToolUse` block does the same; with the plugin, uninstalling it does.
+
+**Test it** without starting Claude. With a graded server named `example` in your
+config:
+
+```
+echo '{"hook_event_name":"PreToolUse","tool_name":"mcp__example__some_tool","session_id":"t","tool_input":{}}' \
+  | python3 ~/.claude/hooks/agentavow_pretool_gate.py
+```
+
+Silence means allow. A deny or ask comes back as a JSON object with a
+`permissionDecision` and a one-line reason.
+
 ## Guarantees
 
 - **Opt-in.** Nothing runs unless you install it.
-- **Warn, never block.** A low score adds context; it never stops your session.
+- **Warn first.** A low score adds context. The only thing that can stop a call is
+  the gate, and by default only for a server graded in the blocked tier; a changed
+  definition asks.
 - **Fail-open.** A network hiccup or an unrecognized config stays silent and exits
-  cleanly. It cannot break session startup.
+  cleanly. It cannot break session startup, and the gate allows the call if anything
+  at all goes wrong.
 - **Nothing local leaves your machine.** Servers on localhost or a private network
   are skipped. A URL whose path looks like it carries a secret is withheld and
   reported as not scanned. Credentials and query strings are stripped from a URL
-  before it is sent.
+  before it is sent to AgentAvow. The gate talks only to the server being called,
+  with the `Authorization` header from your config if there is one, as Claude Code
+  itself does; that header is never stored or printed.
 - **Quiet.** Each server is scanned once. One AgentAvow can't read (it needs
   sign-in, for example) is reported once as "not scanned" and left alone for a week.
 
-The hook and the rule live in the repo at
+The hooks and the rule live in the repo at
 [`integrations/claude-code`](https://github.com/AgentAvow/AgentAvow/tree/main/integrations/claude-code).

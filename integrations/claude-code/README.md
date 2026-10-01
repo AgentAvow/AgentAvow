@@ -33,11 +33,12 @@ start of each session, and surfaces the verdict. No need to remember.
 **Install:**
 ```bash
 mkdir -p ~/.claude/hooks
-cp agentavow_precheck.py ~/.claude/hooks/
-chmod +x ~/.claude/hooks/agentavow_precheck.py
+cp agentavow_precheck.py agentavow_pretool_gate.py ~/.claude/hooks/
+chmod +x ~/.claude/hooks/agentavow_precheck.py ~/.claude/hooks/agentavow_pretool_gate.py
 ```
 Then merge the contents of `settings.hooks.json` into `~/.claude/settings.json`
-(under the `hooks` key — keep any hooks you already have).
+(under the `hooks` key — keep any hooks you already have). Its `PreToolUse` block is
+the per-call gate (below); leave it out for session-start verdicts only.
 
 **Test it:**
 1. Direct run (no Claude needed) — after you've added at least one HTTP MCP server:
@@ -59,7 +60,32 @@ network are never sent anywhere, a URL whose path looks like it carries a secret
 withheld, and credentials and query strings are stripped from a URL before it leaves
 your machine.
 
-**Prefer a plugin?** The same hook ships in the AgentAvow Trust plugin, with the
+---
+
+## The per-call gate (`agentavow_pretool_gate.py`)
+
+Runs before each MCP tool call and acts on the grade the session-start hook stored.
+It never calls AgentAvow. **Deny** when the server's grade is in the `blocked` tier
+(0 to 10 out of 100), with the score and report link as the reason. **Ask** when a
+remote server now serves a definition for this tool that differs from the one that
+was graded, or a tool the grade never saw: the gate re-fetches `tools/list` from the
+server itself (at most once per server per 15 minutes) and recomputes the per-tool
+digest the signed attestation carries. **Allow**, silently, in every other case:
+no grade on file, a stdio server (verdict only), any error or timeout.
+
+Settings, all optional, read from the environment and never sent anywhere:
+`AGENTAVOW_GATE_DENY_BELOW` (default: the `blocked` tier; a number such as `51` or a
+tier name such as `minimal`; `off` never denies), `AGENTAVOW_GATE_RECHECK_SECONDS`
+(default `900`), `AGENTAVOW_GATE=off` (turns the gate off).
+
+Test it without Claude, with a graded server named `example` in your config:
+```bash
+echo '{"hook_event_name":"PreToolUse","tool_name":"mcp__example__some_tool","session_id":"t","tool_input":{}}' \
+  | python3 ~/.claude/hooks/agentavow_pretool_gate.py
+```
+Silence means allow; a deny or ask is a JSON object with a `permissionDecision`.
+
+**Prefer a plugin?** The same hooks ship in the AgentAvow Trust plugin, with the
 connector and a `/scan` command: `/plugin marketplace add AgentAvow/AgentAvow`, then
 `/plugin install agentavow-trust@agentavow`. Use one or the other, not both.
 
