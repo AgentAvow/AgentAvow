@@ -2907,6 +2907,31 @@ def _looks_like_mcp_server(eco: str, name: str, manifest: dict | None) -> bool:
     return False
 
 
+def _declared_scope_from_artifact(files: dict) -> dict:
+    """``.agentavow.yml`` from an unpacked artifact's files (``{path: ArtifactFile}``),
+    parsed into the same ``declared_scope`` shape the repo scan produces. The file must
+    sit at the artifact root (one wrapper directory is tolerated). ``{}`` if absent,
+    binary, or malformed — a bad manifest is simply no declaration."""
+    try:
+        from src.scanner.behavioral.manifest import parse_manifest
+        for path, f in (files or {}).items():
+            parts = [p for p in str(path).replace("\\", "/").split("/") if p]
+            if not parts or parts[-1].lower() not in (".agentavow.yml", ".agentavow.yaml"):
+                continue
+            if len(parts) > 2:
+                continue  # nested copies are not the tool's own declaration
+            text = getattr(f, "text", None)
+            if not isinstance(text, str):
+                continue
+            scope = parse_manifest(text)
+            if scope.present:
+                return {"present": True, "egress": scope.egress,
+                        "capabilities": scope.capabilities, "note": scope.note}
+    except Exception:  # noqa: BLE001 — a manifest must never break a scan
+        pass
+    return {}
+
+
 async def scan_package(surface: str, name: str, version: str | None = None) -> ScanResult:
     """Grade a PUBLISHED npm / PyPI package directly by coordinate — no GitHub repo
     required. Fetches + STATICALLY scans the real artifact tree (the same 12-category
@@ -2986,6 +3011,10 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     result.findings = findings
     result.files_scanned = files_scanned
     result.total_scannable_files = files_scanned
+    # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
+    # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
+    # tier judges observed egress against these declared hosts.
+    result.declared_scope = _declared_scope_from_artifact(fetched.files)
     result.primary_language = (
         "JavaScript/TypeScript" if eco == "npm"
         else "Rust" if eco == "crates"
