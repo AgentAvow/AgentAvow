@@ -119,7 +119,8 @@ async def run_fixture_sandbox(entry: dict, *, timeout: int = 60) -> BehavioralRe
     canary = CANARY_PREFIX + os.urandom(6).hex()
     files = {
         "mcp_exercise.py": (SANDBOX_DIR / "mcp_exercise.py").read_bytes(),
-        "synthetic_args.py": (SANDBOX_DIR / "synthetic_args.py").read_bytes(),
+        "synthetic_args.py": (ROOT / "src" / "scanner" / "behavioral"
+                              / "synthetic_args.py").read_bytes(),
         "_mcp_stdio.py": (FIXTURE_DIR / "_mcp_stdio.py").read_bytes(),
         entry["file"]: fixture.read_bytes(),
     }

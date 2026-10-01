@@ -33,3 +33,10 @@ def test_known_good_entries_are_well_formed():
     for pkg in CORPUS["known_good"]:
         assert pkg["surface"] in ("npm", "pypi")
         assert pkg["name"]
+
+
+def test_sandbox_mode_ships_files_that_exist():
+    """Regression: the generator lives under src/, not scripts/sandbox/."""
+    for rel in ("scripts/sandbox/mcp_exercise.py", "src/scanner/behavioral/synthetic_args.py",
+                "tests/fixtures/behavioral/_mcp_stdio.py"):
+        assert (run_eval.ROOT / rel).is_file(), rel
