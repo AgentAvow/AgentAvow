@@ -1,0 +1,130 @@
+{
+  "note": "Pinned 2026-10-01 from the live scan endpoint; a fresh fetch yields a fresh attestation with new timestamps, so this file is the fixture, not the URL. observed_tools is the tools/list the server served at the same time, fetched directly from the server (MCP Streamable HTTP: initialize, notifications/initialized, tools/list), unmodified.",
+  "attestation_url": "https://agentavow.com/api/v1/public/scan/mcp?endpoint=https%3A%2F%2Fmcp.deepwiki.com%2Fmcp",
+  "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
+  "jwk": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "JwovTLVbpgk85zlMNruTiLzp85dAucsZWngs8NisBFg",
+    "kid": "agentgraph-security-v1",
+    "use": "sig",
+    "alg": "EdDSA"
+  },
+  "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTAyVDIxOjI4OjM0LjA4NTE5NyswMDowMCIsImlzc3VlZEF0IjoiMjAyNi0xMC0wMVQyMToyODozNC4wODUxOTcrMDA6MDAiLCJpc3N1ZXIiOnsiaWQiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJuYW1lIjoiQWdlbnRBdm93IiwidXJsIjoiaHR0cHM6Ly9hZ2VudGdyYXBoLmNvIn0sInJlY29tbWVuZGVkTGltaXRzIjp7Im1heF90b2tlbnNfcGVyX2NhbGwiOjQwOTYsInJlcXVlc3RzX3Blcl9taW51dGUiOjMwLCJyZXF1aXJlX3VzZXJfY29uZmlybWF0aW9uIjpmYWxzZX0sInNjYW4iOnsiY2F0ZWdvcnlTY29yZXMiOnsiY29kZV9zYWZldHkiOjEwMCwiZGF0YV9oYW5kbGluZyI6MTAwLCJkZXBlbmRlbmN5X2hlYWx0aCI6MTAwLCJmaWxlc3lzdGVtX2FjY2VzcyI6MTAwLCJzZWNyZXRfaHlnaWVuZSI6MTAwfSwiY292ZXJhZ2UiOnsiZGJfc25hcHNob3RzIjp7fSwibGl2ZV9vYnNlcnZlZCI6dHJ1ZSwicG9pbnRfaW5fdGltZSI6IjIwMjYtMTAtMDFUMjE6Mjg6MjIuNjU3MDY0WiIsInByb3ZlbmFuY2VfYmluZGluZyI6Im4vYSIsInNjYW5fZGVwdGgiOiJhcnRpZmFjdCtsaXZlIiwic3VyZmFjZSI6Im1jcCJ9LCJmaWxlc1NjYW5uZWQiOjMsImZpbGVzVG90YWwiOjMsImZpbmRpbmdzIjp7ImNhdGVnb3JpZXMiOnt9LCJjcml0aWNhbCI6MCwiY3JpdGljYWxfYWxsIjowLCJoaWdoIjowLCJoaWdoX2FsbCI6MCwiaXRlbXMiOltdLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjowfSwicG9zaXRpdmVTaWduYWxzIjpbIjMgdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0Ijoid2FybmluZ3MiLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDphc2tfd2lraV9xdWVzdGlvbiI6InNoYTI1NjoxNzFhNTNjOTcyNTg3NDI1OGIwYjExMjViYzFkMWM1MTdlMWIwMmY5MWEyMzYwOTZhMzdmNTNjYzNhNzYzZGM5IiwidG9vbDpyZWFkX3dpa2lfY29udGVudHMiOiJzaGEyNTY6MzU4MmE4MTA4OWQxMjA2MzRkNjgxY2NmOTRlOWFiN2YxNWY0NzFkZGQ0OGY0YTgyZTA2YjA1ZDEwOTA1ZDljNCIsInRvb2w6cmVhZF93aWtpX3N0cnVjdHVyZSI6InNoYTI1Njo5YmQ1N2ZmM2U5NTM0YmJlZDU0MTY3ZWYxYTc0YjJiYzBlNGI0NjEyOGRiMjgyMTg3NjdmMGVlZDZlOGY3OWE4In0sInRvb2xNYW5pZmVzdERpZ2VzdCI6InNoYTI1Njo5ZDRhN2Q0MmUyYjZjMDI1MDk5NTcwYjZkZmZmOTc3ZjllNThlYTNmY2U5OGY3MjdjNTg0NTRlOTM2MDI1ZTg0IiwidHJ1c3RTY29yZSI6NzQsInRydXN0VGllciI6InN0YW5kYXJkIn0sInNjYW5uZWRBdCI6IjIwMjYtMTAtMDFUMjE6Mjg6MjIuNjU3MjQzKzAwOjAwIiwic3ViamVjdCI6eyJpZCI6Im1jcDpodHRwczovL21jcC5kZWVwd2lraS5jb20vbWNwIiwicmVwbyI6Im1jcDpodHRwczovL21jcC5kZWVwd2lraS5jb20vbWNwIn0sInR5cGUiOiJTZWN1cml0eVBvc3R1cmVBdHRlc3RhdGlvbiJ9.YjzVmszp_aYR-Lc1YBgwMUgkZ0_nupNuxd-9eU4z62BJlnRjlgANMwSHcVKYHVe0bSXSGdk9_SOZXcWf-r9ZDQ",
+  "observed_tools": [
+    {
+      "name": "ask_wiki_question",
+      "description": "Ask any question about a GitHub repository's codebase and get an AI-powered answer\ngrounded in its DeepWiki.",
+      "inputSchema": {
+        "properties": {
+          "repoName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "GitHub repository or list of repositories (max 10) in owner/repo format."
+          },
+          "question": {
+            "description": "The question to ask about the repository.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoName",
+          "question"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "_meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "read_wiki_contents",
+      "description": "View documentation about a GitHub repository.",
+      "inputSchema": {
+        "properties": {
+          "repoName": {
+            "description": "GitHub repository in owner/repo format (e.g. \"facebook/react\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoName"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "_meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "read_wiki_structure",
+      "description": "Get a list of documentation topics for a GitHub repository.",
+      "inputSchema": {
+        "properties": {
+          "repoName": {
+            "description": "GitHub repository in owner/repo format (e.g. \"facebook/react\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoName"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "_meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      }
+    }
+  ]
+}
