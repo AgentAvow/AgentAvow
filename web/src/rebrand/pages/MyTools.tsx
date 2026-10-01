@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
+import { TrustMini } from '../components/TrustMark'
 import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
-import { getTrustTier } from '../../components/trust/gradeSystem'
 import { Reveal } from '../components/motion'
 
 // Confetti pieces — fixed trajectories so the burst is stable across renders.
@@ -95,19 +95,6 @@ function useAppStatus() {
     queryFn: async () => (await api.get<{ installations: Installation[]; app_configured: boolean }>('/account/github-app/status')).data,
     retry: 0,
   })
-}
-
-/** A small Trust pill — the 0–100 number, coloured by tier (dual-mark system). */
-function GradeBadge({ score }: { score?: number | null; grade?: string | null }) {
-  if (score == null) return null
-  const t = getTrustTier(score)
-  return (
-    <span
-      className="grid place-items-center min-w-[30px] h-[24px] px-1.5 rounded-md font-mono text-[12px] font-bold shrink-0"
-      style={{ background: `${t.color}1f`, color: t.color }}
-      title={`${score}/100 · ${t.name}`}
-    >{score}</span>
-  )
 }
 
 // ── ZONE 1 — Add a tool ──────────────────────────────────────────────────────
@@ -463,7 +450,7 @@ function ToolRow({ c, highlight = false }: { c: Claim; highlight?: boolean }) {
 
   // Left-side state indicator: grade badge once scanned, else a status chip.
   let leftChip: React.ReactNode = null
-  if (verified && c.scanned) leftChip = <GradeBadge score={c.score} grade={c.grade} />
+  if (verified && c.scanned) leftChip = c.score != null ? <TrustMini score={c.score} /> : null
   else if (verified && c.private && !c.scanned) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/15 text-primary-light shrink-0">scanning…</span>
   else if (verified) leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-success/15 text-success shrink-0">✓ owned</span>
   else leftChip = <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-0.5 rounded bg-warning/15 text-warning shrink-0">unverified</span>

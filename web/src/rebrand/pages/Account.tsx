@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import api from '../../lib/api'
 import { useAuth } from '../../hooks/useAuth'
-import { TrustPill } from '../components/TrustMark'
+import { TrustMini } from '../components/TrustMark'
 import { NotifRow } from '../components/NotificationBits'
 import { Reveal, RevealStagger } from '../components/motion'
 
@@ -171,7 +171,7 @@ function WatchRow({ w, onRemove, removing }: { w: Watch; onRemove: () => void; r
   return (
     <div className="glass rounded-xl p-4 flex items-center gap-4">
       {w.last_score != null ? (
-        <TrustPill score={w.last_score} />
+        <TrustMini score={w.last_score} />
       ) : (
         <div className="w-11 h-11 rounded-xl grid place-items-center font-mono text-[10px] text-text-muted bg-surface-hover shrink-0">n/a</div>
       )}
