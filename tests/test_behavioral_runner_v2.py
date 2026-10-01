@@ -358,3 +358,20 @@ def test_dist_name_and_helpers():
     assert runner._dist_name("pkg>=1,<2") == "pkg"
     c = runner._new_canary()
     assert c.startswith("agentavow-canary-") and len(c) == len("agentavow-canary-") + 12
+
+
+@pytest.mark.parametrize("plan", ["npm-mcp", "pypi-mcp"])
+def test_the_real_tree_can_build_a_files_payload_for_every_mcp_plan(plan):
+    """Regression: the generator lives in src/, not scripts/sandbox/; a wrong path here
+    makes every MCP plan silently fall back to the exec plan in production."""
+    import base64
+    import gzip
+    import json
+
+    from src.scanner.behavioral import runner as r
+    payload = r._files_payload(plan, None)
+    assert payload, f"{plan}: a shipped source file is missing"
+    files = json.loads(gzip.decompress(base64.b64decode(payload)))
+    assert set(files) == set(r._PLAN_FILES[plan])
+    for name, b64 in files.items():
+        assert base64.b64decode(b64), name

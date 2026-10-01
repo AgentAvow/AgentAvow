@@ -21,6 +21,11 @@ COPY docs/ docs/
 COPY web/src/rebrand/docs/ docpages_content/
 
 # Run migrations and start (migrations handled by entrypoint)
+# Behavioral tier: the runner ships the in-container launcher/exerciser per run from
+# scripts/sandbox/; the eval corpus + fixture servers let the tier be verified from the
+# running container (`python scripts/sandbox/eval/run_eval.py --sandbox`).
+COPY scripts/sandbox/ scripts/sandbox/
+COPY tests/fixtures/behavioral/ tests/fixtures/behavioral/
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 

@@ -64,6 +64,12 @@ _SURFACE_PLAN: dict[str, tuple[str, str, str]] = {
     "docker": ("{name}", "", "image"),
 }
 # Files from scripts/sandbox/ shipped into /work for a plan (via --files-b64).
+# Where each shipped file lives in the repo. The argument generator is a real module under
+# src/ (unit-tested, importable by the app) and is copied into the container next to the
+# exerciser, which imports it by bare name from its own directory.
+_SHIPPED_SOURCES: dict[str, Path] = {
+    "synthetic_args.py": Path(__file__).resolve().parent / "synthetic_args.py",
+}
 _PLAN_FILES: dict[str, tuple[str, ...]] = {
     "npm-mcp": ("mcp_launch.sh", "mcp_exercise.js"),
     "pypi-mcp": ("mcp_launch.sh", "mcp_exercise.py", "synthetic_args.py"),
@@ -268,7 +274,7 @@ def _files_payload(plan: str, readme_text: str | None) -> str | None:
         return None
     files: dict[str, str] = {}
     for name in names:
-        path = _SANDBOX_DIR / name
+        path = _SHIPPED_SOURCES.get(name, _SANDBOX_DIR / name)
         try:
             files[name] = base64.b64encode(path.read_bytes()).decode("ascii")
         except OSError:
