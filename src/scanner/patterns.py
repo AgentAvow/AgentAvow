@@ -522,7 +522,13 @@ PROMPT_INJECTION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
             # generic types in typed languages (Rust/TS `Vec<Instruction>`, `<System>`)
             # are NOT injection and must not false-fire.
             r"<\s*/?\s*(?-i:system|important|instructions?)\s*>"
-            r"|(?:^|[\s\"'])system\s*prompt\s*:"
+            # The prose form "system prompt:" only — with the space. Without it, the
+            # case-insensitive match also fired on the identifier `systemPrompt:`, which
+            # is the field name of an MCP `sampling/createMessage` request, so every
+            # server that asks the client to sample (the official reference servers
+            # included) was graded as carrying an injected directive. `system_prompt:`
+            # as a config key is likewise an identifier, not text addressed to a model.
+            r"|(?:^|[\s\"'(])system\s+prompt\s*:"
             # "you are now …" only fires on an AI role/mode OVERRIDE context — not benign
             # "you are now the verified owner / a premium member" (which the old broad
             # `(?:a|an|the)?\s` FP'd on, while also missing "you are now IN developer mode").
