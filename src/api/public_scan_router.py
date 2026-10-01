@@ -540,6 +540,14 @@ async def _track_checker(request) -> None:
     if request is None:
         return
     try:
+        from src.api.metrics_dashboard_router import bump_metric_by_client
+
+        # Every public scan request, split by who sent it (person / agent / script),
+        # so the dashboard can show real usage apart from crawler traffic.
+        await bump_metric_by_client("scan_request", request.headers.get("user-agent", ""))
+    except Exception:
+        pass
+    try:
         from src.api.rate_limit import _get_client_ip, _get_entity_id
         from src.scanner.adoption_sources import checker_identity, record_global_checker
 

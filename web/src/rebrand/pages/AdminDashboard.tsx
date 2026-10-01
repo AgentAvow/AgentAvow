@@ -32,6 +32,7 @@ interface Metrics {
   mcp?: { calls_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; by_tool?: Record<string, number>; by_surface?: Record<string, { calls?: number; errors?: number; safe?: number; needs_review?: number }> }
   private_repos?: { app_scans?: number; published_to_search?: number; app_installs_active?: number; onetime_scans_window?: number }
   alert_webhooks?: { active?: number }
+  traffic_quality?: Record<string, { total?: number; human?: number; agent?: number; automated?: number }>
 }
 interface Draft { id: string; platform: string; content: string; topic: string | null; status: string; created_at: string; post_type?: string; llm_model?: string | null }
 interface Health { marketing_enabled?: boolean; anthropic_configured?: boolean; ollama_available?: boolean; daily_spend_usd?: number; monthly_spend_usd?: number; adapters?: Record<string, { configured: boolean; healthy: boolean }> }
@@ -239,6 +240,37 @@ function MetricsTab() {
           </Section>
         )
       })()}
+
+      <Section title="Who is calling — people, agents, automation" note="Public scan requests and badge fetches split by the caller's User-Agent (this window). 'Automated' is crawlers, uptime monitors and scripts — including our own — and is not usage. Honest usage = people + agents. Counting started when this split shipped, so the totals here can trail the older aggregate counters for the first window.">
+        <div className="grid md:grid-cols-2 gap-4">
+          {([['scan_requests', 'Scan requests'], ['badge_fetches', 'Badge fetches']] as const).map(([key, title]) => {
+            const q = data?.traffic_quality?.[key] || {}
+            const total = q.total ?? 0
+            const rows: [string, number, string][] = [
+              ['People (browser)', q.human ?? 0, 'linear-gradient(90deg,#2dd4bf,#818cf8)'],
+              ['Agents (Claude, ChatGPT, plugin, README badges)', q.agent ?? 0, 'linear-gradient(90deg,#818cf8,#e879f9)'],
+              ['Automated (crawlers, monitors, scripts)', q.automated ?? 0, 'linear-gradient(90deg,#64748b,#94a3b8)'],
+            ]
+            const real = (q.human ?? 0) + (q.agent ?? 0)
+            return (
+              <div key={key} className="glass rounded-2xl p-5">
+                <div className="flex justify-between items-baseline mb-3">
+                  <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted">{title}</div>
+                  <div className="text-[12.5px] tabular-nums text-text-muted">{fmt(real)} real <span className="text-text-muted/60">of {fmt(total)}</span></div>
+                </div>
+                {total > 0 ? rows.map(([label, n, bg]) => (
+                  <div key={label} className="mb-2">
+                    <div className="flex justify-between text-[12.5px] mb-1"><span className="text-text-muted">{label}</span><span className="tabular-nums text-text-muted/70">{fmt(n)} <span className="text-[11px]">({Math.round((n / total) * 100)}%)</span></span></div>
+                    <div className="h-2 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(n / total) * 100}%`, background: bg }} /></div>
+                  </div>
+                )) : (
+                  <p className="text-[12.5px] text-text-muted/70">No classified requests yet in this window.</p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </Section>
 
       <Section title="Traffic funnel — where users drop off" note="Scan → watch → claim → install, with step-to-step conversion (this window).">
         <div className="glass rounded-2xl p-6 flex flex-col gap-3">
