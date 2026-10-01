@@ -1,0 +1,53 @@
+{
+  "note": "Source for the atd-provenance-signing-v0 corpus. Every key in this file is a TEST key, generated locally for this corpus on 2026-10-01 with node:crypto generateKeyPairSync('ed25519'). None of them is, or is derived from, the production AgentAvow signing key (which lives only in ATTESTATION_SIGNING_KEY_ED25519 and is never committed). The private parts (d) are published here on purpose so that `node generate.mjs` rebuilds the vector file byte for byte. Do not reuse these keys for anything.",
+  "iss": "did:web:agentgraph.co",
+  "vendor": "agentgraph",
+  "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
+  "keys": {
+    "signing": {
+      "role": "the issuer's current key; its kid is the RFC 7638 thumbprint, computed by generate.mjs",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "eRVJXexMnCeI2v6jAiOh2AhBHnhDi_Cyb-I0BjzgeRA",
+      "d": "oWuilcqwTPuPEIasFs0w8L16CstCQQlcX8OqDoGbtAQ"
+    },
+    "legacy": {
+      "role": "a second key the issuer publishes under a stable name rather than a thumbprint (mirrors AgentAvow's live kid style, agentgraph-security-v1); used only by the kid-not-thumbprint vector",
+      "kid": "agentgraph-test-legacy-v1",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "TRSno96mjQ57MIF3Ktxs4wMZY-SaIjyGClAnaD1Hk50",
+      "d": "6UA6TT24jJamkH9AfVTsdye2U2xQVb3j9fkc-LNch-w"
+    },
+    "attacker": {
+      "role": "a key the issuer does NOT publish; used only by the unpublished-key vector, where the envelope points at a JWKS the issuer does not control",
+      "jwks_url": "https://attacker.example/.well-known/jwks.json",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "vZL-AbN5-rT5_EfxaTjAwmcbaVCq1ILnlLu4nDSmUkA",
+      "d": "-LGRAUoqwWxgPXNfDXgssvCkfk2n2Mih3OI4UFNklbw"
+    }
+  },
+  "payload": {
+    "sub": "github:example/example-mcp-server",
+    "subjectClass": "tool",
+    "issued_at": "2026-10-01T00:00:00Z",
+    "expires_at": "2026-10-02T00:00:00Z",
+    "dimension": "safety",
+    "score": 62,
+    "riskCodes": ["SAFETY_UNSAFE_EXEC", "SAFETY_VULNERABLE_DEPENDENCY"]
+  },
+  "observation": {
+    "signal": "agentgraph.safety.score",
+    "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+    "stored_riskCodes_order": ["SAFETY_VULNERABLE_DEPENDENCY", "SAFETY_UNSAFE_EXEC"],
+    "backstop_threshold": 70,
+    "foreign_signal": "trustmodel.safety.score",
+    "foreign_iss": "did:web:trustmodel.example",
+    "foreign_subject": "github:example/other-mcp-server"
+  },
+  "policy": {
+    "evaluation_time": "2026-10-01T01:00:00Z",
+    "max_age_seconds": 86400
+  }
+}
