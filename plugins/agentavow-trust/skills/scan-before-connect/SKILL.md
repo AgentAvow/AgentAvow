@@ -42,10 +42,8 @@ an hour; pass `force: true` only when the user says the target changed.
 
 ## 3. Report, then continue
 
-Give both scores: the trust score out of 100 with its verdict, and the adoption score
-(the count and unit in `adoption`, such as downloads per week or stars; say when it is
-absent). Then the top findings with where they are, and the report link from the result.
-Adoption never changes the trust verdict.
+Give the score out of 100, the verdict, the top findings with where they are, and the
+report link from the result.
 
 - **Safe:** say so in one line and go ahead with what the user asked.
 - **Needs review:** show the findings and ask whether to continue. Do not install or
