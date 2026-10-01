@@ -74,8 +74,9 @@ _SETUP_URL = "https://agentavow.com/docs/auto-scan-claude-code"
 _INSTRUCTIONS = (
     "AgentAvow grades the safety of anything an AI agent connects to — a GitHub repo, an MCP "
     "server, an npm/PyPI/crates/Docker/Hugging Face package, or a wallet-linked identity — and "
-    "returns a signed 0-100 trust score with a plain safe / needs-review verdict that anyone can "
-    "recompute offline.\n\n"
+    "returns two scores: a signed 0-100 trust score with a plain safe / needs-review verdict "
+    "that anyone can recompute offline, and an adoption score from real usage (downloads, "
+    "stars, installs). Adoption never changes the trust verdict.\n\n"
     "When to use which tool:\n"
     "• scan_repo — a GitHub repo, passed as 'owner/name'.\n"
     "• scan_package — a published package (registry + name).\n"
@@ -646,8 +647,9 @@ _TOOLS: list[types.Tool] = [
         description=(
             "Scan a public GitHub repository with AgentAvow and return whether it is safe "
             "for an agent to connect to: a 0-100 trust score, a plain safe / needs-review "
-            "verdict, the findings behind it (with where and how to fix), and a signed, "
-            "offline-verifiable attestation. Read-only, no account. Calls the AgentAvow "
+            "verdict, the findings behind it (with where and how to fix), an adoption score from "
+            "real usage (stars), and a signed, offline-verifiable attestation. Read-only, no "
+            "account. Calls the AgentAvow "
             "public API at agentavow.com."
         ),
         inputSchema={
@@ -678,7 +680,8 @@ _TOOLS: list[types.Tool] = [
         description=(
             "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with "
             "AgentAvow. Returns a 0-100 trust score, a safe / needs-review verdict, findings "
-            "with remediation, and a signed attestation. Also reports repo-vs-artifact drift "
+            "with remediation, an adoption score from real usage (downloads per week), and a "
+            "signed attestation. Also reports repo-vs-artifact drift "
             "(files shipped that aren't in the source). Read-only; calls agentavow.com."
         ),
         inputSchema={
