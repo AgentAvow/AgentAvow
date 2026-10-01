@@ -178,16 +178,19 @@ function MetricsTab() {
         const safePct = scans ? Math.round((safe * 100) / scans) : 0
         const tools = Object.entries(mcp.by_tool || {}).sort((a, b) => b[1] - a[1])
         const anyTool = tools.some(([, n]) => n > 0)
+        // "other" is what the User-Agent bucketer could not place: in practice the MCP
+        // crawlers and uptime monitors (mcpbeat, SentinelOracle, …), not people. Name it
+        // so, and list it last so the real surfaces read first.
         const surfaceLabels: Record<string, string> = {
           claude: 'Claude Directory', chatgpt: 'ChatGPT', 'claude-code': 'Claude Code',
-          cursor: 'Cursor', vscode: 'VS Code', other: 'Other / dev',
+          cursor: 'Cursor', vscode: 'VS Code', other: 'Crawlers / unknown',
         }
         const surfaces = Object.entries(mcp.by_surface || {})
           .map(([s, d]) => ({ s, label: surfaceLabels[s] || s, ...d, calls: d.calls ?? 0 }))
-          .sort((a, b) => b.calls - a.calls)
+          .sort((a, b) => (a.s === 'other' ? 1 : b.s === 'other' ? -1 : b.calls - a.calls))
         const anySurface = surfaces.some((r) => r.calls > 0)
         return (
-          <Section title="MCP connector — usage by surface" note="Usage of the remote MCP server at agentavow.com/mcp across every place it's installed (Claude Directory, ChatGPT, the Claude Code plugin, Cursor, VS Code). Surface is derived from the request User-Agent and sums back to the total. Fail-open counters; zero means no traffic yet.">
+          <Section title="MCP connector — usage by surface" note="Usage of the remote MCP server at agentavow.com/mcp across every place it's installed (Claude Directory, ChatGPT, the Claude Code plugin, Cursor, VS Code). Surface is derived from the request User-Agent and sums back to the total. Every surface is listed, so a zero means that channel has sent nothing yet. 'Crawlers / unknown' is the MCP directory crawlers and uptime monitors — not users.">
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <Stat label="Total calls" value={fmt(calls)} />
               <Stat label="Ok" value={fmt(ok)} sub={`${errRate}% error rate`} />
@@ -218,8 +221,8 @@ function MetricsTab() {
                     <span>Surface</span>
                     <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-16 text-right">Errors</span><span className="w-20 text-right">Safe/Rev</span></span>
                   </div>
-                  {surfaces.filter((r) => r.calls > 0).map((r) => (
-                    <div key={r.s} className="flex justify-between text-[12.5px] py-0.5">
+                  {surfaces.map((r) => (
+                    <div key={r.s} className={`flex justify-between text-[12.5px] py-0.5${r.calls === 0 ? ' opacity-50' : ''}`}>
                       <span className="text-text-muted truncate">{r.label}</span>
                       <span className="flex gap-4 tabular-nums text-text-muted/70">
                         <span className="w-16 text-right">{fmt(r.calls)}</span>
