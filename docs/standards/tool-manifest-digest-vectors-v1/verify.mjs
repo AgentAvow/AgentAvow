@@ -70,6 +70,9 @@ for (const t of set.observed_tools)
 check('served tool count equals signed tool count',
   set.observed_tools.length, Object.keys(set.attestation.toolDigests).length);
 
+console.log('\nkey encoding');
+for (const kv of set.key_encoding ?? []) check(`${JSON.stringify(kv.name)} -> ${kv.key}`, toolKey(kv.name), kv.key);
+
 console.log('\nvectors');
 const byName = {};
 for (const v of set.vectors) {

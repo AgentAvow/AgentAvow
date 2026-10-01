@@ -95,6 +95,14 @@ implementations, not only the comparison: a consumer in another language that ge
 same three digests from the same three definitions has implemented the derivation
 correctly.
 
+## Key encoding
+
+The pinned server's tool names are plain ASCII, so the six cases never exercise the
+percent-encoding rule for map keys. `key_encoding` in the vector file carries seven
+name-to-key pairs that do (`=`, `%`, space, a tab, `é`, an emoji), derived with the same
+rule and carrying no signature. The verifier checks them; an implementer who gets all
+seven has the encoder right.
+
 ## Claim ceiling
 
 `rely=true` establishes exactly this: at `evaluation_time`, the named issuer had signed a

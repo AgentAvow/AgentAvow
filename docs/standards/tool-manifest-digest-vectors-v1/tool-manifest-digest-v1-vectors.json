@@ -166,6 +166,36 @@
       }
     }
   ],
+  "key_encoding": [
+    {
+      "name": "ask_wiki_question",
+      "key": "tool:ask_wiki_question"
+    },
+    {
+      "name": "a=b",
+      "key": "tool:a%3Db"
+    },
+    {
+      "name": "x%y",
+      "key": "tool:x%25y"
+    },
+    {
+      "name": "read file",
+      "key": "tool:read%20file"
+    },
+    {
+      "name": "tab\there",
+      "key": "tool:tab%09here"
+    },
+    {
+      "name": "héllo",
+      "key": "tool:h%C3%A9llo"
+    },
+    {
+      "name": "search 🙂",
+      "key": "tool:search%20%F0%9F%99%82"
+    }
+  ],
   "vectors": [
     {
       "name": "tool-match",

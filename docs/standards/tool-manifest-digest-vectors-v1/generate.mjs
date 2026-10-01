@@ -94,6 +94,23 @@ const vectors = [
     gate: gate({}), jws: tamperedJws, expect: expectAll({ signature_valid: false, rely: false }) },
 ];
 
+// Key-encoding vectors. The pinned server's tool names are plain ASCII, so the six
+// cases never exercise the percent-encoding rule. These pairs do; they are derived
+// here with the same toolKey() and carry no signature.
+const keyVectors = [
+  ['ask_wiki_question', 'tool:ask_wiki_question'],
+  ['a=b', 'tool:a%3Db'],
+  ['x%y', 'tool:x%25y'],
+  ['read file', 'tool:read%20file'],
+  ['tab\there', 'tool:tab%09here'],
+  ['héllo', 'tool:h%C3%A9llo'],
+  ['search 🙂', 'tool:search%20%F0%9F%99%82'],
+].map(([name, want]) => {
+  const got = toolKey(name);
+  if (got !== want) throw new Error(`toolKey(${JSON.stringify(name)}) = ${got}, expected ${want}`);
+  return { name, key: want };
+});
+
 const out = {
   suite: 'tool-manifest-digest-v1',
   spec: 'aeoess/agent-governance-vocabulary#177 / #179 E1 — tool-safety evidence consumed by a pre-execution gate, bound to one named tool by its definition digest',
@@ -126,6 +143,7 @@ const out = {
     jws: src.jws,
   },
   observed_tools: src.observed_tools,
+  key_encoding: keyVectors,
   vectors,
 };
 writeFileSync(new URL('./tool-manifest-digest-v1-vectors.json', import.meta.url), JSON.stringify(out, null, 2) + '\n');
