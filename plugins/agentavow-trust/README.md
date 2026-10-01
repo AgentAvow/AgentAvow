@@ -1,8 +1,9 @@
 # AgentAvow Trust
 
 Check whether a tool is safe before your agent connects to it. AgentAvow scans an MCP
-server, a package, or a GitHub repo and returns a 0–100 trust score, a plain safe or
-needs-review verdict, and the findings behind it. Every result is signed (Ed25519) and
+server, a package, or a GitHub repo and returns two scores: a 0–100 trust score, with a
+plain safe or needs-review verdict and the findings behind it, and an adoption score
+built from real usage (downloads, stars, installs). Every result is signed (Ed25519) and
 can be verified offline, so you do not have to take AgentAvow's word for it.
 
 Scanning is free and needs no account.
