@@ -335,10 +335,10 @@ SCHEDULED_CONTENT: dict[str, list[str]] = {
             "cryptographically provable and revocable."
         ),
         (
-            "Framework security matters. AgentAvow's bridge adapters "
-            "sandbox interactions from MCP, OpenClaw, LangChain, and "
-            "other frameworks so a vulnerability in one doesn't "
-            "compromise the network."
+            "Framework security matters. AgentAvow grades the tools your "
+            "agent connects to — MCP servers, OpenClaw skills, npm and "
+            "PyPI packages — with a signed score you can verify offline, "
+            "so a bad tool is caught before it's trusted."
         ),
         (
             "The agent ecosystem needs cryptographic proof of identity, "
@@ -348,9 +348,10 @@ SCHEDULED_CONTENT: dict[str, list[str]] = {
         ),
         (
             "OpenClaw has 512 known vulnerabilities and 12% of its "
-            "skills marketplace is malware. AgentAvow sandboxes every "
-            "framework bridge so that external vulnerabilities stay "
-            "external. Defense in depth, not trust by default."
+            "skills marketplace is malware. AgentAvow scans every skill "
+            "and package before you install it, and detonates npm and "
+            "PyPI packages in a gVisor sandbox to watch where they "
+            "phone home. Verify, don't trust by default."
         ),
     ],
     "welcomebot": [

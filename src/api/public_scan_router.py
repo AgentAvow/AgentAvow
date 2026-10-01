@@ -375,24 +375,45 @@ def _tool_description(result) -> str:
 _BEHAVIORAL_CACHE_TTL = 24 * 3600  # a package's runtime behavior rarely changes intra-day
 
 
-def _behavioral_cache_key(surface: str, name: str) -> str:
-    return f"behavioral:{surface}:{str(name).lower()}"
+def _declared_egress(data: dict) -> set[str]:
+    """Egress hosts the tool DECLARED in its ``.agentavow.yml`` (repo root or inside the
+    published artifact), lower-cased. The sandbox judges observed egress against these,
+    so a declared host is expected and an undeclared one is the finding."""
+    scope = (data or {}).get("declared_scope") or {}
+    hosts = scope.get("egress") if isinstance(scope, dict) else None
+    return {str(h).strip().lower() for h in (hosts or []) if str(h).strip()}
 
 
-async def _get_cached_behavioral(surface: str, name: str) -> dict | None:
+def _behavioral_cache_key(surface: str, name: str, expected_hosts: set[str] | None = None) -> str:
+    key = f"behavioral:{surface}:{str(name).lower()}"
+    if expected_hosts:
+        # The verdict depends on what was declared, so a declaration gets its own entry.
+        import hashlib
+        digest = hashlib.sha256("\n".join(sorted(expected_hosts)).encode()).hexdigest()[:12]
+        key += f":{digest}"
+    return key
+
+
+async def _get_cached_behavioral(
+    surface: str, name: str, expected_hosts: set[str] | None = None,
+) -> dict | None:
     try:
         from src.redis_client import get_redis
-        raw = await get_redis().get(_behavioral_cache_key(surface, name))
+        raw = await get_redis().get(_behavioral_cache_key(surface, name, expected_hosts))
         return json.loads(raw) if raw else None
     except Exception:
         return None
 
 
-async def _run_and_cache_behavioral(surface: str, name: str) -> dict | None:
-    """Run the sandbox tier once and cache the result (24h). Returns the block."""
+async def _run_and_cache_behavioral(
+    surface: str, name: str, expected_hosts: set[str] | None = None,
+) -> dict | None:
+    """Run the sandbox tier once and cache the result (24h). Returns the block.
+    ``expected_hosts`` = the tool's declared egress (see ``_declared_egress``); without
+    it the run is judged against the generic registry allowlist only."""
     from src.scanner.behavioral.runner import behavioral_findings, run_behavioral
     try:
-        res = await run_behavioral(surface, str(name))
+        res = await run_behavioral(surface, str(name), expected_hosts=expected_hosts or None)
     except Exception:
         logger.exception("behavioral tier failed for %s", name)
         return {"ran": False, "reason": "behavioral tier error"}
@@ -402,10 +423,12 @@ async def _run_and_cache_behavioral(surface: str, name: str) -> dict | None:
          "remediation": f.remediation}
         for f in behavioral_findings(res)
     ]
+    block["declared_egress"] = sorted(expected_hosts or [])
     try:
         from src.redis_client import get_redis
         await get_redis().set(
-            _behavioral_cache_key(surface, name), json.dumps(block), ex=_BEHAVIORAL_CACHE_TTL,
+            _behavioral_cache_key(surface, name, expected_hosts), json.dumps(block),
+            ex=_BEHAVIORAL_CACHE_TTL,
         )
     except Exception:
         pass
@@ -427,14 +450,15 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     name = pkg.get("name")
     if surface not in ("npm", "pypi") or not name:
         return {"ran": False, "reason": "no npm/pypi package to exercise"} if force else None
+    declared = _declared_egress(data)
     if force:
-        return await _run_and_cache_behavioral(surface, str(name)) or {
+        return await _run_and_cache_behavioral(surface, str(name), declared) or {
             "ran": False, "reason": "behavioral tier error"}
-    cached = await _get_cached_behavioral(surface, str(name))
+    cached = await _get_cached_behavioral(surface, str(name), declared)
     if cached:
         return cached
     # Not cached — run it in the background so it's ready next time, return pending now.
-    asyncio.create_task(_run_and_cache_behavioral(surface, str(name)))
+    asyncio.create_task(_run_and_cache_behavioral(surface, str(name), declared))
     return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
 
 
@@ -1006,7 +1030,9 @@ async def scan_package_endpoint(
     async def _with_behavioral(resp: PublicScanResponse) -> PublicScanResponse:
         if surface in ("npm", "pypi"):
             resp.behavioral = await _behavioral_block(
-                {"package_coordinate": {"surface": surface, "name": name}}, force=behavioral)
+                {"package_coordinate": {"surface": surface, "name": name},
+                 "declared_scope": getattr(resp, "declared_scope", {}) or {}},
+                force=behavioral)
         return resp
 
     if not force:
