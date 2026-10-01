@@ -113,7 +113,8 @@ def test_v1_command_line_is_unchanged_when_v2_setting_is_empty(executed, v2_off)
     assert call["v2"] is False
     assert call["args"] == [
         "node:20-alpine",
-        "npm install --no-audit --no-fund left-pad && node -e 'require(\"left-pad\")'",
+        runner._SANDBOX_ENV
+        + "npm install --no-audit --no-fund left-pad && node -e 'require(\"left-pad\")'",
         "45",
     ]
     assert r.transcript is None and r.canary_exfil == [] and r.notes == []
@@ -125,7 +126,8 @@ def test_pypi_v1_command_line_unchanged(executed, v2_off):
     _run("pypi", "scikit-learn")
     assert executed[0]["args"] == [
         "python:3.12-alpine",
-        "pip install --no-input scikit-learn && python -c 'import scikit_learn'",
+        runner._SANDBOX_ENV
+        + "pip install --no-input --user scikit-learn && python -c 'import scikit_learn'",
         "45",
     ]
 
@@ -173,7 +175,7 @@ def test_v2_npm_mcp_command_line(executed, v2_on, exerciser_files, monkeypatch):
     image, cmd, timeout = o["pos"]
     assert image == "node:20-alpine"
     assert int(timeout) >= 60 + 45 and call["timeout"] == int(timeout)
-    assert cmd.startswith("npm install --no-audit --no-fund @acme/demo-mcp@1.2.3 && ")
+    assert cmd.startswith(runner._SANDBOX_ENV + "npm install --no-audit --no-fund @acme/demo-mcp@1.2.3 && ")
     assert "sh /work/mcp_launch.sh npm @acme/demo-mcp -- node /work/mcp_exercise.js" in cmd
     ex = shlex.split(cmd.split("mcp_exercise.js", 1)[1])
     assert ex[ex.index("--timeout") + 1] == "60"
@@ -207,7 +209,8 @@ def test_v2_plain_exec_plan_gets_mode_and_canary_but_no_files(executed, v2_on):
     o = _opts(executed[0]["args"])
     assert o["--mode"] == "exec" and "--files-b64" not in o
     assert o["pos"][1] == (
-        "npm install --no-audit --no-fund left-pad && node -e 'require(\"left-pad\")'")
+        runner._SANDBOX_ENV
+        + "npm install --no-audit --no-fund left-pad && node -e 'require(\"left-pad\")'")
     assert r.plan == "npm" and r.transcript is None
 
 
@@ -375,3 +378,17 @@ def test_the_real_tree_can_build_a_files_payload_for_every_mcp_plan(plan):
     assert set(files) == set(r._PLAN_FILES[plan])
     for name, b64 in files.items():
         assert base64.b64decode(b64), name
+
+
+def test_every_plan_command_makes_home_and_caches_writable():
+    """Regression: the sandbox root is read-only; without a writable HOME npm could not
+    write its cache and pip could not install at all (EROFS), so runs 'succeeded' having
+    installed nothing. Found 2026-10-01 on the live box."""
+    from src.scanner.behavioral import runner as r
+    for plan, (_image, cmd, mode) in r._SURFACE_PLAN.items():
+        if mode == "image":
+            continue
+        assert cmd.startswith(r._SANDBOX_ENV), plan
+        assert "HOME=/work" in cmd and "PATH=/work/.local/bin:$PATH" in cmd, plan
+        if "pip install" in cmd:
+            assert "pip install --no-input --user " in cmd, plan

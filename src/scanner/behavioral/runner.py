@@ -41,18 +41,37 @@ _SANDBOX_DIR = Path(__file__).resolve().parents[3] / "scripts" / "sandbox"
 _RUNNER = _SANDBOX_DIR / "behavioral_run.sh"
 _RUNNER_V2 = _SANDBOX_DIR / "behavioral_run_v2.sh"
 
+# The sandbox container's root filesystem is READ-ONLY; only /tmp, /run and /work (the
+# working dir) are writable tmpfs. npm and pip both write under $HOME by default
+# (/root/.npm, /root/.local), so without this prefix `npm install` could not write its
+# cache and `pip install` failed outright with EROFS — the run still "ran" and showed
+# registry egress, but nothing was actually installed or imported. Every plan's command
+# starts with this: a writable HOME under /work, caches under /tmp, and the pip user site
+# (where `--user` installs land, console scripts in /work/.local/bin) on PATH.
+_SANDBOX_ENV = (
+    "export HOME=/work npm_config_cache=/tmp/npm-cache PIP_CACHE_DIR=/tmp/pip-cache "
+    "PYTHONUSERBASE=/work/.local PATH=/work/.local/bin:$PATH && "
+)
 # Base image + how to exercise a target per plan. The command installs/loads the target
 # so its install hook + import-time code actually execute inside the sandbox.
-_NPM_CMD = "npm install --no-audit --no-fund {name} && node -e 'require(\"{name}\")'"
-_PIP_CMD = "pip install --no-input {name} && python -c 'import {import_name}'"
+_NPM_CMD = (
+    _SANDBOX_ENV
+    + "npm install --no-audit --no-fund {name} && node -e 'require(\"{name}\")'"
+)
+_PIP_CMD = (
+    _SANDBOX_ENV
+    + "pip install --no-input --user {name} && python -c 'import {import_name}'"
+)
 # MCP plans: install, then the shipped launcher discovers the package's bin(s) and runs
 # the shipped exerciser against up to 3 candidates (first that initializes wins).
 _NPM_MCP_CMD = (
-    "npm install --no-audit --no-fund {name} && "
+    _SANDBOX_ENV
+    + "npm install --no-audit --no-fund {name} && "
     "sh /work/mcp_launch.sh npm {dist} -- node /work/mcp_exercise.js {exerciser_args}"
 )
 _PIP_MCP_CMD = (
-    "pip install --no-input {name} && "
+    _SANDBOX_ENV
+    + "pip install --no-input --user {name} && "
     "sh /work/mcp_launch.sh pypi {dist} -- python /work/mcp_exercise.py {exerciser_args}"
 )
 # plan → (image, command template, runner mode). "{name}" in the image = the coordinate.
