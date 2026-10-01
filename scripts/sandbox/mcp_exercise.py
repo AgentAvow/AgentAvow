@@ -41,6 +41,7 @@ except ImportError:  # the copy next to us is missing; still exercise with empty
         return {}
 
 BEGIN, END = "AGENTAVOW_TRANSCRIPT_BEGIN", "AGENTAVOW_TRANSCRIPT_END"
+INIT_WAIT_MAX = 15.0  # seconds to wait for `initialize` before giving up on a candidate
 PROTOCOLS = ("2025-06-18", "2024-11-05")
 CLIENT_INFO = {"name": "agentavow-exerciser", "version": "1.0"}
 DEFAULT_MOUNTS = "/tmp,/work,/run"
@@ -255,7 +256,9 @@ def exercise(o: Options, out: dict) -> None:
         return
     out["_client"] = client
     try:
-        init_wait = min(max(o.timeout - 0.5, 0.5), max(3 * o.per_call_timeout, 15.0))
+        # A server that will not initialize should fail fast: the in-container launcher may
+        # try up to 3 candidate commands inside one wall clock.
+        init_wait = min(max(o.timeout - 0.5, 0.5), INIT_WAIT_MAX)
         result = err = None
         for proto in PROTOCOLS:
             result, err = client.request("initialize", {

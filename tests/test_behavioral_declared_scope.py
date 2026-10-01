@@ -33,8 +33,11 @@ class _FakeRedis:
     async def get(self, key):
         return self.store.get(key)
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.store:
+            return None
         self.store[key] = value
+        return True
 
 
 @pytest.fixture
@@ -138,3 +141,28 @@ def test_bot_copy_does_not_claim_sandboxing_we_do_not_do():
                       default=str).lower()
     assert "sandboxes every" not in text
     assert "sandbox interactions" not in text
+
+
+def test_background_run_starts_once_per_coordinate_while_in_flight(fake_redis, captured_runs,
+                                                                     monkeypatch):
+    started = []
+    monkeypatch.setattr(router.asyncio, "create_task", lambda coro: (started.append(coro),
+                                                                      coro.close()))
+    data = {"package_coordinate": {"surface": "npm", "name": "left-pad"}}
+
+    async def twice():
+        a = await router._behavioral_block(data, force=False)
+        b = await router._behavioral_block(data, force=False)
+        return a, b
+
+    a, b = asyncio.run(twice())
+    assert a["pending"] and b["pending"]
+    assert len(started) == 1, "the second request must not detonate the same coordinate again"
+    assert any(k.endswith(":lock") for k in fake_redis.store)
+
+
+def test_lock_fails_open_without_redis(monkeypatch):
+    def boom():
+        raise RuntimeError("redis down")
+    monkeypatch.setattr("src.redis_client.get_redis", boom)
+    assert asyncio.run(router._acquire_behavioral_lock("npm", "x", set())) is True

@@ -511,8 +511,27 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     if cached:
         return cached
     # Not cached — run it in the background so it's ready next time, return pending now.
-    asyncio.create_task(_run_and_cache_behavioral(surface, str(name), declared, **run_kwargs))
+    # One detonation per coordinate at a time: the sandbox is a single serial host, and a
+    # popular package can be scanned from many clients within the same minute.
+    if await _acquire_behavioral_lock(surface, str(name), declared, plan):
+        asyncio.create_task(_run_and_cache_behavioral(surface, str(name), declared, **run_kwargs))
     return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
+
+
+_BEHAVIORAL_LOCK_TTL = 240  # seconds; > the longest sandbox wall clock (mcp_timeout + 45)
+
+
+async def _acquire_behavioral_lock(surface: str, name: str, expected_hosts: set[str] | None,
+                                   plan: str | None = None) -> bool:
+    """True when this process should start the background run; False when another run for
+    the same coordinate is already in flight. Fails OPEN (no Redis → run) so a cache outage
+    can never silence the tier."""
+    try:
+        from src.redis_client import get_redis
+        key = _behavioral_cache_key(surface, name, expected_hosts, plan) + ":lock"
+        return bool(await get_redis().set(key, "1", nx=True, ex=_BEHAVIORAL_LOCK_TTL))
+    except Exception:
+        return True
 
 
 async def _track_checker(request) -> None:

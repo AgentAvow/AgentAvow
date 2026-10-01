@@ -266,6 +266,7 @@ function argsForTool(name, schema, mined) {
 
 // ---- exerciser --------------------------------------------------------------------------
 const BEGIN = "AGENTAVOW_TRANSCRIPT_BEGIN", END = "AGENTAVOW_TRANSCRIPT_END";
+const INIT_WAIT_MAX = 15; // seconds to wait for `initialize` before giving up on a candidate
 const PROTOCOLS = ["2025-06-18", "2024-11-05"];
 const CLIENT_INFO = { name: "agentavow-exerciser", version: "1.0" };
 const MAX_WALK_ENTRIES = 50000, MAX_WRITES_PER_CALL = 50, SAMPLE_CHARS = 300, STDERR_TAIL = 500;
@@ -425,7 +426,7 @@ async function exercise(o, out) {
   const client = new StdioClient(o.command, env);
   out._client = client;
   try {
-    const initWait = Math.min(Math.max(o.timeout - 0.5, 0.5), Math.max(3 * o.perCallTimeout, 15));
+    const initWait = Math.min(Math.max(o.timeout - 0.5, 0.5), INIT_WAIT_MAX); // fail fast: launcher may try 3 candidates
     let result = null, err = null, proto = PROTOCOLS[0];
     for (proto of PROTOCOLS) {
       [result, err] = await client.request("initialize", { protocolVersion: proto, capabilities: {}, clientInfo: CLIENT_INFO }, initWait);

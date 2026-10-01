@@ -44,6 +44,9 @@ Value vocabularies (set by the exerciser, matched by the graders):
                    | "exerciser_watchdog"
   launch.error     "spawn_failed: …" | "initialize_timeout" | "server_exited"
                    | "initialize_error: …" | "no_command"   (each may end ": <stderr tail>")
+                   | "no_entrypoint_found"  (synthetic transcript from the in-container
+                   launcher mcp_launch.sh: the installed package exposes no runnable bin /
+                   console script; error is set to the same value — "no bin", not "crashed")
   canary.seen_in_result lists EVERY injected name on a sighting (one shared canary value),
                    so read it as "a canary leaked", not "this exact variable leaked".
 """
