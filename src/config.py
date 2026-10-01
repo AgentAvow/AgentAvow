@@ -151,6 +151,13 @@ class Settings(BaseSettings):
     # Legacy PAT — used only if GitHub App credentials below are not configured.
     github_token: str | None = None
 
+    # PulseMCP Sub-Registry API v0.1 (https://www.pulsemcp.com/api/docs/v0.1).
+    # OPTIONAL: the v0.1 API has no key-less read path; without a key the
+    # pulsemcp fetcher returns None ("unavailable") and imports continue.
+    # X-Tenant-ID is required by PulseMCP for data endpoints alongside the key.
+    pulsemcp_api_key: str | None = None
+    pulsemcp_tenant_id: str | None = None
+
     # GitHub App credentials (preferred over PAT — private key does not expire)
     # See src/github_auth.py for the token-minting flow.
     # github_app_private_key accepts raw PEM, escaped-\n PEM, or base64-of-PEM.
