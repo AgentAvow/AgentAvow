@@ -9,4 +9,4 @@ Choose the tool by what `$ARGUMENTS` looks like:
 - a package — "npm chalk", "pypi requests", "crates serde", "docker …", "hf org/model" → `scan_package`
 - a GitHub repo "owner/name" (e.g. `modelcontextprotocol/servers`) → `scan_repo`
 
-Report both scores — the 0–100 trust score with its plain safe / needs-review verdict, and the adoption score (downloads, stars, or installs) — then the top findings (with where and how to fix), and the signed, offline-verifiable report link. If `$ARGUMENTS` is empty, ask what to scan.
+Report both scores: the 0-100 trust score with its plain safe / needs-review verdict, and the adoption score (downloads, stars, or installs), then the top findings (with where and how to fix), and the signed, offline-verifiable report link. If `$ARGUMENTS` is empty, ask what to scan.
