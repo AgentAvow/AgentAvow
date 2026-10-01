@@ -1,0 +1,12 @@
+{
+  "title": "Fetch",
+  "type": "object",
+  "properties": {
+    "url": {"title": "Url", "type": "string", "format": "uri", "minLength": 1},
+    "max_length": {"title": "Max Length", "type": "integer", "default": 5000,
+                   "exclusiveMinimum": 0, "exclusiveMaximum": 1000000},
+    "start_index": {"title": "Start Index", "type": "integer", "default": 0, "minimum": 0},
+    "raw": {"title": "Raw", "type": "boolean", "default": false}
+  },
+  "required": ["url"]
+}

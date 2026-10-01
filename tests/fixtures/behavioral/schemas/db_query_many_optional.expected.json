@@ -1,0 +1,16 @@
+{
+  "sql": "SELECT 1",
+  "database_path": "/work/agentavow-sample.txt",
+  "kind": "query",
+  "mode": "write",
+  "timeout_ms": 100,
+  "page_size": 1,
+  "tags": [
+    "agentavow",
+    "agentavow",
+    "agentavow",
+    "agentavow"
+  ],
+  "late_required": "agentavow",
+  "undeclared_file": "/work/agentavow-sample.txt"
+}

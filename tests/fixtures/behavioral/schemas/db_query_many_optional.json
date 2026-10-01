@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "sql": {"type": "string", "examples": ["SELECT 1"]},
+    "database_path": {"type": "string"},
+    "kind": {"const": "query"},
+    "mode": {"type": "string", "enum": ["read", "write"], "default": "write"},
+    "timeout_ms": {"type": "integer", "minimum": 100, "exclusiveMaximum": 1000},
+    "page_size": {"type": "integer", "minimum": 0, "exclusiveMinimum": true},
+    "tags": {"type": "array", "items": {"type": "string"}, "minItems": 9},
+    "ratio": {"type": "number", "minimum": 0.5},
+    "retries": {"type": "integer", "maximum": 3},
+    "verbose": {"type": "boolean"},
+    "meta": {"type": "object", "properties": {"tenant_id": {"type": "string"}}},
+    "late_required": {"type": "string"}
+  },
+  "required": ["sql", "late_required", "undeclared_file"]
+}

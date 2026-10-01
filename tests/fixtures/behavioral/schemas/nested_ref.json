@@ -1,0 +1,33 @@
+{
+  "$defs": {
+    "Filter": {
+      "type": "object",
+      "properties": {
+        "field": {"type": "string"},
+        "op": {"enum": ["eq", "ne", "gt"]},
+        "value": {"anyOf": [{"type": "string"}, {"type": "number"}]}
+      },
+      "required": ["field", "op"]
+    }
+  },
+  "definitions": {
+    "Options": {
+      "type": "object",
+      "properties": {
+        "limit": {"type": "integer", "minimum": 5, "maximum": 100},
+        "cursor": {"type": ["string", "null"]},
+        "sort": {"oneOf": [{"const": "asc"}, {"const": "desc"}]},
+        "callback_url": {"type": "string"}
+      }
+    }
+  },
+  "type": "object",
+  "properties": {
+    "query": {"type": "string"},
+    "filters": {"type": "array", "items": {"$ref": "#/$defs/Filter"}, "minItems": 2},
+    "options": {"$ref": "#/definitions/Options"},
+    "owner_email": {"type": "string"},
+    "created": {"type": "string", "format": "date-time"}
+  },
+  "required": ["query"]
+}

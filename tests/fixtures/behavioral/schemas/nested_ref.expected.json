@@ -1,0 +1,23 @@
+{
+  "query": "agentavow",
+  "filters": [
+    {
+      "field": "agentavow",
+      "op": "eq",
+      "value": "agentavow"
+    },
+    {
+      "field": "agentavow",
+      "op": "eq",
+      "value": "agentavow"
+    }
+  ],
+  "options": {
+    "limit": 5,
+    "cursor": "agentavow",
+    "sort": "asc",
+    "callback_url": "https://example.com/agentavow"
+  },
+  "owner_email": "agentavow@example.com",
+  "created": "2024-01-01T00:00:00Z"
+}

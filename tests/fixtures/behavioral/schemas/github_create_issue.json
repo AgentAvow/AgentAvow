@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "owner": {"type": "string", "description": "Repository owner (username or organization)"},
+    "repo": {"type": "string", "description": "Repository name"},
+    "title": {"type": "string", "description": "Issue title"},
+    "body": {"type": "string", "description": "Issue body content"},
+    "assignees": {"type": "array", "items": {"type": "string"}},
+    "milestone": {"type": "number", "description": "Milestone number"},
+    "labels": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["owner", "repo", "title"]
+}
