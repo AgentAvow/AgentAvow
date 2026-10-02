@@ -278,3 +278,20 @@ def test_sandbox_line_marks_a_signed_observation():
     assert "signed" not in _sandbox_line(_scan_data({"ran": False, "pending": True}))
     b.pop("attestation")
     assert "signed" not in _sandbox_line(_scan_data(b))
+
+
+def test_repo_without_a_package_targets_git_install_by_language():
+    from src.api.public_scan_router import _behavioral_plan, _behavioral_target
+    js = {"repo_full_name": "acme/widget", "primary_language": "JavaScript/TypeScript",
+          "package_coordinate": {}}
+    assert _behavioral_target(js) == ("github", "acme/widget")
+    assert _behavioral_plan(js, "github") == "npm-git"
+    assert _behavioral_plan({**js, "is_mcp_server": True}, "github") == "npm-git-mcp"
+    py = {"repo_full_name": "acme/tool", "primary_language": "Python"}
+    assert _behavioral_target(py) == ("github", "acme/tool")
+    assert _behavioral_plan(py, "github") == "pypi-git"
+    assert _behavioral_target({"repo_full_name": "acme/book", "primary_language": "Rust"}) is None
+    # a published package still wins over the repo
+    both = {"repo_full_name": "acme/widget", "primary_language": "Python",
+            "package_coordinate": {"surface": "npm", "name": "widget"}}
+    assert _behavioral_target(both) == ("npm", "widget")

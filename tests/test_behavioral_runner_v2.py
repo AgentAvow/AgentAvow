@@ -498,3 +498,32 @@ def test_readme_credential_names_join_the_canary_list(executed, v2_on, exerciser
     assert runner._merge_env_names(["A_KEY", "A_KEY"], "A_KEY B_SECRET") == ["A_KEY", "B_SECRET"]
     assert runner._merge_env_names(None, None) == []
     assert len(runner._merge_env_names([f"K_{i}_KEY" for i in range(40)], "")) == 32
+
+
+def test_git_plans_install_from_github_and_resolve_the_real_name(monkeypatch):
+    import asyncio
+
+    from src.scanner.behavioral import runner as r
+    monkeypatch.setattr(config.settings, "scanner_behavioral_sandbox_runner_v2", "/x/v2.sh",
+                        raising=False)
+    seen = []
+
+    async def fake(args, timeout, *, v2=False):
+        seen.append(args)
+        return json.dumps({"image": args[-3], "mode": "mcp", "exit_code": 0, "egress_hosts": [],
+                           "fs_writes": [], "canary_exfil": [], "exercise": None,
+                           "schema": "behavioral-v2"}), None
+    monkeypatch.setattr(r, "_execute", fake)
+    res = asyncio.run(r.run_behavioral("github", "acme/widget-mcp", plan="npm-git-mcp"))
+    assert res.ran and res.plan == "npm-git-mcp"
+    cmd = seen[0][-2]
+    assert "npm view github:acme/widget-mcp name" in cmd
+    assert "npm install --no-audit --no-fund github:acme/widget-mcp" in cmd
+    assert 'sh /work/mcp_launch.sh npm "$NAME"' in cmd
+    res = asyncio.run(r.run_behavioral("github", "https://github.com/acme/py-tool.git",
+                                       plan="pypi-git"))
+    cmd = seen[1][-2]
+    assert "pip install --no-input --user --report /work/pipreport.json "
+    assert "git+https://github.com/acme/py-tool" in cmd and ".git" not in cmd.split("py-tool")[1][:4]
+    assert r._git_spec("npm-git", "github:o/r") == "github:o/r"
+    assert r._git_spec("pypi-git-mcp", "o/r/") == "git+https://github.com/o/r"

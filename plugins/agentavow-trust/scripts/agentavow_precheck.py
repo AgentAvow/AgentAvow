@@ -41,7 +41,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -233,7 +233,37 @@ def _verdict(data: dict) -> dict:
         "grade": str(data.get("grade") or ""),
         "tool_digests": digests if isinstance(digests, dict) else {},
         "tool_manifest_digest": data.get("tool_manifest_digest") or None,
+        "sandbox": _sandbox_summary(data.get("behavioral")),
     }
+
+
+def _sandbox_summary(b: object) -> str:
+    """One clause about the behavioral sandbox run AgentAvow did on the package (it runs
+    automatically on the first scan and is cached for a day): what it found, or that it
+    is still running. Empty when there is nothing to say. Read-only; no extra request."""
+    if not isinstance(b, dict):
+        return ""
+    if b.get("pending"):
+        return "sandbox run pending"
+    if not b.get("ran"):
+        return ""
+    findings = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
+    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else {}
+    called = len(ex.get("calls") or []) if ex else 0
+    exfil = b.get("canary_exfil") or []
+    if exfil:
+        return "sandbox: LEAKED a canary credential"
+    if findings:
+        worst = "critical" if any(f.get("severity") == "critical" for f in findings) else (
+            "high" if any(f.get("severity") == "high" for f in findings) else "")
+        sev = f" ({worst})" if worst else ""
+        return f"sandbox: {len(findings)} behavioral finding(s){sev}"
+    if ex and ex.get("launch_ok"):
+        return f"sandbox: clean, {called} tool(s) exercised"
+    reason = str((b.get("grade_summary") or {}).get("start_reason") or "")
+    if reason and reason not in ("started", "not_applicable", "unknown"):
+        return f"sandbox: install clean; server not exercised ({reason.replace('_', ' ')})"
+    return "sandbox: clean"
 
 
 def _record(target: dict, result: dict, now: float) -> dict:
@@ -415,8 +445,9 @@ def main() -> None:
         extra = f", {blocking} blocking finding(s)" if blocking else ""
         changed = ("its tool definitions changed since the last grade; re-graded: "
                    if regraded else "")
+        sandbox = f"; {result['sandbox']}" if result.get("sandbox") else ""
         lines.append(f"{flag} MCP '{t['name']}' ({coord}): {changed}AgentAvow {score}/100 — "
-                     f"{verdict}{extra}.")
+                     f"{verdict}{extra}{sandbox}.")
 
     _save_cache(cache)
     if not lines:

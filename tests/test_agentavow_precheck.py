@@ -378,3 +378,33 @@ def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_pa
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".claude.json").write_text(json.dumps(cfg))
     assert [t["name"] for t in hook._targets()] == ["real"]
+
+
+@pytest.mark.parametrize("behavioral, expected", [
+    (None, ""),
+    ({"ran": False, "pending": True}, "sandbox run pending"),
+    ({"ran": True, "findings": [], "exercise": {"launch_ok": True, "calls": [{}, {}, {}]}},
+     "sandbox: clean, 3 tool(s) exercised"),
+    ({"ran": True, "findings": [{"severity": "high"}], "exercise": None},
+     "sandbox: 1 behavioral finding(s) (high)"),
+    ({"ran": True, "findings": [], "canary_exfil": [{"via": "dns", "host": "evil.net"}]},
+     "sandbox: LEAKED a canary credential"),
+    ({"ran": True, "findings": [], "exercise": {"launch_ok": False},
+      "grade_summary": {"start_reason": "needs_credentials"}},
+     "sandbox: install clean; server not exercised (needs credentials)"),
+    ({"ran": True, "findings": [], "exercise": None}, "sandbox: clean"),
+])
+def test_sandbox_summary_in_the_verdict(behavioral, expected):
+    mod = _load(PLUGIN_COPY)
+    assert mod._sandbox_summary(behavioral) == expected
+    v = mod._verdict({"trust_score": 90, "findings": {"items": []}, "behavioral": behavioral})
+    assert v["sandbox"] == expected
+
+
+def test_verdict_line_carries_the_sandbox_clause(hook, monkeypatch, capsys):
+    def scan(t, force=False):
+        return {"score": 92, "verdict": "safe", "blocking": 0, "tier": "", "grade": "",
+                "tool_digests": {}, "tool_manifest_digest": None,
+                "sandbox": "sandbox: clean, 9 tool(s) exercised"}
+    out = _run(hook, monkeypatch, capsys, [_mcp("a", "https://mcp.example.com/mcp")], scan)
+    assert "92/100 — safe; sandbox: clean, 9 tool(s) exercised." in out

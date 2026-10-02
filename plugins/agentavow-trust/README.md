@@ -65,6 +65,14 @@ Then add an MCP server and start a new session. The hook reports a line such as:
 ⚠️ MCP 'example' (https://mcp.example.com/mcp): AgentAvow 66/100 — needs review, 1 blocking finding(s).
 ```
 
+## The sandbox result in the verdict line
+
+AgentAvow runs every npm and PyPI package it grades in an isolated gVisor sandbox on its own
+servers (automatically, on the first scan; results are kept for a day). The hook's verdict
+line includes that result when it exists, for example `sandbox: clean, 9 tool(s) exercised`
+or `sandbox: 1 behavioral finding(s) (high)`. The hook makes no extra request for it and
+nothing from your machine is run in the sandbox.
+
 ## What the hook reads and what leaves your machine
 
 The hooks are two Python scripts, `scripts/agentavow_precheck.py` (session start) and

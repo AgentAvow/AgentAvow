@@ -405,11 +405,44 @@ def _behavioral_plan(data: dict, surface: str) -> str | None:
     scan says the package is a runnable MCP server, image mode for docker, else the
     surface default (None = let the runner choose)."""
     art = (data or {}).get("artifact_scan") or (data or {}).get("surface_detail") or {}
-    is_mcp = isinstance(art, dict) and bool(art.get("is_mcp_server"))
+    is_mcp = (isinstance(art, dict) and bool(art.get("is_mcp_server"))) or bool(
+        (data or {}).get("is_mcp_server"))
     if surface == "docker":
         return "docker"
     if surface in ("npm", "pypi") and is_mcp:
         return f"{surface}-mcp"
+    if surface == "github":
+        eco = _repo_git_ecosystem(data)
+        return f"{eco}-git-mcp" if (eco and is_mcp) else (f"{eco}-git" if eco else None)
+    return None
+
+
+_JS_LANGS = ("javascript", "typescript", "javascript/typescript")
+
+
+def _repo_git_ecosystem(data: dict) -> str | None:
+    """For a repo with NO published package: 'npm' when it is a JavaScript/TypeScript
+    project, 'pypi' for Python, else None (nothing the sandbox can install from git)."""
+    lang = str((data or {}).get("primary_language") or "").strip().lower()
+    if lang in _JS_LANGS:
+        return "npm"
+    if lang == "python":
+        return "pypi"
+    return None
+
+
+def _behavioral_target(data: dict) -> tuple[str, str] | None:
+    """(surface, coordinate) the sandbox should run for this scan: the published package
+    when the scan maps to one; otherwise the GitHub repo itself, installed from git, when
+    it is a JS/TS or Python project."""
+    pkg = (data or {}).get("package_coordinate") or {}
+    surface = (pkg.get("surface") or "").lower()
+    name = pkg.get("name")
+    if surface in ("npm", "pypi", "docker") and name:
+        return surface, str(name)
+    full = (data or {}).get("repo_full_name")
+    if full and _repo_git_ecosystem(data):
+        return "github", str(full)
     return None
 
 
@@ -473,6 +506,7 @@ async def _run_and_cache_behavioral(
     except Exception:  # noqa: BLE001 — a UI summary must never fail the block
         block["grade_summary"] = {}
     block["attestation"] = _sign_behavioral_observation(surface, str(name), block)
+    await _count_behavioral_run(block)
     try:
         from src.redis_client import get_redis
         await get_redis().set(
@@ -561,27 +595,105 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     from src.config import settings
     if not getattr(settings, "scanner_behavioral_enabled", False):
         return None
-    pkg = data.get("package_coordinate") or {}
-    surface = (pkg.get("surface") or "").lower()
-    name = pkg.get("name")
-    if surface not in ("npm", "pypi", "docker") or not name:
-        return {"ran": False, "reason": "no npm/pypi/docker package to exercise"} if force else None
+    target = _behavioral_target(data)
+    if not target:
+        return {"ran": False, "reason": "nothing the sandbox can install: no npm/PyPI/"
+                "docker package and not a JS/TS or Python repo"} if force else None
+    surface, name = target
     declared = _declared_egress(data)
     plan = _behavioral_plan(data, surface)
     run_kwargs = {"plan": plan, "env_names": _behavioral_env_names(data),
                   "readme_text": _behavioral_readme(data)}
     if force:
-        return await _run_and_cache_behavioral(surface, str(name), declared, **run_kwargs) or {
-            "ran": False, "reason": "behavioral tier error"}
+        if not await _acquire_behavioral_slot():
+            return {"ran": False, "pending": True,
+                    "reason": "sandbox busy — every slot is in use; try again in a minute"}
+        try:
+            return await _run_and_cache_behavioral(
+                surface, str(name), declared, **run_kwargs) or {
+                "ran": False, "reason": "behavioral tier error"}
+        finally:
+            await _release_behavioral_slot()
     cached = await _get_cached_behavioral(surface, str(name), declared, plan)
     if cached:
         return cached
     # Not cached — run it in the background so it's ready next time, return pending now.
-    # One detonation per coordinate at a time: the sandbox is a single serial host, and a
-    # popular package can be scanned from many clients within the same minute.
+    # One detonation per coordinate at a time (lock), and a global cap on concurrent runs
+    # (slots): the sandbox is one small box. A request that finds no slot stays pending
+    # and the next request for the coordinate tries again.
     if await _acquire_behavioral_lock(surface, str(name), declared, plan):
-        asyncio.create_task(_run_and_cache_behavioral(surface, str(name), declared, **run_kwargs))
+        if await _acquire_behavioral_slot():
+            asyncio.create_task(_run_in_slot(surface, str(name), declared, run_kwargs))
+        else:
+            await _release_behavioral_lock(surface, str(name), declared, plan)
     return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
+
+
+async def _run_in_slot(surface: str, name: str, declared: set[str], run_kwargs: dict) -> None:
+    try:
+        await _run_and_cache_behavioral(surface, name, declared, **run_kwargs)
+    finally:
+        await _release_behavioral_slot()
+
+
+_BEHAVIORAL_SLOTS_KEY = "behavioral:slots:active"
+_BEHAVIORAL_SLOT_TTL = 600  # a crashed worker can hold a slot at most this long
+
+
+async def _acquire_behavioral_slot() -> bool:
+    """Global concurrency cap across all workers (Redis counter). Fails OPEN."""
+    from src.config import settings
+    limit = int(getattr(settings, "scanner_behavioral_max_concurrent", 2) or 2)
+    try:
+        from src.redis_client import get_redis
+        r = get_redis()
+        n = int(await r.incr(_BEHAVIORAL_SLOTS_KEY))
+        await r.expire(_BEHAVIORAL_SLOTS_KEY, _BEHAVIORAL_SLOT_TTL)
+        if n > limit:
+            await r.decr(_BEHAVIORAL_SLOTS_KEY)
+            return False
+        return True
+    except Exception:
+        return True
+
+
+async def _release_behavioral_slot() -> None:
+    try:
+        from src.redis_client import get_redis
+        r = get_redis()
+        n = int(await r.decr(_BEHAVIORAL_SLOTS_KEY))
+        if n < 0:
+            await r.set(_BEHAVIORAL_SLOTS_KEY, 0, ex=_BEHAVIORAL_SLOT_TTL)
+    except Exception:
+        pass
+
+
+async def _release_behavioral_lock(surface: str, name: str, expected_hosts: set[str] | None,
+                                   plan: str | None = None) -> None:
+    try:
+        from src.redis_client import get_redis
+        key = _behavioral_cache_key(surface, name, expected_hosts, plan) + ":lock"
+        await get_redis().delete(key)
+    except Exception:
+        pass
+
+
+async def _count_behavioral_run(block: dict) -> None:
+    """Per-day counters for the admin dashboard / metrics log. Best-effort."""
+    try:
+        from src.redis_client import get_redis
+        r = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        keys = [f"ag:metrics:behavioral:runs:{day}"]
+        if (block.get("exercise") or {}).get("launch_ok"):
+            keys.append(f"ag:metrics:behavioral:exercised:{day}")
+        if block.get("findings"):
+            keys.append(f"ag:metrics:behavioral:with_findings:{day}")
+        for k in keys:
+            await r.incr(k)
+            await r.expire(k, 90 * 24 * 3600)
+    except Exception:
+        pass
 
 
 _BEHAVIORAL_LOCK_TTL = 240  # seconds; > the longest sandbox wall clock (mcp_timeout + 45)
@@ -1697,7 +1809,8 @@ async def public_scan(
     )
     # Behavioral runs AUTOMATICALLY for npm/pypi-mapped repos (cached/background),
     # enriching the scorecard without a click. ?behavioral=true forces a fresh run.
-    resp.behavioral = await _behavioral_block(data, force=behavioral)
+    resp.behavioral = await _behavioral_block(
+        {**data, "repo_full_name": full_name}, force=behavioral)
     return resp
 
 

@@ -989,7 +989,9 @@ const START_REASONS: Record<string, string> = {
 function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string } }) {
   const mut = useMutation({ mutationFn: () => pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
   const b: BehavioralData | null | undefined = mut.data?.behavioral ?? auto
-  if (!surface || !SANDBOX_SURFACES.has(surface)) return null
+  // Packages always get the panel; a repo gets it once the sandbox has a result for it
+  // (installed straight from git when it publishes no package).
+  if ((!surface || !SANDBOX_SURFACES.has(surface)) && !b) return null
   const pending = !!b?.pending
   const undeclared = b?.unexpected_egress ?? []
   const ex = b?.exercise ?? null
@@ -1019,8 +1021,9 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
           disabled={mut.isPending}
           className="mt-3 font-semibold text-[13.5px] px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-70"
         >
-          {mut.isPending ? 'Running in the sandbox… (~45s)' : (b && b.ran ? 'Re-run behavioral analysis' : 'Run behavioral analysis')}
+          {mut.isPending ? 'Running in the sandbox… (~45s)' : (b && b.ran ? 'Re-run behavioral analysis' : 'Run now')}
         </button>
+        <span className="ml-3 text-[12px] text-text-muted">Runs automatically on the first scan; results are kept for a day.</span>
         {mut.isError && <p className="mt-3 text-[13px] text-danger">Couldn&apos;t run the behavioral scan — please try again in a moment.</p>}
 
         {pending && !mut.isPending && (

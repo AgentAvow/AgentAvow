@@ -261,6 +261,9 @@ class Settings(BaseSettings):
     # v2 container resource caps (passed as --memory-mb / --pids; the v2 script's own
     # defaults stay 512m / 256 so a v1-style call is unchanged). Puppeteer / desktop-
     # commander download a browser at install and were OOM-killed (exit 137) at 512m.
+    # Global cap on concurrent sandbox runs (the box is 2 vCPU / 3.8 GB; each run gets
+    # 1 CPU and scanner_behavioral_memory_mb). Excess requests stay 'pending' and retry.
+    scanner_behavioral_max_concurrent: int = 2
     scanner_behavioral_memory_mb: int = 1024   # docker --memory for v2 runs (MB)
     scanner_behavioral_pids: int = 512         # docker --pids-limit for v2 runs
 

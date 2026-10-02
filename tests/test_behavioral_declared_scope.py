@@ -199,3 +199,47 @@ def test_no_signed_observation_when_the_sandbox_did_not_run(fake_redis, monkeypa
     block = asyncio.run(router._behavioral_block(
         {"package_coordinate": {"surface": "npm", "name": "x"}}, force=True))
     assert block["ran"] is False and block["attestation"] is None
+
+
+def test_global_slot_cap_limits_concurrent_sandbox_runs(fake_redis, captured_runs, monkeypatch):
+    monkeypatch.setattr(router.settings, "scanner_behavioral_max_concurrent", 1, raising=False)
+
+    class _Redis(_FakeRedis):
+        async def incr(self, key):
+            self.store[key] = int(self.store.get(key, 0)) + 1
+            return self.store[key]
+
+        async def decr(self, key):
+            self.store[key] = int(self.store.get(key, 0)) - 1
+            return self.store[key]
+
+        async def expire(self, key, ttl):
+            return True
+
+        async def delete(self, key):
+            self.store.pop(key, None)
+    r = _Redis()
+    monkeypatch.setattr("src.redis_client.get_redis", lambda: r)
+    started = []
+    monkeypatch.setattr(router.asyncio, "create_task",
+                        lambda coro: (started.append(coro), coro.close()))
+
+    async def go():
+        a = await router._behavioral_block(
+            {"package_coordinate": {"surface": "npm", "name": "one"}}, force=False)
+        # the first run holds the only slot (its task never ran here, so it is not released)
+        b = await router._behavioral_block(
+            {"package_coordinate": {"surface": "npm", "name": "two"}}, force=False)
+        return a, b
+
+    a, b = asyncio.run(go())
+    assert a["pending"] and b["pending"]
+    assert len(started) == 1, "the second coordinate waits for a slot"
+    assert r.store["behavioral:slots:active"] == 1
+    assert not any(k.endswith("two:lock") or "two" in k and k.endswith(":lock") for k in r.store), \
+        "a coordinate that got no slot releases its lock so the next request can retry"
+    # a forced run with no slot is reported as busy, not run
+    busy = asyncio.run(router._behavioral_block(
+        {"package_coordinate": {"surface": "npm", "name": "three"}}, force=True))
+    assert busy["pending"] and "busy" in busy["reason"]
+    assert captured_runs == []

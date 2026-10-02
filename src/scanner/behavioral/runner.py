@@ -107,13 +107,58 @@ _PIP_MCP_CMD = (
     "python /work/mcp_exercise.py {exerciser_args}"
 )
 # plan → (image, command template, runner mode). "{name}" in the image = the coordinate.
+# Repos with NO published package: install straight from GitHub. The installed package's
+# real name is resolved inside the container (`npm view … name` / pip's install report)
+# and handed to the launcher, so a repo-hosted MCP server gets the full exercise.
+# {name} = "github:owner/repo" (npm) or "git+https://github.com/owner/repo" (pip).
+_NPM_GIT_NAME = 'NAME=$(npm view {name} name 2>/dev/null) && [ -n "$NAME" ] && '
+_NPM_GIT_CMD = (
+    _SANDBOX_ENV + _NPM_GIT_NAME
+    + "npm install --no-audit --no-fund {name} && node -e 'require(process.env.NAME)'"
+)
+_NPM_GIT_MCP_CMD = (
+    _SANDBOX_ENV + _NPM_GIT_NAME
+    + "npm install --no-audit --no-fund {name} && "
+    'sh /work/mcp_launch.sh npm "$NAME" --canary-value {canary} -- '
+    "node /work/mcp_exercise.js {exerciser_args}"
+)
+_PIP_GIT_NAME = (
+    "pip install --no-input --user --report /work/pipreport.json {name} && "
+    "NAME=$(python3 -c \"import json;r=json.load(open('/work/pipreport.json'));"
+    "print(next((i['metadata']['name'] for i in r.get('install',[]) if i.get('requested')),''))\")"
+    ' && [ -n "$NAME" ] && '
+)
+_PIP_GIT_CMD = (
+    _SANDBOX_ENV + _ALPINE_GIT_PREFIX + _PIP_GIT_NAME
+    + "python -c 'import importlib,os; importlib.import_module(os.environ[\"NAME\"].replace(\"-\",\"_\"))'"
+)
+_PIP_GIT_MCP_CMD = (
+    _SANDBOX_ENV + _ALPINE_GIT_PREFIX + _PIP_GIT_NAME
+    + 'sh /work/mcp_launch.sh pypi "$NAME" --canary-value {canary} -- '
+    "python /work/mcp_exercise.py {exerciser_args}"
+)
 _SURFACE_PLAN: dict[str, tuple[str, str, str]] = {
     "npm": ("node:20-alpine", _NPM_CMD, "exec"),
     "pypi": ("python:3.12-alpine", _PIP_CMD, "exec"),
     "npm-mcp": ("node:20-alpine", _NPM_MCP_CMD, "mcp"),
     "pypi-mcp": ("python:3.12-alpine", _PIP_MCP_CMD, "mcp"),
+    "npm-git": ("node:20-alpine", _NPM_GIT_CMD, "exec"),
+    "pypi-git": ("python:3.12-alpine", _PIP_GIT_CMD, "exec"),
+    "npm-git-mcp": ("node:20-alpine", _NPM_GIT_MCP_CMD, "mcp"),
+    "pypi-git-mcp": ("python:3.12-alpine", _PIP_GIT_MCP_CMD, "mcp"),
     "docker": ("{name}", "", "image"),
 }
+
+
+def _git_spec(plan: str, coordinate: str) -> str:
+    """The install spec for a git plan: 'owner/repo' → github:owner/repo (npm) or
+    git+https://github.com/owner/repo (pip). A 'github:' / URL prefix is tolerated."""
+    repo = coordinate.strip()
+    for prefix in ("github:", "https://github.com/", "http://github.com/", "git+https://github.com/"):
+        if repo.lower().startswith(prefix):
+            repo = repo[len(prefix):]
+    repo = repo.strip("/").removesuffix(".git")
+    return f"github:{repo}" if plan.startswith("npm") else f"git+https://github.com/{repo}"
 # Files from scripts/sandbox/ shipped into /work for a plan (via --files-b64).
 # Where each shipped file lives in the repo. The argument generator is a real module under
 # src/ (unit-tested, importable by the app) and is copied into the container next to the
@@ -124,9 +169,12 @@ _SHIPPED_SOURCES: dict[str, Path] = {
 _PLAN_FILES: dict[str, tuple[str, ...]] = {
     "npm-mcp": ("mcp_launch.sh", "mcp_exercise.js"),
     "pypi-mcp": ("mcp_launch.sh", "mcp_exercise.py", "synthetic_args.py"),
+    "npm-git-mcp": ("mcp_launch.sh", "mcp_exercise.js"),
+    "pypi-git-mcp": ("mcp_launch.sh", "mcp_exercise.py", "synthetic_args.py"),
 }
 # What an MCP plan degrades to when the exerciser can't be shipped / v2 is off.
-_EXEC_FALLBACK = {"npm-mcp": "npm", "pypi-mcp": "pypi"}
+_EXEC_FALLBACK = {"npm-mcp": "npm", "pypi-mcp": "pypi",
+                  "npm-git-mcp": "npm-git", "pypi-git-mcp": "pypi-git"}
 _README_LIMIT = 64_000
 
 # Hosts a benign install legitimately reaches. Egress OUTSIDE this set (and outside any
@@ -497,15 +545,18 @@ async def run_behavioral(
         mcp_timeout = int(getattr(settings, "scanner_behavioral_mcp_timeout", 90) or 90)
         max_tools = int(getattr(settings, "scanner_behavioral_max_tools", 25) or 25)
         timeout = max(int(timeout), mcp_timeout + 45)  # install + exercise budget
+        spec = _git_spec(plan, coordinate) if "-git" in plan else coordinate
         cmd = cmd_tmpl.format(
-            name=shlex.quote(coordinate), dist=shlex.quote(_dist_name(coordinate)),
+            name=shlex.quote(spec), dist=shlex.quote(_dist_name(coordinate)),
             canary=shlex.quote(canary),
             exerciser_args=_exerciser_args(
                 timeout=mcp_timeout, max_tools=max_tools, canary=canary,
                 env_names=_merge_env_names(env_names, readme_text), readme=bool(readme_text)),
         )
     else:
-        cmd = cmd_tmpl.format(name=coordinate, import_name=_import_name(coordinate))
+        spec = _git_spec(plan, coordinate) if "-git" in plan else coordinate
+        cmd = cmd_tmpl.format(name=shlex.quote(spec) if "-git" in plan else coordinate,
+                              import_name=_import_name(coordinate))
 
     runner_args: list[str] = []
     if v2:
