@@ -651,7 +651,7 @@ def _sandbox_alarm(data: dict) -> str | None:
     behavioral finding (the same findings that pull the score below the safe bar).
     Most serious first. None otherwise."""
     b = data.get("behavioral")
-    if not isinstance(b, dict) or not b.get("ran"):
+    if not isinstance(b, dict) or not b.get("ran") or _is_live_probe(b):
         return None
     found = _behavioral_findings(b)
     for pick in (lambda f: f.get("rule") == "credential_canary_exfiltrated",
@@ -664,8 +664,76 @@ def _sandbox_alarm(data: dict) -> str | None:
 
 
 def _sandbox_has_findings(data: dict) -> bool:
+    """Sandbox findings that should LEAD the result. A live probe's findings are advisory
+    and stay after the static findings."""
     b = data.get("behavioral")
-    return isinstance(b, dict) and bool(b.get("ran")) and bool(_behavioral_findings(b))
+    return (isinstance(b, dict) and bool(b.get("ran")) and not _is_live_probe(b)
+            and bool(_behavioral_findings(b)))
+
+
+def _is_live_probe(b: dict) -> bool:
+    from src.scanner.verdict import is_advisory_block
+    return is_advisory_block(b)
+
+
+def _live_probe_section(b: dict) -> list[str]:
+    """The opt-in live probe of a remote MCP server (``plan == "live-probe"``), as a short
+    labelled block. Advisory and unsigned: only read-only-annotated tools were called, the
+    answers are not reproducible, and nothing here moves the score or the verdict."""
+    head = "**Probed live** (read-only tools only, advisory, not scored): "
+    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else {}
+    gs = b.get("grade_summary") if isinstance(b.get("grade_summary"), dict) else {}
+    lines: list[str] = []
+    if not ex.get("launch_ok"):
+        reason = str(gs.get("start_reason") or "")
+        if reason == "needs_credentials":
+            lines.append(head + "the server requires credentials (HTTP 401/403 on the "
+                         "handshake), so no tool was called.")
+        elif reason == "timeout":
+            lines.append(head + "the server did not answer the handshake in time; no tool "
+                         "was called.")
+        else:
+            detail = str(gs.get("start_reason_detail") or "").strip()
+            lines.append(head + "the handshake failed"
+                         + (f" ({_clip(detail, 80)})" if detail else "") + "; no tool was called.")
+        return lines
+    calls = [c for c in (ex.get("calls") or []) if isinstance(c, dict)]
+    called = {c.get("tool") for c in calls if c.get("tool")}
+    eligible = [t for t in (ex.get("eligible") or []) if isinstance(t, str)]
+    listed = [t for t in (ex.get("tools") or []) if isinstance(t, dict)]
+    n, m = len(called), max(len(eligible), len(called))
+    skipped = len(listed) - m
+    what = (f"called {n} of {m} read-only tool{'' if m == 1 else 's'} once each with "
+            "synthetic inputs")
+    if skipped > 0:
+        what += (f"; {skipped} tool{'' if skipped == 1 else 's'} without a read-only "
+                 f"annotation {'was' if skipped == 1 else 'were'} not called")
+    if m == 0:
+        what = (f"listed {len(listed)} tool{'' if len(listed) == 1 else 's'}; none "
+                "declares itself read-only, so none was called")
+    errored = sorted({c["tool"] for c in calls if c.get("ok") and c.get("is_error")})
+    failed = sorted({c["tool"] for c in calls if not c.get("ok")})
+    tail = []
+    if errored:
+        tail.append(f"{len(errored)} returned an error")
+    if failed:
+        tail.append(f"{len(failed)} did not answer")
+    if ex.get("timed_out"):
+        tail.append("stopped at the time budget")
+    lines.append(head + what + (" (" + "; ".join(tail) + ")" if tail else "") + ".")
+    fs = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
+    fs.sort(key=lambda f: _SEV_RANK.get(str(f.get("severity")), 4))
+    for f in fs[:4]:
+        sev = str(f.get("severity") or "").lower()
+        name = str(f.get("name") or f.get("rule") or "finding")
+        ev = str(f.get("evidence") or "").strip()
+        lines.append(f"- Advisory ({sev or 'note'}): {_clip(name, 110)}"
+                     + (f" — {_clip(ev, 120)}" if ev else ""))
+    if len(fs) > 4:
+        lines[-1] += f" (+{len(fs) - 4} more in the report)"
+    lines.append("- Not scored: a live answer cannot be recomputed by a verifier, so this "
+                 "never changes the trust score or the verdict.")
+    return lines[:6]
 
 
 def _host_list(hosts: list[str], limit: int = 4) -> str:
@@ -727,6 +795,8 @@ def _sandbox_section(data: dict) -> list[str]:
                 "behavior (tools called, network, files)."]
     if not b.get("ran"):
         return []
+    if _is_live_probe(b):
+        return _live_probe_section(b)
     att = b.get("attestation") if isinstance(b.get("attestation"), dict) else None
     when = str((att or {}).get("observed_at") or "")[:10]
     tag = f"gVisor, signed {when}" if (att and when) else ("gVisor, signed" if att else "gVisor")
@@ -933,9 +1003,12 @@ def _sandbox_struct(data: dict) -> dict | None:
                  "evidence": (f.get("evidence") or "")[:200]}
                 for f in (b.get("findings") or []) if isinstance(f, dict)]
     leaked = bool(b.get("canary_exfil"))
-    alarm = leaked or any(f["severity"] in ("critical", "high") for f in findings)
+    advisory = _is_live_probe(b)
+    # A live probe's findings are advisory: reported, never an alarm.
+    alarm = (not advisory) and (
+        leaked or any(f["severity"] in ("critical", "high") for f in findings))
     return {
-        "ran": True, "pending": False, "plan": b.get("plan"),
+        "ran": True, "pending": False, "plan": b.get("plan"), "advisory": advisory,
         "server_started": bool(ex.get("launch_ok")) if ex else None,
         "start_reason": gs.get("start_reason"),
         "start_reason_detail": gs.get("start_reason_detail") or None,
@@ -983,7 +1056,7 @@ def _scan_struct(
         {"severity": f.get("severity"), "category": f.get("category") or "behavioral",
          "name": f.get("name"), "file_path": "<sandbox>", "sandbox": True}
         for f in (sandbox or {}).get("findings") or []
-        if f.get("severity") in ("critical", "high")
+        if f.get("severity") in ("critical", "high") and not (sandbox or {}).get("advisory")
     ]
     alarm = bool(sandbox and sandbox.get("alarm"))
     dep = data.get("deprecation")
@@ -997,8 +1070,9 @@ def _scan_struct(
         "verdict_reason": verdict_reason,
         "critical": crit + sum(1 for i in beh_items if i["severity"] == "critical"),
         "high": high + sum(1 for i in beh_items if i["severity"] == "high"),
+        # a live probe's findings are advisory: they sit in sandbox.findings only
         "findings_total": int((data.get("findings") or {}).get("total") or len(items))
-        + len((sandbox or {}).get("findings") or []),
+        + (0 if (sandbox or {}).get("advisory") else len((sandbox or {}).get("findings") or [])),
         "static_findings_total": int((data.get("findings") or {}).get("total") or len(items)),
         # Version actually scanned + when it was published (so a model need not fetch
         # the registry), the maintainer's deprecation notice (None = not retired), and

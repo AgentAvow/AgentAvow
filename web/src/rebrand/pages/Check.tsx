@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'reac
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchSkillScan, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
@@ -950,11 +950,13 @@ function PkgInstall({ surface, name, isMcp }: { surface: string; name: string; i
  * and report what it actually did (network egress, filesystem writes). Only shown
  * for npm/PyPI coordinates (the surfaces the sandbox can exercise). The result is
  * a runtime observation, kept SEPARATE from the signed score. */
-type ExerciseCall = { tool: string; ok: boolean; is_error?: boolean; duration_ms?: number; fs_writes?: string[]; error?: string | null }
+type ExerciseCall = { tool: string; ok: boolean; is_error?: boolean; duration_ms?: number; fs_writes?: string[]; error?: string | null; result_sample?: string }
 type ExerciseData = {
   launch_ok: boolean
   server?: { name?: string; version?: string }
   tools?: { name: string; annotations?: Record<string, unknown> }[]
+  /** live probe only: the read-only-annotated tools that were eligible to be called */
+  eligible?: string[]
   calls?: ExerciseCall[]
   canary?: { env_names?: string[]; seen_in_result?: string[] }
   timed_out?: boolean
@@ -962,6 +964,8 @@ type ExerciseData = {
 }
 type BehavioralData = {
   ran: boolean; pending?: boolean; timed_out?: boolean; reason?: string
+  /** `plan: "live-probe"` blocks are advisory: reported, never scored, no attestation */
+  advisory?: boolean; notes?: string[]; observed_at?: string
   egress_hosts?: string[]; unexpected_egress?: string[]; declared_egress?: string[]; vendor_egress?: string[]; fs_writes_sample?: string[]
   error?: string | null
   plan?: string
@@ -970,7 +974,7 @@ type BehavioralData = {
   attestation?: { jws: string; kid: string; context: string; observed_at: string; verify_url?: string } | null
   canary_exfil?: { via: string; host?: string }[]
   exercise?: ExerciseData | null
-  findings?: { category: string; name: string; severity: string; remediation?: string }[]
+  findings?: { category: string; name: string; severity: string; remediation?: string; evidence?: string; rule?: string; advisory?: boolean; tool?: string | null }[]
 }
 const SANDBOX_SURFACES = new Set(['npm', 'pypi', 'docker'])
 /** Why a server did not start in the sandbox — none of these is a finding. */
@@ -987,13 +991,21 @@ const START_REASONS: Record<string, string> = {
 }
 
 type ScoreEffect = { applied?: boolean; static_score?: number; score?: number; delta?: number; reason?: string }
-function BehavioralPanel({ owner, repo, surface, auto, pkg, effect }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string }; effect?: ScoreEffect | null }) {
-  const mut = useMutation({ mutationFn: () => pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
+/** Why a live probe did not get to call anything — none of these is a finding. */
+const PROBE_START_REASONS: Record<string, string> = {
+  needs_credentials: 'The server answered the handshake with 401/403 — it needs credentials. No tool was called.',
+  timeout: 'The server did not answer the MCP handshake in time, so no tool was called.',
+  unknown: 'The MCP handshake failed, so no tool was called.',
+}
+/** `probe` switches the panel to the OPT-IN live probe of a remote MCP server: a
+ * button the user must press, read-only-annotated tools only, advisory, never scored. */
+function BehavioralPanel({ owner, repo, surface, auto, pkg, effect, probe }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string }; effect?: ScoreEffect | null; probe?: { endpoint: string } }) {
+  const mut = useMutation({ mutationFn: () => probe ? fetchMcpProbe(probe.endpoint) : pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
   // While the background run is pending, poll the (cached, non-forcing) scan so the panel
   // fills in by itself. ~8 s interval, gives up after 5 minutes.
   const [startedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
-  const autoPending = !!auto?.pending && !mut.data
+  const autoPending = !!auto?.pending && !mut.data && !probe
   const poll = useQuery({
     queryKey: ['behavioral-poll', pkg?.surface ?? 'github', pkg?.name ?? `${owner}/${repo}`],
     queryFn: () => pkg ? fetchPackageScan(pkg.surface, pkg.name) : fetchPublicScan(owner, repo),
@@ -1014,7 +1026,9 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, effect }: { owner: s
     return () => window.clearInterval(id)
   }, [stillPending])
   const waited = Math.max(0, Math.round((now - startedAt) / 1000))
-  const observedAt = b?.attestation?.observed_at ? new Date(b.attestation.observed_at) : null
+  const observedAt = b?.attestation?.observed_at ? new Date(b.attestation.observed_at) : b?.observed_at ? new Date(b.observed_at) : null
+  // The live probe panel is always shown on an MCP page (it is the opt-in affordance).
+  if (probe) return <LiveProbePanel b={b} pending={mut.isPending} error={mut.isError} observedAt={observedAt} onRun={() => mut.mutate()} />
   // Packages always get the panel; a repo gets it once the sandbox has a result for it
   // (installed straight from git when it publishes no package).
   if ((!surface || !SANDBOX_SURFACES.has(surface)) && !b) return null
@@ -1165,6 +1179,110 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, effect }: { owner: s
                 {' '}· <button type="button" className="underline" onClick={() => { void navigator.clipboard?.writeText(b.attestation!.jws) }}>copy JWS</button>
               </p>
             )}
+          </div>
+        )}
+      </div>
+    </Reveal>
+  )
+}
+
+/** The opt-in live probe of a remote MCP server, rendered in the behavioral panel's
+ * place on the MCP score page. Nothing runs until the user presses the button; only
+ * tools whose annotations declare them read-only (and not destructive) are called, at
+ * most 10, once each, with synthetic inputs. Advisory — never part of the signed score. */
+function LiveProbePanel({ b, pending, error, observedAt, onRun }: { b: BehavioralData | null | undefined; pending: boolean; error: boolean; observedAt: Date | null; onRun: () => void }) {
+  const ex = b?.exercise ?? null
+  const calls = ex?.calls ?? []
+  const eligible = ex?.eligible ?? []
+  const listed = ex?.tools ?? []
+  const called = new Set(calls.map((c) => c.tool)).size
+  const skipped = Math.max(0, listed.length - Math.max(eligible.length, called))
+  const findings = b?.findings ?? []
+  const ran = !!b?.ran
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Live probe</h3>
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-warning/15 text-warning">Live probe · advisory</span>
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">not scored</span>
+        </div>
+        <p className="mt-1.5 text-text-muted text-[13px] max-w-[64ch]">
+          Calls only tools that declare themselves read-only, with synthetic inputs, once each.
+          Use on servers you own or are allowed to test. At most 10 tools, 8 seconds each, no
+          credentials sent. What comes back is checked for injection text and credential-looking
+          values. A live answer cannot be recomputed by a verifier, so this never changes the
+          signed score or the verdict.
+        </p>
+        <button
+          onClick={onRun}
+          disabled={pending}
+          className="mt-3 font-semibold text-[13.5px] px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-70"
+        >
+          {pending ? 'Probing… (up to 60s)' : ran ? 'Probe again (read-only tools)' : 'Probe live (read-only tools)'}
+        </button>
+        <span className="ml-3 text-[12px] text-text-muted">Runs only when you press it; the result is kept for a day.</span>
+        {error && <p className="mt-3 text-[13px] text-danger">Couldn&apos;t run the live probe — please try again in a moment.</p>}
+
+        <div className="mt-3 flex items-center gap-2 text-[12.5px]" aria-live="polite">
+          {pending ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" /><span className="text-text-muted">Handshaking and calling read-only tools…</span></>
+          ) : ran ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-success" /><span className="text-text-muted">Completed{observedAt ? ` · probed ${observedAt.toLocaleString()}` : ''}</span></>
+          ) : b ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-text-muted" /><span className="text-text-muted">Not run{b.reason ? `: ${b.reason}` : ''}</span></>
+          ) : (
+            <><span className="inline-block w-2 h-2 rounded-full bg-text-muted" /><span className="text-text-muted">Not probed — nothing is called until you ask.</span></>
+          )}
+        </div>
+
+        {ran && ex && (
+          <div className="mt-4 space-y-3">
+            <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted">
+              {ex.launch_ok
+                ? `Handshake ok${ex.server?.name ? ` (${ex.server.name}${ex.server.version ? ` ${ex.server.version}` : ''})` : ''} · called ${called} of ${Math.max(eligible.length, called)} read-only tool${Math.max(eligible.length, called) === 1 ? '' : 's'}${skipped > 0 ? ` · ${skipped} without a read-only annotation not called` : ''}`
+                : 'Handshake failed · nothing called'}
+            </div>
+            {!ex.launch_ok && (
+              <p className="text-[12.5px] text-text-muted">
+                {PROBE_START_REASONS[b?.grade_summary?.start_reason ?? ''] ?? PROBE_START_REASONS.unknown}
+                {b?.grade_summary?.start_reason_detail ? <span className="block mt-0.5 font-mono text-[11px] text-text-muted/80">{b.grade_summary.start_reason_detail}</span> : null}
+                <span className="block mt-0.5">Not a finding.</span>
+              </p>
+            )}
+            {ex.launch_ok && listed.length > 0 && eligible.length === 0 && (
+              <p className="text-[12.5px] text-text-muted">None of the {listed.length} listed tool{listed.length === 1 ? '' : 's'} declares <span className="font-mono">readOnlyHint: true</span>, so nothing was called.</p>
+            )}
+            {ex.launch_ok && calls.length > 0 && (
+              <ul className="space-y-1.5">
+                {calls.map((c, i) => (
+                  <li key={i} className="text-[12.5px]">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-mono text-text">{c.tool}</span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">declares read-only</span>
+                      <span className="text-text-muted">{c.ok && !c.is_error ? 'ok' : c.is_error ? 'returned an error' : (c.error || 'failed')}{typeof c.duration_ms === 'number' ? ` · ${c.duration_ms} ms` : ''}</span>
+                    </div>
+                    {c.result_sample && <div className="mt-0.5 font-mono text-[11px] text-text-muted/80 break-all line-clamp-2">{c.result_sample}</div>}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {ex.timed_out && <p className="text-[12px] text-warning">Stopped at the time budget — not every eligible tool was called.</p>}
+            {findings.length > 0 ? (
+              <div className="space-y-1.5">
+                {findings.map((fnd, i) => (
+                  <div key={i} className="text-[12.5px] text-text-muted">
+                    <span className={`font-mono text-[10.5px] uppercase px-1.5 py-0.5 rounded mr-2 ${fnd.severity === 'high' || fnd.severity === 'critical' ? 'bg-danger/15 text-danger' : fnd.severity === 'medium' ? 'bg-warning/15 text-warning' : 'bg-surface border border-border text-text-muted'}`}>{fnd.severity}</span>
+                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning mr-2">advisory</span>
+                    {fnd.name}
+                    {fnd.evidence && <div className="mt-0.5 font-mono text-[11px] text-text-muted/80 break-all">{fnd.evidence}</div>}
+                  </div>
+                ))}
+              </div>
+            ) : ex.launch_ok && calls.length > 0 ? (
+              <div className="flex items-center gap-2 text-[13.5px] font-semibold text-success"><span>✓</span> No injection text or credential-looking value in any result.</div>
+            ) : null}
+            <p className="text-[11.5px] text-text-muted/70">Advisory only: a live probe is not reproducible, carries no attestation, and never changes the trust score or the safe / needs-review verdict.</p>
           </div>
         )}
       </div>
@@ -1484,6 +1602,9 @@ function McpResult({ endpoint }: { endpoint: string }) {
       <AddToAgent kind="mcp" url={endpoint} />
 
       <BlastRadius scan={scan} />
+
+      {/* Opt-in live probe — nothing is called until the user presses the button */}
+      <BehavioralPanel owner="mcp" repo={endpoint} probe={{ endpoint }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} />
 
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">

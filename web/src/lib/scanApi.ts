@@ -80,6 +80,18 @@ export async function fetchMcpScan(endpoint: string, force = false): Promise<Pub
   return data
 }
 
+/** OPT-IN live probe of a remote MCP server: calls only the tools whose annotations
+ * declare them read-only (and not destructive), once each, with synthetic inputs.
+ * Advisory — the result comes back as `behavioral` with `plan: "live-probe"` and
+ * never changes the signed score. Bounded to 60 s server-side. */
+export async function fetchMcpProbe(endpoint: string): Promise<PublicScanResponse> {
+  const { data } = await publicApi.get<PublicScanResponse>(
+    `/public/scan/mcp?endpoint=${encodeURIComponent(endpoint)}&probe=true`,
+    { timeout: 90_000 },
+  )
+  return data
+}
+
 export async function fetchWalletScan(
   wallet: string,
   chain = 'ethereum',

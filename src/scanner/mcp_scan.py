@@ -392,6 +392,154 @@ def _parse_jsonrpc_body(text: str) -> dict | None:
     return None
 
 
+_MCP_HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream",
+    "User-Agent": "AgentAvow-MCP-Scanner",
+}
+_MCP_PROTOCOL_VERSION = "2025-06-18"
+
+
+def _rpc(method: str, params: dict | None = None, rid: int | None = 1) -> dict:
+    body: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+    if rid is not None:
+        body["id"] = rid
+    if params is not None:
+        body["params"] = params
+    return body
+
+
+class McpSession:
+    """One Streamable-HTTP MCP session over a (rebind-safe) httpx client: ``initialize``
+    + ``notifications/initialized``, then ``tools/list`` / ``tools/call`` on the same
+    ``mcp-session-id``. Sends exactly the headers ``fetch_mcp_tools`` always sent — no
+    credentials, nothing else. Every method is fail-open (returns a status / None /
+    an error record) and never raises past the transport."""
+
+    def __init__(self, client, url: str) -> None:
+        self._client = client
+        self._url = url
+        self._headers = dict(_MCP_HEADERS)
+        self.server_info: dict = {}
+        self.session_id: str | None = None
+        self.init_status: int | None = None
+        self._rid = 1
+
+    def _next_id(self) -> int:
+        self._rid += 1
+        return self._rid
+
+    async def initialize(self) -> int:
+        """Run the handshake; returns the HTTP status of ``initialize`` (0 on a transport
+        error). ``server_info`` and ``session_id`` are set on success."""
+        try:
+            init = await self._client.post(self._url, headers=self._headers, json=_rpc(
+                "initialize",
+                {
+                    "protocolVersion": _MCP_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "AgentAvow", "version": "1.0"},
+                },
+            ))
+        except Exception:
+            self.init_status = 0
+            return 0
+        self.init_status = init.status_code
+        if init.status_code >= 400:
+            return init.status_code
+        session = init.headers.get("mcp-session-id") or init.headers.get("Mcp-Session-Id")
+        init_doc = _parse_jsonrpc_body(init.text)
+        self.server_info = ((init_doc or {}).get("result") or {}).get("serverInfo") or {}
+        if session:
+            self.session_id = session
+            self._headers["mcp-session-id"] = session
+        # notifications/initialized (no id — a notification)
+        try:
+            await self._client.post(
+                self._url, headers=self._headers,
+                json=_rpc("notifications/initialized", {}, rid=None))
+        except Exception:
+            pass
+        return init.status_code
+
+    async def list(self, method: str, key: str) -> list:
+        try:
+            resp = await self._client.post(
+                self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
+            if resp.status_code >= 400:
+                return []
+            doc = _parse_jsonrpc_body(resp.text)
+            return ((doc or {}).get("result") or {}).get(key) or []
+        except Exception:
+            return []
+
+    async def call_tool(self, name: str, arguments: dict, *, timeout: float) -> dict:
+        """One ``tools/call``. Returns ``{ok, is_error, result, error, status}`` — ``ok``
+        is "a JSON-RPC result arrived"; ``is_error`` is the MCP ``isError`` flag;
+        ``error`` is ``call_timeout`` / ``http_<status>`` / ``rpc_error: <msg>`` /
+        ``transport_error: <class>``. Never raises."""
+        import asyncio
+        out: dict = {"ok": False, "is_error": False, "result": None, "error": None,
+                     "status": None}
+        try:
+            resp = await asyncio.wait_for(
+                self._client.post(
+                    self._url, headers=self._headers, timeout=timeout,
+                    json=_rpc("tools/call", {"name": name, "arguments": arguments},
+                              rid=self._next_id()),
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            out["error"] = "call_timeout"
+            return out
+        except Exception as exc:  # noqa: BLE001 — transport errors are observations
+            msg = str(exc.__class__.__name__)
+            out["error"] = "call_timeout" if "Timeout" in msg else f"transport_error: {msg}"
+            return out
+        out["status"] = resp.status_code
+        if resp.status_code >= 400:
+            out["error"] = f"http_{resp.status_code}"
+            return out
+        doc = _parse_jsonrpc_body(resp.text)
+        if not isinstance(doc, dict):
+            out["error"] = "rpc_error: unparseable response"
+            return out
+        if isinstance(doc.get("error"), dict):
+            msg = str(doc["error"].get("message") or doc["error"].get("code") or "error")
+            out["error"] = f"rpc_error: {msg[:160]}"
+            return out
+        result = doc.get("result")
+        out["ok"] = True
+        out["result"] = result if isinstance(result, dict) else {}
+        out["is_error"] = bool(isinstance(result, dict) and result.get("isError"))
+        return out
+
+
+def mcp_result_text(result: dict | None, limit: int = 65536) -> str:
+    """The text an agent would see from a ``tools/call`` result: every ``content`` item
+    of type ``text`` (``resource`` text included) plus ``structuredContent`` as JSON,
+    capped at ``limit`` characters."""
+    if not isinstance(result, dict):
+        return ""
+    parts: list[str] = []
+    for item in result.get("content") or []:
+        if not isinstance(item, dict):
+            continue
+        if isinstance(item.get("text"), str):
+            parts.append(item["text"])
+        res = item.get("resource")
+        if isinstance(res, dict) and isinstance(res.get("text"), str):
+            parts.append(res["text"])
+    sc = result.get("structuredContent")
+    if isinstance(sc, (dict, list)):
+        try:
+            parts.append(json.dumps(sc, ensure_ascii=False, default=str))
+        except Exception:
+            pass
+    return "\n".join(parts)[:limit]
+
+
 async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
     """Handshake a Streamable-HTTP MCP server and return
     ``{"tools": [...], "resources": [...], "prompts": [...], "server_info": {...}}``.
@@ -406,20 +554,6 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
     except Exception:
         return None
 
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-        "User-Agent": "AgentAvow-MCP-Scanner",
-    }
-
-    def _rpc(method: str, params: dict | None = None, rid: int | None = 1) -> dict:
-        body: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
-        if rid is not None:
-            body["id"] = rid
-        if params is not None:
-            body["params"] = params
-        return body
-
     try:
         # Rebind-safe client: pre-flight validation (validate_url_https above) and the
         # connect-time DNS lookup are otherwise two separate resolutions — a rebinding
@@ -427,50 +561,17 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
         # connects to the exact validated IP. (This endpoint is USER-supplied.)
         from src.ssrf import ssrf_safe_async_client
         async with ssrf_safe_async_client(timeout=_MCP_TIMEOUT, follow_redirects=False) as client:
-            init = await client.post(url, headers=headers, json=_rpc(
-                "initialize",
-                {
-                    "protocolVersion": "2025-06-18",
-                    "capabilities": {},
-                    "clientInfo": {"name": "AgentAvow", "version": "1.0"},
-                },
-            ))
-            if init.status_code >= 400:
+            session = McpSession(client, url)
+            if await session.initialize() >= 400 or session.init_status == 0:
                 return None
-            session = init.headers.get("mcp-session-id") or init.headers.get("Mcp-Session-Id")
-            init_doc = _parse_jsonrpc_body(init.text)
-            server_info = ((init_doc or {}).get("result") or {}).get("serverInfo") or {}
-            sess_headers = dict(headers)
-            if session:
-                sess_headers["mcp-session-id"] = session
-
-            # notifications/initialized (no id — a notification)
-            try:
-                await client.post(
-                    url, headers=sess_headers,
-                    json=_rpc("notifications/initialized", {}, rid=None))
-            except Exception:
-                pass
-
-            async def _list(method: str, key: str) -> list:
-                try:
-                    resp = await client.post(
-                        url, headers=sess_headers, json=_rpc(method, {}, rid=2))
-                    if resp.status_code >= 400:
-                        return []
-                    doc = _parse_jsonrpc_body(resp.text)
-                    return ((doc or {}).get("result") or {}).get(key) or []
-                except Exception:
-                    return []
-
-            tools = await _list("tools/list", "tools")
-            resources = await _list("resources/list", "resources")
-            prompts = await _list("prompts/list", "prompts")
+            tools = await session.list("tools/list", "tools")
+            resources = await session.list("resources/list", "resources")
+            prompts = await session.list("prompts/list", "prompts")
             if not tools and not resources and not prompts:
                 return None
             return {
                 "tools": tools, "resources": resources, "prompts": prompts,
-                "server_info": server_info,
+                "server_info": session.server_info,
             }
     except Exception:
         return None

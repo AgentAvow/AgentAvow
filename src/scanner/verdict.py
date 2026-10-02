@@ -38,10 +38,19 @@ def sandbox_alarm(data: dict) -> bool:
     b = data.get("behavioral")
     if not isinstance(b, dict) or not b.get("ran"):
         return False
+    if is_advisory_block(b):
+        return False
     if b.get("canary_exfil"):
         return True
     return any(str(f.get("severity")) in ("critical", "high")
                for f in (b.get("findings") or []) if isinstance(f, dict))
+
+
+def is_advisory_block(b: dict) -> bool:
+    """True for a ``behavioral`` block that is advisory only — the opt-in live probe of a
+    remote MCP server (``plan == "live-probe"``). Its findings are reported, never a
+    verdict input: nobody can reproduce a live server's answers."""
+    return isinstance(b, dict) and (b.get("plan") == "live-probe" or b.get("advisory") is True)
 
 
 def verdict_reason(data: dict, safe: bool | None = None) -> str:

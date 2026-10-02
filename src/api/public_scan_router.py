@@ -1487,13 +1487,23 @@ async def scan_mcp_endpoint(
     endpoint: str = Query(..., description="The MCP server's Streamable-HTTP URL"),
     request: Request = None,
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    probe: bool = Query(
+        False,
+        description=(
+            "Opt-in live probe: call the server's read-only-annotated tools once each "
+            "with synthetic inputs (at most 10, 8 s each). Advisory only — reported in "
+            "`behavioral` with `plan: live-probe`, never part of the signed score. Use on "
+            "servers you own or are allowed to test."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Grade a LIVE **MCP server** by its endpoint URL — enumerates the served
     `tools/list` and scores the capability surface (tool-poisoning, schema risk,
     dangerous-capability taxonomy + lethal trifecta, annotation truthfulness).
     `coverage.surface = mcp`, live-observed (point-in-time). Streamable-HTTP only.
-    E.g. `/public/scan/mcp?endpoint=https://mcp.example.com/mcp`."""
+    E.g. `/public/scan/mcp?endpoint=https://mcp.example.com/mcp`.
+    `&probe=true` additionally runs the opt-in live probe (see `probe`)."""
     import hashlib
 
     from src.ssrf import validate_url_https
@@ -1509,7 +1519,14 @@ async def scan_mcp_endpoint(
         cached = await _get_cached("mcp", key)
         if cached:
             jws = create_jws(canonicalize(_build_scan_payload(full, cached)))
-            return _package_response(full, cached, jws, cached=True)
+            resp = _package_response(full, cached, jws, cached=True)
+            # A probe is a fresh network action on a user-supplied URL: rate-limited
+            # like a fresh scan even when the static grade came from cache.
+            if probe and request is not None:
+                from src.api.rate_limit import enforce_fresh_scan_limit
+                await enforce_fresh_scan_limit(request)
+            resp.behavioral = await _mcp_live_probe_block(url, run=probe)
+            return resp
 
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
@@ -1542,7 +1559,57 @@ async def scan_mcp_endpoint(
         if (old_cached or {}).get("tool_manifest_digest") else None
     )
     jws = create_jws(canonicalize(_build_scan_payload(full, data, drift)))
-    return _package_response(full, data, jws, cached=False, tool_drift=drift)
+    resp = _package_response(full, data, jws, cached=False, tool_drift=drift)
+    resp.behavioral = await _mcp_live_probe_block(url, run=probe)
+    return resp
+
+
+# ── Opt-in live probe of a remote MCP server (advisory; never scored) ──────────────
+# Runs ONLY when ``?probe=true`` is on the public scan request — never from the watch
+# job, the catalog, or the MCP connector, which only report a block a probe left in
+# the cache. Deliberately bypasses ``_apply_behavioral_score``: a live server's answers
+# are not reproducible, so the block is attached to the response and nothing else.
+
+_LIVE_PROBE_TTL = 24 * 3600
+_LIVE_PROBE_TOTAL_TIMEOUT = 60.0
+
+
+async def _get_live_probe_cached(url: str) -> dict | None:
+    from src import cache
+    from src.scanner.behavioral.live_probe import cache_key
+    try:
+        block = await cache.get(cache_key(url))
+    except Exception:  # noqa: BLE001 — cache trouble never fails a scan
+        return None
+    return block if isinstance(block, dict) else None
+
+
+async def _set_live_probe_cached(url: str, block: dict) -> None:
+    from src import cache
+    from src.scanner.behavioral.live_probe import cache_key
+    try:
+        await cache.set(cache_key(url), block, ttl=_LIVE_PROBE_TTL)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _mcp_live_probe_block(url: str, *, run: bool) -> dict | None:
+    """The ``behavioral`` block for an MCP endpoint: a fresh probe when ``run`` (bounded
+    to 60 s, cached 24 h), else the cached block from a previous opt-in probe, else None.
+    Fail-open: a probe that errors or times out yields a ``ran: False`` block."""
+    if not run:
+        return await _get_live_probe_cached(url)
+    from src.scanner.behavioral.live_probe import not_run, probe_live_mcp
+    try:
+        block = await asyncio.wait_for(probe_live_mcp(url), timeout=_LIVE_PROBE_TOTAL_TIMEOUT)
+    except asyncio.TimeoutError:
+        block = not_run("live probe timed out (60 s)")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("live probe failed for %s", url)
+        block = not_run(f"live probe error: {exc.__class__.__name__}")
+    if isinstance(block, dict) and block.get("ran"):
+        await _set_live_probe_cached(url, block)
+    return block
 
 
 class SubmitRequest(BaseModel):
