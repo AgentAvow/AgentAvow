@@ -10,19 +10,26 @@
   "exports": {
     ".": "./index.js",
     "./verify": "./src/verify.js",
-    "./client": "./src/client.js"
+    "./client": "./src/client.js",
+    "./vercel-ai": {
+      "types": "./dist/vercel-ai.d.ts",
+      "default": "./dist/vercel-ai.js"
+    }
   },
   "files": [
     "index.js",
     "src/",
     "README.md",
-    "bin/"
+    "bin/",
+    "dist/"
   ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "canonicalize": "2.1.0"
@@ -36,9 +43,16 @@
     "rfc8785",
     "jws",
     "did",
-    "verifiable"
+    "verifiable",
+    "vercel-ai-sdk",
+    "tool-gate",
+    "mcp"
   ],
   "bin": {
     "agentavow-trust": "bin/cli.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^22.0.0"
   }
 }

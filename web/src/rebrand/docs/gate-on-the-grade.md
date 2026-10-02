@@ -42,6 +42,62 @@ if (trust_score < 40) throw new Error(`blocked: ${trust_score}/100 (${trust_tier
 
 Framework bridges ship in `sdk/bridges/` (MCP, LangChain, CrewAI, AutoGen) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway`) enforces a policy server-side when you'd rather not embed the logic.
 
+### LangChain
+
+A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before a tool runs it fetches the server's signed grade, allows the call when the score clears the floor (81, Trusted) with no critical/high finding, and checks the definition the agent was served against the per-tool digest in the attestation — so a tool that was redefined after it was graded is stopped, not run. A block comes back to the model as a tool message that says why; nothing raises.
+
+```python
+from langchain.agents import create_agent
+from src.bridges.langchain.middleware import AgentAvowGate   # pip install agentgraph[langchain]
+
+gate = AgentAvowGate(
+    servers={"deepwiki": "https://mcp.deepwiki.com/mcp"},    # or tool_to_server={tool: server}
+    min_score=81,                                             # Trusted floor
+    on_fail="block",                                          # or "confirm" | "warn" | "raise"
+)
+agent = create_agent(model, tools=mcp_tools, middleware=[gate])
+```
+
+The mapping is yours to give — a LangChain tool doesn't carry its server's URL — by tool name (`tool_to_server`), by server name (`servers`, matched to `MCPAdapter`'s server name or a `<server>_` tool-name prefix), or a `resolve_server` callable. Tools that map to no server (your own functions) are not gated. `on_fail="confirm"` pauses the graph with a LangGraph interrupt until you resume with `"approve"`; `fail_closed=False` lets a call through, with a warning, when AgentAvow itself can't answer.
+
+### Google ADK
+
+The same gate is a `before_tool_callback`. For an `McpToolset` over HTTP it needs no mapping at all: the server URL comes off the tool's connection, and the drift check runs against the exact definition ADK was served — the raw `tools/list` entry the tool wraps. A block returns `{"error": …}` as the tool's result, so the model is told why and nothing raises.
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
+from src.bridges.google_adk import AgentAvowToolGate            # pip install agentgraph[adk]
+
+agent = LlmAgent(
+    name="assistant", model="gemini-2.5-flash",
+    tools=[McpToolset(connection_params=StreamableHTTPConnectionParams(url=SERVER_URL))],
+    before_tool_callback=AgentAvowToolGate(min_score=81, on_fail="block"),
+)
+```
+
+A stdio server has no URL — give it a coordinate with `tool_to_server={"tool": "npm:@scope/server"}` and it's graded as a package (score and findings; nothing was served over the wire, so no drift check). `on_fail="confirm"` uses ADK's own tool-confirmation flow: the first call asks, the call runs once the user confirms.
+
+### Vercel AI SDK
+
+`wrapTools` from `agentavow-trust` wraps each tool's `execute` with the same check — the SDK's `onToolExecutionStart` callback can watch a call but can't stop it, so the gate sits on the hook that decides. A blocked tool returns `{ error, agentavow }` as its output; `onFail: 'confirm'` instead sets `needsApproval` so `generateText`, `streamText` and `ToolLoopAgent` pause for the user through the SDK's own approval flow.
+
+```ts
+import { createMCPClient } from '@ai-sdk/mcp'
+import { generateText } from 'ai'
+import { wrapTools } from 'agentavow-trust/vercel-ai'
+
+const mcp = await createMCPClient({ transport: { type: 'http', url: SERVER_URL } })
+const tools = wrapTools(await mcp.tools(), {
+  server: SERVER_URL,        // every tool in this set came from one server
+  minScore: 81,              // Trusted floor
+  onFail: 'block',           // or 'confirm' | 'warn' | 'throw'
+})
+const { text } = await generateText({ model, tools, prompt })
+```
+
+Tools from `createMCPClient().tools()` don't carry their server's URL, so name it once per set (`server`), per tool (`toolToServer`), or with `resolveServer`. Your own function tools map to no server and run ungated. The drift check compares the definition the server serves now (or the `tools/list` you pass as `servedTools`) against the digest in the attestation; `failClosed: false` lets a call through, with a warning, when AgentAvow itself can't answer.
+
 ## Gate anything (the API)
 
 Every surface is one auth-free GET, returning the score, tier, findings, the signed `coverage{}` block, and the JWS attestation:

@@ -1,5 +1,14 @@
 """LangChain bridge — toolkit, callback handler, and auth for AgentGraph.
 
+.. deprecated::
+    ``AgentGraphToolkit``, ``AgentGraphCallback`` and ``AgentGraphAuth`` are the
+    pre-rebrand social-feed toolkit (search entities, create post, feed) and no
+    longer match the product. They stay importable for now and will be removed.
+    The current integration is the tool-call gate in
+    ``src.bridges.langchain.middleware.AgentAvowGate`` (a LangChain 1.x
+    ``AgentMiddleware``): it checks each MCP tool's signed AgentAvow grade and
+    per-tool definition digest before the tool runs.
+
 Provides LangChain-compatible tools that allow LangChain agents to interact
 with the AgentGraph platform (search entities, get trust scores, create posts,
 etc.) via the AgentGraph REST API.

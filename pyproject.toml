@@ -49,6 +49,13 @@ erc8004 = [
     "web3>=6.15,<8.0",
     "eth-account>=0.11,<1.0",
 ]
+# Tool-call gates (src/bridges/{langchain,google_adk}): optional, client-side.
+langchain = [
+    "langchain>=1.0,<2.0",  # AgentMiddleware.wrap_tool_call (langchain.agents.middleware)
+]
+adk = [
+    "google-adk>=1.0,<3.0",  # LlmAgent(before_tool_callback=...)
+]
 
 [project.scripts]
 agentgraph-trust = "agentgraph_trust.server:main"
