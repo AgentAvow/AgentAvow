@@ -73,3 +73,18 @@ def test_pending_and_deprecated_and_advisories_in_structured_content():
     assert s["verdict_reason"] == "deprecated"
     assert [a["id"] for a in s["advisories_affecting_version"]] == ["GHSA-1"]
     assert s["sandbox"] is None
+
+
+
+def test_pinned_version_in_the_name():
+    from src.bridges.mcp_streamable import _split_pinned_version as sp
+    assert sp("npm", "chalk@5.3.0") == ("chalk", "5.3.0")
+    assert sp("npm", "@modelcontextprotocol/server-memory@0.6.3") == ("@modelcontextprotocol/server-memory", "0.6.3")
+    assert sp("npm", "@scope/name") == ("@scope/name", None)
+    assert sp("npm", "chalk@^5") == ("chalk@^5", None)  # a range is not a pin
+    assert sp("pypi", "mcp-server-git==2025.7.1") == ("mcp-server-git", "2025.7.1")
+    assert sp("pypi", "requests === 2.32.5") == ("requests", "2.32.5")
+    assert sp("pypi", "requests@2.32.5") == ("requests", "2.32.5")
+    assert sp("pypi", "requests") == ("requests", None)
+    assert sp("crates", "serde@1.0.200") == ("serde", "1.0.200")
+    assert sp("docker", "nginx:1.25") == ("nginx:1.25", None)

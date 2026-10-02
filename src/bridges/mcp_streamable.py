@@ -18,6 +18,7 @@ import asyncio
 import contextvars
 import json
 import os
+import re
 from urllib.parse import quote
 
 import httpx
@@ -857,6 +858,24 @@ def _incident_summary(ih: dict) -> dict | None:
     }
 
 
+def _split_pinned_version(surface: str, spec: str) -> tuple[str, str | None]:
+    """'chalk@5.3.0' / '@scope/name@1.2.3' / 'requests==2.32.5' / 'pkg===1.0' /
+    'serde@1.0.200' → (name, version). A bare name → (name, None). Only an exact pin is
+    honoured (ranges like ^1 or >=2 are ignored: the registry resolves latest)."""
+    spec = (spec or "").strip()
+    if surface == "pypi":
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*===?\s*([A-Za-z0-9][A-Za-z0-9.+!-]*)$", spec)
+        if m:
+            return m.group(1), m.group(2)
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)@([0-9][A-Za-z0-9.+!-]*)$", spec)
+        return (m.group(1), m.group(2)) if m else (spec, None)
+    # npm (incl. scoped) / crates: name@version where version starts with a digit
+    m = re.match(r"^(@?[^@\s]+)@([0-9][^@\s]*)$", spec)
+    if m and surface in ("npm", "crates"):
+        return m.group(1), m.group(2)
+    return spec, None
+
+
 def _sandbox_struct(data: dict) -> dict | None:
     """The behavioral sandbox result as stable machine-readable fields. None when the
     tier does not apply; ``pending`` True while the first run is still going."""
@@ -1336,11 +1355,18 @@ async def _call_tool(
             if not surface or not pkg:
                 return _text("Give a registry (npm, pypi, crates, docker, or hf) and a package "
                              "name, e.g. registry='npm', name='chalk'.")
-            data = await _get(f"/public/scan/package/{surface}/{pkg}", params=fp)
+            # A pinned version rides in the name the way the ecosystems write it
+            # (chalk@5.3.0, requests==2.32.5, serde@1.0.200) — no tool-schema change.
+            pkg, version = _split_pinned_version(surface, pkg)
+            params = dict(fp)
+            if version:
+                params["version"] = version
+            data = await _get(f"/public/scan/package/{surface}/{pkg}", params=params)
             await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption(surface, surface, pkg)
-            rp = f"/check/pkg/{surface}/{pkg}"
-            api = f"/api/v1/public/scan/package/{surface}/{pkg}"
+            vq = f"?version={quote(version, safe='')}" if version else ""
+            rp = f"/check/pkg/{surface}/{pkg}{vq}"
+            api = f"/api/v1/public/scan/package/{surface}/{pkg}{vq}"
             hint = {
                 "npm": f"npm install {pkg}",
                 "pypi": f"pip install {pkg}",
