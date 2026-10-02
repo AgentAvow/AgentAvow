@@ -439,3 +439,17 @@ async def test_route_probe_timeout_is_fail_open(monkeypatch, mcp_route):
     assert resp.behavioral["reason"].startswith("live probe timed out")
     assert mcp_route.probe_cache == {}  # a non-run is not cached
     assert resp.verdict_reason != "sandbox_finding"
+
+
+
+def test_probe_section_says_a_slow_tool_timed_out_not_failed():
+    from src.bridges.mcp_streamable import _live_probe_section
+    b = {"ran": True, "plan": "live-probe", "advisory": True,
+         "exercise": {"launch_ok": True, "tools": [{"name": "scan_repo"}, {"name": "about"}],
+                      "eligible": ["scan_repo", "about"],
+                      "calls": [{"tool": "scan_repo", "ok": False, "error": "call_timeout"},
+                                {"tool": "about", "ok": True, "is_error": False}]},
+         "findings": [], "grade_summary": {"start_reason": "started"}}
+    text = "\n".join(_live_probe_section(b))
+    assert "scan_repo" in text and "8 s per-call limit" in text and "not a failure" in text
+    assert "did not answer" not in text

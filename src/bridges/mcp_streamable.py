@@ -712,10 +712,15 @@ def _live_probe_section(b: dict) -> list[str]:
         what = (f"listed {len(listed)} tool{'' if len(listed) == 1 else 's'}; none "
                 "declares itself read-only, so none was called")
     errored = sorted({c["tool"] for c in calls if c.get("ok") and c.get("is_error")})
-    failed = sorted({c["tool"] for c in calls if not c.get("ok")})
+    slow = sorted({c["tool"] for c in calls
+                   if not c.get("ok") and str(c.get("error") or "") == "call_timeout"})
+    failed = sorted({c["tool"] for c in calls if not c.get("ok") and c["tool"] not in slow})
     tail = []
     if errored:
         tail.append(f"{len(errored)} returned an error")
+    if slow:
+        tail.append(f"{len(slow)} ({', '.join(slow[:3])}) took longer than the 8 s per-call "
+                    "limit — a slow tool, not a failure")
     if failed:
         tail.append(f"{len(failed)} did not answer")
     if ex.get("timed_out"):
