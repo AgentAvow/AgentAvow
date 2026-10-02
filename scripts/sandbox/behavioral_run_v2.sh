@@ -159,19 +159,15 @@ if [ "$MODE" = "image" ]; then
   fi
 fi
 
-# 1. Start capturing DNS + TLS + plaintext HTTP on the HOST side of a docker bridge that is
-#    PRIVATE TO THIS RUN, before the target runs. gVisor uses a user-space netstack, so a
-#    capture inside the container's netns sees nothing — we capture where the packets cross
-#    the host kernel. A per-run network keeps concurrent runs' egress apart (two runs on the
-#    shared docker0 bridge saw each other's DNS; found 2026-10-02).
-NET="agv-${RUN_ID}"
-if docker network create --driver bridge "$NET" >/dev/null 2>&1; then
-  BRIDGE="br-$(docker network inspect -f '{{.Id}}' "$NET" | cut -c1-12)"
-else
-  NET=""
-  BRIDGE="$(docker network inspect bridge -f '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null)"
-  [ -z "$BRIDGE" ] && BRIDGE=docker0
-fi
+# 1. Start capturing DNS + TLS + plaintext HTTP on the HOST side of the docker bridge, BEFORE
+#    the target runs. gVisor uses a user-space netstack, so a capture inside the container's
+#    netns sees nothing — we capture where the packets cross the host kernel. The bridge is
+#    shared by concurrent runs (a per-run user-defined network does not work: gVisor cannot
+#    reach Docker's embedded DNS there, so every lookup fails), so the capture is read back
+#    filtered to THIS container's IP (found 2026-10-02: two runs saw each other's DNS).
+NET=""
+BRIDGE="$(docker network inspect bridge -f '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null)"
+[ -z "$BRIDGE" ] && BRIDGE=docker0
 timeout "$TIMEOUT" tcpdump -l -nn -i "$BRIDGE" -w "$PCAP" \
   '(udp port 53) or (tcp port 443) or (tcp port 80)' >/dev/null 2>&1 &
 TCPDUMP_PID=$!
@@ -186,7 +182,7 @@ DOCKER_OPTS=(
   --cap-drop ALL --security-opt no-new-privileges
   --memory "${MEMORY_MB}m" --cpus 1 --pids-limit "$PIDS"
 )
-[ -n "$NET" ] && DOCKER_OPTS+=(--network "$NET")
+
 if [ "$MODE" = "image" ]; then
   # The image's own ENTRYPOINT/CMD — what a user would get from `docker run <image>`.
   docker run "${DOCKER_OPTS[@]}" "$IMAGE" >/dev/null 2>&1 \
@@ -195,6 +191,10 @@ else
   docker run "${DOCKER_OPTS[@]}" "$IMAGE" sh -c "$CMD" >/dev/null 2>&1 \
     || { echo '{"error":"container_start_failed"}'; exit 0; }
 fi
+
+# The container's bridge IP: the capture is filtered to it when read back.
+CIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME" 2>/dev/null | head -1)"
+if [ -n "$CIP" ]; then PF="host $CIP and "; else PF=""; fi
 
 # 3. Wait for the target, bounded by the wall-clock timeout.
 TIMED_OUT=false
@@ -210,17 +210,17 @@ wait "${TCPDUMP_PID:-}" 2>/dev/null || true
 #    egress hostnames (DNS + SNI + HTTP Host), files written, and the canary search.
 docker logs "$NAME" 2>/dev/null | head -c 4000000 > "$LOGS" || true
 HOSTS_JSON="$(
-  { tcpdump -nn -r "$PCAP" 'udp port 53' 2>/dev/null | grep -oiE 'A\? [a-z0-9._-]+' | awk '{print $2}' | sed 's/\.$//'
-    tcpdump -nn -A -r "$PCAP" 'tcp port 443' 2>/dev/null | grep -oiE 'server_name.{0,60}' | grep -oiE '[a-z0-9.-]+\.[a-z]{2,}'
-    tcpdump -nn -A -r "$PCAP" 'tcp port 80' 2>/dev/null | grep -oiE '^Host: [a-z0-9._-]+' | awk '{print $2}' ; } \
+  { tcpdump -nn -r "$PCAP" "${PF}udp port 53" 2>/dev/null | grep -oiE 'A\? [a-z0-9._-]+' | awk '{print $2}' | sed 's/\.$//'
+    tcpdump -nn -A -r "$PCAP" "${PF}tcp port 443" 2>/dev/null | grep -oiE 'server_name.{0,60}' | grep -oiE '[a-z0-9.-]+\.[a-z]{2,}'
+    tcpdump -nn -A -r "$PCAP" "${PF}tcp port 80" 2>/dev/null | grep -oiE '^Host: [a-z0-9._-]+' | awk '{print $2}' ; } \
   | tr 'A-Z' 'a-z' | sort -u \
   | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' 2>/dev/null || echo '[]'
 )"
 FS_JSON="$(docker diff "$NAME" 2>/dev/null | grep -E '^[AC] ' \
   | grep -vE ' /(tmp|run|proc|sys|dev)(/|$)' | awk '{print $2}' | head -100 \
   | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' 2>/dev/null || echo '[]')"
-tcpdump -nn -r "$PCAP" 'udp port 53' 2>/dev/null | grep -oiE 'A\? [a-z0-9._-]+' | awk '{print $2}' | head -2000 > "$DNS_TXT" || true
-tcpdump -nn -A -r "$PCAP" 'tcp port 80' 2>/dev/null | head -c 2000000 > "$HTTP_TXT" || true
+tcpdump -nn -r "$PCAP" "${PF}udp port 53" 2>/dev/null | grep -oiE 'A\? [a-z0-9._-]+' | awk '{print $2}' | head -2000 > "$DNS_TXT" || true
+tcpdump -nn -A -r "$PCAP" "${PF}tcp port 80" 2>/dev/null | head -c 2000000 > "$HTTP_TXT" || true
 
 python3 - "$IMAGE" "$MODE" "$EXIT_CODE" "$TIMED_OUT" "$HOSTS_JSON" "$FS_JSON" "$CANARY" "$LOGS" \
   "$IMAGE_PULLED" "$FILES_JSON" "$DNS_TXT" "$HTTP_TXT" <<'PY'
