@@ -83,7 +83,11 @@
     },
     {
       "surface": "npm",
-      "name": "@wonderwhy-er/desktop-commander"
+      "name": "@wonderwhy-er/desktop-commander",
+      "expect_rules": [
+        "behavioral_undeclared_egress"
+      ],
+      "note": "install-time telemetry to telemetry.desktopcommander.app + a download from storage.googleapis.com \u2014 true undeclared egress; also exceeds the memory cap (exit 137)"
     },
     {
       "surface": "npm",
