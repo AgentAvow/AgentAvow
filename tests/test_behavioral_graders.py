@@ -162,7 +162,7 @@ def test_grade_is_deterministic_and_in_rule_order():
         "annotation_open_world_violated", "credential_canary_exfiltrated",
         "canary_echoed_in_result", "tool_call_crashed_server",
     ]
-    assert rules == [name for name, _ in GRADERS]
+    assert rules == [name for name, _ in GRADERS if name != "cloud_metadata_probe"]  # no IMDS here
     s = grade_summary(r)
     assert s["findings"] == {"critical": 2, "high": 1, "medium": 2, "low": 1, "total": 6}
     assert s["rules"] == rules
@@ -245,3 +245,21 @@ def test_install_only_plans_have_no_start_reason():
     assert grade_summary(r)["start_reason"] == "not_applicable"
     r2 = BehavioralResult(ran=True, surface="npm", coordinate="x", plan="npm-mcp", exit_code=1)
     assert classify_start(r2)[0] == "install_failed"
+
+
+
+def test_cloud_metadata_is_a_low_labelled_note_not_undeclared_egress():
+    from src.scanner.behavioral.graders import grade
+    from src.scanner.behavioral.runner import BehavioralResult
+    from src.scanner.behavioral.score_effect import behavioral_score_effect
+    r = BehavioralResult(ran=True, surface="npm", coordinate="x",
+                         egress_hosts=["169.254.169.254", "registry.npmjs.org"],
+                         unexpected_egress=["169.254.169.254"])
+    rules = [(f.rule, f.severity) for f in grade(r)]
+    assert rules == [("cloud_metadata_probe", "low")]
+    blk = {"ran": True, "findings": [{"rule": "cloud_metadata_probe", "severity": "low"}],
+           "attestation": {"jws": "a.b.c"}, "exercise": {"launch_ok": True, "calls": [{}]}}
+    assert behavioral_score_effect(67, blk)["score"] == 67  # low: no score effect
+    r2 = BehavioralResult(ran=True, surface="npm", coordinate="x",
+                          unexpected_egress=["169.254.169.254", "evil.net"])
+    assert ("behavioral_undeclared_egress", "high") in [(f.rule, f.severity) for f in grade(r2)]

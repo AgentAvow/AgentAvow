@@ -528,7 +528,7 @@ BEHAVIORAL_START_REASONS = (
 BEHAVIORAL_RULES = (
     "behavioral_undeclared_egress", "annotation_readonly_violated",
     "annotation_open_world_violated", "credential_canary_exfiltrated",
-    "canary_echoed_in_result", "tool_call_crashed_server",
+    "canary_echoed_in_result", "tool_call_crashed_server", "cloud_metadata_probe",
 )
 BEHAVIORAL_TOTALS = ("runs", "exercised", "tools_called", "findings", "canary_leaks")
 

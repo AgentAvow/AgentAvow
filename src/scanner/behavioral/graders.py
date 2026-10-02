@@ -76,8 +76,37 @@ def _is_scratch(path: str) -> bool:
 
 # ── individual graders ──────────────────────────────────────────────────────────
 
+# Cloud instance-metadata endpoints. Cloud SDKs (AWS, GCP, Azure) query them on their
+# own when looking for credentials, so reaching one is normal for a cloud-backed tool;
+# it is ALSO the classic credential-theft target. Reported as its own LOW, labelled
+# note (no score effect), never as "undeclared egress".
+CLOUD_METADATA_HOSTS = {"169.254.169.254", "fd00:ec2::254", "169.254.170.2",
+                        "metadata.google.internal", "metadata.goog", "metadata"}
+
+
+def _is_cloud_metadata(host: str) -> bool:
+    return (host or "").strip().lower().rstrip(".") in CLOUD_METADATA_HOSTS
+
+
+def grade_cloud_metadata(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
+    hosts = sorted({h for h in (result.unexpected_egress or []) if _is_cloud_metadata(h)})
+    if not hosts:
+        return []
+    return [_finding(
+        "cloud_metadata_probe", category="data_handling",
+        name="Contacted the cloud instance-metadata service",
+        severity="low", evidence=f"egress to {', '.join(hosts)}",
+        remediation=(
+            "Normal for tools built on a cloud SDK (AWS/GCP/Azure look for credentials "
+            "there by default). If this tool is not meant to use a cloud SDK, treat it as "
+            "a red flag: metadata services hand out cloud credentials."
+        ),
+    )]
+
+
 def grade_undeclared_egress(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
-    hosts = sorted(set(h for h in (result.unexpected_egress or []) if h))
+    hosts = sorted(set(h for h in (result.unexpected_egress or [])
+                       if h and not _is_cloud_metadata(h)))
     if not hosts:
         return []
     shown = ", ".join(hosts[:8])
@@ -262,6 +291,7 @@ GRADERS: tuple[tuple[str, Callable[..., list[BehavioralFinding]]], ...] = (
     ("credential_canary_exfiltrated", grade_canary_exfiltrated),
     ("canary_echoed_in_result", grade_canary_echoed),
     ("tool_call_crashed_server", grade_crashed_server),
+    ("cloud_metadata_probe", grade_cloud_metadata),
 )
 
 
