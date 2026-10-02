@@ -620,15 +620,19 @@ def _finding_phrase(f: dict) -> str:
 
 def _sandbox_alarm(data: dict) -> str | None:
     """The short phrase for the headline when the sandbox caught something that must not
-    sit under a 'safe' or 'clean' headline: a canary leak or a critical behavioral
-    finding. None otherwise."""
+    sit under a 'safe' or 'clean' headline: a canary leak, or any critical or HIGH
+    behavioral finding (the same findings that pull the score below the safe bar).
+    Most serious first. None otherwise."""
     b = data.get("behavioral")
     if not isinstance(b, dict) or not b.get("ran"):
         return None
-    for f in _behavioral_findings(b):
-        if (f.get("rule") == "credential_canary_exfiltrated"
-                or str(f.get("severity")) == "critical"):
-            return _clip(_finding_phrase(f), 90)
+    found = _behavioral_findings(b)
+    for pick in (lambda f: f.get("rule") == "credential_canary_exfiltrated",
+                 lambda f: str(f.get("severity")) == "critical",
+                 lambda f: str(f.get("severity")) == "high"):
+        for f in found:
+            if pick(f):
+                return _clip(_finding_phrase(f), 90)
     return None
 
 

@@ -283,8 +283,11 @@ def test_critical_finding_overrides_a_deprecated_or_safe_headline():
         first = _block(b, **extra).split("\n", 1)[0]
         assert first.startswith("⚠️ Review before you connect — caught in the sandbox: "
                                 "contacted undeclared hosts: a.net, b.net, c.net")
-    # a high finding alone does not take over the headline
+    # a high finding also takes over the headline (it pulls the score below the bar too)
     b["findings"][0]["severity"] = "high"
+    assert _block(b).startswith("⚠️ Review before you connect — caught in the sandbox")
+    # a medium/low one does not
+    b["findings"][0]["severity"] = "low"
     assert _block(b).startswith("✅ Safe to connect")
 
 
@@ -419,3 +422,35 @@ def test_repo_without_a_package_targets_git_install_by_language():
     both = {"repo_full_name": "acme/widget", "primary_language": "Python",
             "package_coordinate": {"surface": "npm", "name": "widget"}}
     assert _behavioral_target(both) == ("npm", "widget")
+
+
+
+def test_a_high_sandbox_finding_is_never_headlined_clean():
+    """Live 2026-10-02: exa-mcp-server (telemetry to api.agnost.ai, high) was headlined
+    'Clean, limited coverage — No risks found' with an install prompt."""
+    import inspect
+
+    from src.bridges import mcp_streamable as m
+    fn = next(v for v in vars(m).values() if callable(v)
+              and "Shape a /public/scan response" in (getattr(v, "__doc__", "") or ""))
+    data = {"trust_score": 70, "findings": {"critical": 0, "high": 0, "items": []},
+            "metadata": {"files_scanned": 5},
+            "behavioral": {"ran": True, "plan": "npm-mcp",
+                           "unexpected_egress": ["api.agnost.ai"],
+                           "egress_hosts": ["api.agnost.ai", "registry.npmjs.org"],
+                           "findings": [{"rule": "behavioral_undeclared_egress",
+                                         "severity": "high",
+                                         "name": "Unexpected network egress during install/run",
+                                         "evidence": "egress to api.agnost.ai"}],
+                           "exercise": {"launch_ok": True, "tools": [{"name": "a"}],
+                                        "calls": [{"tool": "a", "ok": True}]}}}
+    required = [p for p in inspect.signature(fn).parameters.values()
+                if p.default is inspect.Parameter.empty]
+    kwargs = {}
+    if "install_hint" in inspect.signature(fn).parameters:
+        kwargs["install_hint"] = "npm install exa-mcp-server"
+    out = fn(data, *[""] * (len(required) - 1), **kwargs)
+    first = out.strip().splitlines()[0]
+    assert first.startswith("⚠️ Review before you") and "sandbox" in first, first
+    assert "Clean" not in first and "No risks found" not in out
+    assert "npm install exa-mcp-server" not in out
