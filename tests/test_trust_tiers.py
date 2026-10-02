@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.trust_tiers import (
+    REVIEW_PHRASE,
     TIER_FLOORS,
     TIERS,
     TRUST_TIERS,
@@ -17,6 +18,7 @@ from src.trust_tiers import (
     trust_color,
     trust_tier_value,
     trust_word,
+    verdict_phrase,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -131,15 +133,77 @@ def test_tool_gate_floors_agree():
 
 def test_frontend_table_agrees():
     """web/src/components/trust/gradeSystem.ts is the TS twin — same values, floors,
-    words, colours (dark + light) and posture, in the same order."""
+    words, colours (dark + light), posture and verdict phrase, in the same order."""
     ts = (ROOT / "web" / "src" / "components" / "trust" / "gradeSystem.ts").read_text()
     rows = re.findall(
         r"\{ value: '([a-z]+)',\s*name: '([A-Za-z]+)',\s*min: (\d+),\s*color: '(#[0-9A-F]{6})',"
-        r"\s*colorText: '(#[0-9A-F]{6})',\s*posture: '([^']+)'", ts)
+        r"\s*colorText: '(#[0-9A-F]{6})',\s*posture: '([^']+)',\s*verdict: '([^']+)'", ts)
     assert len(rows) == 6
-    assert [(v, n, int(m), c, ct, p) for v, n, m, c, ct, p in rows] == [
-        (t.value, t.display, t.floor, t.color, t.color_light, t.posture) for t in TIERS
+    assert [(v, n, int(m), c, ct, p, vd) for v, n, m, c, ct, p, vd in rows] == [
+        (t.value, t.display, t.floor, t.color, t.color_light, t.posture, t.verdict)
+        for t in TIERS
     ]
+    # The demotion phrase is the same constant on both sides.
+    m = re.search(r"export const REVIEW_PHRASE = '([^']+)'", ts)
+    assert m and m.group(1) == REVIEW_PHRASE
+
+
+# ── verdict phrase: one per tier, consistent with the binary verdict ──────────
+
+EXPECTED_VERDICTS = {
+    "verified": "Safe to connect",
+    "trusted": "Safe to connect",
+    "standard": "Review before you connect",
+    "minimal": "Use with caution — confirm sensitive calls",
+    "restricted": "Not recommended",
+    "blocked": "Do not connect",
+}
+
+
+def test_verdict_phrase_table_is_keyed_to_the_six_tiers():
+    assert {t.value: t.verdict for t in TIERS} == EXPECTED_VERDICTS
+    # "Safe" is said at and only at the binary verdict's bar (src/scanner/verdict.py).
+    from src.scanner.verdict import SAFE_BAR
+    assert SAFE_BAR == 81
+    for t in TIERS:
+        assert t.verdict.startswith("Safe") == (t.floor >= SAFE_BAR), t.value
+    assert REVIEW_PHRASE == EXPECTED_VERDICTS["standard"]
+
+
+@pytest.mark.parametrize("score,value", [
+    (100, "verified"), (96, "verified"), (95, "trusted"), (81, "trusted"), (80, "standard"),
+    (51, "standard"), (50, "minimal"), (31, "minimal"), (30, "restricted"), (11, "restricted"),
+    (10, "blocked"), (0, "blocked"), (None, "blocked"),
+])
+def test_verdict_phrase_follows_the_tier(score, value):
+    assert verdict_phrase(score) == EXPECTED_VERDICTS[value]
+    # safe=True never promotes a sub-bar tier …
+    assert verdict_phrase(score, safe=True) == EXPECTED_VERDICTS[value]
+    # … and safe=False only demotes the two "Safe to connect" tiers to the review phrase.
+    demoted = verdict_phrase(score, safe=False)
+    if value in ("verified", "trusted"):
+        assert demoted == REVIEW_PHRASE
+    else:
+        assert demoted == EXPECTED_VERDICTS[value]
+
+
+def test_og_surfaces_use_the_tier_phrase_not_a_letter_table():
+    """The OG card / meta routers used to key a five-phrase table off A+..F. They now
+    read the tier phrase; the letter versions are gone."""
+    from src.api import og_router, public_scan_router
+    assert not hasattr(og_router, "_verdict_text")
+    assert not hasattr(public_scan_router, "_verdict_text")
+    assert og_router._og_verdict(None) == "A signed safety score — verify it offline."
+    assert og_router._og_verdict(90) == "Safe to connect · signed, verifiable offline."
+    assert og_router._og_verdict(90, safe=False) == f"{REVIEW_PHRASE} · signed, verifiable offline."
+    assert og_router._og_verdict(70) == f"{REVIEW_PHRASE} · signed, verifiable offline."
+    assert og_router._og_verdict(5) == "Do not connect · signed, verifiable offline."
+    for rel in ("src/api/og_router.py", "src/api/public_scan_router.py",
+                "web/src/rebrand/pages/Check.tsx"):
+        src = (ROOT / rel).read_text()
+        for stale in ("Generally Safe", "Generally safe", "Significant Risks",
+                      "Significant risks", "Install with caution", "Connect with caution"):
+            assert stale not in src, f"{rel}: {stale}"
 
 
 def test_no_surface_still_says_caution():

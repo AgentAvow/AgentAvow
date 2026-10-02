@@ -125,20 +125,38 @@ export interface TrustTier {
   requestsPerMinute: number | null   // null = unlimited
   maxTokensPerCall: number | null    // null = unlimited
   requireConfirmation: boolean
+  verdict: string        // the consumer-facing verdict phrase (SEO, share text, cards)
 }
 
+// The verdict phrase agrees with binaryVerdict() / the MCP connector: >= 81 reads
+// "Safe to connect"; everything below is a flavour of "review before you connect".
 export const TRUST_TIERS: readonly TrustTier[] = [
-  { value: 'verified',   name: 'Verified',   min: 96, color: '#16A34A', colorText: '#166534', posture: 'Connect normally · no limits',  requestsPerMinute: null, maxTokensPerCall: null, requireConfirmation: false },
-  { value: 'trusted',    name: 'Trusted',    min: 81, color: '#22C55E', colorText: '#15803D', posture: 'Auto-approve within budget',    requestsPerMinute: 60,   maxTokensPerCall: 8192, requireConfirmation: false },
-  { value: 'standard',   name: 'Standard',   min: 51, color: '#5BBF3A', colorText: '#3F7D1F', posture: 'Standard rate + token limits',  requestsPerMinute: 30,   maxTokensPerCall: 4096, requireConfirmation: false },
-  { value: 'minimal',    name: 'Minimal',    min: 31, color: '#F59E0B', colorText: '#B45309', posture: 'Confirm on sensitive calls',    requestsPerMinute: 15,   maxTokensPerCall: 2048, requireConfirmation: true },
-  { value: 'restricted', name: 'Restricted', min: 11, color: '#F97316', colorText: '#C2410C', posture: 'Gated · manual approval',       requestsPerMinute: 5,    maxTokensPerCall: 1024, requireConfirmation: true },
-  { value: 'blocked',    name: 'Blocked',    min: 0,  color: '#EF4444', colorText: '#B91C1C', posture: 'Do not connect',                requestsPerMinute: 0,    maxTokensPerCall: 0,    requireConfirmation: true },
+  { value: 'verified',   name: 'Verified',   min: 96, color: '#16A34A', colorText: '#166534', posture: 'Connect normally · no limits',  verdict: 'Safe to connect',                            requestsPerMinute: null, maxTokensPerCall: null, requireConfirmation: false },
+  { value: 'trusted',    name: 'Trusted',    min: 81, color: '#22C55E', colorText: '#15803D', posture: 'Auto-approve within budget',    verdict: 'Safe to connect',                            requestsPerMinute: 60,   maxTokensPerCall: 8192, requireConfirmation: false },
+  { value: 'standard',   name: 'Standard',   min: 51, color: '#5BBF3A', colorText: '#3F7D1F', posture: 'Standard rate + token limits',  verdict: 'Review before you connect',                  requestsPerMinute: 30,   maxTokensPerCall: 4096, requireConfirmation: false },
+  { value: 'minimal',    name: 'Minimal',    min: 31, color: '#F59E0B', colorText: '#B45309', posture: 'Confirm on sensitive calls',    verdict: 'Use with caution — confirm sensitive calls', requestsPerMinute: 15,   maxTokensPerCall: 2048, requireConfirmation: true },
+  { value: 'restricted', name: 'Restricted', min: 11, color: '#F97316', colorText: '#C2410C', posture: 'Gated · manual approval',       verdict: 'Not recommended',                            requestsPerMinute: 5,    maxTokensPerCall: 1024, requireConfirmation: true },
+  { value: 'blocked',    name: 'Blocked',    min: 0,  color: '#EF4444', colorText: '#B91C1C', posture: 'Do not connect',                verdict: 'Do not connect',                             requestsPerMinute: 0,    maxTokensPerCall: 0,    requireConfirmation: true },
 ]
 
 /** Map a 0–100 score to its Trust tier (API value, word, colour, posture, limits). */
 export function getTrustTier(score: number): TrustTier {
   return TRUST_TIERS.find((t) => score >= t.min) ?? TRUST_TIERS[TRUST_TIERS.length - 1]
+}
+
+/** The phrase a >= 81 score drops to when a blocking finding holds the binary verdict at
+ * needs-review — the Standard tier's phrase, so copy never says "safe" for something the
+ * API says to review. Twin of `REVIEW_PHRASE` in `src/trust_tiers.py`. */
+export const REVIEW_PHRASE = 'Review before you connect'
+
+/** The one consumer-facing verdict phrase for a score's tier (twin of
+ * `verdict_phrase` in `src/trust_tiers.py`). `noBlockingCritHigh` is the server's
+ * `certified.checks.no_critical_or_high` gate when the caller has the scan: it can
+ * only demote a trusted/verified score to REVIEW_PHRASE, never promote. */
+export function verdictPhrase(score: number, noBlockingCritHigh?: boolean): string {
+  const t = getTrustTier(score)
+  if (noBlockingCritHigh === false && t.verdict === TRUST_TIERS[0].verdict) return REVIEW_PHRASE
+  return t.verdict
 }
 
 /** Look a tier up by the API's `trust_tier` value; an unknown value falls back to the score. */

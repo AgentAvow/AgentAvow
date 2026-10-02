@@ -20,6 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_db
+from src.scanner.verdict import is_safe
+from src.trust_tiers import verdict_phrase
 
 logger = logging.getLogger(__name__)
 
@@ -78,19 +80,6 @@ def _grade_from_score(score: int) -> str:
     return grade_from_score(score)
 
 
-def _verdict_text(grade: str) -> str:
-    """Return a consumer-friendly safety verdict for a letter grade."""
-    if grade in ("A+", "A"):
-        return "Safe to Use"
-    if grade == "B":
-        return "Generally Safe"
-    if grade == "C":
-        return "Use with Caution"
-    if grade == "D":
-        return "Significant Risks"
-    return "Not Recommended"
-
-
 # ── Scan OG endpoint ────────────────────────────────────────────────────
 
 
@@ -121,12 +110,12 @@ async def og_check(
         and entity_trust.get("composite_score") is not None
     ):
         score = entity_trust["composite_score"]
-        grade = entity_trust["grade"]
+        safe = None  # a composite has no findings to gate on — tier phrase as-is
     else:
         cached = await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
-            grade = _grade_from_score(score)
+            safe = is_safe(cached)
         else:
             # No scan data available — generic tags
             title = f"Is {full_name} Safe? | AgentAvow Security Scan"
@@ -139,7 +128,7 @@ async def og_check(
                 status_code=200,
             )
 
-    verdict = _verdict_text(grade)
+    verdict = verdict_phrase(score, safe=safe)
     title = f"Is {full_name} Safe? Trust score {score}/100"
     description = f"Security scan: {verdict}."
 
@@ -267,16 +256,12 @@ def _og_image_url(title: str, grade: str, score, subtitle: str) -> str:
     return f"{BASE_URL}/api/v1/public/scan/og.png?{q}"
 
 
-def _og_verdict(score: int | None) -> str:
+def _og_verdict(score: int | None, safe: bool | None = None) -> str:
+    """The card subtitle: the tier's verdict phrase (``src.trust_tiers``), demoted by
+    the binary verdict when the caller has the scan to compute it."""
     if score is None:
         return "A signed safety score — verify it offline."
-    if score >= 81:
-        return "Safe to use · signed, verifiable offline."
-    if score >= 61:
-        return "Generally safe · signed, verifiable offline."
-    if score >= 41:
-        return "Use with caution · signed, verifiable offline."
-    return "Significant risks · signed, verifiable offline."
+    return f"{verdict_phrase(score, safe=safe)} · signed, verifiable offline."
 
 
 @router.get("/pkg/{surface}/{name:path}", response_class=HTMLResponse)
@@ -288,18 +273,20 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
     name = (name or "").strip().strip("/")
     full = f"{surface}:{name}"
     canonical_url = f"{BASE_URL}/check/pkg/{surface}/{name}"
-    grade, score, subtitle = "", None, ""
+    grade, score, subtitle, safe = "", None, "", None
     cached = await _get_cached(surface, name)
     if cached:
         score = cached.get("trust_score")
         _elig = (cached.get("certified") or {}).get("eligible")
         grade = cached.get("grade") or _display_grade(score or 0, _elig)
         subtitle = (cached.get("tool_description") or "").strip()
+        safe = is_safe(cached)
+    verdict = _og_verdict(score, safe)
     if not subtitle:
-        subtitle = _og_verdict(score)
+        subtitle = verdict
     title = f"{name} ({surface})"
     _shown = "—" if score is None else f"{int(score)}/100"
-    description = f"{name} scored {_shown} on AgentAvow — {_og_verdict(score)}"
+    description = f"{name} scored {_shown} on AgentAvow — {verdict}"
     image_url = _og_image_url(full, grade, score, subtitle)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 
@@ -311,15 +298,17 @@ async def og_skill(owner: str, repo: str, db: AsyncSession = Depends(get_db)) ->
 
     full_name = f"{owner}/{repo}"
     canonical_url = f"{BASE_URL}/check/skill/{owner}/{repo}"
-    grade, score = "", None
+    grade, score, safe = "", None, None
     cached = await _get_cached(owner, repo)
     if cached:
         score = cached.get("trust_score")
         grade = cached.get("grade") or _grade_from_score(score or 0)
-    subtitle = "OpenClaw agent skill · " + _og_verdict(score)
+        safe = is_safe(cached)
+    verdict = _og_verdict(score, safe)
+    subtitle = "OpenClaw agent skill · " + verdict
     title = f"{full_name} — Agent Skill"
     _shown = "—" if score is None else f"{int(score)}/100"
-    description = f"{full_name} scored {_shown} on AgentAvow — {_og_verdict(score)}"
+    description = f"{full_name} scored {_shown} on AgentAvow — {verdict}"
     image_url = _og_image_url(full_name, grade, score, subtitle)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 

@@ -52,6 +52,7 @@ from src.signing import canonicalize_jcs_strict as canonicalize
 from src.trust.aggregate_sources import components_to_contributions
 from src.trust.envelope_v2 import Contribution, EnvelopeError, build_envelope, sign_envelope
 from src.trust_tiers import TRUST_TIERS, recommended_limits, trust_tier_value  # noqa: F401
+from src.trust_tiers import verdict_phrase as _tier_verdict_phrase
 
 logger = logging.getLogger(__name__)
 
@@ -3032,19 +3033,6 @@ async def metric_beacon(event: str) -> dict:
     return {"ok": True}
 
 
-def _verdict_text(grade: str) -> str:
-    """Return a consumer-friendly safety verdict for a letter grade."""
-    if grade in ("A+", "A"):
-        return "Safe to Use"
-    if grade == "B":
-        return "Generally Safe"
-    if grade == "C":
-        return "Use with Caution"
-    if grade == "D":
-        return "Significant Risks"
-    return "Not Recommended"
-
-
 def _render_og_svg(
     owner: str,
     repo: str,
@@ -3166,6 +3154,7 @@ async def scan_og_image(
     critical = 0
     high = 0
     medium = 0
+    safe: bool | None = None  # the binary verdict, when a scan is there to compute it
     if (
         entity_trust
         and entity_trust.get("imported")
@@ -3184,6 +3173,7 @@ async def scan_og_image(
             critical = findings.get("critical", 0)
             high = findings.get("high", 0)
             medium = findings.get("medium", 0)
+            safe = _is_safe(cached)
         else:
             # No scan data — return a generic "not scanned" card
             score = 0
@@ -3192,7 +3182,9 @@ async def scan_og_image(
             high = 0
             medium = 0
 
-    verdict = _verdict_text(grade) if grade != "?" else "Not Yet Scanned"
+    # The tier's verdict phrase (src.trust_tiers) — one per tier, demoted by the
+    # binary verdict when a blocking finding holds a trusted score at needs-review.
+    verdict = _tier_verdict_phrase(score, safe=safe) if grade != "?" else "Not yet scanned"
 
     # Prefer a real PNG card (SVG og:image is not rendered by Twitter/Facebook). A
     # cached scan carries the tool's description; fall back to the SVG on any failure.

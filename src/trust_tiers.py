@@ -33,25 +33,40 @@ class TrustTier:
     requests_per_minute: int | None   # None = unlimited
     max_tokens_per_call: int | None   # None = unlimited
     require_user_confirmation: bool
+    verdict: str        # the consumer-facing verdict phrase (OG cards, SEO, share text)
 
 
 # Highest tier first — the first floor the score clears wins. Hues run green -> red:
 # the deeper green is Verified; Trusted / Standard / Minimal / Restricted / Blocked
 # keep the green / light-green / amber / orange / red of the previous five-band scale.
+# The verdict phrase agrees with the binary verdict in ``src/scanner/verdict.py`` and
+# the MCP connector: >= 81 (trusted / verified) reads "Safe to connect"; everything
+# below is a flavour of "review before you connect".
 TIERS: tuple[TrustTier, ...] = (
     TrustTier("verified",   "Verified",   96, "#16A34A", "#166534",
-              "Connect normally · no limits", None, None, False),
+              "Connect normally · no limits", None, None, False,
+              "Safe to connect"),
     TrustTier("trusted",    "Trusted",    81, "#22C55E", "#15803D",
-              "Auto-approve within budget", 60, 8192, False),
+              "Auto-approve within budget", 60, 8192, False,
+              "Safe to connect"),
     TrustTier("standard",   "Standard",   51, "#5BBF3A", "#3F7D1F",
-              "Standard rate + token limits", 30, 4096, False),
+              "Standard rate + token limits", 30, 4096, False,
+              "Review before you connect"),
     TrustTier("minimal",    "Minimal",    31, "#F59E0B", "#B45309",
-              "Confirm on sensitive calls", 15, 2048, True),
+              "Confirm on sensitive calls", 15, 2048, True,
+              "Use with caution — confirm sensitive calls"),
     TrustTier("restricted", "Restricted", 11, "#F97316", "#C2410C",
-              "Gated · manual approval", 5, 1024, True),
+              "Gated · manual approval", 5, 1024, True,
+              "Not recommended"),
     TrustTier("blocked",    "Blocked",    0,  "#EF4444", "#B91C1C",
-              "Do not connect", 0, 0, True),
+              "Do not connect", 0, 0, True,
+              "Do not connect"),
 )
+
+# The phrase a >= 81 score drops to when a blocking critical/high finding (or a sandbox
+# alarm) holds the binary verdict at needs-review — the Standard tier's phrase, so the
+# card never says "safe" for something the API says to review.
+REVIEW_PHRASE = "Review before you connect"
 
 # The legacy tuple shape ``(min_score, tier_name, requests_per_min, max_tokens,
 # require_confirmation)`` with -1 for unlimited — what public_scan_router's
@@ -103,6 +118,20 @@ def trust_color(score: int | float | None, light: bool = False) -> str:
 def trust_posture(score: int | float | None) -> str:
     """The one-line recommended execution posture."""
     return tier_for_score(score).posture
+
+
+def verdict_phrase(score: int | float | None, safe: bool | None = None) -> str:
+    """The one consumer-facing verdict phrase for a score's tier.
+
+    ``safe`` is the canonical binary verdict (``src.scanner.verdict.is_safe``) when the
+    caller has the scan to compute it. It can only demote: a trusted/verified score
+    with a blocking finding reads ``REVIEW_PHRASE`` instead of "Safe to connect".
+    A tier below trusted is never "safe", so ``safe=True`` changes nothing there.
+    """
+    t = tier_for_score(score)
+    if safe is False and t.verdict == TIERS[0].verdict:
+        return REVIEW_PHRASE
+    return t.verdict
 
 
 def recommended_limits(score: int | float | None) -> dict:

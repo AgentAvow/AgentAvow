@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
-import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
+import { getGradeInfo, getTrustTier, verdictPhrase } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
@@ -33,6 +33,17 @@ const CAT_LABELS: Record<string, string> = {
   data_handling: 'Data handling',
   filesystem_access: 'Filesystem access',
   dependency_health: 'Dependency health',
+}
+
+/** The one-line verdict for SEO/share copy: the tier's phrase (gradeSystem.verdictPhrase),
+ * demoted to "review" when a blocking critical/high finding holds the binary verdict —
+ * the same gate VerdictBadge reads, so the description never disagrees with the badge. */
+function scanVerdict(scan: PublicScanResponse): string {
+  const gate = scan.certified?.checks?.no_critical_or_high
+  const noBlocking = typeof gate === 'boolean'
+    ? gate
+    : (scan.findings?.critical ?? 0) === 0 && (scan.findings?.high ?? 0) === 0
+  return verdictPhrase(scan.trust_score, noBlocking)
 }
 
 const SEV_CLASS: Record<string, string> = {
@@ -1412,8 +1423,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
   }
   const t = getTrustTier(scan.trust_score)
   const f = scan.findings
-  const verdict = scan.trust_score >= 81 ? 'Safe to install' : scan.trust_score >= 61 ? 'Generally safe'
-    : scan.trust_score >= 41 ? 'Install with caution' : 'Significant risks'
+  const verdict = scanVerdict(scan)
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
@@ -1594,8 +1604,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
   }
   const t = getTrustTier(scan.trust_score)
   const f = scan.findings
-  const verdict = scan.trust_score >= 81 ? 'Safe to connect' : scan.trust_score >= 61 ? 'Generally safe'
-    : scan.trust_score >= 41 ? 'Connect with caution' : 'Significant risks'
+  const verdict = scanVerdict(scan)
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
@@ -1715,8 +1724,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
   const prov = (scan as { provenance?: { verified?: boolean; present?: boolean } }).provenance || {}
   const certified = (scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified
   const digest = (cov.artifact_digest || '').replace(/^sha256:/, '').slice(0, 16)
-  const verdict = scan.trust_score >= 81 ? 'Safe to use' : scan.trust_score >= 61 ? 'Generally safe'
-    : scan.trust_score >= 41 ? 'Use with caution' : 'Significant risks'
+  const verdict = scanVerdict(scan)
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
