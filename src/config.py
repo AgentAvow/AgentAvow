@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     # the spec (trust-score-v2-design §9.1).
     trust_v2_signing_key_ed25519: str | None = None
 
+    # OPTIONAL ES256 (P-256) assertion key for signing /.well-known/ai-catalog.json
+    # under the Agent-Card/ai-catalog did:web Publisher Profile (ES256 only).
+    # PEM or base64-encoded PKCS8 DER private key. Generate with:
+    # scripts/gen_catalog_key.py. When unset, the key is simply not published
+    # (no DID verificationMethod, no JWKS entry) and startup is unaffected.
+    catalog_signing_key_p256: str | None = None
+
     # SSO
     sso_enabled: bool = False  # Must be explicitly enabled; mock impl is not safe
     sso_saml_entity_id: str = "agentgraph-sp"
