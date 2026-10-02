@@ -11,7 +11,9 @@ break reads as a rule change, not a drop):
 * a response with status 301 / 302 / 308 is a redirect, not usage;
 * a request whose ``Host`` is one of ``LEGACY_HOSTS`` is not usage, whatever its
   status (nginx still proxies ``/api``, ``/.well-known`` and friends for the old
-  domain so README badges and signed receipts keep resolving);
+  domain so README badges and signed receipts keep resolving) — except the
+  trust-badge endpoints (``BADGE_PATH_PREFIXES``): a README badge embedded
+  before the rebrand still renders from the old domain, and that is adoption;
 * both are counted once, under ``REDIRECTED_METRIC``, so the junk volume stays
   visible as its own line.
 
@@ -48,6 +50,11 @@ REDIRECT_STATUSES: frozenset[int] = frozenset({301, 302, 308})
 # The one counter a redirect or legacy-host request may bump.
 REDIRECTED_METRIC = "requests_redirected"
 
+# Paths that still count as usage on a legacy host: README badges embedded before
+# the rebrand point at agentgraph.co and nginx keeps proxying them, so a
+# github-camo fetch there is a real badge render, not redirect junk.
+BADGE_PATH_PREFIXES: tuple[str, ...] = ("/api/v1/badges/",)
+
 # The day these counting rules took effect (ISO date). Surfaced by the dashboard.
 RULES_CHANGED_ON = "2026-10-02"
 
@@ -73,6 +80,11 @@ def is_legacy_host(host: str | None) -> bool:
     if h.startswith("["):  # IPv6 literal: never a legacy host
         return False
     return h.split(":", 1)[0].rstrip(".") in LEGACY_HOSTS
+
+
+def is_badge_path(path: str | None) -> bool:
+    """True for the trust-badge endpoints (SVG, embed, README snippet)."""
+    return (path or "").startswith(BADGE_PATH_PREFIXES)
 
 
 def current_scope() -> UsageScope | None:
@@ -121,7 +133,8 @@ async def usage_scope_middleware(request, call_next):
     Instrumentation never changes a response: every counter write is wrapped so
     a Redis outage (or a bug here) is swallowed and the response goes out as is.
     """
-    scope = UsageScope(excluded=is_legacy_host(request.headers.get("host")))
+    legacy = is_legacy_host(request.headers.get("host"))
+    scope = UsageScope(excluded=legacy and not is_badge_path(request.url.path))
     token = _SCOPE.set(scope)
     try:
         response = await call_next(request)

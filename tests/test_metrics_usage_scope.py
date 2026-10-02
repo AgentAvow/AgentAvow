@@ -75,6 +75,21 @@ def _app() -> FastAPI:
         await md.bump_metric("scan_request")
         return RedirectResponse(url="/scan", status_code=307)
 
+    @app.get("/api/v1/badges/trust/{entity_id}.svg")
+    async def badge_svg(entity_id: str):
+        await md.bump_metric_by_client("badge_fetch", "github-camo (1ff761db)")
+        return {"svg": entity_id}
+
+    @app.get("/api/v1/badges/embed/{entity_id}")
+    async def badge_embed(entity_id: str):
+        await md.bump_metric("badge_fetch")
+        return {"svg": entity_id}
+
+    @app.get("/api/v1/badge-lookalike")
+    async def badge_lookalike():
+        await md.bump_metric("badge_fetch")
+        return {"ok": True}
+
     @app.get("/late")
     async def late():
         # A bump after the scope settled must still count (background work).
@@ -180,6 +195,40 @@ async def test_legacy_host_reaches_no_usage_counter_even_on_200(redis, host):
     assert not any(k.startswith("ag:metrics:scan_request") for k in redis.store)
     assert not any(k.startswith("ag:metrics:badge_fetch") for k in redis.store)
     assert redis.store[_key(us.REDIRECTED_METRIC)] == 1
+
+
+@pytest.mark.parametrize("path", [
+    "/api/v1/badges/trust/abc.svg", "/api/v1/badges/embed/abc", "/api/v1/badges/readme/abc",
+])
+def test_badge_paths(path):
+    assert us.is_badge_path(path)
+
+
+@pytest.mark.parametrize("path", ["/api/v1/badge-lookalike", "/api/v1/public/scan/x", "/", None])
+def test_other_paths_are_not_badge_paths(path):
+    assert not us.is_badge_path(path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/v1/badges/trust/abc.svg", "/api/v1/badges/embed/abc"])
+async def test_badge_render_on_legacy_host_still_counts(redis, path):
+    # A README badge embedded before the rebrand points at agentgraph.co; nginx
+    # keeps proxying it, and a github-camo fetch there is real adoption.
+    r = await _get(path, host="agentgraph.co")
+    assert r.status_code == 200
+    assert redis.store[_key("badge_fetch")] == 1
+    assert _key(us.REDIRECTED_METRIC) not in redis.store
+
+
+@pytest.mark.asyncio
+async def test_badge_exemption_is_only_the_badge_paths(redis):
+    # Anything else on a legacy host stays excluded, including a near-miss path.
+    assert (await _get("/api/v1/badge-lookalike", host="agentgraph.co")).status_code == 200
+    assert _key("badge_fetch") not in redis.store
+    assert redis.store[_key(us.REDIRECTED_METRIC)] == 1
+    assert (await _get("/scan", host="agentgraph.co")).status_code == 200
+    assert _key("scan_request") not in redis.store
+    assert redis.store[_key(us.REDIRECTED_METRIC)] == 2
 
 
 @pytest.mark.asyncio
