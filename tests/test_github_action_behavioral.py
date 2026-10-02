@@ -63,10 +63,10 @@ def test_reads_the_real_api_field_names(tmp_path):
             "deprecation": None}
     p = _run(tmp_path, live)
     assert p.returncode == 0, p.stderr
-    assert "Score: 99/100 (Trusted)" in p.stdout
+    assert "Score: 99/100 (Verified)" in p.stdout
     assert "Findings: 0 critical, 0 high, 0 medium, 1 low" in p.stdout
     summary = (tmp_path / "summary.md").read_text()
-    assert "**AgentAvow Trust: 99/100 (Trusted)** — Clean — no blocking findings" in summary
+    assert "**AgentAvow Trust: 99/100 (Verified)** — Clean — no blocking findings" in summary
     assert "| secret hygiene | 100 |" in summary and "| code safety | 97 |" in summary
     assert "No summary available" not in summary
 

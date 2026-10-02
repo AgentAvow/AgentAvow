@@ -45,7 +45,7 @@ jobs:
 | Output | Description |
 |--------|-------------|
 | `trust-score` | The computed 0–100 score. |
-| `tier` | Trusted / Standard / Caution / Restricted / Blocked. |
+| `tier` | Verified / Trusted / Standard / Minimal / Restricted / Blocked (floors 96 / 81 / 51 / 31 / 11 / 0). |
 
 ## Same thing locally (inner loop)
 

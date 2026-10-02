@@ -41,11 +41,13 @@ if [ -z "${SCORE}" ] || [ "${SCORE}" = "null" ]; then
   echo "::endgroup::"
   exit 1
 fi
-# 0-100 trust tier word (dual-mark thresholds 80/60/40/20)
-if   [ "${SCORE}" -ge 80 ]; then TIER="Trusted"
-elif [ "${SCORE}" -ge 60 ]; then TIER="Standard"
-elif [ "${SCORE}" -ge 40 ]; then TIER="Caution"
-elif [ "${SCORE}" -ge 20 ]; then TIER="Restricted"
+# 0-100 trust tier word — the six API tiers (src/trust_tiers.py; floors 96/81/51/31/11).
+# tests/test_trust_tiers.py checks these numbers against the Python table.
+if   [ "${SCORE}" -ge 96 ]; then TIER="Verified"
+elif [ "${SCORE}" -ge 81 ]; then TIER="Trusted"
+elif [ "${SCORE}" -ge 51 ]; then TIER="Standard"
+elif [ "${SCORE}" -ge 31 ]; then TIER="Minimal"
+elif [ "${SCORE}" -ge 11 ]; then TIER="Restricted"
 else TIER="Blocked"; fi
 # One-line summary: the API's own if present, else derived from the scan result.
 SUMMARY=$(jq -r '
