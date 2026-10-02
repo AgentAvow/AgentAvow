@@ -31,7 +31,29 @@ signed [`/.well-known/ai-catalog.json`](https://agentavow.com/.well-known/ai-cat
 
 The issuer has two DID documents that resolve to the same keys: `did:web:agentgraph.co` (the identifier
 inside every attestation) and `did:web:agentavow.com`. Each lists the other under `alsoKnownAs`, so a
-verifier can start from either domain.
+verifier can start from either domain:
+
+```
+GET https://agentgraph.co/.well-known/did.json
+GET https://agentavow.com/.well-known/did.json
+```
+
+Both documents carry the Ed25519 attestation key as `#agentgraph-security-v1` and the P-256 catalog key as
+`#catalog-es256-v1` (under `assertionMethod` only), so `did:web:<either>#agentgraph-security-v1` resolves
+to the key that signed a scan.
+
+### The signed catalog
+
+[`/.well-known/ai-catalog.json`](https://agentavow.com/.well-known/ai-catalog.json) lists the connector's
+own tools and is signed under the `did:web` Publisher Profile, which mandates ES256, so it uses the P-256
+key rather than the Ed25519 key that signs scans. Each entry's `trustManifest.signature` is a detached
+compact JWS (RFC 7515 Appendix F, `header..signature`) with `alg` `ES256` and `kid`
+`did:web:agentavow.com#catalog-es256-v1`; the payload is the RFC 8785 canonical form of the manifest with
+`signature` removed. To check it offline, resolve the key from the DID document above (or from the JWKS by
+`kid`), rebuild the payload, and verify the P-256 signature over `<header>.<payload>`. The repo ships the
+check as a script: `python3 scripts/ai_catalog_wellknown.py verify --resolve` runs the profile's Level 3
+checks (no `none` or key-carrying headers, `kid` under the publisher's DID, key found in the DID document
+with no private material, signature verifies) and exits non-zero on any failure.
 
 ## Verify in Python
 

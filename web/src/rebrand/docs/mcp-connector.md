@@ -16,6 +16,11 @@ the connector.
 
 - **scan_repo** — scan a public GitHub repo (`owner/name`).
 - **scan_package** — scan a published npm / PyPI / crates / Docker / Hugging Face package.
+  Pin a release inside the name to scan exactly what you would install: `chalk@5.3.0` or
+  `@scope/name@1.2.3` (npm), `requests==2.32.5` (PyPI), `serde@1.0.200` (crates). A bare
+  name scans the latest release; a range such as `^1` is ignored and resolves to latest.
+  Advisories against the package are reported for the version scanned, with the fixed
+  release named.
 - **scan_mcp_server** — scan a live MCP server's tool definitions for poisoning / injection.
 - **verify_trust**, **check_interaction_safety**, **lookup_identity**, **get_trust_badge**
   — resolve and check an agent's identity and trust before delegating to it.
