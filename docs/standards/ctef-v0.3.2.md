@@ -60,7 +60,7 @@ The substrate is reproducible in-tree at [`agentgraph-co/agentgraph/tests/cross-
 
 ### Implementations × byte-match validation
 
-Ten independent implementations have reproduced the CTEF v0.3.2 reference vectors: AgentGraph (substrate maintainer), APS, AgentID, @nobulex/crypto, HiveTrust, msaleme/red-team-blue-team-agent-fabric, Foxbook, Dominion Observatory, ArkForge, and AlgoVoi.
+Ten independent implementations have reproduced the CTEF v0.3.2 reference vectors: AgentGraph (substrate maintainer), APS, AgentID, @nobulex/crypto, HiveTrust, msaleme/red-team-blue-team-agent-fabric, Foxbook, ArkForge, Agent Community Verifiability Gate, and AlgoVoi.
 
 No coordination. Each implementation built independently, validated independently, produced byte-identical canonical attestations against the same reference vectors.
 
