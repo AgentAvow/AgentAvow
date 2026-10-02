@@ -1117,18 +1117,27 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             await db.execute(select(ToolWatch).where(ToolWatch.active.is_(True)).limit(limit))
         ).scalars().all()
 
+    from src.scanner.behavioral.trigger import cached_scan_data, on_watch_rescan
+
     for w in watches:
         async with async_session() as db:
+            w_surface = getattr(w, "surface", "github") or "github"
+            # Previous cached scan — the baseline for the on-change sandbox trigger.
+            prev_scan = await cached_scan_data(w_surface, w.owner, w.repo)
             try:
                 from src.api.watch_router import scan_watch_target_detail
-                ws = await scan_watch_target_detail(
-                    getattr(w, "surface", "github") or "github", w.owner, w.repo, db,
-                )
+                ws = await scan_watch_target_detail(w_surface, w.owner, w.repo, db)
                 new_score, new_digest = ws.score, ws.digest
             except Exception:
                 continue
             if new_score is None:
                 continue  # scan failed this cycle — retry next time, don't false-alert
+            # On-change sandbox trigger: a new version / tool digest drops the cached
+            # block and re-runs; a watched coordinate with no block gets one queued.
+            await on_watch_rescan(
+                w_surface, w.owner, w.repo, prev_scan, ws.data,
+                new_digest=new_digest, last_manifest_digest=w.last_manifest_digest,
+            )
             # Behavioral drift — read-only against the public scan's cache; a watch
             # whose coordinate has no sandbox block keeps its baseline untouched.
             b_block = await _watch_behavioral_block(ws.data)
@@ -1414,11 +1423,24 @@ async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
     populated — kept off the live scan path to keep user scans fast). Fail-open."""
     surface = (surface or "github").lower()
     try:
+        from src.scanner.behavioral.trigger import (
+            cached_scan_data,
+            on_scan_change,
+            set_scan_cache,
+        )
+        # The previous cached scan (fresh or 7d stale copy) is the baseline the
+        # on-change sandbox trigger diffs the fresh scan against. Read it BEFORE the
+        # re-scan overwrites it.
+        prev = await cached_scan_data(surface, owner, repo)
         if surface == "github":
             from src.api.public_scan_router import public_scan
             # public_scan re-scans and captures into community_scans itself.
             await public_scan(owner=owner, repo=repo, force=True, db=db)
             await _store_catalog_adoption(surface, owner, repo, db)
+            # Version / tool-digest moved → drop the cached sandbox block, re-run.
+            fresh = await cached_scan_data(surface, owner, repo, stale=False)
+            if fresh:
+                await on_scan_change(surface, owner, repo, prev, fresh)
             return True
         from src.api.public_scan_router import (
             _capture_community_scan,
@@ -1439,6 +1461,10 @@ async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
         data = _scan_result_to_dict(result)
         await _capture_community_scan(owner, repo, data, db, surface=surface)
         await _store_catalog_adoption(surface, owner, repo, db)
+        # Mirror the public endpoint's cache write so the next cycle has a baseline
+        # to diff and the behavioral backfill has scan data to shape a target from.
+        await set_scan_cache(surface, owner, repo, data)
+        await on_scan_change(surface, owner, repo, prev, data)
         return True
     except Exception:
         logger.debug("catalog re-scan failed for %s %s/%s", surface, owner, repo, exc_info=True)
@@ -1591,6 +1617,34 @@ async def _catalog_rescan_loop(interval: int | None = None) -> None:
             await _run_catalog_rescan()
         except Exception:
             logger.exception("Catalog re-scan loop iteration failed")
+        await asyncio.sleep(interval)
+
+
+async def _behavioral_eval_loop(interval: int | None = None) -> None:
+    """Weekly behavioral eval (fixtures + known-good corpus through the sandbox). Lives
+    inside the scheduler's single-worker lock like every other loop here. The first
+    run waits an hour so a fresh deploy is not spending sandbox slots on itself while
+    live traffic warms up; a run already in progress (admin trigger) is skipped."""
+    from src.config import settings
+
+    interval = interval or int(
+        getattr(settings, "behavioral_eval_interval_hours", 168) or 168) * 60 * 60
+    logger.info("Behavioral eval loop started (interval=%ds)", interval)
+    await asyncio.sleep(getattr(settings, "behavioral_eval_startup_delay_sec", 3600))
+    while True:
+        try:
+            if (getattr(settings, "behavioral_eval_enabled", True)
+                    and getattr(settings, "scanner_behavioral_enabled", False)):
+                from src.jobs.behavioral_eval import EvalAlreadyRunningError, run_behavioral_eval
+
+                try:
+                    await run_behavioral_eval(reason="scheduled")
+                except EvalAlreadyRunningError:
+                    logger.info("Behavioral eval skipped: a run is already in progress")
+            else:
+                logger.debug("Behavioral eval skipped: behavioral tier or eval disabled")
+        except Exception:
+            logger.exception("Behavioral eval loop iteration failed")
         await asyncio.sleep(interval)
 
 
@@ -1761,6 +1815,22 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
         asyncio.create_task(
             _catalog_rescan_loop(),
             name="catalog-rescan",
+        )
+
+    # Behavioral backfill: sandbox the catalog's long tail at low priority (only
+    # ever takes a slot when one stays free for real scans). Gated inside the loop
+    # on behavioral_backfill_enabled + scanner_behavioral_enabled.
+    if getattr(_sched_settings, "behavioral_backfill_enabled", True):
+        from src.jobs.behavioral_backfill import behavioral_backfill_loop
+        asyncio.create_task(
+            behavioral_backfill_loop(),
+            name="behavioral-backfill",
+        )
+    # Weekly behavioral eval (sandbox fixtures + known-good corpus; alerts on regression)
+    if getattr(_sched_settings, "behavioral_eval_enabled", True):
+        asyncio.create_task(
+            _behavioral_eval_loop(),
+            name="behavioral-eval",
         )
 
     return _scheduler_task

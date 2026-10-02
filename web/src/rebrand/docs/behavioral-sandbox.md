@@ -103,12 +103,19 @@ static scan still looks for sandbox-probing and time-conditional code, and why
 [watching](./check-guide.md#stay-safe-over-time) a tool for definition drift matters more than any
 single run.
 
-## Triggering a run
+## When runs happen
 
-A sandbox run starts automatically the first time a supported package is scanned, from any client:
-the Check page, the public API, the GitHub Action, or the AgentAvow MCP server. The result is cached
-for a day. Add `?behavioral=true` to a package scan URL, or press **Run now** (**Re-run behavioral analysis**
-once a result exists) on the score page, to force a fresh run.
+- **First look.** The first time anyone scans a supported package, repo, or skill, from any client, a sandbox run starts within a minute. The result is kept for a day.
+- **When the tool changes.** The catalog is re-scanned on a schedule. When a package publishes a new version, or a server's tool definitions change, its sandbox result is discarded and a fresh run is queued. A tool cannot start behaving differently without shipping a change, so this is the cadence that matters.
+- **Watched tools** are kept current and you are alerted when their observed behavior changes.
+- **The long tail** is backfilled in the background, most-used first, using only sandbox capacity that real scans aren't using.
+- **On demand.** Add `?behavioral=true` to a package scan URL, or press **Run now** on the score page, for a fresh run.
+
+We don't re-run every tool on a calendar: most tools don't change from week to week, and a run that observes the same version again adds nothing.
+
+## How we check ourselves
+
+A fixed corpus runs through the real sandbox every week: fixture servers with known-bad behavior that must be caught, and a set of popular, well-maintained servers and skills on which any finding counts as a false positive until a person says otherwise. The results, and a diff against the previous week, are reviewed, and a regression raises an alert. The same fixtures also run in our test suite on every change.
 
 ## Where the result shows up
 
