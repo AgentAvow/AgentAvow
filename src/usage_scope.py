@@ -30,6 +30,8 @@ import contextvars
 import logging
 from dataclasses import dataclass, field
 
+from src.traffic_class import classify_user_agent
+
 logger = logging.getLogger(__name__)
 
 # Hosts that are not the product any more. Requests arriving under them are the
@@ -133,7 +135,7 @@ async def usage_scope_middleware(request, call_next):
 
 
 async def _finish(scope: UsageScope, status_code: int, request) -> None:
-    from src.api.metrics_dashboard_router import bump_metric
+    from src.api.metrics_dashboard_router import bump_metric, record_human_visitor
 
     names = settle(scope, status_code)
     if scope.excluded:
@@ -141,3 +143,10 @@ async def _finish(scope: UsageScope, status_code: int, request) -> None:
         return
     for name in names:
         await bump_metric(name)
+    # Distinct people per day: only a request that counts as usage AND comes from
+    # a browser User-Agent joins the salted HLL (never a bot, never a redirect).
+    user_agent = request.headers.get("user-agent", "")
+    if classify_user_agent(user_agent) == "human":
+        from src.api.rate_limit import _get_client_ip
+
+        await record_human_visitor(_get_client_ip(request), user_agent)

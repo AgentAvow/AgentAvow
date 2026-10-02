@@ -24,6 +24,8 @@ Endpoints (both under the ``/admin`` prefix, reusing ``require_admin``):
 """
 from __future__ import annotations
 
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -106,6 +108,80 @@ async def _read_client_split(name: str, day_strs: list[str]) -> dict[str, int]:
     for cls in CLIENT_CLASSES:
         out[cls] = sum((await _read_daily_counter(f"{name}:client:{cls}", day_strs)).values())
     return out
+
+
+# ---------------------------------------------------------------------------
+# Unique human visitors per UTC day — a salted HyperLogLog.
+#
+# Method: for every request the User-Agent classifies as ``human``
+# (src/traffic_class) and that counts as usage (src/usage_scope), the member
+# ``sha256(daily_salt || client_ip || user_agent)`` is PFADDed to the day's HLL.
+# The salt is 16 random bytes, created on first use with SET NX, kept only in
+# Redis under a 48-hour TTL, and never logged — so the HLL holds no raw IP or
+# UA, and once the salt expires nothing in it can be re-derived. Each day has
+# its own salt, so the same person hashes differently on different days and
+# days cannot be joined: ``unique_humans`` over a window is the union of the
+# daily HLLs, which is the SUM of each day's distinct humans (one person on
+# three days counts three). Reads degrade to 0 when Redis is unavailable.
+# ---------------------------------------------------------------------------
+_HUMANS_PREFIX = f"{_METRICS_PREFIX}unique_humans:"
+_HUMANS_SALT_TTL = 60 * 60 * 48
+_salt_cache: dict[str, str] = {}  # {day: salt}; one entry, in-process only
+
+
+async def _daily_salt(r, day: str) -> str | None:
+    """Today's salt: from the in-process cache, else Redis, else freshly minted
+    (SET NX so concurrent workers agree). None when Redis is unavailable."""
+    cached = _salt_cache.get(day)
+    if cached:
+        return cached
+    key = f"{_HUMANS_PREFIX}salt:{day}"
+    salt = await r.get(key)
+    if not salt:
+        candidate = secrets.token_hex(16)
+        if await r.set(key, candidate, nx=True, ex=_HUMANS_SALT_TTL):
+            salt = candidate
+        else:
+            salt = await r.get(key)
+    if isinstance(salt, bytes):
+        salt = salt.decode()
+    if salt:
+        _salt_cache.clear()
+        _salt_cache[day] = salt
+    return salt or None
+
+
+async def record_human_visitor(client_ip: str | None, user_agent: str | None) -> None:
+    """PFADD this human request's salted identity to today's HLL. Best-effort —
+    never raises, and stores nothing that identifies the visitor (see above).
+    The caller is responsible for the ``human`` classification and usage scope."""
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        salt = await _daily_salt(r, day)
+        if not salt:
+            return
+        raw = f"{salt}|{client_ip or ''}|{user_agent or ''}".encode("utf-8", "ignore")
+        key = f"{_HUMANS_PREFIX}{day}"
+        await r.pfadd(key, hashlib.sha256(raw).hexdigest())
+        await r.expire(key, _COUNTER_TTL)
+    except Exception:
+        pass
+
+
+async def _read_unique_humans(day_strs: list[str]) -> int:
+    """PFCOUNT over the window's daily HLLs (missing days count 0). 0 on failure."""
+    if not day_strs:
+        return 0
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        return int(await r.pfcount(*[f"{_HUMANS_PREFIX}{d}" for d in day_strs]))
+    except Exception:
+        return 0
 
 
 async def _read_daily_counter(name: str, day_strs: list[str]) -> dict[str, int]:
@@ -277,6 +353,8 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     # (src/usage_scope); they are counted once here so the junk volume stays visible.
     redirected_by_day = await _read_daily_counter(REDIRECTED_METRIC, day_strs)
     requests_redirected_window = sum(redirected_by_day.values())
+    # Distinct people (browser UA) per day, salted HLL — see record_human_visitor.
+    unique_humans_window = await _read_unique_humans(day_strs)
     badge_fetches_window = sum(badge_by_day.values())
     readme_renders_window = sum(readme_render_by_day.values())
     # Who is calling: the same counters split by client class (src/traffic_class).
@@ -405,6 +483,10 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "usage: it reaches no counter above and is tallied once as "
         "'requests_redirected'. Only redirects the backend itself serves are seen "
         "here; the ones nginx answers never reach the app.",
+        "'unique_humans' is distinct browser-UA visitors per UTC day from a salted "
+        "HyperLogLog: sha256(daily random salt + IP + UA), salt kept only in Redis "
+        "for 48h and never logged. Days cannot be joined, so over a window it is the "
+        "sum of each day's distinct people. 0 when Redis is unavailable.",
     ]
 
     return {
@@ -425,6 +507,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "unique_checkers": int(unique_checkers_window),
             "mcp_calls": int(mcp_calls_window),
             "requests_redirected": int(requests_redirected_window),
+            "unique_humans": int(unique_humans_window),
         },
         "scans": {
             "repos_scanned_window": int(repos_scanned_window),
