@@ -224,6 +224,29 @@ _GRADE_CASE = case(
 _GRADE_ORDER = ["A+", "A", "B", "C", "D", "F"]
 
 
+def metrics_baseline() -> dict:
+    """The counting rules, one sentence each, and the date they took effect.
+
+    Shown on the dashboard so the step change in every usage line on
+    ``RULES_CHANGED_ON`` reads as what it is — a rule change — not a drop.
+    """
+    return {
+        "rules_changed_on": RULES_CHANGED_ON,
+        "rules": [
+            "Redirects (301/302/308) are not usage: they reach no counter and are "
+            "tallied once as 'requests_redirected'.",
+            "Requests whose Host is a retired domain (" + ", ".join(sorted(LEGACY_HOSTS))
+            + ") are not usage, whatever their status.",
+            "Humans = a real browser User-Agent; agents = Claude, ChatGPT, Perplexity, "
+            "Cursor, VS Code, the plugin hook and README badge renders; everything else "
+            "(crawlers, monitors, scripts, vendor index bots) is automated.",
+            "Unique humans = distinct sha256(daily random salt + IP + UA) per UTC day in "
+            "a HyperLogLog; the salt lives 48h in Redis only, so days cannot be joined "
+            "and a window is the sum of its days.",
+        ],
+    }
+
+
 async def _aggregate(db: AsyncSession, window: str) -> dict:
     n_days = _WINDOW_DAYS[window]
     # Site-wide distinct checkers over the window (HLL union) — real reach, no raw IPs.
@@ -584,6 +607,8 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         },
         "series": series,
         "notes": notes,
+        # The counting rules + the date they changed, so the trend break is explained.
+        "baseline": metrics_baseline(),
     }
 
 
