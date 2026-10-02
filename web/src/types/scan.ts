@@ -70,6 +70,9 @@ export interface PublicScanResponse {
   grade?: string
   // A+ certified-tier eligibility: { eligible, checks: {check_name: bool} }.
   certified?: { eligible?: boolean; checks?: Record<string, boolean> }
+  // Package scans: the exact published version that was scanned (latest, or the
+  // `?version=` pin the request asked for).
+  package_version?: string | null
   // Recompute-discipline coverage: scan_depth / provenance_binding / db_snapshots.
   coverage?: { scan_depth?: string; provenance_binding?: string; [k: string]: unknown }
   provenance?: { verified?: boolean; source_matches_claim?: boolean; [k: string]: unknown }

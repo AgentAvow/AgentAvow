@@ -1012,16 +1012,16 @@ const PROBE_START_REASONS: Record<string, string> = {
  * Agent Skill repo whose hooks and scripts the sandbox runs, or (probe) the OPT-IN live
  * probe of a remote MCP server: a button the user must press, read-only-annotated tools
  * only, advisory, never scored. */
-function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string }; skill?: boolean; effect?: ScoreEffect | null; probe?: { endpoint: string } }) {
-  const mut = useMutation({ mutationFn: () => probe ? fetchMcpProbe(probe.endpoint) : skill ? fetchSkillBehavioral(owner, repo) : pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
+function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string; version?: string }; skill?: boolean; effect?: ScoreEffect | null; probe?: { endpoint: string } }) {
+  const mut = useMutation({ mutationFn: () => probe ? fetchMcpProbe(probe.endpoint) : skill ? fetchSkillBehavioral(owner, repo) : pkg ? fetchPackageBehavioral(pkg.surface, pkg.name, pkg.version) : fetchBehavioralScan(owner, repo) })
   // While the background run is pending, poll the (cached, non-forcing) scan so the panel
   // fills in by itself. ~8 s interval, gives up after 5 minutes.
   const [startedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
   const autoPending = !!auto?.pending && !mut.data && !probe
   const poll = useQuery({
-    queryKey: ['behavioral-poll', skill ? 'skill' : pkg?.surface ?? 'github', pkg?.name ?? `${owner}/${repo}`],
-    queryFn: () => skill ? fetchSkillScan(owner, repo) : pkg ? fetchPackageScan(pkg.surface, pkg.name) : fetchPublicScan(owner, repo),
+    queryKey: ['behavioral-poll', skill ? 'skill' : pkg?.surface ?? 'github', pkg?.name ?? `${owner}/${repo}`, pkg?.version ?? ''],
+    queryFn: () => skill ? fetchSkillScan(owner, repo) : pkg ? fetchPackageScan(pkg.surface, pkg.name, false, pkg.version) : fetchPublicScan(owner, repo),
     enabled: autoPending,
     refetchInterval: (q) => {
       const blk = (q.state.data as { behavioral?: BehavioralData | null } | undefined)?.behavioral
@@ -1702,12 +1702,15 @@ function McpResult({ endpoint }: { endpoint: string }) {
  * coordinate (no repo). Leads with the artifact/provenance trust-chain + the
  * Certified panel (this is where A+ is actually earned), then the findings.
  * Skips the GitHub-only surfaces (stars, adoption, README badge). */
-function PackageResult({ surface, name }: { surface: string; name: string }) {
+function PackageResult({ surface, name, version }: { surface: string; name: string; version?: string }) {
+  // `version` is the `?version=` the MCP connector / plugin link to for a pinned scan:
+  // it rides into the fetch, the canonical path and the share link unchanged.
   const { data: scan, isLoading, isError } = useQuery({
-    queryKey: ['rebrand-pkg-scan', surface, name],
-    queryFn: () => fetchPackageScan(surface, name),
+    queryKey: ['rebrand-pkg-scan', surface, name, version ?? ''],
+    queryFn: () => fetchPackageScan(surface, name, false, version),
     retry: 0,
   })
+  const versionQs = version ? `?version=${encodeURIComponent(version)}` : ''
   if (isLoading) return <ScanningLoader owner={surface} repo={name} />
   if (isError || !scan) {
     return (
@@ -1729,8 +1732,8 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
         title={`${name} (${surface}) — safety score ${scan.trust_score}/100`}
-        description={`${verdict}. AgentAvow's signed score for ${surface}:${name}: ${scan.trust_score}/100 (${t.name}) — scanned on the published artifact, verifiable offline.`}
-        path={`/check/pkg/${surface}/${name}`}
+        description={`${verdict}. AgentAvow's signed score for ${surface}:${name}${version ? `@${version}` : ''}: ${scan.trust_score}/100 (${t.name}) — scanned on the published artifact, verifiable offline.`}
+        path={`/check/pkg/${surface}/${name}${versionQs}`}
         jsonLd={scanReviewJsonLd(`${surface}:${name}`, scan.trust_score)}
       />
       <Reveal>
@@ -1742,7 +1745,10 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
               {prov.verified && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light">✓ Provenance verified</span>}
               <ClaimedBadge surface={surface} repo={name} />
             </div>
-            <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{name}</h1>
+            <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">
+              {name}
+              {version && <span className="ml-2 align-middle inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-surface border border-border text-text-muted tracking-normal" title={`Scanned exactly this published version${scan.package_version && scan.package_version !== version ? ` (resolved to ${scan.package_version})` : ''}`}>pinned to {version}</span>}
+            </h1>
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           </div>
@@ -1773,7 +1779,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
       </Reveal>
 
       {/* Behavioral deep scan — auto-runs for npm/PyPI packages */}
-      <BehavioralPanel owner={surface} repo={name} surface={surface} pkg={{ surface, name }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
+      <BehavioralPanel owner={surface} repo={name} surface={surface} pkg={{ surface, name, version }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (
@@ -1815,11 +1821,14 @@ export default function RebrandCheck() {
   if (location.pathname.includes('/check/skill/') && params.owner && params.repo) {
     return <SkillResult owner={params.owner} repo={params.repo} />
   }
+  // A pinned package scan (/check/pkg/npm/chalk?version=5.3.0 — what the MCP connector
+  // and the plugin link to). Empty/blank = latest.
+  const pinnedVersion = (sp.get('version') || '').trim() || undefined
   // Package coordinate route (/check/pkg/:surface/*) → native npm/PyPI package scan.
   if (params.surface) {
     const name = params['*'] || ''
     if (!name) return <Hero />
-    return <PackageResult surface={params.surface.toLowerCase()} name={name} />
+    return <PackageResult surface={params.surface.toLowerCase()} name={name} version={pinnedVersion} />
   }
   // A /check/{surface}/{name} URL where the "owner" is actually a package registry
   // (npm/pypi/…) is a package coordinate, not a GitHub repo — render the native package
@@ -1827,7 +1836,7 @@ export default function RebrandCheck() {
   // Scoped names (@scope/pkg) keep using /check/pkg/:surface/*.
   const PKG_SURFACES = ['npm', 'pypi', 'crates', 'huggingface', 'docker']
   if (params.owner && params.repo && PKG_SURFACES.includes(params.owner.toLowerCase())) {
-    return <PackageResult surface={params.owner.toLowerCase()} name={params.repo} />
+    return <PackageResult surface={params.owner.toLowerCase()} name={params.repo} version={pinnedVersion} />
   }
   const { owner, repo } = params
   // A private scan hands its result here via router state so the owner gets the

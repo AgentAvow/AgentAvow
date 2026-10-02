@@ -40,14 +40,31 @@ export async function fetchBehavioralScan(
   return data
 }
 
+/** The package scan URL: `/public/scan/package/{surface}/{name}` plus any flags.
+ * `version` pins the scan to an exact published version (default = latest) — the
+ * same `?version=` the MCP connector and plugin link to. */
+function packageScanUrl(
+  surface: string,
+  name: string,
+  flags: { force?: boolean; behavioral?: boolean; version?: string },
+): string {
+  const q = new URLSearchParams()
+  if (flags.force) q.set('force', 'true')
+  if (flags.behavioral) q.set('behavioral', 'true')
+  if (flags.version) q.set('version', flags.version)
+  const qs = q.toString()
+  return `/public/scan/package/${surface}/${name}${qs ? `?${qs}` : ''}`
+}
+
 /** Scan a PUBLISHED npm/PyPI package by coordinate (no GitHub repo). `name` may
  * be a scoped package (@scope/pkg) — the slash is preserved in the path. */
 export async function fetchPackageBehavioral(
   surface: string,
   name: string,
+  version?: string,
 ): Promise<PublicScanResponse> {
   const { data } = await publicApi.get<PublicScanResponse>(
-    `/public/scan/package/${surface}/${name}?behavioral=true`,
+    packageScanUrl(surface, name, { behavioral: true, version }),
     { timeout: 150_000 },
   )
   return data
@@ -57,9 +74,10 @@ export async function fetchPackageScan(
   surface: string,
   name: string,
   force = false,
+  version?: string,
 ): Promise<PublicScanResponse> {
   const { data } = await publicApi.get<PublicScanResponse>(
-    `/public/scan/package/${surface}/${name}${force ? '?force=true' : ''}`,
+    packageScanUrl(surface, name, { force, version }),
   )
   return data
 }
