@@ -48,8 +48,11 @@ tool      = the served definition restricted to
             (a missing or null field is omitted; _meta and unknown fields are never hashed)
 preimage  = JCS({ "profile": "agentavow.mcp-tool-definition.v1", "tool": tool })
 digest    = "sha256:" + hex(sha256(preimage))
-key       = "tool:" + name, with everything outside printable ASCII, plus % and =,
-            percent-encoded as UTF-8 bytes
+key       = "tool:" + body, where body is the name with every character outside
+            0x21-0x7E (space, controls and all non-ASCII), plus % and =, replaced by
+            its UTF-8 bytes as %XX (uppercase hex); if that encoded body is longer
+            than 128 characters it is cut to its first 96 and suffixed with "~" and
+            the first 16 hex characters of sha256 over the raw UTF-8 name
 ```
 
 The profile label versions the preimage: if the field set ever changes, the label changes,
@@ -98,10 +101,13 @@ correctly.
 ## Key encoding
 
 The pinned server's tool names are plain ASCII, so the six cases never exercise the
-percent-encoding rule for map keys. `key_encoding` in the vector file carries seven
-name-to-key pairs that do (`=`, `%`, space, a tab, `é`, an emoji), derived with the same
-rule and carrying no signature. The verifier checks them; an implementer who gets all
-seven has the encoder right.
+key rules. `key_encoding` in the vector file carries eleven name-to-key pairs that do:
+seven for percent-encoding (`=`, `%`, space, a tab, `é`, an emoji) and four for the
+length rule (an encoded body of exactly 128 stays literal; 129 ASCII characters, 200
+ASCII characters, and 50 `é` whose encoded body is 300 characters are cut and
+suffixed). They are derived with the same rules and carry no signature; the expected
+keys were cross-checked against the issuer's own implementation. The verifier checks
+them; an implementer who gets all eleven has the encoder right.
 
 ## Claim ceiling
 

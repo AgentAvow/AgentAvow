@@ -31,15 +31,19 @@ function toolDigest(tool) {
   for (const f of FIELDS) if (tool[f] !== undefined && tool[f] !== null) body[f] = tool[f];
   return 'sha256:' + createHash('sha256').update(jcs({ profile: PROFILE, tool: body })).digest('hex');
 }
-// map key: "tool:" + the name with everything outside printable ASCII, plus % and =,
-// percent-encoded as UTF-8 bytes (names longer than 128 encoded chars are cut and
-// suffixed; none here).
 function toolKey(name) {
+  // Every character outside 0x21-0x7E (so space, controls and all non-ASCII), plus
+  // % and =, is percent-encoded as its UTF-8 bytes. If the encoded key body is longer
+  // than 128 characters it is cut to its first 96 and suffixed with "~" and the first
+  // 16 hex characters of sha256 over the raw UTF-8 name.
   const enc = Array.from(name).map(ch =>
     (/[\x21-\x7e]/.test(ch) && ch !== '%' && ch !== '=') ? ch
       : Array.from(Buffer.from(ch, 'utf8')).map(b => '%' + b.toString(16).toUpperCase().padStart(2, '0')).join('')
   ).join('');
-  return 'tool:' + enc;
+  const body = enc.length > 128
+    ? enc.slice(0, 96) + '~' + createHash('sha256').update(Buffer.from(name, 'utf8')).digest('hex').slice(0, 16)
+    : enc;
+  return 'tool:' + body;
 }
 
 // Every served definition must recompute to the digest the issuer signed. If this
@@ -105,6 +109,11 @@ const keyVectors = [
   ['tab\there', 'tool:tab%09here'],
   ['héllo', 'tool:h%C3%A9llo'],
   ['search 🙂', 'tool:search%20%F0%9F%99%82'],
+  // length rule: the cut applies to the encoded body, not the raw name
+  ['b'.repeat(128), 'tool:' + 'b'.repeat(128)],
+  ['c'.repeat(129), 'tool:' + 'c'.repeat(96) + '~a2efa32a90eaeb9b'],
+  ['a'.repeat(200), 'tool:' + 'a'.repeat(96) + '~c2a908d98f5df987'],
+  ['é'.repeat(50), 'tool:' + '%C3%A9'.repeat(16) + '~2d18fe4b61f01139'],
 ].map(([name, want]) => {
   const got = toolKey(name);
   if (got !== want) throw new Error(`toolKey(${JSON.stringify(name)}) = ${got}, expected ${want}`);
@@ -120,7 +129,7 @@ const out = {
     attestation: 'compact JWS (RFC 7515), alg EdDSA (Ed25519), payload = RFC 8785 JCS canonical bytes of the verdict; signature over ASCII(BASE64URL(header) || "." || BASE64URL(payload)).',
     subject: 'subject.id = "mcp:" + the endpoint URL that was scanned. The subject is the server, not a tool.',
     tool_digest: `scan.toolDigests["tool:<name>"] = "sha256:" + hex(sha256(JCS({ profile: "${PROFILE}", tool }))) where tool is the served definition restricted to ${FIELDS.join(', ')} (a missing or null field is omitted; _meta and unknown fields are never hashed). A gate can compute observed_tool_digest from the tools/list it is served, with no call to the issuer.`,
-    tool_key: 'the map key is "tool:" + the name with everything outside printable ASCII, plus % and =, percent-encoded as UTF-8 bytes.',
+    tool_key: 'the map key is "tool:" + the name with every character outside 0x21-0x7E (space, controls and all non-ASCII), plus % and =, percent-encoded as its UTF-8 bytes (uppercase hex). If the encoded body is longer than 128 characters it is cut to its first 96 characters and suffixed with "~" and the first 16 hex characters of sha256 over the raw UTF-8 name; the cut is measured on the encoded body. key_encoding carries pairs for both rules.',
     manifest_digest: 'scan.toolManifestDigest = sha-256 folded over the per-tool digests (the v0 whole-server binding; not used by the v1 gate).',
   },
   author_set: 'agentgraph (AgentAvow attestation layer, did:web:agentgraph.co).',

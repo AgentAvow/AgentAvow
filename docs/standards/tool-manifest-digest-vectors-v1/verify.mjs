@@ -25,11 +25,18 @@ function toolDigest(tool) {
   return 'sha256:' + createHash('sha256').update(jcs({ profile: PROFILE, tool: body })).digest('hex');
 }
 function toolKey(name) {
+  // Every character outside 0x21-0x7E (so space, controls and all non-ASCII), plus
+  // % and =, is percent-encoded as its UTF-8 bytes. If the encoded key body is longer
+  // than 128 characters it is cut to its first 96 and suffixed with "~" and the first
+  // 16 hex characters of sha256 over the raw UTF-8 name.
   const enc = Array.from(name).map(ch =>
     (/[\x21-\x7e]/.test(ch) && ch !== '%' && ch !== '=') ? ch
       : Array.from(Buffer.from(ch, 'utf8')).map(b => '%' + b.toString(16).toUpperCase().padStart(2, '0')).join('')
   ).join('');
-  return 'tool:' + enc;
+  const body = enc.length > 128
+    ? enc.slice(0, 96) + '~' + createHash('sha256').update(Buffer.from(name, 'utf8')).digest('hex').slice(0, 16)
+    : enc;
+  return 'tool:' + body;
 }
 const pub = createPublicKey({ key: set.issuer.jwk, format: 'jwk' });
 
