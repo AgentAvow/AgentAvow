@@ -162,6 +162,7 @@ class ArtifactFetchResult:
     # The maintainer's own end-of-life signal: npm `deprecated` on the resolved version,
     # PyPI `yanked` (+ reason) or the 'Development Status :: 7 - Inactive' classifier.
     deprecation: str | None = None
+    published_at: str | None = None  # ISO date the resolved version was published
     error: str | None = None
 
 
@@ -432,6 +433,7 @@ async def fetch_npm_artifact(
             packaged_manifest=packaged_manifest,
             description=(packaged_manifest or {}).get("description"),
             deprecation=_npm_deprecation(vdata),
+            published_at=str((packument.get("time") or {}).get(version) or "")[:10] or None,
         )
     finally:
         if owns:
@@ -509,10 +511,18 @@ async def fetch_pypi_artifact(
             file_count=len(files),
             description=(meta.get("info") or {}).get("summary"),
             deprecation=_pypi_deprecation(meta),
+            published_at=_pypi_published(meta, url),
         )
     finally:
         if owns:
             await client.aclose()
+
+
+def _pypi_published(meta: dict, url: str) -> str | None:
+    for u in (meta or {}).get("urls") or []:
+        if u.get("url") == url and u.get("upload_time"):
+            return str(u["upload_time"])[:10]
+    return None
 
 
 def _npm_deprecation(vdata: dict) -> str | None:

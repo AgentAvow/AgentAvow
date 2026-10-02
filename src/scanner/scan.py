@@ -2212,6 +2212,8 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         "fs_access": "filesystem_access",
         "dependency": "dependency_health",
         "install_hook": "dependency_health",
+        # A published advisory against the package ITSELF affecting the scanned version.
+        "known_vulnerability": "code_safety",
         # The maintainer retired the package (npm deprecated / PyPI yanked or Inactive).
         "maintenance": "dependency_health",
         # Git-config autorun (GitSpawn class) is a code-execution vector → code-safety axis.
@@ -3080,6 +3082,7 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         # Is this package a runnable MCP server? (→ the UI offers stdio 1-click
         # deeplinks with `npx -y <pkg>` / `uvx <pkg>`, not just an install command.)
         "is_mcp_server": _looks_like_mcp_server(eco, fetched.name, fetched.packaged_manifest),
+        "published_at": getattr(fetched, "published_at", None),
     }
     result.coverage = build_coverage(
         surface=eco,
@@ -3112,16 +3115,45 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
                 "scan_package provenance wiring failed for %s:%s", eco, name, exc_info=True
             )
 
+    # OSV for the package itself: MAL- incident history (context only, never scored) and
+    # its own published advisories — one that affects the scanned version IS a finding.
+    # Fetched BEFORE scoring so those findings count. Fail-open.
+    try:
+        from src.scanner.incident_history import fetch_incident_history
+        _ver = (result.artifact_scan or {}).get("version") or version
+        result.incident_history = await fetch_incident_history(surface, name, _ver)
+        result.findings = result.findings + _own_advisory_findings(
+            name, _ver, (result.incident_history or {}).get("advisories") or [])
+    except Exception:
+        pass
+
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
     result.certified = _certified_status(result)
-    # Context-only incident history (OSV MAL- for this package). Fail-open; never scored.
-    try:
-        from src.scanner.incident_history import fetch_incident_history
-        result.incident_history = await fetch_incident_history(surface, name, version)
-    except Exception:
-        pass
     return result
+
+
+def _own_advisory_findings(name: str, version: str | None, advisories: list[dict]) -> list:
+    """A published advisory (GHSA / PYSEC / CVE) against the package ITSELF that affects
+    the scanned version: a known, current vulnerability in exactly what you'd install."""
+    out = []
+    for a in advisories:
+        if not a.get("affects_scanned_version"):
+            continue
+        fixed = a.get("fixed_in")
+        ids = ", ".join([a.get("id") or ""] + list(a.get("aliases") or [])[:2]).strip(", ")
+        out.append(Finding(
+            category="known_vulnerability",
+            name=("Published advisory affects this version: "
+                  f"{a.get('summary') or a.get('id')}")[:160],
+            severity=a.get("severity") or "medium",
+            file_path="registry advisory",
+            line_number=0,
+            snippet=f"{name}@{version}: {ids}"[:300],
+            remediation=(f"Upgrade to {fixed} or later, which fixes this advisory." if fixed
+                         else "No fixed release is listed; avoid this package or isolate it."),
+        ))
+    return out
 
 
 async def scan_mcp(endpoint_url: str) -> ScanResult:

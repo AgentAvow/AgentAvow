@@ -44,6 +44,111 @@ def _version_affected(vuln: dict, version: str | None) -> bool:
     return False
 
 
+# --- The package's OWN published vulnerabilities (non-MAL advisories) --------------
+# Unlike MAL- incident history, a published advisory that AFFECTS THE SCANNED VERSION is
+# a real, current code-security fact about the target itself, so it IS raised as a
+# finding by the scanner (scan.py). Advisories fixed before the scanned version are
+# context only. Deterministic given the OSV response, so the grade stays recomputable
+# from the evidence recorded in the attestation (advisory ids + versions).
+
+_SEVERITY = {"CRITICAL": "critical", "HIGH": "high", "MODERATE": "medium",
+             "MEDIUM": "medium", "LOW": "low"}
+
+
+def _parse_version(eco: str, v: str):
+    """A comparable key for ``v`` in ``eco``; None when unparseable (→ not affected)."""
+    v = str(v or "").strip()
+    if not v:
+        return None
+    if eco == "PyPI":
+        try:
+            from packaging.version import Version
+            return Version(v)
+        except Exception:
+            return None
+    # npm / crates: semver. Pre-release sorts before the release.
+    core, _, pre = v.lstrip("v").partition("-")
+    core = core.split("+", 1)[0]
+    try:
+        nums = tuple(int(x) for x in core.split("."))
+    except ValueError:
+        return None
+    nums = (nums + (0, 0, 0))[:3]
+    return (nums, 0 if pre else 1, pre)
+
+
+def _range_affects(rng: dict, eco: str, version: str) -> bool:
+    if (rng.get("type") or "").upper() not in ("SEMVER", "ECOSYSTEM"):
+        return False
+    cur = _parse_version(eco, version)
+    if cur is None:
+        return False
+    affected = False
+    for ev in rng.get("events") or []:
+        if "introduced" in ev:
+            intro = ev["introduced"]
+            iv = _parse_version(eco, intro) if intro != "0" else None
+            if intro == "0" or (iv is not None and cur >= iv):
+                affected = True
+        elif "fixed" in ev:
+            fv = _parse_version(eco, ev["fixed"])
+            if fv is not None and cur >= fv:
+                affected = False
+        elif "last_affected" in ev:
+            lv = _parse_version(eco, ev["last_affected"])
+            if lv is not None and cur > lv:
+                affected = False
+    return affected
+
+
+def advisory_affects(vuln: dict, eco: str, version: str | None) -> bool:
+    """Does this advisory affect ``version`` (explicit versions list or ranges)?"""
+    if not version:
+        return False
+    for aff in vuln.get("affected") or []:
+        if str(version) in [str(v) for v in (aff.get("versions") or [])]:
+            return True
+        if any(_range_affects(r, eco, version) for r in (aff.get("ranges") or [])):
+            return True
+    return False
+
+
+def _fixed_in(vuln: dict) -> str | None:
+    for aff in vuln.get("affected") or []:
+        for r in aff.get("ranges") or []:
+            for ev in r.get("events") or []:
+                if "fixed" in ev:
+                    return str(ev["fixed"])
+    return None
+
+
+def summarize_advisories(vulns: list[dict], eco: str, version: str | None) -> list[dict]:
+    """Non-MAL advisories for the package itself, with whether the scanned version is
+    affected. Deduplicated by alias (GHSA and PYSEC records describe the same flaw)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for v in vulns:
+        if _is_mal(v):
+            continue
+        ids = {str(v.get("id", ""))} | {str(a) for a in (v.get("aliases") or [])}
+        if ids & seen:
+            continue
+        seen |= ids
+        sev = _SEVERITY.get(str((v.get("database_specific") or {}).get("severity") or "")
+                            .upper(), "medium")
+        primary = next((i for i in sorted(ids) if i.startswith("GHSA-")), v.get("id"))
+        out.append({
+            "id": primary,
+            "aliases": sorted(i for i in ids if i and i != primary)[:5],
+            "summary": (v.get("summary") or "").strip()[:200],
+            "severity": sev,
+            "fixed_in": _fixed_in(v),
+            "affects_scanned_version": advisory_affects(v, eco, version),
+        })
+    out.sort(key=lambda a: (not a["affects_scanned_version"], a["id"] or ""))
+    return out[:20]
+
+
 def summarize_incidents(vulns: list[dict], version: str | None = None) -> dict:
     """Pure reducer: OSV vulns -> the context-only incident_history dict. Network-free
     and unit-testable in isolation."""
@@ -88,4 +193,8 @@ async def fetch_incident_history(
             vulns = resp.json().get("vulns") or []
     except (httpx.HTTPError, ValueError, KeyError):
         return {"checked": False}
-    return summarize_incidents(vulns, version)
+    summary = summarize_incidents(vulns, version)
+    # The package's own (non-MAL) advisories ride along; scan.py turns the ones that
+    # affect the scanned version into findings. Not part of the never-scored history.
+    summary["advisories"] = summarize_advisories(vulns, eco, version)
+    return summary

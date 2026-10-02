@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import math
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -183,6 +184,10 @@ class PublicScanResponse(BaseModel):
     # or non-OSV ecosystems. {checked, has_incident, current_version_affected, count, incidents[]}.
     incident_history: dict = {}
     deprecation: str | None = None  # registry end-of-life message, None if not retired
+    package_version: str | None = None  # the exact version that was scanned
+    published_at: str | None = None  # ISO date that version was published
+    advisories: list = []  # the package's own published advisories (affected flag)
+    behavioral_score_effect: dict = {}  # how the signed sandbox observation moved the score
     provenance: dict = {}  # verified build-provenance summary (Phase 3), if any
     surface_detail: dict = {}  # per-surface detail (skill allowed_tools, MCP capabilities, …)
     # the tool's .agentavow.yml declaration ({present, egress, capabilities, note})
@@ -488,12 +493,14 @@ async def _run_and_cache_behavioral(
         kwargs["env_names"] = list(env_names)
     if readme_text:
         kwargs["readme_text"] = readme_text
+    _t0 = time.monotonic()
     try:
         res = await run_behavioral(surface, str(name), expected_hosts=expected_hosts or None,
                                    **kwargs)
     except Exception:
         logger.exception("behavioral tier failed for %s", name)
         return {"ran": False, "reason": "behavioral tier error"}
+    _duration = time.monotonic() - _t0
     block = res.to_public_dict()
     block["findings"] = [
         {"category": f.category, "name": f.name, "severity": f.severity,
@@ -507,7 +514,7 @@ async def _run_and_cache_behavioral(
     except Exception:  # noqa: BLE001 — a UI summary must never fail the block
         block["grade_summary"] = {}
     block["attestation"] = _sign_behavioral_observation(surface, str(name), block)
-    await _count_behavioral_run(block)
+    await _count_behavioral_run(block, _duration)
     try:
         from src.redis_client import get_redis
         await get_redis().set(
@@ -584,6 +591,27 @@ def _sign_behavioral_observation(surface: str, name: str, block: dict) -> dict |
         return None
 
 
+def _apply_behavioral_score(data: dict, block: dict | None) -> dict:
+    """A COPY of the scan data with the signed sandbox observation folded into the
+    trust score (grade, tier, limits recomputed). The cached static data is untouched."""
+    from src.scanner.behavioral.score_effect import behavioral_score_effect
+    eff = behavioral_score_effect(int(data.get("trust_score") or 0), block)
+    out = dict(data)
+    out["behavioral_score_effect"] = {k: eff[k] for k in
+                                      ("applied", "static_score", "score", "delta", "reason")}
+    if not eff["applied"]:
+        return out
+    score = eff["score"]
+    tier = _compute_tier(score)
+    crit = int(((data.get("findings") or {}).get("critical")) or 0)
+    out["trust_score"] = score
+    out["grade"] = _display_grade(score, (data.get("certified") or {}).get("eligible"), crit)
+    out["trust_tier"] = tier["tier"]
+    out["recommended_limits"] = tier["recommended_limits"]
+    out["behavioral_evidence"] = eff["evidence"]
+    return out
+
+
 async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     """Behavioral tier for a scan's npm/pypi/docker coordinate, kept SEPARATE from the
     signed score (a runtime observation isn't offline-recomputable).
@@ -607,6 +635,7 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
                   "readme_text": _behavioral_readme(data)}
     if force:
         if not await _acquire_behavioral_slot():
+            await _bump_behavioral("slot_rejected")
             return {"ran": False, "pending": True,
                     "reason": "sandbox busy — every slot is in use; try again in a minute"}
         try:
@@ -617,7 +646,9 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
             await _release_behavioral_slot()
     cached = await _get_cached_behavioral(surface, str(name), declared, plan)
     if cached:
+        await _bump_behavioral("cache_hit")
         return cached
+    await _bump_behavioral("cache_miss")
     # Not cached — run it in the background so it's ready next time, return pending now.
     # One detonation per coordinate at a time (lock), and a global cap on concurrent runs
     # (slots): the sandbox is one small box. A request that finds no slot stays pending
@@ -626,6 +657,7 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
         if await _acquire_behavioral_slot():
             asyncio.create_task(_run_in_slot(surface, str(name), declared, run_kwargs))
         else:
+            await _bump_behavioral("slot_rejected")
             await _release_behavioral_lock(surface, str(name), declared, plan)
     return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
 
@@ -679,20 +711,62 @@ async def _release_behavioral_lock(surface: str, name: str, expected_hosts: set[
         pass
 
 
-async def _count_behavioral_run(block: dict) -> None:
-    """Per-day counters for the admin dashboard / metrics log. Best-effort."""
+_BM = "ag:metrics:behavioral"
+_BM_TTL = 90 * 24 * 3600
+
+
+async def _bump_behavioral(name: str, by: int = 1) -> None:
+    """Daily counter ``ag:metrics:behavioral:<name>:<day>``. Best-effort."""
+    try:
+        from src.redis_client import get_redis
+        r = get_redis()
+        k = f"{_BM}:{name}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        await r.incrby(k, by)
+        await r.expire(k, _BM_TTL)
+    except Exception:
+        pass
+
+
+async def _count_behavioral_run(block: dict, duration: float = 0.0) -> None:
+    """Daily + lifetime counters for the admin dashboard and the public sandbox stats.
+    Never package names. Best-effort."""
     try:
         from src.redis_client import get_redis
         r = get_redis()
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        keys = [f"ag:metrics:behavioral:runs:{day}"]
-        if (block.get("exercise") or {}).get("launch_ok"):
-            keys.append(f"ag:metrics:behavioral:exercised:{day}")
-        if block.get("findings"):
-            keys.append(f"ag:metrics:behavioral:with_findings:{day}")
-        for k in keys:
-            await r.incr(k)
-            await r.expire(k, 90 * 24 * 3600)
+        ex = block.get("exercise") or {}
+        findings = [f for f in (block.get("findings") or []) if isinstance(f, dict)]
+        calls = len(ex.get("calls") or [])
+        leaked = bool(block.get("canary_exfil"))
+        reason = str((block.get("grade_summary") or {}).get("start_reason") or "unknown")
+        daily = {"runs": 1, f"start:{reason}": 1}
+        if ex.get("launch_ok"):
+            daily["exercised"] = 1
+        if findings:
+            daily["with_findings"] = 1
+        if leaked:
+            daily["canary_leaks"] = 1
+        if block.get("exit_code") == 137 or "killed_resource_limit" in (block.get("notes") or []):
+            daily["killed"] = 1
+        for f in findings:
+            rule = str(f.get("rule") or "other")
+            daily[f"rule:{rule}"] = daily.get(f"rule:{rule}", 0) + 1
+        secs = max(0, int(round(duration)))
+        daily["duration_sum"] = secs
+        for name, by in daily.items():
+            k = f"{_BM}:{name}:{day}"
+            await r.incrby(k, by)
+            await r.expire(k, _BM_TTL)
+        kmax = f"{_BM}:duration_max:{day}"
+        cur = await r.get(kmax)
+        if cur is None or int(cur) < secs:
+            await r.set(kmax, secs, ex=_BM_TTL)
+        totals = {"runs": 1, "exercised": 1 if ex.get("launch_ok") else 0,
+                  "tools_called": calls, "findings": len(findings),
+                  "canary_leaks": 1 if leaked else 0}
+        for name, by in totals.items():
+            if by:
+                await r.incrby(f"{_BM}:total:{name}", by)
     except Exception:
         pass
 
@@ -998,6 +1072,11 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
     _supply_chain = result_data.get("supply_chain") or {}
     if _supply_chain:
         scan_block["supplyChain"] = _supply_chain
+    # The signed sandbox observation that moved the score (see score_effect.py): with
+    # the observation JWS (sha256 below) + staticScore, the number is recomputable.
+    _bev = result_data.get("behavioral_evidence")
+    if _bev:
+        scan_block["behavioralEvidence"] = _bev
     payload = {
         "@context": "https://schema.agentgraph.co/attestation/security/v1",
         "type": "SecurityPostureAttestation",
@@ -1153,6 +1232,8 @@ def _scan_result_to_dict(result: object) -> dict:
         # Context-only incident history (OSV MAL- for the target's own coordinate).
         "incident_history": getattr(result, "incident_history", {}) or {},
         "deprecation": getattr(result, "deprecation", None),
+        "package_version": (getattr(result, "artifact_scan", None) or {}).get("version"),
+        "published_at": (getattr(result, "artifact_scan", None) or {}).get("published_at"),
         "scanned_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -1230,6 +1311,10 @@ def _package_response(
         supply_chain=data.get("supply_chain", {}),
         incident_history=data.get("incident_history", {}),
         deprecation=data.get("deprecation"),
+        package_version=data.get("package_version"),
+        published_at=data.get("published_at"),
+        advisories=(data.get("incident_history") or {}).get("advisories") or [],
+        behavioral_score_effect=data.get("behavioral_score_effect") or {},
         provenance=data.get("provenance", {}),
         surface_detail=data.get("surface_detail", {}),
         declared_scope=data.get("declared_scope", {}),
@@ -1290,21 +1375,27 @@ async def scan_package_endpoint(
     cache_owner = surface
     cache_repo = f"{name}@{version}" if version else name
 
-    async def _with_behavioral(resp: PublicScanResponse) -> PublicScanResponse:
+    async def _signed_response(data: dict, *, cached: bool) -> PublicScanResponse:
+        """Sandbox block first, so a signed observation can be folded into the score
+        that gets signed; then sign and shape."""
+        block = None
         if surface in ("npm", "pypi", "docker"):
-            resp.behavioral = await _behavioral_block(
+            block = await _behavioral_block(
                 {"package_coordinate": {"surface": surface, "name": name},
-                 "declared_scope": getattr(resp, "declared_scope", {}) or {},
-                 "artifact_scan": getattr(resp, "surface_detail", {}) or {},
-                 "env_reads": getattr(resp, "env_reads", []) or []},
+                 "declared_scope": data.get("declared_scope") or {},
+                 "artifact_scan": data.get("artifact_scan") or data.get("surface_detail") or {},
+                 "env_reads": data.get("env_reads") or []},
                 force=behavioral)
+        scored = _apply_behavioral_score(data, block)
+        jws = create_jws(canonicalize(_build_scan_payload(full, scored)))
+        resp = _package_response(full, scored, jws, cached=cached)
+        resp.behavioral = block
         return resp
 
     if not force:
         cached = await _get_cached(cache_owner, cache_repo)
         if cached:
-            jws = create_jws(canonicalize(_build_scan_payload(full, cached)))
-            return await _with_behavioral(_package_response(full, cached, jws, cached=True))
+            return await _signed_response(cached, cached=True)
 
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
@@ -1327,8 +1418,7 @@ async def scan_package_endpoint(
 
     data = _scan_result_to_dict(result)
     await _set_cached(cache_owner, cache_repo, data)
-    jws = create_jws(canonicalize(_build_scan_payload(full, data)))
-    return await _with_behavioral(_package_response(full, data, jws, cached=False))
+    return await _signed_response(data, cached=False)
 
 
 @router.get(
@@ -1661,23 +1751,26 @@ async def public_scan(
     if not force:
         cached = await _get_cached(owner, repo)
         if cached:
+            # The sandbox result lives in its own cache: attach it on cache hits too, so
+            # a reload (or the score page's poll) picks up a run that finished since —
+            # and fold a signed observation into the score before re-signing.
+            block = await _behavioral_block(
+                {**cached, "repo_full_name": full_name}, force=False)
+            scored = _apply_behavioral_score(cached, block)
             # Re-sign (attestation expires, so sign fresh)
-            payload = _build_scan_payload(full_name, cached)
+            payload = _build_scan_payload(full_name, scored)
             payload_bytes = canonicalize(payload)
             jws = create_jws(payload_bytes)
 
             # Look up entity trust (full composite) if this repo is imported
             entity_trust = await _get_entity_trust(full_name, db)
-            trust_envelope = await _build_scan_envelope(owner, repo, cached, db)
+            trust_envelope = await _build_scan_envelope(owner, repo, scored, db)
 
             resp = _package_response(
-                full_name, cached, jws, cached=True,
+                full_name, scored, jws, cached=True,
                 entity_trust=entity_trust, trust_envelope=trust_envelope,
             )
-            # The sandbox result lives in its own cache: attach it on cache hits too, so
-            # a reload (or the score page's poll) picks up a run that finished since.
-            resp.behavioral = await _behavioral_block(
-                {**cached, "repo_full_name": full_name}, force=False)
+            resp.behavioral = block
             return resp
 
     # Fetch previous cached score before running a fresh scan (for change detection)
@@ -1802,23 +1895,27 @@ async def public_scan(
     # #8 — detect tool-definition drift vs the previous scan (rug-pull signal)
     drift = _compute_tool_drift(old_cached, data)
 
+    # Behavioral runs AUTOMATICALLY for npm/pypi-mapped repos (cached/background),
+    # enriching the scorecard without a click. ?behavioral=true forces a fresh run.
+    # Computed BEFORE signing so a signed observation can be folded into the score.
+    block = await _behavioral_block(
+        {**data, "repo_full_name": full_name}, force=behavioral)
+    scored = _apply_behavioral_score(data, block)
+
     # Sign (JCS-canonical payload for cross-implementation verification)
-    payload = _build_scan_payload(full_name, data, drift)
+    payload = _build_scan_payload(full_name, scored, drift)
     payload_bytes = canonicalize(payload)
     jws = create_jws(payload_bytes)
 
     # Look up entity trust (full composite) if this repo is imported
     entity_trust = await _get_entity_trust(full_name, db)
-    trust_envelope = await _build_scan_envelope(owner, repo, data, db)
+    trust_envelope = await _build_scan_envelope(owner, repo, scored, db)
 
     resp = _package_response(
-        full_name, data, jws, cached=False,
+        full_name, scored, jws, cached=False,
         entity_trust=entity_trust, trust_envelope=trust_envelope, tool_drift=drift,
     )
-    # Behavioral runs AUTOMATICALLY for npm/pypi-mapped repos (cached/background),
-    # enriching the scorecard without a click. ?behavioral=true forces a fresh run.
-    resp.behavioral = await _behavioral_block(
-        {**data, "repo_full_name": full_name}, force=behavioral)
+    resp.behavioral = block
     return resp
 
 
