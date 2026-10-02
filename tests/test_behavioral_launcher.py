@@ -191,8 +191,10 @@ def test_path_like_names_are_never_exported(bench):
 
 def test_no_entrypoint_is_a_synthetic_transcript(bench):
     tr, launches = _launch(bench, "pypi", pkg="not-installed-anywhere")
-    assert launches == [] or all("not_installed" not in " ".join(ln["cmd"]) for ln in launches)
-    # importlib finds nothing → "python3 -m not_installed_anywhere" is the lone candidate;
+    # importlib finds nothing → "python3 -m not_installed_anywhere" is the lone candidate
+    # (a server can be a module without a console script), and it fails to start.
+    assert [ln["cmd"] for ln in launches] == [["python3", "-m", "not_installed_anywhere"]]
+    # (the bench's stub exerciser "starts" anything; the real one would report spawn_failed)
     # with an npm package that has no package.json there is no candidate at all.
     if NODE:
         tr, launches = _launch(bench, "npm", pkg="ghost-pkg")

@@ -176,12 +176,16 @@ def test_v2_npm_mcp_command_line(executed, v2_on, exerciser_files, monkeypatch):
     assert image == "node:20-alpine"
     assert int(timeout) >= 60 + 45 and call["timeout"] == int(timeout)
     assert cmd.startswith(runner._SANDBOX_ENV + "npm install --no-audit --no-fund @acme/demo-mcp@1.2.3 && ")
-    assert "sh /work/mcp_launch.sh npm @acme/demo-mcp -- node /work/mcp_exercise.js" in cmd
+    # the launcher gets the SAME canary before its `--` (for credential retries)
+    assert (f"sh /work/mcp_launch.sh npm @acme/demo-mcp --canary-value {o['--canary']} -- "
+            "node /work/mcp_exercise.js") in cmd
     ex = shlex.split(cmd.split("mcp_exercise.js", 1)[1])
     assert ex[ex.index("--timeout") + 1] == "60"
     assert ex[ex.index("--max-tools") + 1] == "7"
     assert ex[ex.index("--canary-value") + 1] == o["--canary"]
     assert ex[ex.index("--canary-env") + 1] == "API_TOKEN,OTHER_KEY"
+    # v2 resource caps from settings (defaults)
+    assert o["--memory-mb"] == "1024" and o["--pids"] == "512"
     assert ex[ex.index("--readme") + 1] == "/work/README.md"
     # the shipped files: exerciser sources + README, gzip+base64 JSON {name: b64}
     files = json.loads(gzip.decompress(base64.b64decode(o["--files-b64"])))
@@ -196,8 +200,15 @@ def test_v2_pypi_mcp_ships_python_exerciser(executed, v2_on, exerciser_files):
     assert r.plan == "pypi-mcp"
     o = _opts(executed[0]["args"])
     assert o["pos"][0] == "python:3.12-alpine"
-    assert "sh /work/mcp_launch.sh pypi demo-mcp -- python /work/mcp_exercise.py" in o["pos"][1]
+    assert (f"sh /work/mcp_launch.sh pypi demo-mcp --canary-value {o['--canary']} -- "
+            "python /work/mcp_exercise.py") in o["pos"][1]
     assert "--canary-env" not in o["pos"][1]  # no env names → no flag
+    # alpine has no git: the pypi-mcp plan installs it into a writable alt root, fail-soft
+    cmd = o["pos"][1]
+    assert cmd.index(runner._ALPINE_GIT_PREFIX) < cmd.index("pip install")
+    assert "apk add --no-cache --no-scripts --initdb -p /work/.apk git" in cmd
+    assert cmd.count("|| true;") == 1 and "/work/.local/bin/git" in cmd
+    assert "dl-cdn.alpinelinux.org" in runner._REGISTRY_ALLOW
     assert "--readme" not in o["pos"][1]
     files = json.loads(gzip.decompress(base64.b64decode(o["--files-b64"])))
     assert set(files) == {"mcp_launch.sh", "mcp_exercise.py", "synthetic_args.py"}
@@ -438,3 +449,52 @@ def test_gz_envelope_is_unwrapped_and_truncated_output_is_labelled(monkeypatch, 
     res = asyncio.run(r.run_behavioral("npm", "tavily-mcp", plan="npm-mcp"))
     assert res.ran is False and res.error == "runner_output_truncated"
     assert any(n.startswith("runner_output_len=") for n in res.notes)
+
+
+# ── robustness: resource caps, README-mined canary names, exit 137 ─────────────
+
+def test_resource_caps_follow_settings_and_are_v2_only(executed, v2_on, monkeypatch):
+    monkeypatch.setattr(config.settings, "scanner_behavioral_memory_mb", 2048, raising=False)
+    monkeypatch.setattr(config.settings, "scanner_behavioral_pids", 777, raising=False)
+    executed.state["out"] = _v2_output(mode="exec", exercise=None)
+    _run("npm", "left-pad")
+    o = _opts(executed[0]["args"])
+    assert o["--memory-mb"] == "2048" and o["--pids"] == "777"
+    # unset / junk → the runner's own defaults (no flag)
+    monkeypatch.setattr(config.settings, "scanner_behavioral_memory_mb", 0, raising=False)
+    monkeypatch.setattr(config.settings, "scanner_behavioral_pids", "x", raising=False)
+    _run("npm", "left-pad")
+    o = _opts(executed[1]["args"])
+    assert "--memory-mb" not in o and "--pids" not in o
+
+
+def test_v1_call_never_carries_resource_flags(executed, v2_off):
+    _run("npm", "left-pad")
+    assert not any(a.startswith("--") for a in executed[0]["args"])
+
+
+def test_exit_137_is_noted_as_a_resource_kill(executed, v2_on, exerciser_files):
+    from src.scanner.behavioral.graders import grade, grade_summary
+    executed.state["out"] = _v2_output(exit_code=137, exercise=None)
+    r = _run("npm", "@modelcontextprotocol/server-puppeteer", plan="npm-mcp")
+    assert r.ran is True and r.exit_code == 137 and r.transcript is None
+    assert r.notes == ["killed_resource_limit"]
+    assert r.to_public_dict()["notes"] == ["killed_resource_limit"]
+    assert grade(r) == []
+    s = grade_summary(r)
+    assert s["start_reason"] == "resource_limit" and s["exercised"] is False
+
+
+def test_readme_credential_names_join_the_canary_list(executed, v2_on, exerciser_files):
+    executed.state["out"] = _v2_output()
+    readme = ("# Brave Search MCP\n\n```\nexport BRAVE_API_KEY=your-key\n```\n"
+              "LOG_LEVEL=debug is optional. See process.env.BRAVE_API_KEY.")
+    _run("npm", "@brave/brave-search-mcp-server", plan="npm-mcp",
+         env_names=["OTHER_TOKEN"], readme_text=readme)
+    cmd = _opts(executed[0]["args"])["pos"][1]
+    ex = shlex.split(cmd.split("mcp_exercise.js", 1)[1])
+    # static names first (exact), README-mined after, no duplicates, no noise
+    assert ex[ex.index("--canary-env") + 1] == "OTHER_TOKEN,BRAVE_API_KEY"
+    assert runner._merge_env_names(["A_KEY", "A_KEY"], "A_KEY B_SECRET") == ["A_KEY", "B_SECRET"]
+    assert runner._merge_env_names(None, None) == []
+    assert len(runner._merge_env_names([f"K_{i}_KEY" for i in range(40)], "")) == 32
