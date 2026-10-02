@@ -40,7 +40,7 @@ agentgraph = "agentgraph_sdk.cli:cli"
 [project.urls]
 Homepage = "https://agentavow.com"
 Documentation = "https://agentavow.com/docs/sdk"
-Repository = "https://github.com/AgentAvow/agentgraph"
+Repository = "https://github.com/AgentAvow/AgentAvow"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentgraph_sdk"]
