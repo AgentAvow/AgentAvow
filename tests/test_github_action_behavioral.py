@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 
 def _run(tmp_path: Path, response: dict, **env: str) -> subprocess.CompletedProcess:
     bindir = tmp_path / "bin"
-    bindir.mkdir()
+    bindir.mkdir(exist_ok=True)
     fixture = tmp_path / "resp.json"
     fixture.write_text(json.dumps(response))
     curl = bindir / "curl"
@@ -70,6 +70,7 @@ def test_sandbox_line_clean_run_and_pending(tmp_path):
     assert "Sandbox: plan pypi, 0 tool(s) exercised, 0 behavioral finding(s), no unexpected egress" in p.stdout
     p = _run(tmp_path, _resp({"ran": False, "pending": True}))
     assert "Sandbox: behavioral run pending" in p.stdout
+    (tmp_path / "summary.md").unlink()  # the step summary is appended to across runs
     p = _run(tmp_path, _resp(None))
     assert "Sandbox:" not in p.stdout
     assert "Sandbox:" not in (tmp_path / "summary.md").read_text()
