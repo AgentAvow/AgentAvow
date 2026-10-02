@@ -28,7 +28,8 @@ function toolKey(name) {
   // Every character outside 0x21-0x7E (so space, controls and all non-ASCII), plus
   // % and =, is percent-encoded as its UTF-8 bytes. If the encoded key body is longer
   // than 128 characters it is cut to its first 96 and suffixed with "~" and the first
-  // 16 hex characters of sha256 over the raw UTF-8 name.
+  // 16 lowercase hex characters of sha256 over the raw UTF-8 name. The cut is a plain
+  // character count and may land inside a %XX triplet.
   const enc = Array.from(name).map(ch =>
     (/[\x21-\x7e]/.test(ch) && ch !== '%' && ch !== '=') ? ch
       : Array.from(Buffer.from(ch, 'utf8')).map(b => '%' + b.toString(16).toUpperCase().padStart(2, '0')).join('')
