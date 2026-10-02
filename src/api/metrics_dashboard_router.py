@@ -45,6 +45,7 @@ from src.models import (
     ToolWatch,
     VerificationBadge,
 )
+from src.usage_scope import LEGACY_HOSTS, REDIRECTED_METRIC, RULES_CHANGED_ON
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -63,7 +64,15 @@ async def bump_metric(name: str) -> None:
 
     Safe to call from hot public paths (badge render, API-key auth): a Redis
     outage is swallowed and the request proceeds unaffected.
+
+    Inside a request the bump first asks ``src.usage_scope.admit``: a redirect or
+    a legacy-host request is not usage and the bump is dropped (or queued until
+    the response status is known). Outside a request it always counts.
     """
+    from src.usage_scope import admit
+
+    if not admit(name):
+        return
     try:
         from src.redis_client import get_redis
 
@@ -264,6 +273,10 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     adoption_by_day = await _read_daily_counter("adoption_hit", day_strs)
     rescan_by_day = await _read_daily_counter("force_rescan", day_strs)
     install_by_day = await _read_daily_counter("install_click", day_strs)
+    # Redirects and legacy-host requests never reach a usage counter
+    # (src/usage_scope); they are counted once here so the junk volume stays visible.
+    redirected_by_day = await _read_daily_counter(REDIRECTED_METRIC, day_strs)
+    requests_redirected_window = sum(redirected_by_day.values())
     badge_fetches_window = sum(badge_by_day.values())
     readme_renders_window = sum(readme_render_by_day.values())
     # Who is calling: the same counters split by client class (src/traffic_class).
@@ -349,6 +362,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "adoption_hits": _align(adoption_by_day),
         "force_rescans": _align(rescan_by_day),
         "install_clicks": _align(install_by_day),
+        "requests_redirected": _align(redirected_by_day),
     }
 
     # --- Surface breakdown: static launch corpus + live community scans ---
@@ -386,6 +400,11 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "Streamable-HTTP server (src/bridges/mcp_streamable): total calls, per-tool "
         "calls, safe/needs-review scan verdicts, and errors. Ok = total - errors. "
         "No backfill; zero means no connector traffic yet.",
+        "Since " + RULES_CHANGED_ON + " a 301/302/308 response, or any request whose "
+        "Host is a retired domain (" + ", ".join(sorted(LEGACY_HOSTS)) + "), is not "
+        "usage: it reaches no counter above and is tallied once as "
+        "'requests_redirected'. Only redirects the backend itself serves are seen "
+        "here; the ones nginx answers never reach the app.",
     ]
 
     return {
@@ -405,6 +424,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "install_clicks": int(install_clicks_window),
             "unique_checkers": int(unique_checkers_window),
             "mcp_calls": int(mcp_calls_window),
+            "requests_redirected": int(requests_redirected_window),
         },
         "scans": {
             "repos_scanned_window": int(repos_scanned_window),

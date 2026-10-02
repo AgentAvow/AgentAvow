@@ -792,6 +792,10 @@ async def _track_checker(request) -> None:
     HLL (global reach metric). Best-effort — never raises, never blocks the scan."""
     if request is None:
         return
+    from src.usage_scope import usage_excluded
+
+    if usage_excluded():  # legacy-host request: not usage, not reach
+        return
     try:
         from src.api.metrics_dashboard_router import bump_metric_by_client
 
