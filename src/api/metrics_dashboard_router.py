@@ -75,6 +75,29 @@ async def bump_metric(name: str) -> None:
         pass
 
 
+async def bump_metric_by_client(name: str, user_agent: str | None) -> None:
+    """Increment ``name`` and ``name:client:<human|agent|automated>`` for the caller.
+
+    The aggregate counter is unchanged, so existing readers keep working; the
+    per-class counters let the dashboard separate people and agents from the
+    crawlers, monitors and scripts that otherwise pass as usage.
+    """
+    from src.traffic_class import classify_user_agent
+
+    await bump_metric(name)
+    await bump_metric(f"{name}:client:{classify_user_agent(user_agent)}")
+
+
+async def _read_client_split(name: str, day_strs: list[str]) -> dict[str, int]:
+    """``{total, human, agent, automated}`` for ``name`` over the window."""
+    from src.traffic_class import CLIENT_CLASSES
+
+    out = {"total": sum((await _read_daily_counter(name, day_strs)).values())}
+    for cls in CLIENT_CLASSES:
+        out[cls] = sum((await _read_daily_counter(f"{name}:client:{cls}", day_strs)).values())
+    return out
+
+
 async def _read_daily_counter(name: str, day_strs: list[str]) -> dict[str, int]:
     """Return ``{day: count}`` for the given days. Best-effort ({} on failure)."""
     if not day_strs:
@@ -242,6 +265,11 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     install_by_day = await _read_daily_counter("install_click", day_strs)
     badge_fetches_window = sum(badge_by_day.values())
     readme_renders_window = sum(readme_render_by_day.values())
+    # Who is calling: the same counters split by client class (src/traffic_class).
+    # Counting started when the split shipped, so "total" here can trail the
+    # aggregate counters above for the first window.
+    scan_requests_by_client = await _read_client_split("scan_request", day_strs)
+    badge_fetches_by_client = await _read_client_split("badge_fetch", day_strs)
     # "Badges rendering in READMEs" leaderboard (cumulative, all-time) — the live
     # adoption-proof list + warmest re-outreach targets.
     from src.scanner.adoption_sources import get_readme_badge_leaderboard
@@ -423,6 +451,12 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             },
         },
         "alert_webhooks": {"active": int(alert_webhooks_active)},
+        # Humans vs agents vs automation, from the User-Agent. "automated" is the
+        # crawlers, monitors and scripts; the honest usage number is total minus it.
+        "traffic_quality": {
+            "scan_requests": scan_requests_by_client,
+            "badge_fetches": badge_fetches_by_client,
+        },
         "badges": {
             "fetches_window": int(badge_fetches_window),
             "readme_renders_window": int(readme_renders_window),

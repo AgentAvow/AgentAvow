@@ -595,9 +595,9 @@ async def get_trust_badge_svg(
         raise HTTPException(status_code=404, detail="Entity not found")
 
     # Best-effort engagement counter (Redis, never blocks the render).
-    from src.api.metrics_dashboard_router import bump_metric
+    from src.api.metrics_dashboard_router import bump_metric_by_client
 
-    await bump_metric("badge_fetch")
+    await bump_metric_by_client("badge_fetch", request.headers.get("user-agent"))
 
     # Best-effort adoption axis-D signal: log the Referer host so we can count
     # distinct badge-embed domains (30d). MUST never break the badge render.
