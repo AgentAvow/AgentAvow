@@ -8,7 +8,7 @@ Scan your own code **without sending it anywhere** — same engine, same score a
 
 The hosted `/check` scan reads a repo from GitHub, so it only sees **public** code. If your repo is private — or you just want a fast result in your editor/CI without a round-trip — run the same scanner locally. Nothing leaves your machine or your runner.
 
-What you get locally is **identical** to a hosted scan of the same tree: the same 12 detection categories, the same scoring, the same MCP/allowlist handling. The only hosted-only extras are network signals (dependency CVE enrichment, published-artifact diffing, maintainer metadata) — additive, and absent locally by design.
+What you get locally is **identical** to a hosted scan of the same tree: the same detection rules and finding categories, the same five sub-score axes, the same scoring, the same MCP/allowlist handling. The only hosted-only extras are network signals (dependency CVE enrichment, published-artifact diffing, maintainer metadata) — additive, and absent locally by design.
 
 **One thing local scanning does _not_ do: mint a signed attestation.** That needs AgentAvow's key. A local scan *proves the findings* for your inner loop; when you need a third-party-verifiable attestation, run the hosted scan on top. The external attestation is still the thing only we can give you.
 
@@ -63,7 +63,7 @@ Findings show up as inline PR annotations (via code scanning) and a job-summary;
 Three knobs, all honored by the same local engine:
 
 - **Allowlist** — `src/scanner/allowlist.json`: `{file_path, name}` glob entries suppress a known-safe pattern in a path (e.g. `tests/*`).
-- **Inline** — append `ag-scan:ignore` to a source line to suppress that line's findings.
+- **Inline** — append `ag-scan:ignore` to a source line to suppress that line's low and medium findings. A critical or high finding on the same line is still reported, and every suppression still counts toward the suppression penalty.
 - **Context** — MCP servers get `fs_access`/`unsafe_exec` findings automatically discounted (they're expected for that tool class); detection keys off `server.json`/`mcp.json` or an `mcp` mention in your manifest. If an MCP is being over-flagged, confirm it's being *detected* as one.
 
 ## Same score, no drift
