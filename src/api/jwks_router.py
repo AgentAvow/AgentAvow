@@ -727,7 +727,27 @@ async def interop_harness() -> JSONResponse:
             "spec_version": "0.3.1",
             "spec_anchor": "https://agentgraph.co/.well-known/cte-test-vectors.json",
             "wg_proposal": "https://github.com/a2aproject/A2A/issues/1786",
-            "as_of": "2026-05-05",
+            "as_of": "2026-10-02",
+            "publisher": {
+                "name": "AgentAvow",
+                "formerly": "AgentGraph",
+                "site": "https://agentavow.com",
+                "repo": "https://github.com/AgentAvow/AgentAvow",
+                "canonical_url": (
+                    "https://agentavow.com/.well-known/interop-harness.json"
+                ),
+                "also_served_at": (
+                    "https://agentgraph.co/.well-known/interop-harness.json"
+                ),
+                "note": (
+                    "Rebranded AgentGraph -> AgentAvow in 2026-09. Machine "
+                    "identifiers are unchanged by design: did:web:agentgraph.co, "
+                    "the JWKS host, the signing kid, and every "
+                    "agentgraph-co/agentgraph@<sha> pin below (the old GitHub "
+                    "path redirects to AgentAvow/AgentAvow). Entry names and "
+                    "field names are kept as consumers pinned them."
+                ),
+            },
             "evidence_taxonomy": {
                 "substrate": (
                     "JCS canonicalizer byte-match across independent "
@@ -992,6 +1012,67 @@ async def interop_harness() -> JSONResponse:
                     "claim_type_live": False,
                     "added": "2026-06-01 per A2A #1734",
                 },
+                {
+                    "name": "Agent Community Verifiability Gate",
+                    "maintainer": "@Liuyanfeng1234",
+                    "language": "Python",
+                    "role": "substrate_verifier",
+                    "canonicalizer": (
+                        "Python json.dumps(sort_keys=True, separators=(',', ':'), "
+                        "ensure_ascii=False) + integer-float normalization"
+                    ),
+                    "byte_match_aggregate": (
+                        "14/14 byte-match: CTEF v0.3.1 inline 4/4 + APS JCS "
+                        "canonicalization conformance 10/10 (8 RFC 8785 edge "
+                        "cases + bilateral-receipt and migration-attestation "
+                        "shape vectors) — A2A #1829, v4 of the receipt verified "
+                        "on a fresh clone 2026-05-15"
+                    ),
+                    "receipt": (
+                        "https://gist.github.com/Liuyanfeng1234/"
+                        "82da951b5b94a019468f4ccaf35164ad"
+                    ),
+                    "reproduce": "fresh clone, `python3 verify.py`",
+                    "claim_type_live": False,
+                    "section_3_8": "9th byte-match validated implementation",
+                    "added": (
+                        "2026-10-02 harness refresh; ratified on A2A #1829 "
+                        "2026-05-15"
+                    ),
+                },
+                {
+                    "name": "AlgoVoi",
+                    "maintainer": "@chopmob-cloud",
+                    "language": "Python",
+                    "role": "substrate_verifier",
+                    "canonicalizer": (
+                        "trailofbits/rfc8785.py v0.1.4 via a shared "
+                        "jcs_canonical.py wrapper"
+                    ),
+                    "byte_match_aggregate": (
+                        "14/14 byte-match: CTEF v0.3.1 inline 4/4 + APS JCS "
+                        "canonicalization conformance 10/10 — A2A #1829, "
+                        "verified on a fresh clone 2026-05-16"
+                    ),
+                    "receipt": (
+                        "https://gist.github.com/chopmob-cloud/"
+                        "5f35eaa527d292bf3ddc52f8725a85c9"
+                    ),
+                    "reproduce": (
+                        "fresh clone, `pip install rfc8785 && python3 verify.py`"
+                    ),
+                    "production_deployment": (
+                        "did:web:api.algovoi.co.uk (W3C DID Document at the "
+                        "well-known URL) carrying A2AAgent + X402PaymentGateway "
+                        "service endpoints off one DID and one signing key"
+                    ),
+                    "claim_type_live": False,
+                    "section_3_8": "10th byte-match validated implementation",
+                    "added": (
+                        "2026-10-02 harness refresh; ratified on A2A #1829 "
+                        "2026-05-16"
+                    ),
+                },
             ],
             "in_flight": [
                 {
@@ -1170,13 +1251,38 @@ async def interop_harness() -> JSONResponse:
                 },
             },
             "summary": {
-                "implementations_byte_match_validated": 9,
-                "implementations_inline_vector_byte_match_validated": 6,
+                "implementations_byte_match_validated": 11,
+                "implementations_inline_vector_byte_match_validated": 8,
                 "evidence_providers": 6,
                 "enforcement_gateways": 1,
-                "substrate_verifiers": 2,
+                "substrate_verifiers": 4,
                 "languages": 2,
-                "independent_canonicalizers": 8,
+                "independent_canonicalizers": 9,
+                "section_3_8_set": {
+                    "count": 10,
+                    "members": [
+                        "AgentGraph (now AgentAvow)",
+                        "APS",
+                        "AgentID",
+                        "@nobulex/crypto",
+                        "HiveTrust",
+                        "ArkForge",
+                        "msaleme",
+                        "Foxbook",
+                        "Agent Community Verifiability Gate",
+                        "AlgoVoi",
+                    ],
+                    "source": (
+                        "CTEF v0.3.2 §3.8 (docs/standards/"
+                        "v0.3.2-layering-figure.md, Draft 1.4, 2026-05-18)"
+                    ),
+                    "note": (
+                        "The §3.8 set and the implementations list above are "
+                        "not the same list: the list also carries "
+                        "substrate-attestation, added 2026-06-01 after the "
+                        "§3.8 set closed."
+                    ),
+                },
                 "wg_proposal_phase": "Proposal Phase, awaiting maintainer sponsorship",
                 "fail_closed_negative_paths": 2,
                 "reader_runnable_verifiers": 2,
@@ -1402,6 +1508,283 @@ async def interop_harness() -> JSONResponse:
                     "block above) demonstrate the property is exercisable "
                     "on demand, not historical."
                 ),
+                "tool_manifest_digest_v0": {
+                    "boundary": (
+                        "Tool-safety evidence consumed by a pre-execution gate, "
+                        "bound by the tool-definition digest "
+                        "(aeoess/agent-governance-vocabulary#177; edge E1 in "
+                        "#179)"
+                    ),
+                    "fixture_source": (
+                        "https://github.com/AgentAvow/AgentAvow/tree/4404df2c/"
+                        "docs/standards/tool-manifest-digest-vectors-v0"
+                    ),
+                    "fixture_commit": "AgentAvow/AgentAvow@4404df2c",
+                    "fixture_file": "tool-manifest-digest-v0-vectors.json",
+                    "fixture_sha256": (
+                        "2f4632b03305471b3262109dce7db2cf71d029fe6d9ec85fe54e9bf5c82bb9df"
+                    ),
+                    "artifact": (
+                        "One pinned AgentAvow scan attestation (compact JWS, "
+                        "EdDSA/Ed25519, RFC 8785 payload) for "
+                        "github:github/github-mcp-server, carrying "
+                        "scan.toolManifestDigest"
+                    ),
+                    "gate_input": [
+                        "subject_id",
+                        "observed_manifest_digest",
+                        "evaluation_time",
+                    ],
+                    "axes": [
+                        "signature_valid",
+                        "canonical_bytes",
+                        "subject_binds",
+                        "digest_binds",
+                        "fresh",
+                    ],
+                    "cases": [
+                        "digest-match",
+                        "digest-mismatch",
+                        "past-expiry",
+                        "wrong-subject",
+                        "tampered-payload",
+                    ],
+                    "verifier_script": (
+                        "verify.mjs (zero-dependency, Node 18+, nothing fetched)"
+                    ),
+                    "result": (
+                        "30/30 expected axis results; every negative fails "
+                        "exactly one axis (author-produced, AgentAvow)"
+                    ),
+                    "consumer_runs": [
+                        {
+                            "party": "APS-side consumer (@aeoess)",
+                            "date": "2026-09-30",
+                            "pin": (
+                                "aeoess/agent-passport-system@fd47f34 "
+                                "examples/interop/agentavow/"
+                            ),
+                            "implementation": (
+                                "agent-passport-system 7.2.0 primitives "
+                                "(canonicalizeJCS, strict Ed25519 verify); "
+                                "reads the vector file at 4404df2c unchanged"
+                            ),
+                            "result": (
+                                "30 of 30 expected axis results match; each "
+                                "negative fails exactly its own axis"
+                            ),
+                            "label": (
+                                "second implementation, run by the consuming "
+                                "project; a reproduction, not an independent "
+                                "verification record (the runner's own label)"
+                            ),
+                            "boundaries_recorded": (
+                                "tool-to-subject binding reported not_evaluated "
+                                "(the subject is a repo or server, not a named "
+                                "tool); toolManifestDigest kept separate from an "
+                                "APS metadata pin (false_analog)"
+                            ),
+                            "source": (
+                                "https://github.com/aeoess/"
+                                "agent-governance-vocabulary/issues/177"
+                                "#issuecomment-5914989949"
+                            ),
+                        },
+                    ],
+                    "claim_ceiling": (
+                        "rely=true establishes exactly this: at evaluation_time, "
+                        "the named issuer had signed a static-analysis grade for "
+                        "this subject over this tool-definition digest, and "
+                        "signature, subject, digest and window all check. It "
+                        "establishes nothing about runtime behavior, nothing "
+                        "about what the tool does when invoked, and nothing "
+                        "about definitions the scan did not observe."
+                    ),
+                },
+                "tool_manifest_digest_v1": {
+                    "boundary": (
+                        "Extends v0: the attestation signs one digest per served "
+                        "tool, keyed by tool name, and the gate binds to the one "
+                        "tool it is authorizing (E1 'remaining' item on #179)"
+                    ),
+                    "fixture_source": (
+                        "https://github.com/AgentAvow/AgentAvow/tree/36426cf/"
+                        "docs/standards/tool-manifest-digest-vectors-v1"
+                    ),
+                    "fixture_commit": "AgentAvow/AgentAvow@36426cf",
+                    "fixture_file": "tool-manifest-digest-v1-vectors.json",
+                    "fixture_sha256": (
+                        "488496079155830caf83593be0cafcb21367f72cd70ea363c2400f40eda72647"
+                    ),
+                    "artifact": (
+                        "One pinned AgentAvow scan attestation for "
+                        "mcp:https://mcp.deepwiki.com/mcp (three tools) with "
+                        "scan.toolDigests keyed tool:<name>, plus the tools/list "
+                        "the server served in the same minute (observed_tools)"
+                    ),
+                    "digest_profile": "agentavow.mcp-tool-definition.v1",
+                    "gate_input": [
+                        "subject_id",
+                        "tool_name",
+                        "observed_tool_digest",
+                        "evaluation_time",
+                    ],
+                    "axes": [
+                        "signature_valid",
+                        "canonical_bytes",
+                        "subject_binds",
+                        "tool_binds",
+                        "tool_digest_binds",
+                        "fresh",
+                    ],
+                    "cases": [
+                        "tool-match",
+                        "unknown-tool",
+                        "tool-drift",
+                        "wrong-subject",
+                        "past-expiry",
+                        "tampered-payload",
+                    ],
+                    "preimage_under_test": (
+                        "the verifier recomputes all three per-tool digests "
+                        "from observed_tools; thirteen unsigned name-to-key "
+                        "pairs exercise the percent-encoding and length rules"
+                    ),
+                    "verifier_script": (
+                        "verify.mjs (zero-dependency, Node 18+, nothing fetched)"
+                    ),
+                    "result": (
+                        "3/3 per-tool digests + 13/13 key pairs + 42/42 "
+                        "expected axis results; every negative fails exactly "
+                        "one axis (author-produced, AgentAvow)"
+                    ),
+                    "consumer_runs": [
+                        {
+                            "party": "APS-side consumer (@aeoess)",
+                            "date": "2026-10-02",
+                            "pin": (
+                                "AgentAvow/AgentAvow@36426cf (earlier runs at "
+                                "0727e5e9, c568e67, f8ccb60 as the key rules "
+                                "were tightened)"
+                            ),
+                            "implementation": (
+                                "agent-passport-system 7.2.0 canonicalizeJCS and "
+                                "Ed25519 verify plus node:crypto; no AgentAvow "
+                                "code imported; code not published as of "
+                                "2026-10-02"
+                            ),
+                            "result": (
+                                "60/60: all 13 key pairs (including both cuts "
+                                "inside a %XX triplet), the three tool digests "
+                                "and the six cases match; four controlled "
+                                "mutations of the consumer each fail the run"
+                            ),
+                            "label": (
+                                "second implementation, run by the consuming "
+                                "project; not an independent record (the "
+                                "runner's own label)"
+                            ),
+                            "source": (
+                                "https://github.com/aeoess/"
+                                "agent-governance-vocabulary/issues/177"
+                                "#issuecomment-5944466430"
+                            ),
+                        },
+                        {
+                            "party": "Probity (@astrogilda)",
+                            "date": "2026-10-02",
+                            "pin": (
+                                "probityai/agent-evidence-vectors#43 (merged "
+                                "2026-10-02, head c5622736, merge d759fb4d), "
+                                "interop/agentavow-signed-map-v1/; producer "
+                                "pinned at AgentAvow/AgentAvow@36426cf"
+                            ),
+                            "implementation": (
+                                "map_reader.py, a separate signed-map reader; "
+                                "no AgentAvow source, signed packet or tool "
+                                "definitions vendored; the native verifier is "
+                                "never imported or executed"
+                            ),
+                            "result": (
+                                "all 13 name encodings, the three "
+                                "served-definition digests, the payload digest "
+                                "and all six case verdicts match "
+                                "(recorded-run.json)"
+                            ),
+                            "label": (
+                                "third-party implementation with no producer "
+                                "code; the runner authored the reader, so under "
+                                "the Agent Authority Conformance lab's "
+                                "CONTRIBUTING definition the record is "
+                                "author-produced, not independent"
+                            ),
+                            "source": (
+                                "https://github.com/probityai/"
+                                "agent-evidence-vectors/pull/43"
+                            ),
+                        },
+                        {
+                            "party": "heldfast (@rufat325)",
+                            "date": "2026-10-02",
+                            "pin": (
+                                "rufat325/heldfast docs/TRANSPARENCY.md "
+                                "'Comparing with another record' at 321d44a; "
+                                "src/heldfast/profiles.py at ca5a872; "
+                                "tests/test_profile_agentavow.py; vector file "
+                                "read from a local copy of AgentAvow main on "
+                                "2026-10-02 (byte-identical to 36426cf)"
+                            ),
+                            "implementation": (
+                                "profile agentavow.mcp-tool-definition.v1 "
+                                "implemented from the published derivation; "
+                                "no AgentAvow file copied"
+                            ),
+                            "result": (
+                                "the conformance test reproduces the three "
+                                "signed per-tool digests and the thirteen key "
+                                "pairs (3/3 + 13/13); it is gated on "
+                                "AGENTAVOW_VECTORS_DIR, CI never runs it, and no "
+                                "verbatim run output is published. Covers "
+                                "digests and key encoding only, not signature "
+                                "or case verdicts"
+                            ),
+                            "statement": (
+                                "heldfast reproduces the published digests and "
+                                "key encoding for the pinned fixture as of "
+                                "2 October 2026. It makes no claim about "
+                                "AgentAvow's grades."
+                            ),
+                            "label": (
+                                "third-party implementation with no producer "
+                                "code; the runner authored the profile, so under "
+                                "the lab's CONTRIBUTING definition the record is "
+                                "author-produced, not independent"
+                            ),
+                            "source": (
+                                "https://github.com/rufat325/heldfast/blob/"
+                                "321d44aa8792ea48e23355a538c558d6be9130f4/docs/"
+                                "TRANSPARENCY.md#comparing-with-another-record"
+                            ),
+                        },
+                    ],
+                    "claim_ceiling": (
+                        "rely=true establishes exactly this: at evaluation_time, "
+                        "the named issuer had signed a static-analysis grade for "
+                        "this server, the grade covered a tool of this name, the "
+                        "definition the gate was served for that tool is the one "
+                        "the scan graded, and signature, subject and window all "
+                        "check. It establishes nothing about runtime behavior, "
+                        "nothing about what the tool does when invoked, nothing "
+                        "about other tools on the server, and nothing about "
+                        "definitions the scan did not observe."
+                    ),
+                    "boundaries": (
+                        "The subject is a server, not a tool; the tool binding "
+                        "is the separate tool_binds axis. scan.toolManifestDigest "
+                        "is a fold over the per-tool digests, not a per-tool "
+                        "metadata pin, and the v1 gate does not use it."
+                    ),
+                },
             },
         },
         headers={
