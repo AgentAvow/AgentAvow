@@ -17,7 +17,7 @@ trust score, by fixed rules anyone can recompute (see [How the sandbox moves the
 | Rust crates, Hugging Face models | Static analysis only today. |
 
 Each run is a fresh **gVisor** container on a dedicated host: read-only root, no capabilities,
-one CPU, 512 MB, a hard time limit. It is destroyed when the run ends. Nothing from one run can
+one CPU, 1 GB of memory, a hard time limit. It is destroyed when the run ends. Nothing from one run can
 reach the next, and nothing in the sandbox can reach a private network.
 
 ## What is observed
@@ -56,6 +56,7 @@ a model's output is not reproducible, and the result has to be.
 | Credential canary exfiltrated | A canary credential appeared in outbound traffic | critical |
 | Canary echoed in result | A tool returned an environment secret in its output | medium |
 | Tool call crashed the server | The server exited during a call | low |
+| Contacted the cloud instance-metadata service | Reached `169.254.169.254` or another metadata address. Normal for a tool built on a cloud SDK, which looks for credentials there; a red flag for a tool that has no reason to | low (note only) |
 | Skill entrypoint contacted an undeclared host | The one hook, server or script a skill ran reached a host outside GitHub and the declared scope; named only when exactly one entrypoint ran, since egress is captured for the whole run | medium |
 
 ## When a server does not start
@@ -119,5 +120,7 @@ once a result exists) on the score page, to force a fresh run.
 - **AgentAvow MCP server**: the scan result carries a `Sandbox:` line: a clean run and where it
   sent traffic, the behavioral findings, or why the server did not start (not a finding).
 - **Claude Code plugin**: the session-start verdict line carries a sandbox clause, for example
-  `sandbox: clean, 9 tool(s) exercised`, the finding count, or why the server was not exercised.
+  `sandbox: called 9 tools, no network beyond the registry`, `sandbox: CAUGHT a planted credential leaving
+  the sandbox (critical) +1 more`, `sandbox: not started (needs credentials)`, or `sandbox: running now,
+  results in about a minute`.
 - **Catalog**: tools with a sandbox result carry a mark in Browse.
