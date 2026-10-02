@@ -333,6 +333,11 @@ def _scan_block(
     _deprecated = isinstance(data.get("deprecation"), str) and bool(data["deprecation"].strip())
     if _deprecated and mode != "risk":
         mode = "deprecated"
+    # A published advisory against THIS version outranks 'clean' and 'deprecated'.
+    _advs = [a for a in (data.get("advisories") or [])
+             if isinstance(a, dict) and a.get("affects_scanned_version")]
+    if _advs and mode != "risk":
+        mode = "vulnerable"
     # What the sandbox caught outranks every other headline: a canary leak or a critical
     # behavioral finding never sits under "safe", "clean", or "deprecated".
     _alarm = _sandbox_alarm(data)
@@ -368,6 +373,14 @@ def _scan_block(
                "The static scan found no blocking issues; the sandbox observation is "
                "what to weigh.")
         glyph = "⚠ REVIEW"
+    elif mode == "vulnerable":
+        _fix = next((a.get("fixed_in") for a in _advs if a.get("fixed_in")), None)
+        n = len(_advs)
+        head = (f"⚠️ {n} known vulnerabilit{'y' if n == 1 else 'ies'} in this version"
+                + (f" — upgrade to {_fix} or later" if _fix else ""))
+        why = ("Published advisories (" + ", ".join(str(a.get("id")) for a in _advs[:3])
+               + (", …" if n > 3 else "") + ") affect the version you'd install.")
+        glyph = "⚠ VULNERABLE"
     elif mode == "deprecated":
         head = "⚠️ Deprecated — don't adopt for new work"
         why = ("The maintainer retired this package, so it won't get security fixes. "
@@ -454,7 +467,7 @@ def _scan_block(
     # Install CTA (own line so the model relays it). Shown for anything without blocking
     # findings — safe gets the confident label, limited gets a "verify first" cue. Never
     # on a review result (real findings to weigh first).
-    if install_hint and mode not in ("risk", "deprecated", "sandbox"):
+    if install_hint and mode not in ("risk", "deprecated", "sandbox", "vulnerable"):
         if mode == "safe":
             lines.append(f"**Ready to install:** `{install_hint}`")
         else:  # limited — no risks found, but not fully verified
@@ -464,6 +477,11 @@ def _scan_block(
     # (Purely about our own verdict; it never tells the agent to auto-run other tools.)
     if mode == "safe":
         action = f"clears the bar, so it's safe to {verb}."
+    elif mode == "vulnerable":
+        _fix = next((a.get("fixed_in") for a in _advs if a.get("fixed_in")), None)
+        action = (f"upgrade to {_fix} or later before you {verb}; the advisories list the "
+                  "fixed releases." if _fix else
+                  "no fixed release is listed — avoid this version or isolate it.")
     elif mode == "deprecated":
         action = ("don't adopt it for new work. Pick a maintained alternative (the "
                   "deprecation message may name one) and scan that before you connect it.")

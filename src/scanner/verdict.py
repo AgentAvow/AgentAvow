@@ -51,6 +51,7 @@ def verdict_reason(data: dict, safe: bool | None = None) -> str:
     - ``blocking_findings`` — held back by a critical/high finding (real risk).
     - ``sandbox_finding``   — the behavioral sandbox caught it (undeclared egress,
                               a read-only tool that wrote, a leaked canary credential).
+    - ``known_vulnerability`` — a published advisory (GHSA/CVE) affects this version.
     - ``deprecated``        — no risk found; the maintainer retired the package.
     - ``thin_coverage``     — no risk found, but too little code to inspect (<8 files).
     - ``low_signals``       — no risk found, held down by non-finding signals
@@ -67,6 +68,10 @@ def verdict_reason(data: dict, safe: bool | None = None) -> str:
         return "blocking_findings"
     if sandbox_alarm(data):
         return "sandbox_finding"
+    if any(i.get("category") == "known_vulnerability" for i in items) or any(
+            a.get("affects_scanned_version") for a in (data.get("advisories") or [])
+            if isinstance(a, dict)):
+        return "known_vulnerability"
     dep = data.get("deprecation")
     if isinstance(dep, str) and dep.strip():
         return "deprecated"

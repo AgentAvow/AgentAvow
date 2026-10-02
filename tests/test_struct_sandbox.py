@@ -117,3 +117,24 @@ def test_scan_package_tool_with_a_pinned_version_passes_version_to_the_api(monke
     # no pin → no version param, unchanged behaviour
     asyncio.run(m._call_tool("scan_package", {"registry": "npm", "name": "chalk"}))
     assert seen["params"] in ({}, None)
+
+
+
+def test_a_version_with_published_advisories_is_headlined_vulnerable():
+    import inspect
+
+    from src.bridges import mcp_streamable as m
+    fn = next(v for v in vars(m).values() if callable(v)
+              and "Shape a /public/scan response" in (getattr(v, "__doc__", "") or ""))
+    data = {"trust_score": 69, "findings": {"critical": 0, "high": 0, "items": [
+                {"category": "known_vulnerability", "severity": "medium", "name": "x"}]},
+            "metadata": {"files_scanned": 5},
+            "advisories": [{"id": "GHSA-1", "severity": "medium", "fixed_in": "2026.1.14",
+                            "affects_scanned_version": True}]}
+    required = [p for p in inspect.signature(fn).parameters.values()
+                if p.default is inspect.Parameter.empty]
+    out = fn(data, *[""] * (len(required) - 1), install_hint="pip install x")
+    first = out.strip().splitlines()[0]
+    assert "known vulnerability in this version" in first and "upgrade to 2026.1.14" in first
+    assert "Clean" not in first and "pip install x" not in out
+    assert verdict_reason(data) == "known_vulnerability"
