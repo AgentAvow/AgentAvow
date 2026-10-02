@@ -198,7 +198,8 @@ def test_no_entrypoint_is_a_synthetic_transcript(bench):
     # with an npm package that has no package.json there is no candidate at all.
     if NODE:
         tr, launches = _launch(bench, "npm", pkg="ghost-pkg")
-        assert launches == []
+        # the bench log is cumulative across _launch calls: nothing NEW for ghost-pkg
+        assert not any("ghost" in " ".join(ln["cmd"]) for ln in launches)
         assert tr.launch_error == "no_entrypoint_found" and tr.error == "no_entrypoint_found"
         r = BehavioralResult(ran=True, surface="npm", coordinate="ghost-pkg", transcript=tr)
         assert classify_start(r)[0] == "no_entrypoint"
