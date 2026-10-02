@@ -31,6 +31,7 @@ DOCS: list[tuple[str, str]] = [
     ("how-grading-works", "How scoring works"),
     ("gate-on-the-grade", "Gate on the score"),
     ("check-guide", "Reading your scan score"),
+    ("behavioral-sandbox", "Behavioral sandbox"),
     ("run-locally", "Run locally & in CI"),
     ("trust-badges", "Add a trust badge"),
     ("verify-attestations", "Verify an attestation"),
@@ -69,15 +70,35 @@ def _load(slug: str) -> str | None:
 
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
-# ./some-slug.md or ./some-slug.md#anchor  → /docs/some-slug
-_INTRA_RE = re.compile(r"^\./([\w-]+)\.md(?:#.*)?$")
+# ./some-slug.md or ./some-slug.md#anchor  → /docs/some-slug or /docs/some-slug#anchor
+_INTRA_RE = re.compile(r"^\./([\w-]+)\.md(#[\w-]+)?$")
+_META_DESCRIPTION_MAX = 155
 
 
 def _rewrite_href(href: str) -> str:
     m = _INTRA_RE.match(href.strip())
     if m and m.group(1) in _TITLES:
-        return f"/docs/{m.group(1)}"
+        return f"/docs/{m.group(1)}{m.group(2) or ''}"
     return href.strip()
+
+
+def _slugify(text: str) -> str:
+    """GitHub-style heading id: lowercase, drop punctuation, each space → '-'.
+
+    Must stay byte-identical to `slugify` in web/src/rebrand/lib/slugify.ts — the SPA
+    gives the same headings the same ids, so a `#anchor` resolves in both renderers.
+    ASCII-only on purpose (JS `\\w` is ASCII; Python's is not).
+    """
+    text = re.sub(r"[^a-z0-9 _-]", "", text.lower())
+    return text.strip(" ").replace(" ", "-")
+
+
+def _meta_description(text: str, limit: int = _META_DESCRIPTION_MAX) -> str:
+    """Cut at the last word boundary so the whole thing (ellipsis included) fits."""
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:—-")
+    return f"{cut}…"
 
 
 def _inline(text: str) -> str:
@@ -178,7 +199,10 @@ def _render_body(md: str) -> str:
         if h:
             _close_lists()
             level = min(len(h.group(1)), 6)
-            out.append(f"<h{level}>{_inline(h.group(2).strip())}</h{level}>")
+            text = h.group(2).strip()
+            # h2/h3 get a GitHub-style id so ./doc.md#anchor links land on the heading.
+            attr = f' id="{_slugify(text)}"' if level in (2, 3) else ""
+            out.append(f"<h{level}{attr}>{_inline(text)}</h{level}>")
             i += 1
             continue
 
@@ -337,7 +361,7 @@ async def docs_page(slug: str) -> HTMLResponse:
     )
     return HTMLResponse(_page(
         title,
-        _first_paragraph(md)[:180] or f"AgentAvow documentation — {title}.",
+        _meta_description(_first_paragraph(md)) or f"AgentAvow documentation — {title}.",
         f"https://agentavow.com/docs/{slug}",
         body,
     ))
