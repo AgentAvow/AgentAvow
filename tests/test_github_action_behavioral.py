@@ -59,17 +59,18 @@ def test_sandbox_line_when_the_run_completed(tmp_path):
          "unexpected_egress": ["evil.net"]}
     p = _run(tmp_path, _resp(b))
     assert p.returncode == 0, p.stderr
-    assert ("Sandbox: plan npm-mcp, 2 tool(s) exercised, 1 behavioral finding(s), "
+    assert ("Sandbox (gVisor, signed): called 2 tool(s), 1 behavioral finding(s), "
             "unexpected egress: evil.net") in p.stdout
-    assert "Sandbox: plan npm-mcp" in (tmp_path / "summary.md").read_text()
+    assert "Sandbox (gVisor, signed): called 2 tool(s)" in (tmp_path / "summary.md").read_text()
 
 
 def test_sandbox_line_clean_run_and_pending(tmp_path):
     p = _run(tmp_path, _resp({"ran": True, "plan": "pypi", "findings": [],
                                "unexpected_egress": [], "exercise": None}))
-    assert "Sandbox: plan pypi, 0 tool(s) exercised, 0 behavioral finding(s), no unexpected egress" in p.stdout
+    assert ("Sandbox (gVisor, signed): plan pypi, 0 tool(s) exercised, 0 behavioral finding(s), "
+            "no unexpected egress") in p.stdout
     p = _run(tmp_path, _resp({"ran": False, "pending": True}))
-    assert "Sandbox: behavioral run pending" in p.stdout
+    assert "Sandbox: running now" in p.stdout
     (tmp_path / "summary.md").unlink()  # the step summary is appended to across runs
     p = _run(tmp_path, _resp(None))
     assert "Sandbox:" not in p.stdout
@@ -92,3 +93,21 @@ def test_fail_on_behavioral_gates_only_high_and_critical(tmp_path):
     assert _run(tmp_path, _resp({"ran": False, "pending": True}),
                 FAIL_ON_BEHAVIORAL="true").returncode == 0
     assert _run(tmp_path, _resp(None), FAIL_ON_BEHAVIORAL="true").returncode == 0
+
+
+
+def test_sandbox_line_names_a_non_start_a_leak_and_the_score_effect(tmp_path):
+    b = {"ran": True, "plan": "npm-mcp", "exercise": {"launch_ok": False, "calls": []},
+         "grade_summary": {"start_reason": "needs_credentials"}, "findings": [],
+         "unexpected_egress": []}
+    p = _run(tmp_path, _resp(b))
+    assert "server not started (needs credentials) — not a finding" in p.stdout
+    leak = {"ran": True, "plan": "npm-mcp",
+            "exercise": {"launch_ok": True, "calls": [{"tool": "a"}]},
+            "findings": [{"rule": "credential_canary_exfiltrated", "severity": "critical"}],
+            "canary_exfil": [{"via": "dns", "host": "x.evil.net"}], "unexpected_egress": []}
+    resp = _resp(leak)
+    resp["behavioral_score_effect"] = {"applied": True, "delta": -45}
+    p = _run(tmp_path, resp)
+    assert "CANARY CREDENTIAL LEAKED" in p.stdout
+    assert "trust score -45 from the sandbox" in p.stdout

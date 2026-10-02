@@ -68,14 +68,31 @@ if [ "${B_RAN}" = "true" ]; then
   B_SEVERE=$(jq -r '[.behavioral.findings[]? | select(.severity == "high" or .severity == "critical")] | length' /tmp/ag_scan.json)
   B_HOSTS=$(jq -r '[.behavioral.unexpected_egress[]?] | join(", ")' /tmp/ag_scan.json)
   B_HOSTS_N=$(jq -r '[.behavioral.unexpected_egress[]?] | length' /tmp/ag_scan.json)
-  SANDBOX_LINE="Sandbox: plan ${B_PLAN}, ${B_TOOLS} tool(s) exercised, ${B_FINDINGS} behavioral finding(s)"
+  B_STARTED=$(jq -r '.behavioral.exercise.launch_ok // false' /tmp/ag_scan.json)
+  B_REASON=$(jq -r '.behavioral.grade_summary.start_reason // ""' /tmp/ag_scan.json | tr '_' ' ')
+  B_LEAK=$(jq -r '[.behavioral.canary_exfil[]?] | length' /tmp/ag_scan.json)
+  B_DELTA=$(jq -r 'if (.behavioral_score_effect.applied // false) then (.behavioral_score_effect.delta | tostring) else "" end' /tmp/ag_scan.json)
+  if [ "${B_STARTED}" = "true" ]; then
+    SANDBOX_LINE="Sandbox (gVisor, signed): called ${B_TOOLS} tool(s), ${B_FINDINGS} behavioral finding(s)"
+  elif [ -n "${B_REASON}" ] && [ "${B_REASON}" != "not applicable" ] && [ "${B_REASON}" != "started" ]; then
+    SANDBOX_LINE="Sandbox (gVisor, signed): installed; server not started (${B_REASON}) — not a finding; ${B_FINDINGS} behavioral finding(s)"
+  else
+    SANDBOX_LINE="Sandbox (gVisor, signed): plan ${B_PLAN}, ${B_TOOLS} tool(s) exercised, ${B_FINDINGS} behavioral finding(s)"
+  fi
+  if [ "${B_LEAK}" -gt 0 ]; then
+    SANDBOX_LINE="${SANDBOX_LINE}, CANARY CREDENTIAL LEAKED"
+  fi
   if [ "${B_HOSTS_N}" -gt 0 ]; then
     SANDBOX_LINE="${SANDBOX_LINE}, unexpected egress: ${B_HOSTS}"
   else
     SANDBOX_LINE="${SANDBOX_LINE}, no unexpected egress"
   fi
+  if [ -n "${B_DELTA}" ]; then
+    case "${B_DELTA}" in -*) ;; *) B_DELTA="+${B_DELTA}" ;; esac
+    SANDBOX_LINE="${SANDBOX_LINE}; trust score ${B_DELTA} from the sandbox"
+  fi
 elif [ "${B_PENDING}" = "true" ]; then
-  SANDBOX_LINE="Sandbox: behavioral run pending — results appear on the next scan"
+  SANDBOX_LINE="Sandbox: running now — the observed behavior (and its effect on the score) appears on the next scan"
 fi
 
 echo "Score: ${SCORE}/100 (${TIER})"
