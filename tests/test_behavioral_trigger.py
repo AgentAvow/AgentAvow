@@ -285,7 +285,8 @@ async def test_version_change_drops_the_block_and_enqueues(fake_redis, captured_
     await _settle()
     assert [c["coordinate"] for c in captured_runs] == ["left-pad"]
     assert _counter(fake_redis, "trigger:version_change") == 1
-    assert json.loads(fake_redis.store[key])["coordinate"] == "left-pad"  # fresh block
+    fresh = json.loads(fake_redis.store[key])  # the public block has no coordinate key
+    assert fresh["ran"] is True and "declared_egress" in fresh  # fresh block written
 
 
 async def test_no_change_does_nothing_and_keeps_the_block(fake_redis, captured_runs):
@@ -349,7 +350,10 @@ async def test_on_watch_rescan_uses_watchscan_data_and_the_stored_digest(
     assert await trigger.on_watch_rescan("npm", "npm", "left-pad", None, ws_data,
                                          new_digest="sha256:new",
                                          last_manifest_digest="sha256:new") is None
-    # previous cached scan present: the version moved → change
+    # previous cached scan present: the version moved → change. The per-coordinate lock
+    # from the first run would still be held (240 s TTL in prod); simulate its expiry.
+    for k in [k for k in fake_redis.store if k.endswith(":lock")]:
+        del fake_redis.store[k]
     out = await trigger.on_watch_rescan("npm", "npm", "left-pad", NPM, ws_data)
     assert out == "started"
     await _settle()
