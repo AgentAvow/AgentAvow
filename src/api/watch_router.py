@@ -5,6 +5,7 @@ The re-scan + notification loop lives in src/jobs/scheduler.py (_watch_rescan_lo
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass, field
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -19,7 +20,7 @@ router = APIRouter(tags=["watches"])
 
 
 class WatchCreate(BaseModel):
-    # 'github' (owner/repo) · 'npm'/'pypi' (owner=surface, repo=pkg) · 'mcp'
+    # 'github' (owner/repo) · 'npm'/'pypi'/'docker' (owner=surface, repo=pkg) · 'mcp'
     # (owner='mcp', repo=url) · 'openclaw' (owner/repo skill). Default github.
     surface: str = "github"
     owner: str
@@ -37,34 +38,77 @@ def _serialize(w: ToolWatch) -> dict:
     }
 
 
-async def scan_watch_target(
+@dataclass
+class WatchScan:
+    """One re-scan of a watch target. ``data`` carries just the scan fields the
+    behavioral (sandbox) lookup keys on — package coordinate, declared scope, artifact
+    detail, env reads — plus the ``behavioral`` block itself when the scan path already
+    resolved it (the GitHub public_scan path does). Empty for surfaces with no sandbox
+    tier (mcp, openclaw)."""
+
+    score: int | None
+    digest: str | None
+    data: dict = field(default_factory=dict)
+
+
+def _package_scan_data(surface: str, name: str, r) -> dict:
+    return {
+        "package_coordinate": {"surface": surface, "name": name},
+        "declared_scope": getattr(r, "declared_scope", {}) or {},
+        "artifact_scan": getattr(r, "artifact_scan", {}) or {},
+        "env_reads": list(getattr(r, "env_reads", []) or []),
+    }
+
+
+async def scan_watch_target_detail(
     surface: str, owner: str, repo: str, db: AsyncSession,
-) -> tuple[int | None, str | None]:
-    """Scan a watch target by surface → (trust_score, tool_manifest_digest).
-    Fail-open (returns (None, None) on error); the loop retries next cycle."""
+) -> WatchScan:
+    """Scan a watch target by surface → WatchScan(score, tool_manifest_digest, data).
+    Fail-open (score None on error); the loop retries next cycle."""
     surface = (surface or "github").lower()
     try:
-        if surface in ("npm", "pypi"):
+        if surface in ("npm", "pypi", "docker"):
             from src.scanner.scan import scan_package
             r = await scan_package(surface, repo)
-            return (None if r.error else r.trust_score), None
+            return WatchScan(
+                None if r.error else r.trust_score, None,
+                {} if r.error else _package_scan_data(surface, repo, r),
+            )
         if surface == "mcp":
             from src.scanner.scan import scan_mcp
             r = await scan_mcp(repo)
-            return (
+            return WatchScan(
                 (None if r.error else r.trust_score),
                 (getattr(r, "tool_manifest_digest", None) or None),
             )
         if surface == "openclaw":
             from src.scanner.scan import scan_skill
             r = await scan_skill(owner, repo)
-            return (None if r.error else r.trust_score), (r.tool_manifest_digest or None)
+            return WatchScan(None if r.error else r.trust_score, r.tool_manifest_digest or None)
         # default: github repo
         from src.api.public_scan_router import public_scan
         res = await public_scan(owner=owner, repo=repo, force=False, db=db)
-        return res.trust_score, res.tool_manifest_digest
+        data = {
+            "package_coordinate": getattr(res, "package_coordinate", {}) or {},
+            "declared_scope": getattr(res, "declared_scope", {}) or {},
+            "artifact_scan": getattr(res, "surface_detail", {}) or {},
+            "env_reads": list(getattr(res, "env_reads", []) or []),
+        }
+        behavioral = getattr(res, "behavioral", None)
+        if isinstance(behavioral, dict):
+            data["behavioral"] = behavioral
+        return WatchScan(res.trust_score, res.tool_manifest_digest, data)
     except Exception:
-        return None, None
+        return WatchScan(None, None)
+
+
+async def scan_watch_target(
+    surface: str, owner: str, repo: str, db: AsyncSession,
+) -> tuple[int | None, str | None]:
+    """Scan a watch target by surface → (trust_score, tool_manifest_digest).
+    Fail-open (returns (None, None) on error); the loop retries next cycle."""
+    ws = await scan_watch_target_detail(surface, owner, repo, db)
+    return ws.score, ws.digest
 
 
 @router.post("/watches", status_code=status.HTTP_201_CREATED)
@@ -75,7 +119,7 @@ async def add_watch(
 ) -> dict:
     watcher_id = current.id  # snapshot before any awaits that may shift the session
     surface = (body.surface or "github").strip().lower()
-    if surface not in ("github", "npm", "pypi", "mcp", "openclaw"):
+    if surface not in ("github", "npm", "pypi", "docker", "mcp", "openclaw"):
         raise HTTPException(status_code=400, detail="unsupported surface")
     owner = body.owner.strip().strip("/")
     repo = body.repo.strip().strip("/") if surface != "mcp" else body.repo.strip()

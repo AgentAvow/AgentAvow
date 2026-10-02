@@ -19,6 +19,10 @@ inputs:
     description: "Post a comment on the PR with scan results"
     required: false
     default: "true"
+  fail_on_behavioral:
+    description: "Fail the workflow if the behavioral sandbox run has a high/critical finding"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -37,6 +41,7 @@ runs:
         MIN_SCORE: ${{ inputs.min_score }}
         FAIL_ON_FINDINGS: ${{ inputs.fail_on_findings }}
         COMMENT_ON_PR: ${{ inputs.comment_on_pr }}
+        FAIL_ON_BEHAVIORAL: ${{ inputs.fail_on_behavioral }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         REPO_OWNER: ${{ github.repository_owner }}
         REPO_NAME: ${{ github.event.repository.name }}

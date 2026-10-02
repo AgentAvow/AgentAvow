@@ -45,6 +45,15 @@ export interface CatalogRow {
   skipped?: string | null
   has_x402_header?: boolean | null
   http_status?: number | null
+  /** Behavioral sandbox summary — only on npm/pypi/docker rows with a cached run. */
+  sandbox?: CatalogSandbox | null
+}
+
+export interface CatalogSandbox {
+  ran: boolean
+  exercised?: boolean | null  // MCP server launched OK in the sandbox (null: not an MCP plan)
+  findings: number
+  unexpected_egress: number
 }
 
 export interface CatalogResponse {

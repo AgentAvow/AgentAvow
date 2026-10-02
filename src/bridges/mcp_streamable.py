@@ -455,10 +455,39 @@ def _scan_block(
     return "\n".join(lines)
 
 
+# Why an MCP server did not start in the sandbox (``grade_summary.start_reason``). The
+# benign ones are an environment limit, not a finding — say so, or a clean package
+# reads as if it crashed. Unknown / absent → the generic wording.
+_START_REASONS: dict[str, tuple[str, bool]] = {
+    "needs_credentials": ("the server needs credentials to start", True),
+    "needs_arguments": ("the server needs launch arguments to start", True),
+    "missing_binary": ("a required binary is not available in the sandbox", True),
+    "no_entrypoint": ("no MCP entrypoint was found to start", True),
+    "resource_limit": ("the server hit the sandbox resource limit before starting", True),
+    "install_failed": ("the package failed to install in gVisor", False),
+    "timeout": ("the server did not start within the sandbox time limit", False),
+    "crashed": ("the MCP server crashed on start in gVisor", False),
+}
+
+
+def _start_failure_wording(b: dict) -> tuple[str, bool]:
+    """(phrase, benign) for a server that did not start. ``benign`` means the cause is
+    the sandbox environment (credentials, arguments, binaries …) — not a finding."""
+    gs = b.get("grade_summary") if isinstance(b.get("grade_summary"), dict) else {}
+    reason = str((gs or {}).get("start_reason") or "").strip().lower()
+    phrase, benign = _START_REASONS.get(reason, ("the MCP server failed to start in gVisor", False))
+    if benign:
+        phrase = "installed, but " + phrase
+    return phrase, benign
+
+
 def _sandbox_line(data: dict) -> str | None:
     """ONE compact line about the behavioral sandbox tier, when the scan carries it:
     what ran (tools exercised in gVisor) and what it found, or that the run is still
-    pending. None when the scan has no ``behavioral`` block (never invented)."""
+    pending. None when the scan has no ``behavioral`` block (never invented). A server
+    that could not start says why (``grade_summary.start_reason``) and, when the cause
+    is the sandbox environment, that it is not a finding. A block carrying a signed
+    ``attestation`` is marked ``(signed observation)``."""
     b = data.get("behavioral")
     if not isinstance(b, dict):
         return None
@@ -466,12 +495,14 @@ def _sandbox_line(data: dict) -> str | None:
         return "Sandbox: behavioral run still in progress — re-check in about a minute."
     if not b.get("ran"):
         return None
+    signed = " (signed observation)" if b.get("attestation") else ""
     findings = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
     ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else None
     n_tools = len({c.get("tool") for c in (ex or {}).get("calls") or []
                    if isinstance(c, dict) and c.get("tool")}) if ex else 0
+    benign_start = False
     if ex and not ex.get("launch_ok"):
-        what = "the MCP server failed to start in gVisor"
+        what, benign_start = _start_failure_wording(b)
     elif n_tools:
         what = f"ran {n_tools} tool{'' if n_tools == 1 else 's'} in gVisor"
     else:
@@ -481,12 +512,15 @@ def _sandbox_line(data: dict) -> str | None:
                           for f in findings[:3])
         more = f" (+{len(findings) - 3} more)" if len(findings) > 3 else ""
         n = len(findings)
-        return f"Sandbox: {what}; {n} behavioral finding{'' if n == 1 else 's'}: {names}{more}"
+        return (f"Sandbox: {what}; {n} behavioral finding{'' if n == 1 else 's'}: "
+                f"{names}{more}{signed}")
+    if benign_start:
+        return f"Sandbox: {what} (not a finding){signed}"
     hosts = [str(h) for h in (b.get("egress_hosts") or []) if h]
     if hosts:
         shown = ", ".join(hosts[:4]) + (" …" if len(hosts) > 4 else "")
-        return f"Sandbox: clean run ({what}), egress only to {shown}"
-    return f"Sandbox: clean run ({what}), no network egress"
+        return f"Sandbox: clean run ({what}), egress only to {shown}{signed}"
+    return f"Sandbox: clean run ({what}), no network egress{signed}"
 
 
 def _safe_verdict(data: dict) -> bool:

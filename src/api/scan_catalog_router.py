@@ -38,6 +38,15 @@ _DATA_DIR = _PROJECT_ROOT / "data" / "launch-scans"
 _CATALOG_CACHE: dict[str, Any] | None = None
 
 
+class CatalogSandbox(BaseModel):
+    """Read-only summary of the behavioral (sandbox) block the public scan cached for
+    this coordinate — present only when a run exists in cache."""
+    ran: bool
+    exercised: bool | None = None  # MCP server launched OK (None: not an MCP plan)
+    findings: int = 0
+    unexpected_egress: int = 0
+
+
 class CatalogRow(BaseModel):
     surface: str  # x402 | mcp | npm | pypi
     name: str
@@ -60,6 +69,69 @@ class CatalogRow(BaseModel):
     # x402-specific
     has_x402_header: bool | None = None
     http_status: int | None = None
+    # behavioral sandbox summary (npm/pypi/docker rows with a cached run; else None)
+    sandbox: CatalogSandbox | None = None
+
+
+_SANDBOX_SURFACES = ("npm", "pypi", "docker")
+
+
+def _sandbox_candidate_keys(row: CatalogRow) -> list[str]:
+    """Cache keys a row's behavioral block may live under: the plain install plan and,
+    when the row is an MCP server / docker image, the exerciser plan. A declared-egress
+    variant (hash suffix) needs the scan's ``.agentavow.yml`` and is not resolvable from
+    a catalog row, so such rows read as "no sandbox" here."""
+    from src.api.public_scan_router import _behavioral_cache_key
+
+    surface = (row.surface or "").lower()
+    if surface not in _SANDBOX_SURFACES or not row.name:
+        return []
+    keys = [_behavioral_cache_key(surface, row.name)]
+    plan = "docker" if surface == "docker" else (f"{surface}-mcp" if row.is_mcp_server else None)
+    if plan:
+        keys.append(_behavioral_cache_key(surface, row.name, None, plan))
+    return keys
+
+
+def _sandbox_summary(block: Any) -> CatalogSandbox | None:
+    if not isinstance(block, dict) or not block.get("ran"):
+        return None
+    ex = block.get("exercise") if isinstance(block.get("exercise"), dict) else None
+    return CatalogSandbox(
+        ran=True,
+        exercised=(bool(ex.get("launch_ok")) if ex is not None else None),
+        findings=len([f for f in (block.get("findings") or []) if isinstance(f, dict)]),
+        unexpected_egress=len(block.get("unexpected_egress") or []),
+    )
+
+
+async def _attach_sandbox(rows: list[CatalogRow]) -> list[CatalogRow]:
+    """Decorate one page of rows with their cached sandbox summary in ONE Redis round
+    trip (MGET over every candidate key). Rows come from the shared in-memory catalog,
+    so decorated rows are copies — the cache must never hold a stale sandbox mark.
+    Best-effort: any failure leaves every row's ``sandbox`` None."""
+    per_row = [_sandbox_candidate_keys(r) for r in rows]
+    keys = [k for ks in per_row for k in ks]
+    if not keys:
+        return rows
+    try:
+        from src.redis_client import get_redis
+        raw = await get_redis().mget(keys)
+    except Exception:
+        return rows
+    blocks: dict[str, Any] = {}
+    for key, val in zip(keys, raw or []):
+        if not val:
+            continue
+        try:
+            blocks[key] = json.loads(val)
+        except Exception:
+            continue
+    out: list[CatalogRow] = []
+    for row, ks in zip(rows, per_row):
+        summary = next((s for s in (_sandbox_summary(blocks.get(k)) for k in ks) if s), None)
+        out.append(row.model_copy(update={"sandbox": summary}) if summary else row)
+    return out
 
 
 # Purpose-category rules (first match wins) — a coarse, honest facet derived from the
@@ -578,7 +650,7 @@ async def scan_catalog(
         filtered = sorted(filtered, key=_rank)
 
     total = len(filtered)
-    page = filtered[offset:offset + limit]
+    page = await _attach_sandbox(filtered[offset:offset + limit])
 
     return CatalogResponse(
         summary=summary,

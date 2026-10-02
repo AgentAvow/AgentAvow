@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSummary } from '../catalog'
+import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSandbox, type CatalogSummary } from '../catalog'
 import { TrustMini, AdoptionMini } from '../components/TrustMark'
 
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
@@ -59,7 +59,22 @@ function whyLines(row: CatalogRow): string[] {
   if (row.high) out.push(`${row.high} high-severity finding${row.high > 1 ? 's' : ''}`)
   if (row.findings_count != null) out.push(`${row.findings_count} total findings across 12 categories`)
   if (!out.length) out.push('No high or critical findings · signed clean')
+  const sb = row.sandbox
+  if (sb?.ran) {
+    const parts = [sb.findings ? `${sb.findings} behavioral finding${sb.findings > 1 ? 's' : ''}` : 'no behavioral findings']
+    if (sb.unexpected_egress) parts.push(`${sb.unexpected_egress} unexpected egress host${sb.unexpected_egress > 1 ? 's' : ''}`)
+    if (sb.exercised === false) parts.push('server did not start')
+    out.push(`Sandbox run (not part of the signed score): ${parts.join(', ')}`)
+  }
   return out
+}
+
+/** Small neutral mark for a row whose package has a cached sandbox run. The sandbox is
+ *  a runtime observation kept apart from the signed grade, so it never colors the chip. */
+function sandboxMark(sb: CatalogSandbox | null | undefined): string | null {
+  if (!sb?.ran) return null
+  if (sb.findings) return `sandbox: ${sb.findings} finding${sb.findings > 1 ? 's' : ''}`
+  return 'sandbox ✓'
 }
 
 /** At-a-glance status chip on the card face — mirrors the old Scans status column. */
@@ -124,6 +139,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
   // that isn't actually certified.
   const chip = statusChip(row)
   const fnd = findingsLine(row)
+  const sbx = sandboxMark(row.sandbox)
   return (
     <div className="glass card-hover rounded-xl p-[18px]">
       <div className="flex items-center justify-between gap-2.5">
@@ -151,6 +167,14 @@ function ToolCard({ row }: { row: CatalogRow }) {
         <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded ${chip.cls}`}>{chip.label}</span>
         {fnd && <span className="font-mono text-[11px] text-text-muted tabular-nums">{fnd}</span>}
         {row.primary_language && <span className="font-mono text-[11px] text-text-muted">· {row.primary_language}</span>}
+        {sbx && (
+          <span
+            className="font-mono text-[10.5px] px-1.5 py-0.5 rounded bg-surface-hover text-text-muted tabular-nums"
+            title="Observed in the behavioral sandbox (gVisor) — a runtime observation, separate from the signed score"
+          >
+            {sbx}
+          </span>
+        )}
       </div>
       <button onClick={() => setOpen(!open)} className="mt-3 text-[12.5px] text-primary-light hover:text-primary">
         {open ? 'Hide' : 'Why this score'} {open ? '▴' : '▾'}

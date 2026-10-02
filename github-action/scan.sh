@@ -8,6 +8,7 @@ OWNER="${REPO_OWNER}"
 REPO="${REPO_NAME}"
 MIN_SCORE="${MIN_SCORE:-60}"
 FAIL_ON_FINDINGS="${FAIL_ON_FINDINGS:-false}"
+FAIL_ON_BEHAVIORAL="${FAIL_ON_BEHAVIORAL:-false}"
 COMMENT_ON_PR="${COMMENT_ON_PR:-true}"
 PR_NUMBER="${PR_NUMBER:-}"
 
@@ -54,8 +55,34 @@ LOW=$(jq -r '.findings.low // 0' /tmp/ag_scan.json)
 REPORT_URL="https://agentavow.com/check/${OWNER}/${REPO}"
 BADGE_URL="${API_BASE}/${OWNER}/${REPO}/badge"
 
+# Behavioral sandbox tier (present when the repo maps to an npm/PyPI/docker package
+# the sandbox has exercised; absent otherwise). Kept SEPARATE from the signed score.
+B_RAN=$(jq -r '.behavioral.ran // false' /tmp/ag_scan.json)
+B_PENDING=$(jq -r '.behavioral.pending // false' /tmp/ag_scan.json)
+B_SEVERE=0
+SANDBOX_LINE=""
+if [ "${B_RAN}" = "true" ]; then
+  B_PLAN=$(jq -r '.behavioral.plan // "install"' /tmp/ag_scan.json)
+  B_TOOLS=$(jq -r '[.behavioral.exercise.calls[]?.tool] | unique | length' /tmp/ag_scan.json)
+  B_FINDINGS=$(jq -r '[.behavioral.findings[]?] | length' /tmp/ag_scan.json)
+  B_SEVERE=$(jq -r '[.behavioral.findings[]? | select(.severity == "high" or .severity == "critical")] | length' /tmp/ag_scan.json)
+  B_HOSTS=$(jq -r '[.behavioral.unexpected_egress[]?] | join(", ")' /tmp/ag_scan.json)
+  B_HOSTS_N=$(jq -r '[.behavioral.unexpected_egress[]?] | length' /tmp/ag_scan.json)
+  SANDBOX_LINE="Sandbox: plan ${B_PLAN}, ${B_TOOLS} tool(s) exercised, ${B_FINDINGS} behavioral finding(s)"
+  if [ "${B_HOSTS_N}" -gt 0 ]; then
+    SANDBOX_LINE="${SANDBOX_LINE}, unexpected egress: ${B_HOSTS}"
+  else
+    SANDBOX_LINE="${SANDBOX_LINE}, no unexpected egress"
+  fi
+elif [ "${B_PENDING}" = "true" ]; then
+  SANDBOX_LINE="Sandbox: behavioral run pending — results appear on the next scan"
+fi
+
 echo "Score: ${SCORE}/100 (${TIER})"
 echo "Findings: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low"
+if [ -n "${SANDBOX_LINE}" ]; then
+  echo "${SANDBOX_LINE}"
+fi
 echo "::endgroup::"
 
 # ---------------------------------------------------------------------------
@@ -70,7 +97,9 @@ COMMENT_BODY="## AgentAvow Trust Scan
 ${CATEGORIES}
 
 **Findings:** ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low
-
+${SANDBOX_LINE:+
+**${SANDBOX_LINE}**
+}
 [View full report](${REPORT_URL}) | [Add badge to README](${BADGE_URL})
 
 > *This is a code security scan score. [Full composite trust score](${REPORT_URL}) (including identity verification and external signals) is available on AgentAvow.*"
@@ -123,6 +152,13 @@ fi
 # ---------------------------------------------------------------------------
 if [ "${FAIL_ON_FINDINGS}" = "true" ] && [ "${SCORE}" -lt "${MIN_SCORE}" ]; then
   echo "::error::Trust score ${SCORE} is below minimum threshold ${MIN_SCORE}"
+  exit 1
+fi
+
+# 7. Fail on a high/critical BEHAVIORAL finding (sandbox tier) when opted in.
+#    A pending or absent sandbox run never fails the step.
+if [ "${FAIL_ON_BEHAVIORAL}" = "true" ] && [ "${B_SEVERE}" -gt 0 ]; then
+  echo "::error::Sandbox observed ${B_SEVERE} high/critical behavioral finding(s)"
   exit 1
 fi
 

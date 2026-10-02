@@ -34,6 +34,7 @@ That's it. Every PR will now receive a trust scan comment.
 | `min_score` | `60` | Minimum trust score (0-100) to pass the check |
 | `fail_on_findings` | `false` | Fail the workflow if the score is below `min_score` |
 | `comment_on_pr` | `true` | Post a comment on the PR with scan results |
+| `fail_on_behavioral` | `false` | Fail the workflow if the behavioral sandbox run has a high/critical finding |
 
 ### Enforce a minimum trust score
 
@@ -45,6 +46,31 @@ That's it. Every PR will now receive a trust scan comment.
 ```
 
 PRs with a trust score below 70 will fail the check, blocking merge (if you use branch protection rules).
+
+### Gate on sandbox behavior
+
+When the repository maps to a published npm, PyPI or Docker package, AgentAvow also
+runs it in an isolated sandbox (gVisor) and reports what it actually did: which MCP
+tools were exercised, where it sent traffic, and whether it read secrets it should
+not have. The scan output and the PR comment carry one `Sandbox:` line, for example:
+
+```
+Sandbox: plan npm-mcp, 4 tool(s) exercised, 1 behavioral finding(s), unexpected egress: telemetry.example.net
+```
+
+(or `Sandbox: behavioral run pending — results appear on the next scan` while the
+first run is still in flight.) To block a merge on a high/critical behavioral finding:
+
+```yaml
+- uses: AgentAvow/AgentAvow/github-action@main
+  with:
+    fail_on_behavioral: true
+```
+
+The sandbox observation is kept separate from the signed trust score — it is a
+runtime observation, not part of the offline-recomputable verdict — so `min_score`
+and `fail_on_behavioral` are independent gates. A pending or absent sandbox run never
+fails the step.
 
 ### Disable PR comments
 
@@ -74,6 +100,8 @@ Every scanned PR receives a comment like this:
 | Filesystem Access | 65 |
 
 **Findings:** 0 critical, 2 high, 5 medium, 3 low
+
+**Sandbox: plan npm-mcp, 4 tool(s) exercised, 0 behavioral finding(s), no unexpected egress**
 
 [View full report](https://agentavow.com/check/owner/repo) | [Add badge to README](https://agentavow.com/api/v1/public/scan/owner/repo/badge)
 

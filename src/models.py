@@ -2388,6 +2388,12 @@ class ToolWatch(Base):
     repo = Column(String(512), nullable=False)
     last_score = Column(Integer, nullable=True)
     last_manifest_digest = Column(String(128), nullable=True)
+    # Compact fingerprint of the last cached behavioral (sandbox) block — finding
+    # rules, undeclared egress, canary exfil and the (tool, readOnlyHint) set — so the
+    # re-scan loop can alert when a package's observed runtime behavior changes.
+    # Format: see src/jobs/scheduler.py:_behavioral_fingerprint. NULL until a block
+    # has been observed (watches on surfaces with no sandbox tier stay NULL).
+    last_behavioral_digest = Column(String(128), nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_checked_at = Column(DateTime(timezone=True), nullable=True)

@@ -209,3 +209,72 @@ def test_sandbox_line_clean_run_lists_egress_or_none():
     b = {"ran": True, "egress_hosts": [], "findings": [],
          "exercise": {"launch_ok": False, "calls": []}}
     assert "failed to start" in _sandbox_line(_scan_data(b))
+
+
+# ── start_reason: a server that could not start says why ──────────────────────
+
+def _not_started(reason=None, findings=(), attestation=None, hosts=()):
+    b = {"ran": True, "egress_hosts": list(hosts), "findings": list(findings),
+         "exercise": {"launch_ok": False, "calls": []}}
+    if reason is not None:
+        b["grade_summary"] = {"start_reason": reason}
+    if attestation:
+        b["attestation"] = attestation
+    return b
+
+
+def test_sandbox_line_benign_start_reason_is_not_a_finding():
+    line = _sandbox_line(_scan_data(_not_started("needs_credentials")))
+    assert line == ("Sandbox: installed, but the server needs credentials to start "
+                    "(not a finding)")
+    assert "needs launch arguments" in _sandbox_line(_scan_data(_not_started("needs_arguments")))
+    assert "required binary" in _sandbox_line(_scan_data(_not_started("missing_binary")))
+    assert "no MCP entrypoint" in _sandbox_line(_scan_data(_not_started("no_entrypoint")))
+    assert "resource limit" in _sandbox_line(_scan_data(_not_started("resource_limit")))
+    # a benign non-start is never dressed up as a "clean run" with egress details
+    line = _sandbox_line(_scan_data(_not_started("needs_credentials", hosts=["registry.npmjs.org"])))
+    assert "clean run" not in line and "egress" not in line
+
+
+def test_sandbox_line_hard_start_failures_keep_the_failure_wording():
+    assert "crashed on start" in _sandbox_line(_scan_data(_not_started("crashed")))
+    assert "failed to install" in _sandbox_line(_scan_data(_not_started("install_failed")))
+    assert "time limit" in _sandbox_line(_scan_data(_not_started("timeout")))
+    for line in (
+        _sandbox_line(_scan_data(_not_started("crashed"))),
+        _sandbox_line(_scan_data(_not_started("timeout"))),
+    ):
+        assert "not a finding" not in line and "installed, but" not in line
+
+
+def test_sandbox_line_unknown_or_missing_start_reason_falls_back():
+    legacy = "the MCP server failed to start in gVisor"
+    assert legacy in _sandbox_line(_scan_data(_not_started()))            # field absent
+    assert legacy in _sandbox_line(_scan_data(_not_started("unknown")))
+    assert legacy in _sandbox_line(_scan_data(_not_started("something_new")))
+    b = _not_started()
+    b["grade_summary"] = "not-a-dict"
+    assert legacy in _sandbox_line(_scan_data(b))
+
+
+def test_sandbox_line_start_reason_with_findings_still_lists_them():
+    b = _not_started("needs_credentials", findings=[{"rule": "behavioral_undeclared_egress"}])
+    line = _sandbox_line(_scan_data(b))
+    assert line == ("Sandbox: installed, but the server needs credentials to start; "
+                    "1 behavioral finding: behavioral_undeclared_egress")
+
+
+def test_sandbox_line_marks_a_signed_observation():
+    b = {"ran": True, "egress_hosts": [], "findings": [],
+         "exercise": {"launch_ok": True, "calls": [{"tool": "only"}]},
+         "attestation": {"jws": "eyJ..."}}
+    assert _sandbox_line(_scan_data(b)).endswith("no network egress (signed observation)")
+    b["findings"] = [{"rule": "r1"}]
+    assert _sandbox_line(_scan_data(b)).endswith("r1 (signed observation)")
+    assert _sandbox_line(_scan_data(_not_started("needs_credentials", attestation={"jws": "x"}))) == (
+        "Sandbox: installed, but the server needs credentials to start (not a finding) "
+        "(signed observation)")
+    # pending runs and blocks without an attestation are unchanged
+    assert "signed" not in _sandbox_line(_scan_data({"ran": False, "pending": True}))
+    b.pop("attestation")
+    assert "signed" not in _sandbox_line(_scan_data(b))

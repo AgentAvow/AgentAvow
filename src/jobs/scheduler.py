@@ -925,6 +925,184 @@ def _watch_digest_state(last: str | None, new: str | None) -> tuple[bool, str | 
     return bool(last and new and new != last), (new or last)
 
 
+# ── behavioral (sandbox) drift ──────────────────────────────────────────────
+# The watch loop never runs the sandbox itself: it reads the block the public scan
+# cached (24h, see public_scan_router._behavioral_block) and compares a compact
+# fingerprint of it against the last one stored on the watch.
+
+_BEHAVIORAL_FP_VERSION = "v1"
+
+
+def _short_digest(items: list) -> str:
+    import hashlib
+    import json as _json
+    return hashlib.sha256(_json.dumps(items, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _behavioral_rules(block: dict) -> list[str]:
+    return sorted({
+        str(f.get("rule") or f.get("name") or "")
+        for f in (block.get("findings") or []) if isinstance(f, dict)
+    } - {""})
+
+
+def _behavioral_tools(block: dict) -> list[list]:
+    ex = block.get("exercise") if isinstance(block.get("exercise"), dict) else {}
+    pairs = set()
+    for t in (ex or {}).get("tools") or []:
+        if not isinstance(t, dict) or not t.get("name"):
+            continue
+        ann = t.get("annotations") if isinstance(t.get("annotations"), dict) else {}
+        pairs.add((str(t["name"]), ann.get("readOnlyHint") is True))
+    return [list(p) for p in sorted(pairs)]
+
+
+def _behavioral_fingerprint(block: dict | None) -> str | None:
+    """Compact fingerprint of a behavioral block, or None when it did not run.
+
+    ``v1:r=<sha>:u=<sha>:c=<sha>:t=<sha>;r=<n>;u=<n>;c=<n>`` — a sha256 prefix over each
+    of: the sorted finding rules, the sorted undeclared egress hosts, the canary-exfil
+    set, and the set of (tool, readOnlyHint) pairs — followed by the three risk counts.
+    Per-component digests plus counts are what let the loop tell "a NEW finding
+    appeared" from "a finding went away" without storing the whole block.
+    """
+    if not isinstance(block, dict) or not block.get("ran"):
+        return None
+    rules = _behavioral_rules(block)
+    unexpected = sorted({str(h).lower() for h in (block.get("unexpected_egress") or []) if h})
+    canary = sorted({str(c) for c in (block.get("canary_exfil") or []) if c})
+    tools = _behavioral_tools(block)
+    return (
+        f"{_BEHAVIORAL_FP_VERSION}:r={_short_digest(rules)}:u={_short_digest(unexpected)}"
+        f":c={_short_digest(canary)}:t={_short_digest(tools)}"
+        f";r={len(rules)};u={len(unexpected)};c={len(canary)}"
+    )
+
+
+def _parse_behavioral_fp(fp: str) -> tuple[dict[str, str], dict[str, int]] | None:
+    try:
+        head, _, tail = fp.partition(";")
+        parts = head.split(":")
+        if parts[0] != _BEHAVIORAL_FP_VERSION:
+            return None
+        digests = dict(p.split("=", 1) for p in parts[1:])
+        counts = {k: int(v) for k, v in (p.split("=", 1) for p in tail.split(";") if p)}
+        return digests, counts
+    except Exception:
+        return None
+
+
+def _behavioral_change(last: str | None, new: str | None) -> tuple[str | None, str | None]:
+    """(what happened, baseline fingerprint to store) for one watch re-scan.
+
+    Returns ``"alert"`` when a risk component (rules / undeclared egress / canary)
+    changed and did not shrink — i.e. something appeared that was not there before;
+    ``"improved"`` when a risk component changed and only shrank; None for no change,
+    a first observation (sets the baseline silently), a tools-only change, or a cycle
+    with no cached block (which keeps the old baseline, like ``_watch_digest_state``).
+    """
+    if not new:
+        return None, last
+    if not last or last == new:
+        return None, new
+    old_p, new_p = _parse_behavioral_fp(last), _parse_behavioral_fp(new)
+    if old_p is None or new_p is None:
+        return None, new  # unreadable (older format) baseline — re-baseline silently
+    old_d, old_c = old_p
+    new_d, new_c = new_p
+    grew = shrank = False
+    for k in ("r", "u", "c"):
+        if old_d.get(k) == new_d.get(k):
+            continue
+        # The sets differ: if the new one is not smaller it holds something the old
+        # one did not; if it is smaller it may be a pure removal (treated as such).
+        if new_c.get(k, 0) >= old_c.get(k, 0):
+            grew = True
+        else:
+            shrank = True
+    if grew:
+        return "alert", new
+    if shrank:
+        return "improved", new
+    return None, new
+
+
+async def _watch_behavioral_block(data: dict | None) -> dict | None:
+    """The cached behavioral block for a re-scanned watch, or None. Uses the block the
+    scan path already resolved when present; otherwise reads the cache under the same
+    key the public scan would (declared egress + plan). Never starts a sandbox run."""
+    if not isinstance(data, dict):
+        return None
+    inline = data.get("behavioral")
+    if isinstance(inline, dict) and inline.get("ran"):
+        return inline
+    pkg = data.get("package_coordinate") or {}
+    surface = str(pkg.get("surface") or "").lower()
+    name = pkg.get("name")
+    if surface not in ("npm", "pypi", "docker") or not name:
+        return None
+    try:
+        from src.api.public_scan_router import (
+            _behavioral_plan,
+            _declared_egress,
+            _get_cached_behavioral,
+        )
+        block = await _get_cached_behavioral(
+            surface, str(name), _declared_egress(data), _behavioral_plan(data, surface),
+        )
+    except Exception:
+        return None
+    return block if isinstance(block, dict) and block.get("ran") else None
+
+
+def _behavioral_alert_payload(
+    w, block: dict, new_score: int | None, package: dict | None = None,
+) -> dict:
+    """What the behavioral_change webhook carries: the block's current finding rules,
+    undeclared hosts and canary hits (the old block is not stored, so this is the full
+    present state rather than a diff). ``package`` is the npm/pypi/docker coordinate
+    the sandbox exercised (a GitHub watch resolves to one)."""
+    pkg = {k: package[k] for k in ("surface", "name") if isinstance(package, dict)
+           and package.get(k)}
+    ex = block.get("exercise") if isinstance(block.get("exercise"), dict) else {}
+    return {
+        "type": "agentavow.alert.behavioral_change",
+        "event": "behavioral_change",
+        "owner": w.owner,
+        "repo": w.repo,
+        "surface": getattr(w, "surface", "github") or "github",
+        "score": new_score,
+        "reason": "observed runtime behavior changed",
+        "plan": block.get("plan"),
+        "findings": [
+            {"rule": f.get("rule"), "severity": f.get("severity"), "name": f.get("name")}
+            for f in (block.get("findings") or []) if isinstance(f, dict)
+        ],
+        "finding_rules": _behavioral_rules(block),
+        "unexpected_egress": sorted({str(h) for h in (block.get("unexpected_egress") or [])}),
+        "canary_exfil": [str(c) for c in (block.get("canary_exfil") or [])],
+        "tools_exercised": sorted({
+            str(c.get("tool")) for c in (ex or {}).get("calls") or []
+            if isinstance(c, dict) and c.get("tool")
+        }),
+        "package": pkg,
+    }
+
+
+async def _watcher_hook(db, watcher_id):
+    """The watcher's active alert webhook, or None."""
+    from sqlalchemy import select as _select
+
+    from src.models import AlertWebhook
+
+    return (await db.execute(
+        _select(AlertWebhook).where(
+            AlertWebhook.entity_id == watcher_id,
+            AlertWebhook.active.is_(True),
+        )
+    )).scalar_one_or_none()
+
+
 async def _run_watch_rescan(limit: int = 200) -> None:
     from datetime import datetime, timezone
 
@@ -942,14 +1120,21 @@ async def _run_watch_rescan(limit: int = 200) -> None:
     for w in watches:
         async with async_session() as db:
             try:
-                from src.api.watch_router import scan_watch_target
-                new_score, new_digest = await scan_watch_target(
+                from src.api.watch_router import scan_watch_target_detail
+                ws = await scan_watch_target_detail(
                     getattr(w, "surface", "github") or "github", w.owner, w.repo, db,
                 )
+                new_score, new_digest = ws.score, ws.digest
             except Exception:
                 continue
             if new_score is None:
                 continue  # scan failed this cycle — retry next time, don't false-alert
+            # Behavioral drift — read-only against the public scan's cache; a watch
+            # whose coordinate has no sandbox block keeps its baseline untouched.
+            b_block = await _watch_behavioral_block(ws.data)
+            b_change, b_baseline = _behavioral_change(
+                getattr(w, "last_behavioral_digest", None), _behavioral_fingerprint(b_block),
+            )
             dropped = (
                 w.last_score is not None and new_score is not None and new_score < w.last_score - 5
             )
@@ -987,16 +1172,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                     pass
                 # Webhook alert-delivery — POST to the watcher's configured URL.
                 try:
-                    from sqlalchemy import select as _select
-
-                    from src.models import AlertWebhook
-
-                    hook = (await db.execute(
-                        _select(AlertWebhook).where(
-                            AlertWebhook.entity_id == w.watcher_id,
-                            AlertWebhook.active.is_(True),
-                        )
-                    )).scalar_one_or_none()
+                    hook = await _watcher_hook(db, w.watcher_id)
                     if hook is not None:
                         from src.api.account_webhook_router import deliver_to_hook
 
@@ -1033,10 +1209,57 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                         await send_email(watcher.email, subj, html)
                 except Exception:
                     logger.debug("good-news notification failed for %s/%s", w.owner, w.repo)
+            if b_change == "alert" and b_block is not None:
+                # Something the sandbox did not see last time: a new behavioral finding,
+                # a new undeclared egress host, or canary exfiltration. Same channels as
+                # a score drop / definition drift: notification + signed webhook.
+                rules = _behavioral_rules(b_block)
+                hosts = sorted({str(h) for h in (b_block.get("unexpected_egress") or [])})
+                what = ", ".join(rules[:3] + hosts[:3]) or "runtime behavior"
+                title = f"{w.owner}/{w.repo} — sandbox behavior changed"
+                body = (
+                    f"A tool you're watching behaves differently in the sandbox: {what}. "
+                    "Review the behavioral findings before your agents keep using it."
+                )
+                try:
+                    await create_notification(
+                        db, w.watcher_id, "watch_alert", title, body,
+                        reference_id=f"{w.owner}/{w.repo}",
+                    )
+                except Exception:
+                    logger.exception(
+                        "behavioral watch notification failed for %s/%s", w.owner, w.repo)
+                try:
+                    hook = await _watcher_hook(db, w.watcher_id)
+                    if hook is not None:
+                        from src.api.account_webhook_router import deliver_to_hook
+
+                        hook.last_status = await deliver_to_hook(
+                            hook, _behavioral_alert_payload(
+                                w, b_block, new_score,
+                                (ws.data or {}).get("package_coordinate")))
+                        hook.last_delivery_at = datetime.now(timezone.utc)
+                except Exception:
+                    logger.debug(
+                        "behavioral webhook delivery failed for %s/%s", w.owner, w.repo)
+            elif b_change == "improved":
+                # Findings went away — a lighter, positive note, not an alert.
+                try:
+                    await create_notification(
+                        db, w.watcher_id, "watch_good_news",
+                        f"{w.owner}/{w.repo} — sandbox behavior improved",
+                        "Good news: a tool you're watching no longer shows behavioral "
+                        "findings it had on its last sandbox run.",
+                        reference_id=f"{w.owner}/{w.repo}",
+                    )
+                except Exception:
+                    logger.debug(
+                        "behavioral good-news notification failed for %s/%s", w.owner, w.repo)
             fresh = await db.get(ToolWatch, w.id)
             if fresh is not None:
                 fresh.last_score = new_score
                 fresh.last_manifest_digest = baseline_digest
+                fresh.last_behavioral_digest = b_baseline
                 fresh.last_checked_at = datetime.now(timezone.utc)
                 await db.commit()
 
