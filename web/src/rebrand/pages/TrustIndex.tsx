@@ -6,6 +6,7 @@ import { TrustMini, AdoptionMini } from '../components/TrustMark'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity, type CatalogRow } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { SandboxFindingsBlock } from '../components/SandboxStats'
+import SEOHead from '../../components/SEOHead'
 
 interface RecentItem { surface: string; name: string; full_name: string | null; trust_score: number | null; at: string | null }
 
@@ -151,6 +152,11 @@ export default function RebrandTrustIndex() {
 
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-16">
+      <SEOHead
+        title="Trust Index — the state of agent tool safety"
+        description="An independent, signed index of the tools, MCP servers, and packages AI agents connect to: trust scores, adoption scores, and the critical-finding rate."
+        path="/index"
+      />
       {/* hero — the thesis */}
       <Reveal>
         <div className="max-w-[64ch]">

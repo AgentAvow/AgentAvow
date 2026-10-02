@@ -6,6 +6,7 @@ import { rp } from '../basePath'
 import { type CatalogRow, rowIdentity } from '../catalog'
 import { CertifiedMark } from '../components/TrustMark'
 import { Reveal } from '../components/motion'
+import SEOHead from '../../components/SEOHead'
 
 const PKG_SURFACES = ['npm', 'pypi', 'crates', 'docker', 'hf']
 
@@ -92,6 +93,11 @@ export default function RebrandCertified() {
 
   return (
     <div className="max-w-[820px] mx-auto px-6 py-16">
+      <SEOHead
+        title="Certified — the earned top tier"
+        description="Certified is a public conjunctive gate above the trust score: every check must pass, no averaging. See exactly why a tool does or doesn't earn it, and which ones have."
+        path="/certified"
+      />
       <Reveal>
         <div className="flex items-start justify-between gap-6 flex-wrap">
           <div className="max-w-[60ch]">
