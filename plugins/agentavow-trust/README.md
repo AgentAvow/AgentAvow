@@ -1,8 +1,9 @@
 # AgentAvow Trust
 
 Check whether a tool is safe before your agent connects to it. AgentAvow scans an MCP
-server, a package, or a GitHub repo and returns a 0–100 trust score, a plain safe or
-needs-review verdict, and the findings behind it. Every result is signed (Ed25519) and
+server, a package, or a GitHub repo and returns two scores: a 0–100 trust score, with a
+plain safe or needs-review verdict and the findings behind it, and an adoption score
+built from real usage (downloads, stars, installs). Every result is signed (Ed25519) and
 can be verified offline, so you do not have to take AgentAvow's word for it.
 
 Scanning is free and needs no account.
@@ -15,8 +16,42 @@ Scanning is free and needs no account.
 | `/scan` command | `/scan npm chalk`, `/scan owner/repo`, `/scan https://mcp.example.com/mcp` | Chat, Cowork, Claude Code |
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the verdict before it goes ahead. | Chat, Cowork, Claude Code |
 | SessionStart hook | At the start of a session, grades each MCP server in your config that it has not seen before and adds one line per server to the session. | Claude Code, Cowork |
+| PreToolUse gate | Before each MCP tool call, checks the grade on file for that server. Denies a call to a server in the blocked tier; asks before a tool whose definition changed since it was graded. | Claude Code, Cowork |
 
-The hook and the skill warn. They never block: a low score adds context and you decide.
+The session-start hook and the skill warn; a low score adds context and you decide.
+The gate is the one part that can stop a call, and by default only for a server graded
+in the blocked tier (0 to 10 out of 100). A changed definition asks; it never denies.
+
+## Per-call gate
+
+`scripts/agentavow_pretool_gate.py` runs before each MCP tool call (tool names look
+like `mcp__<server>__<tool>`). It reads the grade the session-start hook stored for
+that server and:
+
+- **denies** the call when the server's grade is in the `blocked` tier. The reason
+  gives the score and the report link.
+- **asks** before a tool on a remote server whose definition no longer matches the one
+  AgentAvow graded, or that the grade never saw. The gate fetches `tools/list` from the
+  server itself, at most once per server per 15 minutes, and recomputes the per-tool
+  digest the signed attestation carries. That is done offline, with no call to
+  AgentAvow. A server whose definitions changed is re-graded at your next session
+  start.
+- **allows** everything else: a server with no grade on file, a stdio server (there is
+  no served definition to re-fetch, so only its grade applies), any network error or
+  timeout, any definition the gate cannot canonicalize.
+
+It fails open. It stops within 8 seconds, and if anything goes wrong it allows the
+call and says nothing.
+
+Settings, all optional, read from the environment and never sent anywhere:
+
+- `AGENTAVOW_GATE_DENY_BELOW` (default: deny only the `blocked` tier). A number such
+  as `51` denies any server graded below it. A tier name (`restricted`, `minimal`,
+  `standard`, `trusted`, `verified`) denies anything below that tier's floor. `off`
+  never denies; a changed definition still asks.
+- `AGENTAVOW_GATE_RECHECK_SECONDS` (default `900`). How often a remote server's
+  `tools/list` is re-fetched to check for a changed definition.
+- `AGENTAVOW_GATE=off` turns the gate off. Uninstalling the plugin removes it.
 
 ## Try it
 
@@ -32,13 +67,15 @@ Then add an MCP server and start a new session. The hook reports a line such as:
 
 ## What the hook reads and what leaves your machine
 
-The hook is one Python script, `scripts/agentavow_precheck.py`. It uses only the
-standard library and you can read all of it.
+The hooks are two Python scripts, `scripts/agentavow_precheck.py` (session start) and
+`scripts/agentavow_pretool_gate.py` (per call). Both use only the standard library and
+you can read all of them.
 
-**It reads** three files, looking only for `mcpServers` entries: `~/.claude.json`,
-`.mcp.json` in the current folder, and `.claude/settings.json` in the current folder.
-From each entry it takes the server URL, or the launcher command and package name.
-It does not use headers, environment values, tokens, or any other part of those files.
+**The session-start hook reads** three files, looking only for `mcpServers` entries:
+`~/.claude.json`, `.mcp.json` in the current folder, and `.claude/settings.json` in the
+current folder. From each entry it takes the server URL, or the launcher command and
+package name. It does not use headers, environment values, tokens, or any other part
+of those files.
 
 **It sends** one HTTPS request per new server to `https://agentavow.com/api/v1/public/scan`,
 containing either:
@@ -57,15 +94,28 @@ containing either:
 - anything else from your machine. No file contents, environment values, or credentials.
 
 **It writes** one file, `~/.cache/agentavow/scanned.json`, so each server is scanned
-once. A server AgentAvow cannot read (one that needs sign-in, for example) is reported
-once and retried after a week. Delete the file to scan everything again.
+once: per server, the score, tier and grade, the signed per-tool digests, the report
+link, and when it was graded. A server AgentAvow cannot read (one that needs sign-in,
+for example) is reported once and retried after a week. Delete the file to scan
+everything again.
+
+**The gate reads** the same three files, for the URL and any `Authorization` header
+of the one server being called, plus its own `AGENTAVOW_GATE*` settings from the
+environment. **It sends** one short `initialize` + `tools/list` exchange to that
+server, over the URL in your config (`user:password@` and `#fragment` removed), with
+the configured `Authorization` header if there is one, as Claude Code itself does when
+it connects. A header that still holds a `${...}` placeholder is not expanded and not
+sent. Nothing goes to AgentAvow, and the header is never written to the cache or
+printed. The gate writes the digests it last saw to the same cache file; the graded
+digests are never overwritten by it.
 
 The first time the hook finds nothing to scan (no remote MCP servers configured), it
 shows one line saying so and how to scan a tool on demand. That line is shown once per
 machine, is recorded in the same file, and makes no request.
 
-If the network is down or anything unexpected happens, the hook prints nothing and
-exits cleanly. It cannot stop a session from starting.
+If the network is down or anything unexpected happens, either hook prints nothing and
+exits cleanly. The session-start hook cannot stop a session from starting, and the
+gate cannot stop a call for any reason other than a blocked-tier grade on file.
 
 The MCP connector sends AgentAvow only the target you ask it to scan. Scan results for
 public tools are public.

@@ -13,6 +13,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLUGIN_DIR = ROOT / "plugins" / "agentavow-trust"
 PLUGIN_COPY = PLUGIN_DIR / "scripts" / "agentavow_precheck.py"
 MANUAL_COPY = ROOT / "integrations" / "claude-code" / "agentavow_precheck.py"
+GATE_COPY = PLUGIN_DIR / "scripts" / "agentavow_pretool_gate.py"
+GATE_MANUAL_COPY = ROOT / "integrations" / "claude-code" / "agentavow_pretool_gate.py"
 
 
 def _load(path: pathlib.Path):
@@ -52,15 +54,38 @@ def _mcp(name: str, url: str) -> dict:
     return {"name": name, "kind": "mcp", "id": url, "url": url}
 
 
+def _ok(score: int, verdict: str, blocking: int, **extra) -> dict:
+    """A scan result as _scan returns it."""
+    base = {"score": score, "verdict": verdict, "blocking": blocking, "tier": "standard",
+            "grade": "C", "tool_digests": {}, "tool_manifest_digest": None}
+    base.update(extra)
+    return base
+
+
 def test_both_copies_are_identical():
     assert PLUGIN_COPY.read_text() == MANUAL_COPY.read_text()
+    assert GATE_COPY.read_text() == GATE_MANUAL_COPY.read_text()
 
 
 def test_versions_agree():
     hook = _load(PLUGIN_COPY)
+    gate = _load(GATE_COPY)
     plugin = json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text())
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
     assert hook.__version__ == plugin["version"] == market["plugins"][0]["version"]
+    assert gate.__version__ == plugin["version"]
+
+
+def test_plugin_registers_both_hooks_with_short_timeouts():
+    hooks = json.loads((PLUGIN_DIR / "hooks" / "hooks.json").read_text())["hooks"]
+    manual = json.loads((ROOT / "integrations" / "claude-code" / "settings.hooks.json")
+                        .read_text())["hooks"]
+    for cfg in (hooks, manual):
+        gate = cfg["PreToolUse"][0]
+        assert gate["matcher"] == "mcp__.*"
+        assert gate["hooks"][0]["timeout"] <= 10
+        assert "agentavow_pretool_gate.py" in gate["hooks"][0]["command"]
+        assert "agentavow_precheck.py" in cfg["SessionStart"][0]["hooks"][0]["command"]
 
 
 def test_user_agent_names_the_install_source():
@@ -147,9 +172,10 @@ def test_stdio_package_targets(hook):
 def test_scanned_target_is_reported_once(hook, monkeypatch, capsys):
     calls = []
 
-    def scan(t):
+    def scan(t, force=False):
         calls.append(t["id"])
-        return 92, "safe", 0
+        return _ok(92, "safe", 0, tool_digests={"tool:a": "sha256:aa"},
+                   tool_manifest_digest="sha256:mm", tier="trusted", grade="A")
 
     targets = [_mcp("a", "https://mcp.example.com/mcp")]
     first = _run(hook, monkeypatch, capsys, targets, scan)
@@ -157,12 +183,61 @@ def test_scanned_target_is_reported_once(hook, monkeypatch, capsys):
     assert "92/100 — safe" in first
     assert second == ""
     assert len(calls) == 1
+    rec = json.loads(hook.CACHE.read_text())["a"]
+    assert rec["id"] == rec["url"] == "https://mcp.example.com/mcp"
+    assert rec["kind"] == "mcp" and rec["approved_at"] > 0
+    assert (rec["score"], rec["tier"], rec["grade"], rec["verdict"]) == (92, "trusted", "A", "safe")
+    assert rec["tool_digests"] == {"tool:a": "sha256:aa"}
+    assert rec["tool_manifest_digest"] == "sha256:mm"
+    assert rec["report_url"] == "https://agentavow.com/check/mcp?endpoint=https%3A%2F%2Fmcp.example.com%2Fmcp"
+
+
+def test_package_record_carries_no_live_digests(hook, monkeypatch, capsys):
+    target = hook._resolve_target("git", {"command": "uvx", "args": ["mcp-server-git"]})
+    out = _run(hook, monkeypatch, capsys, [target],
+               lambda t, force=False: _ok(70, "needs review", 1, tool_digests={"tool:x": "y"}))
+    assert "70/100" in out
+    rec = json.loads(hook.CACHE.read_text())["git"]
+    assert rec["kind"] == "package" and rec["id"] == "pypi:mcp-server-git"
+    assert rec["tool_digests"] == {} and rec["tool_manifest_digest"] is None
+    assert rec["report_url"] == "https://agentavow.com/check/pkg/pypi/mcp-server-git"
+
+
+def test_drifted_server_is_regraded_with_force_and_reported_again(hook, monkeypatch, capsys):
+    url = "https://mcp.example.com/mcp"
+    calls = []
+
+    def scan(t, force=False):
+        calls.append(force)
+        return _ok(61, "needs review", 0, tool_digests={"tool:a": "sha256:new"})
+
+    hook.CACHE.write_text(json.dumps({"a": {
+        "id": url, "kind": "mcp", "url": url, "approved_at": 1, "score": 90,
+        "tool_digests": {"tool:a": "sha256:old"},
+        "last_seen": {"at": 2, "ok": True, "tool_digests": {"tool:a": "sha256:new"}},
+    }}))
+    out = _run(hook, monkeypatch, capsys, [_mcp("a", url)], scan)
+    assert calls == [True]
+    assert "tool definitions changed since the last grade; re-graded: AgentAvow 61/100" in out
+    rec = json.loads(hook.CACHE.read_text())["a"]
+    assert rec["tool_digests"] == {"tool:a": "sha256:new"} and "last_seen" not in rec
+    assert _run(hook, monkeypatch, capsys, [_mcp("a", url)], scan) == ""
+
+
+def test_unhashable_tools_do_not_count_as_drift(hook):
+    rec = {"id": "x", "approved_at": 1, "tool_digests": {"tool:a": "1", "tool:b": "2"},
+           "last_seen": {"tool_digests": {"tool:a": "1"}, "unhashable": ["tool:b"]}}
+    assert hook._drifted(rec) is False
+    rec["last_seen"]["tool_digests"]["tool:a"] = "9"
+    assert hook._drifted(rec) is True
+    assert hook._drifted({"id": "x", "approved_at": 1, "tool_digests": {"tool:a": "1"},
+                          "last_seen": {"ok": False, "tool_digests": {}}}) is False
 
 
 def test_unscannable_target_is_cached_not_retried_every_session(hook, monkeypatch, capsys):
     calls = []
 
-    def scan(t):
+    def scan(t, force=False):
         calls.append(t["id"])
         raise hook._UnscannableError("422")
 
@@ -177,14 +252,15 @@ def test_unscannable_target_is_cached_not_retried_every_session(hook, monkeypatc
 def test_unscannable_target_is_retried_after_the_retry_window(hook, monkeypatch, capsys):
     url = "https://mcp.figma.com/mcp"
     hook.CACHE.write_text(json.dumps({"figma": {"id": url, "retry_after": 1}}))
-    out = _run(hook, monkeypatch, capsys, [_mcp("figma", url)], lambda t: (88, "safe", 0))
+    out = _run(hook, monkeypatch, capsys, [_mcp("figma", url)],
+               lambda t, force=False: _ok(88, "safe", 0))
     assert "88/100 — safe" in out
 
 
 def test_transient_failure_is_not_cached(hook, monkeypatch, capsys):
     calls = []
 
-    def scan(t):
+    def scan(t, force=False):
         calls.append(t["id"])
         raise TimeoutError
 
@@ -197,9 +273,9 @@ def test_transient_failure_is_not_cached(hook, monkeypatch, capsys):
 def test_same_coordinate_under_two_names_scans_once(hook, monkeypatch, capsys):
     calls = []
 
-    def scan(t):
+    def scan(t, force=False):
         calls.append(t["id"])
-        return 70, "needs review", 1
+        return _ok(70, "needs review", 1)
 
     url = "https://mcp.example.com/mcp"
     out = _run(hook, monkeypatch, capsys, [_mcp("a", url), _mcp("b", url)], scan)
@@ -211,7 +287,8 @@ def test_run_stops_scanning_when_the_time_budget_is_spent(hook, monkeypatch, cap
     monkeypatch.setattr(hook, "BUDGET", -1)
     calls = []
     targets = [_mcp("a", "https://mcp.example.com/mcp")]
-    assert _run(hook, monkeypatch, capsys, targets, lambda t: calls.append(t) or (90, "safe", 0)) == ""
+    assert _run(hook, monkeypatch, capsys, targets,
+                lambda t, force=False: calls.append(t) or _ok(90, "safe", 0)) == ""
     assert calls == []
 
 
@@ -229,18 +306,39 @@ def test_only_a_definite_refusal_counts_as_unscannable(hook, monkeypatch, code, 
     assert (exc.type is hook._UnscannableError) == unscannable
 
 
-def test_cache_written_by_the_previous_version_still_counts(hook, monkeypatch, capsys):
+def test_bare_id_from_a_pre_gate_version_is_graded_once_more(hook, monkeypatch, capsys):
+    """Before 0.1.5 a graded server was cached as its id string, with no verdict for
+    the gate to act on. It is graded once more, then cached as a record."""
     url = "https://mcp.example.com/mcp"
     hook.CACHE.write_text(json.dumps({"a": url}))
     calls = []
-    assert _run(hook, monkeypatch, capsys, [_mcp("a", url)], lambda t: calls.append(t)) == ""
-    assert calls == []
+
+    def scan(t, force=False):
+        calls.append(force)
+        return _ok(92, "safe", 0)
+
+    assert "92/100" in _run(hook, monkeypatch, capsys, [_mcp("a", url)], scan)
+    assert _run(hook, monkeypatch, capsys, [_mcp("a", url)], scan) == ""
+    assert calls == [False]
+
+
+def test_withheld_string_entry_from_the_previous_version_still_counts(hook, monkeypatch, capsys):
+    target = hook._resolve_target(
+        "zap", {"url": "https://mcp.example.com/s/QmFzZTY0VG9rZW5Mb29raW5nU2VnbWVudEZvclRlc3Rz/mcp"})
+    hook.CACHE.write_text(json.dumps({"zap": target["id"]}))
+    assert _run(hook, monkeypatch, capsys, [target], lambda t, force=False: None) == ""
+
+
+def test_cache_is_written_atomically(hook, monkeypatch, capsys):
+    _run(hook, monkeypatch, capsys, [_mcp("a", "https://mcp.example.com/mcp")],
+         lambda t, force=False: _ok(92, "safe", 0))
+    assert [p.name for p in hook.CACHE.parent.iterdir()] == ["scanned.json"]
 
 
 def test_nothing_to_scan_shows_the_intro_once_and_makes_no_request(hook, monkeypatch, capsys):
     calls = []
-    first = _run_raw(hook, monkeypatch, capsys, [], lambda t: calls.append(t))
-    second = _run_raw(hook, monkeypatch, capsys, [], lambda t: calls.append(t))
+    first = _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: calls.append(t))
+    second = _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: calls.append(t))
     assert "no remote MCP servers to scan yet" in first["systemMessage"]
     assert "/agentavow-trust:scan" in first["systemMessage"]  # the plugin copy names the command
     assert "hookSpecificOutput" not in first  # user-facing only; nothing enters Claude's context
@@ -258,7 +356,8 @@ def test_manual_copy_intro_points_at_the_site_not_the_plugin_command(tmp_path, m
 
 def test_intro_is_not_shown_when_there_are_targets(hook, monkeypatch, capsys):
     out = _run_raw(hook, monkeypatch, capsys,
-                   [_mcp("a", "https://mcp.example.com/mcp")], lambda t: (92, "safe", 0))
+                   [_mcp("a", "https://mcp.example.com/mcp")],
+                   lambda t, force=False: _ok(92, "safe", 0))
     assert "systemMessage" not in out
     assert "92/100" in out["hookSpecificOutput"]["additionalContext"]
 
@@ -268,8 +367,8 @@ def test_intro_is_skipped_rather_than_repeated_when_the_cache_is_unwritable(
     blocker = tmp_path / "file"
     blocker.write_text("x")
     monkeypatch.setattr(hook, "CACHE", blocker / "scanned.json")  # parent is a file
-    assert _run_raw(hook, monkeypatch, capsys, [], lambda t: None) == {}
-    assert _run_raw(hook, monkeypatch, capsys, [], lambda t: None) == {}
+    assert _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: None) == {}
+    assert _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: None) == {}
 
 
 def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_path):
