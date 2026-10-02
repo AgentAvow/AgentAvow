@@ -279,7 +279,7 @@
         "mcp",
         "scanner"
       ],
-      "updatedAt": "2026-10-01T22:32:19Z",
+      "updatedAt": "2026-10-02T00:17:09Z",
       "publisher": {
         "identifier": "did:web:agentavow.com",
         "displayName": "AgentAvow",
@@ -308,7 +308,7 @@
           "com.agentavow.toolManifest": {
             "profile": "agentavow.mcp-tool-definition.v1",
             "endpoint": "https://agentavow.com/mcp",
-            "observedAt": "2026-10-01T22:32:19Z",
+            "observedAt": "2026-10-02T00:17:09Z",
             "toolDigests": {
               "tool:scan_repo": "sha256:85646a96b2767545c7d4701834f9172b23e1fdc7a00de074ffa814e925f21f7b",
               "tool:scan_package": "sha256:222e45db5d17bb40f3bf3c2bb2e33a9b897b9f356330d5c3b724c0750ab6b5fb",
@@ -328,16 +328,16 @@
           "type": "application/mcp-server-card+json",
           "digest": "sha256:6f90b0c077df797b563d189c38b9a981f5d2dcf4f9f64c17e3a256700e433ee7"
         },
-        "issuedAt": "2026-10-01T22:32:19Z",
-        "expiresAt": "2026-10-31T22:32:19Z",
-        "signature": "UNSIGNED-DRAFT: run `scripts/ai_catalog_wellknown.py sign --prod` on the signing host to replace this with the detached JWS",
+        "issuedAt": "2026-10-02T00:17:09Z",
+        "expiresAt": "2026-11-01T00:17:09Z",
+        "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImRpZDp3ZWI6YWdlbnRhdm93LmNvbSNjYXRhbG9nLWVzMjU2LXYxIn0..ln06HZvnYea5KkBthB2Zd0ZWY93n9ZZepApg25RnS6ewPGk8koydj4QNqHuSdTYJombmnj-ptHy4wINzAp4D7g",
         "attestations": [
           {
             "type": "com.agentavow.scan-attestation",
-            "uri": "data:application/jose,eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTAyVDIyOjI5OjAxLjk5NDc1NyswMDowMCIsImlzc3VlZEF0IjoiMjAyNi0xMC0wMVQyMjoyOTowMS45OTQ3NTcrMDA6MDAiLCJpc3N1ZXIiOnsiaWQiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJuYW1lIjoiQWdlbnRBdm93IiwidXJsIjoiaHR0cHM6Ly9hZ2VudGdyYXBoLmNvIn0sInJlY29tbWVuZGVkTGltaXRzIjp7Im1heF90b2tlbnNfcGVyX2NhbGwiOjgxOTIsInJlcXVlc3RzX3Blcl9taW51dGUiOjYwLCJyZXF1aXJlX3VzZXJfY29uZmlybWF0aW9uIjpmYWxzZX0sInNjYW4iOnsiY2F0ZWdvcnlTY29yZXMiOnsiY29kZV9zYWZldHkiOjEwMCwiZGF0YV9oYW5kbGluZyI6MTAwLCJkZXBlbmRlbmN5X2hlYWx0aCI6MTAwLCJmaWxlc3lzdGVtX2FjY2VzcyI6MTAwLCJzZWNyZXRfaHlnaWVuZSI6MTAwfSwiY292ZXJhZ2UiOnsiZGJfc25hcHNob3RzIjp7fSwibGl2ZV9vYnNlcnZlZCI6dHJ1ZSwicG9pbnRfaW5fdGltZSI6IjIwMjYtMTAtMDFUMjI6Mjk6MDEuOTkyNjYzWiIsInByb3ZlbmFuY2VfYmluZGluZyI6Im4vYSIsInNjYW5fZGVwdGgiOiJhcnRpZmFjdCtsaXZlIiwic3VyZmFjZSI6Im1jcCJ9LCJmaWxlc1NjYW5uZWQiOjgsImZpbGVzVG90YWwiOjgsImZpbmRpbmdzIjp7ImNhdGVnb3JpZXMiOnt9LCJjcml0aWNhbCI6MCwiY3JpdGljYWxfYWxsIjowLCJoaWdoIjowLCJoaWdoX2FsbCI6MCwiaXRlbXMiOltdLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjowfSwicG9zaXRpdmVTaWduYWxzIjpbIjggdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0IjoiY2xlYW4iLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDphYm91dF9hZ2VudGF2b3ciOiJzaGEyNTY6NTIyYzA5NjEzOWFhODU5ZDRkNTAzMmI4ZjI0ODQ4MjQ4ZTA0MGQ2MGI1YjkzYTQ1ODY1ZThhNmFlODYyZDRlZCIsInRvb2w6Y2hlY2tfaW50ZXJhY3Rpb25fc2FmZXR5Ijoic2hhMjU2OjY2YTkwZjU1MTRkMTkyYWRlMmVhNTM0ZWNkMGM0YTYzMWJjNDEwN2FmY2QyZTkxMGQ0NTg4YmM2ZTMzNzJhMzYiLCJ0b29sOmdldF90cnVzdF9iYWRnZSI6InNoYTI1NjoyZGIwYmQ2OTE5ZDZlYTM3YmVmYjMyMTkwNDYzMzYxNjIyNTgxNDQ1MWNkZWM5ZGExZDdlYzQxYTM2ODYzODZjIiwidG9vbDpsb29rdXBfaWRlbnRpdHkiOiJzaGEyNTY6NmE1ODA1N2ZkZTYyMzFkYWE1YmI3NzRhMjMwZGQyZjE4ZWU0Njg5ODBjZmUyNTM3ZGQyMTE5MzFhNjU2MDQ0NSIsInRvb2w6c2Nhbl9tY3Bfc2VydmVyIjoic2hhMjU2OjYxOTBhYTQzMTY2MDFlMmJjODA1ODk2OGJkZmY1ZGI3ODM4OWY4YTI4ODYxMjIzNmJmYmRiZDE4M2Y1MzllOTMiLCJ0b29sOnNjYW5fcGFja2FnZSI6InNoYTI1NjoyMjJlNDVkYjVkMTdiYjQwZjNiZjNjMmJiMmUzM2E5Yjg5N2I5ZjM1NjMzMGQ1YzNiNzI0YzA3NTBhYjZiNWZiIiwidG9vbDpzY2FuX3JlcG8iOiJzaGEyNTY6ODU2NDZhOTZiMjc2NzU0NWM3ZDQ3MDE4MzRmOTE3MmIyM2UxZmRjN2EwMGRlMDc0ZmZhODE0ZTkyNWYyMWY3YiIsInRvb2w6dmVyaWZ5X3RydXN0Ijoic2hhMjU2OjAxYjlmNWE0NzgzOTEwNTg3YjJlODE5ODE4NjdjYTlkNjZkNmFiMWE2YjczODQ4N2U3YTkxOTJhNzg1YTU5MWYifSwidG9vbE1hbmlmZXN0RGlnZXN0Ijoic2hhMjU2Ojg4ZWYzOTJkZDkyNmM2Njg3ZWYzOGNhYmE5MDIyMWE5MjFkZGM1OTQ4ZDI5ZTg1MGFkZGIzY2RiZTUxNWJiZjciLCJ0cnVzdFNjb3JlIjo4NywidHJ1c3RUaWVyIjoidHJ1c3RlZCJ9LCJzY2FubmVkQXQiOiIyMDI2LTEwLTAxVDIyOjI5OjAxLjk5Mjg1MiswMDowMCIsInN1YmplY3QiOnsiaWQiOiJtY3A6aHR0cHM6Ly9hZ2VudGF2b3cuY29tL21jcCIsInJlcG8iOiJtY3A6aHR0cHM6Ly9hZ2VudGF2b3cuY29tL21jcCJ9LCJ0eXBlIjoiU2VjdXJpdHlQb3N0dXJlQXR0ZXN0YXRpb24ifQ.8jn9t96jgWeIkyqff5mBvIQW7q9MmpWexyJp1Yqpk0mX-t3Sn37vxYcrE5bDU1dKBN6K3x5B40Q3VYs7f4MCAg",
-            "digest": "sha256:080cd2ac5b904441da583c6db0a65fbb4ca8ae179b68da1602a54d779b05de1f",
+            "uri": "data:application/jose,eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTAzVDAwOjE3OjA5LjM4ODYxOSswMDowMCIsImlzc3VlZEF0IjoiMjAyNi0xMC0wMlQwMDoxNzowOS4zODg2MTkrMDA6MDAiLCJpc3N1ZXIiOnsiaWQiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJuYW1lIjoiQWdlbnRBdm93IiwidXJsIjoiaHR0cHM6Ly9hZ2VudGdyYXBoLmNvIn0sInJlY29tbWVuZGVkTGltaXRzIjp7Im1heF90b2tlbnNfcGVyX2NhbGwiOjgxOTIsInJlcXVlc3RzX3Blcl9taW51dGUiOjYwLCJyZXF1aXJlX3VzZXJfY29uZmlybWF0aW9uIjpmYWxzZX0sInNjYW4iOnsiY2F0ZWdvcnlTY29yZXMiOnsiY29kZV9zYWZldHkiOjEwMCwiZGF0YV9oYW5kbGluZyI6MTAwLCJkZXBlbmRlbmN5X2hlYWx0aCI6MTAwLCJmaWxlc3lzdGVtX2FjY2VzcyI6MTAwLCJzZWNyZXRfaHlnaWVuZSI6MTAwfSwiY292ZXJhZ2UiOnsiZGJfc25hcHNob3RzIjp7fSwibGl2ZV9vYnNlcnZlZCI6dHJ1ZSwicG9pbnRfaW5fdGltZSI6IjIwMjYtMTAtMDJUMDA6MTY6NDMuODMxNjcwWiIsInByb3ZlbmFuY2VfYmluZGluZyI6Im4vYSIsInNjYW5fZGVwdGgiOiJhcnRpZmFjdCtsaXZlIiwic3VyZmFjZSI6Im1jcCJ9LCJmaWxlc1NjYW5uZWQiOjgsImZpbGVzVG90YWwiOjgsImZpbmRpbmdzIjp7ImNhdGVnb3JpZXMiOnt9LCJjcml0aWNhbCI6MCwiY3JpdGljYWxfYWxsIjowLCJoaWdoIjowLCJoaWdoX2FsbCI6MCwiaXRlbXMiOltdLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjowfSwicG9zaXRpdmVTaWduYWxzIjpbIjggdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0IjoiY2xlYW4iLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDphYm91dF9hZ2VudGF2b3ciOiJzaGEyNTY6NTIyYzA5NjEzOWFhODU5ZDRkNTAzMmI4ZjI0ODQ4MjQ4ZTA0MGQ2MGI1YjkzYTQ1ODY1ZThhNmFlODYyZDRlZCIsInRvb2w6Y2hlY2tfaW50ZXJhY3Rpb25fc2FmZXR5Ijoic2hhMjU2OjY2YTkwZjU1MTRkMTkyYWRlMmVhNTM0ZWNkMGM0YTYzMWJjNDEwN2FmY2QyZTkxMGQ0NTg4YmM2ZTMzNzJhMzYiLCJ0b29sOmdldF90cnVzdF9iYWRnZSI6InNoYTI1NjoyZGIwYmQ2OTE5ZDZlYTM3YmVmYjMyMTkwNDYzMzYxNjIyNTgxNDQ1MWNkZWM5ZGExZDdlYzQxYTM2ODYzODZjIiwidG9vbDpsb29rdXBfaWRlbnRpdHkiOiJzaGEyNTY6NmE1ODA1N2ZkZTYyMzFkYWE1YmI3NzRhMjMwZGQyZjE4ZWU0Njg5ODBjZmUyNTM3ZGQyMTE5MzFhNjU2MDQ0NSIsInRvb2w6c2Nhbl9tY3Bfc2VydmVyIjoic2hhMjU2OjYxOTBhYTQzMTY2MDFlMmJjODA1ODk2OGJkZmY1ZGI3ODM4OWY4YTI4ODYxMjIzNmJmYmRiZDE4M2Y1MzllOTMiLCJ0b29sOnNjYW5fcGFja2FnZSI6InNoYTI1NjoyMjJlNDVkYjVkMTdiYjQwZjNiZjNjMmJiMmUzM2E5Yjg5N2I5ZjM1NjMzMGQ1YzNiNzI0YzA3NTBhYjZiNWZiIiwidG9vbDpzY2FuX3JlcG8iOiJzaGEyNTY6ODU2NDZhOTZiMjc2NzU0NWM3ZDQ3MDE4MzRmOTE3MmIyM2UxZmRjN2EwMGRlMDc0ZmZhODE0ZTkyNWYyMWY3YiIsInRvb2w6dmVyaWZ5X3RydXN0Ijoic2hhMjU2OjAxYjlmNWE0NzgzOTEwNTg3YjJlODE5ODE4NjdjYTlkNjZkNmFiMWE2YjczODQ4N2U3YTkxOTJhNzg1YTU5MWYifSwidG9vbE1hbmlmZXN0RGlnZXN0Ijoic2hhMjU2Ojg4ZWYzOTJkZDkyNmM2Njg3ZWYzOGNhYmE5MDIyMWE5MjFkZGM1OTQ4ZDI5ZTg1MGFkZGIzY2RiZTUxNWJiZjciLCJ0cnVzdFNjb3JlIjo4NywidHJ1c3RUaWVyIjoidHJ1c3RlZCJ9LCJzY2FubmVkQXQiOiIyMDI2LTEwLTAyVDAwOjE2OjQzLjgzMTkxMyswMDowMCIsInN1YmplY3QiOnsiaWQiOiJtY3A6aHR0cHM6Ly9hZ2VudGF2b3cuY29tL21jcCIsInJlcG8iOiJtY3A6aHR0cHM6Ly9hZ2VudGF2b3cuY29tL21jcCJ9LCJ0eXBlIjoiU2VjdXJpdHlQb3N0dXJlQXR0ZXN0YXRpb24ifQ.o60G407GhGFlaOOZ4Ci1sk2u7fIE-fUxlT-cnw5Moxxm2GTkCCzwa621G_rHR6dS1IXrcbB8Ix-G8pJ8UV_HAQ",
+            "digest": "sha256:1165c4d96fe162169d526127e3b355dd8cc9cda3426e5c1b04fee53ac9406c90",
             "size": 2872,
-            "description": "AgentAvow scan verdict for mcp:https://agentavow.com/mcp: grade A, score 87/100, tier trusted. Compact JWS (EdDSA, kid agentgraph-security-v1); verify against https://agentgraph.co/.well-known/jwks.json. Issued 2026-10-01T22:29:01.994757+00:00, expires 2026-10-02T22:29:01.994757+00:00. Live re-check: https://agentavow.com/api/v1/public/scan/mcp?endpoint=https://agentavow.com/mcp"
+            "description": "AgentAvow scan verdict for mcp:https://agentavow.com/mcp: grade A, score 87/100, tier trusted. Compact JWS (EdDSA, kid agentgraph-security-v1); verify against https://agentgraph.co/.well-known/jwks.json. Issued 2026-10-02T00:17:09.388619+00:00, expires 2026-10-03T00:17:09.388619+00:00. Live re-check: https://agentavow.com/api/v1/public/scan/mcp?endpoint=https://agentavow.com/mcp"
           }
         ]
       }
@@ -345,14 +345,15 @@
   ],
   "extensions": {
     "com.agentavow.catalogBuild": {
-      "status": "draft-unsigned",
+      "status": "signed",
       "generator": "scripts/ai_catalog_wellknown.py",
       "specTarget": "Agent-Card/ai-catalog main @ 2026-10-01 (post #108/#109/#110)",
       "signatureAlg": "ES256 (P-256) per the did:web Publisher Profile",
       "signerDid": "did:web:agentavow.com",
       "signerKid": "did:web:agentavow.com#catalog-es256-v1",
       "didDocument": "https://agentavow.com/.well-known/did.json",
-      "jwks": "https://agentgraph.co/.well-known/jwks.json"
+      "jwks": "https://agentgraph.co/.well-known/jwks.json",
+      "signedAt": "2026-10-02T00:17:12Z"
     }
   }
 }

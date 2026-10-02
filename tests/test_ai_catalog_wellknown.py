@@ -145,13 +145,17 @@ def test_unsigned_draft_verifies_structurally(catalog):
     assert r.ok, r.render()
 
 
-def test_committed_catalog_is_an_unsigned_draft_that_validates():
+def test_committed_catalog_is_signed_and_verifies_against_the_pinned_did_document():
+    """The committed file is the production-signed catalog (ES256 under
+    did:web:agentavow.com#catalog-es256-v1). It must verify strictly against a
+    pinned copy of the live DID document, with no network and no EdDSA fallback."""
     cat = json.loads(COMMITTED.read_text())
-    r = ac.verify_catalog(cat, unsigned_ok=True)
+    did_doc = json.loads((ROOT / "tests" / "fixtures" / "did_web_agentavow_com.json").read_text())
+    r = ac.verify_catalog(cat, did_doc=did_doc)
     assert r.ok, r.render()
     build = cat["extensions"][ac.BUILD_EXT_KEY]
-    assert build["status"] == "draft-unsigned"
-    assert cat["entries"][0]["trustManifest"]["signature"] == ac.SIGNATURE_PLACEHOLDER
+    assert build["status"] == "signed"
+    assert cat["entries"][0]["trustManifest"]["signature"] != ac.SIGNATURE_PLACEHOLDER
     # Identity + signer are the rebrand DID with the ES256 catalog key.
     assert cat["host"]["identifier"] == IDENTITY
     assert cat["entries"][0]["trustManifest"]["identity"] == IDENTITY
