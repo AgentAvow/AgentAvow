@@ -374,7 +374,7 @@ def _scan_block(
                "what to weigh.")
         glyph = "⚠ REVIEW"
     elif mode == "vulnerable":
-        _fix = next((a.get("fixed_in") for a in _advs if a.get("fixed_in")), None)
+        _fix = _highest_fix(_advs)
         n = len(_advs)
         head = (f"⚠️ {n} known vulnerabilit{'y' if n == 1 else 'ies'} in this version"
                 + (f" — upgrade to {_fix} or later" if _fix else ""))
@@ -478,7 +478,7 @@ def _scan_block(
     if mode == "safe":
         action = f"clears the bar, so it's safe to {verb}."
     elif mode == "vulnerable":
-        _fix = next((a.get("fixed_in") for a in _advs if a.get("fixed_in")), None)
+        _fix = _highest_fix(_advs)
         action = (f"upgrade to {_fix} or later before you {verb}; the advisories list the "
                   "fixed releases." if _fix else
                   "no fixed release is listed — avoid this version or isolate it.")
@@ -874,6 +874,20 @@ def _incident_summary(ih: dict) -> dict | None:
             "published": latest.get("published"),
         },
     }
+
+
+def _version_key(v: str) -> tuple:
+    parts = []
+    for p in str(v).lstrip("v").split("."):
+        num = "".join(ch for ch in p if ch.isdigit())
+        parts.append((int(num) if num else 0, p))
+    return tuple(parts)
+
+
+def _highest_fix(advisories: list[dict]) -> str | None:
+    """The release that fixes ALL the listed advisories = the highest fixed_in."""
+    fixes = [str(a.get("fixed_in")) for a in advisories if a.get("fixed_in")]
+    return max(fixes, key=_version_key) if fixes else None
 
 
 def _split_pinned_version(surface: str, spec: str) -> tuple[str, str | None]:

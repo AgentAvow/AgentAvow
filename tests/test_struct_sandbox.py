@@ -70,7 +70,8 @@ def test_pending_and_deprecated_and_advisories_in_structured_content():
                           {"id": "GHSA-2", "severity": "low", "affects_scanned_version": False}]}
     s = _scan_struct(dep, "x", "npm", "/r", "/a", None)
     assert s["deprecated"] == "Package no longer supported." and s["install"] is None
-    assert s["verdict_reason"] == "deprecated"
+    assert s["verdict_reason"] == "known_vulnerability"  # outranks deprecated
+    assert verdict_reason(dict(dep, advisories=[])) == "deprecated"
     assert [a["id"] for a in s["advisories_affecting_version"]] == ["GHSA-1"]
     assert s["sandbox"] is None
 
@@ -138,3 +139,13 @@ def test_a_version_with_published_advisories_is_headlined_vulnerable():
     assert "known vulnerability in this version" in first and "upgrade to 2026.1.14" in first
     assert "Clean" not in first and "pip install x" not in out
     assert verdict_reason(data) == "known_vulnerability"
+
+
+
+def test_upgrade_advice_names_the_release_that_fixes_everything():
+    from src.bridges.mcp_streamable import _highest_fix
+    advs = [{"fixed_in": "2025.9.25"}, {"fixed_in": "2025.12.18"}, {"fixed_in": "2026.1.14"},
+            {"fixed_in": None}]
+    assert _highest_fix(advs) == "2026.1.14"
+    assert _highest_fix([{"fixed_in": "1.10.0"}, {"fixed_in": "1.9.3"}]) == "1.10.0"
+    assert _highest_fix([{}]) is None
