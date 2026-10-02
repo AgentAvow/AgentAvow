@@ -136,10 +136,13 @@ to its signed digest. The pinned attestation was fetched once on 2026-10-01 from
 the `tools/list` was fetched from the server in the same minute. A fresh fetch yields a
 fresh attestation, so the file is the fixture, not the URL.
 
-## Independent implementations
+## Separate implementations
 
 Each entry says who wrote the implementation, what it ran against, and what it reported.
-The labels follow the authors' own.
+The labels follow the authors' own. In the Agent Authority Conformance lab's terms, a run
+counts as independent only when the runner authored neither the vectors nor the reader.
+Every run below was made by the reader's own author, so each is a separate implementation,
+not an independent record. A run of either reader by someone who wrote neither would be.
 
 - **Probity reader** (`probityai/agent-evidence-vectors`, Apache-2.0), owned by Probity:
   [`interop/agentavow-signed-map-v1/` at `d759fb4`](https://github.com/probityai/agent-evidence-vectors/tree/d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1),
@@ -148,18 +151,26 @@ The labels follow the authors' own.
   A separate reader in Python (name encoding, JWS and canonical-bytes checks, the six
   axes, the served-definition digest) that reads the vector file at `36426cf` unchanged.
   It matches all thirteen name-to-key pairs, the three served-definition digests, the
-  payload digest and the six case verdicts. Independent: written by a party other than
-  us and other than a consumer we handed a fixture to. It selects the signing key on its
-  own side (`selection.json`) rather than taking it from the packet, and adds an
-  `issuer_binds` axis of its own.
+  payload digest and the six case verdicts. A separate implementation, run by its author:
+  written by a party other than us and other than a consumer we handed a fixture to. It
+  selects the signing key on its own side (`selection.json`) rather than taking it from
+  the packet, and adds an `issuer_binds` axis of its own.
 - **APS-side consumer** (`agent-passport-system` 7.2.0 primitives), owned by APS:
   [`examples/interop/agentavow/` at `fd47f34`](https://github.com/aeoess/agent-passport-system/tree/fd47f34cc36fce060d092fe1216aff3f89fb8d88/examples/interop/agentavow),
   listed under Consumers in the [v0 README](../tool-manifest-digest-vectors-v0/README.md).
   By its author's label, a second implementation run by the consuming project: a
   reproduction, not an independent verification record. Its v0 run is what recorded the
   two boundaries that v1 closes; a v1 run will be listed here when it is reported.
-- **heldfast** (rufat325) has offered a second digest implementation under this profile.
-  It will be listed here when its run agrees with the vector file.
+- **heldfast** (`rufat325/heldfast`, Apache-2.0), owned by heldfast:
+  [docs/TRANSPARENCY.md, "Comparing with another record"](https://github.com/rufat325/heldfast/blob/main/docs/TRANSPARENCY.md#comparing-with-another-record),
+  reported on [stacklok/toolhive#6734](https://github.com/stacklok/toolhive/issues/6734).
+  heldfast reproduces the published per-tool digests and the key encoding for the pinned
+  fixture (3 of 3 digests, 13 of 13 key pairs, as of 2 October 2026), from its own
+  implementation of the rules, with none of our files copied. It makes no claim about
+  AgentAvow's grades, and asked to be described exactly that narrowly. Its native record
+  keeps a different preimage (snake_case keys, defaults for missing fields, no profile
+  label) and does not store this profile's digest per entry; it is recomputed from the
+  definitions it already holds.
 
 ### The CI check
 
