@@ -39,13 +39,14 @@ remediation. In the [MCP connector](./mcp-connector.md), pin the same way inside
 ## The score
 
 Every scan returns a single **0–100 trust score**. The score is the headline; the subscores tell you *why*.
-It maps to a **tier** (higher is safer):
+It maps to one of **six tiers** — the `trust_tier` field in the response (higher is safer):
 
-- **80–100 · Trusted** — no high or critical findings, clean dependencies.
-- **60–79 · Standard** — minor issues; safe for most uses.
-- **40–59 · Caution** — real findings worth reviewing before you connect.
-- **20–39 · Restricted** — high-severity issues present; human-in-the-loop.
-- **0–19 · Blocked** — critical issues; do not connect.
+- **96–100 · Verified** (`verified`) — nothing to fix; clean findings and dependencies.
+- **81–95 · Trusted** (`trusted`) — no high or critical findings, clean dependencies.
+- **51–80 · Standard** (`standard`) — minor issues; safe for most uses.
+- **31–50 · Minimal** (`minimal`) — real findings worth reviewing before you connect.
+- **11–30 · Restricted** (`restricted`) — high-severity issues present; human-in-the-loop.
+- **0–10 · Blocked** (`blocked`) — critical issues; do not connect.
 
 **Certified** is not a score band. It is a separate set of checks the response reports under
 `certified.checks` — the published artifact was scanned, build provenance is verified, no drift, no
@@ -69,12 +70,14 @@ one of these five axes.
 
 ## Score → recommended posture
 
-Each tier maps to a **recommended execution posture**, so a gateway or framework can act on it automatically:
+Each tier maps to a **recommended execution posture** — returned as `recommended_limits` (requests per
+minute, max tokens per call, whether to confirm first) — so a gateway or framework can act on it automatically:
 
-- **Trusted** — connect normally, standard budget.
-- **Standard** — standard rate + token limits.
-- **Caution** — confirm before sensitive tool calls.
-- **Restricted** — human-in-the-loop; no autonomous execution.
+- **Verified** — connect normally; no limits.
+- **Trusted** — auto-approve within budget: 60 requests/min, 8192 tokens/call, no confirmation.
+- **Standard** — standard rate + token limits: 30 requests/min, 4096 tokens/call, no confirmation.
+- **Minimal** — confirm before sensitive tool calls: 15 requests/min, 2048 tokens/call.
+- **Restricted** — human-in-the-loop; no autonomous execution: 5 requests/min, 1024 tokens/call, confirm every call.
 - **Blocked** — execution denied.
 
 ## Findings

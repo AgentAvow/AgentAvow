@@ -4,13 +4,14 @@ A score you don't act on is trivia. AgentAvow is built so a **machine** can read
 
 ## What the score tells a machine to do
 
-Each verdict carries a **trust tier** and a **recommended execution posture** — not just a number:
+Each verdict carries a **trust tier** (`trust_tier`) and a **recommended execution posture** (`recommended_limits`) — not just a number:
 
-- **80–100 · Trusted** — connect normally.
-- **60–79 · Standard** — standard rate + token limits.
-- **40–59 · Caution** — rate-limit, cap the token budget, prompt before high-impact tool calls.
-- **20–39 · Restricted** — human-in-the-loop; no autonomous execution.
-- **0–19 · Blocked** — do not connect.
+- **96–100 · Verified** (`verified`) — connect normally; no limits.
+- **81–95 · Trusted** (`trusted`) — auto-approve within budget: 60 requests/min, 8192 tokens/call, no confirmation.
+- **51–80 · Standard** (`standard`) — standard rate + token limits: 30 requests/min, 4096 tokens/call, no confirmation.
+- **31–50 · Minimal** (`minimal`) — rate-limit and cap the token budget (15 requests/min, 2048 tokens/call); prompt before high-impact tool calls.
+- **11–30 · Restricted** (`restricted`) — human-in-the-loop; no autonomous execution (5 requests/min, 1024 tokens/call, confirm every call).
+- **0–10 · Blocked** (`blocked`) — do not connect.
 - **known-malicious (MAL) dependency** — do not connect; disqualifying, regardless of the score.
 
 **Blocked** and **MAL** are a hard stop. Everything above is a **dial**, not a gate — degrade capability instead of failing closed, so an unproven-but-fine tool still runs, just carefully.
@@ -28,7 +29,7 @@ Fail a pull request when a repo's trust score drops below a threshold, and post 
     fail_on_behavioral: false  # optional: also fail on a high/critical sandbox finding
 ```
 
-The action scans on AgentAvow's free API and fails the job when the score is below your `min_score` — so a supply-chain regression blocks the merge instead of shipping. Set `min_score` to the level you want to hold (e.g. **80** for Trusted, **60** for Standard).
+The action scans on AgentAvow's free API and fails the job when the score is below your `min_score` — so a supply-chain regression blocks the merge instead of shipping. Set `min_score` to the tier floor you want to hold (e.g. **81** for Trusted, **51** for Standard).
 
 ## Gate your agent at runtime (SDK + bridges)
 
@@ -38,7 +39,7 @@ Check a tool's score **before** your agent connects it. The client SDKs — `age
 import { TrustClient } from 'agentavow-trust'
 const client = new TrustClient('https://agentavow.com')
 const { trust_score, trust_tier } = await client.checkRepo('owner', 'repo')
-if (trust_score < 40) throw new Error(`blocked: ${trust_score}/100 (${trust_tier})`)
+if (trust_score < 31) throw new Error(`blocked: ${trust_score}/100 (${trust_tier})`)  // below the Minimal floor
 // else apply the recommended posture (rate limit / token cap / confirmation)
 ```
 

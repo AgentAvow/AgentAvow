@@ -96,13 +96,18 @@ critical findings score 100.)
 
 The clamped score maps to a tier and a recommended execution posture a gateway MAY apply:
 
-| Score | Tier | Colour | Posture |
-|---|---|---|---|
-| 80–100 | Trusted | green | Auto-approve within budget |
-| 60–79 | Standard | green | Standard rate + token limits |
-| 40–59 | Caution | amber | Confirm on sensitive calls |
-| 20–39 | Restricted | orange | Gated · manual approval |
-| 0–19 | Blocked | red | Do not connect |
+| Score | Tier (`trust_tier`) | Colour | Posture | Requests/min | Tokens/call | Confirmation |
+|---|---|---|---|---|---|---|
+| 96–100 | Verified (`verified`) | deep green | Connect normally · no limits | unlimited | unlimited | no |
+| 81–95 | Trusted (`trusted`) | green | Auto-approve within budget | 60 | 8192 | no |
+| 51–80 | Standard (`standard`) | light green | Standard rate + token limits | 30 | 4096 | no |
+| 31–50 | Minimal (`minimal`) | amber | Confirm on sensitive calls | 15 | 2048 | yes |
+| 11–30 | Restricted (`restricted`) | orange | Gated · manual approval | 5 | 1024 | yes |
+| 0–10 | Blocked (`blocked`) | red | Do not connect | 0 | 0 | yes |
+
+These are the six tiers the API has always emitted in `trust_tier` / `recommended_limits`
+(`src/trust_tiers.py`); earlier revisions of this table listed a five-word display
+scheme at different floors, which no surface shows any more.
 
 Adoption is a **separate** axis (teal→magenta, never a safety colour) and never alters the
 safety score.

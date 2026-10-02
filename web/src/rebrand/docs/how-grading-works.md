@@ -15,13 +15,14 @@ A widely-adopted tool can still be a serious trust risk (bigger blast radius, no
 
 ## The trust score: 0–100
 
-The score maps to a **tier** and a recommended execution posture (rate limits, token budget, confirmation prompts):
+The score maps to one of **six tiers** (the API's `trust_tier`) and a recommended execution posture (`recommended_limits`: requests per minute, token budget per call, whether to confirm first):
 
-- **80–100 · Trusted** — connect normally.
-- **60–79 · Standard** — standard rate + token limits.
-- **40–59 · Caution** — confirm on sensitive calls.
-- **20–39 · Restricted** — gated, manual approval.
-- **0–19 · Blocked** — do not connect.
+- **96–100 · Verified** — connect normally; no limits.
+- **81–95 · Trusted** — auto-approve within budget (60 requests/min, 8192 tokens/call).
+- **51–80 · Standard** — standard rate + token limits (30 requests/min, 4096 tokens/call).
+- **31–50 · Minimal** — confirm on sensitive calls (15 requests/min, 2048 tokens/call).
+- **11–30 · Restricted** — gated, manual approval (5 requests/min, 1024 tokens/call).
+- **0–10 · Blocked** — do not connect.
 
 A **Blocked** score and any **known-malicious (MAL)** dependency block execution.
 
