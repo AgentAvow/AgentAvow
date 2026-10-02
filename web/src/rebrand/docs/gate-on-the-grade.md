@@ -78,6 +78,26 @@ agent = LlmAgent(
 
 A stdio server has no URL — give it a coordinate with `tool_to_server={"tool": "npm:@scope/server"}` and it's graded as a package (score and findings; nothing was served over the wire, so no drift check). `on_fail="confirm"` uses ADK's own tool-confirmation flow: the first call asks, the call runs once the user confirms.
 
+### Vercel AI SDK
+
+`wrapTools` from `agentavow-trust` wraps each tool's `execute` with the same check — the SDK's `onToolExecutionStart` callback can watch a call but can't stop it, so the gate sits on the hook that decides. A blocked tool returns `{ error, agentavow }` as its output; `onFail: 'confirm'` instead sets `needsApproval` so `generateText`, `streamText` and `ToolLoopAgent` pause for the user through the SDK's own approval flow.
+
+```ts
+import { createMCPClient } from '@ai-sdk/mcp'
+import { generateText } from 'ai'
+import { wrapTools } from 'agentavow-trust/vercel-ai'
+
+const mcp = await createMCPClient({ transport: { type: 'http', url: SERVER_URL } })
+const tools = wrapTools(await mcp.tools(), {
+  server: SERVER_URL,        // every tool in this set came from one server
+  minScore: 81,              // Trusted floor
+  onFail: 'block',           // or 'confirm' | 'warn' | 'throw'
+})
+const { text } = await generateText({ model, tools, prompt })
+```
+
+Tools from `createMCPClient().tools()` don't carry their server's URL, so name it once per set (`server`), per tool (`toolToServer`), or with `resolveServer`. Your own function tools map to no server and run ungated. The drift check compares the definition the server serves now (or the `tools/list` you pass as `servedTools`) against the digest in the attestation; `failClosed: false` lets a call through, with a warning, when AgentAvow itself can't answer.
+
 ## Gate anything (the API)
 
 Every surface is one auth-free GET, returning the score, tier, findings, the signed `coverage{}` block, and the JWS attestation:
