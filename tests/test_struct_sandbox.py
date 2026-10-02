@@ -88,3 +88,32 @@ def test_pinned_version_in_the_name():
     assert sp("pypi", "requests") == ("requests", None)
     assert sp("crates", "serde@1.0.200") == ("serde", "1.0.200")
     assert sp("docker", "nginx:1.25") == ("nginx:1.25", None)
+
+
+def test_scan_package_tool_with_a_pinned_version_passes_version_to_the_api(monkeypatch):
+    import asyncio
+
+    from src.bridges import mcp_streamable as m
+    seen = {}
+
+    async def fake_get(path, params=None):
+        seen["path"], seen["params"] = path, params
+        return {"trust_score": 69, "findings": {"items": [], "total": 0}, "trust_tier": "standard",
+                "package_version": "2025.7.1", "metadata": {"files_scanned": 3}}
+
+    async def none(*a, **k):
+        return None
+    monkeypatch.setattr(m, "_get", fake_get)
+    monkeypatch.setattr(m, "_adoption", none)
+    monkeypatch.setattr(m, "_bump_s", none)
+    out = asyncio.run(m._call_tool("scan_package", {"registry": "pypi",
+                                                    "name": "mcp-server-git==2025.7.1"}))
+    assert seen["path"] == "/public/scan/package/pypi/mcp-server-git"
+    assert seen["params"] == {"version": "2025.7.1"}
+    text, struct = out
+    assert "Could not complete" not in text[0].text
+    assert struct["package_version"] == "2025.7.1"
+    assert "version=2025.7.1" in struct["report_url"]
+    # no pin → no version param, unchanged behaviour
+    asyncio.run(m._call_tool("scan_package", {"registry": "npm", "name": "chalk"}))
+    assert seen["params"] in ({}, None)

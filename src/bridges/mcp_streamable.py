@@ -1358,7 +1358,7 @@ async def _call_tool(
             # A pinned version rides in the name the way the ecosystems write it
             # (chalk@5.3.0, requests==2.32.5, serde@1.0.200) — no tool-schema change.
             pkg, version = _split_pinned_version(surface, pkg)
-            params = dict(fp)
+            params = dict(fp or {})
             if version:
                 params["version"] = version
             data = await _get(f"/public/scan/package/{surface}/{pkg}", params=params)
