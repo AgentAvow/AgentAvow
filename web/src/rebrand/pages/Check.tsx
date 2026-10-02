@@ -988,7 +988,32 @@ const START_REASONS: Record<string, string> = {
 
 function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string } }) {
   const mut = useMutation({ mutationFn: () => pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
-  const b: BehavioralData | null | undefined = mut.data?.behavioral ?? auto
+  // While the background run is pending, poll the (cached, non-forcing) scan so the panel
+  // fills in by itself. ~8 s interval, gives up after 5 minutes.
+  const [startedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
+  const autoPending = !!auto?.pending && !mut.data
+  const poll = useQuery({
+    queryKey: ['behavioral-poll', pkg?.surface ?? 'github', pkg?.name ?? `${owner}/${repo}`],
+    queryFn: () => pkg ? fetchPackageScan(pkg.surface, pkg.name) : fetchPublicScan(owner, repo),
+    enabled: autoPending,
+    refetchInterval: (q) => {
+      const blk = (q.state.data as { behavioral?: BehavioralData | null } | undefined)?.behavioral
+      if (blk && !blk.pending) return false
+      return Date.now() - startedAt > 5 * 60_000 ? false : 8_000
+    },
+    refetchIntervalInBackground: false,
+  })
+  const polled = (poll.data as { behavioral?: BehavioralData | null } | undefined)?.behavioral
+  const b: BehavioralData | null | undefined = mut.data?.behavioral ?? (polled && !polled.pending ? polled : undefined) ?? auto
+  const stillPending = !!b?.pending && !mut.isPending
+  useEffect(() => {
+    if (!stillPending) return
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [stillPending])
+  const waited = Math.max(0, Math.round((now - startedAt) / 1000))
+  const observedAt = b?.attestation?.observed_at ? new Date(b.attestation.observed_at) : null
   // Packages always get the panel; a repo gets it once the sandbox has a result for it
   // (installed straight from git when it publishes no package).
   if ((!surface || !SANDBOX_SURFACES.has(surface)) && !b) return null
@@ -1026,9 +1051,23 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
         <span className="ml-3 text-[12px] text-text-muted">Runs automatically on the first scan; results are kept for a day.</span>
         {mut.isError && <p className="mt-3 text-[13px] text-danger">Couldn&apos;t run the behavioral scan — please try again in a moment.</p>}
 
-        {pending && !mut.isPending && (
-          <p className="mt-3 text-[13px] text-text-muted">Behavioral analysis is running in the background — reload in about a minute, or hit the button to run it now.</p>
-        )}
+        <div className="mt-3 flex items-center gap-2 text-[12.5px]" aria-live="polite">
+          {mut.isPending ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" /><span className="text-text-muted">Running now in the sandbox…</span></>
+          ) : stillPending ? (
+            waited < 300 ? (
+              <><span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" /><span className="text-text-muted">Running in the sandbox · {waited}s — this panel updates by itself (usually under a minute)</span></>
+            ) : (
+              <><span className="inline-block w-2 h-2 rounded-full bg-warning" /><span className="text-text-muted">Still running or queued behind other runs — reload later, or press Run now.</span></>
+            )
+          ) : b?.ran ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-success" /><span className="text-text-muted">Completed{observedAt ? ` · observed ${observedAt.toLocaleString()}` : ''}{b.plan ? ` · plan ${b.plan}` : ''}</span></>
+          ) : b ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-text-muted" /><span className="text-text-muted">Not run</span></>
+          ) : (
+            <><span className="inline-block w-2 h-2 rounded-full bg-text-muted" /><span className="text-text-muted">No sandbox result yet</span></>
+          )}
+        </div>
         {b && !b.ran && !pending && (
           <p className="mt-3 text-[13px] text-text-muted">Behavioral scan didn&apos;t run: {b.reason || b.error || 'no package to exercise in the sandbox'}.</p>
         )}

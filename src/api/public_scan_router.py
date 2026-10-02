@@ -1667,10 +1667,15 @@ async def public_scan(
             entity_trust = await _get_entity_trust(full_name, db)
             trust_envelope = await _build_scan_envelope(owner, repo, cached, db)
 
-            return _package_response(
+            resp = _package_response(
                 full_name, cached, jws, cached=True,
                 entity_trust=entity_trust, trust_envelope=trust_envelope,
             )
+            # The sandbox result lives in its own cache: attach it on cache hits too, so
+            # a reload (or the score page's poll) picks up a run that finished since.
+            resp.behavioral = await _behavioral_block(
+                {**cached, "repo_full_name": full_name}, force=False)
+            return resp
 
     # Fetch previous cached score before running a fresh scan (for change detection)
     old_cached = await _get_cached(owner, repo)
