@@ -207,3 +207,9 @@ Without `--probity` the script clones the pinned commit into its output director
 reader's `pyproject.toml` says Python 3.13 or newer; it also runs on 3.14. Its runtime
 dependencies are `cryptography` and `rfc8785`, at the versions pinned in that
 requirements file.
+
+## Licence
+
+This directory (the vector file, `source.json`, `generate.mjs`, `verify.mjs` and this README) is licensed under
+Apache-2.0; see [`LICENSE`](./LICENSE) here. The repository LICENSE grants a subdirectory with its own LICENSE file
+its own terms, so these vectors can be vendored and redistributed by any implementer.

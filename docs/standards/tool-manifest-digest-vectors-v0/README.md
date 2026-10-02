@@ -109,3 +109,9 @@ The pinned attestation was fetched once on 2026-09-29 from
 fresh attestation with new timestamps, so the file is the fixture, not the URL. Any current
 attestation from the same endpoint can be dropped into `source.json` to regenerate the set
 against a different tool.
+
+## Licence
+
+This directory (the vector file, `source.json`, `generate.mjs`, `verify.mjs` and this README) is licensed under
+Apache-2.0; see [`LICENSE`](./LICENSE) here. The repository LICENSE grants a subdirectory with its own LICENSE file
+its own terms, so these vectors can be vendored and redistributed by any implementer.
