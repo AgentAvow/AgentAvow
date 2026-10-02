@@ -1,6 +1,6 @@
 # AgentAvow Safety Model — v1.0
 
-**Status:** Stable · **Model version:** `safety-model-v1` · **Last updated:** 2026-08-15
+**Status:** Stable · **Model version:** `safety-model-v1` · **Last updated:** 2026-10-02 (§5 tier table aligned with the API's six `trust_tier` values)
 
 This document specifies the **model** AgentAvow uses to turn a scan into a 0–100 safety
 score, a tier, and a Certified verdict. It is the declarative, versioned counterpart to
