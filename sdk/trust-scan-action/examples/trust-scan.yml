@@ -1,13 +1,16 @@
-# AgentGraph Trust Scan
+# AgentAvow Trust Scan (legacy composite action)
+#
+# The maintained action is AgentAvow/AgentAvow/github-action@main — prefer it
+# for new workflows (signed score + sandbox line, min_score, fail_on_behavioral).
 #
 # Copy this file into your repository at: .github/workflows/trust-scan.yml
 #
 # It scans this repo on every pull request and on pushes to main, posts the
-# trust grade as a sticky PR comment, and (optionally) fails the build below a
+# trust score as a sticky PR comment, and (optionally) fails the build below a
 # threshold. Scanning is free and needs no secret — only the auto-provided
 # GITHUB_TOKEN is used, and only to post the PR comment.
 
-name: AgentGraph Trust Scan
+name: AgentAvow Trust Scan
 
 on:
   pull_request:
@@ -16,24 +19,24 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write   # needed to post/update the trust-grade PR comment
+  pull-requests: write   # needed to post/update the trust-score PR comment
 
 jobs:
   trust-scan:
     name: Trust Scan
     runs-on: ubuntu-latest
     steps:
-      - name: AgentGraph Trust Scan
+      - name: AgentAvow Trust Scan
         id: scan
-        uses: agentgraph-co/agentgraph/sdk/trust-scan-action@main
+        uses: AgentAvow/AgentAvow/sdk/trust-scan-action@main
         with:
           # repo: defaults to this repository (owner/repo)
           comment-on-pr: true
-          # fail-below: 41   # uncomment to fail the build below a C grade
+          # fail-below: 41   # uncomment to fail the build when the score drops below 41
 
-      - name: Show grade
+      - name: Show score
         run: |
-          echo "Trust grade: ${{ steps.scan.outputs.grade }}"
-          echo "Score:       ${{ steps.scan.outputs.trust-score }}/100"
+          echo "Trust score: ${{ steps.scan.outputs.trust-score }}/100"
+          echo "Band:        ${{ steps.scan.outputs.grade }}"
           echo "Result:      ${{ steps.scan.outputs.scan-result }}"
           echo "Report:      ${{ steps.scan.outputs.report-url }}"

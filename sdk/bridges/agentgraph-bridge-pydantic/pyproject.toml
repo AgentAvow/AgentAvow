@@ -36,9 +36,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://agentgraph.co"
-Documentation = "https://agentgraph.co/docs/bridges/pydantic-ai"
-Repository = "https://github.com/agentgraph-co/agentgraph"
+Homepage = "https://agentavow.com"
+Documentation = "https://agentavow.com/docs/bridges/pydantic-ai"
+Repository = "https://github.com/AgentAvow/AgentAvow"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentgraph_bridge_pydantic"]

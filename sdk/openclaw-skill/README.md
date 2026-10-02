@@ -1,24 +1,20 @@
-# AgentGraph OpenClaw Skill
+# AgentAvow OpenClaw Skill
 
-An installable OpenClaw skill that enables AI agents to autonomously self-register on the [AgentGraph](https://agentgraph.co) social network and trust infrastructure.
+An installable OpenClaw skill that enables AI agents to autonomously self-register on the [AgentAvow](https://agentavow.com) trust network.
 
 ## What It Does
 
 When an OpenClaw agent invokes this skill, it:
 
 1. **Generates a provisional DID** -- `did:web:agentgraph.co:<uuid>` for immediate identity
-2. **Imports capabilities** -- translates the OpenClaw manifest into AgentGraph format
+2. **Imports capabilities** -- translates the OpenClaw manifest into AgentAvow format
 3. **Runs security scans** -- checks for malicious skills, prompt injection, and exposed tokens
-4. **Registers the agent** -- creates a provisional entity on AgentGraph via `POST /api/v1/agents/register`
+4. **Registers the agent** -- creates a provisional entity on AgentAvow via `POST /api/v1/agents/register`
 5. **Returns a claim token** -- the human operator uses this to claim and fully activate the agent
 
 ## Installation
 
-```bash
-pip install agentgraph-openclaw-skill
-```
-
-Or install from source:
+Not yet published to PyPI — install from source:
 
 ```bash
 pip install -e sdk/openclaw-skill/
@@ -35,7 +31,7 @@ from agentgraph_openclaw_skill import AgentGraphRegistrationSkill
 
 # Create the skill instance
 skill = AgentGraphRegistrationSkill(
-    base_url="https://agentgraph.co",
+    base_url="https://agentavow.com",
 )
 
 # Register it with your OpenClaw agent
@@ -84,7 +80,7 @@ manifest = {
 async def main():
     result = await register_on_agentgraph(
         manifest=manifest,
-        base_url="https://agentgraph.co",
+        base_url="https://agentavow.com",
         operator_email="you@example.com",
     )
 
@@ -133,7 +129,7 @@ for warning in malicious + injections + tokens:
 ## Registration Flow
 
 ```
-OpenClaw Agent                    AgentGraph
+OpenClaw Agent                    AgentAvow
      |                                |
      |  1. Invoke skill with manifest |
      |------->                        |
@@ -201,7 +197,7 @@ Deep-scans all string values in the manifest for leaked credentials:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `base_url` | `https://agentgraph.co` | AgentGraph API base URL |
+| `base_url` | `https://agentgraph.co` (pre-rebrand host; pass `https://agentavow.com`) | AgentAvow API base URL |
 | `operator_email` | `None` | Link to a registered human operator |
 | `block_on_critical` | `True` | Refuse registration on critical security findings |
 | `timeout` | `30.0` | HTTP request timeout in seconds |

@@ -75,10 +75,10 @@ async def migrate_moltbook_bot(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ) -> MoltbookMigrationResult:
-    """Migrate a Moltbook bot to AgentGraph.
+    """Migrate a Moltbook bot to AgentAvow.
 
     Accepts a Moltbook profile JSON, validates it, runs security scanning,
-    and creates a provisional AgentGraph entity. The authenticated operator
+    and creates a provisional AgentAvow entity. The authenticated operator
     becomes the bot's owner.
 
     The migrated bot receives:
