@@ -1,0 +1,10 @@
+{
+  "repository": "probityai/agent-evidence-vectors",
+  "commit": "d759fb4db68a7fefcc91c2d3ad2a585471d6a53a",
+  "pull_request": "https://github.com/probityai/agent-evidence-vectors/pull/43",
+  "reader_dir": "interop/agentavow-signed-map-v1",
+  "requirements": "interop/a2a-s3-retain-2026-10-01/requirements.txt",
+  "python": "3.13",
+  "license": "Apache-2.0",
+  "matched_at_producer_commit": "36426cfd5152bba6a27766febfac8aaef47b6f34"
+}

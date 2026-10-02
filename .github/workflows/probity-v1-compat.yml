@@ -1,0 +1,101 @@
+name: Probity v1 compat
+
+# Runs Probity's independent signed-map reader (probityai/agent-evidence-vectors,
+# pinned by commit in docs/standards/tool-manifest-digest-vectors-v1/compat/probity-pin.json)
+# against our tool-manifest-digest v1 vectors, next to our own verify.mjs. A producer
+# change that our verifier agrees with but an outside consumer does not fails here.
+# Network: two checkouts and one pip install. No secrets.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "docs/standards/tool-manifest-digest-vectors-v1/**"
+      - ".github/workflows/probity-v1-compat.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/standards/tool-manifest-digest-vectors-v1/**"
+      - ".github/workflows/probity-v1-compat.yml"
+  schedule:
+    # Weekly, Monday 06:17 UTC: catches a drift in the pinned action runtimes, not in the pin.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  V1_DIR: docs/standards/tool-manifest-digest-vectors-v1
+
+jobs:
+  compat:
+    name: Native verifier + Probity reader
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Read the Probity pin
+        id: pin
+        run: |
+          python3 - "$V1_DIR/compat/probity-pin.json" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          pin = json.load(open(sys.argv[1]))
+          for key in ("repository", "commit", "python", "requirements", "pull_request"):
+              print(f"{key}={pin[key]}")
+          PY
+
+      - name: Check out Probity at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pin.outputs.repository }}
+          ref: ${{ steps.pin.outputs.commit }}
+          path: .probity
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.pin.outputs.python }}
+
+      - name: Install the reader's pinned dependencies
+        run: python -m pip install -r ".probity/${{ steps.pin.outputs.requirements }}"
+
+      - name: Native verifier, then Probity reader
+        run: |
+          "$V1_DIR/compat/run-probity.sh" \
+            --probity "$GITHUB_WORKSPACE/.probity" \
+            --out "$RUNNER_TEMP/probity-v1-compat" \
+            --python python
+
+      - name: Retain both reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probity-v1-compat-reports
+          path: ${{ runner.temp }}/probity-v1-compat/*
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Summary
+        if: always()
+        run: |
+          SUMMARY="$RUNNER_TEMP/probity-v1-compat/summary.md"
+          if [ -f "$SUMMARY" ]; then
+            cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Probity v1 compat" >> "$GITHUB_STEP_SUMMARY"
+            echo "The check did not reach the reporting step; see the job log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo
+            echo "Pinned via ${{ steps.pin.outputs.pull_request }}; commit \`${{ steps.pin.outputs.commit }}\`."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -135,3 +135,64 @@ to its signed digest. The pinned attestation was fetched once on 2026-10-01 from
 `https://agentavow.com/api/v1/public/scan/mcp?endpoint=https%3A%2F%2Fmcp.deepwiki.com%2Fmcp`;
 the `tools/list` was fetched from the server in the same minute. A fresh fetch yields a
 fresh attestation, so the file is the fixture, not the URL.
+
+## Independent implementations
+
+Each entry says who wrote the implementation, what it ran against, and what it reported.
+The labels follow the authors' own.
+
+- **Probity reader** (`probityai/agent-evidence-vectors`, Apache-2.0), owned by Probity:
+  [`interop/agentavow-signed-map-v1/` at `d759fb4`](https://github.com/probityai/agent-evidence-vectors/tree/d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1),
+  merged in [PR #43](https://github.com/probityai/agent-evidence-vectors/pull/43) and
+  reported on [#177](https://github.com/aeoess/agent-governance-vocabulary/issues/177).
+  A separate reader in Python (name encoding, JWS and canonical-bytes checks, the six
+  axes, the served-definition digest) that reads the vector file at `36426cf` unchanged.
+  It matches all thirteen name-to-key pairs, the three served-definition digests, the
+  payload digest and the six case verdicts. Independent: written by a party other than
+  us and other than a consumer we handed a fixture to. It selects the signing key on its
+  own side (`selection.json`) rather than taking it from the packet, and adds an
+  `issuer_binds` axis of its own.
+- **APS-side consumer** (`agent-passport-system` 7.2.0 primitives), owned by APS:
+  [`examples/interop/agentavow/` at `fd47f34`](https://github.com/aeoess/agent-passport-system/tree/fd47f34cc36fce060d092fe1216aff3f89fb8d88/examples/interop/agentavow),
+  listed under Consumers in the [v0 README](../tool-manifest-digest-vectors-v0/README.md).
+  By its author's label, a second implementation run by the consuming project: a
+  reproduction, not an independent verification record. Its v0 run is what recorded the
+  two boundaries that v1 closes; a v1 run will be listed here when it is reported.
+- **heldfast** (rufat325) has offered a second digest implementation under this profile.
+  It will be listed here when its run agrees with the vector file.
+
+### The CI check
+
+The Probity reader is run in our CI against the current vector file, next to
+`verify.mjs`, by the workflow
+[`probity-v1-compat.yml`](../../../.github/workflows/probity-v1-compat.yml). It runs on
+every change under this directory, on a weekly schedule, and on demand. A producer change
+that `verify.mjs` agrees with but the outside reader does not fails the job. Both reports
+are retained as a workflow artifact for 90 days.
+
+The pin is `compat/probity-pin.json` (repository, commit, reader directory, Python
+version, requirements file). Moving to a newer Probity commit means changing that one file.
+
+What runs, in order (`compat/run-probity.sh`):
+
+1. `node verify.mjs`, our native verifier.
+2. Probity's own driver, `run_agentavow.py`, unmodified. It refuses any vector file whose
+   bytes differ from the one it locked at `36426cf`, which is the right control for their
+   repository. So this step runs only while the file is byte-identical to that lock, and
+   is reported as skipped otherwise.
+3. `compat/probity_compat.py`, which imports Probity's `map_reader` from the pinned
+   checkout and runs the same sequence their driver runs (thirteen keys, three
+   definition digests, payload digest, six cases, positive pin) on the current file. Only
+   glue lives in that script; no encoding, hashing or verification logic is ours. The
+   signing key comes from Probity's `selection.json`, so a rotated issuer key fails here
+   until the consumer updates its selection; `--key-from-fixture` isolates that case.
+
+Locally:
+
+    python3.13 -m pip install -r <probity-checkout>/interop/a2a-s3-retain-2026-10-01/requirements.txt
+    compat/run-probity.sh --probity <probity-checkout> --python python3.13
+
+Without `--probity` the script clones the pinned commit into its output directory. The
+reader's `pyproject.toml` says Python 3.13 or newer; it also runs on 3.14. Its runtime
+dependencies are `cryptography` and `rfc8785`, at the versions pinned in that
+requirements file.
