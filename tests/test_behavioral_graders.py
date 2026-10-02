@@ -164,7 +164,7 @@ def test_grade_is_deterministic_and_in_rule_order():
     ]
     assert rules == [name for name, _ in GRADERS if name != "cloud_metadata_probe"]  # no IMDS here
     s = grade_summary(r)
-    assert s["findings"] == {"critical": 2, "high": 1, "medium": 2, "low": 1, "total": 6}
+    assert s["findings"] == {"critical": 1, "high": 2, "medium": 2, "low": 1, "total": 6}
     assert s["rules"] == rules
     assert s["calls_failed"] == 1 and s["canary_exfil"] == 1
 

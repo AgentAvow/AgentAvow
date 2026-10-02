@@ -49,10 +49,11 @@ def test_unexpected_egress_becomes_a_finding():
     assert "evil.net" in fs[0].snippet
 
 
-def test_many_unexpected_hosts_escalates_to_critical():
+def test_many_unexpected_hosts_stay_high_never_critical_by_count():
+    """Validation 2026-10-02: host count is not exfiltration (the canary detects that)."""
     r = BehavioralResult(ran=True, surface="npm", coordinate="malware",
                          egress_hosts=[], unexpected_egress=["a.net", "b.net", "c.net"])
-    assert behavioral_findings(r)[0].severity == "critical"
+    assert behavioral_findings(r)[0].severity == "high"
 
 
 def test_clean_run_no_findings():

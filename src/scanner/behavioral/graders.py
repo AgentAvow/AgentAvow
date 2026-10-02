@@ -113,7 +113,10 @@ def grade_undeclared_egress(result, transcript: ExerciseTranscript) -> list[Beha
     return [_finding(
         "behavioral_undeclared_egress", category="exfiltration",
         name="Unexpected network egress during install/run",
-        severity="high" if len(hosts) < 3 else "critical",
+        # Never critical by host COUNT: many undeclared hosts is not exfiltration (that is
+        # what the canary detects). Validated 2026-10-02: nia-mcp-server hit 3 hosts
+        # (its vendor, a tokenizer download, an API) and was capped at 45.
+        severity="high",
         evidence=f"egress to {shown}",
         remediation=(
             "The tool contacted host(s) outside the package registry and its declared "

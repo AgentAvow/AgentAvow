@@ -46,7 +46,7 @@ a model's output is not reproducible, and the result has to be.
 
 | Finding | Meaning | Severity |
 |---|---|---|
-| Undeclared egress | Contacted a host outside the registry and the declared scope | medium, critical at 3+ hosts |
+| Undeclared egress | Contacted a host outside the registry, the tool's own vendor, and the declared scope | high |
 | Read-only annotation violated | A tool declared `readOnlyHint: true` and wrote files when called | high |
 | Open-world annotation violated | Every tool declares `openWorldHint: false`, yet the server reached undeclared hosts | medium |
 | Credential canary exfiltrated | A canary credential appeared in outbound traffic | critical |

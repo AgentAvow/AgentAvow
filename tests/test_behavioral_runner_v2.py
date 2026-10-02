@@ -551,3 +551,25 @@ def test_region_never_becomes_a_canary_regression():
                            readme=False)
     assert "--canary-env AWS_SECRET_ACCESS_KEY" in args
     assert "AWS_REGION" not in args and "KB_ID" not in args
+
+
+
+@pytest.mark.parametrize("coord, host, vendor", [
+    ("@modelcontextprotocol/server-google-maps", "maps.googleapis.com", True),
+    ("nia-mcp-server", "apigcp.trynia.ai", True),
+    ("@aws/kb-mcp", "bedrock.us-east-1.amazonaws.com", True),
+    ("tmux-bridge-mcp", "apigcp.trynia.ai", False),        # a different vendor: still flagged
+    ("task-master-ai", "maps.googleapis.com", False),
+    ("exa-mcp-server", "api.agnost.ai", False),
+    ("left-pad", "evil-leftpad.net", False),
+])
+def test_vendor_matching_validated_cases(coord, host, vendor):
+    from src.scanner.behavioral import runner as r
+    assert (r._vendor_hosts(coord, [host]) == [host]) is vendor
+
+
+def test_release_assets_and_tokenizer_downloads_are_expected():
+    from src.scanner.behavioral import runner as r
+    assert r._classify_egress(["release-assets.githubusercontent.com",
+                               "openaipublic.blob.core.windows.net"], set()) == []
+    assert r._classify_egress(["raw.githubusercontent.com"], set()) == ["raw.githubusercontent.com"]

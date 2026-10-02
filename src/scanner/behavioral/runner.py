@@ -183,6 +183,11 @@ _REGISTRY_ALLOW = {
     "registry.npmjs.org", "registry.yarnpkg.com",
     "pypi.org", "files.pythonhosted.org",
     "github.com", "codeload.github.com", "objects.githubusercontent.com",
+    # GitHub release downloads (install-time prebuilt binaries) moved here in 2025.
+    "release-assets.githubusercontent.com",
+    # Well-known library data fetched at import, not by the tool's own logic:
+    # tiktoken's tokenizer files (any Python package using OpenAI tokenizers).
+    "openaipublic.blob.core.windows.net",
     "dl-cdn.alpinelinux.org",  # apk mirror: the pypi-mcp plan installs git (see above)
 }
 # A container that exits 137 was SIGKILLed by its cgroup (memory / pids cap), not by the
@@ -297,9 +302,33 @@ def _vendor_hosts(coordinate: str, hosts: list[str]) -> list[str]:
         registrable = labels[-2]
         if registrable in _SECOND_LEVEL_SUFFIXES and len(labels) >= 3:
             registrable = labels[-3]
-        if registrable in toks:
+        if _vendor_label_matches(registrable, toks):
             out.append(h)
     return out
+
+
+# A vendor's API often lives on a domain that is not its bare name.
+_VENDOR_ALIASES = {
+    "google": {"googleapis", "google", "gstatic", "googleusercontent"},
+    "gmail": {"googleapis", "google"}, "gdrive": {"googleapis", "google"},
+    "gcp": {"googleapis", "google"}, "gemini": {"googleapis", "google"},
+    "aws": {"amazonaws"}, "amazon": {"amazonaws", "amazon"},
+    "azure": {"azure", "windows", "microsoft"}, "microsoft": {"microsoft", "windows", "azure"},
+    "github": {"github", "githubusercontent"}, "slack": {"slack"},
+}
+# Common product-domain affixes: trynia.ai / getnia.com / niaapp.io → vendor 'nia'.
+_VENDOR_AFFIXES = ("try", "get", "use", "go", "my", "hq", "app", "api", "io")
+
+
+def _vendor_label_matches(label: str, toks: set[str]) -> bool:
+    if label in toks:
+        return True
+    for t in toks:
+        if label in _VENDOR_ALIASES.get(t, ()):
+            return True
+        if any(label in (a + t, t + a) for a in _VENDOR_AFFIXES):
+            return True
+    return False
 
 
 def _classify_egress(hosts: list[str], expected: set[str]) -> list[str]:
