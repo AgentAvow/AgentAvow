@@ -52,5 +52,8 @@ change to any of these verdicts.
 the file — signatures and digests are derived, not transcribed.
 
 The canonicalization these rest on is exercised independently in the
-`jcs-comparison-semantics-v1` author-set (agentgraph + trail), so this set can
-assume byte-stable canonical forms and focus on the coverage/execution axes.
+`jcs-comparison-semantics-v1` author-set (agentgraph + trail), published in
+`draft-etcheverry-action-ref` under
+[`conformance/agentgraph/jcs-comparison/`](https://github.com/giskard09/draft-etcheverry-action-ref/tree/main/conformance/agentgraph/jcs-comparison)
+([PR #9](https://github.com/giskard09/draft-etcheverry-action-ref/pull/9)), so this
+set can assume byte-stable canonical forms and focus on the coverage/execution axes.
