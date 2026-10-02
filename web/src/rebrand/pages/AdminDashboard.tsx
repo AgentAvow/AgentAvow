@@ -430,12 +430,14 @@ function MetricsTab() {
       </Section>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <Section title="Grade distribution" note="Live scanned corpus, all-time.">
+        <Section title="Trust-score distribution" note="Live scanned corpus, all-time, by trust-score band.">
           <div className="glass rounded-2xl p-5 flex flex-col gap-2">
-            {['A+', 'A', 'B', 'C', 'D', 'F'].map((g) => {
+            {/* The API still keys these buckets by legacy letter (metrics_dashboard_router._GRADE_CASE);
+                the bands are the score floors behind those keys. */}
+            {([['A+', '96–100'], ['A', '81–95'], ['B', '61–80'], ['C', '41–60'], ['D', '21–40'], ['F', '0–20']] as const).map(([g, band]) => {
               const n = grades[g] ?? 0
               const tot = Object.values(grades).reduce((a, b) => a + b, 0) || 1
-              return <div key={g} className="flex items-center gap-3 text-[13px]"><span className="font-mono w-8">{g}</span><div className="flex-1 h-2 rounded-full bg-surface overflow-hidden"><div className="h-full bg-primary/60" style={{ width: `${(n / tot) * 100}%` }} /></div><span className="tabular-nums text-text-muted w-16 text-right">{fmt(n)}</span></div>
+              return <div key={g} className="flex items-center gap-3 text-[13px]"><span className="font-mono w-14 tabular-nums">{band}</span><div className="flex-1 h-2 rounded-full bg-surface overflow-hidden"><div className="h-full bg-primary/60" style={{ width: `${(n / tot) * 100}%` }} /></div><span className="tabular-nums text-text-muted w-16 text-right">{fmt(n)}</span></div>
             })}
           </div>
         </Section>
