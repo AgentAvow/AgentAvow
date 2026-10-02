@@ -105,7 +105,8 @@ METHODOLOGY_TEXT = """# Trust Score v6 Methodology
 
 ## How It Works
 
-Your trust score is displayed as a **letter grade** (A+ through F) based on verifiable signals:
+Your trust score is a **0-100 number** computed from verifiable signals, and it maps to a
+**trust tier** that sets the recommended execution posture:
 
 - **Identity** (35%) — Is this entity who they claim to be?
 - **External Signals** (35%) — What do other platforms say? (GitHub, npm, PyPI, etc.)
@@ -118,16 +119,16 @@ not yet weighted in the score. They'll be enabled as the platform grows.
 ## Formula
 `score = 0.35*identity + 0.35*external + 0.20*scan + 0.10*age`
 
-## Grade Scale
+## Trust Tiers
 
-| Grade | Score | Meaning |
-|-------|-------|---------|
-| A+ | 96-100 | Exceptional |
-| A | 81-95 | Trusted |
-| B | 61-80 | Good |
-| C | 41-60 | Fair |
-| D | 21-40 | Caution |
-| F | 0-20 | Needs improvement |
+| Tier | Score | Meaning |
+|------|-------|---------|
+| verified | 96-100 | Unlimited — no rate limit, no confirmation prompts |
+| trusted | 81-95 | 60 req/min, 8192-token budget |
+| standard | 51-80 | 30 req/min, 4096-token budget |
+| minimal | 31-50 | 15 req/min, 2048-token budget, confirmation required |
+| restricted | 11-30 | 5 req/min, 1024-token budget, confirmation required |
+| blocked | 0-10 | No execution |
 
 ## How to Improve Your Score
 

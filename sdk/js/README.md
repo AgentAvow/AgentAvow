@@ -1,8 +1,10 @@
-# agentgraph-trust
+# agentavow-trust
 
-JavaScript/TypeScript SDK for **AgentGraph Trust Score v2** — signed,
+> **Formerly `agentgraph-trust`.** This package is now published as **`agentavow-trust`**.
+
+JavaScript/TypeScript SDK for **AgentAvow Trust Score v2** — signed,
 self-verifiable trust-score envelopes. This is the JS peer of the Python
-`agentgraph-sdk` verify module; both reproduce the server's
+`agentavow-sdk` verify module; both reproduce the server's
 JCS-canonical, Ed25519-over-SHA-256 verification **byte-for-byte**.
 
 - Zero crypto deps: uses Node's built-in `node:crypto` for Ed25519.
@@ -13,8 +15,24 @@ JCS-canonical, Ed25519-over-SHA-256 verification **byte-for-byte**.
 ## Install
 
 ```bash
-npm install agentgraph-trust
+npm install agentavow-trust
 ```
+
+## CLI — a signed score from the terminal, no install
+
+The package ships an `agentavow-trust` bin, so `npx` runs it without installing:
+
+```bash
+npx agentavow-trust scan modelcontextprotocol/servers   # GitHub repo
+npx agentavow-trust scan npm:chalk                      # npm / pypi / crates / docker / hf
+npx agentavow-trust badge you/your-repo                 # prints the README badge line
+```
+
+`scan` prints the 0–100 trust score, trust tier, finding counts, the report
+link, and whether the result carries a signed attestation. `badge` prints the
+markdown for a live badge that links to the full report. Both hit the free
+public API (`AGENTAVOW_API` overrides the base, default
+`https://agentavow.com/api/v1`).
 
 ## Trust Score v2 — signed, self-verifiable envelopes
 
@@ -23,9 +41,9 @@ server** — fetch it, then check the Ed25519 signature against our published JW
 yourself.
 
 ```js
-import { TrustClient } from 'agentgraph-trust';
+import { TrustClient } from 'agentavow-trust';
 
-const client = new TrustClient('https://agentgraph.co');
+const client = new TrustClient('https://agentavow.com');
 const did = 'did:web:agentgraph.co:agents:<id>';
 
 // Signed envelope: score + per-source methodology breakdown + proof
@@ -40,12 +58,16 @@ if (result.valid) {            // true iff signature valid AND fresh
   console.log('NOT verified:', result.reason);
 }
 
-// Scan any GitHub repo -> grade + findings + a verifiable envelope
+// Scan any GitHub repo -> trust score + findings + a verifiable envelope
 const scan = await client.checkRepo('owner', 'repo');
 if (scan.trust_envelope) {
   console.log(await client.verifyEnvelope(scan.trust_envelope));
 }
 ```
+
+> The signer identity (`did:web:agentgraph.co`) and the JWKS host intentionally
+> keep the `agentgraph.co` name so existing attestations stay verifiable; the
+> service and site are **AgentAvow** at `agentavow.com`.
 
 ### Standalone verification (no client)
 
@@ -54,7 +76,7 @@ if (scan.trust_envelope) {
 check byte-for-byte.
 
 ```js
-import { verifyEnvelope } from 'agentgraph-trust';
+import { verifyEnvelope } from 'agentavow-trust';
 
 const result = verifyEnvelope(envelope, jwks);
 // => { valid, signatureValid, fresh, kid, reason }
@@ -67,6 +89,49 @@ Ed25519 signature over the digest, then (7) checks
 `computed_at + freshness_ttl_seconds >= now`. `valid` is
 `signatureValid && fresh`.
 
+## Vercel AI SDK tool gate — `agentavow-trust/vercel-ai`
+
+> Available from source (the `./vercel-ai` subpath export in `package.json`,
+> built to `dist/` by `npm run build`). It is **not in the `0.2.1` release on
+> npm**; it ships with the next publish.
+
+`wrapTools(tools, options)` returns the same AI SDK `ToolSet` with each tool's
+`execute` wrapped. Before a tool runs, the gate fetches the serving MCP server's
+signed score from AgentAvow's free API and allows the call only when the score
+clears `minScore` (default 81, the `trusted` tier), no critical / high finding
+is on the result, and the tool definition the agent was served recomputes to
+the per-tool digest signed into the attestation (`tool_digests["tool:<name>"]`,
+profile `agentavow.mcp-tool-definition.v1`) — so a server that quietly changes
+a tool's definition after it was scanned is blocked.
+
+```ts
+import { experimental_createMCPClient as createMCPClient, generateText } from 'ai';
+import { wrapTools } from 'agentavow-trust/vercel-ai';
+
+const mcp = await createMCPClient({ transport: { type: 'http', url: 'https://mcp.deepwiki.com/mcp' } });
+const tools = wrapTools(await mcp.tools(), {
+  server: 'https://mcp.deepwiki.com/mcp',  // one server for the whole set
+  minScore: 81,                            // default
+  onFail: 'block',                         // block | confirm | warn | throw
+});
+
+await generateText({ model, tools, prompt: '...' });
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `server` / `toolToServer` / `resolveServer` | — | Map a tool to its server coordinate (`https://…` MCP URL, `owner/repo`, `npm:name`, …). An unmapped tool is not gated (`unmapped: 'block'` to refuse it). |
+| `minScore` | `81` | Lowest trust score (0–100) that is allowed to run. |
+| `blockOn` | `['critical','high']` | Finding severities that block regardless of score. |
+| `onFail` | `'block'` | `block` returns `{ error, agentavow }` as the tool result; `confirm` uses the AI SDK's `needsApproval` pause; `warn` runs and calls `onWarn`; `throw` throws `ToolGateError`. |
+| `failClosed` | `true` | What to do when AgentAvow cannot be reached. |
+| `servedTools` / `fetchServed` | fetch | The `tools/list` each server served (for the drift check); fetched from the https server by default. |
+| `baseUrl` / `cacheTtlMs` / `timeoutMs` | `https://agentavow.com/api/v1`, 1h, 10s | API base and caching. |
+
+Also exported: `TrustGate`, `TrustGateClient`, `evaluate` (the pure policy,
+no I/O), `toolDigest` / `toolKey` (the per-tool digest exactly as the
+attestation signs it), `parseCoordinate`, `ToolGateError`.
+
 ## API
 
 ### `new TrustClient(baseUrl, { apiKey?, token?, timeout? })`
@@ -75,7 +140,7 @@ Ed25519 signature over the digest, then (7) checks
 |--------|-------------|
 | `getAggregate(did)` | Signed v2 envelope for a subject DID |
 | `getContributions(did)` | Just the methodology breakdown |
-| `checkRepo(owner, repo)` | Scan a GitHub repo -> grade + findings + envelope |
+| `checkRepo(owner, repo)` | Scan a GitHub repo -> trust score + findings + envelope |
 | `getJwks()` | Issuer JWKS from `<baseUrl>/.well-known/jwks.json` |
 | `verifyEnvelope(env, { now? })` | Fetch JWKS + verify an envelope client-side |
 | `verify(did, { now? })` | `getAggregate` + `verifyEnvelope` in one call |
@@ -100,10 +165,11 @@ npm test          # node --test
 ```
 
 The test suite validates against **production**: it fetches the real JWKS and a
-real signed aggregate from `agentgraph.co` and asserts the JS verifier accepts
-it (`valid === true`, `kid === 'trust-v2-2026'`). A passing live check proves
-byte-compatible JCS canonicalization + Ed25519 with the Python/server side. If
-prod is unreachable it falls back to a pinned fixture captured from prod.
+real signed aggregate from the `agentgraph.co` signing host and asserts the JS
+verifier accepts it (`valid === true`, `kid === 'trust-v2-2026'`). A passing
+live check proves byte-compatible JCS canonicalization + Ed25519 with the
+Python/server side. If prod is unreachable it falls back to a pinned fixture
+captured from prod.
 
 ## Spec
 

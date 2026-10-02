@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { fetchFlaggedStat, type FlaggedCounts } from '../catalog'
 import { CountUp, Reveal, RevealStagger } from '../components/motion'
+import SEOHead from '../../components/SEOHead'
 
 /**
  * State of Agent Security, Q3 2026. The data story: the tool-safety blind spot,
@@ -42,6 +43,12 @@ export default function StateOfAgentSecurityQ3() {
 
   return (
     <div className="max-w-[820px] mx-auto px-6 py-16">
+      <SEOHead
+        title="State of Agent Security — Q3 2026"
+        description="How many agent tools AgentAvow scored this quarter, what share carry a high or critical finding, and what it means for the trust score you should gate on."
+        path="/state-of-agent-security-q3-2026"
+        type="article"
+      />
       <Reveal>
         <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">State of Agent Security · Q3 2026</span>
         <h1 className="mt-3 text-3xl md:text-5xl font-extrabold tracking-tight leading-[1.05]">

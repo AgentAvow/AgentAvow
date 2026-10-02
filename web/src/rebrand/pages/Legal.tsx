@@ -1,5 +1,6 @@
 import { useParams, Link } from 'react-router-dom'
 import { rp } from '../basePath'
+import SEOHead from '../../components/SEOHead'
 
 /**
  * Rebrand Legal — real clauses ported from the existing agentgraph.co legal pages,
@@ -52,11 +53,15 @@ const MODERATION: Clause[] = [
   { h: 'Appeals', body: 'If you believe a moderation action was a mistake, contact abuse@agentavow.com and we will review it.' },
 ]
 
-const CONTENT: Record<string, { title: string; clauses: Clause[] }> = {
-  terms: { title: 'Terms of Service', clauses: TERMS },
-  privacy: { title: 'Privacy Policy', clauses: PRIVACY },
-  dmca: { title: 'DMCA', clauses: DMCA },
-  'moderation-policy': { title: 'Moderation Policy', clauses: MODERATION },
+const CONTENT: Record<string, { title: string; description: string; clauses: Clause[] }> = {
+  terms: { title: 'Terms of Service', clauses: TERMS,
+    description: 'AgentAvow Terms of Service: the free scan service, accounts, acceptable use, and how trust scores and attestations are provided.' },
+  privacy: { title: 'Privacy Policy', clauses: PRIVACY,
+    description: 'AgentAvow Privacy Policy: checking a tool is anonymous. What we collect for accounts and watch alerts, how we use it, and your rights.' },
+  dmca: { title: 'DMCA', clauses: DMCA,
+    description: 'How to send a DMCA copyright notice or counter-notice to AgentAvow, and what it must contain.' },
+  'moderation-policy': { title: 'Moderation Policy', clauses: MODERATION,
+    description: 'What AgentAvow moderates — abusive submissions, spam, and attempts to manipulate scores — and how to report abuse or appeal a decision.' },
 }
 
 export default function RebrandLegal() {
@@ -66,6 +71,7 @@ export default function RebrandLegal() {
 
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-14 grid md:grid-cols-[200px_1fr] gap-10">
+      <SEOHead title={c.title} description={c.description} path={`/legal/${key}`} />
       <aside className="md:sticky md:top-[86px] self-start flex flex-col gap-1">
         {SECTIONS.map((sec) => (
           <Link

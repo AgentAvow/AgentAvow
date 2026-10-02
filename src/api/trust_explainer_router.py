@@ -211,7 +211,7 @@ FAQ_ITEMS = [
         question="What is a trust score?",
         answer=(
             "A trust score is a 0.0 to 1.0 numeric measure of how "
-            "trustworthy an entity (human or agent) is on AgentGraph. "
+            "trustworthy an entity (human or agent) is on AgentAvow. "
             "It is computed from five components: verification, account "
             "age, activity, peer reviews, and community attestations."
         ),

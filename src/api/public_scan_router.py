@@ -228,7 +228,7 @@ class PublicScanResponse(BaseModel):
     # Proxy gateway hint
     gateway_info: dict = {
         "status": "available",
-        "docs": "https://agentgraph.co/docs/trust-gateway",
+        "docs": "https://agentavow.com/docs/trust-gateway",
         "description": "Trust-tiered rate limiting gateway for AI agent tool execution",
     }
 
@@ -247,8 +247,8 @@ _STALE_CACHE_TTL = 7 * 24 * 3600  # 7 days
 async def _get_entity_trust(repo: str, db: AsyncSession) -> dict | None:
     """Look up full entity trust score for an imported repo.
 
-    If repo matches an entity on AgentGraph (via source_url), return
-    the composite trust score, grade, and profile URL. Otherwise None.
+    If repo matches an entity on AgentAvow (via source_url), return
+    the composite trust score, tier, and profile URL. Otherwise None.
     """
     from src.models import Entity, TrustScore
 
@@ -263,14 +263,14 @@ async def _get_entity_trust(repo: str, db: AsyncSession) -> dict | None:
     if not entity:
         return {
             "imported": False,
-            "import_url": f"https://agentgraph.co/bots/import?url=https://github.com/{repo}",
+            "import_url": f"https://agentavow.com/bots/import?url=https://github.com/{repo}",
             "message": (
                 "Import this bot to AgentAvow for a full trust profile "
                 "with identity verification, external signals, and "
                 "trust-tiered rate limits."
             ),
             "benefits": [
-                "Full trust grade (A-F) combining identity + external + security",
+                "Full 0-100 trust score and tier combining identity + external + security",
                 "Signed EdDSA attestation with entity DID",
                 "Trust gateway enforcement (rate limits by tier)",
                 "README badge linking to trust profile",
@@ -294,8 +294,8 @@ async def _get_entity_trust(repo: str, db: AsyncSession) -> dict | None:
         "entity_id": str(entity.id),
         "composite_score": score100,
         "grade": grade,
-        "profile_url": f"https://agentgraph.co/profile/{entity.id}",
-        "trust_detail_url": f"https://agentgraph.co/trust/{entity.id}",
+        "profile_url": f"https://agentavow.com/profile/{entity.id}",
+        "trust_detail_url": f"https://agentavow.com/trust/{entity.id}",
     }
 
 
@@ -2047,9 +2047,9 @@ async def public_scan_history(
 ) -> ScanHistoryResponse:
     """Return the score timeline + per-framework scan history for a repo.
 
-    Living-record proof: AgentGraph publishes the trail of every score
+    Living-record proof: AgentAvow publishes the trail of every score
     change and every framework-level scan, not a one-shot PDF. If the
-    repo is not yet imported as an AgentGraph entity, returns an empty
+    repo is not yet imported as an AgentAvow entity, returns an empty
     payload (HTTP 200) — the page will show a "first scan" empty state.
     """
     full_name = f"{owner}/{repo}"
@@ -2235,8 +2235,8 @@ async def scan_badge(
 
     Usage in markdown:
     ```
-    ![Trust](https://agentgraph.co/api/v1/public/scan/owner/repo/badge)
-    ![Adoption](https://agentgraph.co/api/v1/public/scan/owner/repo/badge?metric=adoption)
+    ![Trust](https://agentavow.com/api/v1/public/scan/owner/repo/badge)
+    ![Adoption](https://agentavow.com/api/v1/public/scan/owner/repo/badge?metric=adoption)
     ```
     """
     full_name = f"{owner}/{repo}"

@@ -4,20 +4,32 @@
 
 > Trust-gated AutoGen tools for the AgentAvow trust network
 
-**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/agentgraph/issues)
+**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/AgentAvow/issues)
 
 ## Install
 
 ```bash
-pip install agentgraph-bridge-autogen
+pip install agentavow-bridge-autogen
 
 # With AutoGen support:
-pip install agentgraph-bridge-autogen[autogen]
+pip install agentavow-bridge-autogen[autogen]
 ```
+
+> **AutoGen version note.** The examples below use the AutoGen **0.2** API
+> (`from autogen import register_function, AssistantAgent, UserProxyAgent`).
+> The `[autogen]` extra pins `autogen-agentchat>=0.2.0`, which today resolves
+> to the 0.4+ line (`import autogen_agentchat`) where `import autogen` and
+> `register_function` no longer exist. To run these examples as written,
+> install the 0.2 API explicitly: `pip install "autogen-agentchat<0.4"`
+> (or the `pyautogen` / `ag2` fork). On 0.4+, the trust gate itself still
+> works — `trust_gated_tool` returns a plain callable — so wrap the function
+> in `autogen_core.tools.FunctionTool` and pass it to an
+> `autogen_agentchat.agents.AssistantAgent(tools=[...])` instead of
+> `register_function`.
 
 ## Trust-Gated Tools
 
-Wrap any function with an AgentGraph trust check before registering it with AutoGen. The wrapper will verify the trust score of the underlying repo/package before every execution.
+Wrap any function with an AgentAvow trust check before registering it with AutoGen. The wrapper will verify the trust score of the underlying repo/package before every execution.
 
 ```python
 from agentgraph_bridge_autogen import trust_gated_tool
@@ -73,7 +85,7 @@ safe_tool = trust_gated_tool(my_func, "owner/repo", guard=guard)
 from agentgraph_bridge_autogen import check_trust
 
 result = await check_trust("microsoft/autogen")
-print(f"{result.grade} ({result.score}/100) -- {result.reason}")
+print(f"{result.score}/100 {result.tier} -- {result.reason}")
 if result.allowed:
     # proceed
     ...
@@ -117,7 +129,7 @@ user_proxy.initiate_chat(assistant, message="Search for AI agent frameworks")
 
 ## What This Does
 
-This bridge provides trust-gated execution for AutoGen tool functions. It wraps callable functions so they check AgentGraph trust scores before running. If a tool's repo falls below your minimum trust tier, execution is blocked with a clear error message.
+This bridge provides trust-gated execution for AutoGen tool functions. It wraps callable functions so they check AgentAvow trust scores before running. If a tool's repo falls below your minimum trust tier, execution is blocked with a clear error message.
 
 Works with AutoGen's `register_function` pattern -- wrap your functions before registration and trust checks happen transparently on every call.
 

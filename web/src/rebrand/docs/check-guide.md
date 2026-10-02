@@ -21,6 +21,21 @@ GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}
 
 The result is cached for 1 hour. Add `?force=true` to force a fresh scan.
 
+### Pin a version
+
+A package scan reads the latest release unless you say otherwise. Add `?version=` to scan the exact release
+you are about to install:
+
+```
+GET https://agentavow.com/api/v1/public/scan/package/{npm|pypi|crates|docker}/{name}?version=1.2.3
+```
+
+For npm, PyPI and crates that is the published version; for a container image it is the tag. The scan
+runs on that release's bytes, and a published advisory (GHSA / PYSEC / CVE) against the package itself is
+reported as a finding only when it affects the version scanned, with the fixed release named in the
+remediation. In the [MCP connector](./mcp-connector.md), pin the same way inside the package name:
+`chalk@5.3.0`, `@scope/name@1.2.3`, `requests==2.32.5`, `serde@1.0.200`.
+
 ## The score
 
 Every scan returns a single **0–100 trust score**. The score is the headline; the subscores tell you *why*.
@@ -32,18 +47,25 @@ It maps to a **tier** (higher is safer):
 - **20–39 · Restricted** — high-severity issues present; human-in-the-loop.
 - **0–19 · Blocked** — critical issues; do not connect.
 
-The earned top tier, **Certified**, is separate — a score of 96+ *plus* verified provenance, no drift, and full
-coverage (see [How scoring works](./how-grading-works.md)).
+**Certified** is not a score band. It is a separate set of checks the response reports under
+`certified.checks` — the published artifact was scanned, build provenance is verified, no drift, no
+critical or high finding, the verdict recomputes offline, and the whole tree was read — and every check must
+pass (see [How scoring works](./how-grading-works.md)).
 
 ### Subscores
 
-The overall score is composed from category subscores, each independently scored:
+The trust score is computed from the findings themselves (penalties by severity, with ceilings for blocking
+findings), not averaged from the subscores. Alongside it, five subscores are reported as independent axes so
+you can see where the findings land:
 
 - **Secret hygiene** — hardcoded tokens, keys, credentials
-- **Code safety** — unsafe `exec`/shell, dangerous sinks
-- **Data handling** — exfiltration surfaces, over-broad permissions
-- **Dependencies** — known-vulnerable packages
-- …across **12 detection categories** total.
+- **Code safety** — unsafe `exec`/shell, obfuscation, prompt injection, remote code loading, insecure deserialization, published advisories
+- **Data handling** — exfiltration surfaces, toxic capability combinations
+- **Filesystem access** — unrestricted file reads and writes
+- **Dependency health** — known-vulnerable or malicious dependencies, install hooks, deprecated packages
+
+Each finding carries a finer category (`prompt_injection`, `exfiltration`, `install_hook`, …) that maps onto
+one of these five axes.
 
 ## Score → recommended posture
 
@@ -100,7 +122,7 @@ you can recompute it. See [Verify an AgentAvow attestation](./verify-attestation
 
 Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its score drops
 or its signed definition changes — the rug-pull you'd otherwise miss. For an MCP server the attestation pins
-one digest per served tool (`scan.toolDigests`, keyed by tool name) plus a digest of the whole set, and a
+one digest per served tool (`scan.toolDigests`, keyed `tool:<name>`) plus a digest of the whole set, and a
 re-scan reports `toolDrift` — which tools were added, removed or changed since the last grade — so you can
 see exactly what moved, not just that something did. A gate can recompute the digest of the tool it is about
 to call from the server's own `tools/list` and refuse on mismatch; see

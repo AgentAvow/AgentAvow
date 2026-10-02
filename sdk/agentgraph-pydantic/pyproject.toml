@@ -36,7 +36,7 @@ dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
 [project.urls]
 Homepage = "https://agentavow.com"
 Documentation = "https://agentavow.com/docs"
-Repository = "https://github.com/AgentAvow/agentgraph"
+Repository = "https://github.com/AgentAvow/AgentAvow"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentgraph_pydantic"]

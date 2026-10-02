@@ -1,4 +1,5 @@
 import { Reveal, RevealStagger } from '../components/motion'
+import SEOHead from '../../components/SEOHead'
 
 /**
  * Research hub (rebrand) — self-published reports + specs. On a trust product,
@@ -24,6 +25,11 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 export default function RebrandResearch() {
   return (
     <div className="max-w-[880px] mx-auto px-6 py-16">
+      <SEOHead
+        title="Research & standards"
+        description="Quarterly reports and open specifications on agent-tool safety — every number backed by signed, reproducible scan evidence you can recompute yourself."
+        path="/research"
+      />
       <Reveal>
         <div className="max-w-[62ch]">
           <Eyebrow>Research</Eyebrow>

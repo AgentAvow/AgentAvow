@@ -16,7 +16,7 @@ dev = ["pytest>=7.0", "pytest-asyncio>=0.21"]
 [project.urls]
 Homepage = "https://agentavow.com"
 Documentation = "https://agentavow.com/docs"
-Repository = "https://github.com/AgentAvow/agentgraph"
+Repository = "https://github.com/AgentAvow/AgentAvow"
 
 [build-system]
 requires = ["hatchling"]

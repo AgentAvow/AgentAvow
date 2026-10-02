@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { isValidElement, useEffect, type ReactNode } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import Markdown from 'react-markdown'
+import SEOHead from '../../components/SEOHead'
+import { slugify } from '../lib/slugify'
 import howGradingWorks from '../docs/how-grading-works.md?raw'
 import gateOnTheGrade from '../docs/gate-on-the-grade.md?raw'
 import checkGuide from '../docs/check-guide.md?raw'
@@ -18,17 +20,37 @@ import behavioralSandbox from '../docs/behavioral-sandbox.md?raw'
  * cutover these get wired into the backend docs system (see docs/rebrand/README.md).
  */
 
+// `blurb` is the page's meta description (≤155 chars). Keep slugs in sync with the
+// DOCS list in src/api/docs_content_router.py (SSR of the same files).
 const DOCS = [
-  { slug: 'how-grading-works', title: 'How scoring works', body: howGradingWorks },
-  { slug: 'gate-on-the-grade', title: 'Gate on the score', body: gateOnTheGrade },
-  { slug: 'check-guide', title: 'Reading your scan score', body: checkGuide },
-  { slug: 'behavioral-sandbox', title: 'Behavioral sandbox', body: behavioralSandbox },
-  { slug: 'run-locally', title: 'Run locally & in CI', body: runLocally },
-  { slug: 'trust-badges', title: 'Add a trust badge', body: trustBadges },
-  { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations },
-  { slug: 'mcp-connector', title: 'MCP connector', body: mcpConnector },
-  { slug: 'auto-scan-claude-code', title: 'Auto-scan in Claude Code', body: autoScanClaudeCode },
+  { slug: 'how-grading-works', title: 'How scoring works', body: howGradingWorks,
+    blurb: 'How the 0–100 trust score and the adoption score are computed from scan findings, and why anyone can recompute them offline.' },
+  { slug: 'gate-on-the-grade', title: 'Gate on the score', body: gateOnTheGrade,
+    blurb: 'Block a tool below a minimum trust score — per call, in CI with the GitHub Action, at runtime in your agent, or anywhere via the API.' },
+  { slug: 'check-guide', title: 'Reading your scan score', body: checkGuide,
+    blurb: 'What a check result means: the trust score, the adoption score, subscores, findings, the recommended posture, and the signature under it.' },
+  { slug: 'behavioral-sandbox', title: 'Behavioral sandbox', body: behavioralSandbox,
+    blurb: 'What the behavioral sandbox runs, what it observes, how a signed observation moves the trust score, and what a clean run does not prove.' },
+  { slug: 'run-locally', title: 'Run locally & in CI', body: runLocally,
+    blurb: 'Run the same scanner on your own machine or in CI and get the same trust score as agentavow.com — no drift, no account.' },
+  { slug: 'trust-badges', title: 'Add a trust badge', body: trustBadges,
+    blurb: 'Add a trust-score badge and an adoption badge to your README — a one-line SVG that links to the full verifiable report.' },
+  { slug: 'verify-attestations', title: 'Verify an attestation', body: verifyAttestations,
+    blurb: 'Verify an AgentAvow attestation offline: fetch the public JWKS, check the Ed25519 signature, and recompute the trust score byte for byte.' },
+  { slug: 'mcp-connector', title: 'MCP connector', body: mcpConnector,
+    blurb: 'Connect the AgentAvow MCP server to Claude, Cursor, or VS Code and check any tool’s trust score before your agent connects to it.' },
+  { slug: 'auto-scan-claude-code', title: 'Auto-scan in Claude Code', body: autoScanClaudeCode,
+    blurb: 'Have Claude Code check every new tool’s trust score automatically — via the plugin, a CLAUDE.md rule, or a SessionStart hook.' },
 ]
+
+/** Plain text of a react-markdown heading's children, for its id. */
+function textOf(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  if (isValidElement<{ children?: ReactNode }>(node)) return textOf(node.props.children)
+  return ''
+}
 
 // Real destinations that already exist (were "coming at launch" placeholders).
 const MORE: [string, string][] = [
@@ -60,6 +82,7 @@ export default function RebrandDocs() {
   // Deep-linkable: /docs/<slug> selects a doc (shareable URLs); the bare /docs
   // lands on the first. Clicking a doc pushes the slug so the URL stays copyable.
   const { slug } = useParams()
+  const { hash } = useLocation()
   const navigate = useNavigate()
   const doc = DOCS.find((d) => d.slug === slug) ?? DOCS[0]
   const active = doc.slug
@@ -71,9 +94,17 @@ export default function RebrandDocs() {
   useEffect(() => {
     if (slug && !DOCS.some((d) => d.slug === slug)) navigate(rp('/rebrand/docs'), { replace: true })
   }, [slug, navigate])
+  // After the doc renders, land on the #anchor heading (direct hit, cross-doc link,
+  // or in-page link); with no anchor, a doc switch starts at the top.
+  useEffect(() => {
+    const el = hash.length > 1 ? document.getElementById(hash.slice(1)) : null
+    if (el) el.scrollIntoView()
+    else window.scrollTo({ top: 0 })
+  }, [doc.slug, hash])
 
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-14 grid md:grid-cols-[220px_1fr] gap-10">
+      <SEOHead title={`${doc.title} · Docs`} description={doc.blurb} path={`/docs/${doc.slug}`} />
       <aside className="md:sticky md:top-[86px] self-start">
         <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light mb-3">Verify an agent</div>
         <nav className="flex flex-col gap-1">
@@ -101,15 +132,18 @@ export default function RebrandDocs() {
 
       <article className={`min-w-0 ${PROSE}`}>
         <Markdown components={{
+          // GitHub-style ids on h2/h3 so #anchor links resolve (same ids as the SSR render).
+          h2: ({ children }) => <h2 id={slugify(textOf(children))} className="scroll-mt-24">{children}</h2>,
+          h3: ({ children }) => <h3 id={slugify(textOf(children))} className="scroll-mt-24">{children}</h3>,
           a: ({ href, children }) => {
             const h = href || ''
-            // In-doc cross-link (./slug.md): switch the active doc client-side instead of
-            // navigating to a .md URL that would hit the SPA catch-all and land on Home.
-            const m = h.match(/\.\/([\w-]+)\.md(?:#.*)?$/)
+            // In-doc cross-link (./slug.md or ./slug.md#anchor): switch the active doc
+            // client-side, keeping the anchor, instead of navigating to a .md URL that
+            // would hit the SPA catch-all and land on Home.
+            const m = h.match(/\.\/([\w-]+)\.md(#[\w-]+)?$/)
             if (m && DOCS.some((d) => d.slug === m[1])) {
               return (
-                <a href={`#${m[1]}`} className="text-primary-light hover:underline cursor-pointer"
-                  onClick={(e) => { e.preventDefault(); setActive(m[1]); window.scrollTo({ top: 0 }) }}>{children}</a>
+                <Link to={rp(`/rebrand/docs/${m[1]}`) + (m[2] ?? '')} className="text-primary-light hover:underline">{children}</Link>
               )
             }
             const external = /^https?:/.test(h)

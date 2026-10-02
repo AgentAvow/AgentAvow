@@ -25,8 +25,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.deps import get_current_entity, require_admin
 from src.api.rate_limit import rate_limit_reads
 from src.database import get_db
+from src.models import Entity
 
 logger = logging.getLogger(__name__)
 
@@ -662,8 +664,12 @@ async def scan_catalog(
 
 
 @router.post("/refresh", include_in_schema=False)
-async def refresh_catalog() -> dict[str, Any]:
-    """Force-rebuild the in-memory catalog from disk (admin/internal use)."""
+async def refresh_catalog(
+    current_entity: Entity = Depends(get_current_entity),
+) -> dict[str, Any]:
+    """Force-rebuild the in-memory catalog from disk. Admin only: the rebuild reads
+    every scan file on disk, so an anonymous caller must not be able to trigger it."""
+    require_admin(current_entity)
     global _CATALOG_CACHE
     _CATALOG_CACHE = None
     catalog = _get_catalog()

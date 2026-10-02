@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { claudeCodeStdio, cursorStdio, stdioServersConfig, vscodeStdio } from '../lib/installLinks'
 import { Reveal, RevealStagger } from '../components/motion'
+import SEOHead from '../../components/SEOHead'
 
 // Our own MCP server as a stdio target — the "is this safe to install?" check.
 const AA_MCP = { name: 'agentavow-trust', command: 'uvx', args: ['agentavow-trust'] }
@@ -59,6 +60,11 @@ export default function RebrandForDevelopers() {
 
   return (
     <div className="max-w-[960px] mx-auto px-6 py-16">
+      <SEOHead
+        title="For developers — ship a tool your users can trust"
+        description="A signed, offline-recomputable trust score and adoption score for the MCP server, package, or tool you publish. Scan it, fix findings, badge your README."
+        path="/for-developers"
+      />
       {/* hero — the thesis, aimed at the tool author */}
       <Reveal>
         <div className="max-w-[64ch]">
@@ -88,7 +94,7 @@ export default function RebrandForDevelopers() {
       <RevealStagger className="grid sm:grid-cols-2 gap-3 mt-5" stagger={0.05}>
         {[
           ['Signed, not "trust us"', 'Every score is cryptographically signed (Ed25519) — so you can prove WHO issued it, WHEN, and that nobody tampered with the number in your README. Others give you a number to take on faith or re-derive; ours carries a signature you verify offline against our public keys. Tamper-evident is the part they can’t copy.'],
-          ['Stand out in a crowded space', 'MCP servers and agent tools are multiplying. A signed high score is a real differentiator for a new project with no reputation yet — a trust signal to YOUR users.'],
+          ['Stand out in a crowded space', 'MCP servers and agent tools are multiplying. A signed high score is a real differentiator for a new project nobody has vetted yet — a trust signal to YOUR users.'],
           ['One score, everywhere your code lives', 'MCP server, npm, PyPI, GitHub repo, or skill — one recomputable score across all of them, that travels with the artifact instead of dying inside one directory.'],
           ['Actionable, not a black box', 'Score poorly and the report points at the exact file and line, with the fix. Score well and you get the badge. Either way you learn something.'],
         ].map(([h, p]) => (

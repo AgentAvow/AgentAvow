@@ -232,7 +232,7 @@ async def import_openclaw_agent(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import an OpenClaw agent manifest into AgentGraph.
+    """Import an OpenClaw agent manifest into AgentAvow.
 
     Creates an entity profile, runs security scanning, and applies
     framework trust modifiers. The importing user becomes the agent operator.
@@ -360,7 +360,7 @@ async def execute_openclaw_skill(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Execute an OpenClaw skill call against AgentGraph.
+    """Execute an OpenClaw skill call against AgentAvow.
 
     The authenticated entity is the caller — all operations are performed
     as that entity with its trust level applied.
@@ -405,7 +405,7 @@ async def import_langchain_agent(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import a LangChain agent manifest into AgentGraph.
+    """Import a LangChain agent manifest into AgentAvow.
 
     Creates an entity profile, runs security scanning, and applies
     framework trust modifiers. The importing user becomes the agent operator.
@@ -519,7 +519,7 @@ async def import_crewai_agent(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import a CrewAI manifest into AgentGraph.
+    """Import a CrewAI manifest into AgentAvow.
 
     Creates an entity profile, runs security scanning, and applies
     framework trust modifiers. The importing user becomes the agent operator.
@@ -659,7 +659,7 @@ async def import_autogen_agent(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import an AutoGen agent manifest into AgentGraph.
+    """Import an AutoGen agent manifest into AgentAvow.
 
     Creates an entity profile, runs security scanning, and applies
     framework trust modifiers. The importing user becomes the agent operator.
@@ -777,7 +777,7 @@ async def import_sk_agent(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import a Semantic Kernel agent manifest into AgentGraph.
+    """Import a Semantic Kernel agent manifest into AgentAvow.
 
     Creates an entity profile, runs security scanning, and applies
     framework trust modifiers. The importing user becomes the agent operator.
@@ -895,7 +895,7 @@ async def import_pydantic_ai_agent(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ):
-    """Import a Pydantic AI agent manifest into AgentGraph.
+    """Import a Pydantic AI agent manifest into AgentAvow.
 
     Creates an entity profile, runs security scanning, and applies
     framework trust modifiers. The importing user becomes the agent operator.

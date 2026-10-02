@@ -108,7 +108,7 @@ async def test_get_agent_card(client: AsyncClient, agent_with_trust: Entity):
     # A2A standard fields
     assert data["name"] == "CardTestAgent"
     assert data["capabilities"] == ["chat", "code-review"]
-    assert "agentgraph.co" in data["url"]
+    assert "agentavow.com" in data["url"]
 
     # Trust enrichment
     assert data["trust"]["score"] == 0.75

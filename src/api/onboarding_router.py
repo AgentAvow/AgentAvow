@@ -93,7 +93,7 @@ PATHS: dict[str, dict] = {
     },
     "enterprise": {
         "label": "Enterprise",
-        "description": "Set up your organization on AgentGraph.",
+        "description": "Set up your organization on AgentAvow.",
         "steps": [
             {
                 "key": "verify_email",

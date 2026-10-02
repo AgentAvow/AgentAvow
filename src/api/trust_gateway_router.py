@@ -403,7 +403,7 @@ async def gateway_re_verify(
         )
         verdict_payload = {
             "type": "MutationBoundaryReverify",
-            "issuer": {"id": "did:web:agentgraph.co", "name": "AgentGraph"},
+            "issuer": {"id": "did:web:agentgraph.co", "name": "AgentAvow"},
             "subject": {"repo": request.repo},
             "verified": False,
             "action_class": request.action_class,
@@ -471,7 +471,7 @@ async def gateway_re_verify(
 
     verdict_payload = {
         "type": "MutationBoundaryReverify",
-        "issuer": {"id": "did:web:agentgraph.co", "name": "AgentGraph"},
+        "issuer": {"id": "did:web:agentgraph.co", "name": "AgentAvow"},
         "subject": {"repo": request.repo, "id": f"github:{request.repo}"},
         "verified": verified,
         "action_class": request.action_class,
@@ -539,7 +539,7 @@ async def gateway_stats() -> dict:
         "status": "operational",
         "version": "v1",
         "description": "Trust-tiered enforcement gateway for AI agent tool execution",
-        "docs": "https://agentgraph.co/docs/trust-gateway",
+        "docs": "https://agentavow.com/docs/trust-gateway",
         "endpoints": {
             "check": "POST /api/v1/gateway/check",
             "re_verify": "POST /api/v1/gateway/re-verify",
@@ -596,7 +596,7 @@ async def webhook_subscribe(
 ) -> WebhookSubscribeResponse:
     """Register an outbound webhook for scan-score-change notifications.
 
-    When the security scan score changes for the specified repo, AgentGraph
+    When the security scan score changes for the specified repo, AgentAvow
     will POST a signed payload to the callback URL containing:
     ``{repo, new_score, old_score, changed_at, jws}``.
 

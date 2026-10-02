@@ -11,7 +11,7 @@ We publish **two** scores and never mix them:
 - **Trust** — *is it safe?* The signed 0–100 score, from static analysis + supply-chain + provenance.
 - **Adoption** — *do real, independent parties rely on it?* A distinct signal (with "rising" vs "established" states) from downloads, reverse-dependents, stars, and first-party data.
 
-A widely-adopted tool can still be a serious trust risk (bigger blast radius, not higher trust). A pristine unknown can be top-tier **Trusted** with near-zero adoption. **Popular is not the same as safe** — so adoption never raises the trust score. It only weights how *grave* a finding is (a CVE in a package with 40k dependents matters more than one with none).
+A widely-adopted tool can still be a serious trust risk (bigger blast radius, not higher trust). A pristine unknown can be top-tier **Trusted** with near-zero adoption. **Popular is not the same as safe** — so adoption is never an input to the trust score or to the safe / needs-review verdict. A CVE costs the same points in a package with 40k dependents as in one with none. Adoption is the second score, reported beside the first: it tells you how many independent parties rely on the tool, which is what is at stake if the trust score is wrong.
 
 ## The trust score: 0–100
 
@@ -65,12 +65,12 @@ Static analysis reads a tool. For packages and MCP servers we also **run** it: a
 
 Point AgentAvow at anything your agent connects to — a repo, a package on four registries, a model, a container, a live server, or a skill:
 
-- **GitHub repo** (`github.com/owner/repo`) — the 12-category static scan of the source. Large monorepos are scored on a **shipped-code-first sample** (test/vendored files ranked last), disclosed as `sampled`.
+- **GitHub repo** (`github.com/owner/repo`) — the static scan of the source. Large monorepos are scored on a **shipped-code-first sample** (test/vendored files ranked last), disclosed as `sampled`.
 - **npm package** (`npm:chalk`) — the **published artifact**: real bytes, drift vs source, install-hook detection, and its build provenance.
 - **PyPI package** (`pypi:requests`) — the published sdist/wheel: real bytes, `setup.py` install-exec, drift, and provenance.
 - **crates (Rust)** (`crates:serde`) — the published `.crate`, the real extracted tree through the same engine.
 - **Hugging Face model** (`hf:org/model`) — the model card, configs, and any custom `modeling_*.py` — **plus a census of the weight format**: pickle-backed weights (`.bin`/`.pt`/`.ckpt`) execute arbitrary code on load, so they raise an `insecure_deserialization` finding (a safetensors copy lowers it).
-- **Container image** (`docker:nginx`, `ghcr.io/org/img`) — the **image config** (runs-as-root, secrets baked into `ENV`/labels, exposed SSH, a stale base) **plus a bounded scan of the actual layer filesystem** (the 12-category engine over the code baked into the image, newest layers first).
+- **Container image** (`docker:nginx`, `ghcr.io/org/img`) — the **image config** (runs-as-root, secrets baked into `ENV`/labels, exposed SSH, a stale base) **plus a bounded scan of the actual layer filesystem** (the same static engine over the code baked into the image, newest layers first).
 - **MCP server** (`mcp:https://…`) — the **live tool surface** it actually serves: schema risk, hidden instructions in tool descriptions, dangerous-capability taxonomy + the lethal trifecta, annotation truthfulness.
 - **Agent Skill (OpenClaw)** (`owner/repo`) — the capability manifest: the `allowed-tools` **auto-exec grant**, always-loaded-description injection, lifecycle-hook escalation, and credential-exfil in bundled scripts.
 
@@ -82,4 +82,4 @@ Every score page has an **"Add to your agent"** button — the scored tool, read
 
 ## Adoption, per surface
 
-The second score is real and surface-specific — never a fabricated number. npm/PyPI use registry downloads + reverse-dependents; crates and Hugging Face use downloads (and HF likes); containers use Docker Hub pulls; repos, MCP servers, and skills use GitHub stars. A live MCP endpoint with no repo behind it shows **no adoption signal** rather than a guess. Adoption sorts the catalog ("widely relied upon") and weights finding gravity — it never moves the trust score.
+The second score is real and surface-specific — never a fabricated number. npm/PyPI use registry downloads + reverse-dependents; crates and Hugging Face use downloads (and HF likes); containers use Docker Hub pulls; repos, MCP servers, and skills use GitHub stars. A live MCP endpoint with no repo behind it shows **no adoption signal** rather than a guess. Adoption sorts the catalog ("widely relied upon") and is shown beside the trust score — it never moves it.

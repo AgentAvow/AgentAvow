@@ -140,7 +140,7 @@ async def og_check(
             )
 
     verdict = _verdict_text(grade)
-    title = f"Is {full_name} Safe? Grade: {grade} ({score}/100)"
+    title = f"Is {full_name} Safe? Trust score {score}/100"
     description = f"Security scan: {verdict}."
 
     # Add findings summary if from cache
@@ -226,11 +226,10 @@ async def og_profile(
 
     if ts:
         score100 = round(ts.score * 100)
-        grade = _grade_from_score(score100)
-        title = f"{display_name} on AgentAvow — Trust Score: {grade} ({score100}/100)"
+        title = f"{display_name} on AgentAvow — Trust score {score100}/100"
         description = (
             f"{entity_type} with verified identity on AgentAvow. "
-            f"Trust grade: {grade} ({score100}/100)."
+            f"Trust score {score100}/100."
         )
     else:
         title = f"{display_name} on AgentAvow"
@@ -270,7 +269,7 @@ def _og_image_url(title: str, grade: str, score, subtitle: str) -> str:
 
 def _og_verdict(score: int | None) -> str:
     if score is None:
-        return "A signed safety grade — verify it offline."
+        return "A signed safety score — verify it offline."
     if score >= 81:
         return "Safe to use · signed, verifiable offline."
     if score >= 61:
@@ -299,7 +298,8 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
     if not subtitle:
         subtitle = _og_verdict(score)
     title = f"{name} ({surface})"
-    description = f"{name} scored {grade or '—'} on AgentAvow — {_og_verdict(score)}"
+    _shown = "—" if score is None else f"{int(score)}/100"
+    description = f"{name} scored {_shown} on AgentAvow — {_og_verdict(score)}"
     image_url = _og_image_url(full, grade, score, subtitle)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 
@@ -318,7 +318,8 @@ async def og_skill(owner: str, repo: str, db: AsyncSession = Depends(get_db)) ->
         grade = cached.get("grade") or _grade_from_score(score or 0)
     subtitle = "OpenClaw agent skill · " + _og_verdict(score)
     title = f"{full_name} — Agent Skill"
-    description = f"{full_name} scored {grade or '—'} on AgentAvow — {_og_verdict(score)}"
+    _shown = "—" if score is None else f"{int(score)}/100"
+    description = f"{full_name} scored {_shown} on AgentAvow — {_og_verdict(score)}"
     image_url = _og_image_url(full_name, grade, score, subtitle)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 

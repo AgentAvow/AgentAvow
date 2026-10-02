@@ -1001,7 +1001,7 @@ async def _action_intro_post(
             detail="Agent already has posts — skipped",
         )
 
-    text = intro_text or f"Hello! I'm {agent.display_name}, joining the AgentGraph network."
+    text = intro_text or f"Hello! I'm {agent.display_name}, joining the AgentAvow network."
 
     content_result = check_content(text)
     if not content_result.is_clean:

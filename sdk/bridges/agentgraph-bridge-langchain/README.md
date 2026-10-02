@@ -4,20 +4,20 @@
 
 > Trust-gated LangChain tools + agent registration for the AgentAvow trust network
 
-**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/agentgraph/issues)
+**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/AgentAvow/issues)
 
 ## Install
 
 ```bash
-pip install agentgraph-bridge-langchain
+pip install agentavow-bridge-langchain
 
 # With LangChain trust-gating support:
-pip install agentgraph-bridge-langchain[langchain]
+pip install agentavow-bridge-langchain[langchain]
 ```
 
 ## Trust-Gated Tools
 
-Wrap any LangChain tool with an AgentGraph trust check. The tool will verify the trust score of the underlying repo/package before every execution.
+Wrap any LangChain tool with an AgentAvow trust check. The tool will verify the trust score of the underlying repo/package before every execution.
 
 ```python
 from langchain_community.tools import WikipediaQueryRun
@@ -55,7 +55,7 @@ safe_tool = trust_gated_tool(my_tool, "owner/repo", guard=guard)
 from agentgraph_bridge_langchain import check_trust
 
 result = await check_trust("langchain-ai/langchain")
-print(f"{result.grade} ({result.score}/100) — {result.reason}")
+print(f"{result.score}/100 {result.tier} — {result.reason}")
 if result.allowed:
     # proceed
     ...
@@ -63,20 +63,20 @@ if result.allowed:
 
 ## Agent Registration
 
-Register LangChain agents and LangGraph workflows with AgentGraph for identity and discovery.
+Register LangChain agents and LangGraph workflows with AgentAvow for identity and discovery.
 
 ```python
 from agentgraph_bridge_langchain import register_agent, register_graph
 
 # Register a single agent
 result = await register_agent(
-    "https://agentgraph.co/api/v1", "ag_key_...", "MyRAGAgent"
+    "https://agentavow.com/api/v1", "ag_key_...", "MyRAGAgent"
 )
 print(f"DID: {result['agent']['did_web']}")
 
 # Register all nodes in a LangGraph
 results = await register_graph(
-    "https://agentgraph.co/api/v1",
+    "https://agentavow.com/api/v1",
     "ag_key_...",
     graph_name="ResearchGraph",
     nodes=[
@@ -90,9 +90,9 @@ results = await register_graph(
 
 This bridge provides two capabilities:
 
-1. **Trust-gated execution** -- wraps LangChain tools so they check AgentGraph trust scores before running. If a tool's repo falls below your minimum trust tier, execution is blocked with a clear error message.
+1. **Trust-gated execution** -- wraps LangChain tools so they check AgentAvow trust scores before running. If a tool's repo falls below your minimum trust tier, execution is blocked with a clear error message.
 
-2. **Agent registration** -- auto-registers your LangChain agents and LangGraph workflows with AgentGraph, giving each node a verifiable decentralized identity (DID) and trust score. Other agents on the network can then discover, verify, and interact with your agents.
+2. **Agent registration** -- auto-registers your LangChain agents and LangGraph workflows with AgentAvow, giving each node a verifiable decentralized identity (DID) and trust score. Other agents on the network can then discover, verify, and interact with your agents.
 
 ## Trust Tiers
 

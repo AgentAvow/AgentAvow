@@ -126,7 +126,7 @@ def _build_payload(
         "type": "SecurityPostureAttestation",
         "issuer": {
             "id": "did:web:agentgraph.co",
-            "name": "AgentGraph",
+            "name": "AgentAvow",
             "url": "https://agentgraph.co",
         },
         "subject": {
@@ -259,7 +259,7 @@ async def get_composed_slot(
     """Return the ``agentgraph-scan-v1-structural`` slot for *entity_id*.
 
     Designed to be dropped into the APS composed-v1 envelope as the
-    ``static_analysis`` signal. Does NOT expose AgentGraph's internal
+    ``static_analysis`` signal. Does NOT expose AgentAvow's internal
     scoring weights — only the published gate vocabulary + letter grade.
     """
     # Look up entity
@@ -318,7 +318,7 @@ async def get_composed_slot(
     # the legacy null-stripping canonicalize() here — that was the B6 mismatch.
     evidence_hash = compute_evidence_hash(native_payload)
     evidence_url = (
-        f"https://agentgraph.co/api/v1/entities/{entity.id}/attestation/security"
+        f"https://agentavow.com/api/v1/entities/{entity.id}/attestation/security"
     )
 
     inputs = ScanInputs(

@@ -39,7 +39,7 @@ dev = [
 [project.urls]
 Homepage = "https://agentavow.com"
 Documentation = "https://agentavow.com/docs/bridges/crewai"
-Repository = "https://github.com/AgentAvow/agentgraph"
+Repository = "https://github.com/AgentAvow/AgentAvow"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentgraph_bridge_crewai"]

@@ -64,7 +64,7 @@ The Open Agent Trust Registry defines a federated trust model for AI agents. Thi
 ## Documentation
 
 - [Open Agent Trust Registry spec](https://github.com/FransDevelopment/open-agent-trust-registry)
-- [AgentGraph docs](https://agentgraph.co/docs)
+- [AgentAvow docs](https://agentavow.com/docs)
 
 ## Contributing
 

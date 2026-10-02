@@ -94,7 +94,7 @@ async def mcp_registry_auth() -> PlainTextResponse:
 async def webhook_test_vectors() -> JSONResponse:
     """Publish deterministic test vectors for the partner scan-change webhook.
 
-    Partners building a receive-side verifier for AgentGraph's outbound
+    Partners building a receive-side verifier for AgentAvow's outbound
     ``scan-change`` events can reproduce the HMAC locally and confirm
     byte-for-byte agreement with our sender before a live shared secret
     is exchanged. The canonical form is identical to what production
@@ -143,7 +143,7 @@ async def webhook_test_vectors() -> JSONResponse:
                     "jws string — real outbound events carry a valid JWS."
                 ),
                 "partner_docs": (
-                    "https://agentgraph.co/api/v1/gateway/webhook/subscribe"
+                    "https://agentavow.com/api/v1/gateway/webhook/subscribe"
                 ),
             },
             "test_vector": {
@@ -348,12 +348,12 @@ async def cte_test_vectors() -> JSONResponse:
     """Publish deterministic test vectors for CTEF v0.3 canonicalization.
 
     Partners building a CTEF v0.3 verifier (or a provider that composes
-    with AgentGraph bilaterally) can reproduce the canonical bytes + the
+    with AgentAvow bilaterally) can reproduce the canonical bytes + the
     delegation-chain-root hash locally and confirm byte-for-byte
-    agreement with AgentGraph's canonicalizer. The canonical form is
+    agreement with AgentAvow's canonicalizer. The canonical form is
     identical to ``src.signing.canonicalize_jcs_strict`` and is validated
     against the APS bilateral-delegation fixture (10 JCS vectors, all
-    passing) — so an APS-conformant verifier and an AgentGraph-conformant
+    passing) — so an APS-conformant verifier and an AgentAvow-conformant
     verifier MUST produce byte-exact agreement on the same input.
 
     The two example envelopes here (a ``TrustAttestation`` carrying a
