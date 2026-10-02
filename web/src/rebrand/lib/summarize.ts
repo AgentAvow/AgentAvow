@@ -3,6 +3,7 @@
  * straight from the scan data (no LLM, nothing to leak, nothing to hallucinate).
  * The goal: anyone can read this and decide "is this safe for me?" in ten seconds.
  */
+import { getTrustTier } from '../../components/trust/gradeSystem'
 
 const CAT_HUMAN: Record<string, { good: string; weak: string }> = {
   secret_hygiene: { good: 'keeps secrets and API keys out of its code', weak: 'may expose secrets or API keys' },
@@ -37,12 +38,15 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
   const total = s.findings?.total ?? 0
   const cats = s.category_scores ?? {}
 
-  // Aligned to the trust tiers: Trusted (≥80) · Standard (≥60) · Caution (≥40) · below.
-  // A solid Standard-tier tool reads as "generally safe", not "caution" — the old
-  // safe≥81/caution≥51 split (calibrated for inflated scores) mislabelled the whole
-  // 60–80 band as caution.
+  // Aligned to the six trust tiers (gradeSystem.ts getTrustTier): Verified / Trusted
+  // read as safe, Standard as ok, Minimal as caution, Restricted / Blocked as risky.
+  // A solid Standard-tier tool reads as "generally safe", not "caution".
+  const tier = getTrustTier(score).value
   const verdict: PlainSummary['verdict'] =
-    score >= 80 ? 'safe' : score >= 60 ? 'ok' : score >= 40 ? 'caution' : 'risky'
+    tier === 'verified' || tier === 'trusted' ? 'safe'
+    : tier === 'standard' ? 'ok'
+    : tier === 'minimal' ? 'caution'
+    : 'risky'
   const headline =
     verdict === 'safe' ? 'Looks safe to connect'
     : verdict === 'ok' ? 'Generally safe to connect'

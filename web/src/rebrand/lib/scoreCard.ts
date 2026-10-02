@@ -22,7 +22,7 @@ function esc(s: string): string {
 }
 
 // Adoption is brand teal, NEVER a trust/safety colour (fixes the old amber
-// #F59E0B collision with the trust "Caution" hue). Trust owns green→red.
+// #F59E0B collision with the trust "Minimal" hue). Trust owns green→red.
 const ADOPTION_HEX = '#2DD4BF'
 
 export function scoreCardSvg(d: ScoreCardData): string {

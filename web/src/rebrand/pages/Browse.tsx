@@ -44,12 +44,14 @@ const SEVERITIES = [
   { key: 'skipped', label: 'Skipped / errored' },
 ]
 
+// Tier floors are the API's (gradeSystem.ts TRUST_TIERS); the catalog filters on them.
 const GRADES = [
   { key: '', label: 'Any score' },
   { key: 'certified', label: '✦ Certified' },
-  { key: 'A', label: '80+ · Trusted' },
-  { key: 'B', label: '60+ · Standard' },
-  { key: 'C', label: '40+ · Caution' },
+  { key: 'verified', label: '96+ · Verified' },
+  { key: 'trusted', label: '81+ · Trusted' },
+  { key: 'standard', label: '51+ · Standard' },
+  { key: 'minimal', label: '31+ · Minimal' },
 ]
 
 const PAGE_SIZE = 30

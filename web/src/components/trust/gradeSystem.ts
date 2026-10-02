@@ -105,32 +105,45 @@ export function binaryVerdict(score: number, noBlockingCritHigh: boolean): 'safe
 }
 
 // ─── 0–100 Trust mark (dual-mark pivot 2026-08) ─────────────────────────────
-// The product now displays a 0–100 number + tier word, not an A–F letter.
-// Trust owns the semantic green→red scale; thresholds 80/60/40/20 per the locked
-// mark spec. The A–F helpers above are retained for legacy logic (e.g. verdict
-// keying, SEO strings) during the flip — display surfaces use getTrustTier().
+// The product displays a 0–100 number + tier word, not an A–F letter. The tiers
+// are the API's six (`trust_tier`: verified / trusted / standard / minimal /
+// restricted / blocked, floors 96/81/51/31/11/0) — ONE table, byte-identical to
+// `src/trust_tiers.py`; do not fork it. Trust owns the semantic green→red scale.
+// The A–F helpers above are retained for legacy logic (verdict keying, SEO
+// strings, the catalog's letter filter) — display surfaces use getTrustTier().
 
-export type TrustTierName = 'Trusted' | 'Standard' | 'Caution' | 'Restricted' | 'Blocked'
+export type TrustTierValue = 'verified' | 'trusted' | 'standard' | 'minimal' | 'restricted' | 'blocked'
+export type TrustTierName = 'Verified' | 'Trusted' | 'Standard' | 'Minimal' | 'Restricted' | 'Blocked'
 
 export interface TrustTier {
-  name: TrustTierName
-  min: number
-  color: string       // vivid — for bars/rings/needles on dark
-  colorText: string   // darkened — for the number/word on light surfaces
-  posture: string     // recommended execution posture
+  value: TrustTierValue  // the API's `trust_tier` value (lowercase)
+  name: TrustTierName    // the display word
+  min: number            // score floor
+  color: string          // vivid — for bars/rings/needles on dark
+  colorText: string      // darkened — for the number/word on light surfaces
+  posture: string        // recommended execution posture
+  requestsPerMinute: number | null   // null = unlimited
+  maxTokensPerCall: number | null    // null = unlimited
+  requireConfirmation: boolean
 }
 
-const TRUST_TIERS: TrustTier[] = [
-  { name: 'Trusted',    min: 80, color: '#22C55E', colorText: '#15803D', posture: 'Auto-approve within budget' },
-  { name: 'Standard',   min: 60, color: '#5BBF3A', colorText: '#3F7D1F', posture: 'Standard rate + token limits' },
-  { name: 'Caution',    min: 40, color: '#F59E0B', colorText: '#B45309', posture: 'Confirm on sensitive calls' },
-  { name: 'Restricted', min: 20, color: '#F97316', colorText: '#C2410C', posture: 'Gated · manual approval' },
-  { name: 'Blocked',    min: 0,  color: '#EF4444', colorText: '#B91C1C', posture: 'Do not connect' },
+export const TRUST_TIERS: readonly TrustTier[] = [
+  { value: 'verified',   name: 'Verified',   min: 96, color: '#16A34A', colorText: '#166534', posture: 'Connect normally · no limits',  requestsPerMinute: null, maxTokensPerCall: null, requireConfirmation: false },
+  { value: 'trusted',    name: 'Trusted',    min: 81, color: '#22C55E', colorText: '#15803D', posture: 'Auto-approve within budget',    requestsPerMinute: 60,   maxTokensPerCall: 8192, requireConfirmation: false },
+  { value: 'standard',   name: 'Standard',   min: 51, color: '#5BBF3A', colorText: '#3F7D1F', posture: 'Standard rate + token limits',  requestsPerMinute: 30,   maxTokensPerCall: 4096, requireConfirmation: false },
+  { value: 'minimal',    name: 'Minimal',    min: 31, color: '#F59E0B', colorText: '#B45309', posture: 'Confirm on sensitive calls',    requestsPerMinute: 15,   maxTokensPerCall: 2048, requireConfirmation: true },
+  { value: 'restricted', name: 'Restricted', min: 11, color: '#F97316', colorText: '#C2410C', posture: 'Gated · manual approval',       requestsPerMinute: 5,    maxTokensPerCall: 1024, requireConfirmation: true },
+  { value: 'blocked',    name: 'Blocked',    min: 0,  color: '#EF4444', colorText: '#B91C1C', posture: 'Do not connect',                requestsPerMinute: 0,    maxTokensPerCall: 0,    requireConfirmation: true },
 ]
 
-/** Map a 0–100 score to its Trust tier (word, colour, posture). */
+/** Map a 0–100 score to its Trust tier (API value, word, colour, posture, limits). */
 export function getTrustTier(score: number): TrustTier {
   return TRUST_TIERS.find((t) => score >= t.min) ?? TRUST_TIERS[TRUST_TIERS.length - 1]
+}
+
+/** Look a tier up by the API's `trust_tier` value; an unknown value falls back to the score. */
+export function trustTierByValue(value: string | null | undefined, score: number): TrustTier {
+  return TRUST_TIERS.find((t) => t.value === value) ?? getTrustTier(score)
 }
 
 // ─── Dimension Scores ───
