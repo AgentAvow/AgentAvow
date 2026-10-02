@@ -1,6 +1,8 @@
 """Deterministic graders: crafted transcripts → findings. No sandbox, no network."""
 from __future__ import annotations
 
+import pytest
+
 from src.scanner.behavioral.graders import (
     GRADERS,
     grade,
@@ -263,3 +265,16 @@ def test_cloud_metadata_is_a_low_labelled_note_not_undeclared_egress():
     r2 = BehavioralResult(ran=True, surface="npm", coordinate="x",
                           unexpected_egress=["169.254.169.254", "evil.net"])
     assert ("behavioral_undeclared_egress", "high") in [(f.rule, f.severity) for f in grade(r2)]
+
+
+
+@pytest.mark.parametrize("path, cache", [
+    ("/tmp/data-gym-cache/9b5ad71b2ce5302211f9c61530b329a4922fc6a4", True),
+    ("/tmp/data-gym-cache", True),
+    ("/work/.cache/x", True), ("/work/hf_cache/model.bin", True),
+    ("/tmp/agentavow-lie.txt", False), ("/work/state.db", False),
+    ("/work/notes/cached-results.txt", False),   # a FILE named 'cached…' is still a write
+])
+def test_cache_named_directories_are_cache(path, cache):
+    from src.scanner.behavioral.graders import _is_cache_like
+    assert _is_cache_like(path) is cache

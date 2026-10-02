@@ -46,8 +46,19 @@ def _finding(rule: str, *, category: str, name: str, severity: str, evidence: st
 
 
 def _is_cache_like(path: str) -> bool:
+    """A cache write, not a modification: known cache paths, or any path under a
+    directory whose NAME says cache (tiktoken's /tmp/data-gym-cache/<sha>, *-cache,
+    .cache, cache_dir…). Validated 2026-10-02 on nia-mcp-server."""
     p = (path or "").replace("\\", "/")
-    return any(marker in p for marker in _CACHE_LIKE)
+    if any(marker in p for marker in _CACHE_LIKE):
+        return True
+    segments = [seg.lower() for seg in p.split("/") if seg]
+    if not segments:
+        return False
+    *parents, last = segments
+    # under a cache dir, or the cache dir itself (no extension); a FILE named 'cached…'
+    # elsewhere is a real write
+    return any("cache" in seg for seg in parents) or ("cache" in last and "." not in last)
 
 
 _SCRATCH_PREFIXES = ("/tmp/tmp", "/tmp/npm-", "/tmp/pip-", "/tmp/.", "/tmp/node-")
