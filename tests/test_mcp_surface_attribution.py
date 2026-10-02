@@ -32,6 +32,45 @@ def test_surface_from_ua(ua: str, expected: str) -> None:
     assert _surface_from_ua(ua) == expected
 
 
+@pytest.mark.parametrize(
+    "ua,expected",
+    [
+        # Real strings hitting /mcp (prod nginx, 48h to 2026-10-02).
+        ("claude-code/2.1.284 (claude-desktop, agent-sdk/0.3.284)", "claude-code"),
+        ("claude-code/2.1.286 (claude-vscode, agent-sdk/0.3.286)", "claude-code"),
+        ("claude-code/2.1.287 (cli)", "claude-code"),
+        ("claude-code/2.1.286 (local-agent, agent-sdk/0.3.286)", "claude-code"),
+        ("Claude-User", "claude"),
+        ("mcpbeat/0.1 (+https://mcpbeat.com/bot/; liveness check)", "other"),
+        ("SentinelOracle/0.1 (+https://glimind.com/opt-out; liveness-only)", "other"),
+        ("zevruna-monitor/1.0 (+https://zevruna.com)", "other"),
+        ("node", "other"),
+        ("undici", "other"),
+        ("Python/3.11 aiohttp/3.14.3", "other"),
+        ("Toucan-Datagen/1.0", "other"),
+        ("CALLSET-Directory/1 (health check of MCP Registry entries)", "other"),
+    ],
+)
+def test_surface_from_real_ua(ua: str, expected: str) -> None:
+    assert _surface_from_ua(ua) == expected
+
+
+@pytest.mark.parametrize(
+    "ua",
+    [
+        # Index crawlers that carry a vendor name must not count as that surface.
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; "
+        "+claudebot@anthropic.com)",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36; compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot",
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.2; "
+        "+https://openai.com/gptbot",
+    ],
+)
+def test_vendor_crawlers_are_other_not_a_surface(ua: str) -> None:
+    assert _surface_from_ua(ua) == "other"
+
+
 def test_claude_code_beats_bare_claude() -> None:
     # "claude-code" contains "claude"; ordering must resolve it to the plugin,
     # not the generic Claude Directory bucket.

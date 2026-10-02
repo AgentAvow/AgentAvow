@@ -430,6 +430,15 @@ async def request_id_middleware(request: Request, call_next) -> Response:
 
 
 @app.middleware("http")
+async def usage_scope_http_middleware(request: Request, call_next) -> Response:
+    """Decide what counts as usage: redirects and legacy-host requests reach no
+    usage counter (src/usage_scope)."""
+    from src.usage_scope import usage_scope_middleware
+
+    return await usage_scope_middleware(request, call_next)
+
+
+@app.middleware("http")
 async def request_logging_middleware(request: Request, call_next) -> Response:
     """Log every request with method, path, status, and timing."""
     import time as _time

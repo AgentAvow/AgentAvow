@@ -8,7 +8,12 @@ This classifies a request by its User-Agent so usage counters can be split into
 Best effort by design. A User-Agent is self-declared, so a crawler that spoofs a
 browser lands in ``human``; the point is to stop counting the honest bots, which
 are nearly all of them. Checked against 72 hours of production traffic on
-2026-10-01 (see tests/test_traffic_class.py for the real strings).
+2026-10-01 and re-checked against 48 hours on 2026-10-02 (see
+tests/test_traffic_class.py for the real strings).
+
+Order of tests: known crawlers that carry an agent vendor's name (ClaudeBot,
+GPTBot) first, then agent clients, then bots and HTTP libraries, then a real
+browser engine string; anything else is automated.
 """
 from __future__ import annotations
 
@@ -19,19 +24,30 @@ ClientClass = Literal["human", "agent", "automated"]
 
 CLIENT_CLASSES: tuple[ClientClass, ...] = ("human", "agent", "automated")
 
+# Index crawlers run by the AI vendors. Their strings carry the vendor's name
+# ("+claudebot@anthropic.com", "openai.com/searchbot"), so they must be settled
+# before the agent markers below or they would count as agents using the product.
+_VENDOR_CRAWLER_RE = re.compile(
+    r"claudebot|gptbot|oai-searchbot|anthropic-ai|perplexitybot/", re.IGNORECASE
+)
+
 # Clients that are an AI agent, or a tool acting for one, using the product as
-# intended. Checked first: "Claude-User (claude-code/…; +https://support.anthropic…)"
-# must not fall to the bot test below on a stray word.
+# intended. Checked before the bot test: "Claude-User (claude-code/…;
+# +https://support.anthropic…)" must not fall to it on a stray word. The
+# "<Vendor>-User" strings are the user-triggered fetchers (a person asked the
+# assistant something and it read our page), the same thing as Claude-User.
 _AGENT_MARKERS = (
     "agentavow-precheck",  # the Claude Code plugin's pre-connect hook
     "claude-user", "claude-code", "claude code", "claudecode", "anthropic",
-    "openai-mcp", "chatgpt",
+    "openai-mcp", "chatgpt", "perplexity-user",
     "cursor", "vscode", "visual studio code",
     "github-camo",  # a README rendering our badge — real adoption, not a crawler
 )
 
 # Crawlers, monitors and research scanners. Word-boundary on "bot" so "Robot" in a
-# product name still matches, but "bottom" does not.
+# product name still matches, but "bottom" does not. The last line is the tells a
+# crawler leaves when it appends itself to a real browser string: an opt-out URL
+# (ForestEngine), Google App Engine (VirusTotal), an "[ip:…]" tag (proxy scrapers).
 _BOT_RE = re.compile(
     r"\bbot\b|bot/|crawler|spider|slurp|monitor|probe|liveness|uptime|pingdom|"
     r"headless|lightpanda|phantom|census|archive|research|scoringengine|scanner|"
@@ -39,7 +55,8 @@ _BOT_RE = re.compile(
     r"protogrid|mcpmon|mcplane|tendle|facebookexternalhit|twitterbot|slackbot|"
     r"discordbot|whatsapp|telegrambot|linkedinbot|embedly|bingpreview|yandex|"
     r"baidu|duckduck|semrush|ahrefs|mj12|dotbot|petalbot|bytespider|gptbot|"
-    r"claudebot|ccbot|perplexitybot|applebot|amazonbot",
+    r"claudebot|ccbot|perplexitybot|applebot|amazonbot|"
+    r"opt-?out|appengine|\[ip:",
     re.IGNORECASE,
 )
 
@@ -64,6 +81,8 @@ def classify_user_agent(user_agent: str | None) -> ClientClass:
     """Bucket a User-Agent. Empty or unparseable strings count as automated."""
     ua = (user_agent or "").strip().lower()
     if not ua:
+        return "automated"
+    if _VENDOR_CRAWLER_RE.search(ua):
         return "automated"
     if any(marker in ua for marker in _AGENT_MARKERS):
         return "agent"

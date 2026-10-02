@@ -168,8 +168,16 @@ _SURFACE_MATCHERS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 def _surface_from_ua(ua: str) -> str:
     """Bucket a request's User-Agent into a known distribution surface. Best-effort;
-    unknown/dev traffic → 'other'."""
+    unknown/dev traffic → 'other'.
+
+    A crawler never lands in a product surface: ClaudeBot carries "anthropic" and
+    OAI-SearchBot carries "openai", and both are index crawlers, so anything
+    src.traffic_class calls automated goes to 'other' before the needles run."""
+    from src.traffic_class import classify_user_agent
+
     u = (ua or "").lower()
+    if classify_user_agent(u) == "automated":
+        return "other"
     for surface, needles in _SURFACE_MATCHERS:
         if any(n in u for n in needles):
             return surface

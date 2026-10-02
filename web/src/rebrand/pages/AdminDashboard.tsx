@@ -33,6 +33,7 @@ interface Metrics {
   private_repos?: { app_scans?: number; published_to_search?: number; app_installs_active?: number; onetime_scans_window?: number }
   alert_webhooks?: { active?: number }
   traffic_quality?: Record<string, { total?: number; human?: number; agent?: number; automated?: number }>
+  baseline?: { rules_changed_on?: string; rules?: string[] }
 }
 interface Draft { id: string; platform: string; content: string; topic: string | null; status: string; created_at: string; post_type?: string; llm_model?: string | null }
 interface Health { marketing_enabled?: boolean; anthropic_configured?: boolean; ollama_available?: boolean; daily_spend_usd?: number; monthly_spend_usd?: number; adapters?: Record<string, { configured: boolean; healthy: boolean }> }
@@ -250,6 +251,7 @@ function MetricsTab() {
           <Stat label="Badge fetches" value={fmt(h.badge_fetches)} sub={`${fmt(h.readme_renders)} in READMEs`} series={s.badge_fetches} />
           <Stat label="Watches created" value={fmt(h.watches_created)} series={s.watches_created} />
           <Stat label="Unique checkers" value={fmt(h.unique_checkers)} />
+          <Stat label="Unique humans" value={fmt(h.unique_humans)} sub="browser UA · per-day salted HLL" />
           <Stat label="Adoption lookups" value={fmt(h.adoption_hits)} series={s.adoption_hits} />
           <Stat label="Install clicks" value={fmt(h.install_clicks)} series={s.install_clicks} />
           <Stat label="Fresh re-scans" value={fmt(h.force_rescans)} series={s.force_rescans} />
@@ -262,6 +264,7 @@ function MetricsTab() {
           <Stat label="Private repo scans (GitHub App)" value={fmt(data?.private_repos?.app_scans)} sub={`${fmt(data?.private_repos?.app_installs_active)} installs · ${fmt(data?.private_repos?.published_to_search)} published`} />
           <Stat label="One-time private scans" value={fmt(data?.private_repos?.onetime_scans_window)} sub="token scans (window)" />
           <Stat label="Alert webhooks" value={fmt(data?.alert_webhooks?.active)} sub="active" />
+          <Stat label="Redirects (not usage)" value={fmt(h.requests_redirected)} sub="301/302/308 + old-domain hosts" series={s.requests_redirected} />
         </div>
       </Section>
 
@@ -370,6 +373,21 @@ function MetricsTab() {
             )
           })}
         </div>
+        {/* The counting rules and the date they changed — so the step down in every
+            usage line on that date reads as a rule change, not a drop. */}
+        {data?.baseline?.rules?.length ? (
+          <div className="glass rounded-2xl p-5 mt-4">
+            <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">
+              Counting rules · since {data.baseline.rules_changed_on ?? '—'}
+            </div>
+            <ul className="space-y-1">
+              {data.baseline.rules.map((rule) => (
+                <li key={rule} className="text-[12.5px] text-text-muted/80 pl-3 border-l border-primary/30">{rule}</li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-text-muted/60 mt-2">Every usage number above steps down on that date. That is the rules changing, not usage.</p>
+          </div>
+        ) : null}
       </Section>
 
       <Section title="Traffic funnel — where users drop off" note="Scan → watch → claim → install, with step-to-step conversion (this window).">
