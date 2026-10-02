@@ -28,7 +28,20 @@ def is_safe(data: dict) -> bool:
     no_blocking = checks.get("no_critical_or_high")
     if not isinstance(no_blocking, bool):
         no_blocking = not any(i.get("severity") in ("critical", "high") for i in items)
-    return score >= SAFE_BAR and bool(no_blocking)
+    return score >= SAFE_BAR and bool(no_blocking) and not sandbox_alarm(data)
+
+
+def sandbox_alarm(data: dict) -> bool:
+    """True when the behavioral sandbox caught something that must block a 'safe' call:
+    a leaked canary credential, or a high/critical behavioral finding. Reads the public
+    ``behavioral`` block (absent/pending → False)."""
+    b = data.get("behavioral")
+    if not isinstance(b, dict) or not b.get("ran"):
+        return False
+    if b.get("canary_exfil"):
+        return True
+    return any(str(f.get("severity")) in ("critical", "high")
+               for f in (b.get("findings") or []) if isinstance(f, dict))
 
 
 def verdict_reason(data: dict, safe: bool | None = None) -> str:
@@ -36,6 +49,9 @@ def verdict_reason(data: dict, safe: bool | None = None) -> str:
 
     - ``clean``             — safe.
     - ``blocking_findings`` — held back by a critical/high finding (real risk).
+    - ``sandbox_finding``   — the behavioral sandbox caught it (undeclared egress,
+                              a read-only tool that wrote, a leaked canary credential).
+    - ``deprecated``        — no risk found; the maintainer retired the package.
     - ``thin_coverage``     — no risk found, but too little code to inspect (<8 files).
     - ``low_signals``       — no risk found, held down by non-finding signals
                               (maintainer/provenance/adoption), not detected risk.
@@ -49,6 +65,11 @@ def verdict_reason(data: dict, safe: bool | None = None) -> str:
     items = (data.get("findings") or {}).get("items") or []
     if any(i.get("severity") in ("critical", "high") for i in items):
         return "blocking_findings"
+    if sandbox_alarm(data):
+        return "sandbox_finding"
+    dep = data.get("deprecation")
+    if isinstance(dep, str) and dep.strip():
+        return "deprecated"
     files = (data.get("metadata") or {}).get("files_scanned")
     return "thin_coverage" if isinstance(files, int) and 0 < files < 8 else "low_signals"
 

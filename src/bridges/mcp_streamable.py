@@ -857,6 +857,44 @@ def _incident_summary(ih: dict) -> dict | None:
     }
 
 
+def _sandbox_struct(data: dict) -> dict | None:
+    """The behavioral sandbox result as stable machine-readable fields. None when the
+    tier does not apply; ``pending`` True while the first run is still going."""
+    b = data.get("behavioral")
+    if not isinstance(b, dict):
+        return None
+    if b.get("pending") or not b.get("ran"):
+        return {"ran": False, "pending": bool(b.get("pending")),
+                "reason": b.get("reason") or None}
+    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else {}
+    gs = b.get("grade_summary") or {}
+    eff = data.get("behavioral_score_effect") or {}
+    att = b.get("attestation") or {}
+    findings = [{"rule": f.get("rule"), "severity": f.get("severity"), "name": f.get("name"),
+                 "evidence": (f.get("evidence") or "")[:200]}
+                for f in (b.get("findings") or []) if isinstance(f, dict)]
+    leaked = bool(b.get("canary_exfil"))
+    alarm = leaked or any(f["severity"] in ("critical", "high") for f in findings)
+    return {
+        "ran": True, "pending": False, "plan": b.get("plan"),
+        "server_started": bool(ex.get("launch_ok")) if ex else None,
+        "start_reason": gs.get("start_reason"),
+        "start_reason_detail": gs.get("start_reason_detail") or None,
+        "tools_listed": len(ex.get("tools") or []) if ex else 0,
+        "tools_called": len(ex.get("calls") or []) if ex else 0,
+        "egress_hosts": b.get("egress_hosts") or [],
+        "undeclared_egress": b.get("unexpected_egress") or [],
+        "vendor_egress": b.get("vendor_egress") or [],
+        "canary_env": (ex.get("canary") or {}).get("env_names") if ex else [],
+        "canary_leaked": leaked,
+        "findings": findings,
+        "alarm": alarm,
+        "score_effect": ({"delta": eff.get("delta"), "static_score": eff.get("static_score"),
+                          "reason": eff.get("reason")} if eff.get("applied") else None),
+        "signed_observation_at": att.get("observed_at") if isinstance(att, dict) else None,
+    }
+
+
 def _scan_struct(
     data: dict,
     target: str,
@@ -878,6 +916,18 @@ def _scan_struct(
     # Machine-readable "why": distinguishes a real risk review from a coverage cap.
     # Shared with the public API so the two surfaces never disagree.
     verdict_reason = _shared_verdict_reason(data, safe)
+    sandbox = _sandbox_struct(data)
+    # Behavioral high/critical findings are findings: a consumer that only reads
+    # findings_total / top_findings must see them (a model summarising structuredContent
+    # said "0 findings" about a server caught sending telemetry).
+    beh_items = [
+        {"severity": f.get("severity"), "category": f.get("category") or "behavioral",
+         "name": f.get("name"), "file_path": "<sandbox>", "sandbox": True}
+        for f in (sandbox or {}).get("findings") or []
+        if f.get("severity") in ("critical", "high")
+    ]
+    alarm = bool(sandbox and sandbox.get("alarm"))
+    dep = data.get("deprecation")
     return {
         "target": target,
         "target_type": target_type,
@@ -886,9 +936,25 @@ def _scan_struct(
         "tier": data.get("trust_tier"),
         "verdict": "safe" if safe else "needs_review",
         "verdict_reason": verdict_reason,
-        "critical": crit,
-        "high": high,
-        "findings_total": int((data.get("findings") or {}).get("total") or len(items)),
+        "critical": crit + sum(1 for i in beh_items if i["severity"] == "critical"),
+        "high": high + sum(1 for i in beh_items if i["severity"] == "high"),
+        "findings_total": int((data.get("findings") or {}).get("total") or len(items))
+        + len((sandbox or {}).get("findings") or []),
+        "static_findings_total": int((data.get("findings") or {}).get("total") or len(items)),
+        # Version actually scanned + when it was published (so a model need not fetch
+        # the registry), the maintainer's deprecation notice (None = not retired), and
+        # the package's own published advisories that affect this version.
+        "package_version": data.get("package_version")
+        or (data.get("surface_detail") or data.get("artifact_scan") or {}).get("version"),
+        "published_at": data.get("published_at"),
+        "deprecated": dep.strip()[:300] if isinstance(dep, str) and dep.strip() else None,
+        "advisories_affecting_version": [
+            {"id": a.get("id"), "severity": a.get("severity"), "fixed_in": a.get("fixed_in"),
+             "summary": (a.get("summary") or "")[:160]}
+            for a in (data.get("advisories") or []) if a.get("affects_scanned_version")
+        ][:10],
+        # What the sandbox observed (None until the first run completes; see `pending`).
+        "sandbox": sandbox,
         # MUST match the signed attestation's certified.eligible (the 6 crypto gates) — a
         # trust product cannot have its MCP field disagree with its own signed report.
         # The "only render the Certified MARK when also safe" rule is a DISPLAY gate applied
@@ -897,7 +963,7 @@ def _scan_struct(
         "certified": bool((data.get("certified") or {}).get("eligible")),
         "certified_mark": bool((data.get("certified") or {}).get("eligible")) and safe,
         # top findings, repeats collapsed to one row + count — for the card + CI triage
-        "top_findings": _grouped_findings(items, 3),
+        "top_findings": (beh_items + _grouped_findings(items, 3))[:5],
         # context-only incident history (was this package ever compromised?) — never
         # part of the score/verdict; None when there is no known incident.
         "incident": _incident_summary(data.get("incident_history") or {}),
@@ -909,7 +975,7 @@ def _scan_struct(
         "install": (
             {"npm": f"npm install {target}", "pypi": f"pip install {target}",
              "crates": f"cargo add {target}"}.get(target_type)
-            if crit + high == 0 else None
+            if crit + high == 0 and not alarm and not dep else None
         ),
         "adoption": (
             {"count": adoption[0], "unit": adoption[1], "score_0_100": adoption[2]}
