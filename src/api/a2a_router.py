@@ -95,7 +95,7 @@ async def get_agent_card(
     """Get an A2A-compatible Agent Card enriched with trust data.
 
     This endpoint returns agent metadata in a format compatible with
-    A2A Agent Card discovery, enriched with AgentGraph trust scores,
+    A2A Agent Card discovery, enriched with AgentAvow trust scores,
     verification status, and interaction history.
     """
     cache_key = f"a2a:card:{entity_id}"
@@ -223,7 +223,7 @@ async def _build_agent_card(
     return {
         "name": entity.display_name,
         "description": entity.bio_markdown or "",
-        "url": f"https://agentgraph.co/agent/{entity.id}",
+        "url": f"https://agentavow.com/agent/{entity.id}",
         "capabilities": entity.capabilities or [],
         "version": "1.0.0",
         "entity_id": str(entity.id),

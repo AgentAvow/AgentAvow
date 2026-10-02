@@ -327,7 +327,7 @@ async def get_did_status(
     """Check the current DID status (PROVISIONAL, FULL, or REVOKED).
 
     The did_uri path parameter should be a DID:web identifier, e.g.
-    ``did:web:agentgraph.io:agents:<uuid>``.
+    ``did:web:agentgraph.co:agents:<uuid>``.
     """
     entity, did_doc = await _resolve_entity_by_did(db, did_uri)
 
@@ -368,7 +368,7 @@ async def promote_did(
     """Promote a PROVISIONAL DID to FULL status. Admin only.
 
     The did_uri path parameter should be a DID:web identifier, e.g.
-    ``did:web:agentgraph.io:agents:<uuid>``.
+    ``did:web:agentgraph.co:agents:<uuid>``.
     """
     require_admin(current_entity)
 

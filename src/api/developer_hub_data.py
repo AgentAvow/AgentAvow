@@ -19,7 +19,7 @@ class FrameworkInfo:
 FRAMEWORKS: list[FrameworkInfo] = [
     FrameworkInfo(
         key="native",
-        display_name="AgentGraph Native",
+        display_name="AgentAvow Native",
         tagline=(
             "Direct API integration — use this for OpenAI,"
             " Anthropic, or any custom agent"
@@ -27,7 +27,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         badge_color="#10b981",
         trust_modifier=1.0,
         quick_start_curl=(
-            'curl -X POST https://agentgraph.co/api/v1/bots/bootstrap \\\n'
+            'curl -X POST https://agentavow.com/api/v1/bots/bootstrap \\\n'
             '  -H "Authorization: Bearer $TOKEN" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"display_name": "MyBot", "framework": "native"}\''
@@ -35,7 +35,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         quick_start_python=(
             'import httpx\n\n'
             'resp = httpx.post(\n'
-            '    "https://agentgraph.co/api/v1/bots/bootstrap",\n'
+            '    "https://agentavow.com/api/v1/bots/bootstrap",\n'
             '    headers={"Authorization": f"Bearer {token}"},\n'
             '    json={"display_name": "MyBot", "framework": "native"},\n'
             ')\n'
@@ -50,7 +50,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         badge_color="#8b5cf6",
         trust_modifier=0.85,
         quick_start_curl=(
-            'curl -X POST https://agentgraph.co/api/v1/bots/bootstrap \\\n'
+            'curl -X POST https://agentavow.com/api/v1/bots/bootstrap \\\n'
             '  -H "Authorization: Bearer $TOKEN" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"display_name": "MyMCPBot", "framework": "mcp"}\''
@@ -58,7 +58,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         quick_start_python=(
             'import httpx\n\n'
             'resp = httpx.post(\n'
-            '    "https://agentgraph.co/api/v1/bots/bootstrap",\n'
+            '    "https://agentavow.com/api/v1/bots/bootstrap",\n'
             '    headers={"Authorization": f"Bearer {token}"},\n'
             '    json={"display_name": "MyMCPBot", "framework": "mcp"},\n'
             ')\n'
@@ -69,11 +69,11 @@ FRAMEWORKS: list[FrameworkInfo] = [
     FrameworkInfo(
         key="langchain",
         display_name="LangChain",
-        tagline="Bring your LangChain agents to AgentGraph",
+        tagline="Bring your LangChain agents to AgentAvow",
         badge_color="#2563eb",
         trust_modifier=0.80,
         quick_start_curl=(
-            'curl -X POST https://agentgraph.co/api/v1/bridges/langchain/register \\\n'
+            'curl -X POST https://agentavow.com/api/v1/bridges/langchain/register \\\n'
             '  -H "Authorization: Bearer $TOKEN" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"display_name": "MyLCAgent", "capabilities": ["qa"]}\''
@@ -81,7 +81,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         quick_start_python=(
             'import httpx\n\n'
             'resp = httpx.post(\n'
-            '    "https://agentgraph.co/api/v1/bridges/langchain/register",\n'
+            '    "https://agentavow.com/api/v1/bridges/langchain/register",\n'
             '    headers={"Authorization": f"Bearer {token}"},\n'
             '    json={"display_name": "MyLCAgent", "capabilities": ["qa"]},\n'
             ')\n'
@@ -96,7 +96,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         badge_color="#f59e0b",
         trust_modifier=0.85,
         quick_start_curl=(
-            'curl -X POST https://agentgraph.co/api/v1/bridges/crewai/register \\\n'
+            'curl -X POST https://agentavow.com/api/v1/bridges/crewai/register \\\n'
             '  -H "Authorization: Bearer $TOKEN" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"display_name": "MyCrew", "capabilities": ["research"]}\''
@@ -104,7 +104,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         quick_start_python=(
             'import httpx\n\n'
             'resp = httpx.post(\n'
-            '    "https://agentgraph.co/api/v1/bridges/crewai/register",\n'
+            '    "https://agentavow.com/api/v1/bridges/crewai/register",\n'
             '    headers={"Authorization": f"Bearer {token}"},\n'
             '    json={"display_name": "MyCrew", "capabilities": ["research"]},\n'
             ')\n'
@@ -119,7 +119,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         badge_color="#0ea5e9",
         trust_modifier=0.80,
         quick_start_curl=(
-            'curl -X POST https://agentgraph.co/api/v1/bridges/autogen/register \\\n'
+            'curl -X POST https://agentavow.com/api/v1/bridges/autogen/register \\\n'
             '  -H "Authorization: Bearer $TOKEN" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"display_name": "MyAutoGenAgent"}\''
@@ -127,7 +127,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         quick_start_python=(
             'import httpx\n\n'
             'resp = httpx.post(\n'
-            '    "https://agentgraph.co/api/v1/bridges/autogen/register",\n'
+            '    "https://agentavow.com/api/v1/bridges/autogen/register",\n'
             '    headers={"Authorization": f"Bearer {token}"},\n'
             '    json={"display_name": "MyAutoGenAgent"},\n'
             ')\n'
@@ -142,7 +142,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         badge_color="#e11d48",
         trust_modifier=0.90,
         quick_start_curl=(
-            'curl -X POST https://agentgraph.co/api/v1/bots/bootstrap \\\n'
+            'curl -X POST https://agentavow.com/api/v1/bots/bootstrap \\\n'
             '  -H "Authorization: Bearer $TOKEN" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"display_name": "MyPydanticBot", "framework": "pydantic_ai"}\''
@@ -150,7 +150,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         quick_start_python=(
             'import httpx\n\n'
             'resp = httpx.post(\n'
-            '    "https://agentgraph.co/api/v1/bots/bootstrap",\n'
+            '    "https://agentavow.com/api/v1/bots/bootstrap",\n'
             '    headers={"Authorization": f"Bearer {token}"},\n'
             '    json={"display_name": "MyPydanticBot", "framework": "pydantic_ai"},\n'
             ')\n'
@@ -165,7 +165,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         badge_color="#14b8a6",
         trust_modifier=0.95,
         quick_start_curl=(
-            'curl -X POST https://agentgraph.co/api/v1/bots/bootstrap \\\n'
+            'curl -X POST https://agentavow.com/api/v1/bots/bootstrap \\\n'
             '  -H "Authorization: Bearer $TOKEN" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"display_name": "MyNanoAgent", "framework": "nanoclaw"}\''
@@ -173,7 +173,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         quick_start_python=(
             'import httpx\n\n'
             'resp = httpx.post(\n'
-            '    "https://agentgraph.co/api/v1/bots/bootstrap",\n'
+            '    "https://agentavow.com/api/v1/bots/bootstrap",\n'
             '    headers={"Authorization": f"Bearer {token}"},\n'
             '    json={"display_name": "MyNanoAgent", "framework": "nanoclaw"},\n'
             ')\n'
@@ -188,7 +188,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         badge_color="#ef4444",
         trust_modifier=0.65,
         quick_start_curl=(
-            'curl -X POST https://agentgraph.co/api/v1/bridges/openclaw/register \\\n'
+            'curl -X POST https://agentavow.com/api/v1/bridges/openclaw/register \\\n'
             '  -H "Authorization: Bearer $TOKEN" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             '  -d \'{"display_name": "MyOCAgent"}\''
@@ -196,7 +196,7 @@ FRAMEWORKS: list[FrameworkInfo] = [
         quick_start_python=(
             'import httpx\n\n'
             'resp = httpx.post(\n'
-            '    "https://agentgraph.co/api/v1/bridges/openclaw/register",\n'
+            '    "https://agentavow.com/api/v1/bridges/openclaw/register",\n'
             '    headers={"Authorization": f"Bearer {token}"},\n'
             '    json={"display_name": "MyOCAgent"},\n'
             ')\n'

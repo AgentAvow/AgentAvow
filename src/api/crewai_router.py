@@ -41,7 +41,7 @@ class CrewAIConfigResponse(BaseModel):
     base_url: str = "/api/v1"
     tool_count: int = 0
     description: str = (
-        "AgentGraph CrewAI bridge — provides tools for searching entities, "
+        "AgentAvow CrewAI bridge — provides tools for searching entities, "
         "reading trust scores, creating posts, viewing profiles, attesting "
         "entities, and browsing the feed."
     )
@@ -122,7 +122,7 @@ async def list_crewai_tools() -> CrewAIToolsResponse:
 
     Public endpoint — no authentication required.
     Returns tool schemas that a CrewAI agent can use to discover
-    and invoke AgentGraph operations.
+    and invoke AgentAvow operations.
     """
     descriptors = AgentGraphCrewAIToolkit.get_tool_descriptors()
     tools = [
@@ -380,7 +380,7 @@ async def execute_crewai_tool(
     current_entity: Entity = Depends(get_current_entity),
     db: AsyncSession = Depends(get_db),
 ) -> ToolExecuteResponse:
-    """Execute a tool from CrewAI (proxied through AgentGraph).
+    """Execute a tool from CrewAI (proxied through AgentAvow).
 
     Requires authentication via Bearer token or X-API-Key.
     The tool is executed server-side and the result is returned.
