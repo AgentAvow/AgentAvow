@@ -4,20 +4,20 @@
 
 > Trust-gated CrewAI tools for the AgentAvow trust network
 
-**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/agentgraph/issues)
+**Status:** Early Development — [feedback welcome](https://github.com/AgentAvow/AgentAvow/issues)
 
 ## Install
 
 ```bash
-pip install agentgraph-bridge-crewai
+pip install agentavow-bridge-crewai
 
 # With CrewAI trust-gating support:
-pip install agentgraph-bridge-crewai[crewai]
+pip install agentavow-bridge-crewai[crewai]
 ```
 
 ## Trust-Gated Tools
 
-Wrap any CrewAI tool with an AgentGraph trust check. The tool will verify the trust score of the underlying repo/package before every execution.
+Wrap any CrewAI tool with an AgentAvow trust check. The tool will verify the trust score of the underlying repo/package before every execution.
 
 ```python
 from crewai.tools import BaseTool
@@ -62,7 +62,7 @@ safe_tool = trust_gated_tool(my_tool, "owner/repo", guard=guard)
 from agentgraph_bridge_crewai import check_trust
 
 result = await check_trust("crewai/crewai")
-print(f"{result.grade} ({result.score}/100) -- {result.reason}")
+print(f"{result.score}/100 {result.tier} -- {result.reason}")
 if result.allowed:
     # proceed
     ...
@@ -95,7 +95,7 @@ result = crew.kickoff()
 
 ## What This Does
 
-This bridge provides trust-gated execution for CrewAI tools. It wraps CrewAI `BaseTool` instances so they check AgentGraph trust scores before running. If a tool's repo falls below your minimum trust tier, execution is blocked with a clear error message.
+This bridge provides trust-gated execution for CrewAI tools. It wraps CrewAI `BaseTool` instances so they check AgentAvow trust scores before running. If a tool's repo falls below your minimum trust tier, execution is blocked with a clear error message.
 
 ## Trust Tiers
 

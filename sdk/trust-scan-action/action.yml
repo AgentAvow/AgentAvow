@@ -1,6 +1,6 @@
-name: "AgentGraph Trust Scan"
-description: "Scan an MCP/agent-tool repo via AgentGraph's free API; posts the trust grade as a PR comment, can fail the build."
-author: "AgentGraph"
+name: "AgentAvow Trust Scan"
+description: "Scan an MCP/agent-tool repo via AgentAvow's free API; posts the trust score as a PR comment, can fail the build."
+author: "AgentAvow"
 
 branding:
   icon: "shield"
@@ -12,19 +12,19 @@ inputs:
     required: false
     default: ${{ github.repository }}
   api-url:
-    description: "AgentGraph API base URL"
+    description: "AgentAvow API base URL"
     required: false
-    default: "https://agentgraph.co/api/v1"
+    default: "https://agentavow.com/api/v1"
   fail-below:
     description: "Fail the build if the trust score is below this threshold (0-100). 0 = never fail."
     required: false
     default: "0"
   comment-on-pr:
-    description: "Post/update a sticky trust-grade comment on the pull request"
+    description: "Post/update a sticky trust-score comment on the pull request"
     required: false
     default: "true"
   github-token:
-    description: "Token used to post the PR comment (auto-provided as github.token; no AgentGraph secret needed)"
+    description: "Token used to post the PR comment (auto-provided as github.token; no AgentAvow secret needed)"
     required: false
     default: ${{ github.token }}
 
@@ -33,7 +33,7 @@ outputs:
     description: "Trust score 0-100 (security scan score)"
     value: ${{ steps.scan.outputs.trust_score }}
   grade:
-    description: "Letter grade derived from the score (A+, A, B, C, D, F)"
+    description: "Score band derived from the trust score (A+, A, B, C, D, F); kept for compatibility — branch on trust-score"
     value: ${{ steps.scan.outputs.grade }}
   scan-result:
     description: "Scan result (clean, warnings, flagged, etc.)"
@@ -48,7 +48,7 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Scan repository on AgentGraph
+    - name: Scan repository on AgentAvow
       id: scan
       shell: bash
       env:
@@ -84,13 +84,13 @@ runs:
         HTTP_BODY=$(printf '%s' "$HTTP_RESPONSE" | sed '$d')
 
         if [ "$HTTP_STATUS" != "200" ]; then
-          echo "::error::AgentGraph scan failed (HTTP ${HTTP_STATUS}) for ${REPO}"
+          echo "::error::AgentAvow scan failed (HTTP ${HTTP_STATUS}) for ${REPO}"
           echo "$HTTP_BODY"
           exit 1
         fi
 
         if ! printf '%s' "$HTTP_BODY" | jq -e . >/dev/null 2>&1; then
-          echo "::error::AgentGraph returned a non-JSON response for ${REPO}"
+          echo "::error::AgentAvow returned a non-JSON response for ${REPO}"
           echo "$HTTP_BODY"
           exit 1
         fi
@@ -106,7 +106,7 @@ runs:
         # Normalize score to an integer for grading + comparison.
         SCORE_INT=$(printf '%.0f' "$SCORE" 2>/dev/null || echo 0)
 
-        # Derive letter grade (matches AgentGraph's _grade_from_score).
+        # Derive the compatibility score band (output name `grade`).
         if [ "$SCORE_INT" -ge 96 ]; then GRADE="A+"
         elif [ "$SCORE_INT" -ge 81 ]; then GRADE="A"
         elif [ "$SCORE_INT" -ge 61 ]; then GRADE="B"
@@ -116,7 +116,7 @@ runs:
         fi
 
         BADGE_URL="${SCAN_URL}/badge"
-        REPORT_URL="https://agentgraph.co/check/${OWNER}/${NAME}"
+        REPORT_URL="https://agentavow.com/check/${OWNER}/${NAME}"
 
         # Export outputs.
         {
@@ -131,13 +131,13 @@ runs:
           echo "findings_total=${F_TOTAL}"
         } >> "$GITHUB_OUTPUT"
 
-        echo "::notice::AgentGraph trust grade for ${REPO}: ${GRADE} (${SCORE_INT}/100, ${SCAN_RESULT}) — ${REPORT_URL}"
+        echo "::notice::AgentAvow trust score for ${REPO}: ${SCORE_INT}/100 (${GRADE}, ${SCAN_RESULT}) — ${REPORT_URL}"
 
         # Job summary.
         {
-          echo "## AgentGraph Trust Scan"
+          echo "## AgentAvow Trust Scan"
           echo ""
-          echo "**${REPO}** — Grade **${GRADE}** (${SCORE_INT}/100), result: \`${SCAN_RESULT}\`"
+          echo "**${REPO}** — Trust score **${SCORE_INT}/100** (${GRADE}), result: \`${SCAN_RESULT}\`"
           echo ""
           echo "| Critical | High | Medium | Total |"
           echo "|---|---|---|---|"
@@ -167,7 +167,7 @@ runs:
         set -euo pipefail
 
         MARKER="<!-- agentgraph-trust-scan -->"
-        BADGE_MD="[![AgentGraph Trust](${BADGE_URL})](${REPORT_URL})"
+        BADGE_MD="[![AgentAvow Trust](${BADGE_URL})](${REPORT_URL})"
 
         # Build the comment body. Use printf (not an indented heredoc) so the
         # markdown is emitted with no leading whitespace.
@@ -175,11 +175,11 @@ runs:
           "${MARKER}" \
           "## ${BADGE_MD}" \
           "" \
-          "**AgentGraph Trust Scan** for \`${AG_REPO}\`" \
+          "**AgentAvow Trust Scan** for \`${AG_REPO}\`" \
           "" \
-          "| Grade | Score | Result |" \
-          "|-------|-------|--------|" \
-          "| **${GRADE}** | ${SCORE}/100 | \`${SCAN_RESULT}\` |" \
+          "| Trust score | Band | Result |" \
+          "|-------------|------|--------|" \
+          "| **${SCORE}/100** | ${GRADE} | \`${SCAN_RESULT}\` |" \
           "" \
           "| Critical | High | Medium | Total findings |" \
           "|----------|------|--------|----------------|" \
@@ -191,11 +191,11 @@ runs:
           "<summary>Add the trust badge to your README</summary>" \
           "" \
           '```markdown' \
-          "[![AgentGraph Trust](${BADGE_URL})](${REPORT_URL})" \
+          "[![AgentAvow Trust](${BADGE_URL})](${REPORT_URL})" \
           '```' \
           "</details>" \
           "" \
-          '<sub>Scanned for free by <a href="https://agentgraph.co">AgentGraph</a> — trust infrastructure for AI agents. No secret required.</sub>')
+          '<sub>Scanned for free by <a href="https://agentavow.com">AgentAvow</a> — signed, verifiable safety scores for the tools agents connect to. No secret required.</sub>')
 
         # Find an existing sticky comment by marker, then update it; else create.
         EXISTING_ID=$(gh api \
@@ -226,7 +226,7 @@ runs:
       run: |
         set -euo pipefail
         if [ "${SCORE}" -lt "${AG_FAIL_BELOW}" ]; then
-          echo "::error::AgentGraph trust score ${SCORE} (grade ${GRADE}) is below the required threshold of ${AG_FAIL_BELOW}. See ${REPORT_URL}"
+          echo "::error::AgentAvow trust score ${SCORE} (band ${GRADE}) is below the required threshold of ${AG_FAIL_BELOW}. See ${REPORT_URL}"
           exit 1
         fi
         echo "::notice::Trust score ${SCORE} meets the threshold of ${AG_FAIL_BELOW}."

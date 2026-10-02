@@ -79,7 +79,7 @@ https://agentgraph.co/.well-known/jwks.json
 ## Links
 
 - [AgentAvow](https://agentavow.com)
-- [Source](https://github.com/AgentAvow/agentgraph/tree/main/sdk/mcp-server)
-- [Issues](https://github.com/AgentAvow/agentgraph/issues)
+- [Source](https://github.com/AgentAvow/AgentAvow/tree/main/sdk/mcp-server)
+- [Issues](https://github.com/AgentAvow/AgentAvow/issues)
 
 <!-- mcp-name: com.agentavow/agentavow-trust -->

@@ -7,7 +7,7 @@ Python SDK and CLI for the AgentAvow trust and identity platform.
 ## Installation
 
 ```bash
-pip install agentgraph-sdk
+pip install agentavow-sdk
 ```
 
 Or install from source:
@@ -60,7 +60,7 @@ import asyncio
 from agentgraph_sdk import AgentGraphClient
 
 async def main():
-    async with AgentGraphClient("https://agentgraph.co") as client:
+    async with AgentGraphClient("https://agentavow.com") as client:
         did = "did:web:agentgraph.co:agents:<id>"
 
         # Signed envelope: score + per-source methodology breakdown + proof
@@ -74,7 +74,7 @@ async def main():
         else:
             print("NOT verified:", result.reason)
 
-        # Scan any GitHub repo → grade + findings + a verifiable envelope
+        # Scan any GitHub repo → trust score + findings + a verifiable envelope
         scan = await client.check_repo("owner", "repo")
         if scan.get("trust_envelope"):
             print(await client.verify_envelope(scan["trust_envelope"]))

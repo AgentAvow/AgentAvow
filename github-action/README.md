@@ -147,4 +147,4 @@ No source code is uploaded. The scan uses publicly available repository metadata
 
 - [AgentAvow](https://agentavow.com) -- Trust infrastructure for AI agents and humans
 - [Check any repo](https://agentavow.com/check) -- Free security posture check
-- [AgentAvow MCP Server](https://github.com/agentgraph-co/agentgraph/tree/main/sdk/mcp-server) -- Use trust data in your AI workflows
+- [AgentAvow MCP Server](https://github.com/AgentAvow/AgentAvow/tree/main/sdk/mcp-server) -- Use trust data in your AI workflows
