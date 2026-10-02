@@ -72,6 +72,16 @@ export async function fetchSkillScan(owner: string, repo: string, force = false)
   return data
 }
 
+/** Force a fresh behavioral sandbox run of a skill: it is cloned and its lifecycle
+ * hooks and bundled scripts are run with canary credentials (~1–2 min). */
+export async function fetchSkillBehavioral(owner: string, repo: string): Promise<PublicScanResponse> {
+  const { data } = await publicApi.get<PublicScanResponse>(
+    `/public/scan/skill/${owner}/${repo}?behavioral=true`,
+    { timeout: 200_000 },
+  )
+  return data
+}
+
 /** Grade a LIVE MCP server by its Streamable-HTTP endpoint URL. */
 export async function fetchMcpScan(endpoint: string, force = false): Promise<PublicScanResponse> {
   const { data } = await publicApi.get<PublicScanResponse>(

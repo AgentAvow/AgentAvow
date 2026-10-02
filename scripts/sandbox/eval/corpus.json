@@ -1,5 +1,5 @@
 {
-  "_doc": "Behavioral-tier eval corpus. 'known_good' = widely used, maintained MCP servers shipped as packages; a behavioral finding on one of these is a false positive until a human says otherwise. 'fixtures' = synthetic servers in tests/fixtures/behavioral shipped INTO the sandbox via --files-b64 (nothing malicious is ever published); each has the exact findings the graders must and must not raise. Run scripts/sandbox/eval/run_eval.py. A known_good entry may carry expect_rules: findings with those rules are correct, not false positives (e.g. a server that ships third-party telemetry).",
+  "_doc": "Behavioral-tier eval corpus. 'known_good' = widely used, maintained MCP servers shipped as packages; a behavioral finding on one of these is a false positive until a human says otherwise. 'fixtures' = synthetic servers in tests/fixtures/behavioral shipped INTO the sandbox via --files-b64 (nothing malicious is ever published); each has the exact findings the graders must and must not raise. Run scripts/sandbox/eval/run_eval.py. A known_good entry may carry expect_rules: findings with those rules are correct, not false positives (e.g. a server that ships third-party telemetry). 'skill_fixtures' = fixture SKILLS under tests/fixtures/behavioral/skills/<dir> run through scripts/sandbox/skill_exercise.sh (locally: hooks + scripts run against a temp mount with the network stubbed out, 'simulated_egress' standing in for the sandbox's capture; --sandbox ships the tree as a tar.gz). 'known_good_skills' = real public skill repos ({repo: owner/repo}) for the skill plan; a finding on one is a false positive until a human says otherwise.",
   "known_good": [
     {
       "surface": "npm",
@@ -172,6 +172,45 @@
       "expect": {
         "launch_ok": false
       }
+    }
+  ],
+  "known_good_skills": [],
+  "_known_good_skills_todo": "TODO: fill with 3-5 real public repo-per-skill GitHub repos (one SKILL.md at the root, bundled scripts, no network). None chosen yet: anthropics/skills is a collection (many skills per repo), and the catalog's openclaw entries were not verified as single-skill repos. Run `run_eval.py --known-good --only <repo>` on the sandbox box to vet a candidate before listing it.",
+  "skill_fixtures": [
+    {
+      "dir": "benign-skill",
+      "label": "benign_skill",
+      "must_not_raise": [
+        "behavioral_undeclared_egress",
+        "skill_script_egress",
+        "credential_canary_exfiltrated",
+        "canary_echoed_in_result",
+        "annotation_readonly_violated"
+      ],
+      "expect": {
+        "launch_ok": true,
+        "min_calls": 1
+      }
+    },
+    {
+      "dir": "phones-home-skill",
+      "label": "skill_phones_home",
+      "simulated_egress": [
+        "phone-home.agentavow-eval.invalid"
+      ],
+      "must_raise": [
+        "behavioral_undeclared_egress",
+        "skill_script_egress"
+      ],
+      "must_not_raise": [
+        "credential_canary_exfiltrated",
+        "canary_echoed_in_result"
+      ],
+      "expect": {
+        "launch_ok": true,
+        "min_calls": 1
+      },
+      "note": "its SessionStart hook resolves an undeclared host; the only entrypoint that ran, so skill_script_egress names hooks.json:SessionStart"
     }
   ]
 }

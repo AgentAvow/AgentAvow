@@ -415,6 +415,8 @@ def _behavioral_plan(data: dict, surface: str) -> str | None:
         (data or {}).get("is_mcp_server"))
     if surface == "docker":
         return "docker"
+    if surface == "skill":
+        return "skill"
     if surface in ("npm", "pypi") and is_mcp:
         return f"{surface}-mcp"
     if surface == "github":
@@ -438,9 +440,13 @@ def _repo_git_ecosystem(data: dict) -> str | None:
 
 
 def _behavioral_target(data: dict) -> tuple[str, str] | None:
-    """(surface, coordinate) the sandbox should run for this scan: the published package
-    when the scan maps to one; otherwise the GitHub repo itself, installed from git, when
-    it is a JS/TS or Python project."""
+    """(surface, coordinate) the sandbox should run for this scan: an OpenClaw / Agent
+    Skill (``surface_kind: "skill"``, set by the skill endpoint) is cloned and its hooks
+    and scripts run; otherwise the published package when the scan maps to one; otherwise
+    the GitHub repo itself, installed from git, when it is a JS/TS or Python project."""
+    if (data or {}).get("surface_kind") == "skill":
+        full = (data or {}).get("repo_full_name")
+        return ("skill", str(full)) if full else None
     pkg = (data or {}).get("package_coordinate") or {}
     surface = (pkg.get("surface") or "").lower()
     name = pkg.get("name")
@@ -1435,23 +1441,45 @@ async def scan_skill_endpoint(
     repo: str,
     request: Request = None,
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    behavioral: bool = Query(
+        False,
+        description="Force a fresh behavioral sandbox run: the skill is cloned and its "
+        "lifecycle hooks and bundled scripts are run with canary credentials (implies "
+        "a fresh scan). The run is also started automatically on the first scan.",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Grade an **OpenClaw / Agent Skill** in a GitHub repo — the capability surface
     a repo scan misses: the auto-exec `allowed-tools` grant, always-loaded-
     description injection, lifecycle-hook escalation, and env-exfil in bundled
-    scripts. `coverage.surface = openclaw`. E.g. `/public/scan/skill/owner/repo`."""
+    scripts. `coverage.surface = openclaw`. E.g. `/public/scan/skill/owner/repo`.
+    The behavioral sandbox (plan `skill`) clones the repo and runs its hooks and
+    scripts; the signed observation comes back in `behavioral`."""
     if not all(c.isalnum() or c in "-_." for c in owner):
         raise HTTPException(400, "Invalid owner")
     if not repo.replace("-", "").replace("_", "").replace(".", "").isalnum():
         raise HTTPException(400, "Invalid repo name")
     full = f"skill:{owner}/{repo}"
+    full_name = f"{owner}/{repo}"
+    if behavioral:
+        force = True  # a deep scan is paired with a fresh static scan (same as repos)
+
+    async def _signed_response(data: dict, *, cached: bool) -> PublicScanResponse:
+        """Sandbox block first (cached / background / forced), folded into the score
+        that gets signed — the same shape as the repo and package endpoints."""
+        block = await _behavioral_block(
+            {**data, "repo_full_name": full_name, "surface_kind": "skill"},
+            force=behavioral)
+        scored = _apply_behavioral_score(data, block)
+        jws = create_jws(canonicalize(_build_scan_payload(full, scored)))
+        resp = _package_response(full, scored, jws, cached=cached)
+        resp.behavioral = block
+        return resp
 
     if not force:
-        cached = await _get_cached("skill", f"{owner}/{repo}")
+        cached = await _get_cached("skill", full_name)
         if cached:
-            jws = create_jws(canonicalize(_build_scan_payload(full, cached)))
-            return _package_response(full, cached, jws, cached=True)
+            return await _signed_response(cached, cached=True)
 
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
@@ -1473,9 +1501,8 @@ async def scan_skill_endpoint(
         raise HTTPException(code, f"Scan error: {result.error}")
 
     data = _scan_result_to_dict(result)
-    await _set_cached("skill", f"{owner}/{repo}", data)
-    jws = create_jws(canonicalize(_build_scan_payload(full, data)))
-    return _package_response(full, data, jws, cached=False)
+    await _set_cached("skill", full_name, data)
+    return await _signed_response(data, cached=False)
 
 
 @router.get(

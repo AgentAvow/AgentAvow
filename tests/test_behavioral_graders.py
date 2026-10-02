@@ -164,7 +164,9 @@ def test_grade_is_deterministic_and_in_rule_order():
         "annotation_open_world_violated", "credential_canary_exfiltrated",
         "canary_echoed_in_result", "tool_call_crashed_server",
     ]
-    assert rules == [name for name, _ in GRADERS if name != "cloud_metadata_probe"]  # no IMDS here
+    # no IMDS here, and the skill-only grader never fires on an MCP plan
+    assert rules == [name for name, _ in GRADERS
+                     if name not in ("cloud_metadata_probe", "skill_script_egress")]
     s = grade_summary(r)
     assert s["findings"] == {"critical": 1, "high": 2, "medium": 2, "low": 1, "total": 6}
     assert s["rules"] == rules

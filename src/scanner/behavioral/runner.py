@@ -137,6 +137,38 @@ _PIP_GIT_MCP_CMD = (
     + 'sh /work/mcp_launch.sh pypi "$NAME" --canary-value {canary} -- '
     "python /work/mcp_exercise.py {exerciser_args}"
 )
+# OpenClaw / Agent Skill: a repo, not a package. The skill is cloned (shallow) and the
+# shipped exerciser runs its lifecycle hooks, .mcp.json servers and bundled scripts with
+# canary credentials (see scripts/sandbox/skill_exercise.sh for the exact rules). Scripts
+# may be bash / node, so the alt-root apk install also brings nodejs, npm and bash — each
+# a separate, optional step so a mirror hiccup on one never costs the clone. The git
+# wrapper is the pypi-mcp one plus the CA bundle for an https clone.
+_ALPINE_SKILL_PREFIX = (
+    "(mkdir -p /work/.apk/etc/apk /work/.local/bin && "
+    "cp -r /etc/apk/keys /etc/apk/repositories /work/.apk/etc/apk/ && "
+    "apk add --no-cache --no-scripts --initdb -p /work/.apk git && "
+    "printf '#!/bin/sh\\nexport LD_LIBRARY_PATH=/work/.apk/usr/lib:/work/.apk/lib "
+    "GIT_EXEC_PATH=/work/.apk/usr/libexec/git-core "
+    "GIT_TEMPLATE_DIR=/work/.apk/usr/share/git-core/templates "
+    "GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt\\n"
+    "exec /work/.apk/usr/bin/git \"$@\"\\n' > /work/.local/bin/git && "
+    "chmod +x /work/.local/bin/git && "
+    "(apk add --no-cache --no-scripts -p /work/.apk nodejs npm bash && "
+    "printf '#!/bin/sh\\nexport LD_LIBRARY_PATH=/work/.apk/usr/lib:/work/.apk/lib\\n"
+    "exec /work/.apk/usr/bin/node \"$@\"\\n' > /work/.local/bin/node && "
+    "printf '#!/bin/sh\\nexec /work/.local/bin/node /work/.apk/usr/bin/npm \"$@\"\\n' "
+    "> /work/.local/bin/npm && "
+    "printf '#!/bin/sh\\nexport LD_LIBRARY_PATH=/work/.apk/usr/lib:/work/.apk/lib\\n"
+    "exec /work/.apk/bin/bash \"$@\"\\n' > /work/.local/bin/bash && "
+    "chmod +x /work/.local/bin/node /work/.local/bin/npm /work/.local/bin/bash || true)"
+    ") >/dev/null 2>&1 || true; "
+)
+# {repo} = "owner/repo" (GitHub only; validated + shell-quoted by the runner).
+_SKILL_CMD = (
+    _SANDBOX_ENV + _ALPINE_SKILL_PREFIX
+    + "git clone --depth 1 https://github.com/{repo} /work/skill && cd /work/skill && "
+    "sh /work/skill_exercise.sh {exerciser_args}"
+)
 _SURFACE_PLAN: dict[str, tuple[str, str, str]] = {
     "npm": ("node:20-alpine", _NPM_CMD, "exec"),
     "pypi": ("python:3.12-alpine", _PIP_CMD, "exec"),
@@ -147,7 +179,9 @@ _SURFACE_PLAN: dict[str, tuple[str, str, str]] = {
     "npm-git-mcp": ("node:20-alpine", _NPM_GIT_MCP_CMD, "mcp"),
     "pypi-git-mcp": ("python:3.12-alpine", _PIP_GIT_MCP_CMD, "mcp"),
     "docker": ("{name}", "", "image"),
+    "skill": ("python:3.12-alpine", _SKILL_CMD, "exec"),
 }
+_SKILL_REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
 def _git_spec(plan: str, coordinate: str) -> str:
@@ -158,6 +192,8 @@ def _git_spec(plan: str, coordinate: str) -> str:
         if repo.lower().startswith(prefix):
             repo = repo[len(prefix):]
     repo = repo.strip("/").removesuffix(".git")
+    if plan == "skill":
+        return repo  # the skill plan clones https://github.com/{repo} itself
     return f"github:{repo}" if plan.startswith("npm") else f"git+https://github.com/{repo}"
 # Files from scripts/sandbox/ shipped into /work for a plan (via --files-b64).
 # Where each shipped file lives in the repo. The argument generator is a real module under
@@ -171,6 +207,7 @@ _PLAN_FILES: dict[str, tuple[str, ...]] = {
     "pypi-mcp": ("mcp_launch.sh", "mcp_exercise.py", "synthetic_args.py"),
     "npm-git-mcp": ("mcp_launch.sh", "mcp_exercise.js"),
     "pypi-git-mcp": ("mcp_launch.sh", "mcp_exercise.py", "synthetic_args.py"),
+    "skill": ("skill_exercise.sh",),
 }
 # What an MCP plan degrades to when the exerciser can't be shipped / v2 is off.
 _EXEC_FALLBACK = {"npm-mcp": "npm", "pypi-mcp": "pypi",
@@ -498,15 +535,37 @@ def is_secret_name(name: str) -> bool:
     return any(p in _SECRET_PARTS or p.endswith(("KEY", "TOKEN", "SECRET")) for p in parts)
 
 
+def _canary_env_names(env_names: list[str]) -> list[str]:
+    """The env names that get a canary: well-formed and secret-looking (≤32)."""
+    return [n for n in env_names
+            if n and n.replace("_", "").isalnum() and is_secret_name(n)][:32]
+
+
 def _exerciser_args(*, timeout: int, max_tools: int, canary: str, env_names: list[str],
                     readme: bool) -> str:
     args = ["--timeout", str(timeout), "--per-call-timeout", "10", "--max-tools",
             str(max_tools), "--canary-value", canary]
-    names = [n for n in env_names if n and n.replace("_", "").isalnum() and is_secret_name(n)]
+    names = _canary_env_names(env_names)
     if names:
-        args += ["--canary-env", ",".join(names[:32])]
+        args += ["--canary-env", ",".join(names)]
     if readme:
         args += ["--readme", "/work/README.md"]
+    return " ".join(shlex.quote(a) for a in args)
+
+
+_SKILL_SCRIPT_TIMEOUT = 20  # seconds per hook / bundled script inside the sandbox
+
+
+def _skill_exerciser_args(*, timeout: int, max_scripts: int, canary: str,
+                          env_names: list[str]) -> str:
+    """Arguments for scripts/sandbox/skill_exercise.sh: the overall budget, the per-script
+    timeout, the script cap, and the canary value + the secret-named env vars the static
+    scan saw the skill read (exported with that value for every hook and script)."""
+    args = ["--timeout", str(timeout), "--per-script-timeout", str(_SKILL_SCRIPT_TIMEOUT),
+            "--max-scripts", str(max_scripts), "--canary-value", canary]
+    names = _canary_env_names(env_names)
+    if names:
+        args += ["--canary-env", ",".join(names)]
     return " ".join(shlex.quote(a) for a in args)
 
 
@@ -561,7 +620,8 @@ async def run_behavioral(
     ``manifest`` is the tool's optional ``.agentavow.yml`` text; its declared egress hosts
     are added to ``expected_hosts`` so a tool is judged against what its author declared.
     ``plan`` overrides the surface→plan choice ("npm-mcp" / "pypi-mcp" when the package
-    looks like an MCP server, "docker" for an image). ``env_names`` are the env vars the
+    looks like an MCP server, "docker" for an image, "skill" for an OpenClaw / Agent Skill
+    repo — coordinate "owner/repo" — whose hooks and scripts are run). ``env_names`` are the env vars the
     package reads (canary targets); ``readme_text`` helps the exerciser pick arguments."""
     from src.config import settings
     from src.scanner.behavioral.manifest import parse_manifest
@@ -581,8 +641,10 @@ async def run_behavioral(
     if not v2 and plan in _EXEC_FALLBACK:
         notes.append("v2_runner_off")
         plan = _EXEC_FALLBACK[plan]
-    if not v2 and plan == "docker":
+    if not v2 and plan in ("docker", "skill"):
         return _fail("v2_runner_off")
+    if plan == "skill" and not _SKILL_REPO_RE.fullmatch(_git_spec(plan, coordinate)):
+        return _fail("bad_coordinate")
 
     canary = _new_canary()
     files_b64: str | None = None
@@ -590,6 +652,8 @@ async def run_behavioral(
         files_b64 = _files_payload(plan, readme_text)
         if files_b64 is None:
             notes.append("exerciser_missing")
+            if plan not in _EXEC_FALLBACK:
+                return _fail("exerciser_missing")  # a skill has no install-only fallback
             plan = _EXEC_FALLBACK[plan]
 
     image_tmpl, cmd_tmpl, mode = _SURFACE_PLAN[plan]
@@ -605,6 +669,18 @@ async def run_behavioral(
             exerciser_args=_exerciser_args(
                 timeout=mcp_timeout, max_tools=max_tools, canary=canary,
                 env_names=_merge_env_names(env_names, readme_text), readme=bool(readme_text)),
+        )
+    elif plan == "skill":
+        # apk + clone, then every hook/script with its own timeout inside one budget: the
+        # exerciser gets the MCP budget, the container the budget plus install headroom.
+        budget = int(getattr(settings, "scanner_behavioral_mcp_timeout", 90) or 90)
+        max_scripts = int(getattr(settings, "scanner_behavioral_max_tools", 25) or 25)
+        timeout = max(int(timeout), budget + 60)
+        cmd = cmd_tmpl.format(
+            repo=shlex.quote(_git_spec(plan, coordinate)),
+            exerciser_args=_skill_exerciser_args(
+                timeout=budget, max_scripts=max_scripts, canary=canary,
+                env_names=list(env_names or [])),
         )
     else:
         spec = _git_spec(plan, coordinate) if "-git" in plan else coordinate

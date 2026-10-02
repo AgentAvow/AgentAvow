@@ -810,7 +810,10 @@ def _sandbox_section(data: dict) -> list[str]:
         called = {c.get("tool") for c in (ex.get("calls") or [])
                   if isinstance(c, dict) and c.get("tool")}
         n, m = len(called), max(len(tools), len(called))
-        if n:
+        if plan == "skill":
+            what = (f"cloned the skill and ran {n} of {m} hook{'' if m == 1 else 's'}/"
+                    "script(s) with canary credentials.")
+        elif n:
             what = (f"started the server and called {n} of {m} tool{'' if m == 1 else 's'} "
                     "with synthetic inputs.")
         else:
@@ -819,6 +822,13 @@ def _sandbox_section(data: dict) -> list[str]:
         lines.append(head + what)
         clauses = [net, _file_clause(ex), _credential_clause(ex, b)]
         lines.append("- " + _cap("; ".join(c for c in clauses if c)) + ".")
+    elif plan == "skill":
+        reason, phrase = _start_phrase(b)
+        if reason == "no_entrypoint":
+            phrase = "it ships no lifecycle hook or runnable script"
+        lines.append(head + f"cloned the skill, but nothing ran — {phrase}. "
+                     "This is not a finding.")
+        lines.append(f"- {_cap(net)} (during clone).")
     elif ex is not None or plan.endswith("-mcp"):
         _, phrase = _start_phrase(b)
         lines.append(head + f"installed it, but the server did not start — {phrase}. "

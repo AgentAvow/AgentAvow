@@ -12,6 +12,8 @@ Rules (id → severity):
   credential_canary_exfiltrated  canary seen in DNS / plaintext HTTP          critical
   canary_echoed_in_result        canary env value returned in a tool result   medium
   tool_call_crashed_server       a tool call took the server down             low
+  skill_script_egress            (skill plan) the ONE hook/script that ran    medium
+                                 reached an undeclared host — named
   server_failed_to_start         no finding — surfaced via launch_ok/launch_error and
                                  classify_start() → (start_reason, start_reason_detail)
 """
@@ -298,6 +300,46 @@ def grade_crashed_server(result, transcript: ExerciseTranscript) -> list[Behavio
     )]
 
 
+def _call_spawned(call) -> bool:
+    """Did this entrypoint actually start a process? A call that never spawned (missing
+    interpreter, spawn failure) cannot have produced egress."""
+    err = (call.error or "")
+    return bool(call.ok) or bool(err and not err.startswith(("spawn_failed", "missing_binary")))
+
+
+def grade_skill_script_egress(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
+    """Skill plan only: name the bundled script / hook / server behind undeclared egress.
+    Egress is captured run-wide (passively, on the host side of the bridge), so it is
+    attributed ONLY when exactly one entrypoint ran — then it is that one's. With two or
+    more, this grader stays silent (``behavioral_undeclared_egress`` still covers the run)
+    rather than guess; the per-call attribution is a documented gap."""
+    if str(getattr(result, "plan", "") or "") != "skill":
+        return []
+    hosts = sorted({h for h in (result.unexpected_egress or [])
+                    if h and not _is_cloud_metadata(h)})
+    if not hosts:
+        return []
+    ran = [c for c in transcript.calls if _call_spawned(c)]
+    if len(ran) != 1:
+        return []
+    call = ran[0]
+    kind = str((call.args or {}).get("kind") or "script")
+    noun = {"hook": "lifecycle hook", "mcp": "bundled MCP server"}.get(kind, "bundled script")
+    return [_finding(
+        "skill_script_egress", category="exfiltration",
+        name=f"{noun[0].upper() + noun[1:]} '{call.tool}' contacted undeclared host(s)",
+        severity="medium",
+        evidence=f"{call.tool} was the only entrypoint that ran; egress to "
+                 + ", ".join(hosts[:8]),
+        remediation=(
+            "This skill entrypoint reached a host outside GitHub and the skill's declared "
+            "scope while running with no arguments and canary credentials. A hook runs on "
+            "every session without asking; review why it phones home, or declare the host "
+            "in .agentavow.yml."
+        ),
+    )]
+
+
 GRADERS: tuple[tuple[str, Callable[..., list[BehavioralFinding]]], ...] = (
     ("behavioral_undeclared_egress", grade_undeclared_egress),
     ("annotation_readonly_violated", grade_readonly_violated),
@@ -306,6 +348,7 @@ GRADERS: tuple[tuple[str, Callable[..., list[BehavioralFinding]]], ...] = (
     ("canary_echoed_in_result", grade_canary_echoed),
     ("tool_call_crashed_server", grade_crashed_server),
     ("cloud_metadata_probe", grade_cloud_metadata),
+    ("skill_script_egress", grade_skill_script_egress),
 )
 
 
@@ -326,6 +369,8 @@ START_REASONS = (
 )
 _RESOURCE_LIMIT_EXIT = 137  # SIGKILL from the cgroup OOM killer / pids cap
 _DETAIL_LIMIT = 160
+# Plans that always exercise something (a transcript is expected), besides the MCP plans.
+_EXERCISE_PLANS = ("docker", "skill")
 # Strong credential vocabulary. "PAT" is case-sensitive and whole-word (it is inside
 # "path" and "compatible"); "environment variable" alone is NOT enough — GitPython's
 # missing-binary message mentions one — it only counts next to a credential-looking name.
@@ -406,7 +451,7 @@ def classify_start(result, transcript: ExerciseTranscript | None = None) -> tupl
     if t.launch_ok:
         return "started", ""
     plan = str(getattr(result, "plan", "") or "")
-    if plan and not plan.endswith("-mcp") and plan != "docker" and not t.present:
+    if plan and not plan.endswith("-mcp") and plan not in _EXERCISE_PLANS and not t.present:
         # install/import plans never launch a server; "did it start" does not apply
         return "not_applicable", "install/import plan: no server is launched"
     exit_code = getattr(result, "exit_code", None)
@@ -420,11 +465,15 @@ def classify_start(result, transcript: ExerciseTranscript | None = None) -> tupl
         if getattr(result, "timed_out", False):
             return "timeout", "the run hit the sandbox wall clock before the server started"
         if isinstance(exit_code, int) and exit_code != 0:
+            if plan == "skill":
+                return "install_failed", f"clone step exited {exit_code}; nothing ran"
             return "install_failed", f"install step exited {exit_code}; no exercise ran"
         return "unknown", _clean_detail(getattr(result, "error", None) or "")
     err = t.launch_error or t.error or ""
     low = err.lower()
     if "no_entrypoint_found" in low:
+        if plan == "skill":
+            return "no_entrypoint", "the skill ships no lifecycle hook or runnable script"
         return "no_entrypoint", "the installed package exposes no runnable bin / console script"
     detail = _clean_detail(err)
     if _looks_like_credential_error(err):

@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'reac
 import { rp } from '../basePath'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getGradeInfo, getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
@@ -976,7 +976,7 @@ type BehavioralData = {
   exercise?: ExerciseData | null
   findings?: { category: string; name: string; severity: string; remediation?: string; evidence?: string; rule?: string; advisory?: boolean; tool?: string | null }[]
 }
-const SANDBOX_SURFACES = new Set(['npm', 'pypi', 'docker'])
+const SANDBOX_SURFACES = new Set(['npm', 'pypi', 'docker', 'skill'])
 /** Why a server did not start in the sandbox — none of these is a finding. */
 const START_REASONS: Record<string, string> = {
   needs_credentials: 'The server needs credentials to start (an API key or token). The sandbox never supplies real ones, so its tools were not exercised.',
@@ -997,18 +997,20 @@ const PROBE_START_REASONS: Record<string, string> = {
   timeout: 'The server did not answer the MCP handshake in time, so no tool was called.',
   unknown: 'The MCP handshake failed, so no tool was called.',
 }
-/** `probe` switches the panel to the OPT-IN live probe of a remote MCP server: a
- * button the user must press, read-only-annotated tools only, advisory, never scored. */
-function BehavioralPanel({ owner, repo, surface, auto, pkg, effect, probe }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string }; effect?: ScoreEffect | null; probe?: { endpoint: string } }) {
-  const mut = useMutation({ mutationFn: () => probe ? fetchMcpProbe(probe.endpoint) : pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
+/** Four targets share the panel: a package coordinate, a GitHub repo, (skill) an OpenClaw /
+ * Agent Skill repo whose hooks and scripts the sandbox runs, or (probe) the OPT-IN live
+ * probe of a remote MCP server: a button the user must press, read-only-annotated tools
+ * only, advisory, never scored. */
+function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string }; skill?: boolean; effect?: ScoreEffect | null; probe?: { endpoint: string } }) {
+  const mut = useMutation({ mutationFn: () => probe ? fetchMcpProbe(probe.endpoint) : skill ? fetchSkillBehavioral(owner, repo) : pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
   // While the background run is pending, poll the (cached, non-forcing) scan so the panel
   // fills in by itself. ~8 s interval, gives up after 5 minutes.
   const [startedAt] = useState(() => Date.now())
   const [now, setNow] = useState(() => Date.now())
   const autoPending = !!auto?.pending && !mut.data && !probe
   const poll = useQuery({
-    queryKey: ['behavioral-poll', pkg?.surface ?? 'github', pkg?.name ?? `${owner}/${repo}`],
-    queryFn: () => pkg ? fetchPackageScan(pkg.surface, pkg.name) : fetchPublicScan(owner, repo),
+    queryKey: ['behavioral-poll', skill ? 'skill' : pkg?.surface ?? 'github', pkg?.name ?? `${owner}/${repo}`],
+    queryFn: () => skill ? fetchSkillScan(owner, repo) : pkg ? fetchPackageScan(pkg.surface, pkg.name) : fetchPublicScan(owner, repo),
     enabled: autoPending,
     refetchInterval: (q) => {
       const blk = (q.state.data as { behavioral?: BehavioralData | null } | undefined)?.behavioral
@@ -1039,6 +1041,15 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, effect, probe }: { o
   const listed = ex ? (ex.tools ?? []).length : 0
   const canaryLeaked = (b?.canary_exfil?.length ?? 0) > 0
   const isMcpRun = !!b?.plan && b.plan.endsWith('-mcp')
+  const isSkillRun = b?.plan === 'skill'
+  const skillKinds = isSkillRun && ex ? (ex.calls ?? []).reduce((acc, c) => {
+    const k = ((ex.tools ?? []).find((t) => t.name === c.tool)?.annotations as { kind?: string } | undefined)?.kind ?? 'script'
+    acc[k] = (acc[k] ?? 0) + 1
+    return acc
+  }, {} as Record<string, number>) : null
+  const skillRanLine = skillKinds
+    ? [skillKinds.hook ? `${skillKinds.hook} hook${skillKinds.hook === 1 ? '' : 's'}` : '', skillKinds.mcp ? `${skillKinds.mcp} MCP server${skillKinds.mcp === 1 ? '' : 's'}` : '', skillKinds.script ? `${skillKinds.script} script${skillKinds.script === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')
+    : ''
   return (
     <Reveal>
       <div className="mt-4 glass rounded-2xl p-6 border-l-4 border-primary/50">
@@ -1054,6 +1065,7 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, effect, probe }: { o
           credentials are canaries, and the sandbox is destroyed after the run. Any egress beyond
           the registry and the tool&apos;s declared hosts is flagged. The signed observation also
           feeds the trust score by fixed, recomputable rules — a caught credential leak caps it at 45.
+          {skill && <> A skill is cloned and every lifecycle hook, bundled MCP server and bundled script it ships is run with no arguments, each with its own timeout, so what runs on your machine without asking is what runs here.</>}
         </p>
 
         <button
@@ -1105,12 +1117,21 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, effect, probe }: { o
             {isMcpRun && !ex && typeof b.exit_code === 'number' && b.exit_code !== 0 && (
               <p className="text-[12.5px] text-text-muted">The package could not be installed in the sandbox (install step exited {b.exit_code}), so its MCP server was not started.</p>
             )}
-            {isMcpRun && ex && (
+            {(isMcpRun || isSkillRun) && ex && (
               <div>
                 <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">
-                  MCP server {ex.launch_ok ? `started${ex.server?.name ? ` (${ex.server.name}${ex.server.version ? ` ${ex.server.version}` : ''})` : ''} · ${exercised} of ${listed} tool${listed === 1 ? '' : 's'} exercised` : 'did not start'}
+                  {isSkillRun
+                    ? (ex.launch_ok ? `Skill cloned${ex.server?.name ? ` (${ex.server.name}${ex.server.version ? ` @ ${ex.server.version}` : ''})` : ''} · ran ${skillRanLine || `${exercised} of ${listed} entrypoints`}` : 'Skill cloned · nothing ran')
+                    : `MCP server ${ex.launch_ok ? `started${ex.server?.name ? ` (${ex.server.name}${ex.server.version ? ` ${ex.server.version}` : ''})` : ''} · ${exercised} of ${listed} tool${listed === 1 ? '' : 's'} exercised` : 'did not start'}`}
                 </div>
-                {!ex.launch_ok && (
+                {!ex.launch_ok && isSkillRun && (
+                  <p className="text-[12.5px] text-text-muted">
+                    {b.grade_summary?.start_reason === 'no_entrypoint' ? 'The skill ships no lifecycle hook or runnable script, so there was nothing to run.' : (START_REASONS[b.grade_summary?.start_reason ?? ''] ?? ex.error ?? 'Nothing in the skill could be started in the sandbox.')}
+                    {b.grade_summary?.start_reason_detail ? <span className="block mt-0.5 font-mono text-[11px] text-text-muted/80">{b.grade_summary.start_reason_detail}</span> : null}
+                    <span className="block mt-0.5">Not a finding: a skill with nothing runnable is reported as not exercised, never penalized.</span>
+                  </p>
+                )}
+                {!ex.launch_ok && !isSkillRun && (
                   <p className="text-[12.5px] text-text-muted">
                     {START_REASONS[b.grade_summary?.start_reason ?? ''] ?? ex.error ?? START_REASONS.unknown}
                     {b.grade_summary?.start_reason_detail ? <span className="block mt-0.5 font-mono text-[11px] text-text-muted/80">{b.grade_summary.start_reason_detail}</span> : null}
@@ -1122,11 +1143,13 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, effect, probe }: { o
                     {(ex.calls ?? []).map((c, i) => {
                       const spec = (ex.tools ?? []).find((t) => t.name === c.tool)
                       const readOnly = spec?.annotations?.readOnlyHint === true
+                      const kind = isSkillRun ? ((spec?.annotations as { kind?: string } | undefined)?.kind ?? 'script') : null
                       const wrote = (c.fs_writes?.length ?? 0) > 0
                       const lied = readOnly && wrote
                       return (
                         <li key={i} className="text-[12.5px] flex flex-wrap items-center gap-x-2 gap-y-0.5">
                           <span className={`font-mono ${lied ? 'text-danger' : 'text-text'}`}>{c.tool}</span>
+                          {kind && <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">{kind === 'mcp' ? 'MCP server' : kind}</span>}
                           {readOnly && <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${lied ? 'bg-danger/15 text-danger' : 'bg-surface border border-border text-text-muted'}`}>declares read-only</span>}
                           <span className="text-text-muted">{c.ok && !c.is_error ? 'ok' : c.is_error ? 'returned an error' : (c.error || 'failed')}{typeof c.duration_ms === 'number' ? ` · ${c.duration_ms} ms` : ''}</span>
                           {wrote && <span className={`font-mono text-[11px] ${lied ? 'text-danger' : 'text-text-muted'}`}>wrote {c.fs_writes!.length} file{c.fs_writes!.length > 1 ? 's' : ''}{lied ? ' ⚠' : ''}</span>}
@@ -1136,7 +1159,7 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, effect, probe }: { o
                   </ul>
                 )}
                 {(ex.canary?.seen_in_result?.length ?? 0) > 0 && (
-                  <p className="mt-1 text-[12.5px] text-warning">A tool returned the value of {ex.canary!.seen_in_result!.join(', ')} from its environment in a result.</p>
+                  <p className="mt-1 text-[12.5px] text-warning">{isSkillRun ? 'A hook or script printed' : 'A tool returned'} the value of {ex.canary!.seen_in_result!.join(', ')} from its environment{isSkillRun ? '' : ' in a result'}.</p>
                 )}
                 {(ex.canary?.env_names?.length ?? 0) > 0 && (
                   <p className="mt-1 text-[11.5px] text-text-muted">Canary credentials supplied for: {ex.canary!.env_names!.join(', ')}. No real secret was used.</p>
@@ -1423,6 +1446,8 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
       <AddToAgent kind="skill" owner={owner} repo={repo} />
 
       <BlastRadius scan={scan} />
+
+      <BehavioralPanel owner={owner} repo={repo} surface="skill" skill auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
 
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">

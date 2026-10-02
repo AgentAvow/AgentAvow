@@ -3309,6 +3309,12 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
 
         skill = analyze_skill(files, skill_md_path=skill_md_path)
 
+        # Env vars the skill's scripts read: the behavioral sandbox fills each
+        # secret-named one with a canary when it runs the hooks and scripts.
+        from types import SimpleNamespace
+        result.env_reads = _env_reads_from_artifact(
+            {path: SimpleNamespace(text=text) for path, text in files.items()})
+
         result.findings = skill.findings
         result.files_scanned = len(files)
         result.total_scannable_files = len(files)

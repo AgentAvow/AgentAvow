@@ -44,6 +44,7 @@ from src.scanner.behavioral.transcript import (  # noqa: E402
 
 SANDBOX_DIR = ROOT / "scripts" / "sandbox"
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "behavioral"
+SKILL_FIXTURE_DIR = FIXTURE_DIR / "skills"  # one directory per fixture skill
 CORPUS = pathlib.Path(__file__).with_name("corpus.json")
 PY = sys.executable
 
@@ -103,6 +104,31 @@ def run_fixture_local(entry: dict, *, per_call: float = 2.0, timeout: float = 20
                             fs_writes=fs, transcript=tr)
 
 
+def run_skill_fixture_local(entry: dict, *, per_script: float = 5.0, timeout: float = 30.0,
+                            ) -> BehavioralResult:
+    """A fixture SKILL through the real in-container exerciser (skill_exercise.sh) on this
+    machine: hooks + scripts run against a temp mount, no sandbox and no network
+    (AGENTAVOW_FIXTURE_NET=0). Egress cannot be observed here, so an entry's
+    ``simulated_egress`` stands in for what the sandbox's capture would report."""
+    skill_dir = SKILL_FIXTURE_DIR / entry["dir"]
+    canary = CANARY_PREFIX + "evalfixture0"
+    with tempfile.TemporaryDirectory(prefix="agentavow-eval-skill-") as mount:
+        env = dict(os.environ, AGENTAVOW_FIXTURE_TMP=mount, AGENTAVOW_FIXTURE_NET="0")
+        cmd = ["sh", str(SANDBOX_DIR / "skill_exercise.sh"), "--timeout", str(int(timeout)),
+               "--per-script-timeout", str(int(per_script)), "--root", str(skill_dir),
+               "--mounts", mount, "--canary-value", canary]
+        if entry.get("env_names"):
+            cmd += ["--canary-env", ",".join(entry["env_names"])]
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
+                              timeout=timeout + 20)
+    tr = parse_transcript(extract_transcript_json(proc.stdout))
+    fs = sorted({p for c in tr.calls for p in c.fs_writes})
+    hosts = [str(h) for h in entry.get("simulated_egress") or []]
+    return BehavioralResult(ran=True, surface="fixture", coordinate=entry["dir"], plan="skill",
+                            fs_writes=fs, transcript=tr, egress_hosts=hosts,
+                            unexpected_egress=_classify_egress(hosts, set()))
+
+
 # ---------------------------------------------------------------------------
 # --sandbox: same fixtures through the real v2 runner
 # ---------------------------------------------------------------------------
@@ -153,14 +179,73 @@ async def run_fixture_sandbox(entry: dict, *, timeout: int = 60) -> BehavioralRe
     )
 
 
+async def run_skill_fixture_sandbox(entry: dict, *, timeout: int = 90) -> BehavioralResult:
+    """A fixture skill INTO the real sandbox: the skill's tree travels as one tar.gz in
+    the --files-b64 payload (the runner only materializes flat filenames), is unpacked to
+    /work/skill, and the shipped exerciser runs it exactly as the skill plan would —
+    minus the clone, so the egress capture sees only what the skill itself does."""
+    import io
+    import tarfile
+
+    from src.scanner.behavioral.runner import _execute
+    skill_dir = SKILL_FIXTURE_DIR / entry["dir"]
+    canary = CANARY_PREFIX + os.urandom(6).hex()
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        tar.add(skill_dir, arcname=".")
+    files = {"skill_exercise.sh": (SANDBOX_DIR / "skill_exercise.sh").read_bytes(),
+             "skill.tgz": buf.getvalue()}
+    ex = ["sh", "/work/skill_exercise.sh", "--timeout", str(timeout - 20),
+          "--per-script-timeout", "10", "--canary-value", canary]
+    if entry.get("env_names"):
+        ex += ["--canary-env", ",".join(entry["env_names"])]
+    command = ("mkdir -p /work/skill && tar -xzf /work/skill.tgz -C /work/skill && "
+               "cd /work/skill && " + " ".join(ex))
+    args = ["--mode", "exec", "--files-b64", _payload(files), "--canary", canary,
+            "--timeout", str(timeout), "python:3.12-alpine", command]
+    stdout, err = await _execute(args, timeout, v2=True)
+    if err or not stdout:
+        return BehavioralResult(ran=False, surface="fixture", coordinate=entry["dir"],
+                                plan="skill", error=err or "no_output")
+    try:
+        data = json.loads(stdout[stdout.index("{"):stdout.rindex("}") + 1])
+    except Exception as e:  # noqa: BLE001
+        return BehavioralResult(ran=False, surface="fixture", coordinate=entry["dir"],
+                                plan="skill", error=f"unparseable_runner_output: {e}")
+    hosts = [h for h in data.get("egress_hosts") or [] if isinstance(h, str)]
+    return BehavioralResult(
+        ran=True, surface="fixture", coordinate=entry["dir"], plan="skill",
+        timed_out=bool(data.get("timed_out")), exit_code=data.get("exit_code"),
+        egress_hosts=hosts, unexpected_egress=_classify_egress(hosts, set()),
+        fs_writes=[p for p in data.get("fs_writes") or [] if isinstance(p, str)],
+        transcript=parse_transcript(data.get("exercise")),
+        canary_exfil=[c for c in data.get("canary_exfil") or [] if isinstance(c, dict)],
+    )
+
+
+def run_fixture_entry_local(entry: dict) -> BehavioralResult:
+    return (run_skill_fixture_local(entry) if "dir" in entry else run_fixture_local(entry))
+
+
+async def run_fixture_entry_sandbox(entry: dict) -> BehavioralResult:
+    return await (run_skill_fixture_sandbox(entry) if "dir" in entry
+                  else run_fixture_sandbox(entry))
+
+
 # ---------------------------------------------------------------------------
 # --known-good: real packages, every finding is a suspected false positive
 # ---------------------------------------------------------------------------
 
 async def run_known_good(pkg: dict) -> dict:
+    """One corpus package (MCP plan) or, for a ``known_good_skills`` entry
+    ({"repo": "owner/repo"}), one skill through the skill plan."""
     from src.scanner.behavioral.runner import run_behavioral
     started = time.monotonic()
-    res = await run_behavioral(pkg["surface"], pkg["name"], plan=f"{pkg['surface']}-mcp")
+    if "repo" in pkg:
+        pkg = dict(pkg, surface="skill", name=pkg["repo"])
+        res = await run_behavioral("skill", pkg["name"], plan="skill")
+    else:
+        res = await run_behavioral(pkg["surface"], pkg["name"], plan=f"{pkg['surface']}-mcp")
     findings = grade(res)
     tr = res.transcript
     return {
@@ -209,11 +294,12 @@ def main(argv: list[str] | None = None) -> int:
 
     def _rows(mode: str, runner) -> list[dict]:
         rows = []
-        for entry in corpus["fixtures"]:
-            if a.only and a.only not in entry["file"]:
+        for entry in corpus["fixtures"] + corpus.get("skill_fixtures", []):
+            name = entry.get("file") or entry["dir"]
+            if a.only and a.only not in name:
                 continue
             res = runner(entry)
-            rows.append({"file": entry["file"], "label": entry["label"],
+            rows.append({"file": name, "label": entry["label"],
                          "rules": sorted({f.rule for f in grade(res)}),
                          "failures": check_expectations(entry, res) if res.ran
                          else [f"did not run: {res.error}"],
@@ -222,17 +308,20 @@ def main(argv: list[str] | None = None) -> int:
         return rows
 
     if a.fixtures:
-        report["fixtures_local"] = _rows("fixtures (local exerciser + graders)", run_fixture_local)
+        report["fixtures_local"] = _rows("fixtures (local exerciser + graders)",
+                                         run_fixture_entry_local)
         ok &= _report_fixtures(report["fixtures_local"])
     if a.sandbox:
         report["fixtures_sandbox"] = _rows(
             "fixtures (real sandbox, v2 runner)",
-            lambda e: asyncio.run(run_fixture_sandbox(e)))
+            lambda e: asyncio.run(run_fixture_entry_sandbox(e)))
         ok &= _report_fixtures(report["fixtures_sandbox"])
     if a.known_good:
         rows = []
         print("\n== known-good packages (every finding = suspected false positive) ==")
-        for pkg in corpus["known_good"]:
+        for pkg in corpus["known_good"] + [
+                dict(e, surface="skill", name=e["repo"])
+                for e in corpus.get("known_good_skills", [])]:
             if a.only and a.only not in pkg["name"]:
                 continue
             row = asyncio.run(run_known_good(pkg))
