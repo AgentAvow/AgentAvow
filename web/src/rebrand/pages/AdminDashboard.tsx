@@ -128,7 +128,23 @@ interface Behavioral {
   start_reasons?: Record<string, number>; findings_by_rule?: Record<string, number>
   series?: { runs?: number[]; exercised?: number[]; slot_rejected?: number[] }
   concurrency_limit?: number; scaling_hint?: string
+  last_eval?: EvalReport | null
+  corpus?: CorpusEntry[]
 }
+interface EvalFp { surface: string; name: string; rules: string[] }
+interface EvalReport {
+  ran_at?: string; reason?: string; duration_s?: number; running?: boolean
+  fixtures?: { total?: number; passed?: number; failed?: string[] }
+  known_good?: { total?: number; ran?: number; exercised?: number; false_positives?: EvalFp[]; expected_findings?: number; not_started?: { name: string; start_reason: string }[] }
+  diff?: {
+    first_run?: boolean; previous_ran_at?: string | null; regression?: boolean; exercised_delta?: number
+    fixture_failures?: string[]; fixture_regressions?: string[]; fixture_fixed?: string[]
+    new_false_positives?: EvalFp[]; cleared_false_positives?: string[]
+    newly_not_exercised?: string[]; newly_exercised?: string[]
+  }
+  alert?: { notified?: number; webhooks?: number }
+}
+interface CorpusEntry { key: string; surface: string; name: string; expect_rules?: string[]; note?: string; source: 'file' | 'admin'; removed?: boolean }
 const START_LABEL: Record<string, string> = {
   started: 'Started', needs_credentials: 'Needs credentials', needs_arguments: 'Needs arguments',
   missing_binary: 'Missing binary', install_failed: 'Install failed', resource_limit: 'Resource limit',
@@ -154,6 +170,143 @@ function BarList({ title, rows, labels, empty, gradient }: { title: string; rows
           <div className="h-2 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(n / max) * 100}%`, background: gradient }} /></div>
         </div>
       )) : <p className="text-[12.5px] text-text-muted/70">{empty}</p>}
+    </div>
+  )
+}
+
+// ── Scheduled eval tile (weekly corpus run; POST /admin/metrics/behavioral/eval) ──
+function EvalTile({ report, corpus, win }: { report?: EvalReport | null; corpus: CorpusEntry[]; win: Win }) {
+  const qc = useQueryClient()
+  const [msg, setMsg] = useState<string | null>(null)
+  const [showCorpus, setShowCorpus] = useState(false)
+  const [addSurface, setAddSurface] = useState<'npm' | 'pypi' | 'skill'>('npm')
+  const [addName, setAddName] = useState('')
+  const [addRules, setAddRules] = useState('')
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin-dash-behavioral', win] })
+  const run = useMutation({
+    mutationFn: async () => (await api.post('/admin/metrics/behavioral/eval')).data,
+    onSuccess: () => { setMsg('queued — the report lands here when the run finishes'); invalidate() },
+    onError: (e: unknown) => {
+      const status = (e as { response?: { status?: number } })?.response?.status
+      setMsg(status === 409 ? 'a run is already in progress' : 'could not start the run')
+    },
+  })
+  const edit = useMutation({
+    mutationFn: async (body: { action: 'add' | 'remove'; surface: string; name: string; expect_rules?: string[] }) =>
+      (await api.post('/admin/metrics/behavioral/corpus', body)).data,
+    onSuccess: () => { setAddName(''); setAddRules(''); invalidate() },
+  })
+  const r = report || null
+  const fx = r?.fixtures || {}
+  const kg = r?.known_good || {}
+  const d = r?.diff || {}
+  const fpCount = (kg.false_positives || []).length
+  const regressed = !!d.regression
+  const diffLines: { tone: 'bad' | 'good' | 'muted'; text: string }[] = []
+  for (const l of d.fixture_regressions || []) diffLines.push({ tone: 'bad', text: `fixture now failing: ${l}` })
+  for (const f of d.new_false_positives || []) diffLines.push({ tone: 'bad', text: `new false positive: ${f.surface}:${f.name} (${f.rules.join(', ')})` })
+  for (const n of d.newly_not_exercised || []) diffLines.push({ tone: 'bad', text: `no longer exercised: ${n}` })
+  for (const l of d.fixture_fixed || []) diffLines.push({ tone: 'good', text: `fixture fixed: ${l}` })
+  for (const n of d.cleared_false_positives || []) diffLines.push({ tone: 'good', text: `false positive cleared: ${n}` })
+  for (const n of d.newly_exercised || []) diffLines.push({ tone: 'good', text: `newly exercised: ${n}` })
+  const toneCls = { bad: 'text-danger', good: 'text-success', muted: 'text-text-muted/70' }
+  const active = corpus.filter((c) => !c.removed)
+  const removed = corpus.filter((c) => c.removed)
+  return (
+    <div className="glass rounded-2xl p-5 mt-3">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted">
+          Eval — weekly corpus run {r?.ran_at ? <span className="normal-case tracking-normal">· last {ago(r.ran_at)} ago ({new Date(r.ran_at).toLocaleDateString()}, {r.reason || 'scheduled'}{r.duration_s != null ? `, ${Math.round(r.duration_s / 60)} min` : ''})</span> : <span className="normal-case tracking-normal">· never run</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          {msg && <span className="text-[11.5px] text-text-muted">{msg}</span>}
+          <button
+            onClick={() => { setMsg(null); run.mutate() }}
+            disabled={run.isPending || !!r?.running}
+            className="px-2.5 py-1 rounded-lg text-[12px] font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50 transition-colors"
+          >
+            {r?.running ? 'running…' : 'Run eval now'}
+          </button>
+        </div>
+      </div>
+      {r ? (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+            <div>
+              <div className={`text-[20px] font-extrabold tabular-nums ${(fx.failed || []).length ? 'text-danger' : 'gradient-text'}`}>{fmt(fx.passed)}/{fmt(fx.total)}</div>
+              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">fixtures passed</div>
+            </div>
+            <div>
+              <div className="text-[20px] font-extrabold tabular-nums gradient-text">{fmt(kg.exercised)}/{fmt(kg.total)}</div>
+              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">known-good exercised{d.exercised_delta ? ` (${d.exercised_delta > 0 ? '+' : ''}${d.exercised_delta})` : ''}</div>
+            </div>
+            <div>
+              <div className={`text-[20px] font-extrabold tabular-nums ${fpCount > 0 ? 'text-danger' : 'gradient-text'}`}>{fmt(fpCount)}</div>
+              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">false positives</div>
+            </div>
+            <div>
+              <div className={`text-[20px] font-extrabold tabular-nums ${regressed ? 'text-danger' : 'text-success'}`}>{d.first_run ? 'first run' : regressed ? 'regressed' : 'stable'}</div>
+              <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted">vs previous{d.previous_ran_at ? ` (${ago(d.previous_ran_at)} ago)` : ''}</div>
+            </div>
+          </div>
+          {(fx.failed || []).length > 0 && <p className="mt-2 text-[12px] text-danger">Failing fixtures: {(fx.failed || []).join(', ')}</p>}
+          {fpCount > 0 && (
+            <ul className="mt-2 text-[12px] text-danger space-y-0.5">
+              {(kg.false_positives || []).map((f) => <li key={`${f.surface}:${f.name}`}>{f.surface}:{f.name} — {f.rules.join(', ')}</li>)}
+            </ul>
+          )}
+          <div className="mt-3">
+            <div className="text-[11px] font-mono uppercase tracking-wide text-text-muted mb-1">Diff vs previous</div>
+            {diffLines.length ? (
+              <ul className="text-[12px] space-y-0.5">{diffLines.map((l, i) => <li key={i} className={toneCls[l.tone]}>{l.text}</li>)}</ul>
+            ) : (
+              <p className="text-[12px] text-text-muted/70">{d.first_run ? 'No previous report to compare against.' : 'No change.'}</p>
+            )}
+          </div>
+          {(kg.not_started || []).length > 0 && (
+            <p className="mt-2 text-[11px] text-text-muted/70">Not started: {(kg.not_started || []).map((n) => `${n.name} (${START_LABEL[n.start_reason] || n.start_reason})`).join(' · ')}</p>
+          )}
+        </>
+      ) : (
+        <p className="mt-2 text-[12.5px] text-text-muted/70">No eval report yet. The job runs weekly (first run an hour after startup) when the behavioral tier is enabled; or start one now.</p>
+      )}
+      <div className="mt-3 border-t border-border/40 pt-3">
+        <button onClick={() => setShowCorpus(!showCorpus)} className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted hover:text-text transition-colors">
+          Known-good corpus · {active.length} entries {showCorpus ? '▾' : '▸'}
+        </button>
+        {showCorpus && (
+          <div className="mt-2">
+            <ul className="text-[12px] space-y-1">
+              {active.map((c) => (
+                <li key={c.key} className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono">{c.surface}:{c.name}</span>
+                  {c.source === 'admin' && <span className="text-[10.5px] px-1.5 rounded bg-primary/15 text-primary-light">admin</span>}
+                  {(c.expect_rules || []).length > 0 && <span className="text-[11px] text-text-muted/70">expects {c.expect_rules!.join(', ')}</span>}
+                  <button onClick={() => edit.mutate({ action: 'remove', surface: c.surface, name: c.name })} className="text-[11px] text-text-muted hover:text-danger">remove</button>
+                </li>
+              ))}
+              {removed.map((c) => (
+                <li key={c.key} className="flex items-center gap-2 flex-wrap opacity-60">
+                  <span className="font-mono line-through">{c.surface}:{c.name}</span>
+                  <button onClick={() => edit.mutate({ action: 'add', surface: c.surface, name: c.name, expect_rules: c.expect_rules || [] })} className="text-[11px] text-text-muted hover:text-success">restore</button>
+                </li>
+              ))}
+            </ul>
+            <form
+              className="mt-2 flex items-center gap-2 flex-wrap text-[12px]"
+              onSubmit={(e) => { e.preventDefault(); if (addName.trim()) edit.mutate({ action: 'add', surface: addSurface, name: addName.trim(), expect_rules: addRules.split(',').map((x) => x.trim()).filter(Boolean) }) }}
+            >
+              <select value={addSurface} onChange={(e) => setAddSurface(e.target.value as 'npm' | 'pypi' | 'skill')} className="bg-surface rounded-lg px-2 py-1 font-mono">
+                <option value="npm">npm</option><option value="pypi">pypi</option><option value="skill">skill</option>
+              </select>
+              <input value={addName} onChange={(e) => setAddName(e.target.value)} placeholder={addSurface === 'skill' ? 'owner/repo' : 'package name'} className="bg-surface rounded-lg px-2 py-1 font-mono min-w-[14rem]" />
+              <input value={addRules} onChange={(e) => setAddRules(e.target.value)} placeholder="expect_rules (comma-separated, optional)" className="bg-surface rounded-lg px-2 py-1 font-mono min-w-[16rem]" />
+              <button type="submit" disabled={edit.isPending || !addName.trim()} className="px-2.5 py-1 rounded-lg font-mono bg-primary/15 text-primary-light hover:bg-primary/25 disabled:opacity-50">add</button>
+              {edit.isError && <span className="text-danger">could not save</span>}
+            </form>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -213,6 +366,7 @@ function BehavioralPanel({ win }: { win: Win }) {
           <p className="mt-2 text-[11px] text-text-muted/60">Bar: runs (teal) then slot rejections (amber), scaled to the busiest day.</p>
         </div>
       )}
+      <EvalTile report={b.last_eval} corpus={b.corpus || []} win={win} />
     </Section>
   )
 }

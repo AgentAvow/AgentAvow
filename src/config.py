@@ -282,6 +282,14 @@ class Settings(BaseSettings):
     behavioral_backfill_batch: int = 6
     behavioral_backfill_max_examined: int = 400   # rows looked at per pass (bounds Redis work)
     behavioral_backfill_retry_days: int = 7
+    # Scheduled behavioral eval (src/jobs/behavioral_eval.py): the sandbox eval corpus
+    # (fixtures + known-good packages/skills) run weekly, one sandbox slot at a time,
+    # reports kept in Redis, admins alerted on a regression. Runs only when the
+    # behavioral tier itself is enabled. First run one hour after startup.
+    behavioral_eval_enabled: bool = True
+    behavioral_eval_interval_hours: int = 168
+    behavioral_eval_startup_delay_sec: int = 60 * 60
+    behavioral_eval_slot_wait_sec: int = 600   # wait this long per item for a free slot
 
     # --- Phase 5: maintainer / behavioral trust signals -----------------------
     # Cheap GitHub-METADATA maintainer signals (NO code execution, NO sandbox):

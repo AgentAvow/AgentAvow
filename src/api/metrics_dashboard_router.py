@@ -20,20 +20,26 @@ deploy time (no historical backfill) and never block the hot path.
 Endpoints (both under the ``/admin`` prefix, reusing ``require_admin``):
   * GET /admin/metrics            -> JSON aggregation (window = today|7d|30d)
   * GET /admin/metrics/dashboard  -> minimal server-rendered HTML view
-  * GET /admin/metrics/behavioral -> behavioral sandbox health (Redis counters)
+  * GET /admin/metrics/behavioral -> behavioral sandbox health (Redis counters) plus
+    the latest scheduled eval report (``last_eval``) and the known-good corpus
+  * POST /admin/metrics/behavioral/eval   -> start an eval run now (202 / 409 if running)
+  * POST /admin/metrics/behavioral/corpus -> add / remove a known-good corpus entry
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import case, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_entity, require_admin
-from src.api.rate_limit import rate_limit_reads
+from src.api.rate_limit import rate_limit_reads, rate_limit_writes
 from src.database import get_db
 from src.models import (
     AlertWebhook,
@@ -800,7 +806,33 @@ async def _behavioral_aggregate(window: str) -> dict:
         ),
         "scaling_hint": behavioral_scaling_hint(runs, slot_rejected, killed),
         "backfill": await _behavioral_backfill_block(day_strs),
+        "last_eval": await _last_eval(),
+        "corpus": await _eval_corpus(),
     }
+
+
+async def _last_eval() -> dict | None:
+    """The latest scheduled-eval report minus its rows, plus whether one is running.
+    Never raises: a Redis outage reads as no report."""
+    try:
+        from src.jobs import behavioral_eval as be
+
+        summary = be.report_summary(await be.read_latest())
+        running = await be.is_running()
+    except Exception:
+        return None
+    if summary is None and not running:
+        return None
+    return dict(summary or {}, running=running)
+
+
+async def _eval_corpus() -> list[dict]:
+    try:
+        from src.jobs import behavioral_eval as be
+
+        return await be.corpus_view()
+    except Exception:
+        return []
 
 
 @router.get("/metrics/behavioral", dependencies=[Depends(rate_limit_reads)])
@@ -817,3 +849,69 @@ async def behavioral_metrics(
     """
     require_admin(current_entity)
     return await _behavioral_aggregate(window)
+
+
+_EVAL_TASKS: set[asyncio.Task] = set()
+
+
+@router.post("/metrics/behavioral/eval", status_code=202,
+             dependencies=[Depends(rate_limit_writes)])
+async def trigger_behavioral_eval(
+    current_entity: Entity = Depends(get_current_entity),
+) -> dict:
+    """Start a behavioral eval run now (fixtures + known-good corpus through the
+    sandbox). Admin only. 202 when queued; 409 when a run is already in progress.
+    The run holds one sandbox slot at a time and takes tens of minutes; the report
+    lands in ``last_eval`` on ``GET /admin/metrics/behavioral``."""
+    from src.jobs import behavioral_eval as be
+
+    require_admin(current_entity)
+    if not await be.mark_running():
+        raise HTTPException(status_code=409, detail="A behavioral eval is already running")
+
+    async def _run() -> None:
+        try:
+            await be.run_behavioral_eval(reason="admin", _already_marked=True)
+        except Exception:
+            logging.getLogger(__name__).exception("admin-triggered behavioral eval failed")
+
+    # Detached from the request (a Starlette BackgroundTask is tied to it); the strong
+    # reference keeps the task alive until it finishes.
+    task = asyncio.create_task(_run(), name="behavioral-eval-admin")
+    _EVAL_TASKS.add(task)
+    task.add_done_callback(_EVAL_TASKS.discard)
+    return {"status": "queued", "reason": "admin"}
+
+
+class CorpusEdit(BaseModel):
+    action: str = Field(pattern="^(add|remove)$")
+    surface: str = Field(min_length=1, max_length=16)
+    name: str | None = Field(default=None, max_length=200)
+    repo: str | None = Field(default=None, max_length=200)
+    expect_rules: list[str] = Field(default_factory=list, max_length=20)
+
+
+@router.post("/metrics/behavioral/corpus", dependencies=[Depends(rate_limit_writes)])
+async def edit_behavioral_corpus(
+    body: CorpusEdit,
+    current_entity: Entity = Depends(get_current_entity),
+) -> dict:
+    """Add or remove a known-good corpus entry (admin override kept in Redis, merged
+    with the file corpus on every eval). ``surface`` is npm / pypi / skill; a skill
+    is named by ``repo`` (owner/repo). ``expect_rules`` marks findings that are true,
+    not false positives. Removing a file entry hides it; adding it back restores it."""
+    from src.jobs import behavioral_eval as be
+
+    require_admin(current_entity)
+    name = (body.name or body.repo or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name (or repo for a skill) is required")
+    try:
+        corpus = await be.apply_corpus_edit(
+            body.action, body.surface, name,
+            [r.strip() for r in body.expect_rules if r and r.strip()])
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="corpus store unavailable") from e
+    return {"corpus": corpus}

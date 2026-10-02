@@ -1620,6 +1620,34 @@ async def _catalog_rescan_loop(interval: int | None = None) -> None:
         await asyncio.sleep(interval)
 
 
+async def _behavioral_eval_loop(interval: int | None = None) -> None:
+    """Weekly behavioral eval (fixtures + known-good corpus through the sandbox). Lives
+    inside the scheduler's single-worker lock like every other loop here. The first
+    run waits an hour so a fresh deploy is not spending sandbox slots on itself while
+    live traffic warms up; a run already in progress (admin trigger) is skipped."""
+    from src.config import settings
+
+    interval = interval or int(
+        getattr(settings, "behavioral_eval_interval_hours", 168) or 168) * 60 * 60
+    logger.info("Behavioral eval loop started (interval=%ds)", interval)
+    await asyncio.sleep(getattr(settings, "behavioral_eval_startup_delay_sec", 3600))
+    while True:
+        try:
+            if (getattr(settings, "behavioral_eval_enabled", True)
+                    and getattr(settings, "scanner_behavioral_enabled", False)):
+                from src.jobs.behavioral_eval import EvalAlreadyRunningError, run_behavioral_eval
+
+                try:
+                    await run_behavioral_eval(reason="scheduled")
+                except EvalAlreadyRunningError:
+                    logger.info("Behavioral eval skipped: a run is already in progress")
+            else:
+                logger.debug("Behavioral eval skipped: behavioral tier or eval disabled")
+        except Exception:
+            logger.exception("Behavioral eval loop iteration failed")
+        await asyncio.sleep(interval)
+
+
 async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     """Start the background scheduler task.
 
@@ -1797,6 +1825,12 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
         asyncio.create_task(
             behavioral_backfill_loop(),
             name="behavioral-backfill",
+        )
+    # Weekly behavioral eval (sandbox fixtures + known-good corpus; alerts on regression)
+    if getattr(_sched_settings, "behavioral_eval_enabled", True):
+        asyncio.create_task(
+            _behavioral_eval_loop(),
+            name="behavioral-eval",
         )
 
     return _scheduler_task
