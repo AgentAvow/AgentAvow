@@ -60,6 +60,24 @@ agent = create_agent(model, tools=mcp_tools, middleware=[gate])
 
 The mapping is yours to give — a LangChain tool doesn't carry its server's URL — by tool name (`tool_to_server`), by server name (`servers`, matched to `MCPAdapter`'s server name or a `<server>_` tool-name prefix), or a `resolve_server` callable. Tools that map to no server (your own functions) are not gated. `on_fail="confirm"` pauses the graph with a LangGraph interrupt until you resume with `"approve"`; `fail_closed=False` lets a call through, with a warning, when AgentAvow itself can't answer.
 
+### Google ADK
+
+The same gate is a `before_tool_callback`. For an `McpToolset` over HTTP it needs no mapping at all: the server URL comes off the tool's connection, and the drift check runs against the exact definition ADK was served — the raw `tools/list` entry the tool wraps. A block returns `{"error": …}` as the tool's result, so the model is told why and nothing raises.
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
+from src.bridges.google_adk import AgentAvowToolGate            # pip install agentgraph[adk]
+
+agent = LlmAgent(
+    name="assistant", model="gemini-2.5-flash",
+    tools=[McpToolset(connection_params=StreamableHTTPConnectionParams(url=SERVER_URL))],
+    before_tool_callback=AgentAvowToolGate(min_score=81, on_fail="block"),
+)
+```
+
+A stdio server has no URL — give it a coordinate with `tool_to_server={"tool": "npm:@scope/server"}` and it's graded as a package (score and findings; nothing was served over the wire, so no drift check). `on_fail="confirm"` uses ADK's own tool-confirmation flow: the first call asks, the call runs once the user confirms.
+
 ## Gate anything (the API)
 
 Every surface is one auth-free GET, returning the score, tier, findings, the signed `coverage{}` block, and the JWS attestation:
