@@ -354,6 +354,10 @@ def classify_start(result, transcript: ExerciseTranscript | None = None) -> tupl
     t = transcript if isinstance(transcript, ExerciseTranscript) else _transcript_of(result)
     if t.launch_ok:
         return "started", ""
+    plan = str(getattr(result, "plan", "") or "")
+    if plan and not plan.endswith("-mcp") and plan != "docker" and not t.present:
+        # install/import plans never launch a server; "did it start" does not apply
+        return "not_applicable", "install/import plan: no server is launched"
     exit_code = getattr(result, "exit_code", None)
     notes = [str(n) for n in (getattr(result, "notes", None) or [])]
     present = (t.present or bool(t.launch_error) or bool(t.launch_command))

@@ -235,3 +235,13 @@ def test_generated_temp_names_are_scratch_even_when_one_tail_looks_like_a_word()
                              calls=[ToolCall("snapshot", ok=True, fs_writes=["/tmp/out-report"])])
     res2 = BehavioralResult(ran=True, surface="npm", coordinate="x", transcript=tr2)
     assert len(grade_readonly_violated(res2, tr2)) == 1
+
+
+def test_install_only_plans_have_no_start_reason():
+    from src.scanner.behavioral.graders import classify_start, grade_summary
+    from src.scanner.behavioral.runner import BehavioralResult
+    r = BehavioralResult(ran=True, surface="npm", coordinate="left-pad", plan="npm", exit_code=0)
+    assert classify_start(r)[0] == "not_applicable"
+    assert grade_summary(r)["start_reason"] == "not_applicable"
+    r2 = BehavioralResult(ran=True, surface="npm", coordinate="x", plan="npm-mcp", exit_code=1)
+    assert classify_start(r2)[0] == "install_failed"
