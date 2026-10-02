@@ -8,9 +8,9 @@ the connector.
 
 - **URL:** `https://agentavow.com/mcp` (remote, Streamable HTTP)
 - **Auth:** none. Every tool is anonymous and read-only.
-- **What it does:** scans a target and returns a signed 0–100 trust score, a plain
-  safe / needs-review verdict, the findings behind it, and how widely the target is
-  adopted. Each result is signed (Ed25519) and can be recomputed offline.
+- **What it does:** scans a target and returns two scores: a signed 0–100 trust score with a
+  plain safe / needs-review verdict and the findings behind it, and an adoption score
+  from real usage (downloads, stars, installs). Each result is signed (Ed25519) and can be recomputed offline.
 
 ## Tools (all read-only)
 

@@ -204,13 +204,13 @@ function WatchCTA({ surface = 'github', owner, repo }: { surface?: string; owner
 }
 
 /** schema.org Review JSON-LD so a scan result is a rich, indexable object. */
-function scanReviewJsonLd(name: string, grade: string, score: number): Record<string, unknown> {
+function scanReviewJsonLd(name: string, score: number): Record<string, unknown> {
   return {
     '@context': 'https://schema.org', '@type': 'Review',
     itemReviewed: { '@type': 'SoftwareApplication', name, applicationCategory: 'DeveloperApplication' },
     reviewRating: { '@type': 'Rating', ratingValue: score, bestRating: 100, worstRating: 0 },
     author: { '@type': 'Organization', name: 'AgentAvow' },
-    reviewBody: `Signed, offline-verifiable safety score ${grade} (${score}/100).`,
+    reviewBody: `Signed, offline-verifiable trust score ${score}/100.`,
   }
 }
 
@@ -421,10 +421,10 @@ function DefinitionDrift({ owner, repo }: { owner: string; repo: string }) {
 }
 
 /** Share row — copy link + branded X / Bluesky icons. */
-function ShareRow({ owner, repo, score, grade }: { owner: string; repo: string; score: number; grade: string }) {
+function ShareRow({ owner, repo, score }: { owner: string; repo: string; score: number }) {
   const [copied, setCopied] = useState(false)
   const url = typeof window !== 'undefined' ? window.location.href : ''
-  const text = `${owner}/${repo} scored ${grade} (${score}/100) on AgentAvow — a signed, verifiable trust score.`
+  const text = `${owner}/${repo} scored ${score}/100 on AgentAvow — a signed, verifiable trust score.`
   const copy = () => { if (navigator.clipboard) navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) }
   const icon = 'grid place-items-center w-8 h-8 rounded-lg border border-border text-text-muted hover:border-primary-light hover:text-primary-light transition-colors'
   return (
@@ -577,7 +577,7 @@ function OwnershipCTA({ owner, repo, token }: { owner: string; repo: string; tok
 /** The secondary-action slot for a stored PRIVATE repo, sitting right below the
  * watch CTA. Not listed → a clear "Publish to search" CTA; on publish it animates
  * into the share row (which is also what shows if it's already listed). */
-function PrivateSearchSlot({ owner, repo, score, grade, published }: { owner: string; repo: string; score: number; grade: string; published: boolean }) {
+function PrivateSearchSlot({ owner, repo, score, published }: { owner: string; repo: string; score: number; published: boolean }) {
   const qc = useQueryClient()
   const reduce = useReducedMotion()
   const publish = useMutation({
@@ -596,7 +596,7 @@ function PrivateSearchSlot({ owner, repo, score, grade, published }: { owner: st
         className="flex flex-col items-center gap-2"
       >
         <div className="text-[12px] text-success font-medium">🌐 Listed in search — share it</div>
-        <ShareRow owner={owner} repo={repo} score={score} grade={grade} />
+        <ShareRow owner={owner} repo={repo} score={score} />
       </motion.div>
     )
   }
@@ -1203,7 +1203,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
         description={`${verdict}. AgentAvow's signed capability grade for the ${owner}/${repo} Agent Skill: ${scan.trust_score}/100 (${t.name}), verifiable offline.`}
         path={`/check/skill/${owner}/${repo}`}
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
-        jsonLd={scanReviewJsonLd(`${owner}/${repo}`, t.name, scan.trust_score)}
+        jsonLd={scanReviewJsonLd(`${owner}/${repo}`, scan.trust_score)}
       />
       <Reveal>
         <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
@@ -1269,7 +1269,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
       )}
 
       <div className="mt-8 flex justify-center">
-        <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={t.name} />
+        <ShareRow owner={owner} repo={repo} score={scan.trust_score} />
       </div>
     </div>
   )
@@ -1365,7 +1365,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
         title={`MCP server — safety score ${scan.trust_score}/100`}
         description={`${verdict}. AgentAvow live-graded this MCP server's served tool surface: ${scan.trust_score}/100 (${t.name}).`}
         path={`/check/mcp?endpoint=${encodeURIComponent(endpoint)}`}
-        jsonLd={scanReviewJsonLd(endpoint, t.name, scan.trust_score)}
+        jsonLd={scanReviewJsonLd(endpoint, scan.trust_score)}
       />
       <Reveal>
         <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
@@ -1443,7 +1443,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
       <CategoryFindings categoryScores={scan.category_scores as Record<string, number> | undefined} findings={f} maxFindings={15} emptyMessage="✓ No capability-surface risks found — clean tool set." />
 
       <div className="mt-8 flex justify-center">
-        <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} grade={t.name} />
+        <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} />
       </div>
     </div>
   )
@@ -1483,7 +1483,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
         title={`${name} (${surface}) — safety score ${scan.trust_score}/100`}
         description={`${verdict}. AgentAvow's signed score for ${surface}:${name}: ${scan.trust_score}/100 (${t.name}) — scanned on the published artifact, verifiable offline.`}
         path={`/check/pkg/${surface}/${name}`}
-        jsonLd={scanReviewJsonLd(`${surface}:${name}`, t.name, scan.trust_score)}
+        jsonLd={scanReviewJsonLd(`${surface}:${name}`, scan.trust_score)}
       />
       <Reveal>
         <div className="glass rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${t.color}12, transparent 55%), var(--color-surface)` }}>
@@ -1547,7 +1547,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
       )}
 
       <div className="mt-8 flex justify-center">
-        <ShareRow owner={surface} repo={name} score={scan.trust_score} grade={t.name} />
+        <ShareRow owner={surface} repo={name} score={scan.trust_score} />
       </div>
     </div>
   )
@@ -1685,7 +1685,7 @@ function Result({ owner, repo, privateResult }: {
         path={`/check/${owner}/${repo}`}
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
         noindex={isPrivate}
-        jsonLd={isPrivate ? undefined : scanReviewJsonLd(`${owner}/${repo}`, t.name, scan.trust_score)}
+        jsonLd={isPrivate ? undefined : scanReviewJsonLd(`${owner}/${repo}`, scan.trust_score)}
       />
       {/* BRANDED HERO — two co-equal scores + primary Watch CTA */}
       <motion.div className="rounded-2xl overflow-hidden relative border border-border/60"
@@ -1736,7 +1736,7 @@ function Result({ owner, repo, privateResult }: {
         {/* a stored private repo publishes to search here (then animates into share) */}
         {storedPrivate && (
           <div className="relative px-7 pb-6 mt-4 flex items-center justify-center gap-2 flex-wrap border-t border-border/50 pt-4">
-            <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} grade={t.name} published={published} />
+            <PrivateSearchSlot owner={owner} repo={repo} score={scan.trust_score} published={published} />
           </div>
         )}
       </motion.div>
@@ -1853,7 +1853,7 @@ function Result({ owner, repo, privateResult }: {
       {/* share — floats at the bottom, consistent with every other score page */}
       {!isPrivate && (
         <div className="mt-8 flex justify-center">
-          <ShareRow owner={owner} repo={repo} score={scan.trust_score} grade={t.name} />
+          <ShareRow owner={owner} repo={repo} score={scan.trust_score} />
         </div>
       )}
     </div>
