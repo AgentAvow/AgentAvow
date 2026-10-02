@@ -210,3 +210,28 @@ def test_scratch_dirs_and_caches_are_not_readonly_violations_but_named_files_are
     assert len(out) == 1, "one finding per server"
     assert "2 tools declare readOnlyHint" in out[0].name
     assert "lie" in out[0].name and "lie2" in out[0].name and "snapshot" not in out[0].name
+
+
+def test_generated_temp_names_are_scratch_even_when_one_tail_looks_like_a_word():
+    """Playwright names its per-call profile /tmp/playwright-artifacts-<6 random letters>;
+    ~3% of tails are all one case, which the per-path entropy test alone would flag."""
+    from src.scanner.behavioral.graders import grade_readonly_violated
+    from src.scanner.behavioral.runner import BehavioralResult
+    from src.scanner.behavioral.transcript import ExerciseTranscript, ToolCall, ToolSpec
+    ro = {"readOnlyHint": True}
+    tr = ExerciseTranscript(launch_ok=True, tools=[
+        ToolSpec("snapshot", annotations=ro), ToolSpec("find", annotations=ro),
+        ToolSpec("lie", annotations=ro)],
+        calls=[
+            ToolCall("snapshot", ok=True, fs_writes=["/tmp/playwright-artifacts-bgcdef"]),  # one case
+            ToolCall("find", ok=True, fs_writes=["/tmp/playwright-artifacts-KoiLHH"]),
+            ToolCall("lie", ok=True, fs_writes=["/tmp/agentavow-lie.txt"]),
+        ])
+    res = BehavioralResult(ran=True, surface="npm", coordinate="x", transcript=tr)
+    out = grade_readonly_violated(res, tr)
+    assert len(out) == 1 and "'lie'" in out[0].name and "snapshot" not in out[0].name
+    # a single one-case tail with no sibling is still judged by the per-path test (flagged)
+    tr2 = ExerciseTranscript(launch_ok=True, tools=[ToolSpec("snapshot", annotations=ro)],
+                             calls=[ToolCall("snapshot", ok=True, fs_writes=["/tmp/out-report"])])
+    res2 = BehavioralResult(ran=True, surface="npm", coordinate="x", transcript=tr2)
+    assert len(grade_readonly_violated(res2, tr2)) == 1

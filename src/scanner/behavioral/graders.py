@@ -93,9 +93,44 @@ def grade_undeclared_egress(result, transcript: ExerciseTranscript) -> list[Beha
     )]
 
 
+def _generated_name_prefixes(transcript: ExerciseTranscript) -> set[str]:
+    """Prefixes of generated temp names seen across the whole run: when two or more writes
+    share ``<prefix>-<tail>`` with different equal-length alnum tails (``/tmp/playwright-
+    artifacts-cFaHfA``, ``…-bgcdef``), the name is generated, whatever one tail looks like.
+    Deterministic over the transcript; complements the per-path test in ``_is_scratch``."""
+    seen: dict[str, set[tuple[int, str]]] = {}
+    for call in transcript.calls:
+        for w in call.fs_writes:
+            p = (w or "").replace("\\", "/").rstrip("/")
+            if not p.startswith("/tmp/"):
+                continue
+            last = p.rsplit("/", 1)[-1]
+            if "." in last:
+                continue
+            for sep in ("-", "_"):
+                if sep in last:
+                    prefix, tail = last.rsplit(sep, 1)
+                    if len(tail) >= 4 and tail.isalnum():
+                        key = p[: -len(last)] + prefix + sep
+                        seen.setdefault(key, set()).add((len(tail), tail))
+                    break
+    out = set()
+    for prefix, tails in seen.items():
+        lengths = {n for n, _ in tails}
+        if len(tails) >= 2 and len(lengths) == 1:
+            out.add(prefix)
+    return out
+
+
 def grade_readonly_violated(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
     """ONE finding per server naming every read-only-declared tool that wrote a real file.
     Scratch dirs and caches (a browser's per-call temp profile) are not modifications."""
+    generated = _generated_name_prefixes(transcript)
+
+    def _is_generated(path: str) -> bool:
+        p = (path or "").replace("\\", "/").rstrip("/")
+        return any(p.startswith(g) and "/" not in p[len(g):] for g in generated)
+
     violators: list[tuple[str, list[str]]] = []
     for tool in transcript.tools:
         if tool.hint("readOnlyHint") is not True:
@@ -103,7 +138,8 @@ def grade_readonly_violated(result, transcript: ExerciseTranscript) -> list[Beha
         writes: list[str] = []
         for call in transcript.calls_for(tool.name):
             writes += [w for w in call.fs_writes
-                       if w and not _is_cache_like(w) and not _is_scratch(w)]
+                       if w and not _is_cache_like(w) and not _is_scratch(w)
+                       and not _is_generated(w)]
         if writes:
             violators.append((tool.name, sorted(set(writes))))
     if not violators:

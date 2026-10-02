@@ -87,7 +87,11 @@
     },
     {
       "surface": "npm",
-      "name": "@modelcontextprotocol/server-puppeteer"
+      "name": "@modelcontextprotocol/server-puppeteer",
+      "expect_rules": [
+        "behavioral_undeclared_egress"
+      ],
+      "note": "postinstall downloads Chromium from storage.googleapis.com \u2014 true undeclared install-time egress (and the 512 MB cap kills it: exit 137)"
     }
   ],
   "fixtures": [
