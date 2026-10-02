@@ -290,10 +290,17 @@ _CRED_RE = re.compile(
 )
 _CRED_CI_RE = re.compile(_CRED_RE.pattern, re.IGNORECASE)
 _ENV_VAR_RE = re.compile(r"env(ironment)?[ _-]?var(iable)?s?", re.IGNORECASE)
+# A server that exits asking for a launch argument (a URL, path, connection string …).
+# Searched anywhere in the error, not only at its start: the launcher prefixes it with
+# ``server_exited:`` and stderr may carry a banner first. Real strings:
+#   server-postgres  "Please provide a database URL as a command-line argument"
+#   mcp-remote       "Usage: mcp-remote <https://server-url> [callback-port] [--debug]"
 _ARGS_RE = re.compile(
-    r"usage:|expected \d+ (positional )?arguments?|missing required|"
-    r"<[a-z:/_. -]*url[^>]*>|required argument|too few arguments|"
-    r"(the following arguments are required)",
+    r"usage:|expected \d+ (positional )?arguments?|missing (required )?argument|"
+    r"missing required|<[a-z:/_. -]*url[^>]*>|<url>|required argument|too few arguments|"
+    r"the following arguments are required|as an? command[- ]line argument|"
+    r"provide an? [\w ./-]{0,40}?(url|uri|path|argument|connection string|dsn|directory)\b|"
+    r"requires? (a|an) [\w ./-]{0,40}?argument",
     re.IGNORECASE,
 )
 _BINARY_RE = re.compile(

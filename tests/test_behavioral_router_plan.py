@@ -1,7 +1,7 @@
 """The public scan router's behavioral block: plan selection from the static scan
 (``artifact_scan.is_mcp_server`` → the MCP exerciser plan), the docker surface, env
 names + README passthrough, the grade summary, the cache key, and the MCP connector's
-one-line sandbox summary. Same style as test_behavioral_declared_scope.py: the sandbox
+sandbox section. Same style as test_behavioral_declared_scope.py: the sandbox
 runner is replaced by a fake, redis by a dict."""
 from __future__ import annotations
 
@@ -162,122 +162,246 @@ def test_scan_package_env_reads_helper_is_fail_open():
     assert _env_reads_from_artifact(None) == []
 
 
-# ── MCP connector: one compact sandbox line ────────────────────────────────────
+# ── MCP connector: the sandbox section of the tool result ──────────────────────
 
-def _scan_data(behavioral=None) -> dict:
-    return {"trust_score": 92, "findings": {"items": [], "total": 0}, "category_scores": {},
-            "metadata": {"files_scanned": 40}, "jws": "x", "certified": {},
-            "behavioral": behavioral}
+def _scan_data(behavioral=None, **kw) -> dict:
+    d = {"trust_score": 92, "findings": {"items": [], "total": 0}, "category_scores": {},
+         "metadata": {"files_scanned": 40}, "jws": "x", "certified": {},
+         "behavioral": behavioral}
+    d.update(kw)
+    return d
 
 
-def test_sandbox_line_absent_without_a_behavioral_block():
+_ATT = {"jws": "eyJ...", "observed_at": "2026-09-30T12:00:00+00:00"}
+
+
+def _exercised(**kw):
+    b = {"ran": True, "plan": "npm-mcp", "egress_hosts": ["registry.npmjs.org", "api.x.com"],
+         "vendor_egress": ["api.x.com"], "findings": [], "attestation": _ATT,
+         "exercise": {"launch_ok": True, "tools": [{"name": f"t{i}"} for i in range(12)],
+                      "calls": [{"tool": f"t{i}", "fs_writes": []} for i in range(9)]
+                      + [{"tool": "t0", "fs_writes": ["/tmp/tmpab12cd/cache"]}],
+                      "canary": {"env_names": ["X_API_KEY"], "seen_in_result": []}}}
+    b.update(kw)
+    return b
+
+
+def _block(b, **kw) -> str:
+    return _scan_block(_scan_data(b, **kw), "connect", "/check/pkg/npm/x", "x · npm",
+                       install_hint="npm install x")
+
+
+def test_sandbox_section_absent_without_a_behavioral_block():
     assert _sandbox_line(_scan_data(None)) is None
     assert _sandbox_line({}) is None
     assert _sandbox_line(_scan_data({"ran": False, "reason": "off"})) is None
     text = _scan_block(_scan_data(None), "use", "/check/pkg/npm/x", "x · npm")
-    assert "Sandbox:" not in text
+    assert "sandbox" not in text.lower()
 
 
-def test_sandbox_line_pending():
+def test_pending_invites_a_follow_up():
     line = _sandbox_line(_scan_data({"ran": False, "pending": True}))
-    assert line.startswith("Sandbox:") and "in progress" in line
+    assert line == ("**Sandbox:** running now — ask again in about a minute for the observed "
+                    "behavior (tools called, network, files).")
+    assert "signed" not in line and "static" not in line
 
 
-def test_sandbox_line_with_findings_and_tools():
-    b = {"ran": True, "egress_hosts": ["registry.npmjs.org", "evil.net"],
-         "exercise": {"launch_ok": True,
-                      "calls": [{"tool": "a"}, {"tool": "b"}, {"tool": "a"}]},
-         "findings": [{"name": "Unexpected network egress during install/run",
-                       "rule": "behavioral_undeclared_egress"},
-                      {"rule": "annotation_readonly_violated"}]}
-    line = _sandbox_line(_scan_data(b))
-    assert line == ("Sandbox: ran 2 tools in gVisor; 2 behavioral findings: "
-                    "Unexpected network egress during install/run, annotation_readonly_violated")
-    text = _scan_block(_scan_data(b), "use", "/check/pkg/npm/x", "x · npm")
-    assert text.count("Sandbox:") == 1
-    assert text.index("Sandbox:") < text.index("Full report:")
+def test_clean_exercised_server_reads_what_ran_network_files_credentials():
+    lines = _sandbox_line(_scan_data(_exercised())).split("\n")
+    assert lines == [
+        "**Observed in the sandbox** (gVisor, signed 2026-09-30): started the server and "
+        "called 9 of 12 tools with synthetic inputs.",
+        "- Network: only api.x.com, registry.npmjs.org (vendor: api.x.com); file writes: "
+        "none outside temp/cache dirs; credentials: canary values for X_API_KEY stayed put.",
+    ]
+    text = _block(_exercised())
+    assert text.startswith("✅ Safe to connect")
+    # clean: after the (static) findings, before the install line and Next
+    assert text.index("Observed in the sandbox") < text.index("Ready to install")
+    assert "clean run" not in text
 
 
-def test_sandbox_line_clean_run_lists_egress_or_none():
-    b = {"ran": True, "egress_hosts": ["registry.npmjs.org"], "findings": [], "exercise": None}
+def test_unsigned_block_and_no_egress_and_real_writes():
+    b = _exercised(attestation=None, egress_hosts=[], vendor_egress=[])
+    b["exercise"]["calls"].append({"tool": "t1", "fs_writes": ["/work/out.txt"]})
+    lines = _sandbox_line(_scan_data(b)).split("\n")
+    assert lines[0].startswith("**Observed in the sandbox** (gVisor): ")
+    assert "network: no connections" in lines[1].lower()
+    assert "file writes: 1 outside temp/cache dirs (e.g. /work/out.txt)" in lines[1]
+
+
+def test_findings_name_the_tool_and_go_before_the_static_findings():
+    b = _exercised(findings=[
+        {"rule": "behavioral_undeclared_egress", "severity": "high",
+         "evidence": "egress to evil.net"},
+        {"rule": "annotation_readonly_violated", "severity": "high",
+         "evidence": "browser_snapshot wrote /work/x"}], unexpected_egress=["evil.net"],
+        egress_hosts=["registry.npmjs.org", "evil.net"])
+    items = [{"severity": "medium", "name": "m", "file": "a.js", "line": 1}]
+    text = _block(b, findings={"items": items, "total": 1})
+    assert "- Caught (high): browser_snapshot declares read-only but wrote /work/x" in text
+    assert "- Caught (high): contacted undeclared hosts: evil.net" in text
+    assert "Network: undeclared evil.net (plus registry.npmjs.org)" in text
+    assert text.index("Observed in the sandbox") < text.index("**Top findings:**")
+    assert len(_sandbox_line(_scan_data(b)).split("\n")) <= 6
+
+
+def test_canary_leak_leads_and_the_headline_is_not_safe():
+    b = _exercised(canary_exfil=[{"via": "dns", "host": "c2.evil.net"}], findings=[
+        {"rule": "annotation_readonly_violated", "severity": "high",
+         "evidence": "a wrote /work/x; b wrote /work/y; c wrote /work/z"},
+        {"rule": "credential_canary_exfiltrated", "severity": "critical",
+         "evidence": "canary left the sandbox via dns:c2.evil.net"}])
+    text = _block(b, behavioral_score_effect={"applied": True, "delta": -20,
+                                              "reason": "a credential canary left the sandbox"})
+    first = text.split("\n", 1)[0]
+    assert first.startswith("⚠️ Review before you connect — caught in the sandbox: "
+                            "a planted credential left the sandbox (dns:c2.evil.net)")
+    assert "Safe" not in first and "clean" not in first.lower()
+    sec = _sandbox_line(_scan_data(b, behavioral_score_effect={
+        "applied": True, "delta": -20, "reason": "a credential canary left the sandbox"}))
+    lines = sec.split("\n")
+    assert lines[2] == ("- 🚨 Caught (critical): a planted credential left the sandbox "
+                        "(dns:c2.evil.net)")
+    assert lines[3] == ("- Caught (high): a declares read-only but wrote /work/x; b declares "
+                        "read-only but wrote /work/y; +1 more tools")
+    assert lines[-1] == ("- Included in the trust score: −20, a credential canary left the "
+                         "sandbox.")
+    assert "credentials: canary values" not in sec  # never "stayed put" next to a leak
+    assert "Ready to install" not in text and "hold off" in text
+
+
+def test_canary_hit_without_a_finding_still_alarms():
+    b = _exercised(canary_exfil=[{"via": "http", "host": "x.net"}])
+    assert _block(b).startswith("⚠️ Review before you connect — caught in the sandbox: ")
+
+
+def test_critical_finding_overrides_a_deprecated_or_safe_headline():
+    b = _exercised(findings=[{"rule": "behavioral_undeclared_egress", "severity": "critical",
+                              "evidence": "egress to a.net, b.net, c.net"}])
+    for extra in ({}, {"deprecation": "retired"}):
+        first = _block(b, **extra).split("\n", 1)[0]
+        assert first.startswith("⚠️ Review before you connect — caught in the sandbox: "
+                                "contacted undeclared hosts: a.net, b.net, c.net")
+    # a high finding alone does not take over the headline
+    b["findings"][0]["severity"] = "high"
+    assert _block(b).startswith("✅ Safe to connect")
+
+
+def test_score_effect_line_only_when_applied():
+    b = _exercised()
+    assert "trust score" not in _sandbox_line(_scan_data(
+        b, behavioral_score_effect={"applied": False, "delta": -20, "reason": "x"}))
+    assert "Included in the trust score: −5, a tool wrote files." in _sandbox_line(_scan_data(
+        b, behavioral_score_effect={"applied": True, "delta": -5, "reason": "a tool wrote files"}))
+    assert "Included in the trust score (no change)." in _sandbox_line(_scan_data(
+        b, behavioral_score_effect={"applied": True, "delta": 0}))
+    assert _sandbox_line(_scan_data(b, behavioral_score_effect="junk"))  # ignored, no crash
+
+
+def test_listed_but_not_called():
+    b = _exercised()
+    b["exercise"]["calls"] = []
+    assert "started the server and listed 12 tools; none were called." in _sandbox_line(
+        _scan_data(b))
+
+
+def test_install_only_plans():
+    b = {"ran": True, "plan": "npm", "egress_hosts": ["registry.npmjs.org"], "findings": [],
+         "exercise": None}
     assert _sandbox_line(_scan_data(b)) == (
-        "Sandbox: clean run (install/run observed in gVisor), egress only to registry.npmjs.org")
-    b = {"ran": True, "egress_hosts": [], "findings": [],
-         "exercise": {"launch_ok": True, "calls": [{"tool": "only"}]}}
-    assert _sandbox_line(_scan_data(b)) == (
-        "Sandbox: clean run (ran 1 tool in gVisor), no network egress")
-    b = {"ran": True, "egress_hosts": [], "findings": [],
-         "exercise": {"launch_ok": False, "calls": []}}
-    assert "failed to start" in _sandbox_line(_scan_data(b))
+        "**Observed in the sandbox** (gVisor): installed and imported it; network: only "
+        "registry.npmjs.org.")
+    b.update(plan="docker", egress_hosts=[])
+    assert "ran the container image; network: no connections." in _sandbox_line(_scan_data(b))
+    b.update(plan="pypi", exit_code=1)
+    assert "exited with code 1 (not a finding)" in _sandbox_line(_scan_data(b))
 
 
 # ── start_reason: a server that could not start says why ──────────────────────
 
-def _not_started(reason=None, findings=(), attestation=None, hosts=()):
-    b = {"ran": True, "egress_hosts": list(hosts), "findings": list(findings),
+def _not_started(reason=None, findings=(), attestation=None, hosts=(), detail=None):
+    b = {"ran": True, "plan": "npm-mcp", "egress_hosts": list(hosts), "findings": list(findings),
          "exercise": {"launch_ok": False, "calls": []}}
     if reason is not None:
         b["grade_summary"] = {"start_reason": reason}
+        if detail:
+            b["grade_summary"]["start_reason_detail"] = detail
     if attestation:
         b["attestation"] = attestation
     return b
 
 
-def test_sandbox_line_benign_start_reason_is_not_a_finding():
-    line = _sandbox_line(_scan_data(_not_started("needs_credentials")))
-    assert line == ("Sandbox: installed, but the server needs credentials to start "
-                    "(not a finding)")
-    assert "needs launch arguments" in _sandbox_line(_scan_data(_not_started("needs_arguments")))
-    assert "required binary" in _sandbox_line(_scan_data(_not_started("missing_binary")))
-    assert "no MCP entrypoint" in _sandbox_line(_scan_data(_not_started("no_entrypoint")))
-    assert "resource limit" in _sandbox_line(_scan_data(_not_started("resource_limit")))
-    # a benign non-start is never dressed up as a "clean run" with egress details
-    line = _sandbox_line(_scan_data(_not_started("needs_credentials", hosts=["registry.npmjs.org"])))
-    assert "clean run" not in line and "egress" not in line
+@pytest.mark.parametrize("reason,phrase", [
+    ("needs_credentials", "it needs credentials (an API key or token) to start"),
+    ("needs_arguments", "it needs a startup argument, such as a URL or connection string"),
+    ("missing_binary", "a program it depends on is not available in the sandbox"),
+    ("no_entrypoint", "the package has no runnable entry point to start"),
+    ("resource_limit", "it hit the sandbox memory/process limit before starting"),
+    ("install_failed", "the package failed to install"),
+    ("timeout", "it did not start within the sandbox time limit"),
+    ("crashed", "it exited with an error on start"),
+    (None, "the run did not record why"),
+    ("unknown", "the run did not record why"),
+    ("something_new", "the run did not record why"),
+])
+def test_not_started_says_why_in_plain_words_and_is_not_a_finding(reason, phrase):
+    line = _sandbox_line(_scan_data(_not_started(reason, hosts=["registry.npmjs.org"])))
+    first = line.split("\n")[0]
+    assert f"the server did not start — {phrase}" in first
+    assert first.endswith("Its tools were not exercised; this is not a finding.")
+    assert "clean run" not in line
+    assert line.split("\n")[1] == "- Network: only registry.npmjs.org (during install)."
 
 
-def test_sandbox_line_hard_start_failures_keep_the_failure_wording():
-    assert "crashed on start" in _sandbox_line(_scan_data(_not_started("crashed")))
-    assert "failed to install" in _sandbox_line(_scan_data(_not_started("install_failed")))
-    assert "time limit" in _sandbox_line(_scan_data(_not_started("timeout")))
-    for line in (
-        _sandbox_line(_scan_data(_not_started("crashed"))),
-        _sandbox_line(_scan_data(_not_started("timeout"))),
-    ):
-        assert "not a finding" not in line and "installed, but" not in line
+def test_server_postgres_needs_a_database_url():
+    b = _not_started("needs_arguments", attestation=_ATT, hosts=["registry.npmjs.org"],
+                     detail="server_exited: Please provide a database URL as a command-line "
+                            "argument")
+    text = _block(b, deprecation="Package no longer supported.", package_version="0.6.2",
+                  published_at="2024-12-03T18:00:00.000Z")
+    assert ("**Observed in the sandbox** (gVisor, signed 2026-09-30): installed it, but the "
+            "server did not start — it needs a database URL as a startup argument. Its tools "
+            "were not exercised; this is not a finding.") in text
+    assert "Version 0.6.2 · published 2024-12-03" in text
+    assert "**Deprecated by its maintainer** (latest release 0.6.2, 2024-12-03):" in text
+    assert text.startswith("⚠️ Deprecated")
 
 
-def test_sandbox_line_unknown_or_missing_start_reason_falls_back():
-    legacy = "the MCP server failed to start in gVisor"
-    assert legacy in _sandbox_line(_scan_data(_not_started()))            # field absent
-    assert legacy in _sandbox_line(_scan_data(_not_started("unknown")))
-    assert legacy in _sandbox_line(_scan_data(_not_started("something_new")))
+def test_crashed_quotes_the_error_excerpt():
+    b = _not_started("crashed", detail="server_exited: TypeError: boom")
+    assert 'it exited with an error on start ("server_exited: TypeError: boom")' in \
+        _sandbox_line(_scan_data(b))
+
+
+def test_grade_summary_not_a_dict_falls_back():
     b = _not_started()
     b["grade_summary"] = "not-a-dict"
-    assert legacy in _sandbox_line(_scan_data(b))
+    assert "did not start — the run did not record why." in _sandbox_line(_scan_data(b))
 
 
-def test_sandbox_line_start_reason_with_findings_still_lists_them():
-    b = _not_started("needs_credentials", findings=[{"rule": "behavioral_undeclared_egress"}])
-    line = _sandbox_line(_scan_data(b))
-    assert line == ("Sandbox: installed, but the server needs credentials to start; "
-                    "1 behavioral finding: behavioral_undeclared_egress")
+def test_not_started_with_findings_still_lists_them_first():
+    b = _not_started("needs_credentials", hosts=["evil.net"], findings=[
+        {"rule": "behavioral_undeclared_egress", "severity": "high",
+         "evidence": "egress to evil.net"}])
+    b["unexpected_egress"] = ["evil.net"]
+    text = _block(b)
+    assert "- Caught (high): contacted undeclared hosts: evil.net" in text
 
 
-def test_sandbox_line_marks_a_signed_observation():
-    b = {"ran": True, "egress_hosts": [], "findings": [],
-         "exercise": {"launch_ok": True, "calls": [{"tool": "only"}]},
-         "attestation": {"jws": "eyJ..."}}
-    assert _sandbox_line(_scan_data(b)).endswith("no network egress (signed observation)")
-    b["findings"] = [{"rule": "r1"}]
-    assert _sandbox_line(_scan_data(b)).endswith("r1 (signed observation)")
-    assert _sandbox_line(_scan_data(_not_started("needs_credentials", attestation={"jws": "x"}))) == (
-        "Sandbox: installed, but the server needs credentials to start (not a finding) "
-        "(signed observation)")
-    # pending runs and blocks without an attestation are unchanged
-    assert "signed" not in _sandbox_line(_scan_data({"ran": False, "pending": True}))
-    b.pop("attestation")
-    assert "signed" not in _sandbox_line(_scan_data(b))
+# ── version + publish date ─────────────────────────────────────────────────────
+
+def test_version_line_sources_and_fallbacks():
+    from src.bridges.mcp_streamable import _version_line
+    assert _version_line({}) is None
+    assert _version_line({"package_version": "1.2.3"}) == "Version 1.2.3"
+    assert _version_line({"published_at": "2024-01-02T00:00:00Z"}) == "Published 2024-01-02"
+    assert _version_line({"artifact_scan": {"version": "4.0"}}) == "Version 4.0"
+    assert _version_line({"surface_detail": {"version": "5.0"},
+                          "published_at": "2025-05-05"}) == "Version 5.0 · published 2025-05-05"
+    assert _version_line({"package_version": 7, "artifact_scan": "x"}) is None
+    text = _block(None, package_version="1.2.3")
+    assert text.index("```\nVersion 1.2.3") > 0  # right under the card
 
 
 def test_repo_without_a_package_targets_git_install_by_language():

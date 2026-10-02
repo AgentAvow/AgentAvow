@@ -41,7 +41,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -238,33 +238,86 @@ def _verdict(data: dict) -> dict:
     }
 
 
+# Package-registry hosts an install always reaches; left out of the one-line network
+# clause so it names the hosts the tool itself contacted.
+_REGISTRY_HOSTS = frozenset({
+    "registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "files.pythonhosted.org",
+    "github.com", "codeload.github.com", "objects.githubusercontent.com",
+    "registry-1.docker.io", "auth.docker.io", "production.cloudflare.docker.com",
+})
+# A behavioral rule in a few words, for "sandbox: CAUGHT <...>".
+_RULE_SHORT = {
+    "credential_canary_exfiltrated": "a planted credential leaving the sandbox",
+    "behavioral_undeclared_egress": "undeclared network egress",
+    "annotation_readonly_violated": "a read-only tool writing files",
+    "annotation_open_world_violated": "closed-world tools reaching the network",
+    "canary_echoed_in_result": "a secret echoed in tool output",
+    "tool_call_crashed_server": "a tool call crashing the server",
+}
+_START_SHORT = {
+    "needs_credentials": "needs credentials", "missing_binary": "missing a program",
+    "no_entrypoint": "no entry point", "resource_limit": "hit the resource limit",
+    "install_failed": "install failed", "timeout": "timed out", "crashed": "crashed on start",
+}
+_SEV = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
+def _needs_what(detail: str) -> str:
+    low = (detail or "").lower()
+    if any(k in low for k in ("database url", "connection string", "dsn", "postgres")):
+        return "needs a database URL"
+    if "url" in low:
+        return "needs a URL argument"
+    if "path" in low or "directory" in low:
+        return "needs a path argument"
+    return "needs a startup argument"
+
+
+def _hosts(hosts: list, limit: int = 2) -> str:
+    return ", ".join(hosts[:limit]) + (f" +{len(hosts) - limit}" if len(hosts) > limit else "")
+
+
 def _sandbox_summary(b: object) -> str:
     """One clause about the behavioral sandbox run AgentAvow did on the package (it runs
-    automatically on the first scan and is cached for a day): what it found, or that it
-    is still running. Empty when there is nothing to say. Read-only; no extra request."""
+    automatically on the first scan and is cached for a day): what it caught, what it
+    called and where it connected, why the server did not start, or that it is still
+    running. Empty when there is nothing to say. Read-only; no extra request."""
     if not isinstance(b, dict):
         return ""
     if b.get("pending"):
-        return "sandbox run pending"
+        return "sandbox: running now, results in about a minute"
     if not b.get("ran"):
         return ""
     findings = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
-    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else {}
-    called = len(ex.get("calls") or []) if ex else 0
-    exfil = b.get("canary_exfil") or []
-    if exfil:
-        return "sandbox: LEAKED a canary credential"
+    if b.get("canary_exfil") and not any(
+            f.get("rule") == "credential_canary_exfiltrated" for f in findings):
+        findings.append({"rule": "credential_canary_exfiltrated", "severity": "critical"})
     if findings:
-        worst = "critical" if any(f.get("severity") == "critical" for f in findings) else (
-            "high" if any(f.get("severity") == "high" for f in findings) else "")
-        sev = f" ({worst})" if worst else ""
-        return f"sandbox: {len(findings)} behavioral finding(s){sev}"
+        findings.sort(key=lambda f: (f.get("rule") != "credential_canary_exfiltrated",
+                                     _SEV.get(str(f.get("severity")), 4)))
+        top = findings[0]
+        what = _RULE_SHORT.get(str(top.get("rule") or ""),
+                               str(top.get("name") or top.get("rule") or "a behavior"))
+        sev = str(top.get("severity") or "")
+        more = f" +{len(findings) - 1} more" if len(findings) > 1 else ""
+        return f"sandbox: CAUGHT {what}" + (f" ({sev})" if sev else "") + more
+    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else None
+    hosts = sorted({str(h) for h in (b.get("egress_hosts") or []) if h} - _REGISTRY_HOSTS)
+    net = f"network only {_hosts(hosts)}" if hosts else "no network beyond the registry"
     if ex and ex.get("launch_ok"):
-        return f"sandbox: clean, {called} tool(s) exercised"
-    reason = str((b.get("grade_summary") or {}).get("start_reason") or "")
-    if reason and reason not in ("started", "not_applicable", "unknown"):
-        return f"sandbox: install clean; server not exercised ({reason.replace('_', ' ')})"
-    return "sandbox: clean"
+        called = len({c.get("tool") for c in (ex.get("calls") or [])
+                      if isinstance(c, dict) and c.get("tool")})
+        return f"sandbox: called {called} tool{'' if called == 1 else 's'}, {net}"
+    plan = str(b.get("plan") or "")
+    if ex is not None or plan.endswith("-mcp"):
+        gs = b.get("grade_summary") if isinstance(b.get("grade_summary"), dict) else {}
+        reason = str(gs.get("start_reason") or "")
+        if reason == "needs_arguments":
+            why = _needs_what(str(gs.get("start_reason_detail") or ""))
+        else:
+            why = _START_SHORT.get(reason, "")
+        return "sandbox: not started" + (f" ({why})" if why else "")
+    return f"sandbox: installed, {net}"
 
 
 def _record(target: dict, result: dict, now: float) -> dict:

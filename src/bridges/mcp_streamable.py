@@ -332,6 +332,11 @@ def _scan_block(
     _deprecated = isinstance(data.get("deprecation"), str) and bool(data["deprecation"].strip())
     if _deprecated and mode != "risk":
         mode = "deprecated"
+    # What the sandbox caught outranks every other headline: a canary leak or a critical
+    # behavioral finding never sits under "safe", "clean", or "deprecated".
+    _alarm = _sandbox_alarm(data)
+    if _alarm:
+        mode = "sandbox"
 
     # Reason phrase, reused in the headline and the Next step (limited mode only).
     _files = (data.get("metadata") or {}).get("files_scanned")
@@ -354,6 +359,13 @@ def _scan_block(
         n = crit + high
         head = f"⚠️ Review before you {verb}"
         why = f"{n} blocking finding{'' if n == 1 else 's'} (critical/high)."
+        glyph = "⚠ REVIEW"
+    elif mode == "sandbox":
+        head = f"⚠️ Review before you {verb} — caught in the sandbox: {_alarm}"
+        n = crit + high
+        why = (f"Plus {n} blocking static finding{'' if n == 1 else 's'}." if n else
+               "The static scan found no blocking issues; the sandbox observation is "
+               "what to weigh.")
         glyph = "⚠ REVIEW"
     elif mode == "deprecated":
         head = "⚠️ Deprecated — don't adopt for new work"
@@ -392,8 +404,12 @@ def _scan_block(
         card.append(f"  ADOPTION  {_trust_bar(0)}  new")
     if bool(data.get("jws")):
         card.append("  signed ✔ Ed25519 · recompute offline")
-    card += ["─────────────────────────────────────────", "```", ""]
+    card += ["─────────────────────────────────────────", "```"]
     lines += card
+    _ver = _version_line(data)
+    if _ver:
+        lines.append(_ver)
+    lines.append("")
 
     # Incident history (context, not scored): was this package ever caught being malicious?
     _inc = _incident_summary(data.get("incident_history") or {})
@@ -412,6 +428,13 @@ def _scan_block(
                 f"it does not change the score.")
         lines.append("")
 
+    # The sandbox observation: ahead of the static findings when it caught something,
+    # after them when clean (or pending / not started).
+    _sb = _sandbox_section(data)
+    _sb_first = bool(_sb) and _sandbox_has_findings(data)
+    if _sb_first:
+        lines += _sb + [""]
+
     fs = _grouped_findings(items, 5)
     if fs:
         lines.append("**Top findings:**")
@@ -424,10 +447,13 @@ def _scan_block(
             lines.append(f"- … {len(items) - shown} more")
         lines.append("")
 
+    if _sb and not _sb_first:
+        lines += _sb + [""]
+
     # Install CTA (own line so the model relays it). Shown for anything without blocking
     # findings — safe gets the confident label, limited gets a "verify first" cue. Never
     # on a review result (real findings to weigh first).
-    if install_hint and mode not in ("risk", "deprecated"):
+    if install_hint and mode not in ("risk", "deprecated", "sandbox"):
         if mode == "safe":
             lines.append(f"**Ready to install:** `{install_hint}`")
         else:  # limited — no risks found, but not fully verified
@@ -440,6 +466,9 @@ def _scan_block(
     elif mode == "deprecated":
         action = ("don't adopt it for new work. Pick a maintained alternative (the "
                   "deprecation message may name one) and scan that before you connect it.")
+    elif mode == "sandbox":
+        action = ("hold off. Ask me to walk through what the sandbox observed and whether "
+                  "it matters for your use, or check an alternative.")
     elif mode == "risk":
         n = crit + high
         action = (
@@ -455,12 +484,11 @@ def _scan_block(
         )
     _dep = data.get("deprecation")
     if isinstance(_dep, str) and _dep.strip():
+        _rel = ", ".join(p for p in _version_parts(data) if p)
+        _rel = f" (latest release {_rel})" if _rel else ""
         lines.append(
-            f"**Deprecated by its maintainer:** \"{_dep.strip()[:200]}\" — it won't get "
-            "security fixes; don't adopt it for new work, use a maintained alternative.")
-    _sb = _sandbox_line(data)
-    if _sb:
-        lines.append(_sb)
+            f"**Deprecated by its maintainer**{_rel}: \"{_dep.strip()[:200]}\" — it won't "
+            "get security fixes; don't adopt it for new work, use a maintained alternative.")
     lines.append(f"**Next:** {action}")
     lines.append(
         f"Full report: {_WEB_BASE}{report_path} · "
@@ -472,72 +500,291 @@ def _scan_block(
     return "\n".join(lines)
 
 
-# Why an MCP server did not start in the sandbox (``grade_summary.start_reason``). The
-# benign ones are an environment limit, not a finding — say so, or a clean package
-# reads as if it crashed. Unknown / absent → the generic wording.
-_START_REASONS: dict[str, tuple[str, bool]] = {
-    "needs_credentials": ("the server needs credentials to start", True),
-    "needs_arguments": ("the server needs launch arguments to start", True),
-    "missing_binary": ("a required binary is not available in the sandbox", True),
-    "no_entrypoint": ("no MCP entrypoint was found to start", True),
-    "resource_limit": ("the server hit the sandbox resource limit before starting", True),
-    "install_failed": ("the package failed to install in gVisor", False),
-    "timeout": ("the server did not start within the sandbox time limit", False),
-    "crashed": ("the MCP server crashed on start in gVisor", False),
+# ── Behavioral sandbox: what AgentAvow saw when it ran the tool ─────────────────────
+# Read from ``data["behavioral"]`` (a dated, signed observation kept apart from the
+# recomputable score). Everything here is defensive: a missing or odd field drops its
+# clause, never the scan result. Wording is plain and factual — no adjectives.
+
+# Why an MCP server did not start (``grade_summary.start_reason``), in plain words. None
+# of these is a finding: the run just could not exercise the tools.
+_START_REASONS: dict[str, str] = {
+    "needs_credentials": "it needs credentials (an API key or token) to start",
+    "needs_arguments": "it needs a startup argument, such as a URL or connection string",
+    "missing_binary": "a program it depends on is not available in the sandbox",
+    "no_entrypoint": "the package has no runnable entry point to start",
+    "resource_limit": "it hit the sandbox memory/process limit before starting",
+    "install_failed": "the package failed to install",
+    "timeout": "it did not start within the sandbox time limit",
+    "crashed": "it exited with an error on start",
 }
+_START_UNKNOWN = "the run did not record why"
+_SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
-def _start_failure_wording(b: dict) -> tuple[str, bool]:
-    """(phrase, benign) for a server that did not start. ``benign`` means the cause is
-    the sandbox environment (credentials, arguments, binaries …) — not a finding."""
+def _needed_argument(detail: str) -> str:
+    """The specific launch argument a needs_arguments error asks for, when it names one."""
+    low = (detail or "").lower()
+    if any(k in low for k in ("database url", "connection string", "dsn", "postgres://",
+                              "postgresql://")):
+        return "a database URL"
+    if "url" in low or "<https://" in low:
+        return "a URL"
+    if "path" in low or "directory" in low or "<dir" in low:
+        return "a path"
+    return ""
+
+
+def _start_phrase(b: dict) -> tuple[str, str]:
+    """(reason key, plain phrase) for a server that did not start."""
     gs = b.get("grade_summary") if isinstance(b.get("grade_summary"), dict) else {}
     reason = str((gs or {}).get("start_reason") or "").strip().lower()
-    phrase, benign = _START_REASONS.get(reason, ("the MCP server failed to start in gVisor", False))
-    if benign:
-        phrase = "installed, but " + phrase
-    return phrase, benign
+    phrase = _START_REASONS.get(reason, _START_UNKNOWN)
+    if reason == "needs_arguments":
+        arg = _needed_argument(str((gs or {}).get("start_reason_detail") or ""))
+        if arg:
+            phrase = f"it needs {arg} as a startup argument"
+    elif reason == "crashed":
+        detail = str((gs or {}).get("start_reason_detail") or "").strip()
+        if detail:
+            phrase += f" (\"{detail[:100]}\")"
+    return reason, phrase
+
+
+def _start_short(b: dict) -> str:
+    """A few words for one-line summaries: 'needs a database URL', 'crashed on start'."""
+    reason, _ = _start_phrase(b)
+    gs = b.get("grade_summary") if isinstance(b.get("grade_summary"), dict) else {}
+    if reason == "needs_arguments":
+        arg = _needed_argument(str((gs or {}).get("start_reason_detail") or ""))
+        return f"needs {arg or 'a startup argument'}"
+    return {
+        "needs_credentials": "needs credentials", "missing_binary": "missing program",
+        "no_entrypoint": "no entry point", "resource_limit": "resource limit",
+        "install_failed": "install failed", "timeout": "timed out",
+        "crashed": "crashed on start",
+    }.get(reason, "did not start")
+
+
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+def _clip(s: str, n: int) -> str:
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= n else s[: n - 1].rstrip() + "…"
+
+
+def _behavioral_findings(b: dict) -> list[dict]:
+    """Behavioral findings, a canary leak first, then by severity. A canary hit that the
+    graders did not (yet) turn into a finding still leads."""
+    fs = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
+    exfil = [h for h in (b.get("canary_exfil") or []) if isinstance(h, dict)]
+    if exfil and not any(f.get("rule") == "credential_canary_exfiltrated" for f in fs):
+        via = ", ".join(f"{h.get('via') or '?'}:{h.get('host') or '?'}" for h in exfil[:4])
+        fs.append({"rule": "credential_canary_exfiltrated", "severity": "critical",
+                   "evidence": f"canary left the sandbox via {via}"})
+    return sorted(fs, key=lambda f: (f.get("rule") != "credential_canary_exfiltrated",
+                                     _SEV_RANK.get(str(f.get("severity")), 4)))
+
+
+def _finding_phrase(f: dict) -> str:
+    """One behavioral finding in concrete terms, naming the tools and paths/hosts."""
+    rule = str(f.get("rule") or "")
+    ev = str(f.get("evidence") or "").strip()
+    if rule == "credential_canary_exfiltrated":
+        via = ev.split("via", 1)[1].strip() if "via" in ev else ""
+        return "a planted credential left the sandbox" + (f" ({_clip(via, 80)})" if via else "")
+    if rule == "annotation_readonly_violated" and " wrote " in ev:
+        parts = [p.strip() for p in ev.split(";") if " wrote " in p]
+        out = [f"{t.strip()} declares read-only but wrote {w.strip()}"
+               for t, w in (p.split(" wrote ", 1) for p in parts[:2])]
+        if len(parts) > 2:
+            out.append(f"+{len(parts) - 2} more tools")
+        return _clip("; ".join(out), 160)
+    if rule == "behavioral_undeclared_egress":
+        hosts = ev[len("egress to "):] if ev.startswith("egress to ") else ev
+        return _clip(f"contacted undeclared hosts: {hosts}", 140)
+    if rule == "annotation_open_world_violated":
+        return "every tool declares no network access (openWorldHint=false), yet it reached " \
+               "the network"
+    if rule == "canary_echoed_in_result":
+        names = ev.rsplit(" of ", 1)[-1] if " of " in ev else ""
+        return "a tool returned an environment secret's value" + (
+            f" ({_clip(names, 60)})" if names else "")
+    if rule == "tool_call_crashed_server":
+        tools = ev.rsplit(" to ", 1)[-1] if " to " in ev else ""
+        return "a tool call crashed the server" + (f" ({_clip(tools, 60)})" if tools else "")
+    name = str(f.get("name") or rule or "behavioral finding")
+    return _clip(name + (f": {ev}" if ev else ""), 140)
+
+
+def _sandbox_alarm(data: dict) -> str | None:
+    """The short phrase for the headline when the sandbox caught something that must not
+    sit under a 'safe' or 'clean' headline: a canary leak or a critical behavioral
+    finding. None otherwise."""
+    b = data.get("behavioral")
+    if not isinstance(b, dict) or not b.get("ran"):
+        return None
+    for f in _behavioral_findings(b):
+        if (f.get("rule") == "credential_canary_exfiltrated"
+                or str(f.get("severity")) == "critical"):
+            return _clip(_finding_phrase(f), 90)
+    return None
+
+
+def _sandbox_has_findings(data: dict) -> bool:
+    b = data.get("behavioral")
+    return isinstance(b, dict) and bool(b.get("ran")) and bool(_behavioral_findings(b))
+
+
+def _host_list(hosts: list[str], limit: int = 4) -> str:
+    return ", ".join(hosts[:limit]) + (f" (+{len(hosts) - limit} more)" if len(hosts) > limit
+                                       else "")
+
+
+def _network_clause(b: dict) -> str:
+    hosts = sorted({str(h) for h in (b.get("egress_hosts") or []) if h})
+    if not hosts:
+        return "network: no connections"
+    vendor = sorted({str(h) for h in (b.get("vendor_egress") or []) if h} & set(hosts))
+    odd = sorted({str(h) for h in (b.get("unexpected_egress") or []) if h})
+    if odd:
+        rest = [h for h in hosts if h not in odd]
+        return (f"network: undeclared {_host_list(odd)}"
+                + (f" (plus {_host_list(rest, 3)})" if rest else ""))
+    out = f"network: only {_host_list(hosts)}"
+    if vendor:
+        out += f" (vendor: {_host_list(vendor, 2)})"
+    return out
+
+
+def _file_clause(ex: dict) -> str:
+    writes = sorted({str(w) for c in (ex.get("calls") or []) if isinstance(c, dict)
+                     for w in (c.get("fs_writes") or []) if w})
+    if not writes:
+        return "file writes: none"
+    try:
+        from src.scanner.behavioral.graders import _is_cache_like, _is_scratch
+        real = [w for w in writes if not _is_scratch(w) and not _is_cache_like(w)]
+    except Exception:  # noqa: BLE001 — wording only; fall back to the raw count
+        real = writes
+    if not real:
+        return "file writes: none outside temp/cache dirs"
+    return f"file writes: {len(real)} outside temp/cache dirs (e.g. {_clip(real[0], 60)})"
+
+
+def _credential_clause(ex: dict, b: dict) -> str:
+    canary = ex.get("canary") if isinstance(ex.get("canary"), dict) else {}
+    names = [str(n) for n in (canary.get("env_names") or []) if n]
+    seen = [str(n) for n in (canary.get("seen_in_result") or []) if n]
+    if not names or b.get("canary_exfil") or seen:
+        return ""  # a leak or an echo is reported as a finding line instead
+    shown = ", ".join(names[:3]) + (f" +{len(names) - 3}" if len(names) > 3 else "")
+    return f"credentials: canary values for {shown} stayed put"
+
+
+def _sandbox_section(data: dict) -> list[str]:
+    """The behavioral sandbox observation as a short labelled block (≤6 lines), or [] when
+    the scan carries no sandbox result (never invented). Pending runs say so and invite a
+    follow-up. A server that did not start says why in plain words and that it is not a
+    finding. Findings name the tool and what it did; a canary leak leads."""
+    b = data.get("behavioral")
+    if not isinstance(b, dict):
+        return []
+    if b.get("pending"):
+        return ["**Sandbox:** running now — ask again in about a minute for the observed "
+                "behavior (tools called, network, files)."]
+    if not b.get("ran"):
+        return []
+    att = b.get("attestation") if isinstance(b.get("attestation"), dict) else None
+    when = str((att or {}).get("observed_at") or "")[:10]
+    tag = f"gVisor, signed {when}" if (att and when) else ("gVisor, signed" if att else "gVisor")
+    head = f"**Observed in the sandbox** ({tag}): "
+    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else None
+    plan = str(b.get("plan") or "")
+    net = _network_clause(b)
+    lines: list[str] = []
+    if ex and ex.get("launch_ok"):
+        tools = [t for t in (ex.get("tools") or []) if isinstance(t, dict)]
+        called = {c.get("tool") for c in (ex.get("calls") or [])
+                  if isinstance(c, dict) and c.get("tool")}
+        n, m = len(called), max(len(tools), len(called))
+        if n:
+            what = (f"started the server and called {n} of {m} tool{'' if m == 1 else 's'} "
+                    "with synthetic inputs.")
+        else:
+            what = (f"started the server and listed {m} tool{'' if m == 1 else 's'}; "
+                    "none were called.")
+        lines.append(head + what)
+        clauses = [net, _file_clause(ex), _credential_clause(ex, b)]
+        lines.append("- " + _cap("; ".join(c for c in clauses if c)) + ".")
+    elif ex is not None or plan.endswith("-mcp"):
+        _, phrase = _start_phrase(b)
+        lines.append(head + f"installed it, but the server did not start — {phrase}. "
+                     "Its tools were not exercised; this is not a finding.")
+        lines.append(f"- {_cap(net)} (during install).")
+    else:
+        code = b.get("exit_code")
+        verb = "ran the container image" if plan == "docker" else "installed and imported it"
+        if isinstance(code, int) and code != 0:
+            lines.append(head + f"{verb}; the step exited with code {code} "
+                         f"(not a finding); {net}.")
+        else:
+            lines.append(head + f"{verb}; {net}.")
+    fs = _behavioral_findings(b)
+    room = 6 - len(lines) - 1  # leave a line for the score effect
+    for f in fs[: max(room, 1)]:
+        sev = str(f.get("severity") or "").lower()
+        mark = "🚨 " if (f.get("rule") == "credential_canary_exfiltrated"
+                         or sev == "critical") else ""
+        lines.append(f"- {mark}Caught ({sev or 'finding'}): {_finding_phrase(f)}")
+    if len(fs) > max(room, 1):
+        lines[-1] += f" (+{len(fs) - max(room, 1)} more in the report)"
+    eff = data.get("behavioral_score_effect")
+    if isinstance(eff, dict) and eff.get("applied"):
+        delta = eff.get("delta")
+        why = str(eff.get("reason") or "").strip().rstrip(".")
+        if isinstance(delta, int) and not isinstance(delta, bool) and delta:
+            amount = f"{'+' if delta > 0 else '−'}{abs(delta)}"
+            lines.append(f"- Included in the trust score: {amount}"
+                         + (f", {_clip(why, 100)}." if why else "."))
+        else:
+            lines.append("- Included in the trust score (no change)"
+                         + (f": {_clip(why, 100)}." if why else "."))
+    return lines[:6]
 
 
 def _sandbox_line(data: dict) -> str | None:
-    """ONE compact line about the behavioral sandbox tier, when the scan carries it:
-    what ran (tools exercised in gVisor) and what it found, or that the run is still
-    pending. None when the scan has no ``behavioral`` block (never invented). A server
-    that could not start says why (``grade_summary.start_reason``) and, when the cause
-    is the sandbox environment, that it is not a finding. A block carrying a signed
-    ``attestation`` is marked ``(signed observation)``."""
-    b = data.get("behavioral")
-    if not isinstance(b, dict):
-        return None
-    if b.get("pending"):
-        return "Sandbox: behavioral run still in progress — re-check in about a minute."
-    if not b.get("ran"):
-        return None
-    signed = " (signed observation)" if b.get("attestation") else ""
-    findings = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
-    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else None
-    n_tools = len({c.get("tool") for c in (ex or {}).get("calls") or []
-                   if isinstance(c, dict) and c.get("tool")}) if ex else 0
-    benign_start = False
-    if ex and not ex.get("launch_ok"):
-        what, benign_start = _start_failure_wording(b)
-    elif n_tools:
-        what = f"ran {n_tools} tool{'' if n_tools == 1 else 's'} in gVisor"
-    else:
-        what = "install/run observed in gVisor"
-    if findings:
-        names = ", ".join(str(f.get("name") or f.get("rule") or "finding")
-                          for f in findings[:3])
-        more = f" (+{len(findings) - 3} more)" if len(findings) > 3 else ""
-        n = len(findings)
-        return (f"Sandbox: {what}; {n} behavioral finding{'' if n == 1 else 's'}: "
-                f"{names}{more}{signed}")
-    if benign_start:
-        return f"Sandbox: {what} (not a finding){signed}"
-    hosts = [str(h) for h in (b.get("egress_hosts") or []) if h]
-    if hosts:
-        shown = ", ".join(hosts[:4]) + (" …" if len(hosts) > 4 else "")
-        return f"Sandbox: clean run ({what}), egress only to {shown}{signed}"
-    return f"Sandbox: clean run ({what}), no network egress{signed}"
+    """The sandbox block as one string (None when the scan carries no sandbox result)."""
+    lines = _sandbox_section(data)
+    return "\n".join(lines) if lines else None
+
+
+def _version_parts(data: dict) -> tuple[str | None, str | None]:
+    """(version, publish date YYYY-MM-DD) of the scanned release, when the scan has them."""
+    ver = data.get("package_version")
+    if not (isinstance(ver, str) and ver.strip()):
+        ver = None
+        for k in ("artifact_scan", "surface_detail"):
+            d = data.get(k)
+            if isinstance(d, dict) and isinstance(d.get("version"), str) and d["version"].strip():
+                ver = d["version"]
+                break
+    pub = data.get("published_at")
+    pub = pub.strip()[:10] if isinstance(pub, str) and pub.strip() else None
+    return (_clip(ver.strip(), 40) if ver else None), pub
+
+
+def _version_line(data: dict) -> str | None:
+    """'Version 0.6.2 · published 2024-12-03' so a model does not fetch the registry."""
+    ver, pub = _version_parts(data)
+    if ver and pub:
+        return f"Version {ver} · published {pub}"
+    if ver:
+        return f"Version {ver}"
+    if pub:
+        return f"Published {pub}"
+    return None
 
 
 def _safe_verdict(data: dict) -> bool:

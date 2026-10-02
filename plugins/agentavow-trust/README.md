@@ -69,9 +69,21 @@ Then add an MCP server and start a new session. The hook reports a line such as:
 
 AgentAvow runs every npm and PyPI package it grades in an isolated gVisor sandbox on its own
 servers (automatically, on the first scan; results are kept for a day). The hook's verdict
-line includes that result when it exists, for example `sandbox: clean, 9 tool(s) exercised`
-or `sandbox: 1 behavioral finding(s) (high)`. The hook makes no extra request for it and
-nothing from your machine is run in the sandbox.
+line includes that result in one clause when it exists:
+
+- `sandbox: called 9 tools, network only api.example.com`: the server started, its tools
+  were called with synthetic inputs, and these are the hosts it reached (package
+  registries left out).
+- `sandbox: CAUGHT a read-only tool writing files (high)`: the run observed a behavior
+  worth reviewing; a planted credential leaving the sandbox is always listed first.
+- `sandbox: not started (needs a database URL)`: the server needs a credential or a
+  startup argument the sandbox does not have, so its tools were not called. This is not
+  a finding.
+- `sandbox: running now, results in about a minute`: the first run is still in progress.
+
+The hook makes no extra request for it and nothing from your machine is run in the
+sandbox. The `/scan` command and the scan-before-connect skill report the full sandbox
+observation (tools called, network, file writes, credentials) as its own section.
 
 ## What the hook reads and what leaves your machine
 

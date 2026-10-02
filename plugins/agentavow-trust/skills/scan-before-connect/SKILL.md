@@ -45,7 +45,16 @@ an hour; pass `force: true` only when the user says the target changed.
 Give both scores: the trust score out of 100 with its verdict, and the adoption score
 (the count and unit in `adoption`, such as downloads per week or stars; say when it is
 absent). Then the top findings with where they are, and the report link from the result.
-Adoption never changes the trust verdict.
+Adoption never changes the trust verdict. Give the version and publish date from the
+result's `Version … · published …` line; do not look them up in the registry.
+
+If the result has an **Observed in the sandbox** block, report it as its own short
+section: what ran, how many tools were called, where it connected on the network, file
+writes, whether the planted credentials stayed put, and each thing it caught, with the
+tool's name. If the server did not start, give the reason from the result and say it is
+not a finding. If the result says the sandbox is running now, say so and offer to
+re-check in about a minute. Do not call the score "static analysis only" without saying
+that the sandbox is pending or what it observed.
 
 - **Safe:** say so in one line and go ahead with what the user asked.
 - **Needs review:** show the findings and ask whether to continue. Do not install or

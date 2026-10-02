@@ -133,3 +133,34 @@ def test_reason_vocabulary_is_closed():
         "started", "needs_credentials", "needs_arguments", "missing_binary", "install_failed",
         "resource_limit", "no_entrypoint", "timeout", "crashed", "unknown",
     }
+
+
+# @modelcontextprotocol/server-postgres launched bare (its source:
+# ``if (args.length === 0) { console.error("Please provide a database URL as a
+# command-line argument"); process.exit(1); }``) was classified ``crashed``.
+POSTGRES = "server_exited: Please provide a database URL as a command-line argument"
+
+
+@pytest.mark.parametrize("name,error,reason", [
+    ("@modelcontextprotocol/server-postgres", POSTGRES, "needs_arguments"),
+    ("server-postgres after a banner", "server_exited: postgres mcp v0.6.2\n" + POSTGRES[15:],
+     "needs_arguments"),
+    ("mcp-remote", MCP_REMOTE, "needs_arguments"),
+    ("usage mid-error", "server_exited: error: bad invocation. usage: tool <dir>",
+     "needs_arguments"),
+    ("needs a path", "server_exited: Please provide a directory path to serve", "needs_arguments"),
+    ("connection string", "server_exited: Provide a connection string for the database",
+     "needs_arguments"),
+    ("requires an argument", "server_exited: This server requires a --root argument",
+     "needs_arguments"),
+    ("missing argument", "server_exited: Error: missing required argument 'url'",
+     "needs_arguments"),
+    ("missing argument bare", "server_exited: missing argument: target", "needs_arguments"),
+    ("<url> placeholder", "server_exited: run as: srv <url>", "needs_arguments"),
+    ("@brave/brave-search-mcp-server", BRAVE, "needs_credentials"),
+    ("@supabase/mcp-server-supabase", SUPABASE, "needs_credentials"),
+    ("mcp-server-sqlite (traceback)", SQLITE[:300], "crashed"),
+    ("plain crash", "server_exited: TypeError: Cannot read properties of undefined", "crashed"),
+])
+def test_argument_and_credential_errors_win_over_crashed(name, error, reason):
+    assert classify_start(_res(_tr(error)))[0] == reason, name

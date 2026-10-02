@@ -382,17 +382,46 @@ def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_pa
 
 @pytest.mark.parametrize("behavioral, expected", [
     (None, ""),
-    ({"ran": False, "pending": True}, "sandbox run pending"),
-    ({"ran": True, "findings": [], "exercise": {"launch_ok": True, "calls": [{}, {}, {}]}},
-     "sandbox: clean, 3 tool(s) exercised"),
-    ({"ran": True, "findings": [{"severity": "high"}], "exercise": None},
-     "sandbox: 1 behavioral finding(s) (high)"),
+    ({"ran": False, "reason": "off"}, ""),
+    ({"ran": False, "pending": True}, "sandbox: running now, results in about a minute"),
+    ({"ran": True, "findings": [], "plan": "npm-mcp",
+      "egress_hosts": ["registry.npmjs.org", "api.x.com"],
+      "exercise": {"launch_ok": True, "calls": [{"tool": f"t{i}"} for i in range(9)]
+                   + [{"tool": "t0"}]}},
+     "sandbox: called 9 tools, network only api.x.com"),
+    ({"ran": True, "findings": [], "egress_hosts": ["registry.npmjs.org"],
+      "exercise": {"launch_ok": True, "calls": [{"tool": "a"}]}},
+     "sandbox: called 1 tool, no network beyond the registry"),
+    ({"ran": True, "findings": [], "egress_hosts": ["a.io", "b.io", "c.io"],
+      "exercise": {"launch_ok": True, "calls": []}},
+     "sandbox: called 0 tools, network only a.io, b.io +1"),
+    ({"ran": True, "findings": [{"severity": "high", "rule": "annotation_readonly_violated"}],
+      "exercise": None},
+     "sandbox: CAUGHT a read-only tool writing files (high)"),
+    ({"ran": True, "findings": [{"severity": "medium", "rule": "x_new", "name": "Odd thing"},
+                                {"severity": "critical",
+                                 "rule": "behavioral_undeclared_egress"}]},
+     "sandbox: CAUGHT undeclared network egress (critical) +1 more"),
     ({"ran": True, "findings": [], "canary_exfil": [{"via": "dns", "host": "evil.net"}]},
-     "sandbox: LEAKED a canary credential"),
+     "sandbox: CAUGHT a planted credential leaving the sandbox (critical)"),
+    ({"ran": True, "findings": [{"severity": "high", "rule": "behavioral_undeclared_egress"}],
+      "canary_exfil": [{"via": "dns", "host": "evil.net"}]},
+     "sandbox: CAUGHT a planted credential leaving the sandbox (critical) +1 more"),
     ({"ran": True, "findings": [], "exercise": {"launch_ok": False},
       "grade_summary": {"start_reason": "needs_credentials"}},
-     "sandbox: install clean; server not exercised (needs credentials)"),
-    ({"ran": True, "findings": [], "exercise": None}, "sandbox: clean"),
+     "sandbox: not started (needs credentials)"),
+    ({"ran": True, "findings": [], "plan": "npm-mcp", "exercise": {"launch_ok": False},
+      "grade_summary": {"start_reason": "needs_arguments", "start_reason_detail":
+                        "server_exited: Please provide a database URL as a command-line "
+                        "argument"}},
+     "sandbox: not started (needs a database URL)"),
+    ({"ran": True, "findings": [], "exercise": {"launch_ok": False},
+      "grade_summary": {"start_reason": "crashed"}},
+     "sandbox: not started (crashed on start)"),
+    ({"ran": True, "findings": [], "exercise": {"launch_ok": False}},
+     "sandbox: not started"),
+    ({"ran": True, "findings": [], "exercise": None, "egress_hosts": ["registry.npmjs.org"]},
+     "sandbox: installed, no network beyond the registry"),
 ])
 def test_sandbox_summary_in_the_verdict(behavioral, expected):
     mod = _load(PLUGIN_COPY)
@@ -405,9 +434,9 @@ def test_verdict_line_carries_the_sandbox_clause(hook, monkeypatch, capsys):
     def scan(t, force=False):
         return {"score": 92, "verdict": "safe", "blocking": 0, "tier": "", "grade": "",
                 "tool_digests": {}, "tool_manifest_digest": None,
-                "sandbox": "sandbox: clean, 9 tool(s) exercised"}
+                "sandbox": "sandbox: called 9 tools, network only api.x.com"}
     out = _run(hook, monkeypatch, capsys, [_mcp("a", "https://mcp.example.com/mcp")], scan)
-    assert "92/100 — safe; sandbox: clean, 9 tool(s) exercised." in out
+    assert "92/100 — safe; sandbox: called 9 tools, network only api.x.com." in out
 
 
 def test_verdict_line_flags_a_deprecated_package(hook, monkeypatch, capsys):

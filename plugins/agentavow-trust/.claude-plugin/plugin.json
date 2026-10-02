@@ -1,7 +1,7 @@
 {
   "name": "agentavow-trust",
   "displayName": "AgentAvow Trust",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Signed, verifiable safety grades for the tools your agent connects to. Bundles the AgentAvow MCP connector (scan any MCP server, package, or repo for a signed 0-100 trust score and an adoption score), a /scan command, a skill that scans a server or package before Claude adds or installs it, a session-start hook that grades newly added MCP servers (warn-only, fail-open), and a per-call gate that denies tools on a blocked-tier server and asks before a tool whose definition changed since it was graded (fail-open).",
   "author": { "name": "AgentAvow", "url": "https://agentavow.com" },
   "license": "MIT",
