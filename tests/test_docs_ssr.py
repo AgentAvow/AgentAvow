@@ -188,7 +188,9 @@ async def test_slug_endpoint_has_heading_ids_and_bounded_description(client: Asy
 
 
 @pytest.mark.asyncio
-async def test_unknown_slug_falls_back_to_hub(client: AsyncClient):
+async def test_unknown_slug_is_a_404_that_still_shows_the_hub(client: AsyncClient):
+    """A typo'd doc URL must not be indexed as a 200, but the reader still gets the
+    hub so they can find the page they meant."""
     resp = await client.get("/api/v1/docpages/does-not-exist")
-    assert resp.status_code == 200
+    assert resp.status_code == 404
     assert "AgentAvow Documentation" in resp.text

@@ -349,10 +349,16 @@ async def docs_hub() -> HTMLResponse:
 async def docs_page(slug: str) -> HTMLResponse:
     """SSR a single doc by slug — readable without JavaScript."""
     if slug not in _TITLES:
-        return await docs_hub()
+        # A real 404: the hub is still rendered so the reader can find the right page,
+        # but crawlers and link checkers must not index a typo as a 200.
+        hub = await docs_hub()
+        hub.status_code = 404
+        return hub
     md = _load(slug)
     if md is None:
-        return await docs_hub()
+        hub = await docs_hub()
+        hub.status_code = 404
+        return hub
     title = _TITLES[slug]
     body = (
         f"<h1>{html.escape(title)}</h1>\n"
