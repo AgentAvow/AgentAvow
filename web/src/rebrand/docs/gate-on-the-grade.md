@@ -42,6 +42,24 @@ if (trust_score < 40) throw new Error(`blocked: ${trust_score}/100 (${trust_tier
 
 Framework bridges ship in `sdk/bridges/` (MCP, LangChain, CrewAI, AutoGen) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway`) enforces a policy server-side when you'd rather not embed the logic.
 
+### LangChain
+
+A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before a tool runs it fetches the server's signed grade, allows the call when the score clears the floor (81, Trusted) with no critical/high finding, and checks the definition the agent was served against the per-tool digest in the attestation — so a tool that was redefined after it was graded is stopped, not run. A block comes back to the model as a tool message that says why; nothing raises.
+
+```python
+from langchain.agents import create_agent
+from src.bridges.langchain.middleware import AgentAvowGate   # pip install agentgraph[langchain]
+
+gate = AgentAvowGate(
+    servers={"deepwiki": "https://mcp.deepwiki.com/mcp"},    # or tool_to_server={tool: server}
+    min_score=81,                                             # Trusted floor
+    on_fail="block",                                          # or "confirm" | "warn" | "raise"
+)
+agent = create_agent(model, tools=mcp_tools, middleware=[gate])
+```
+
+The mapping is yours to give — a LangChain tool doesn't carry its server's URL — by tool name (`tool_to_server`), by server name (`servers`, matched to `MCPAdapter`'s server name or a `<server>_` tool-name prefix), or a `resolve_server` callable. Tools that map to no server (your own functions) are not gated. `on_fail="confirm"` pauses the graph with a LangGraph interrupt until you resume with `"approve"`; `fail_closed=False` lets a call through, with a warning, when AgentAvow itself can't answer.
+
 ## Gate anything (the API)
 
 Every surface is one auth-free GET, returning the score, tier, findings, the signed `coverage{}` block, and the JWS attestation:
