@@ -31,26 +31,47 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Parse the JSON response
 # ---------------------------------------------------------------------------
-SCORE=$(jq -r '.score // 0' /tmp/ag_scan.json)
+# The public scan API returns `trust_score`, `scan_result`, `category_scores` and a
+# `findings` object with per-severity counts. The older names are kept as fallbacks.
+# A response with no score at all is an API problem, not a 0/100 verdict: stop.
+SCORE=$(jq -r '.trust_score // .score // empty' /tmp/ag_scan.json)
+if [ -z "${SCORE}" ] || [ "${SCORE}" = "null" ]; then
+  echo "::error::AgentAvow API response carried no trust_score; not posting a verdict"
+  head -c 600 /tmp/ag_scan.json 2>/dev/null || true
+  echo "::endgroup::"
+  exit 1
+fi
 # 0-100 trust tier word (dual-mark thresholds 80/60/40/20)
 if   [ "${SCORE}" -ge 80 ]; then TIER="Trusted"
 elif [ "${SCORE}" -ge 60 ]; then TIER="Standard"
 elif [ "${SCORE}" -ge 40 ]; then TIER="Caution"
 elif [ "${SCORE}" -ge 20 ]; then TIER="Restricted"
 else TIER="Blocked"; fi
-SUMMARY=$(jq -r '.summary // "No summary available"' /tmp/ag_scan.json)
-
-# Category scores — build a markdown table
-CATEGORIES=$(jq -r '
-  .categories // {} | to_entries[]
-  | "| \(.key) | \(.value) |"
+# One-line summary: the API's own if present, else derived from the scan result.
+SUMMARY=$(jq -r '
+  .summary //
+  (if .deprecation then "Deprecated upstream — do not adopt for new work"
+   elif .scan_result == "clean" then "Clean — no blocking findings"
+   elif .scan_result then "Scan result: \(.scan_result)"
+   else "See the full report" end)
 ' /tmp/ag_scan.json)
 
-# Findings counts
+# Category scores — build a markdown table (snake_case keys shown as words)
+CATEGORIES=$(jq -r '
+  (.category_scores // .categories // {}) | to_entries[]
+  | "| \(.key | gsub("_"; " ")) | \(.value) |"
+' /tmp/ag_scan.json)
+
+# Findings counts. The API reports critical/high/medium and a total; "low" is what is
+# left of the total once the three named severities are taken out.
 CRITICAL=$(jq -r '.findings.critical // 0' /tmp/ag_scan.json)
 HIGH=$(jq -r '.findings.high // 0' /tmp/ag_scan.json)
 MEDIUM=$(jq -r '.findings.medium // 0' /tmp/ag_scan.json)
-LOW=$(jq -r '.findings.low // 0' /tmp/ag_scan.json)
+LOW=$(jq -r '
+  .findings.low //
+  ([(.findings.total // 0) - (.findings.critical // 0) - (.findings.high // 0)
+    - (.findings.medium // 0), 0] | max)
+' /tmp/ag_scan.json)
 
 REPORT_URL="https://agentavow.com/check/${OWNER}/${REPO}"
 BADGE_URL="${API_BASE}/${OWNER}/${REPO}/badge"

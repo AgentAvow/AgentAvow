@@ -51,6 +51,43 @@ def _resp(behavioral=None) -> dict:
     return r
 
 
+def test_reads_the_real_api_field_names(tmp_path):
+    """The live response carries trust_score / scan_result / category_scores and a
+    findings object with a total. Until 2026-10-02 the script read `score`, `summary`
+    and `categories`, which the API never sent, and posted 0/100 Blocked on every PR."""
+    live = {"trust_score": 99, "security_score": 99, "trust_tier": "verified",
+            "scan_result": "clean",
+            "category_scores": {"secret_hygiene": 100, "code_safety": 97},
+            "findings": {"critical": 0, "high": 0, "medium": 0, "total": 1,
+                         "categories": {"dependency": 1}, "items": []},
+            "deprecation": None}
+    p = _run(tmp_path, live)
+    assert p.returncode == 0, p.stderr
+    assert "Score: 99/100 (Trusted)" in p.stdout
+    assert "Findings: 0 critical, 0 high, 0 medium, 1 low" in p.stdout
+    summary = (tmp_path / "summary.md").read_text()
+    assert "**AgentAvow Trust: 99/100 (Trusted)** — Clean — no blocking findings" in summary
+    assert "| secret hygiene | 100 |" in summary and "| code safety | 97 |" in summary
+    assert "No summary available" not in summary
+
+
+def test_deprecated_summary_and_gate_use_the_real_score(tmp_path):
+    live = {"trust_score": 55, "scan_result": "warning", "category_scores": {},
+            "findings": {"critical": 0, "high": 1, "medium": 2, "total": 3},
+            "deprecation": {"reason": "package deprecated"}}
+    p = _run(tmp_path, live, FAIL_ON_FINDINGS="true", MIN_SCORE="80")
+    assert p.returncode == 1
+    assert "Trust score 55 is below minimum threshold 80" in p.stderr + p.stdout
+    assert "Deprecated upstream" in (tmp_path / "summary.md").read_text()
+
+
+def test_response_without_a_score_is_an_error_not_a_verdict(tmp_path):
+    p = _run(tmp_path, {"detail": "Not Found"})
+    assert p.returncode == 1
+    assert "carried no trust_score" in p.stdout + p.stderr
+    assert not (tmp_path / "summary.md").exists()
+
+
 def test_sandbox_line_when_the_run_completed(tmp_path):
     b = {"ran": True, "plan": "npm-mcp",
          "exercise": {"launch_ok": True,
