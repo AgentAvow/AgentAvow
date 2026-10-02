@@ -408,3 +408,16 @@ def test_verdict_line_carries_the_sandbox_clause(hook, monkeypatch, capsys):
                 "sandbox": "sandbox: clean, 9 tool(s) exercised"}
     out = _run(hook, monkeypatch, capsys, [_mcp("a", "https://mcp.example.com/mcp")], scan)
     assert "92/100 — safe; sandbox: clean, 9 tool(s) exercised." in out
+
+
+def test_verdict_line_flags_a_deprecated_package(hook, monkeypatch, capsys):
+    v = _load(PLUGIN_COPY)._verdict({"trust_score": 70, "findings": {"items": []},
+                                      "deprecation": "no longer supported"})
+    assert v["deprecated"] is True
+
+    def scan(t, force=False):
+        return {"score": 70, "verdict": "needs review", "blocking": 0, "tier": "", "grade": "",
+                "tool_digests": {}, "tool_manifest_digest": None, "sandbox": "",
+                "deprecated": True}
+    out = _run(hook, monkeypatch, capsys, [_mcp("a", "https://mcp.example.com/mcp")], scan)
+    assert "DEPRECATED by its maintainer" in out

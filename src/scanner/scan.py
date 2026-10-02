@@ -157,6 +157,9 @@ class ScanResult:
     # context alongside the verdict. Empty for repos with no package coordinate / non-OSV
     # ecosystems / when the lookup fails (fail-open).
     incident_history: dict = field(default_factory=dict)
+    # The registry's end-of-life signal for a package (npm deprecated / PyPI yanked or
+    # Inactive); None when the maintainer has not retired it. Also raised as a finding.
+    deprecation: str | None = None
     # Phase 2 artifact scanning: repo↔artifact drift summary + a compact summary of
     # the published-artifact fetch/scan. Both stay empty for repo-only scans (the
     # feature is flag-gated), so existing behaviour is unchanged.
@@ -2209,6 +2212,8 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         "fs_access": "filesystem_access",
         "dependency": "dependency_health",
         "install_hook": "dependency_health",
+        # The maintainer retired the package (npm deprecated / PyPI yanked or Inactive).
+        "maintenance": "dependency_health",
         # Git-config autorun (GitSpawn class) is a code-execution vector → code-safety axis.
         "git_autorun": "code_safety",
         # Phase 2: repo↔artifact drift (injected/modified files) is a code-safety axis.
@@ -2944,6 +2949,25 @@ def _env_reads_from_artifact(files: dict) -> list[str]:
         return []
 
 
+def _deprecation_finding(eco: str, name: str, version: str, message: str) -> Finding:
+    """'Clean but abandoned': the maintainer retired the package. Not malicious, so it is
+    a MEDIUM maintenance finding (no security fixes are coming), never a blocker."""
+    where = "package.json" if eco == "npm" else "registry metadata"
+    return Finding(
+        category="maintenance",
+        name="Package deprecated by its maintainer",
+        severity="medium",
+        file_path=where,
+        line_number=0,
+        snippet=f"{name}@{version}: {message}"[:300],
+        remediation=(
+            "The maintainer has retired this package, so it will not receive security "
+            "fixes. Don't adopt it for new work; move to a maintained alternative (the "
+            "deprecation message often names one) and scan that before you connect it."
+        ),
+    )
+
+
 async def scan_package(surface: str, name: str, version: str | None = None) -> ScanResult:
     """Grade a PUBLISHED npm / PyPI package directly by coordinate — no GitHub repo
     required. Fetches + STATICALLY scans the real artifact tree (the same 12-category
@@ -3020,6 +3044,10 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     elif eco == "docker":
         # No layer scan: the OCI config carries the graded signal (root/env/base).
         findings = findings + docker_config_findings(fetched)
+    if getattr(fetched, "deprecation", None):
+        result.deprecation = fetched.deprecation
+        findings = findings + [_deprecation_finding(eco, fetched.name, fetched.version,
+                                                    fetched.deprecation)]
     result.findings = findings
     result.files_scanned = files_scanned
     result.total_scannable_files = files_scanned

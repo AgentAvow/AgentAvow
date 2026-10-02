@@ -1353,6 +1353,23 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
  * coordinate). Never affects the score — red if the current version is flagged, amber
  * for a past-and-cleaned compromise. Renders nothing when there's no known incident. */
 function IncidentBanner({ scan }: { scan: PublicScanResponse }) {
+  return <><DeprecationBanner scan={scan} /><IncidentHistoryBanner scan={scan} /></>
+}
+
+/** The maintainer retired this package (npm deprecated / PyPI yanked or Inactive). Clean
+ * code can still be abandoned: no security fixes are coming. Also a medium finding. */
+function DeprecationBanner({ scan }: { scan: PublicScanResponse }) {
+  if (!scan.deprecation) return null
+  return (
+    <div className="mt-4 rounded-2xl border border-warning/40 bg-warning/10 p-4 text-[13px]">
+      <div className="font-semibold text-warning">Deprecated by its maintainer</div>
+      <p className="mt-1 text-text-muted">This package is retired and won&apos;t receive security fixes. Don&apos;t adopt it for new work; use a maintained alternative and scan that.</p>
+      <p className="mt-1 font-mono text-[11.5px] text-text-muted break-words">“{scan.deprecation}”</p>
+    </div>
+  )
+}
+
+function IncidentHistoryBanner({ scan }: { scan: PublicScanResponse }) {
   const ih = scan.incident_history
   if (!ih?.has_incident) return null
   const latest = (ih.incidents || [])[0] || {}

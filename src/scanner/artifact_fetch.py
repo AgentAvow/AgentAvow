@@ -159,6 +159,9 @@ class ArtifactFetchResult:
     file_count: int = 0
     packaged_manifest: dict | None = None  # parsed package.json (npm), None otherwise
     description: str | None = None          # one-line "what it is" from registry metadata
+    # The maintainer's own end-of-life signal: npm `deprecated` on the resolved version,
+    # PyPI `yanked` (+ reason) or the 'Development Status :: 7 - Inactive' classifier.
+    deprecation: str | None = None
     error: str | None = None
 
 
@@ -428,6 +431,7 @@ async def fetch_npm_artifact(
             file_count=len(files),
             packaged_manifest=packaged_manifest,
             description=(packaged_manifest or {}).get("description"),
+            deprecation=_npm_deprecation(vdata),
         )
     finally:
         if owns:
@@ -504,10 +508,34 @@ async def fetch_pypi_artifact(
             unpacked_size=sum(f.size for f in files.values()),
             file_count=len(files),
             description=(meta.get("info") or {}).get("summary"),
+            deprecation=_pypi_deprecation(meta),
         )
     finally:
         if owns:
             await client.aclose()
+
+
+def _npm_deprecation(vdata: dict) -> str | None:
+    """npm marks a version deprecated with a string message (or, rarely, ``true``)."""
+    dep = (vdata or {}).get("deprecated")
+    if dep is True:
+        return "deprecated by its maintainer"
+    if isinstance(dep, str) and dep.strip():
+        return dep.strip()[:300]
+    return None
+
+
+def _pypi_deprecation(meta: dict) -> str | None:
+    """PyPI has no 'deprecated' flag: a yanked release, or the maintainer's own
+    'Development Status :: 7 - Inactive' classifier, is the equivalent signal."""
+    info = (meta or {}).get("info") or {}
+    if info.get("yanked"):
+        reason = str(info.get("yanked_reason") or "").strip()
+        return f"release yanked: {reason[:280]}" if reason else "release yanked by its maintainer"
+    classifiers = info.get("classifiers") or []
+    if any(str(c).strip() == "Development Status :: 7 - Inactive" for c in classifiers):
+        return "marked inactive by its maintainer (Development Status :: 7 - Inactive)"
+    return None
 
 
 async def fetch_crates_artifact(

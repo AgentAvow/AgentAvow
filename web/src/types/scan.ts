@@ -79,6 +79,7 @@ export interface PublicScanResponse {
   category_scores: Partial<CategoryScores>
   // Context-only incident history — OSV MAL- advisories for THIS package's own coordinate
   // ("was it ever compromised?"). NOT scored, NOT signed. Empty for repos w/o a coordinate.
+  deprecation?: string | null
   incident_history?: {
     checked?: boolean
     has_incident?: boolean

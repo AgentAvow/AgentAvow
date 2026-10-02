@@ -182,6 +182,7 @@ class PublicScanResponse(BaseModel):
     # ("was it ever compromised?"). NOT scored, NOT signed; empty for repos w/o a coordinate
     # or non-OSV ecosystems. {checked, has_incident, current_version_affected, count, incidents[]}.
     incident_history: dict = {}
+    deprecation: str | None = None  # registry end-of-life message, None if not retired
     provenance: dict = {}  # verified build-provenance summary (Phase 3), if any
     surface_detail: dict = {}  # per-surface detail (skill allowed_tools, MCP capabilities, …)
     # the tool's .agentavow.yml declaration ({present, egress, capabilities, note})
@@ -1151,6 +1152,7 @@ def _scan_result_to_dict(result: object) -> dict:
         "supply_chain": getattr(result, "supply_chain", {}) or {},
         # Context-only incident history (OSV MAL- for the target's own coordinate).
         "incident_history": getattr(result, "incident_history", {}) or {},
+        "deprecation": getattr(result, "deprecation", None),
         "scanned_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -1227,6 +1229,7 @@ def _package_response(
         coverage=data.get("coverage", {}),
         supply_chain=data.get("supply_chain", {}),
         incident_history=data.get("incident_history", {}),
+        deprecation=data.get("deprecation"),
         provenance=data.get("provenance", {}),
         surface_detail=data.get("surface_detail", {}),
         declared_scope=data.get("declared_scope", {}),

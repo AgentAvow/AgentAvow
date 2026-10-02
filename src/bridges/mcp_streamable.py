@@ -441,6 +441,11 @@ def _scan_block(
             f"no risks found — the score is {reason}, a confidence limit rather than "
             f"detected risk. Adoption and the signed report can help you decide."
         )
+    _dep = data.get("deprecation")
+    if isinstance(_dep, str) and _dep.strip():
+        lines.append(
+            f"**Deprecated by its maintainer:** \"{_dep.strip()[:200]}\" — it won't get "
+            "security fixes; don't adopt it for new work, use a maintained alternative.")
     _sb = _sandbox_line(data)
     if _sb:
         lines.append(_sb)

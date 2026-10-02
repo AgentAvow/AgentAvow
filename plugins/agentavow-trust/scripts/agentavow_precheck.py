@@ -41,7 +41,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -234,6 +234,7 @@ def _verdict(data: dict) -> dict:
         "tool_digests": digests if isinstance(digests, dict) else {},
         "tool_manifest_digest": data.get("tool_manifest_digest") or None,
         "sandbox": _sandbox_summary(data.get("behavioral")),
+        "deprecated": bool(data.get("deprecation")),
     }
 
 
@@ -446,6 +447,8 @@ def main() -> None:
         changed = ("its tool definitions changed since the last grade; re-graded: "
                    if regraded else "")
         sandbox = f"; {result['sandbox']}" if result.get("sandbox") else ""
+        if result.get("deprecated"):
+            sandbox = "; DEPRECATED by its maintainer (no more security fixes)" + sandbox
         lines.append(f"{flag} MCP '{t['name']}' ({coord}): {changed}AgentAvow {score}/100 — "
                      f"{verdict}{extra}{sandbox}.")
 
