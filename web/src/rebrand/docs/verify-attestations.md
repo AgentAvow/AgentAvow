@@ -59,6 +59,28 @@ console.log('verified:', payload.repo, payload.trust_score)
 
 If verification throws, the attestation was tampered with or the key doesn't match — do not trust the result.
 
+## Behavioral observations
+
+A [sandbox run](./behavioral-sandbox.md) is also signed, with the **same key and JWKS** as the
+score, but as a different document type: `BehavioralObservation` under
+`https://schema.agentgraph.co/attestation/behavioral-observation/v1`. It is a dated witness
+statement — "AgentAvow ran this package in gVisor on this date and observed these hosts, writes,
+tool calls and findings" — not a recomputable score. You verify it the same way:
+
+```python
+scan = requests.get("https://agentavow.com/api/v1/public/scan/package/npm/left-pad").json()
+obs = scan["behavioral"]["attestation"]          # None until the sandbox has run
+jws = obs["jws"]                                 # header.payload.signature, kid in the header
+# … resolve the key by kid from the JWKS exactly as above, verify, then decode the payload:
+payload = json.loads(base64.urlsafe_b64decode(jws.split(".")[1] + "=="))
+assert payload["type"] == "BehavioralObservation"
+print(payload["observation"]["egressHosts"], payload["findings"])
+```
+
+Two things to keep straight: the observation's `subject.id` is `pkg:<surface>/<name>`, and its
+`observedAt` is when the sandbox ran, which can be up to a day older than the score you fetched
+it with. Re-run with `?behavioral=true` for a fresh, freshly signed observation.
+
 ## Freshness
 
 Attestations are freshness-bounded (`expires_at`). Re-fetch (or `?force=true`) for a current signature; an

@@ -472,6 +472,7 @@ async def _run_and_cache_behavioral(
         block["grade_summary"] = grade_summary(res)
     except Exception:  # noqa: BLE001 — a UI summary must never fail the block
         block["grade_summary"] = {}
+    block["attestation"] = _sign_behavioral_observation(surface, str(name), block)
     try:
         from src.redis_client import get_redis
         await get_redis().set(
@@ -481,6 +482,71 @@ async def _run_and_cache_behavioral(
     except Exception:
         pass
     return block
+
+
+BEHAVIORAL_OBSERVATION_CONTEXT = (
+    "https://schema.agentgraph.co/attestation/behavioral-observation/v1"
+)
+
+
+def _behavioral_observation_payload(surface: str, name: str, block: dict) -> dict:
+    """The signed OBSERVATION: what AgentAvow saw when it ran the tool, on this date, in
+    this sandbox. Deliberately a different ``type``/``@context`` from the score
+    attestation: a score is recomputable from the code; an observation is a dated witness
+    statement, reproducible by re-running, not by recomputing. Never feeds trust_score."""
+    now = datetime.now(timezone.utc).isoformat()
+    ex = block.get("exercise") or {}
+    tools = [t for t in (ex.get("tools") or []) if isinstance(t, dict)]
+    calls = [c for c in (ex.get("calls") or []) if isinstance(c, dict)]
+    server = ex.get("server") or {}
+    return {
+        "@context": BEHAVIORAL_OBSERVATION_CONTEXT,
+        "type": "BehavioralObservation",
+        "issuer": {"id": "did:web:agentgraph.co", "name": "AgentAvow",
+                   "url": "https://agentgraph.co"},
+        "subject": {"id": f"pkg:{surface}/{name}", "surface": surface, "name": name},
+        "observedAt": now,
+        "issuedAt": now,
+        "sandbox": {"isolation": "gvisor", "plan": block.get("plan") or ""},
+        "observation": {
+            "ran": bool(block.get("ran")),
+            "timedOut": bool(block.get("timed_out")),
+            "exitCode": block.get("exit_code"),
+            "egressHosts": sorted(block.get("egress_hosts") or []),
+            "unexpectedEgress": sorted(block.get("unexpected_egress") or []),
+            "vendorEgress": sorted(block.get("vendor_egress") or []),
+            "declaredEgress": sorted(block.get("declared_egress") or []),
+            "canaryExfil": block.get("canary_exfil") or [],
+            "server": {"started": bool(ex.get("launch_ok")),
+                       "name": server.get("name") or "", "version": server.get("version") or ""},
+            "tools": [{"name": t.get("name"), "annotations": t.get("annotations") or {}}
+                      for t in tools],
+            "calls": [{"tool": c.get("tool"), "ok": bool(c.get("ok")),
+                       "isError": bool(c.get("is_error")),
+                       "fsWrites": len(c.get("fs_writes") or [])} for c in calls],
+        },
+        "findings": [{"rule": f.get("rule"), "severity": f.get("severity"),
+                      "name": f.get("name")} for f in (block.get("findings") or [])],
+    }
+
+
+def _sign_behavioral_observation(surface: str, name: str, block: dict) -> dict | None:
+    """JWS (EdDSA, same JWKS as score attestations) over the JCS-canonical observation.
+    Fail-open: a signing problem returns None and never blocks the sandbox result."""
+    if not block.get("ran"):
+        return None
+    try:
+        payload = _behavioral_observation_payload(surface, name, block)
+        return {
+            "jws": create_jws(canonicalize(payload)),
+            "kid": "agentgraph-security-v1",
+            "context": BEHAVIORAL_OBSERVATION_CONTEXT,
+            "observed_at": payload["observedAt"],
+            "verify_url": "https://agentavow.com/docs/verify-attestations#behavioral-observations",
+        }
+    except Exception:  # noqa: BLE001
+        logger.exception("behavioral observation signing failed for %s", name)
+        return None
 
 
 async def _behavioral_block(data: dict, force: bool = False) -> dict | None:

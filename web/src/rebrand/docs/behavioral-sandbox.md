@@ -53,6 +53,22 @@ a model's output is not reproducible, and the result has to be.
 | Canary echoed in result | A tool returned an environment secret in its output | medium |
 | Tool call crashed the server | The server exited during a call | low |
 
+## When a server does not start
+
+Many servers need something the sandbox will not supply: a real API key, a URL or path on the
+command line, a program the image lacks, or more memory than a browser download allows. The
+result says which (`needs_credentials`, `needs_arguments`, `missing_binary`, `install_failed`,
+`resource_limit`, `no_entrypoint`, `timeout`, `crashed`) and the tools are reported as **not
+exercised**. That is never a finding and never lowers a score. Where a server only needs a
+credential, the sandbox retries once with a canary value so the server can get as far as its
+first authenticated call.
+
+## The observation is signed
+
+Every completed run carries a `BehavioralObservation` attestation: a JWS over the hosts, writes,
+tool calls and findings you see, with the sandbox plan and the date, signed with the same key
+as the score. See [Verify an attestation](./verify-attestations.md#behavioral-observations).
+
 ## What the sandbox cannot prove
 
 A clean run means the tool did nothing bad **under these conditions**. It does not prove the tool

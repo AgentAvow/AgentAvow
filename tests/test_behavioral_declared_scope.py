@@ -166,3 +166,36 @@ def test_lock_fails_open_without_redis(monkeypatch):
         raise RuntimeError("redis down")
     monkeypatch.setattr("src.redis_client.get_redis", boom)
     assert asyncio.run(router._acquire_behavioral_lock("npm", "x", set())) is True
+
+
+def test_a_ran_block_carries_a_verifiable_signed_observation(fake_redis, captured_runs):
+    import base64
+
+    from src.signing import get_public_key
+    data = {"package_coordinate": {"surface": "npm", "name": "left-pad"},
+            "declared_scope": {"present": True, "egress": ["api.example.com"]}}
+    block = asyncio.run(router._behavioral_block(data, force=True))
+    att = block["attestation"]
+    assert att and att["kid"] == "agentgraph-security-v1"
+    h, p, sig = att["jws"].split(".")
+    pad = lambda x: x + "=" * (-len(x) % 4)  # noqa: E731
+    get_public_key().verify(base64.urlsafe_b64decode(pad(sig)), f"{h}.{p}".encode())
+    payload = json.loads(base64.urlsafe_b64decode(pad(p)))
+    assert payload["type"] == "BehavioralObservation"
+    assert payload["@context"] == router.BEHAVIORAL_OBSERVATION_CONTEXT
+    assert payload["subject"] == {"id": "pkg:npm/left-pad", "surface": "npm", "name": "left-pad"}
+    assert payload["observation"]["declaredEgress"] == ["api.example.com"]
+    assert payload["observation"]["egressHosts"] == ["api.example.com"]
+    assert "trust_score" not in json.dumps(payload)  # an observation, never a score
+    assert payload["observedAt"] == att["observed_at"]
+
+
+def test_no_signed_observation_when_the_sandbox_did_not_run(fake_redis, monkeypatch):
+    async def fake_run(surface, coordinate, *, expected_hosts=None, manifest=None, timeout=45):
+        return BehavioralResult(ran=False, surface=surface, coordinate=coordinate,
+                                error="unsupported_surface")
+    monkeypatch.setattr(behavioral_runner, "run_behavioral", fake_run)
+    monkeypatch.setattr(router.settings, "scanner_behavioral_enabled", True, raising=False)
+    block = asyncio.run(router._behavioral_block(
+        {"package_coordinate": {"surface": "npm", "name": "x"}}, force=True))
+    assert block["ran"] is False and block["attestation"] is None

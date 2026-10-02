@@ -966,11 +966,25 @@ type BehavioralData = {
   error?: string | null
   plan?: string
   exit_code?: number | null
+  grade_summary?: { start_reason?: string; start_reason_detail?: string; tools_called?: number }
+  attestation?: { jws: string; kid: string; context: string; observed_at: string; verify_url?: string } | null
   canary_exfil?: { via: string; host?: string }[]
   exercise?: ExerciseData | null
   findings?: { category: string; name: string; severity: string; remediation?: string }[]
 }
 const SANDBOX_SURFACES = new Set(['npm', 'pypi', 'docker'])
+/** Why a server did not start in the sandbox — none of these is a finding. */
+const START_REASONS: Record<string, string> = {
+  needs_credentials: 'The server needs credentials to start (an API key or token). The sandbox never supplies real ones, so its tools were not exercised.',
+  needs_arguments: 'The server needs a startup argument (a URL, a path, a flag) that the sandbox cannot guess, so its tools were not exercised.',
+  missing_binary: 'The server depends on a program the sandbox image does not have, so it could not start.',
+  install_failed: 'The package could not be installed in the sandbox, so its server was not started.',
+  resource_limit: 'The run exceeded the sandbox memory or time limit (common for packages that download a browser), so its server was not exercised.',
+  no_entrypoint: 'The package exposes no runnable entry point, so there was nothing to start.',
+  timeout: 'The server never completed the MCP handshake in the sandbox, so its tools were not exercised.',
+  crashed: 'The server exited during startup in the sandbox, so its tools were not exercised.',
+  unknown: 'The server did not start in the sandbox, so its tools were not exercised.',
+}
 
 function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string } }) {
   const mut = useMutation({ mutationFn: () => pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
@@ -1033,7 +1047,13 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
                 <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">
                   MCP server {ex.launch_ok ? `started${ex.server?.name ? ` (${ex.server.name}${ex.server.version ? ` ${ex.server.version}` : ''})` : ''} · ${exercised} of ${listed} tool${listed === 1 ? '' : 's'} exercised` : 'did not start'}
                 </div>
-                {!ex.launch_ok && <p className="text-[12.5px] text-text-muted">{ex.error || 'The server never completed the MCP handshake in the sandbox, so its tools were not exercised.'}</p>}
+                {!ex.launch_ok && (
+                  <p className="text-[12.5px] text-text-muted">
+                    {START_REASONS[b.grade_summary?.start_reason ?? ''] ?? ex.error ?? START_REASONS.unknown}
+                    {b.grade_summary?.start_reason_detail ? <span className="block mt-0.5 font-mono text-[11px] text-text-muted/80">{b.grade_summary.start_reason_detail}</span> : null}
+                    <span className="block mt-0.5">Not a finding: a server that cannot start here is reported as not exercised, never penalized.</span>
+                  </p>
+                )}
                 {ex.launch_ok && (ex.calls ?? []).length > 0 && (
                   <ul className="space-y-1">
                     {(ex.calls ?? []).map((c, i) => {
@@ -1088,6 +1108,14 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
               </div>
             )}
             {b.timed_out && <p className="text-[12px] text-warning">Note: the run hit its time limit — results may be partial.</p>}
+            {b.attestation?.jws && (
+              <p className="text-[12px] text-text-muted">
+                <span className="font-mono text-[10.5px] uppercase tracking-wide mr-2">Signed observation</span>
+                What you see above is signed (EdDSA, key <span className="font-mono">{b.attestation.kid}</span>) as a dated observation, separate from the score.
+                {' '}<a className="underline" href="/docs/verify-attestations#behavioral-observations">Verify it</a>
+                {' '}· <button type="button" className="underline" onClick={() => { void navigator.clipboard?.writeText(b.attestation!.jws) }}>copy JWS</button>
+              </p>
+            )}
           </div>
         )}
       </div>
