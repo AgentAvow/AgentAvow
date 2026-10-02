@@ -328,6 +328,10 @@ def _scan_block(
     # that only missed the bar on coverage/signals must NOT wear the same risk warning
     # as a target with real findings. Adoption is context here, never a verdict input.
     mode = "safe" if safe else ("risk" if risk else "limited")
+    # A retired package must not lead with "clean": the headline is what a model relays.
+    _deprecated = isinstance(data.get("deprecation"), str) and bool(data["deprecation"].strip())
+    if _deprecated and mode != "risk":
+        mode = "deprecated"
 
     # Reason phrase, reused in the headline and the Next step (limited mode only).
     _files = (data.get("metadata") or {}).get("files_scanned")
@@ -351,6 +355,11 @@ def _scan_block(
         head = f"⚠️ Review before you {verb}"
         why = f"{n} blocking finding{'' if n == 1 else 's'} (critical/high)."
         glyph = "⚠ REVIEW"
+    elif mode == "deprecated":
+        head = "⚠️ Deprecated — don't adopt for new work"
+        why = ("The maintainer retired this package, so it won't get security fixes. "
+               "The code itself showed no blocking issues.")
+        glyph = "⚠ DEPRECATED"
     else:
         head = "◍ Clean, limited coverage"
         why = f"No risks found; {reason}."
@@ -418,7 +427,7 @@ def _scan_block(
     # Install CTA (own line so the model relays it). Shown for anything without blocking
     # findings — safe gets the confident label, limited gets a "verify first" cue. Never
     # on a review result (real findings to weigh first).
-    if install_hint and mode != "risk":
+    if install_hint and mode not in ("risk", "deprecated"):
         if mode == "safe":
             lines.append(f"**Ready to install:** `{install_hint}`")
         else:  # limited — no risks found, but not fully verified
@@ -428,6 +437,9 @@ def _scan_block(
     # (Purely about our own verdict; it never tells the agent to auto-run other tools.)
     if mode == "safe":
         action = f"clears the bar, so it's safe to {verb}."
+    elif mode == "deprecated":
+        action = ("don't adopt it for new work. Pick a maintained alternative (the "
+                  "deprecation message may name one) and scan that before you connect it.")
     elif mode == "risk":
         n = crit + high
         action = (

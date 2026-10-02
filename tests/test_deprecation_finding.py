@@ -48,3 +48,6 @@ def test_mcp_output_names_the_deprecation():
                                  if p.default is inspect.Parameter.empty]) - 1)
     out = fn(*args)
     assert "Deprecated by its maintainer" in out and "Package no longer supported." in out
+    first = out.strip().splitlines()[0]
+    assert "Deprecated" in first and "Clean" not in first, first
+    assert "Install" not in out
