@@ -573,3 +573,11 @@ def test_release_assets_and_tokenizer_downloads_are_expected():
     assert r._classify_egress(["release-assets.githubusercontent.com",
                                "openaipublic.blob.core.windows.net"], set()) == []
     assert r._classify_egress(["raw.githubusercontent.com"], set()) == ["raw.githubusercontent.com"]
+
+
+
+def test_resolver_search_domain_artifacts_are_not_egress():
+    from src.scanner.behavioral import runner as r
+    assert r._classify_egress(["github.com.ec2.internal", "evil.net", "x.compute.internal"],
+                              set()) == ["evil.net"]
+    assert r._is_search_domain_artifact("api.tavily.com") is False

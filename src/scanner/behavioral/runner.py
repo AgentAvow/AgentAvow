@@ -368,13 +368,23 @@ def _vendor_label_matches(label: str, toks: set[str]) -> bool:
     return False
 
 
+# The sandbox host's resolver appends its search domain to non-FQDN lookups, so a lookup
+# of github.com can also appear as github.com.ec2.internal. Those are not destinations.
+_SEARCH_DOMAIN_SUFFIXES = (".ec2.internal", ".internal", ".local", ".localdomain",
+                           ".home.arpa", ".lan", ".compute.internal")
+
+
+def _is_search_domain_artifact(host: str) -> bool:
+    return (host or "").lower().rstrip(".").endswith(_SEARCH_DOMAIN_SUFFIXES)
+
+
 def _classify_egress(hosts: list[str], expected: set[str]) -> list[str]:
     """Hosts reached that are neither a package registry nor a declared/expected host."""
     allow = _REGISTRY_ALLOW | {h.lower() for h in expected}
     out: list[str] = []
     for h in hosts:
         hl = (h or "").strip().lower()
-        if not hl:
+        if not hl or _is_search_domain_artifact(hl):
             continue
         # allow exact + subdomain matches of an allowed host
         if any(hl == a or hl.endswith("." + a) for a in allow):
@@ -716,7 +726,8 @@ async def run_behavioral(
         return _fail(str(data["error"]))
     if data.get("exit_code") == _RESOURCE_LIMIT_EXIT:
         notes.append("killed_resource_limit")
-    hosts = [str(h) for h in (data.get("egress_hosts") or [])]
+    hosts = [str(h) for h in (data.get("egress_hosts") or [])
+             if not _is_search_domain_artifact(str(h))]
     allow = expected | _SYNTHETIC_HOSTS | (_IMAGE_ALLOW if mode == "image" else set())
     vendor = _vendor_hosts(coordinate, hosts)
     unexpected = [h for h in _classify_egress(hosts, allow) if h not in vendor]

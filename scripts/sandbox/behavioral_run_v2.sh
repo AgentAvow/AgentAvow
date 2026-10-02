@@ -113,6 +113,7 @@ HTTP_TXT="$(mktemp /tmp/${RUN_ID}.XXXX.http)"
 IMAGE_PULLED=false
 cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
+  [ -n "${NET:-}" ] && docker network rm "$NET" >/dev/null 2>&1 || true
   rm -f "$PCAP" "$LOGS" "$DNS_TXT" "$HTTP_TXT" /tmp/${RUN_ID}.exit >/dev/null 2>&1 || true
   if [ "$IMAGE_PULLED" = true ]; then docker rmi -f "$IMAGE" >/dev/null 2>&1 || true; fi
 }
@@ -158,12 +159,19 @@ if [ "$MODE" = "image" ]; then
   fi
 fi
 
-# 1. Start capturing DNS + TLS + plaintext HTTP on the HOST side of the docker bridge, BEFORE
-#    the target runs. gVisor uses a user-space netstack, so a capture inside the container's
-#    netns sees nothing — we capture where the packets cross the host kernel. On a dedicated
-#    single-container sandbox the bridge carries only this run's egress.
-BRIDGE="$(docker network inspect bridge -f '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null)"
-[ -z "$BRIDGE" ] && BRIDGE=docker0
+# 1. Start capturing DNS + TLS + plaintext HTTP on the HOST side of a docker bridge that is
+#    PRIVATE TO THIS RUN, before the target runs. gVisor uses a user-space netstack, so a
+#    capture inside the container's netns sees nothing — we capture where the packets cross
+#    the host kernel. A per-run network keeps concurrent runs' egress apart (two runs on the
+#    shared docker0 bridge saw each other's DNS; found 2026-10-02).
+NET="agv-${RUN_ID}"
+if docker network create --driver bridge "$NET" >/dev/null 2>&1; then
+  BRIDGE="br-$(docker network inspect -f '{{.Id}}' "$NET" | cut -c1-12)"
+else
+  NET=""
+  BRIDGE="$(docker network inspect bridge -f '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null)"
+  [ -z "$BRIDGE" ] && BRIDGE=docker0
+fi
 timeout "$TIMEOUT" tcpdump -l -nn -i "$BRIDGE" -w "$PCAP" \
   '(udp port 53) or (tcp port 443) or (tcp port 80)' >/dev/null 2>&1 &
 TCPDUMP_PID=$!
@@ -178,6 +186,7 @@ DOCKER_OPTS=(
   --cap-drop ALL --security-opt no-new-privileges
   --memory "${MEMORY_MB}m" --cpus 1 --pids-limit "$PIDS"
 )
+[ -n "$NET" ] && DOCKER_OPTS+=(--network "$NET")
 if [ "$MODE" = "image" ]; then
   # The image's own ENTRYPOINT/CMD — what a user would get from `docker run <image>`.
   docker run "${DOCKER_OPTS[@]}" "$IMAGE" >/dev/null 2>&1 \
