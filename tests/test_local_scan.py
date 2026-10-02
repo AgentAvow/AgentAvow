@@ -83,7 +83,9 @@ def test_output_serializers(tmp_path):
     result = scan_local(tmp_path)
     d = result_to_dict(result)
     assert set(d) >= {"trust_score", "tier", "counts", "findings"}
-    assert d["tier"] in ("Trusted", "Standard", "Caution", "Restricted", "Blocked")
+    assert d["tier"] in ("Verified", "Trusted", "Standard", "Minimal", "Restricted", "Blocked")
+    from src.trust_tiers import trust_word
+    assert d["tier"] == trust_word(d["trust_score"])
     # JSON round-trips
     json.dumps(d)
 

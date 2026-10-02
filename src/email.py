@@ -15,12 +15,13 @@ _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
 def _grade_and_color(score: int | None) -> tuple[str, str]:
-    """Letter grade + hex color for a 0-100 score, using the CANONICAL bands shared with
-    every other surface (src/scoring.py) — previously this had drifted to its own cutoffs,
-    so an email could show a different grade than the site it linked to."""
-    from src.scoring import grade_color, grade_from_score
-    g = grade_from_score(score)
-    return g, grade_color(g)
+    """Letter grade (canonical bands, src/scoring.py — kept for parity tests; the email
+    never renders it) + the hex colour of the score's trust TIER (src/trust_tiers.py),
+    so the number and power bar in a watch email are the same colour as the badge and
+    the score page it links to."""
+    from src.scoring import grade_from_score
+    from src.trust_tiers import trust_color
+    return grade_from_score(score), trust_color(score)
 
 
 def render_watch_notification(

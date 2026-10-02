@@ -857,7 +857,7 @@ def _finding_is_blocking(f: object) -> bool:
         return True
     # Dependency/supply-chain vulns do NOT hard-block: a CVE in a dependency (often
     # transitive, unreachable, or severity-inflated) shouldn't floor a reputable tool to
-    # Caution the way a first-party code RCE does. They flow through the separate,
+    # the Minimal tier the way a first-party code RCE does. They flow through the separate,
     # bounded, reachability-weighted _dependency_penalty (and a known-malicious dep still
     # short-circuits above / via _DEP_MAL_PENALTY). Only FIRST-PARTY shipped code blocks.
     if getattr(f, "category", "") in _DEP_CATEGORIES:
@@ -1991,12 +1991,12 @@ def _dedupe_findings(findings: list) -> list:
 _CODE_HM_DEDUCTION_CAP = 42
 
 # Per-critical deduction (uncapped, never file-ratio-scaled). At 22, one critical drops a
-# findings-baseline repo (68) into Caution (≤46 before highs), so a critical can never sit
-# in the Trusted band — the property the old ×15 + MCP exemption violated.
+# findings-baseline repo (68) into the Minimal tier (≤46 before highs), so a critical can
+# never sit in the Trusted band — the property the old ×15 + MCP exemption violated.
 _CRIT_DEDUCTION = 22
 
 # Hard ceiling when a BLOCKING (shipped or known-malicious) critical exists: the number
-# is floored to the top of the Caution band so the score, tier, and colour can never read
+# is floored inside the Minimal tier (31-50) so the score, tier, and colour can never read
 # "Trusted/verified" over a real open critical — no matter how many positives offset it.
 _CRITICAL_CEILING = 45
 

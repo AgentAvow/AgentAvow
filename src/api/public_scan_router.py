@@ -51,6 +51,7 @@ from src.signing import (
 from src.signing import canonicalize_jcs_strict as canonicalize
 from src.trust.aggregate_sources import components_to_contributions
 from src.trust.envelope_v2 import Contribution, EnvelopeError, build_envelope, sign_envelope
+from src.trust_tiers import TRUST_TIERS, recommended_limits, trust_tier_value  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -58,38 +59,14 @@ router = APIRouter(prefix="/public/scan", tags=["public-scan"])
 
 
 # ── Trust Tiers ─────────────────────────────────────────────────────────
-
-TRUST_TIERS = [
-    # (min_score, tier_name, requests_per_min, max_tokens, require_confirmation)
-    (96, "verified",    -1,   -1,   False),  # -1 = unlimited
-    (81, "trusted",     60,   8192, False),
-    (51, "standard",    30,   4096, False),
-    (31, "minimal",     15,   2048, True),
-    (11, "restricted",  5,    1024, True),
-    (0,  "blocked",     0,    0,    True),
-]
+# The table lives in src/trust_tiers.py (one source for every surface); TRUST_TIERS
+# is imported above and kept here in its historical (min_score, name, rpm, tokens,
+# confirm) shape for anything that still reads it from this module.
 
 
 def _compute_tier(score: int) -> dict:
     """Map a trust score (0-100) to a tier with recommended limits."""
-    for min_score, name, rpm, tokens, confirm in TRUST_TIERS:
-        if score >= min_score:
-            return {
-                "tier": name,
-                "recommended_limits": {
-                    "requests_per_minute": rpm if rpm >= 0 else None,
-                    "max_tokens_per_call": tokens if tokens >= 0 else None,
-                    "require_user_confirmation": confirm,
-                },
-            }
-    return {
-        "tier": "blocked",
-        "recommended_limits": {
-            "requests_per_minute": 0,
-            "max_tokens_per_call": 0,
-            "require_user_confirmation": True,
-        },
-    }
+    return {"tier": trust_tier_value(score), "recommended_limits": recommended_limits(score)}
 
 
 # ── Response Models ──────────────────────────────────────────────────────

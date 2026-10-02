@@ -43,6 +43,7 @@ from src.scanner.scan import (
     _select_scan_files,
     _should_skip_path,
 )
+from src.trust_tiers import trust_word
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
@@ -269,16 +270,8 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
 # --------------------------------------------------------------------------- #
 
 def _tier(score: int) -> str:
-    """Score → trust tier (matches the published bands in the check guide)."""
-    if score >= 80:
-        return "Trusted"
-    if score >= 60:
-        return "Standard"
-    if score >= 40:
-        return "Caution"
-    if score >= 20:
-        return "Restricted"
-    return "Blocked"
+    """Score → trust tier word (the six API tiers, src/trust_tiers.py)."""
+    return trust_word(score)
 
 
 def result_to_dict(result: ScanResult) -> dict:

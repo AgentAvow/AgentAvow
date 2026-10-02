@@ -118,7 +118,8 @@ async def test_embed_badge_json(client, db):
     assert data["entity_id"] == entity_id
     assert data["entity_name"] == "EmbedBadgeUser"
     assert data["trust_score"] == 0.85
-    # trust_tier is the 0-100 tier word (dual-mark); 85 → Trusted, green
+    # trust_tier is the 0-100 tier word (the six API tiers, src/trust_tiers.py);
+    # 85 → Trusted (81-95), green
     assert data["trust_tier"] == "Trusted"
     assert isinstance(data["is_verified"], bool)
     assert data["badge_color"] == "#22C55E"
@@ -130,10 +131,22 @@ async def test_embed_badge_json_trust_tiers(client, db):
     """JSON format returns correct tier labels for different score ranges."""
     _, entity_id = await _setup_user(client)
 
-    # Trusted tier (>= 80)
+    # Trusted tier (81-95)
     await _set_trust_score(db, entity_id, 0.90)
     resp = await client.get(f"/api/v1/badges/embed/{entity_id}?format=json")
     assert resp.json()["trust_tier"] == "Trusted"
+
+    # Verified tier (>= 96) — the top of the six API tiers, deeper green
+    await _set_trust_score(db, entity_id, 0.97)
+    resp = await client.get(f"/api/v1/badges/embed/{entity_id}?format=json")
+    assert resp.json()["trust_tier"] == "Verified"
+    assert resp.json()["badge_color"] == "#16A34A"
+
+    # Minimal tier (31-50) — amber
+    await _set_trust_score(db, entity_id, 0.45)
+    resp = await client.get(f"/api/v1/badges/embed/{entity_id}?format=json")
+    assert resp.json()["trust_tier"] == "Minimal"
+    assert resp.json()["badge_color"] == "#F59E0B"
 
 
 # --- Edge cases ---

@@ -29,6 +29,7 @@ from src.api.deps import get_current_entity, require_admin
 from src.api.rate_limit import rate_limit_reads
 from src.database import get_db
 from src.models import Entity
+from src.trust_tiers import TIER_FLOORS
 
 logger = logging.getLogger(__name__)
 
@@ -533,7 +534,9 @@ async def scan_catalog(
     ),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
-    grade: str | None = Query(None, pattern="^(certified|A|B|C)$"),
+    grade: str | None = Query(
+        None, pattern="^(certified|verified|trusted|standard|minimal|restricted|A|B|C)$",
+    ),
     category: str | None = Query(None, max_length=40),
     sort: str = Query("default", pattern="^(default|score-asc|score-desc|name|adoption)$"),
     limit: int = Query(50, ge=1, le=200),
@@ -611,8 +614,13 @@ async def scan_catalog(
     elif severity == "skipped":
         filtered = [r for r in filtered if _severity_bucket(r) == BUCKET_SKIPPED]
 
-    # Grade filter (curation): "certified" = A+ only; A/B/C = that band and above.
-    if grade:
+    # Grade filter (curation): "certified" = A+ only; a tier value (verified … minimal)
+    # = that tier's score floor and above (src/trust_tiers.py); A/B/C = the legacy
+    # letter band and above, kept for links already in the wild.
+    if grade in TIER_FLOORS:
+        _floor = TIER_FLOORS[grade]
+        filtered = [r for r in filtered if r.trust_score is not None and r.trust_score >= _floor]
+    elif grade:
         _min_ok = {
             "certified": {"A+"},
             "A": {"A+", "A"},

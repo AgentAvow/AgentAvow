@@ -6,10 +6,19 @@ and the legacy `/badges/embed`) imports width, colour, font, and the Certified
 gradient from here, so badges that share a README line up and match. The richer
 card / OG surfaces are separate objects and keep their system-ui type by design.
 
-The 0-100 trust colour mapping is byte-identical to the frontend `getTrustTier`
-(`web/src/components/trust/gradeSystem.ts`) — do not fork it.
+The 0-100 tier word and colour come from ``src.trust_tiers`` (the six API tiers:
+verified / trusted / standard / minimal / restricted / blocked), byte-identical to
+the frontend `getTrustTier` (`web/src/components/trust/gradeSystem.ts`) — do not
+fork either.
 """
 from __future__ import annotations
+
+from src.trust_tiers import trust_color, trust_word
+
+__all__ = [
+    "BADGE_FONT", "BADGE_HEIGHT", "CERT_GRADIENT", "cert_gradient_def",
+    "trust_color", "trust_word", "verdana_width",
+]
 
 # The earned-tier gradient (the on-site CertifiedMark teal→magenta). Single source
 # for every certified badge/card/OG surface.
@@ -20,43 +29,6 @@ CERT_GRADIENT = ("#2dd4bf", "#e879f9")
 BADGE_FONT = "Verdana,Geneva,DejaVu Sans,sans-serif"
 
 BADGE_HEIGHT = 20
-
-
-def trust_color(score_0_100: int, light: bool = False) -> str:
-    """0-100 Trust mark colour — green→red at 80/60/40/20 (locked mark spec).
-
-    ``light`` returns the darkened set for light grounds. Values are byte-identical
-    to ``gradeSystem.ts`` (dark = ``color``, light = ``colorText``)."""
-    s = int(score_0_100)
-    if s >= 80:
-        return "#15803D" if light else "#22C55E"  # Trusted
-    if s >= 60:
-        return "#3F7D1F" if light else "#5BBF3A"   # Standard
-    if s >= 40:
-        return "#B45309" if light else "#F59E0B"   # Caution
-    if s >= 20:
-        return "#C2410C" if light else "#F97316"   # Restricted
-    return "#B91C1C" if light else "#EF4444"       # Blocked
-
-
-def trust_word(score_0_100: int) -> str:
-    """0-100 tier word (Trusted / Standard / Caution / Restricted / Blocked).
-
-    NOTE: distinct from the rate-limit ``TRUST_TIERS`` in public_scan_router
-    (verified/trusted/standard/… at 96/81/51/31/11), which is what the public
-    ``trust_tier`` API field exposes. These two vocabularies overlap in words but
-    not thresholds — this one is the visual mark tier; that one is the posture tier.
-    """
-    s = int(score_0_100)
-    if s >= 80:
-        return "Trusted"
-    if s >= 60:
-        return "Standard"
-    if s >= 40:
-        return "Caution"
-    if s >= 20:
-        return "Restricted"
-    return "Blocked"
 
 
 # ---------------------------------------------------------------------------

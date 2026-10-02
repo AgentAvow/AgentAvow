@@ -8,7 +8,7 @@ def _mcp_data(*, score=92, categories=None, lethal=False, blast="low",
               has_readme=True, has_license=True, certified=False):
     return {
         "trust_score": score,
-        "trust_tier": "Trusted",
+        "trust_tier": "trusted",  # the API value (lowercase), as /public/scan emits it
         "grade": "A",
         "findings": {"categories": categories or {}, "items": []},
         "surface_detail": {"surface": "mcp", "lethal_trifecta": lethal,

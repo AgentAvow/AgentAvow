@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from src.api.badge_style import trust_color
+from src.trust_tiers import trust_color, trust_word
 
 # ── palette ─────────────────────────────────────────────────────────────────
 # One self-contained (dark) card — it carries its own background, so it reads on
@@ -20,11 +20,6 @@ _DARK = {
     "text": "#eef2fb", "muted": "#93a1c0", "faint": "#63728f",
     "ndl": "#2dd4bf", "g1": "#2dd4bf", "g2": "#e879f9",
 }
-
-
-def _trust_word(score: int) -> str:
-    return ("Trusted" if score >= 80 else "Standard" if score >= 60
-            else "Caution" if score >= 40 else "Restricted" if score >= 20 else "Blocked")
 
 
 def _adopt_word(pct: int) -> str:
@@ -55,7 +50,7 @@ def render_card_svg(
     has_score = score is not None
     s = int(score) if has_score else 0
     tcol = trust_color(s) if has_score else c["faint"]
-    tword = _trust_word(s) if has_score else "—"
+    tword = trust_word(s) if has_score else "—"
 
     # ── trust segmented bar (left) ───────────────────────────────────────────
     total, seg_w, seg_h, gap = 10, 12, 5, 2.5  # spec: 12×5px, gap 2.5

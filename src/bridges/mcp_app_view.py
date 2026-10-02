@@ -17,10 +17,15 @@ to bust host caches on change.
 Artwork MATCHES the live site's locked marks (web/src/rebrand/components/TrustMark.tsx):
 vertical 10-segment trust bar (tier-tinted, or a teal->magenta gradient when Certified),
 the adoption VU needle, per-category subscores, top findings, and an install CTA for
-safe/certified packages. Plain string (not an f-string) so JS/SVG braces are literal.
+safe/certified packages. Plain string (not an f-string) so JS/SVG braces are literal; the
+one substitution is the six-tier table (``__TRUST_TIERS_JS__``), generated from
+``src.trust_tiers`` so the card's tier words, floors and colours match every other surface.
 """
+from __future__ import annotations
 
-TRUST_CARD_HTML = r"""<!DOCTYPE html>
+from src.trust_tiers import tiers_js_table
+
+_TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -116,10 +121,10 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
 
   function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); }
   function compact(n){ n=+n||0; var u=[[1e9,"B"],[1e6,"M"],[1e3,"k"]]; for(var i=0;i<u.length;i++){ if(n>=u[i][0]) return (n/u[i][0]).toFixed(1).replace(/\.0$/,"")+u[i][1]; } return ""+n; }
-  function tier(s){ var T=[["Trusted",80,"#22C55E","Auto-approve within budget"],["Standard",60,"#5BBF3A","Standard rate + token limits"],["Caution",40,"#F59E0B","Confirm on sensitive calls"],["Restricted",20,"#F97316","Gated · manual approval"],["Blocked",0,"#EF4444","Do not connect"]]; for(var i=0;i<T.length;i++){ if(s>=T[i][1]) return {name:T[i][0],color:T[i][2],posture:T[i][3]}; } return {name:"Blocked",color:"#EF4444",posture:"Do not connect"}; }
+  function tier(s){ var T=__TRUST_TIERS_JS__; for(var i=0;i<T.length;i++){ if(s>=T[i][1]) return {name:T[i][0],color:T[i][2],posture:T[i][3]}; } var b=T[T.length-1]; return {name:b[0],color:b[2],posture:b[3]}; }
   function sevColor(sev){ return {critical:"#EF4444",high:"#F97316",medium:"#F59E0B",low:"#94A3B8"}[sev]||"#94A3B8"; }
   function axisLabel(k){ return {secret_hygiene:"Secrets",code_safety:"Code safety",data_handling:"Data handling",filesystem_access:"Filesystem",dependency_health:"Dependencies"}[k] || k.replace(/_/g," ").replace(/\b\w/g,function(c){return c.toUpperCase();}); }
-  function axisColor(v){ return v>=80?"#22C55E":v>=60?"#5BBF3A":v>=40?"#F59E0B":v>=20?"#F97316":"#EF4444"; }
+  function axisColor(v){ return tier(v).color; }
   function P(cx,cy,r,d){ var a=d*Math.PI/180; return [cx+r*Math.cos(a), cy+r*Math.sin(a)]; }
   function ARC(cx,cy,r,a0,a1){ var s=P(cx,cy,r,a0),e=P(cx,cy,r,a1),lg=(a1-a0>180)?1:0; return "M"+s[0].toFixed(1)+" "+s[1].toFixed(1)+" A"+r+" "+r+" 0 "+lg+" 1 "+e[0].toFixed(1)+" "+e[1].toFixed(1); }
   function adoptionPct(c){ c=c||0; return c>0?Math.min(100,Math.round(Math.log10(c+1)/9*100)):0; }
@@ -274,3 +279,5 @@ TRUST_CARD_HTML = r"""<!DOCTYPE html>
 </body>
 </html>
 """
+
+TRUST_CARD_HTML = _TRUST_CARD_TEMPLATE.replace("__TRUST_TIERS_JS__", tiers_js_table())
