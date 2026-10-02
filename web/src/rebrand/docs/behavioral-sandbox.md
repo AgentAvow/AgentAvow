@@ -1,8 +1,8 @@
 # Behavioral sandbox
 
 The static scan reads a tool. The behavioral sandbox **runs** it and reports what it actually did.
-The two are kept apart on purpose: the signed score is recomputable from the code alone, and the
-sandbox result is an observation attached beside it. A sandbox run never changes a grade.
+The run is signed as its own dated observation, and that signed observation is also an input to the
+trust score, by fixed rules anyone can recompute (see [How the sandbox moves the score](#how-the-sandbox-moves-the-score)).
 
 ## What runs
 
@@ -68,6 +68,25 @@ first authenticated call.
 Every completed run carries a `BehavioralObservation` attestation: a JWS over the hosts, writes,
 tool calls and findings you see, with the sandbox plan and the date, signed with the same key
 as the score. See [Verify an attestation](./verify-attestations.md#behavioral-observations).
+
+## How the sandbox moves the score
+
+Only a **signed, completed** run counts. Applied to the score from the static scan, in this order:
+
+| What the sandbox observed | Effect on the trust score |
+|---|---|
+| A canary credential left the sandbox, or any critical behavioral finding | Capped at 45, the same as a shipped critical in code |
+| Any high behavioral finding (undeclared egress, a read-only tool that wrote files) | −10 and capped at 70, so the verdict is always "needs review" |
+| Medium behavioral findings only | −5 |
+| Low findings (a crash) | No change |
+| A clean, full exercise: the server started, tools were called, nothing was found | +3, for evidence nobody else has |
+| Still running, not run, server did not start, install-only, or unsigned | No change |
+
+The score attestation records the evidence as `scan.behavioralEvidence`: the SHA-256 of the
+observation's JWS, the static score, the findings, and the resulting delta. With the observation in
+hand, anyone recomputes the same number. Because a sandbox result is cached for a day and the first
+scan of a package returns before the run finishes, a package's score can move once, shortly after
+it is first scanned.
 
 ## What the sandbox cannot prove
 

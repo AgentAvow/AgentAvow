@@ -59,7 +59,7 @@ The finding lowers the score like any medium finding. It is not a blocker and do
 
 ## The behavioral sandbox
 
-Static analysis reads a tool. For packages and MCP servers we also **run** it: a fresh gVisor container installs it, starts an MCP server and calls every tool with synthetic arguments, and plants canary credentials in the environment variables it reads. The result (hosts contacted, files written, tool calls, findings) is signed as a separate **BehavioralObservation** with the same key as the score, and shown beside the score on the result page. For how a sandbox run relates to the trust score, what it observes, and what a clean run does and does not prove, see [Behavioral sandbox](./behavioral-sandbox.md).
+Static analysis reads a tool. For packages and MCP servers we also **run** it: a fresh gVisor container installs it, starts an MCP server and calls every tool with synthetic arguments, and plants canary credentials in the environment variables it reads. The result (hosts contacted, files written, tool calls, findings) is signed as a separate **BehavioralObservation** with the same key as the score, and shown beside the score on the result page. The signed observation is also an input to the trust score by fixed rules: a leaked canary credential or critical behavioral finding caps the score at 45, a high finding costs 10 and caps it at 70, and a clean full exercise adds 3. The attestation records the evidence so the number stays recomputable. Details, and what a clean run does and does not prove, are in [Behavioral sandbox](./behavioral-sandbox.md#how-the-sandbox-moves-the-score).
 
 ## The surfaces we score
 

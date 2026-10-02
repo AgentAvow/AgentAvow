@@ -986,7 +986,8 @@ const START_REASONS: Record<string, string> = {
   unknown: 'The server did not start in the sandbox, so its tools were not exercised.',
 }
 
-function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string } }) {
+type ScoreEffect = { applied?: boolean; static_score?: number; score?: number; delta?: number; reason?: string }
+function BehavioralPanel({ owner, repo, surface, auto, pkg, effect }: { owner: string; repo: string; surface?: string; auto?: BehavioralData | null; pkg?: { surface: string; name: string }; effect?: ScoreEffect | null }) {
   const mut = useMutation({ mutationFn: () => pkg ? fetchPackageBehavioral(pkg.surface, pkg.name) : fetchBehavioralScan(owner, repo) })
   // While the background run is pending, poll the (cached, non-forcing) scan so the panel
   // fills in by itself. ~8 s interval, gives up after 5 minutes.
@@ -1037,8 +1038,8 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
           tools is called with synthetic arguments, so a tool that claims to be read-only but
           writes, or that leaks a credential, is caught in the act. Nothing real is given to it:
           credentials are canaries, and the sandbox is destroyed after the run. Any egress beyond
-          the registry and the tool&apos;s declared hosts is flagged. This is an observation, kept
-          separate from the signed score — it never changes the grade.
+          the registry and the tool&apos;s declared hosts is flagged. The signed observation also
+          feeds the trust score by fixed, recomputable rules — a caught credential leak caps it at 45.
         </p>
 
         <button
@@ -1068,6 +1069,12 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg }: { owner: string; r
             <><span className="inline-block w-2 h-2 rounded-full bg-text-muted" /><span className="text-text-muted">No sandbox result yet</span></>
           )}
         </div>
+        {effect?.applied && typeof effect.delta === 'number' && (
+          <p className="mt-2 text-[12.5px] text-text-muted">
+            <span className="font-mono text-[10.5px] uppercase tracking-wide mr-2">Score</span>
+            This observation {effect.delta > 0 ? 'added' : 'took'} {Math.abs(effect.delta)} point{Math.abs(effect.delta) === 1 ? '' : 's'} {effect.delta > 0 ? 'to' : 'from'} the trust score ({effect.static_score} → {effect.score}){effect.reason ? ` — ${effect.reason}` : ''}. <a className="underline" href="/docs/behavioral-sandbox#how-the-sandbox-moves-the-score">How</a>
+          </p>
+        )}
         {b && !b.ran && !pending && (
           <p className="mt-3 text-[13px] text-text-muted">Behavioral scan didn&apos;t run: {b.reason || b.error || 'no package to exercise in the sandbox'}.</p>
         )}
@@ -1612,7 +1619,7 @@ function PackageResult({ surface, name }: { surface: string; name: string }) {
       </Reveal>
 
       {/* Behavioral deep scan — auto-runs for npm/PyPI packages */}
-      <BehavioralPanel owner={surface} repo={name} surface={surface} pkg={{ surface, name }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} />
+      <BehavioralPanel owner={surface} repo={name} surface={surface} pkg={{ surface, name }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
 
       {/* findings detail */}
       {f?.items && f.items.length > 0 && (
@@ -1878,7 +1885,7 @@ function Result({ owner, repo, privateResult }: {
       <DeclaredScopePanel scope={(scan as { declared_scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string } }).declared_scope} />
 
       {/* Behavioral deep scan — auto-runs for npm/PyPI; re-run on demand */}
-      {!isPrivate && <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} />}
+      {!isPrivate && <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />}
 
       {/* Adoption — the real 5-axis metric, distinct from safety (public repos only) */}
       {!isPrivate && <AdoptionPanel owner={owner} repo={repo} />}
