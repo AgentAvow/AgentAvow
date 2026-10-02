@@ -1,0 +1,534 @@
+{
+  "suite": "atd-provenance-signing-v0",
+  "spec": "agentnameservice/agent-trust-discovery#27 at cbddb41 (provenance signing extension, compact JWS), plus the pending review amendments: iss in the signed payload, keys resolved from iss and cached by (iss, kid), binding against the stored observation values, pinned evaluation time and max-age",
+  "status": "proposed; AgentAvow's half of the two-signer conformance corpus the spec requires before the shape locks. Signed with a TEST key, not the production key",
+  "test_key_notice": "Every key in this file is a test key generated for this corpus. did:web:agentgraph.co does not publish them; the `issuers` map below stands in for what resolving iss would return. The production AgentAvow key and its kid (agentgraph-security-v1) are not used here.",
+  "derivation": "jws = compact JWS (RFC 7515), header {alg, kid}, payload embedded as plain JSON (no canonicalisation), signature over ASCII(BASE64URL(header) || \".\" || BASE64URL(payload)). kid = RFC 7638 thumbprint: BASE64URL(SHA-256('{\"crv\":\"Ed25519\",\"kty\":\"OKP\",\"x\":\"<x>\"}')). iat/exp are seconds since the epoch.",
+  "kid_computation": {
+    "input": "{\"crv\":\"Ed25519\",\"kty\":\"OKP\",\"x\":\"eRVJXexMnCeI2v6jAiOh2AhBHnhDi_Cyb-I0BjzgeRA\"}",
+    "sha256_base64url": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0"
+  },
+  "alg_allowlist": [
+    "EdDSA"
+  ],
+  "checks": {
+    "iss_bound": "payload.iss is a string, equals observation.provenance.aimId, and the vendor the issuer is registered under equals the vendor segment of observation.signal. Pending amendment to §3 and §1.",
+    "kid_present": "header.kid is a non-empty string and equals observation.provenance.signed.kid (step 2).",
+    "key_resolves": "issuers[payload.iss].jwks has a key with kid = header.kid. Resolution is by (iss, kid); the envelope's jwks URL is not consulted (pending amendment to step 3). null when kid_present is false.",
+    "kid_is_thumbprint": "header.kid equals the RFC 7638 thumbprint of the resolved key (§2). null when no key resolves.",
+    "alg_allowed": "header.alg is in alg_allowlist (step 4).",
+    "signature_valid": "Ed25519 verifies over the signing input under the resolved key. null when alg_allowed is false or no key resolves; a verifier does not run a signature check it has already refused.",
+    "binding": "payload.dimension and payload.score equal observation.stored by scalar equality; payload.riskCodes equals observation.stored.riskCodes by set-equality (order-insensitive, duplicates ignored). Compared against the stored observation, never the evaluated SignalScore (§1 as amended).",
+    "subject_bound": "payload.sub equals observation.subject and payload.subjectClass equals observation.subjectClass (§3).",
+    "fresh": "with exp: evaluation_time < exp. Without exp: evaluation_time - iat <= max_age_seconds. Both inputs are pinned in the vector (§3, step 7).",
+    "accept": "every other check is true. null is not true."
+  },
+  "not_evaluated_rule": "A check reported as null was not run because a check it depends on failed. It is never reported as passed. Each negative fails exactly one check; the rest are true or null.",
+  "issuers": {
+    "did:web:agentgraph.co": {
+      "vendor": "agentgraph",
+      "resolution": "what resolving did:web:agentgraph.co returns for this corpus (did:web DID document verificationMethod or https://agentgraph.co/.well-known/jwks.json); pinned so nothing is fetched. TEST keys.",
+      "jwks": {
+        "keys": [
+          {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "eRVJXexMnCeI2v6jAiOh2AhBHnhDi_Cyb-I0BjzgeRA",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "use": "sig",
+            "alg": "EdDSA"
+          },
+          {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "TRSno96mjQ57MIF3Ktxs4wMZY-SaIjyGClAnaD1Hk50",
+            "kid": "agentgraph-test-legacy-v1",
+            "use": "sig",
+            "alg": "EdDSA"
+          }
+        ]
+      }
+    }
+  },
+  "reference": {
+    "header": {
+      "alg": "EdDSA",
+      "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0"
+    },
+    "payload": {
+      "iss": "did:web:agentgraph.co",
+      "sub": "github:example/example-mcp-server",
+      "subjectClass": "tool",
+      "iat": 1790812800,
+      "exp": 1790899200,
+      "dimension": "safety",
+      "score": 62,
+      "riskCodes": [
+        "SAFETY_UNSAFE_EXEC",
+        "SAFETY_VULNERABLE_DEPENDENCY"
+      ]
+    },
+    "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhWZ1dUV0w2bDRDLWYyclRlRVlrT3NQeWkxMUpiVHdxTkFRVXE3WnhnbDAifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.X4eV7pvpPejQcAdoLykLxME3vShNEQls5yxzFch9QC9Tfqc_sn821ovcupbFNKlT69wkDIIHYDClGQxnlN77Bw"
+  },
+  "vectors": [
+    {
+      "name": "valid",
+      "fails": null,
+      "note": "The positive case. The payload names its issuer, subject, class, time and scored values; the header kid is the RFC 7638 thumbprint of a key the issuer publishes; the container holds the same score and the same risk codes in a different order; the pinned evaluation time is inside [iat, exp). Every check passes. Accept.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhWZ1dUV0w2bDRDLWYyclRlRVlrT3NQeWkxMUpiVHdxTkFRVXE3WnhnbDAifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.X4eV7pvpPejQcAdoLykLxME3vShNEQls5yxzFch9QC9Tfqc_sn821ovcupbFNKlT69wkDIIHYDClGQxnlN77Bw",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400,
+        "evaluated": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC",
+            "SAFETY_AGENTGRAPH_SCORE_LOW"
+          ]
+        }
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": true,
+        "alg_allowed": true,
+        "signature_valid": true,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": true,
+        "accept": true
+      }
+    },
+    {
+      "name": "score-mismatch",
+      "fails": "binding",
+      "note": "The container score was raised after signing (62 to 91). The signature is intact because the signed payload still says 62; the drift is between payload and container. Spec §1: a verification failure, not a warning. Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 91,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhWZ1dUV0w2bDRDLWYyclRlRVlrT3NQeWkxMUpiVHdxTkFRVXE3WnhnbDAifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.X4eV7pvpPejQcAdoLykLxME3vShNEQls5yxzFch9QC9Tfqc_sn821ovcupbFNKlT69wkDIIHYDClGQxnlN77Bw",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": true,
+        "alg_allowed": true,
+        "signature_valid": true,
+        "binding": false,
+        "subject_bound": true,
+        "fresh": true,
+        "accept": false
+      }
+    },
+    {
+      "name": "wrong-sub",
+      "fails": "subject_bound",
+      "note": "A valid signed verdict about one tool presented on another tool's observation. Spec §3: sub MUST match the observation subject. Reject.",
+      "observation": {
+        "subject": "github:example/other-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhWZ1dUV0w2bDRDLWYyclRlRVlrT3NQeWkxMUpiVHdxTkFRVXE3WnhnbDAifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.X4eV7pvpPejQcAdoLykLxME3vShNEQls5yxzFch9QC9Tfqc_sn821ovcupbFNKlT69wkDIIHYDClGQxnlN77Bw",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": true,
+        "alg_allowed": true,
+        "signature_valid": true,
+        "binding": true,
+        "subject_bound": false,
+        "fresh": true,
+        "accept": false
+      }
+    },
+    {
+      "name": "wrong-iss",
+      "fails": "iss_bound",
+      "note": "Re-attribution. The payload is genuinely signed by did:web:agentgraph.co and says so in its signed iss, but the observation carries it under a different provider (aimId and the signal's vendor segment both name trustmodel). The key resolves from the signed iss and the signature verifies; the issuer check fails. Pending amendment (PR #27 review): iss MUST be in the payload and MUST equal the observation's expected issuer. Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "trustmodel.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:trustmodel.example",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhWZ1dUV0w2bDRDLWYyclRlRVlrT3NQeWkxMUpiVHdxTkFRVXE3WnhnbDAifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.X4eV7pvpPejQcAdoLykLxME3vShNEQls5yxzFch9QC9Tfqc_sn821ovcupbFNKlT69wkDIIHYDClGQxnlN77Bw",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": false,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": true,
+        "alg_allowed": true,
+        "signature_valid": true,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": true,
+        "accept": false
+      }
+    },
+    {
+      "name": "alg-none",
+      "fails": "alg_allowed",
+      "note": "Protected header alg is \"none\" and the signature segment is empty. The explicit allowlist (EdDSA only for v1) rejects it before any signature check; signature_valid is therefore not evaluated, not passed. Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJub25lIiwia2lkIjoiaFZnV1RXTDZsNEMtZjJyVGVFWWtPc1B5aTExSmJUd3FOQVFVcTdaeGdsMCJ9.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": true,
+        "alg_allowed": false,
+        "signature_valid": null,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": true,
+        "accept": false
+      }
+    },
+    {
+      "name": "alg-off-allowlist",
+      "fails": "alg_allowed",
+      "note": "Algorithm confusion. Header alg is HS256 and the signature is an HMAC-SHA256 keyed with the issuer's own public key bytes, which is what a verifier that dispatches on the header's alg would compute and accept. The allowlist rejects any alg outside it, not only \"none\". Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJIUzI1NiIsImtpZCI6ImhWZ1dUV0w2bDRDLWYyclRlRVlrT3NQeWkxMUpiVHdxTkFRVXE3WnhnbDAifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.8YiDqfktxBVh317GXfGy-scACgDpFzYpT7FTaej7hYg",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": true,
+        "alg_allowed": false,
+        "signature_valid": null,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": true,
+        "accept": false
+      }
+    },
+    {
+      "name": "missing-kid",
+      "fails": "kid_present",
+      "note": "No kid in the protected header and none in the envelope. The bytes are a genuine Ed25519 signature by the issuer's key, so the only thing wrong is that the verifier has no key identifier to resolve. Spec §2 and step 2: kid MUST be present. Nothing that needs a key is evaluated. Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.fBRwyPraE01LZYTza1uUWETqbmXOqFpFhrUugHw0wOv1XIMwlFgIId-tfFyzDZoL2XQkAId1InA2RxTrEUIQDQ",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": false,
+        "key_resolves": null,
+        "kid_is_thumbprint": null,
+        "alg_allowed": true,
+        "signature_valid": null,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": true,
+        "accept": false
+      }
+    },
+    {
+      "name": "kid-not-thumbprint",
+      "fails": "kid_is_thumbprint",
+      "note": "The issuer publishes this key under a stable name (agentgraph-test-legacy-v1) rather than its thumbprint, and the JWS is correctly signed by it. The key resolves and the signature verifies; the kid rule (§2, RFC 7638 thumbprint or otherwise strictly key-derived) fails. Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtdGVzdC1sZWdhY3ktdjEifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.WuS04fg1Lf_KmK3SkU5Oli4oDZS2ctRrbOIpThTl84iEOeDJorjQcxJmTHRtf7wM6PyEVdOPFdSUQYU9NcnPBw",
+            "kid": "agentgraph-test-legacy-v1",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": false,
+        "alg_allowed": true,
+        "signature_valid": true,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": true,
+        "accept": false
+      }
+    },
+    {
+      "name": "past-exp",
+      "fails": "fresh",
+      "note": "Same valid credential, evaluated one hour after its exp. The evaluation time is pinned in the vector so the verdict is a property of the corpus. Spec §3: past exp is treated as unsigned. Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhWZ1dUV0w2bDRDLWYyclRlRVlrT3NQeWkxMUpiVHdxTkFRVXE3WnhnbDAifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.X4eV7pvpPejQcAdoLykLxME3vShNEQls5yxzFch9QC9Tfqc_sn821ovcupbFNKlT69wkDIIHYDClGQxnlN77Bw",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-02T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": true,
+        "alg_allowed": true,
+        "signature_valid": true,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": false,
+        "accept": false
+      }
+    },
+    {
+      "name": "stale-iat",
+      "fails": "fresh",
+      "note": "The payload carries iat but no exp (the spec allows this: exp is SHOULD), and the relying party's max-age is pinned in the vector at 86400 s. Evaluated one second past iat + max-age. Spec §3: a payload without exp MUST be bounded by max-age against iat. Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImhWZ1dUV0w2bDRDLWYyclRlRVlrT3NQeWkxMUpiVHdxTkFRVXE3WnhnbDAifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJkaW1lbnNpb24iOiJzYWZldHkiLCJzY29yZSI6NjIsInJpc2tDb2RlcyI6WyJTQUZFVFlfVU5TQUZFX0VYRUMiLCJTQUZFVFlfVlVMTkVSQUJMRV9ERVBFTkRFTkNZIl19.3VWzIga5Zr-Jr2mBz5mWPOMpEN_-f1XSk7ZwYTs2Tbp4GDwgxT1tgL68k3dfJ-mzjthR1Xv7kvZ8QNI987bzAg",
+            "kid": "hVgWTWL6l4C-f2rTeEYkOsPyi11JbTwqNAQUq7Zxgl0",
+            "jwks": "https://agentgraph.co/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-02T00:00:01Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": true,
+        "kid_is_thumbprint": true,
+        "alg_allowed": true,
+        "signature_valid": true,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": false,
+        "accept": false
+      }
+    },
+    {
+      "name": "unpublished-key",
+      "fails": "key_resolves",
+      "note": "The forgery the iss amendment closes. The payload says iss did:web:agentgraph.co, the header kid is the correct thumbprint of the signing key, and the envelope points at a JWKS that serves that key. But the key is the attacker's: the issuer does not publish it. A verifier that resolves keys from the envelope's jwks URL accepts this; one that resolves from iss finds no such kid. Reject.",
+      "observation": {
+        "subject": "github:example/example-mcp-server",
+        "subjectClass": "tool",
+        "signal": "agentgraph.safety.score",
+        "stored": {
+          "dimension": "safety",
+          "score": 62,
+          "riskCodes": [
+            "SAFETY_VULNERABLE_DEPENDENCY",
+            "SAFETY_UNSAFE_EXEC"
+          ]
+        },
+        "provenance": {
+          "aimId": "did:web:agentgraph.co",
+          "evidenceUrl": "https://agentavow.com/api/v1/public/scan/github/example/example-mcp-server",
+          "signed": {
+            "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImlKS0ctZ1FLZWo4bjdqT1R3bF9ySzhHUWd1SEdWN3VhTGxlR0stWVNnVjgifQ.eyJpc3MiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJzdWIiOiJnaXRodWI6ZXhhbXBsZS9leGFtcGxlLW1jcC1zZXJ2ZXIiLCJzdWJqZWN0Q2xhc3MiOiJ0b29sIiwiaWF0IjoxNzkwODEyODAwLCJleHAiOjE3OTA4OTkyMDAsImRpbWVuc2lvbiI6InNhZmV0eSIsInNjb3JlIjo2Miwicmlza0NvZGVzIjpbIlNBRkVUWV9VTlNBRkVfRVhFQyIsIlNBRkVUWV9WVUxORVJBQkxFX0RFUEVOREVOQ1kiXX0.7WobEtyDqOcJgnnw8Zl6aHQvzCGB6sKZe9fXTlaniaw_rZhl1p09HkatZCHiq2EGRUBzYvf-i_PZM2hDIm_FAw",
+            "kid": "iJKG-gQKej8n7jOTwl_rK8GQguHGV7uaLleGK-YSgV8",
+            "jwks": "https://attacker.example/.well-known/jwks.json"
+          }
+        },
+        "evaluation_time": "2026-10-01T01:00:00Z",
+        "max_age_seconds": 86400
+      },
+      "expect": {
+        "iss_bound": true,
+        "kid_present": true,
+        "key_resolves": false,
+        "kid_is_thumbprint": null,
+        "alg_allowed": true,
+        "signature_valid": null,
+        "binding": true,
+        "subject_bound": true,
+        "fresh": true,
+        "accept": false
+      }
+    }
+  ]
+}
