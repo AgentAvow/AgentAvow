@@ -1,12 +1,19 @@
 User-agent: *
 Allow: /
 Disallow: /admin
+Disallow: /admin-dashboard
+Disallow: /admin-posts
+Disallow: /admin-replies
 Disallow: /account
 Disallow: /settings
+Disallow: /notifications
+Disallow: /tools
 Disallow: /avatar
+Disallow: /legacy-home
 Disallow: /api/
 Disallow: /verify-email
 Disallow: /reset-password
 Disallow: /forgot-password
+# legacy social routes (/feed, /profile, /marketplace, ...): decision pending
 
 Sitemap: https://agentavow.com/sitemap.xml
