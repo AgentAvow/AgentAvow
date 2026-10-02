@@ -16,7 +16,9 @@ Flow:
 Runner versions. v1 (``scripts/sandbox/behavioral_run.sh``, LIVE on the sandbox box) takes
 ``<image> '<cmd>' [timeout]``. v2 (``behavioral_run_v2.sh``) adds ``--mode exec|mcp|image``,
 ``--files-b64`` (the exerciser sources shipped per run — the sandbox host never needs files
-from us) and ``--canary``. v2 is selected ONLY by the ``scanner_behavioral_sandbox_runner_v2``
+from us), ``--canary``, and ``--memory-mb`` / ``--pids`` (container caps from
+``scanner_behavioral_memory_mb`` / ``scanner_behavioral_pids``). v2 is selected ONLY by the
+``scanner_behavioral_sandbox_runner_v2``
 setting; while it is empty the v1 script is called with exactly the old command line and
 MCP/docker plans degrade (mcp → the plain exec plan, docker → not run).
 
@@ -35,6 +37,7 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.scanner.behavioral.env_reads import MAX_ENV_NAMES, env_names_from_text
 from src.scanner.behavioral.transcript import CANARY_PREFIX, ExerciseTranscript, parse_transcript
 from src.scanner.scan import Finding
 
@@ -65,16 +68,43 @@ _PIP_CMD = (
     + "pip install --no-input --user {name} && python -c 'import {import_name}'"
 )
 # MCP plans: install, then the shipped launcher discovers the package's bin(s) and runs
-# the shipped exerciser against up to 3 candidates (first that initializes wins).
+# the shipped exerciser against the candidates (first that initializes wins; at most 4
+# launches). The launcher gets the canary value as ``--canary-value V`` BEFORE its ``--``
+# so it can retry a key-gated server with the credential names / flags the server's own
+# error names (see mcp_launch.sh) — the exerciser still receives the same value after
+# ``--``; the two are always identical.
 _NPM_MCP_CMD = (
     _SANDBOX_ENV
     + "npm install --no-audit --no-fund {name} && "
-    "sh /work/mcp_launch.sh npm {dist} -- node /work/mcp_exercise.js {exerciser_args}"
+    "sh /work/mcp_launch.sh npm {dist} --canary-value {canary} -- "
+    "node /work/mcp_exercise.js {exerciser_args}"
+)
+# python:3.12-alpine has no git; mcp-server-git (GitPython) cannot even initialize
+# without the binary. The root filesystem is READ-ONLY, so a plain ``apk add git`` fails
+# (EROFS on /usr) — instead apk installs git + its libraries into an alternate root under
+# the writable /work (``-p``, ``--initdb``, the image's own keys + repositories copied in,
+# ``--no-scripts`` so apk never chroots) and a tiny wrapper on PATH points git at those
+# libraries. Every step is ``|| true``: if the mirror or apk misbehaves the run proceeds
+# exactly as before and the launch is classified ``missing_binary`` honestly. Costs ~5 s
+# and egress to dl-cdn.alpinelinux.org (allow-listed). Build deps for pip (gcc, musl-dev)
+# are deliberately NOT installed: that is 150 MB+ per run; a package that needs them
+# records ``install_failed``.
+_ALPINE_GIT_PREFIX = (
+    "(mkdir -p /work/.apk/etc/apk /work/.local/bin && "
+    "cp -r /etc/apk/keys /etc/apk/repositories /work/.apk/etc/apk/ && "
+    "apk add --no-cache --no-scripts --initdb -p /work/.apk git && "
+    "printf '#!/bin/sh\\nexport LD_LIBRARY_PATH=/work/.apk/usr/lib:/work/.apk/lib "
+    "GIT_EXEC_PATH=/work/.apk/usr/libexec/git-core "
+    "GIT_TEMPLATE_DIR=/work/.apk/usr/share/git-core/templates\\n"
+    "exec /work/.apk/usr/bin/git \"$@\"\\n' > /work/.local/bin/git && "
+    "chmod +x /work/.local/bin/git) >/dev/null 2>&1 || true; "
 )
 _PIP_MCP_CMD = (
     _SANDBOX_ENV
+    + _ALPINE_GIT_PREFIX
     + "pip install --no-input --user {name} && "
-    "sh /work/mcp_launch.sh pypi {dist} -- python /work/mcp_exercise.py {exerciser_args}"
+    "sh /work/mcp_launch.sh pypi {dist} --canary-value {canary} -- "
+    "python /work/mcp_exercise.py {exerciser_args}"
 )
 # plan → (image, command template, runner mode). "{name}" in the image = the coordinate.
 _SURFACE_PLAN: dict[str, tuple[str, str, str]] = {
@@ -105,7 +135,11 @@ _REGISTRY_ALLOW = {
     "registry.npmjs.org", "registry.yarnpkg.com",
     "pypi.org", "files.pythonhosted.org",
     "github.com", "codeload.github.com", "objects.githubusercontent.com",
+    "dl-cdn.alpinelinux.org",  # apk mirror: the pypi-mcp plan installs git (see above)
 }
+# A container that exits 137 was SIGKILLed by its cgroup (memory / pids cap), not by the
+# target: recorded as the ``killed_resource_limit`` note → start_reason ``resource_limit``.
+_RESOURCE_LIMIT_EXIT = 137
 # Image mode pulls from a registry too.
 _IMAGE_ALLOW = {
     "registry-1.docker.io", "auth.docker.io", "production.cloudflare.docker.com",
@@ -379,6 +413,37 @@ def _default_plan(surface: str) -> str | None:
     return surface if surface in ("npm", "pypi", "docker") else None
 
 
+def _merge_env_names(static: list[str] | None, readme_text: str | None) -> list[str]:
+    """Static env reads first (exact), then credential-looking names mined from the README
+    (``BRAVE_API_KEY`` in an install snippet) — a key-gated server gets its canary even
+    when the static pass missed the read. De-duplicated, capped like the static list."""
+    out: list[str] = []
+    for name in list(static or []) + env_names_from_text(readme_text or ""):
+        if name and name not in out:
+            out.append(name)
+    return out[:MAX_ENV_NAMES]
+
+
+def _resource_args() -> list[str]:
+    """``--memory-mb`` / ``--pids`` for the v2 runner from settings (v2 only: the v1
+    script does not know the flags). Non-positive / unset → the runner's own defaults."""
+    from src.config import settings
+    out: list[str] = []
+    try:
+        mem = int(getattr(settings, "scanner_behavioral_memory_mb", 0) or 0)
+    except (TypeError, ValueError):
+        mem = 0
+    try:
+        pids = int(getattr(settings, "scanner_behavioral_pids", 0) or 0)
+    except (TypeError, ValueError):
+        pids = 0
+    if mem > 0:
+        out += ["--memory-mb", str(mem)]
+    if pids > 0:
+        out += ["--pids", str(pids)]
+    return out
+
+
 async def run_behavioral(
     surface: str,
     coordinate: str,
@@ -434,16 +499,17 @@ async def run_behavioral(
         timeout = max(int(timeout), mcp_timeout + 45)  # install + exercise budget
         cmd = cmd_tmpl.format(
             name=shlex.quote(coordinate), dist=shlex.quote(_dist_name(coordinate)),
+            canary=shlex.quote(canary),
             exerciser_args=_exerciser_args(
                 timeout=mcp_timeout, max_tools=max_tools, canary=canary,
-                env_names=list(env_names or []), readme=bool(readme_text)),
+                env_names=_merge_env_names(env_names, readme_text), readme=bool(readme_text)),
         )
     else:
         cmd = cmd_tmpl.format(name=coordinate, import_name=_import_name(coordinate))
 
     runner_args: list[str] = []
     if v2:
-        runner_args += ["--mode", mode, "--canary", canary]
+        runner_args += ["--mode", mode, "--canary", canary, *_resource_args()]
         if files_b64:
             runner_args += ["--files-b64", files_b64]
     runner_args += [image, cmd, str(timeout)]
@@ -468,6 +534,8 @@ async def run_behavioral(
         return _fail("runner_bad_output")
     if data.get("error"):
         return _fail(str(data["error"]))
+    if data.get("exit_code") == _RESOURCE_LIMIT_EXIT:
+        notes.append("killed_resource_limit")
     hosts = [str(h) for h in (data.get("egress_hosts") or [])]
     allow = expected | _SYNTHETIC_HOSTS | (_IMAGE_ALLOW if mode == "image" else set())
     vendor = _vendor_hosts(coordinate, hosts)

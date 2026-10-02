@@ -258,6 +258,11 @@ class Settings(BaseSettings):
     scanner_behavioral_sandbox_runner_v2: str = ""  # e.g. /home/ec2-user/behavioral_run_v2.sh
     scanner_behavioral_max_tools: int = 25     # exerciser: max tools called per server
     scanner_behavioral_mcp_timeout: int = 90   # exerciser: overall budget (s) per server
+    # v2 container resource caps (passed as --memory-mb / --pids; the v2 script's own
+    # defaults stay 512m / 256 so a v1-style call is unchanged). Puppeteer / desktop-
+    # commander download a browser at install and were OOM-killed (exit 137) at 512m.
+    scanner_behavioral_memory_mb: int = 1024   # docker --memory for v2 runs (MB)
+    scanner_behavioral_pids: int = 512         # docker --pids-limit for v2 runs
 
     # --- Phase 5: maintainer / behavioral trust signals -----------------------
     # Cheap GitHub-METADATA maintainer signals (NO code execution, NO sandbox):

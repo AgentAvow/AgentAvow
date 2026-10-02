@@ -26,6 +26,11 @@
 #   --canary <value>        credential canary; its first 16 chars are searched in DNS query
 #                           names and plaintext HTTP (port 80) payloads → canary_exfil.
 #   --timeout <secs>        same as the 3rd positional.
+#   --memory-mb <MB>        container memory cap (default 512 — unchanged for v1-style calls;
+#                           the app passes scanner_behavioral_memory_mb, default 1024).
+#   --pids <N>              container pids cap (default 256; the app passes
+#                           scanner_behavioral_pids, default 512). exit_code 137 = the
+#                           container was SIGKILLed by one of these caps.
 #
 # Output JSON (schema "behavioral-v2"; every v1 field is kept):
 #   {
@@ -58,8 +63,14 @@ MODE="exec"
 FILES_B64=""
 CANARY=""
 TIMEOUT_OPT=""
+MEMORY_MB="512"
+PIDS="256"
 while [ $# -gt 0 ]; do
   case "$1" in
+    --memory-mb) MEMORY_MB="${2:-512}"; shift 2 ;;
+    --memory-mb=*) MEMORY_MB="${1#--memory-mb=}"; shift ;;
+    --pids) PIDS="${2:-256}"; shift 2 ;;
+    --pids=*) PIDS="${1#--pids=}"; shift ;;
     --mode) MODE="${2:-exec}"; shift 2 ;;
     --mode=*) MODE="${1#--mode=}"; shift ;;
     --files-b64) FILES_B64="${2:-}"; shift 2 ;;
@@ -74,7 +85,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-USAGE="usage: behavioral_run_v2.sh [--mode exec|mcp|image] [--files-b64 B64] [--canary V] <image> <command> [timeout]"
+USAGE="usage: behavioral_run_v2.sh [--mode exec|mcp|image] [--files-b64 B64] [--canary V] [--memory-mb MB] [--pids N] <image> <command> [timeout]"
 IMAGE="${1:?$USAGE}"
 if [ "$MODE" = "image" ]; then
   CMD="${2:-}"
@@ -84,6 +95,10 @@ fi
 TIMEOUT="${TIMEOUT_OPT:-${3:-45}}"
 case "$MODE" in exec|mcp|image) ;; *) echo '{"error":"bad_mode"}'; exit 0 ;; esac
 case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=45 ;; esac
+case "$MEMORY_MB" in ''|*[!0-9]*|0) MEMORY_MB=512 ;; esac
+case "$PIDS" in ''|*[!0-9]*|0) PIDS=256 ;; esac
+[ "$MEMORY_MB" -gt 4096 ] && MEMORY_MB=4096   # the sandbox box itself is small
+[ "$PIDS" -gt 4096 ] && PIDS=4096
 
 RUNTIME="runsc"
 docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q runsc || {
@@ -161,7 +176,7 @@ DOCKER_OPTS=(
   --read-only --tmpfs /tmp:exec --tmpfs /run --tmpfs /work:exec
   --workdir /work
   --cap-drop ALL --security-opt no-new-privileges
-  --memory 512m --cpus 1 --pids-limit 256
+  --memory "${MEMORY_MB}m" --cpus 1 --pids-limit "$PIDS"
 )
 if [ "$MODE" = "image" ]; then
   # The image's own ENTRYPOINT/CMD — what a user would get from `docker run <image>`.

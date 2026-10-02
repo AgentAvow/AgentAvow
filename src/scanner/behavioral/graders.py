@@ -12,10 +12,12 @@ Rules (id → severity):
   credential_canary_exfiltrated  canary seen in DNS / plaintext HTTP          critical
   canary_echoed_in_result        canary env value returned in a tool result   medium
   tool_call_crashed_server       a tool call took the server down             low
-  server_failed_to_start         no finding — surfaced via launch_ok/launch_error
+  server_failed_to_start         no finding — surfaced via launch_ok/launch_error and
+                                 classify_start() → (start_reason, start_reason_detail)
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -268,6 +270,121 @@ def _transcript_of(result) -> ExerciseTranscript:
     return t if isinstance(t, ExerciseTranscript) else ExerciseTranscript()
 
 
+# ── start-reason classifier ─────────────────────────────────────────────────────
+#
+# WHY a server did not start, as a fixed vocabulary the UI can render and the eval can
+# count. Deterministic over (result, transcript); the order of the checks below IS the
+# precedence. A non-started server never yields a finding — this only explains it.
+
+START_REASONS = (
+    "started", "needs_credentials", "needs_arguments", "missing_binary", "install_failed",
+    "resource_limit", "no_entrypoint", "timeout", "crashed", "unknown",
+)
+_RESOURCE_LIMIT_EXIT = 137  # SIGKILL from the cgroup OOM killer / pids cap
+_DETAIL_LIMIT = 160
+# Strong credential vocabulary. "PAT" is case-sensitive and whole-word (it is inside
+# "path" and "compatible"); "environment variable" alone is NOT enough — GitPython's
+# missing-binary message mentions one — it only counts next to a credential-looking name.
+_CRED_RE = re.compile(
+    r"api[ _-]?key|token|secret|credential|password|passwd|(?<![A-Za-z])PAT(?![A-Za-z])",
+)
+_CRED_CI_RE = re.compile(_CRED_RE.pattern, re.IGNORECASE)
+_ENV_VAR_RE = re.compile(r"env(ironment)?[ _-]?var(iable)?s?", re.IGNORECASE)
+_ARGS_RE = re.compile(
+    r"usage:|expected \d+ (positional )?arguments?|missing required|"
+    r"<[a-z:/_. -]*url[^>]*>|required argument|too few arguments|"
+    r"(the following arguments are required)",
+    re.IGNORECASE,
+)
+_BINARY_RE = re.compile(
+    r"not found|executable|ENOENT|No such file|command not found|cannot find module|"
+    r"cannot execute|not recognized as", re.IGNORECASE,
+)
+_PATH_RE = re.compile(r"(?<![\w:/])/[\w.@~-]+(?:/[\w.@~-]+)+")
+_FRAME_PREFIXES = ("File \"", "at ", "Traceback (most recent call last)", "^")
+_EXCEPTION_LINE_RE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Warning|Exit|Interrupt)\b")
+
+
+def _clean_detail(text: str, limit: int = _DETAIL_LIMIT) -> str:
+    """A short, human excerpt of an error: stack frames and the traceback header dropped,
+    absolute paths replaced by ``<path>``, whitespace collapsed, cut to ``limit``. For a
+    Python traceback the last line (the exception) is the excerpt."""
+    raw = (text or "").replace("\r", "\n")
+    lines = [ln.strip() for ln in raw.split("\n")]
+    lines = [ln for ln in lines if ln and not ln.startswith(_FRAME_PREFIXES)
+             and not re.fullmatch(r"[~^|\s]+", ln)]
+    if "Traceback (most recent call last)" in raw and lines:
+        # keep the exerciser's own code prefix ("server_exited: ") in front of the
+        # exception line; the transcript caps the error text, so the exception line may
+        # be gone — then say so rather than quote a random frame.
+        head = lines[0].split(":", 1)[0] if lines[0] and ":" in lines[0] else ""
+        exc = [ln for ln in lines if _EXCEPTION_LINE_RE.match(ln)]
+        last = exc[-1] if exc else "Python traceback (exception line truncated)"
+        if head and head.replace("_", "").isalnum() and not last.startswith(head):
+            lines = [head + ": " + last]
+        else:
+            lines = [last]
+    out = " ".join(lines)
+    out = _PATH_RE.sub("<path>", out)
+    out = re.sub(r"\s+", " ", out).strip()
+    if len(out) > limit:
+        out = out[: limit - 1].rstrip() + "…"
+    return out
+
+
+def _looks_like_credential_error(text: str) -> bool:
+    if not text:
+        return False
+    if _CRED_CI_RE.search(text):
+        return True
+    if _ENV_VAR_RE.search(text):
+        from src.scanner.behavioral.env_reads import env_names_from_text
+        return bool(env_names_from_text(text))
+    return False
+
+
+def classify_start(result, transcript: ExerciseTranscript | None = None) -> tuple[str, str]:
+    """(reason, detail) for why the server did or did not start — see START_REASONS.
+
+    Precedence: started → resource_limit (exit 137 / ``killed_resource_limit`` note) →
+    timeout (wall clock hit with no transcript) → install_failed (no transcript, exit≠0)
+    → no_entrypoint → needs_credentials → needs_arguments → missing_binary → timeout
+    (initialize_timeout) → crashed (server_exited / spawn_failed / exerciser error) →
+    unknown. ``detail`` is a ≤160-char cleaned excerpt of the underlying error."""
+    t = transcript if isinstance(transcript, ExerciseTranscript) else _transcript_of(result)
+    if t.launch_ok:
+        return "started", ""
+    exit_code = getattr(result, "exit_code", None)
+    notes = [str(n) for n in (getattr(result, "notes", None) or [])]
+    present = (t.present or bool(t.launch_error) or bool(t.launch_command))
+    if exit_code == _RESOURCE_LIMIT_EXIT or "killed_resource_limit" in notes:
+        return "resource_limit", (
+            "container killed by the sandbox resource cap (memory / pids) before the "
+            "server could be exercised")
+    if not present:
+        if getattr(result, "timed_out", False):
+            return "timeout", "the run hit the sandbox wall clock before the server started"
+        if isinstance(exit_code, int) and exit_code != 0:
+            return "install_failed", f"install step exited {exit_code}; no exercise ran"
+        return "unknown", _clean_detail(getattr(result, "error", None) or "")
+    err = t.launch_error or t.error or ""
+    low = err.lower()
+    if "no_entrypoint_found" in low:
+        return "no_entrypoint", "the installed package exposes no runnable bin / console script"
+    detail = _clean_detail(err)
+    if _looks_like_credential_error(err):
+        return "needs_credentials", detail
+    if _ARGS_RE.search(err):
+        return "needs_arguments", detail
+    if _BINARY_RE.search(err):
+        return "missing_binary", detail
+    if low.startswith("initialize_timeout") or (t.timed_out and not t.launch_ok):
+        return "timeout", detail
+    if low.startswith(("server_exited", "spawn_failed", "initialize_error")) or t.error:
+        return "crashed", detail
+    return "unknown", detail
+
+
 def grade(result) -> list[BehavioralFinding]:
     """All findings for a sandbox result, in rule order. Empty when it didn't run."""
     if not getattr(result, "ran", False):
@@ -295,6 +412,7 @@ def grade_summary(result) -> dict:
     # a transcript that names a launch command or error was still an exercise attempt.
     exercised = (transcript.present or bool(transcript.launch_error)
                  or bool(transcript.launch_command))
+    reason, detail = classify_start(result, transcript)
     return {
         "ran": bool(getattr(result, "ran", False)),
         "plan": getattr(result, "plan", "") or "",
@@ -302,6 +420,8 @@ def grade_summary(result) -> dict:
         "launch_ok": transcript.launch_ok,
         "launch_error": transcript.launch_error,
         "server_failed_to_start": exercised and not transcript.launch_ok,
+        "start_reason": reason,
+        "start_reason_detail": detail,
         "tools_listed": len(transcript.tools),
         "tools_called": len({c.tool for c in calls}),
         "calls_total": len(calls),
