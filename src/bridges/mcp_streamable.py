@@ -18,6 +18,7 @@ import asyncio
 import contextvars
 import json
 import os
+import re
 from urllib.parse import quote
 
 import httpx
@@ -340,6 +341,11 @@ def _scan_block(
     _deprecated = isinstance(data.get("deprecation"), str) and bool(data["deprecation"].strip())
     if _deprecated and mode != "risk":
         mode = "deprecated"
+    # A published advisory against THIS version outranks 'clean' and 'deprecated'.
+    _advs = [a for a in (data.get("advisories") or [])
+             if isinstance(a, dict) and a.get("affects_scanned_version")]
+    if _advs and mode != "risk":
+        mode = "vulnerable"
     # What the sandbox caught outranks every other headline: a canary leak or a critical
     # behavioral finding never sits under "safe", "clean", or "deprecated".
     _alarm = _sandbox_alarm(data)
@@ -375,6 +381,14 @@ def _scan_block(
                "The static scan found no blocking issues; the sandbox observation is "
                "what to weigh.")
         glyph = "⚠ REVIEW"
+    elif mode == "vulnerable":
+        _fix = _highest_fix(_advs)
+        n = len(_advs)
+        head = (f"⚠️ {n} known vulnerabilit{'y' if n == 1 else 'ies'} in this version"
+                + (f" — upgrade to {_fix} or later" if _fix else ""))
+        why = ("Published advisories (" + ", ".join(str(a.get("id")) for a in _advs[:3])
+               + (", …" if n > 3 else "") + ") affect the version you'd install.")
+        glyph = "⚠ VULNERABLE"
     elif mode == "deprecated":
         head = "⚠️ Deprecated — don't adopt for new work"
         why = ("The maintainer retired this package, so it won't get security fixes. "
@@ -461,7 +475,7 @@ def _scan_block(
     # Install CTA (own line so the model relays it). Shown for anything without blocking
     # findings — safe gets the confident label, limited gets a "verify first" cue. Never
     # on a review result (real findings to weigh first).
-    if install_hint and mode not in ("risk", "deprecated", "sandbox"):
+    if install_hint and mode not in ("risk", "deprecated", "sandbox", "vulnerable"):
         if mode == "safe":
             lines.append(f"**Ready to install:** `{install_hint}`")
         else:  # limited — no risks found, but not fully verified
@@ -471,6 +485,11 @@ def _scan_block(
     # (Purely about our own verdict; it never tells the agent to auto-run other tools.)
     if mode == "safe":
         action = f"clears the bar, so it's safe to {verb}."
+    elif mode == "vulnerable":
+        _fix = _highest_fix(_advs)
+        action = (f"upgrade to {_fix} or later before you {verb}; the advisories list the "
+                  "fixed releases." if _fix else
+                  "no fixed release is listed — avoid this version or isolate it.")
     elif mode == "deprecated":
         action = ("don't adopt it for new work. Pick a maintained alternative (the "
                   "deprecation message may name one) and scan that before you connect it.")
@@ -865,6 +884,76 @@ def _incident_summary(ih: dict) -> dict | None:
     }
 
 
+def _version_key(v: str) -> tuple:
+    parts = []
+    for p in str(v).lstrip("v").split("."):
+        num = "".join(ch for ch in p if ch.isdigit())
+        parts.append((int(num) if num else 0, p))
+    return tuple(parts)
+
+
+def _highest_fix(advisories: list[dict]) -> str | None:
+    """The release that fixes ALL the listed advisories = the highest fixed_in."""
+    fixes = [str(a.get("fixed_in")) for a in advisories if a.get("fixed_in")]
+    return max(fixes, key=_version_key) if fixes else None
+
+
+def _split_pinned_version(surface: str, spec: str) -> tuple[str, str | None]:
+    """'chalk@5.3.0' / '@scope/name@1.2.3' / 'requests==2.32.5' / 'pkg===1.0' /
+    'serde@1.0.200' → (name, version). A bare name → (name, None). Only an exact pin is
+    honoured (ranges like ^1 or >=2 are ignored: the registry resolves latest)."""
+    spec = (spec or "").strip()
+    if surface == "pypi":
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*===?\s*([A-Za-z0-9][A-Za-z0-9.+!-]*)$", spec)
+        if m:
+            return m.group(1), m.group(2)
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)@([0-9][A-Za-z0-9.+!-]*)$", spec)
+        return (m.group(1), m.group(2)) if m else (spec, None)
+    # npm (incl. scoped) / crates: name@version where version starts with a digit
+    m = re.match(r"^(@?[^@\s]+)@([0-9][^@\s]*)$", spec)
+    if m and surface in ("npm", "crates"):
+        return m.group(1), m.group(2)
+    return spec, None
+
+
+def _sandbox_struct(data: dict) -> dict | None:
+    """The behavioral sandbox result as stable machine-readable fields. None when the
+    tier does not apply; ``pending`` True while the first run is still going."""
+    b = data.get("behavioral")
+    if not isinstance(b, dict):
+        return None
+    if b.get("pending") or not b.get("ran"):
+        return {"ran": False, "pending": bool(b.get("pending")),
+                "reason": b.get("reason") or None}
+    ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else {}
+    gs = b.get("grade_summary") or {}
+    eff = data.get("behavioral_score_effect") or {}
+    att = b.get("attestation") or {}
+    findings = [{"rule": f.get("rule"), "severity": f.get("severity"), "name": f.get("name"),
+                 "evidence": (f.get("evidence") or "")[:200]}
+                for f in (b.get("findings") or []) if isinstance(f, dict)]
+    leaked = bool(b.get("canary_exfil"))
+    alarm = leaked or any(f["severity"] in ("critical", "high") for f in findings)
+    return {
+        "ran": True, "pending": False, "plan": b.get("plan"),
+        "server_started": bool(ex.get("launch_ok")) if ex else None,
+        "start_reason": gs.get("start_reason"),
+        "start_reason_detail": gs.get("start_reason_detail") or None,
+        "tools_listed": len(ex.get("tools") or []) if ex else 0,
+        "tools_called": len(ex.get("calls") or []) if ex else 0,
+        "egress_hosts": b.get("egress_hosts") or [],
+        "undeclared_egress": b.get("unexpected_egress") or [],
+        "vendor_egress": b.get("vendor_egress") or [],
+        "canary_env": (ex.get("canary") or {}).get("env_names") if ex else [],
+        "canary_leaked": leaked,
+        "findings": findings,
+        "alarm": alarm,
+        "score_effect": ({"delta": eff.get("delta"), "static_score": eff.get("static_score"),
+                          "reason": eff.get("reason")} if eff.get("applied") else None),
+        "signed_observation_at": att.get("observed_at") if isinstance(att, dict) else None,
+    }
+
+
 def _scan_struct(
     data: dict,
     target: str,
@@ -886,6 +975,18 @@ def _scan_struct(
     # Machine-readable "why": distinguishes a real risk review from a coverage cap.
     # Shared with the public API so the two surfaces never disagree.
     verdict_reason = _shared_verdict_reason(data, safe)
+    sandbox = _sandbox_struct(data)
+    # Behavioral high/critical findings are findings: a consumer that only reads
+    # findings_total / top_findings must see them (a model summarising structuredContent
+    # said "0 findings" about a server caught sending telemetry).
+    beh_items = [
+        {"severity": f.get("severity"), "category": f.get("category") or "behavioral",
+         "name": f.get("name"), "file_path": "<sandbox>", "sandbox": True}
+        for f in (sandbox or {}).get("findings") or []
+        if f.get("severity") in ("critical", "high")
+    ]
+    alarm = bool(sandbox and sandbox.get("alarm"))
+    dep = data.get("deprecation")
     return {
         "target": target,
         "target_type": target_type,
@@ -894,9 +995,25 @@ def _scan_struct(
         "tier": data.get("trust_tier"),
         "verdict": "safe" if safe else "needs_review",
         "verdict_reason": verdict_reason,
-        "critical": crit,
-        "high": high,
-        "findings_total": int((data.get("findings") or {}).get("total") or len(items)),
+        "critical": crit + sum(1 for i in beh_items if i["severity"] == "critical"),
+        "high": high + sum(1 for i in beh_items if i["severity"] == "high"),
+        "findings_total": int((data.get("findings") or {}).get("total") or len(items))
+        + len((sandbox or {}).get("findings") or []),
+        "static_findings_total": int((data.get("findings") or {}).get("total") or len(items)),
+        # Version actually scanned + when it was published (so a model need not fetch
+        # the registry), the maintainer's deprecation notice (None = not retired), and
+        # the package's own published advisories that affect this version.
+        "package_version": data.get("package_version")
+        or (data.get("surface_detail") or data.get("artifact_scan") or {}).get("version"),
+        "published_at": data.get("published_at"),
+        "deprecated": dep.strip()[:300] if isinstance(dep, str) and dep.strip() else None,
+        "advisories_affecting_version": [
+            {"id": a.get("id"), "severity": a.get("severity"), "fixed_in": a.get("fixed_in"),
+             "summary": (a.get("summary") or "")[:160]}
+            for a in (data.get("advisories") or []) if a.get("affects_scanned_version")
+        ][:10],
+        # What the sandbox observed (None until the first run completes; see `pending`).
+        "sandbox": sandbox,
         # MUST match the signed attestation's certified.eligible (the 6 crypto gates) — a
         # trust product cannot have its MCP field disagree with its own signed report.
         # The "only render the Certified MARK when also safe" rule is a DISPLAY gate applied
@@ -905,7 +1022,7 @@ def _scan_struct(
         "certified": bool((data.get("certified") or {}).get("eligible")),
         "certified_mark": bool((data.get("certified") or {}).get("eligible")) and safe,
         # top findings, repeats collapsed to one row + count — for the card + CI triage
-        "top_findings": _grouped_findings(items, 3),
+        "top_findings": (beh_items + _grouped_findings(items, 3))[:5],
         # context-only incident history (was this package ever compromised?) — never
         # part of the score/verdict; None when there is no known incident.
         "incident": _incident_summary(data.get("incident_history") or {}),
@@ -917,7 +1034,7 @@ def _scan_struct(
         "install": (
             {"npm": f"npm install {target}", "pypi": f"pip install {target}",
              "crates": f"cargo add {target}"}.get(target_type)
-            if crit + high == 0 else None
+            if crit + high == 0 and not alarm and not dep else None
         ),
         "adoption": (
             {"count": adoption[0], "unit": adoption[1], "score_0_100": adoption[2]}
@@ -1278,11 +1395,18 @@ async def _call_tool(
             if not surface or not pkg:
                 return _text("Give a registry (npm, pypi, crates, docker, or hf) and a package "
                              "name, e.g. registry='npm', name='chalk'.")
-            data = await _get(f"/public/scan/package/{surface}/{pkg}", params=fp)
+            # A pinned version rides in the name the way the ecosystems write it
+            # (chalk@5.3.0, requests==2.32.5, serde@1.0.200) — no tool-schema change.
+            pkg, version = _split_pinned_version(surface, pkg)
+            params = dict(fp or {})
+            if version:
+                params["version"] = version
+            data = await _get(f"/public/scan/package/{surface}/{pkg}", params=params)
             await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption(surface, surface, pkg)
-            rp = f"/check/pkg/{surface}/{pkg}"
-            api = f"/api/v1/public/scan/package/{surface}/{pkg}"
+            vq = f"?version={quote(version, safe='')}" if version else ""
+            rp = f"/check/pkg/{surface}/{pkg}{vq}"
+            api = f"/api/v1/public/scan/package/{surface}/{pkg}{vq}"
             hint = {
                 "npm": f"npm install {pkg}",
                 "pypi": f"pip install {pkg}",

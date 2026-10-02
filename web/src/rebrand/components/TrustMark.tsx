@@ -206,6 +206,16 @@ export function VerdictBadge(
       critical?: number | null
       high?: number | null
       metadata?: { files_scanned?: number | null } | null
+      deprecation?: string | null
+      behavioral?: {
+        ran?: boolean; pending?: boolean; plan?: string
+        canary_exfil?: unknown[]
+        findings?: Array<{ severity?: string; name?: string; rule?: string }>
+        exercise?: { launch_ok?: boolean; calls?: unknown[] } | null
+        grade_summary?: { start_reason?: string } | null
+        unexpected_egress?: string[]
+      } | null
+      behavioral_score_effect?: { applied?: boolean; delta?: number } | null
     }
     verb?: 'connect' | 'install' | 'use'
     className?: string
@@ -235,7 +245,31 @@ export function VerdictBadge(
   // Three visual treatments over the strict two-state verdict: a clean result that only
   // missed the bar on coverage/signals must not wear the same warning as real findings.
   // (Adoption is context elsewhere on the page, never a verdict input.)
-  const mode: 'safe' | 'risk' | 'limited' = safe ? 'safe' : blocking > 0 ? 'risk' : 'limited'
+  // The sandbox and the registry can override: a high/critical behavioral finding or a
+  // leaked canary is a review, never "clean"; a retired package is never "clean" either.
+  const b = scan.behavioral
+  const bFindings = (b?.ran && !b.pending ? b.findings : []) ?? []
+  const leaked = !!(b?.ran && (b.canary_exfil?.length ?? 0) > 0)
+  const bAlarm = leaked || bFindings.some((f) => f.severity === 'critical' || f.severity === 'high')
+  const deprecated = !!(scan.deprecation && scan.deprecation.trim())
+  const mode: 'safe' | 'risk' | 'limited' | 'sandbox' | 'deprecated' =
+    bAlarm ? 'sandbox' : safe ? 'safe' : blocking > 0 ? 'risk' : deprecated ? 'deprecated' : 'limited'
+  const caught = leaked
+    ? 'a planted credential left the sandbox'
+    : (bFindings.find((f) => f.severity === 'critical') ?? bFindings.find((f) => f.severity === 'high'))?.name ?? 'a behavioral finding'
+  // One line about the sandbox for the card, whatever the mode.
+  const calls = b?.exercise?.calls?.length ?? 0
+  const reason = (b?.grade_summary?.start_reason ?? '').replace(/_/g, ' ')
+  const delta = scan.behavioral_score_effect?.applied ? scan.behavioral_score_effect.delta ?? 0 : 0
+  const deltaTxt = delta ? ` · score ${delta > 0 ? '+' : ''}${delta}` : ''
+  const sandboxLine = !b ? null
+    : b.pending ? 'Sandbox: running now — observed behavior appears here in about a minute'
+    : !b.ran ? null
+    : bAlarm ? `Sandbox: caught — ${caught}${deltaTxt}`
+    : bFindings.length ? `Sandbox: ran, ${bFindings.length} minor finding${bFindings.length === 1 ? '' : 's'}${deltaTxt}`
+    : b.exercise?.launch_ok ? `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'}, clean${deltaTxt}`
+    : reason && reason !== 'not applicable' && reason !== 'started' ? `Sandbox: installed; server not started (${reason}) — not a finding`
+    : 'Sandbox: installed and imported, clean'
   const files = scan.metadata?.files_scanned
   const limitedReason = (typeof files === 'number' && files > 0 && files < 8)
     ? `No risks found — the score is capped by limited coverage (${files} file${files === 1 ? '' : 's'} to inspect), not detected risk.`
@@ -244,6 +278,8 @@ export function VerdictBadge(
     safe: { box: 'bg-success/10 border-success/30', fg: 'text-success', icon: '✓', title: `Safe to ${verb}`, reason: 'No blocking issues found.' },
     risk: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠', title: `Review before you ${verb}`, reason: `${blocking} blocking finding${blocking === 1 ? '' : 's'} to review below.` },
     limited: { box: 'bg-surface border-border', fg: 'text-text-muted', icon: '◍', title: 'Clean — limited coverage', reason: limitedReason },
+    sandbox: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠', title: `Review before you ${verb} — caught in the sandbox`, reason: `${caught}. The static scan found ${blocking ? `${blocking} blocking finding${blocking === 1 ? '' : 's'}` : 'no blocking issues'}; what the tool did when run is what to weigh.` },
+    deprecated: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠', title: `Deprecated — don't adopt for new work`, reason: 'The maintainer retired this package, so it won\'t get security fixes. The code itself showed no blocking issues.' },
   }[mode]
   return (
     <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${cfg.box} ${className}`}>
@@ -251,6 +287,7 @@ export function VerdictBadge(
       <div className="min-w-0">
         <div className={`font-bold text-[15px] ${cfg.fg}`}>{cfg.title}</div>
         <div className="text-[12.5px] text-text-muted">{cfg.reason}</div>
+        {sandboxLine && <div className="text-[12px] text-text-muted mt-0.5"><span className="font-mono text-[10px] uppercase tracking-wide mr-1.5">gVisor</span>{sandboxLine}</div>}
       </div>
       <span className="ml-auto font-mono text-[10px] text-text-muted/60 shrink-0 hidden sm:block">derived from the signed score</span>
     </div>

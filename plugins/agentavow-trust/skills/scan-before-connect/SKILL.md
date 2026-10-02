@@ -69,3 +69,6 @@ that the sandbox is pending or what it observed.
 - "Needs review" means look before you connect. It does not mean malicious.
 - "Safe" means the scan found no blocking issue. It is not a guarantee.
 - The scan is advice. The user decides whether to install or connect.
+
+
+To scan a specific version, put it in the name the way the ecosystem writes it: `name@1.2.3` for npm and crates, `name==1.2.3` for PyPI (for example `scan_package` with registry `pypi`, name `mcp-server-git==2025.7.1`). Do not fetch the registry or the API URL yourself to compare versions; call the tool once per version.
