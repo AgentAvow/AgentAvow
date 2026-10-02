@@ -174,8 +174,28 @@
       }
     }
   ],
-  "known_good_skills": [],
-  "_known_good_skills_todo": "TODO: fill with 3-5 real public repo-per-skill GitHub repos (one SKILL.md at the root, bundled scripts, no network). None chosen yet: anthropics/skills is a collection (many skills per repo), and the catalog's openclaw entries were not verified as single-skill repos. Run `run_eval.py --known-good --only <repo>` on the sandbox box to vet a candidate before listing it.",
+  "known_good_skills": [
+    {
+      "repo": "dominikmartn/hue",
+      "note": "JS skill, 833 stars"
+    },
+    {
+      "repo": "DenisSergeevitch/repo-task-proof-loop",
+      "note": "Python skill, 731 stars"
+    },
+    {
+      "repo": "browser-use/browser-harness-js",
+      "note": "TS skill, 488 stars"
+    },
+    {
+      "repo": "Cedriccmh/claude-code-skill-scrapling",
+      "note": "Python skill, 437 stars"
+    },
+    {
+      "repo": "bowenliang123/markdown-exporter",
+      "note": "Python skill, 271 stars"
+    }
+  ],
   "skill_fixtures": [
     {
       "dir": "benign-skill",
