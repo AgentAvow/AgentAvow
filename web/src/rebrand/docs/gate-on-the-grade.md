@@ -20,27 +20,31 @@ Each verdict carries a **trust tier** and a **recommended execution posture** �
 Fail a pull request when a repo's trust score drops below a threshold, and post the score as a sticky PR comment:
 
 ```yaml
-- uses: AgentAvow/trust-scan-action@v1
+- uses: AgentAvow/AgentAvow/github-action@main
   with:
-    min_score: 80          # 0–100 threshold to pass
-    fail_on_findings: true # fail the job when the score is under min_score
-    comment_on_pr: true    # sticky PR comment with score + findings
+    min_score: 80              # 0–100 threshold to pass
+    fail_on_findings: true     # fail the job when the score is under min_score
+    comment_on_pr: true        # sticky PR comment with score + findings
+    fail_on_behavioral: false  # optional: also fail on a high/critical sandbox finding
 ```
 
 The action scans on AgentAvow's free API and fails the job when the score is below your `min_score` — so a supply-chain regression blocks the merge instead of shipping. Set `min_score` to the level you want to hold (e.g. **80** for Trusted, **60** for Standard).
 
 ## Gate your agent at runtime (SDK + bridges)
 
-Check a tool's score **before** your agent connects it. The client SDKs — `agentgraph-trust` (JS) and the Python client — resolve any coordinate's score over the same free API, so you can enforce a floor in code:
+Check a tool's score **before** your agent connects it. The client SDKs — `agentavow-trust` (npm) and the Python client — read a repo's score over the same free API, so you can enforce a floor in code. The client takes the API origin; `checkRepo` returns the same JSON as the public scan endpoint:
 
 ```js
-import { TrustClient } from 'agentgraph-trust'
-const { trust_score, trust_tier } = await new TrustClient().scan('npm:chalk')
+import { TrustClient } from 'agentavow-trust'
+const client = new TrustClient('https://agentavow.com')
+const { trust_score, trust_tier } = await client.checkRepo('owner', 'repo')
 if (trust_score < 40) throw new Error(`blocked: ${trust_score}/100 (${trust_tier})`)
 // else apply the recommended posture (rate limit / token cap / confirmation)
 ```
 
-Framework bridges ship in `sdk/bridges/` (MCP, LangChain, CrewAI, AutoGen) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway`) enforces a policy server-side when you'd rather not embed the logic.
+For a package or a live MCP server, call the scan endpoints under **Gate anything** below; the response shape is the same.
+
+Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway`) enforces a policy server-side when you'd rather not embed the logic.
 
 ### LangChain
 
@@ -110,20 +114,36 @@ GET /api/v1/public/scan/skill/{owner}/{repo}                 # OpenClaw skill
 GET /api/v1/public/scan/{owner}/{repo}/adoption              # the second score
 ```
 
-Read `trust_score` / `trust_tier` to decide, and `attestation` to prove the decision later. The scan response also carries `tool_description` (what the tool is), `package_coordinate` (the registry name a repo maps to), and `coverage{}` (surface, scan depth, artifact digest, DB snapshots). The **adoption** endpoint returns the independent-reliance headline separately — it never moves the trust score. Results cache for an hour; add `?force=true` to re-scan. Don't trust our word for it — **recompute the verdict** from `coverage{}` and check the signature against our public JWKS (see **Verify an attestation**).
+Read `trust_score` / `trust_tier` to decide, and `jws` (the signed attestation) to prove the decision later. The scan response also carries `tool_description` (what the tool is), `package_coordinate` (the registry name a repo maps to), and `coverage{}` (surface, scan depth, artifact digest, DB snapshots). The **adoption** endpoint returns the independent-reliance headline separately — it never moves the trust score. Results cache for an hour; add `?force=true` to re-scan. Don't trust our word for it — **recompute the verdict** from `coverage{}` and check the signature against our public JWKS (see **Verify an attestation**).
 
 ## Catch the rug-pull after you've shipped
 
-A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** the moment either its score drops **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
+A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** when its score drops by more than 5 points **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
 
 Definition-change alerts cover GitHub repos, OpenClaw skills and live MCP servers, where the scan pins the tool definitions. For a live MCP server the digest is per tool name, taken from the `tools/list` the server actually serves. npm and PyPI package watches alert on score only.
 
-Set the webhook under **Account → Alert webhook**. The URL must be a public `https://` address. Saving it shows a signing secret once. Every delivery then carries two headers, and the signature covers the exact bytes of the body:
+Set the webhook under **Account → Alert webhook**, or with the account API (JWT or API key):
+
+```
+GET    /api/v1/account/alert-webhook                 # the saved webhook and its last delivery status
+PUT    /api/v1/account/alert-webhook  {"url": "…"}   # save or replace the URL
+POST   /api/v1/account/alert-webhook/rotate-secret   # new signing secret; the old one stops verifying
+POST   /api/v1/account/alert-webhook/test            # deliver a sample payload now
+DELETE /api/v1/account/alert-webhook
+```
+
+The URL must be a public `https://` address. The first `PUT` (and every `rotate-secret`) returns a `signing_secret` of the form `whsec_…` in that one response only; it is stored encrypted and never shown again. Every delivery then carries two headers, and the signature covers the exact bytes of the body:
 
 ```
 X-AgentAvow-Timestamp: 1790812800
 X-AgentAvow-Signature: sha256=<hex>
 ```
+
+The body is JSON with a `type` that says what happened:
+
+- `agentavow.alert.grade_change` — `{type, owner, repo, old_score, new_score, reason}`, where `reason` is `score dropped` or `signed definition changed`.
+- `agentavow.alert.behavioral_change` — a later [sandbox run](./behavioral-sandbox.md) added findings, leaked a canary or reached a new undeclared host. Carries the run's current state rather than a diff: `findings[]` (`rule`, `severity`, `name`), `unexpected_egress[]`, `canary_exfil[]`, `tools_exercised[]`, `plan`, `score`, and the `package` the sandbox exercised.
+- `agentavow.alert.test` — what `POST …/test` sends, shaped like a grade change with a `message`.
 
 Verify before you act on an alert:
 
@@ -137,7 +157,7 @@ def verify(secret: str, timestamp: str, body: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, signature)
 ```
 
-Reject a delivery whose timestamp is more than a few minutes old. Rotating the secret on the account page stops the old one verifying immediately.
+Reject a delivery whose timestamp is more than a few minutes old. Rotating the secret (on the account page or with `rotate-secret`) stops the old one verifying immediately.
 
 ## Put it together
 
