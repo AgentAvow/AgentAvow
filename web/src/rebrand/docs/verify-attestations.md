@@ -9,9 +9,12 @@ our servers. That's the whole point: *not a score you take on faith — a signat
 
 ## What you're verifying
 
-The scan response includes a `jws` field: a compact JWS whose payload is the canonical verdict (repo, score,
-tier, findings summary, `issued_at`, `expires_at`). The header carries a `kid` (key id, e.g.
-`agentgraph-security-v1`) identifying the signing key.
+The scan response includes a `jws` field: a compact JWS whose payload is the canonical verdict — a
+`SecurityPostureAttestation` with `issuer`, `subject` (`id` such as `github:owner/repo`, `npm:name` or
+`mcp:https://…`), `scannedAt`, `issuedAt`, `expiresAt`, and a `scan` block (`trustScore`, `trustTier`,
+`findings`, `categoryScores`, `toolDigests`, `toolManifestDigest`, …). The payload bytes are the RFC 8785
+(JCS) canonical form of that object, so a verifier can re-serialize and compare byte-for-byte. The header
+carries a `kid` (key id, e.g. `agentgraph-security-v1`) identifying the signing key.
 
 ## The public keys (JWKS)
 
@@ -21,7 +24,14 @@ Fetch the JSON Web Key Set once and cache it:
 GET https://agentgraph.co/.well-known/jwks.json
 ```
 
-Resolve the `kid` from the JWS header to the matching key. Keys rotate; always match by `kid`.
+Resolve the `kid` from the JWS header to the matching key. Keys rotate; always match by `kid`. The set
+currently publishes three keys: `agentgraph-security-v1` (Ed25519 — scan attestations and behavioral
+observations), `trust-v2-2026` (Ed25519 — trust-score envelopes) and `catalog-es256-v1` (P-256/ES256 — the
+signed [`/.well-known/ai-catalog.json`](https://agentavow.com/.well-known/ai-catalog.json)).
+
+The issuer has two DID documents that resolve to the same keys: `did:web:agentgraph.co` (the identifier
+inside every attestation) and `did:web:agentavow.com`. Each lists the other under `alsoKnownAs`, so a
+verifier can start from either domain.
 
 ## Verify in Python
 
@@ -43,7 +53,7 @@ verifier = jws.JWS()
 verifier.deserialize(token)
 verifier.verify(key)               # EdDSA / Ed25519
 verdict = json.loads(verifier.payload)
-print("verified:", verdict["repo"], verdict["trust_score"], verdict["trust_tier"])
+print("verified:", verdict["subject"]["id"], verdict["scan"]["trustScore"], verdict["scan"]["trustTier"])
 ```
 
 ## Verify in JavaScript
@@ -54,10 +64,36 @@ import { jwtVerify, createRemoteJWKSet } from 'jose'
 const JWKS = createRemoteJWKSet(new URL('https://agentgraph.co/.well-known/jwks.json'))
 const scan = await (await fetch('https://agentavow.com/api/v1/public/scan/owner/repo')).json()
 const { payload } = await jwtVerify(scan.jws, JWKS)   // throws if tampered
-console.log('verified:', payload.repo, payload.trust_score)
+console.log('verified:', payload.subject.id, payload.scan.trustScore)
 ```
 
 If verification throws, the attestation was tampered with or the key doesn't match — do not trust the result.
+
+## Tool definitions: per-tool digests and drift
+
+For an MCP server (and for skills and tool manifests), the signed `scan` block also pins **what the server
+served**, so a gate can check that the tool it is about to call is the one that was graded:
+
+- `scan.toolDigests` — one digest per served tool, keyed `tool:<name>`. Each is `sha256:` over the RFC 8785
+  canonical bytes of `{"profile": "agentavow.mcp-tool-definition.v1", "tool": {…}}`, where the tool is the
+  served definition restricted to `name`, `title`, `description`, `inputSchema`, `outputSchema` and
+  `annotations` (missing or null fields omitted; `_meta` never hashed).
+- `scan.toolManifestDigest` — a fold over the per-tool digests: the whole served tool set in one value.
+- `toolDrift` (top-level, only when present) — the diff against our previous scan of the same server: which
+  tools were added, removed or changed since the last grade.
+
+A consumer holding the server's `tools/list` recomputes the digest of the tool it is authorizing, with no call
+to us, and compares it with the signed one. A mismatch means the definition changed after the grade — the
+per-tool rug-pull — even if a fresh scan of the code would still come back clean. `annotations` is inside the
+digest on purpose: a flipped `readOnlyHint` or `destructiveHint` is the cheapest redefinition.
+
+The exact derivation, the key-encoding rules for unusual tool names, a pinned real attestation with the
+`tools/list` it was computed from, and six test cases (match, unknown tool, drift, wrong server, expiry,
+tampered payload) are published as
+[tool-manifest-digest-vectors-v1](https://github.com/AgentAvow/AgentAvow/tree/main/docs/standards/tool-manifest-digest-vectors-v1)
+(`node verify.mjs`, zero dependencies, fetches nothing). Three implementations written without our code —
+an APS-side consumer, Probity's signed-map reader and heldfast's profile — reproduce every digest and key
+from the pinned bytes.
 
 ## Behavioral observations
 
@@ -83,8 +119,10 @@ it with. Re-run with `?behavioral=true` for a fresh, freshly signed observation.
 
 ## Freshness
 
-Attestations are freshness-bounded (`expires_at`). Re-fetch (or `?force=true`) for a current signature; an
-expired attestation proves what was true at `issued_at`, not now.
+Attestations are freshness-bounded (`expiresAt`, 24 hours after `issuedAt`). Re-fetch (or `?force=true`) for
+a current signature; an expired attestation proves what was true at `scannedAt`, not now. `scannedAt` is when
+the analysis ran and `issuedAt` when this signature was minted; a cached result can be re-signed, so diff the
+two to judge evidence staleness.
 
 ## Why this matters
 

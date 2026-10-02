@@ -99,7 +99,12 @@ you can recompute it. See [Verify an AgentAvow attestation](./verify-attestation
 ## Stay safe over time
 
 Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its score drops
-or its signed definition changes — the rug-pull you'd otherwise miss. Once the sandbox has run a watched tool, a
+or its signed definition changes — the rug-pull you'd otherwise miss. For an MCP server the attestation pins
+one digest per served tool (`scan.toolDigests`, keyed by tool name) plus a digest of the whole set, and a
+re-scan reports `toolDrift` — which tools were added, removed or changed since the last grade — so you can
+see exactly what moved, not just that something did. A gate can recompute the digest of the tool it is about
+to call from the server's own `tools/list` and refuse on mismatch; see
+[Verify an AgentAvow attestation](./verify-attestations.md#tool-definitions-per-tool-digests-and-drift). Once the sandbox has run a watched tool, a
 later run that adds behavioral findings (a leaked canary, a new undeclared host) raises an alert too.
 
 In CI, the [GitHub Action](https://github.com/AgentAvow/AgentAvow/tree/main/github-action) prints a `Sandbox:`
