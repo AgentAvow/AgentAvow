@@ -52,14 +52,18 @@ PRs with a trust score below 70 will fail the check, blocking merge (if you use 
 When the repository maps to a published npm, PyPI or Docker package, AgentAvow also
 runs it in an isolated sandbox (gVisor) and reports what it actually did: which MCP
 tools were exercised, where it sent traffic, and whether it read secrets it should
-not have. The scan output and the PR comment carry one `Sandbox:` line, for example:
+not have. The scan output and the PR comment carry one `Sandbox` line, for example:
 
 ```
-Sandbox: plan npm-mcp, 4 tool(s) exercised, 1 behavioral finding(s), unexpected egress: telemetry.example.net
+Sandbox (gVisor, signed): called 4 tool(s), 1 behavioral finding(s), unexpected egress: telemetry.example.net; trust score -10 from the sandbox
 ```
 
-(or `Sandbox: behavioral run pending — results appear on the next scan` while the
-first run is still in flight.) To block a merge on a high/critical behavioral finding:
+While the first run is still in flight the line reads
+`Sandbox: running now — the observed behavior (and its effect on the score) appears on the next scan`.
+A server the sandbox installed but could not start reads
+`Sandbox (gVisor, signed): installed; server not started (needs credentials) — not a finding; 0 behavioral finding(s), no unexpected egress`.
+
+To block a merge on a high/critical behavioral finding:
 
 ```yaml
 - uses: AgentAvow/AgentAvow/github-action@main
@@ -67,10 +71,16 @@ first run is still in flight.) To block a merge on a high/critical behavioral fi
     fail_on_behavioral: true
 ```
 
-The sandbox observation is kept separate from the signed trust score — it is a
-runtime observation, not part of the offline-recomputable verdict — so `min_score`
-and `fail_on_behavioral` are independent gates. A pending or absent sandbox run never
-fails the step.
+The sandbox run is signed as its own observation, and that signed observation also
+moves the trust score by fixed rules: a leaked canary credential or critical
+behavioral finding caps the score at 45, a high finding costs 10 and caps it at 70,
+medium findings cost 5, and a clean full exercise adds 3. The line's trailing
+`trust score ±N from the sandbox` is that delta; the attestation records the evidence
+so the number stays recomputable (see
+[Behavioral sandbox](https://agentavow.com/docs/behavioral-sandbox)). `min_score` and
+`fail_on_behavioral` are still two separate gates: the first reads the score after the
+sandbox delta, the second fails on the finding itself even when the score clears the
+threshold. A pending or absent sandbox run never fails the step.
 
 ### Disable PR comments
 
@@ -90,20 +100,23 @@ Every scanned PR receives a comment like this:
 
 ## AgentAvow Trust Scan
 
-**Grade: B (67/100)** -- Use with Caution
+**AgentAvow Trust: 67/100 (Standard)** — Scan result: warnings
 
 | Category | Score |
 |----------|-------|
-| Secret Hygiene | 100 |
-| Code Safety | 41 |
-| Data Handling | 85 |
-| Filesystem Access | 65 |
+| secret hygiene | 100 |
+| code safety | 41 |
+| data handling | 85 |
+| filesystem access | 65 |
+| dependency health | 90 |
 
 **Findings:** 0 critical, 2 high, 5 medium, 3 low
 
-**Sandbox: plan npm-mcp, 4 tool(s) exercised, 0 behavioral finding(s), no unexpected egress**
+**Sandbox (gVisor, signed): called 4 tool(s), 0 behavioral finding(s), no unexpected egress; trust score +3 from the sandbox**
 
 [View full report](https://agentavow.com/check/owner/repo) | [Add badge to README](https://agentavow.com/api/v1/public/scan/owner/repo/badge)
+
+> *This is a code security scan score. [Full composite trust score](https://agentavow.com/check/owner/repo) (including identity verification and external signals) is available on AgentAvow.*
 
 ---
 
@@ -139,7 +152,7 @@ No source code is uploaded. The scan uses publicly available repository metadata
 
 ## Requirements
 
-- The repository must be **public** (private repo scanning requires an API key -- coming soon)
+- The repository must be **public**. This action calls the public scan API, which reads public repos only. A private repo can be scanned two other ways: signed in, `POST /api/v1/account/private-scan` with `{owner, repo, token}` scans it with a GitHub token you supply in the request (used for that scan, never stored, never added to the public catalog); or run the scanner inside your own runner with the [local-scan action](../local-scan-action/), which sends nothing anywhere.
 - The workflow needs `pull-requests: write` permission to post comments
 - Runs on `ubuntu-latest` (uses `bash`, `curl`, and `jq`)
 
@@ -147,4 +160,4 @@ No source code is uploaded. The scan uses publicly available repository metadata
 
 - [AgentAvow](https://agentavow.com) -- Trust infrastructure for AI agents and humans
 - [Check any repo](https://agentavow.com/check) -- Free security posture check
-- [AgentAvow MCP Server](https://github.com/agentgraph-co/agentgraph/tree/main/sdk/mcp-server) -- Use trust data in your AI workflows
+- [AgentAvow MCP Server](https://github.com/AgentAvow/AgentAvow/tree/main/sdk/mcp-server) -- Use trust data in your AI workflows
