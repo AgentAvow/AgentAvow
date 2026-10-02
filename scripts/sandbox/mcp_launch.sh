@@ -157,6 +157,7 @@ while IFS= read -r CAND; do
       NAMES="$(printf '%s' "$ERR" | grep -oE '[A-Z][A-Z0-9_]{3,}' \
         | grep -E 'KEY|TOKEN|SECRET|AUTH|CREDENTIAL|PASSWORD|PASSWD|(^|_)(API|PAT|ACCESS)(_|$)' \
         | grep -vxE 'PATH|HOME|USER|SHELL|PWD|TERM|LANG|NODE_OPTIONS|NODE_PATH|PYTHONPATH' \
+        | grep -vE '_(REGION|ENDPOINT|URL|URI|HOST|HOSTNAME|PORT|BASE|DOMAIN|PATH|DIR|FILE|MODEL|VERSION|ENV|LEVEL|MODE|NAME|ID|TIMEOUT|PROFILE|BUCKET|ZONE)$' \
         | sort -u | head -8 | tr '\n' ',' | sed 's/,$//')"
       if [ -n "$NAMES" ] && [ "$N" -lt "$MAX_LAUNCHES" ]; then
         OLDIFS="$IFS"; IFS=','

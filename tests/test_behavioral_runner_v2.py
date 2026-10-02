@@ -527,3 +527,27 @@ def test_git_plans_install_from_github_and_resolve_the_real_name(monkeypatch):
     assert "git+https://github.com/acme/py-tool" in cmd and ".git" not in cmd.split("py-tool")[1][:4]
     assert r._git_spec("npm-git", "github:o/r") == "github:o/r"
     assert r._git_spec("pypi-git-mcp", "o/r/") == "git+https://github.com/o/r"
+
+
+
+@pytest.mark.parametrize("name, secret", [
+    ("AWS_SECRET_ACCESS_KEY", True), ("AWS_ACCESS_KEY_ID", False), ("GITHUB_TOKEN", True),
+    ("OPENAI_API_KEY", True), ("SUPABASE_ACCESS_TOKEN", True), ("DB_PASSWORD", True),
+    ("BRAVE_API_KEY", True), ("AWS_SESSION_TOKEN", True),
+    ("AWS_REGION", False), ("API_BASE_URL", False), ("KB_ID", False), ("SESSION_ID", False),
+    ("MEMORY_FILE_PATH", False), ("OPENAI_MODEL", False), ("NODE_ENV", False),
+])
+def test_only_secret_names_get_canaries(name, secret):
+    from src.scanner.behavioral.runner import is_secret_name
+    assert is_secret_name(name) is secret
+
+
+def test_region_never_becomes_a_canary_regression():
+    """2026-10-02: AWS_REGION=<canary> made the AWS SDK resolve
+    bedrock-agent-runtime.<canary>.amazonaws.com, graded as a critical credential leak."""
+    from src.scanner.behavioral.runner import _exerciser_args
+    args = _exerciser_args(timeout=60, max_tools=5, canary="agentavow-canary-x",
+                           env_names=["AWS_REGION", "AWS_SECRET_ACCESS_KEY", "KB_ID"],
+                           readme=False)
+    assert "--canary-env AWS_SECRET_ACCESS_KEY" in args
+    assert "AWS_REGION" not in args and "KB_ID" not in args

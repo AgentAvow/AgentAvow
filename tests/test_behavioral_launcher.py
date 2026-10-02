@@ -133,8 +133,8 @@ def test_env_names_in_the_error_are_exported_as_the_canary_and_retried_once(benc
     assert first["env_value"] is None and retry["env_value"] == CANARY
     # same bare candidate, the exerciser's own list EXTENDED (not replaced)
     assert retry["cmd"] == first["cmd"]
-    assert retry["canary_env"] == ["GITHUB_TOKEN", "BRAVE_API_KEY", "BRAVE_API_KEY_FILE"]
-    assert tr.canary_env_names == ["GITHUB_TOKEN", "BRAVE_API_KEY", "BRAVE_API_KEY_FILE"]
+    assert retry["canary_env"] == ["GITHUB_TOKEN", "BRAVE_API_KEY"]  # *_FILE is a path, not a secret
+    assert tr.canary_env_names == ["GITHUB_TOKEN", "BRAVE_API_KEY"]  # *_FILE is a path, not a secret
 
 
 def test_flag_in_the_error_is_retried_with_the_canary_after_the_env_retry(bench):

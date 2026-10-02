@@ -445,11 +445,35 @@ def _files_payload(plan: str, readme_text: str | None) -> str | None:
     return base64.b64encode(gzip.compress(raw, compresslevel=6)).decode("ascii")
 
 
+_SECRET_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "PASS", "PAT",
+                 "CREDENTIAL", "CREDENTIALS", "AUTH", "COOKIE", "SESSION", "PRIVATE",
+                 "BEARER", "JWT", "SIGNATURE")
+# Config that is NOT a secret even when it sits next to one (AWS_REGION, API_BASE_URL…):
+# a canary here becomes part of a hostname/URL the tool legitimately contacts and would
+# read as exfiltration. Seen 2026-10-02: AWS_REGION=canary → DNS for
+# bedrock-agent-runtime.<canary>.amazonaws.com flagged as a credential leak.
+_NOT_SECRET_PARTS = ("REGION", "ENDPOINT", "URL", "URI", "HOST", "HOSTNAME", "PORT", "BASE",
+                     "DOMAIN", "PATH", "DIR", "FILE", "MODEL", "VERSION", "ENV", "LEVEL",
+                     "MODE", "NAME", "ID", "TIMEOUT", "PROFILE", "BUCKET", "ZONE")
+
+
+def is_secret_name(name: str) -> bool:
+    """Does an env var NAME denote a secret (gets a canary) rather than configuration?
+    Word-based on '_'-separated parts: AWS_SECRET_ACCESS_KEY / GITHUB_TOKEN → yes;
+    AWS_REGION / API_BASE_URL / KB_ID / SESSION_ID → no."""
+    parts = [p for p in str(name).upper().split("_") if p]
+    if not parts:
+        return False
+    if parts[-1] in _NOT_SECRET_PARTS:
+        return False
+    return any(p in _SECRET_PARTS or p.endswith(("KEY", "TOKEN", "SECRET")) for p in parts)
+
+
 def _exerciser_args(*, timeout: int, max_tools: int, canary: str, env_names: list[str],
                     readme: bool) -> str:
     args = ["--timeout", str(timeout), "--per-call-timeout", "10", "--max-tools",
             str(max_tools), "--canary-value", canary]
-    names = [n for n in env_names if n and n.replace("_", "").isalnum()]
+    names = [n for n in env_names if n and n.replace("_", "").isalnum() and is_secret_name(n)]
     if names:
         args += ["--canary-env", ",".join(names[:32])]
     if readme:
