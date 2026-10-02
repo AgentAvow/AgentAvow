@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { claudeCodeStdio, cursorStdio, stdioServersConfig, vscodeStdio } from '../lib/installLinks'
 import { Reveal, RevealStagger } from '../components/motion'
+import SEOHead from '../../components/SEOHead'
 
 // Our own MCP server as a stdio target — the "is this safe to install?" check.
 const AA_MCP = { name: 'agentavow-trust', command: 'uvx', args: ['agentavow-trust'] }
@@ -59,6 +60,11 @@ export default function RebrandForDevelopers() {
 
   return (
     <div className="max-w-[960px] mx-auto px-6 py-16">
+      <SEOHead
+        title="For developers — ship a tool your users can trust"
+        description="A signed, offline-recomputable trust score and adoption score for the MCP server, package, or tool you publish. Scan it, fix findings, badge your README."
+        path="/for-developers"
+      />
       {/* hero — the thesis, aimed at the tool author */}
       <Reveal>
         <div className="max-w-[64ch]">

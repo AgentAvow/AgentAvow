@@ -6,6 +6,7 @@ import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSandbox, type C
 import { TrustMini, AdoptionMini } from '../components/TrustMark'
 
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
+import SEOHead from '../../components/SEOHead'
 
 /**
  * The "Yelp" browse catalog — LIVE from /public/scan-catalog.
@@ -288,6 +289,11 @@ export default function RebrandBrowse() {
 
   return (
     <div>
+      <SEOHead
+        title="Find tools your agent can trust"
+        description="The public catalog of scanned repos, packages, MCP servers, and skills — each with a signed trust score and adoption score you can recompute yourself."
+        path="/browse"
+      />
       {/* header block */}
       <div className="max-w-[1080px] mx-auto px-6 pt-14">
         <div className="max-w-[62ch]">

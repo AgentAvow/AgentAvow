@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useAuth } from '../../hooks/useAuth'
 import { trackEvent } from '../../lib/analytics'
+import SEOHead from '../../components/SEOHead'
 
 /**
  * Rebrand-styled sign-in / sign-up. Reuses the real auth (useAuth().login/register)
@@ -44,6 +45,12 @@ export default function RebrandLogin() {
 
   return (
     <div className="max-w-[420px] mx-auto px-6 py-20">
+      <SEOHead
+        title="Sign in"
+        description="Sign in to AgentAvow to watch tools and get change alerts. Checking a tool's trust score is always free and anonymous."
+        path="/login"
+        noindex
+      />
       <div className="text-center">
         <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
           {mode === 'signup' ? 'Create your ' : 'Sign in to '}<span className="gradient-text">AgentAvow</span>{mode === 'signup' ? ' account' : ''}

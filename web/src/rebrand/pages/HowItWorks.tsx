@@ -6,6 +6,7 @@ import { TrustBar, AdoptionNeedle } from '../components/TrustMark'
 import { VerifyDemo } from '../components/VerifyDemo'
 import { SandboxTotalsStrip } from '../components/SandboxStats'
 import { cursorStdio, vscodeStdio } from '../lib/installLinks'
+import SEOHead from '../../components/SEOHead'
 
 const AA_MCP = { name: 'agentavow-trust', command: 'uvx', args: ['agentavow-trust'] }
 
@@ -54,6 +55,11 @@ export default function RebrandHowItWorks() {
   }, [location.hash])
   return (
     <div className="max-w-[880px] mx-auto px-6 py-16">
+      <SEOHead
+        title="How it works — a trust score you don't have to trust"
+        description="Scan, score, attest, verify: how AgentAvow turns scan evidence into a signed trust score and adoption score anyone can recompute offline with public keys."
+        path="/how-it-works"
+      />
       <Reveal>
         <div className="max-w-[62ch]">
           <Eyebrow>How it works</Eyebrow>

@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import api from '../../lib/api'
 import { rp } from '../basePath'
 import { useRotatingPlaceholder } from '../lib/hooks'
+import SEOHead from '../../components/SEOHead'
 
 declare global {
   interface Window { AgentAvow?: { render: (root?: Element | Document) => void } }
@@ -106,6 +107,11 @@ export default function RebrandBadge() {
 
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-14">
+      <SEOHead
+        title="Ship a signed trust badge"
+        description="One line of Markdown puts a live, verifiable trust-score badge (and an adoption badge) in your README, linking to the full signed report. No account."
+        path="/badge"
+      />
       <div className="max-w-[60ch]">
         <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">For developers</span>
         <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight">

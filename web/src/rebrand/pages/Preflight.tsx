@@ -5,6 +5,7 @@ import { getTrustTier } from '../../components/trust/gradeSystem'
 import api from '../../lib/api'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
+import SEOHead from '../../components/SEOHead'
 
 /**
  * Connector Preflight — a pre-submission readiness check for the Anthropic Claude
@@ -105,6 +106,11 @@ export default function RebrandPreflight() {
 
   return (
     <div className="max-w-[820px] mx-auto px-6 py-16">
+      <SEOHead
+        title="Connector preflight — will it pass app-store review?"
+        description="Check your MCP server against the Claude connectors and OpenAI apps rejection gates before you submit — and get a signed trust score either way. Free."
+        path="/preflight"
+      />
       <Reveal>
         <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">Connector Preflight</span>
         <h1 className="mt-3 text-3xl md:text-4xl font-extrabold tracking-tight leading-[1.08]">

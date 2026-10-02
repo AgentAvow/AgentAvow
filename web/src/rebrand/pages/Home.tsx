@@ -11,6 +11,7 @@ import { Reveal, CountUp } from '../components/motion'
 import { trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { SandboxTotalsStrip } from '../components/SandboxStats'
+import SEOHead from '../../components/SEOHead'
 
 const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
 
@@ -149,6 +150,11 @@ export default function RebrandHome() {
 
   return (
     <div>
+      <SEOHead
+        title="Is this AI tool safe to connect?"
+        description="Scan any tool, MCP server, package, or skill your agent connects to and get a signed trust score (0–100) and adoption score. Free, no signup, verifiable."
+        path="/"
+      />
       {/* ① HERO = the check itself */}
       <section className="text-center pt-16 pb-8 px-6">
         <motion.div
