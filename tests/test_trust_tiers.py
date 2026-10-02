@@ -131,6 +131,29 @@ def test_tool_gate_floors_agree():
     assert tool_gate.TIER_FLOORS == TIER_FLOORS
 
 
+def test_admin_dashboard_distribution_buckets_are_the_tier_floors():
+    """metrics_dashboard_router's grade_distribution buckets: one per tier, at the
+    tier's floor, keyed by the API tier value, highest first (the first WHEN that
+    clears wins, like tier_for_score)."""
+    from sqlalchemy.dialects import postgresql
+
+    from src.api import metrics_dashboard_router as m
+
+    assert m._TIER_ORDER == [t.value for t in TIERS]
+    assert not hasattr(m, "_GRADE_CASE") and not hasattr(m, "_GRADE_ORDER")
+    sql = str(m._TIER_CASE.compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+    whens = re.findall(r"trust_score >= (\d+)\) THEN '([a-z]+)'", sql)
+    assert [(int(f), v) for f, v in whens] == [(t.floor, t.value) for t in TIERS[:-1]]
+    assert re.search(r"ELSE '([a-z]+)'", sql).group(1) == TIERS[-1].value
+    for letter in ("'A+'", "'A'", "'B'", "'C'", "'D'", "'F'"):
+        assert letter not in sql
+    # the admin panel iterates the tier table, not a local band list
+    for rel in ("web/src/rebrand/pages/AdminDashboard.tsx", "web/src/pages/admin/MetricsTab.tsx"):
+        src = (ROOT / rel).read_text()
+        assert "TRUST_TIERS" in src and "'A+'" not in src, rel
+
+
 def test_frontend_table_agrees():
     """web/src/components/trust/gradeSystem.ts is the TS twin — same values, floors,
     words, colours (dark + light), posture and verdict phrase, in the same order."""

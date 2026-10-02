@@ -53,6 +53,7 @@ from src.models import (
     ToolWatch,
     VerificationBadge,
 )
+from src.trust_tiers import TIERS
 from src.usage_scope import LEGACY_HOSTS, REDIRECTED_METRIC, RULES_CHANGED_ON
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -218,16 +219,15 @@ def _utc_date_expr(col):
     return func.date(func.timezone(literal_column("'UTC'"), col))
 
 
-_GRADE_CASE = case(
-    (CommunityScan.trust_score >= 96, "A+"),
-    (CommunityScan.trust_score >= 81, "A"),
-    (CommunityScan.trust_score >= 61, "B"),
-    (CommunityScan.trust_score >= 41, "C"),
-    (CommunityScan.trust_score >= 21, "D"),
-    else_="F",
+# The distribution buckets ARE the six trust tiers (src/trust_tiers.py): one bucket per
+# tier at its floor, keyed by the API's `trust_tier` value. Highest tier first — the
+# first floor the score clears wins, exactly as tier_for_score() does in Python.
+_TIER_CASE = case(
+    *[(CommunityScan.trust_score >= t.floor, t.value) for t in TIERS[:-1]],
+    else_=TIERS[-1].value,
 )
 
-_GRADE_ORDER = ["A+", "A", "B", "C", "D", "F"]
+_TIER_ORDER = [t.value for t in TIERS]
 
 
 def metrics_baseline() -> dict:
@@ -284,16 +284,17 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         )
     ) or 0
 
-    # Grade distribution over the live scanned corpus (single grouped query).
+    # Trust-tier distribution over the live scanned corpus (single grouped query).
+    # The response key stays `grade_distribution`; its keys are the six tier values.
     grade_rows = (
         await db.execute(
-            select(_GRADE_CASE.label("grade"), func.count().label("cnt"))
+            select(_TIER_CASE.label("tier"), func.count().label("cnt"))
             .where(CommunityScan.trust_score.isnot(None))
-            .group_by(_GRADE_CASE)
+            .group_by(_TIER_CASE)
         )
     ).all()
     grade_map = {g: c for g, c in grade_rows}
-    grade_distribution = {g: int(grade_map.get(g, 0)) for g in _GRADE_ORDER}
+    grade_distribution = {g: int(grade_map.get(g, 0)) for g in _TIER_ORDER}
 
     # --- Watches ---
     watches_created_window = await db.scalar(

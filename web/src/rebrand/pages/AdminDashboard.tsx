@@ -13,6 +13,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
+import { TRUST_TIERS } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 
@@ -584,14 +585,15 @@ function MetricsTab() {
       </Section>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <Section title="Trust-score distribution" note="Live scanned corpus, all-time, by trust-score band.">
+        <Section title="Trust-tier distribution" note="Live scanned corpus, all-time, by trust tier.">
           <div className="glass rounded-2xl p-5 flex flex-col gap-2">
-            {/* The API still keys these buckets by legacy letter (metrics_dashboard_router._GRADE_CASE);
-                the bands are the score floors behind those keys. */}
-            {([['A+', '96–100'], ['A', '81–95'], ['B', '61–80'], ['C', '41–60'], ['D', '21–40'], ['F', '0–20']] as const).map(([g, band]) => {
-              const n = grades[g] ?? 0
+            {/* One bucket per tier, keyed by the API's trust_tier value — the same six floors
+                as getTrustTier / src/trust_tiers.py (metrics_dashboard_router._TIER_CASE). */}
+            {TRUST_TIERS.map((t, i) => {
+              const top = i === 0 ? 100 : TRUST_TIERS[i - 1].min - 1
+              const n = grades[t.value] ?? 0
               const tot = Object.values(grades).reduce((a, b) => a + b, 0) || 1
-              return <div key={g} className="flex items-center gap-3 text-[13px]"><span className="font-mono w-14 tabular-nums">{band}</span><div className="flex-1 h-2 rounded-full bg-surface overflow-hidden"><div className="h-full bg-primary/60" style={{ width: `${(n / tot) * 100}%` }} /></div><span className="tabular-nums text-text-muted w-16 text-right">{fmt(n)}</span></div>
+              return <div key={t.value} className="flex items-center gap-3 text-[13px]"><span className="w-[7.5rem] shrink-0 flex items-center gap-2"><span className="inline-block w-2 h-2 rounded-full" style={{ background: t.color }} /><span className="font-semibold">{t.name}</span><span className="font-mono tabular-nums text-text-muted text-[11.5px]">{t.min}–{top}</span></span><div className="flex-1 h-2 rounded-full bg-surface overflow-hidden"><div className="h-full" style={{ width: `${(n / tot) * 100}%`, background: t.color }} /></div><span className="tabular-nums text-text-muted w-16 text-right">{fmt(n)}</span></div>
             })}
           </div>
         </Section>

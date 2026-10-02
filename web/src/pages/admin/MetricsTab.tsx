@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import api from '../../lib/api'
 import { InlineSkeleton } from '../../components/Skeleton'
+import { TRUST_TIERS } from '../../components/trust/gradeSystem'
 import { StatCard } from './StatCard'
 
 type Metrics = {
@@ -123,10 +124,10 @@ export default function MetricsTab() {
 
           {data.scans?.grade_distribution && (
             <div>
-              <div className="text-sm font-semibold mb-2">Grade distribution (all-time)</div>
+              <div className="text-sm font-semibold mb-2">Trust-tier distribution (all-time)</div>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-                {['A+', 'A', 'B', 'C', 'D', 'F'].map((g) => (
-                  <StatCard key={g} label={`Grade ${g}`} value={data.scans!.grade_distribution![g] ?? 0} />
+                {TRUST_TIERS.map((t) => (
+                  <StatCard key={t.value} label={t.name} value={data.scans!.grade_distribution![t.value] ?? 0} />
                 ))}
               </div>
             </div>
