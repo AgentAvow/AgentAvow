@@ -79,6 +79,7 @@ from src.api.reply_guy_router import router as reply_guy_router
 from src.api.safety_hardening_router import router as safety_hardening_router
 from src.api.safety_router import router as safety_router
 from src.api.sandbox_router import router as sandbox_router
+from src.api.sandbox_stats_router import router as sandbox_stats_router
 from src.api.scan_catalog_router import router as scan_catalog_router
 from src.api.search_router import router as search_router
 from src.api.security_attestation_router import router as security_attestation_router
@@ -746,6 +747,7 @@ app.include_router(bluesky_feed_router)
 app.include_router(jwks_router)
 
 # Public scan API — trust-tiered security scanning (no auth required)
+app.include_router(sandbox_stats_router, prefix=settings.api_v1_prefix)
 app.include_router(public_scan_router, prefix=settings.api_v1_prefix)
 app.include_router(preflight_router, prefix=settings.api_v1_prefix)
 app.include_router(watch_router, prefix=settings.api_v1_prefix)

@@ -10,6 +10,7 @@ import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini } from
 import { Reveal, CountUp } from '../components/motion'
 import { trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
+import { SandboxTotalsStrip } from '../components/SandboxStats'
 
 const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
 
@@ -238,6 +239,7 @@ export default function RebrandHome() {
               live from the scan catalog · a one-time launch corpus (not continuously re-scanned)
             </div>
           </div>
+          <SandboxTotalsStrip className="mt-3 px-2" linkLabel="Behavioral sandbox →" />
         </Reveal>
       </section>
 

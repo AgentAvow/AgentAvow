@@ -20,6 +20,7 @@ deploy time (no historical backfill) and never block the hot path.
 Endpoints (both under the ``/admin`` prefix, reusing ``require_admin``):
   * GET /admin/metrics            -> JSON aggregation (window = today|7d|30d)
   * GET /admin/metrics/dashboard  -> minimal server-rendered HTML view
+  * GET /admin/metrics/behavioral -> behavioral sandbox health (Redis counters)
 """
 from __future__ import annotations
 
@@ -507,3 +508,151 @@ async def engagement_metrics(
     result = await _aggregate(db, window)
     await cache.set(cache_key, result, ttl=cache.TTL_SHORT)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Behavioral sandbox counters (written by src/api/public_scan_router.py).
+# Daily keys carry a ``:<YYYY-MM-DD>`` (UTC) suffix; lifetime totals have none.
+# Readers here are defensive: a missing key is 0, a malformed value is 0.
+# ---------------------------------------------------------------------------
+BEHAVIORAL_PREFIX = f"{_METRICS_PREFIX}behavioral:"
+BEHAVIORAL_DAILY = (
+    "runs", "exercised", "with_findings", "canary_leaks", "slot_rejected",
+    "cache_hit", "cache_miss", "killed", "duration_sum", "duration_max",
+)
+BEHAVIORAL_START_REASONS = (
+    "started", "needs_credentials", "needs_arguments", "missing_binary",
+    "install_failed", "resource_limit", "no_entrypoint", "timeout", "crashed",
+    "unknown", "not_applicable",
+)
+BEHAVIORAL_RULES = (
+    "behavioral_undeclared_egress", "annotation_readonly_violated",
+    "annotation_open_world_violated", "credential_canary_exfiltrated",
+    "canary_echoed_in_result", "tool_call_crashed_server",
+)
+BEHAVIORAL_TOTALS = ("runs", "exercised", "tools_called", "findings", "canary_leaks")
+
+
+def _num(v: object) -> float:
+    """Redis value -> number; None, garbage or negatives read as 0."""
+    if v is None:
+        return 0.0
+    try:
+        if isinstance(v, bytes):
+            v = v.decode()
+        n = float(v)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    return n if n > 0 and n == n else 0.0  # drop negatives and NaN
+
+
+def window_day_strs(n_days: int) -> list[str]:
+    """The last ``n_days`` UTC dates, oldest first, as YYYY-MM-DD."""
+    today = datetime.now(timezone.utc).date()
+    return [(today - timedelta(days=i)).isoformat() for i in range(n_days - 1, -1, -1)]
+
+
+def behavioral_daily_names() -> list[str]:
+    """Every daily counter name under ``behavioral:`` the readers know about."""
+    return (
+        list(BEHAVIORAL_DAILY)
+        + [f"start:{r}" for r in BEHAVIORAL_START_REASONS]
+        + [f"rule:{r}" for r in BEHAVIORAL_RULES]
+    )
+
+
+async def read_behavioral_counters(
+    day_strs: list[str], daily: list[str], totals: tuple[str, ...] | list[str] = (),
+) -> tuple[dict[str, list[float]], dict[str, float]]:
+    """Read daily + lifetime behavioral counters in ONE Redis MGET.
+
+    Returns ``(daily_values, totals)`` where ``daily_values[name]`` is aligned to
+    ``day_strs``. On any Redis failure everything reads as 0.
+    """
+    keys = [f"{BEHAVIORAL_PREFIX}{name}:{d}" for name in daily for d in day_strs]
+    keys += [f"{BEHAVIORAL_PREFIX}total:{t}" for t in totals]
+    vals: list[object]
+    try:
+        from src.redis_client import get_redis
+
+        vals = list(await get_redis().mget(keys)) if keys else []
+        if len(vals) != len(keys):
+            vals = [None] * len(keys)
+    except Exception:
+        vals = [None] * len(keys)
+    n = len(day_strs)
+    out_daily: dict[str, list[float]] = {}
+    for i, name in enumerate(daily):
+        out_daily[name] = [_num(v) for v in vals[i * n:(i + 1) * n]]
+    base = len(daily) * n
+    out_totals = {t: _num(vals[base + j]) for j, t in enumerate(totals)}
+    return out_daily, out_totals
+
+
+def behavioral_scaling_hint(runs: int, slot_rejected: int, killed: int) -> str:
+    """'add capacity' when >5% of attempts were turned away for lack of a slot,
+    'watch memory' when >10% of runs were killed, else 'ok'."""
+    attempts = runs + slot_rejected
+    if attempts and slot_rejected / attempts > 0.05:
+        return "add capacity"
+    if runs and killed / runs > 0.10:
+        return "watch memory"
+    return "ok"
+
+
+async def _behavioral_aggregate(window: str) -> dict:
+    from src.config import settings
+
+    day_strs = window_day_strs(_WINDOW_DAYS[window])
+    daily, _ = await read_behavioral_counters(day_strs, behavioral_daily_names())
+
+    def tot(name: str) -> int:
+        return int(sum(daily.get(name, [])))
+
+    runs = tot("runs")
+    slot_rejected = tot("slot_rejected")
+    killed = tot("killed")
+    hits, misses = tot("cache_hit"), tot("cache_miss")
+    duration_sum = sum(daily.get("duration_sum", []))
+    duration_max = max(daily.get("duration_max", []) or [0.0])
+    return {
+        "window": window,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "days": day_strs,
+        "runs": runs,
+        "exercised": tot("exercised"),
+        "with_findings": tot("with_findings"),
+        "canary_leaks": tot("canary_leaks"),
+        "slot_rejected": slot_rejected,
+        "killed": killed,
+        "cache_hits": hits,
+        "cache_misses": misses,
+        "cache_hit_rate": round(hits / (hits + misses), 3) if hits + misses else None,
+        "avg_duration_s": round(duration_sum / runs, 1) if runs else None,
+        "max_duration_s": round(duration_max, 1) if duration_max else None,
+        "start_reasons": {r: tot(f"start:{r}") for r in BEHAVIORAL_START_REASONS},
+        "findings_by_rule": {r: tot(f"rule:{r}") for r in BEHAVIORAL_RULES},
+        "series": {
+            k: [int(v) for v in daily[k]] for k in ("runs", "exercised", "slot_rejected")
+        },
+        "concurrency_limit": int(
+            getattr(settings, "scanner_behavioral_max_concurrent", 2) or 2
+        ),
+        "scaling_hint": behavioral_scaling_hint(runs, slot_rejected, killed),
+    }
+
+
+@router.get("/metrics/behavioral", dependencies=[Depends(rate_limit_reads)])
+async def behavioral_metrics(
+    window: str = Query("7d", pattern="^(today|7d|30d)$"),
+    current_entity: Entity = Depends(get_current_entity),
+) -> dict:
+    """Behavioral sandbox health over a window. Admin only.
+
+    Runs, exercised servers, findings, canary leaks, slot rejections (runs turned
+    away because every sandbox slot was busy), killed runs, cache hit rate,
+    durations, start-reason and finding-rule breakdowns, a per-day series, and a
+    ``scaling_hint`` ('add capacity' | 'watch memory' | 'ok'). One Redis MGET.
+    """
+    require_admin(current_entity)
+    return await _behavioral_aggregate(window)

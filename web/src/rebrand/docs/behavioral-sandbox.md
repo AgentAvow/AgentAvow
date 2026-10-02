@@ -11,7 +11,7 @@ sandbox result is an observation attached beside it. A sandbox run never changes
 | npm or PyPI package | Installs it and imports it, so install hooks and import-time code execute. |
 | MCP server published as a package | Installs it, starts it over stdio, completes the MCP handshake, lists its tools, and **calls every tool** with synthetic arguments. |
 | Container image | Runs the image's own entrypoint for a bounded time. |
-| GitHub repo | Runs when the repo maps to a published package; otherwise there is nothing defined to execute. |
+| GitHub repo | Runs the package the repo publishes. A JavaScript/TypeScript or Python repo with no published package is installed straight from GitHub instead (and exercised as an MCP server if it is one). Other repos have nothing defined to execute. |
 | MCP server reached by URL | Not run. Calling tools on someone else's live server could have real side effects, so remote servers get definition analysis only. If the same server ships as a package, scan the package. |
 | Rust crates, Hugging Face models, OpenClaw skills | Static analysis only today. |
 
@@ -82,5 +82,18 @@ single run.
 
 A sandbox run starts automatically the first time a supported package is scanned, from any client:
 the Check page, the public API, the GitHub Action, or the AgentAvow MCP server. The result is cached
-for a day. Add `?behavioral=true` to a package scan URL, or press **Run behavioral analysis** on the
-score page, to force a fresh run.
+for a day. Add `?behavioral=true` to a package scan URL, or press **Run now** (**Re-run behavioral analysis**
+once a result exists) on the score page, to force a fresh run.
+
+## Where the result shows up
+
+- **Score page**: the sandbox panel, which updates itself while a run is in progress.
+- **Watches**: a watched tool whose later run adds findings, an exfiltrated canary, or a new
+  undeclared host raises a behavioral-change alert (an in-app notification and an HMAC-signed webhook).
+- **GitHub Action**: a `Sandbox:` line in the output and PR comment; set `fail_on_behavioral: true`
+  to fail the build on a high or critical sandbox finding. The trust-score gate (`min_score`) is separate.
+- **AgentAvow MCP server**: the scan result carries a `Sandbox:` line: a clean run and where it
+  sent traffic, the behavioral findings, or why the server did not start (not a finding).
+- **Claude Code plugin**: the session-start verdict line carries a sandbox clause, for example
+  `sandbox: clean, 9 tool(s) exercised`, the finding count, or why the server was not exercised.
+- **Catalog**: tools with a sandbox result carry a mark in Browse.

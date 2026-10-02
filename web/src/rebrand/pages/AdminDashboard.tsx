@@ -118,6 +118,104 @@ function WindowToggle({ win, setWin }: { win: Win; setWin: (w: Win) => void }) {
 interface Conversion { funnel?: { event_type: string; count: number; conversion_rate: number }[]; top_pages?: { page: string; count: number }[]; total_events?: number }
 const FUNNEL_LABEL: Record<string, string> = { guest_page_view: 'Page views', guest_cta_click: 'CTA clicks', register_start: 'Register start', register_complete: 'Registered', first_action: 'First action' }
 
+// ── Behavioral sandbox panel (GET /admin/metrics/behavioral) ────────────────
+interface Behavioral {
+  days?: string[]
+  runs?: number; exercised?: number; with_findings?: number; canary_leaks?: number
+  slot_rejected?: number; killed?: number; cache_hits?: number; cache_misses?: number
+  cache_hit_rate?: number | null; avg_duration_s?: number | null; max_duration_s?: number | null
+  start_reasons?: Record<string, number>; findings_by_rule?: Record<string, number>
+  series?: { runs?: number[]; exercised?: number[]; slot_rejected?: number[] }
+  concurrency_limit?: number; scaling_hint?: string
+}
+const START_LABEL: Record<string, string> = {
+  started: 'Started', needs_credentials: 'Needs credentials', needs_arguments: 'Needs arguments',
+  missing_binary: 'Missing binary', install_failed: 'Install failed', resource_limit: 'Resource limit',
+  no_entrypoint: 'No entrypoint', timeout: 'Timeout', crashed: 'Crashed', unknown: 'Unknown',
+  not_applicable: 'Install-only (n/a)',
+}
+const RULE_LABEL: Record<string, string> = {
+  behavioral_undeclared_egress: 'Undeclared egress', annotation_readonly_violated: 'Read-only annotation violated',
+  annotation_open_world_violated: 'Open-world annotation violated', credential_canary_exfiltrated: 'Canary credential exfiltrated',
+  canary_echoed_in_result: 'Canary echoed in result', tool_call_crashed_server: 'Tool call crashed server',
+}
+
+function BarList({ title, rows, labels, empty, gradient }: { title: string; rows: Record<string, number>; labels: Record<string, string>; empty: string; gradient: string }) {
+  const entries = Object.entries(rows).sort((a, b) => b[1] - a[1])
+  const total = entries.reduce((a, [, n]) => a + n, 0)
+  const max = Math.max(...entries.map(([, n]) => n), 1)
+  return (
+    <div className="glass rounded-2xl p-5 min-w-0">
+      <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-3">{title}</div>
+      {total > 0 ? entries.map(([k, n]) => (
+        <div key={k} className={`mb-2${n === 0 ? ' opacity-50' : ''}`}>
+          <div className="flex justify-between text-[12.5px] mb-1"><span className="text-text-muted truncate">{labels[k] || k}</span><span className="tabular-nums text-text-muted/70 ml-3">{fmt(n)} <span className="text-[11px]">({Math.round((n / total) * 100)}%)</span></span></div>
+          <div className="h-2 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(n / max) * 100}%`, background: gradient }} /></div>
+        </div>
+      )) : <p className="text-[12.5px] text-text-muted/70">{empty}</p>}
+    </div>
+  )
+}
+
+function BehavioralPanel({ win }: { win: Win }) {
+  const { data } = useQuery<Behavioral>({
+    queryKey: ['admin-dash-behavioral', win],
+    queryFn: async () => (await api.get('/admin/metrics/behavioral', { params: { window: win } })).data,
+  })
+  const b = data || {}
+  const s = b.series || {}
+  const runs = b.runs ?? 0
+  const attempts = runs + (b.slot_rejected ?? 0)
+  const hint = b.scaling_hint || 'ok'
+  const hintCls = hint === 'ok' ? 'text-success border-success/40' : 'text-warning border-warning/40'
+  const days = b.days || []
+  const runSeries = s.runs || []
+  const smax = Math.max(...runSeries, ...(s.slot_rejected || []), 1)
+  return (
+    <Section
+      title="Behavioral sandbox"
+      note="Sandbox runs from the public scan path (gVisor, every tool called with synthetic args, canary credentials). 'Slot rejected' = a run turned away because every concurrent slot was busy. Counters are best-effort Redis day keys; no backfill."
+      right={<span className={`font-mono text-[11.5px] px-2.5 py-1 rounded-lg border ${hintCls}`}>scaling: {hint} · limit {fmt(b.concurrency_limit)}</span>}
+    >
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <Stat label="Runs" value={fmt(runs)} series={s.runs} />
+        <Stat label="Servers exercised" value={fmt(b.exercised)} sub={runs ? `${Math.round(((b.exercised ?? 0) * 100) / runs)}% of runs` : undefined} series={s.exercised} />
+        <Stat label="Runs with findings" value={fmt(b.with_findings)} />
+        <Stat label="Canary leaks" value={fmt(b.canary_leaks)} />
+        <Stat label="Slot rejected" value={fmt(b.slot_rejected)} sub={attempts ? `${Math.round(((b.slot_rejected ?? 0) * 100) / attempts)}% of attempts` : undefined} series={s.slot_rejected} />
+        <Stat label="Killed" value={fmt(b.killed)} sub={runs ? `${Math.round(((b.killed ?? 0) * 100) / runs)}% of runs` : undefined} />
+        <Stat label="Cache hit rate" value={b.cache_hit_rate != null ? `${Math.round(b.cache_hit_rate * 100)}%` : '—'} sub={`${fmt(b.cache_hits)} hit · ${fmt(b.cache_misses)} miss`} />
+        <Stat label="Duration avg / max" value={b.avg_duration_s != null ? `${b.avg_duration_s}s` : '—'} sub={b.max_duration_s != null ? `max ${b.max_duration_s}s` : undefined} />
+      </div>
+      <div className="grid md:grid-cols-2 gap-3 mt-3">
+        <BarList title="Start reason" rows={b.start_reasons || {}} labels={START_LABEL} empty="No sandbox runs recorded in this window." gradient="linear-gradient(90deg,#2dd4bf,#818cf8)" />
+        <BarList title="Findings by rule" rows={b.findings_by_rule || {}} labels={RULE_LABEL} empty="No behavioral findings in this window." gradient="linear-gradient(90deg,#f59e0b,#e879f9)" />
+      </div>
+      {days.length > 1 && (
+        <div className="glass rounded-2xl p-5 mt-3">
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-3">Per day — runs · exercised · slot rejected</div>
+          <div className="space-y-1">
+            {days.map((d, i) => {
+              const r = runSeries[i] ?? 0, e = s.exercised?.[i] ?? 0, rj = s.slot_rejected?.[i] ?? 0
+              return (
+                <div key={d} className="flex items-center gap-3 text-[12px]">
+                  <span className="font-mono text-text-muted/70 w-[5.5rem] shrink-0">{d.slice(5)}</span>
+                  <div className="flex-1 h-2 rounded-full bg-surface overflow-hidden flex">
+                    <div className="h-full" style={{ width: `${(r / smax) * 100}%`, background: 'linear-gradient(90deg,#2dd4bf,#818cf8)' }} />
+                    <div className="h-full bg-warning/70" style={{ width: `${(rj / smax) * 100}%` }} />
+                  </div>
+                  <span className="tabular-nums text-text-muted/70 w-28 text-right shrink-0">{fmt(r)} · {fmt(e)} · {fmt(rj)}</span>
+                </div>
+              )
+            })}
+          </div>
+          <p className="mt-2 text-[11px] text-text-muted/60">Bar: runs (teal) then slot rejections (amber), scaled to the busiest day.</p>
+        </div>
+      )}
+    </Section>
+  )
+}
+
 // ── METRICS TAB ──────────────────────────────────────────────────────────────
 function MetricsTab() {
   const [win, setWin] = useState<Win>('7d')
@@ -240,6 +338,8 @@ function MetricsTab() {
           </Section>
         )
       })()}
+
+      <BehavioralPanel win={win} />
 
       <Section title="Who is calling — people, agents, automation" note="Public scan requests and badge fetches split by the caller's User-Agent (this window). 'Automated' is crawlers, uptime monitors and scripts — including our own — and is not usage. Honest usage = people + agents. Counting started when this split shipped, so the totals here can trail the older aggregate counters for the first window.">
         <div className="grid md:grid-cols-2 gap-4">

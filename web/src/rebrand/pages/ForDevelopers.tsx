@@ -124,6 +124,28 @@ export default function RebrandForDevelopers() {
           fully offline. Nothing leaves your machine. <Link to={rp('/rebrand/docs/run-locally')} className="text-primary-light hover:text-primary">Run locally &amp; in CI →</Link>
         </p>
       </Reveal>
+      <Reveal>
+        <div className="mt-4 glass rounded-xl p-5">
+          <div className="text-[15px] font-semibold">Gate pull requests on the score and on sandbox behavior</div>
+          <p className="mt-1.5 text-text-muted text-[13.5px] leading-relaxed max-w-[64ch]">
+            For a public repo, the hosted GitHub Action comments the trust score on every PR. When the repo publishes a
+            package (or is a JavaScript or Python project), AgentAvow also runs it in the behavioral sandbox and the
+            Action prints a <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">Sandbox:</code> line.
+            Set <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">fail_on_behavioral: true</code> to
+            fail the build on a high or critical sandbox finding. It is a separate gate from <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">min_score</code>,
+            and a pending sandbox run never fails the step.
+          </p>
+          <pre className="mt-3 font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3 text-text overflow-x-auto">{`- uses: AgentAvow/AgentAvow/github-action@main
+  with:
+    min_score: 70
+    fail_on_findings: true
+    fail_on_behavioral: true`}</pre>
+          <div className="mt-2.5 flex gap-4 flex-wrap text-[13px]">
+            <a href="https://github.com/AgentAvow/AgentAvow/tree/main/github-action" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary-light hover:text-primary">Action inputs ↗</a>
+            <Link to={rp('/rebrand/docs/behavioral-sandbox')} className="font-semibold text-primary-light hover:text-primary">How the sandbox works →</Link>
+          </div>
+        </div>
+      </Reveal>
 
       {/* 3 — show it off (assets) */}
       <Reveal>
@@ -178,7 +200,7 @@ export default function RebrandForDevelopers() {
             <a href="https://pypi.org/project/agentavow-trust/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">PyPI ↗</a>
           </div>
           <p className="mt-3 text-[13px] text-text-muted">Claude Code: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">{claudeCodeStdio(AA_MCP)}</code></p>
-          <p className="mt-2 text-[13px] text-text-muted">Or install the Claude Code plugin, which also scans each new MCP server at session start: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin marketplace add AgentAvow/AgentAvow</code> then <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin install agentavow-trust@agentavow</code>. <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="text-primary-light hover:underline">How it works</Link>.</p>
+          <p className="mt-2 text-[13px] text-text-muted">Or install the Claude Code plugin, which also scans each new MCP server at session start: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin marketplace add AgentAvow/AgentAvow</code> then <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin install agentavow-trust@agentavow</code>. Its verdict line for each server includes the sandbox result (for example <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">sandbox: clean, 9 tool(s) exercised</code>) and says when the maintainer has deprecated the package. <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="text-primary-light hover:underline">How it works</Link>.</p>
           <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Or add it by hand (any MCP client)</div>
           <div className="relative">
             <pre className="font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3.5 pr-16 text-text overflow-x-auto">{MCP_CONFIG}</pre>

@@ -5,6 +5,7 @@ import { Reveal } from '../components/motion'
 import { TrustMini, AdoptionMini } from '../components/TrustMark'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity, type CatalogRow } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
+import { SandboxFindingsBlock } from '../components/SandboxStats'
 
 interface RecentItem { surface: string; name: string; full_name: string | null; trust_score: number | null; at: string | null }
 
@@ -187,6 +188,9 @@ export default function RebrandTrustIndex() {
           </div>
         </div>
       </Reveal>
+
+      {/* From the sandbox — 30-day behavioral findings by rule (hidden until the sandbox has run) */}
+      <Reveal><div className="mt-4"><SandboxFindingsBlock /></div></Reveal>
 
       {/* leaderboards */}
       <Reveal>

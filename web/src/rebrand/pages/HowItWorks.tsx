@@ -4,6 +4,7 @@ import { rp } from '../basePath'
 import { Reveal, RevealStagger } from '../components/motion'
 import { TrustBar, AdoptionNeedle } from '../components/TrustMark'
 import { VerifyDemo } from '../components/VerifyDemo'
+import { SandboxTotalsStrip } from '../components/SandboxStats'
 import { cursorStdio, vscodeStdio } from '../lib/installLinks'
 
 const AA_MCP = { name: 'agentavow-trust', command: 'uvx', args: ['agentavow-trust'] }
@@ -93,13 +94,14 @@ export default function RebrandHowItWorks() {
 
       {/* pipeline */}
       <Reveal>
-        <h2 className="mt-12 text-xl font-bold">Paste → scan → sign.</h2>
+        <h2 className="mt-12 text-xl font-bold">Paste → scan → run → sign.</h2>
       </Reveal>
-      <RevealStagger className="grid md:grid-cols-3 gap-3 mt-4" stagger={0.06}>
+      <RevealStagger className="grid sm:grid-cols-2 md:grid-cols-4 gap-3 mt-4" stagger={0.06}>
         {[
           ['01', 'You paste a URL', 'A repo, MCP server, npm/PyPI package, or skill. No signup, no install.'],
           ['02', 'We read the actual code', 'Not metadata or self-claims — the real source, across the categories below.'],
-          ['03', 'You get a signed score', 'A 0–100 trust score plus a cryptographic attestation you can verify offline.'],
+          ['03', 'We run it in a sandbox', 'Packages and MCP servers are installed and run in isolation, every tool called, with fake credentials planted.'],
+          ['04', 'You get a signed score', 'A 0–100 trust score plus a cryptographic attestation you can verify offline. The sandbox run is signed separately.'],
         ].map(([n, h, p]) => (
           <div key={n} className="glass rounded-xl p-5">
             <div className="font-mono text-[12px] text-primary-light">{n}</div>
@@ -108,6 +110,27 @@ export default function RebrandHowItWorks() {
           </div>
         ))}
       </RevealStagger>
+
+      {/* behavioral sandbox — the run step, with live totals */}
+      <Reveal>
+        <div id="sandbox" className="mt-4 glass rounded-2xl p-6 border-l-4 border-accent/50 scroll-mt-24">
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <h3 className="text-[16px] font-bold">Behavioral sandbox: what the tool actually does.</h3>
+            <span className="font-mono text-[11px] text-text-muted">gVisor · canary credentials · signed</span>
+          </div>
+          <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
+            Reading code misses what only shows up at runtime. So we install npm, PyPI and Docker packages in a fresh
+            gVisor container, start MCP servers and <strong className="text-text">call every tool</strong> with synthetic
+            arguments, and fill the environment variables a tool reads with <strong className="text-text">canary
+            credentials</strong>. If a canary leaves the machine, that is credential exfiltration, graded critical. We also flag
+            undeclared network hosts and read-only tools that write files. Each run is signed as a
+            <strong className="text-text"> BehavioralObservation</strong> and shown beside the score. Watches alert you when a later run turns up new sandbox findings, and the GitHub Action can fail a build on a
+            high or critical sandbox finding.
+          </p>
+          <SandboxTotalsStrip className="mt-4" align="start" linkLabel={null} />
+          <Link to={rp('/rebrand/docs/behavioral-sandbox')} className="inline-block mt-3 text-[13.5px] font-semibold text-primary-light hover:text-primary">How the behavioral sandbox works →</Link>
+        </div>
+      </Reveal>
 
       {/* run it yourself — local / CI */}
       <Reveal>

@@ -96,7 +96,18 @@ configured:
 echo '{}' | python3 ~/.claude/hooks/agentavow_precheck.py
 ```
 
-You should see a verdict line per new MCP server. Run it again and it stays silent
+You should see a verdict line per new MCP server, for example:
+
+```
+✅ MCP 'files' (npm:@acme/files-mcp): AgentAvow 92/100 — safe; sandbox: clean, 9 tool(s) exercised.
+```
+
+For a server that runs from an npm or PyPI package, the line ends with the
+[behavioral sandbox](./behavioral-sandbox.md) result: clean with the number of tools
+exercised, the number of behavioral findings, a leaked canary credential, a run still
+pending, or why the server was not exercised (for example, it needs credentials). If the
+maintainer has deprecated the package, the line says `DEPRECATED by its maintainer (no more
+security fixes)`. Run it again and it stays silent
 (already-scanned servers are cached in `~/.cache/agentavow/scanned.json`). End to
 end: add a new server, then start a new session and the verdict appears in context.
 

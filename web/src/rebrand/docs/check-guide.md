@@ -61,6 +61,11 @@ Each finding lists a **severity** (critical / high / medium / low), the category
 A finding is evidence, not an opinion — it points at the exact line or manifest entry. This is the "review"
 of a tool: recomputable scan evidence, not a star rating.
 
+**Deprecated packages.** If the maintainer has retired an npm or PyPI package (npm `deprecated`, a yanked
+PyPI release, or the `Development Status :: 7 - Inactive` classifier), you'll see a **medium maintenance
+finding** quoting their message and a deprecation banner on the result. It lowers the score but is not a
+blocker. No more security fixes are coming, so don't adopt it for new work.
+
 False positive? See [how scoring works](./how-grading-works.md).
 
 ## Declare your tool's scope (optional)
@@ -68,6 +73,20 @@ False positive? See [how scoring works](./how-grading-works.md).
 Own the tool? Drop an [`.agentavow.yml`](https://github.com/AgentAvow/AgentAvow/blob/main/.agentavow.yml) at your
 repo root declaring the hosts it contacts and the capabilities it uses — AgentAvow surfaces it on your score page
 as **Declared scope**, and the behavioral tier holds the tool to it: any egress it didn't declare becomes a finding.
+
+## The sandbox result
+
+For npm and PyPI packages, container images, and MCP servers published as packages, AgentAvow also **runs**
+the tool in an isolated gVisor sandbox the first time it is scanned. An MCP server is started and **every tool is
+called** with synthetic arguments; the environment variables the tool reads hold **canary credentials** (fake,
+unique values). The result panel shows which tools were exercised, the hosts the tool contacted, the files it
+wrote, and any behavioral findings: undeclared egress, a read-only tool that wrote files, a canary that left the
+machine (critical), or a secret returned in a tool result. If a server could not be started, the panel says why
+(for example `needs_credentials` or `missing_binary`); that is never a finding.
+
+Each run is signed as a **BehavioralObservation** (same key as the score) and shown beside the score. The panel
+fills in on its own while a run is in progress; press **Run now** (or **Re-run behavioral analysis**) to force a
+fresh run.
 
 See [Behavioral sandbox](./behavioral-sandbox.md) for what the sandbox runs, observes, and never does.
 
@@ -80,7 +99,11 @@ you can recompute it. See [Verify an AgentAvow attestation](./verify-attestation
 ## Stay safe over time
 
 Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its score drops
-or its signed definition changes — the rug-pull you'd otherwise miss.
+or its signed definition changes — the rug-pull you'd otherwise miss. Once the sandbox has run a watched tool, a
+later run that adds behavioral findings (a leaked canary, a new undeclared host) raises an alert too.
+
+In CI, the [GitHub Action](https://github.com/AgentAvow/AgentAvow/tree/main/github-action) prints a `Sandbox:`
+line with the result, and `fail_on_behavioral: true` fails the build on a high or critical sandbox finding.
 
 ## Next
 

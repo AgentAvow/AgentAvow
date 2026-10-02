@@ -48,6 +48,19 @@ Every verdict carries a **coverage block** stating exactly what was measured: th
 
 Dependencies are checked against a real vulnerability database (OSV) across the full resolved tree — not a regex list. Vulnerabilities apply a **bounded, saturating penalty** (a CVE-class hit is capped; it can't false-fail a healthy package on transitive noise), while a **known-malicious (MAL) package is disqualifying**. Dev-only dependencies are excluded — a consumer never installs them.
 
+## Deprecated packages
+
+A package can be clean and still a bad choice: its maintainer has retired it and no security fixes are coming. When the registry carries that signal, the scan reports it as a **medium maintenance finding** (dependency-health axis) that quotes the maintainer's message:
+
+- **npm** — the resolved version is marked `deprecated`.
+- **PyPI** — the release is **yanked** (with its reason, when given), or the project carries the `Development Status :: 7 - Inactive` classifier.
+
+The finding lowers the score like any medium finding. It is not a blocker and does not cap the score the way a critical does. The score page shows a deprecation banner, and the MCP server and Claude Code plugin lead with "deprecated by its maintainer" instead of "clean". GitHub repos already carry the equivalent signal when the repo is **archived**.
+
+## The behavioral sandbox
+
+Static analysis reads a tool. For packages and MCP servers we also **run** it: a fresh gVisor container installs it, starts an MCP server and calls every tool with synthetic arguments, and plants canary credentials in the environment variables it reads. The result (hosts contacted, files written, tool calls, findings) is signed as a separate **BehavioralObservation** with the same key as the score, and shown beside the score on the result page. For how a sandbox run relates to the trust score, what it observes, and what a clean run does and does not prove, see [Behavioral sandbox](./behavioral-sandbox.md).
+
 ## The surfaces we score
 
 Point AgentAvow at anything your agent connects to — a repo, a package on four registries, a model, a container, a live server, or a skill:
