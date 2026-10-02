@@ -266,6 +266,22 @@ class Settings(BaseSettings):
     scanner_behavioral_max_concurrent: int = 2
     scanner_behavioral_memory_mb: int = 1024   # docker --memory for v2 runs (MB)
     scanner_behavioral_pids: int = 512         # docker --pids-limit for v2 runs
+    # --- Behavioral backfill (src/jobs/behavioral_backfill.py) --------------------
+    # Sandboxes the browse catalog's long tail at LOW priority: every
+    # behavioral_backfill_interval_minutes it takes up to behavioral_backfill_batch
+    # sandbox-eligible community_scans rows (npm / pypi / docker / openclaw, plus github
+    # repos that are JS/TS or Python), most-adopted first, that have cached scan data
+    # and no cached sandbox block, and enqueues a run that only takes a slot when at
+    # least one slot stays free for real scans (with max_concurrent=2: only when the
+    # sandbox is idle). The first deferred run ends the pass. A row is retried after
+    # behavioral_backfill_retry_days. Needs scanner_behavioral_enabled; does nothing
+    # otherwise. The on-change trigger (re-run when a tool's version / tool digest
+    # moves) is NOT gated by these — it rides the catalog and watch re-scan loops.
+    behavioral_backfill_enabled: bool = True
+    behavioral_backfill_interval_minutes: int = 10
+    behavioral_backfill_batch: int = 6
+    behavioral_backfill_max_examined: int = 400   # rows looked at per pass (bounds Redis work)
+    behavioral_backfill_retry_days: int = 7
 
     # --- Phase 5: maintainer / behavioral trust signals -----------------------
     # Cheap GitHub-METADATA maintainer signals (NO code execution, NO sandbox):

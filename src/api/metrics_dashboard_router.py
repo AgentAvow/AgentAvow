@@ -728,6 +728,38 @@ def behavioral_scaling_hint(runs: int, slot_rejected: int, killed: int) -> str:
     return "ok"
 
 
+BACKFILL_DAILY = ("attempted", "started", "deferred", "skipped")
+TRIGGER_REASONS = ("version_change", "watch", "backfill")
+
+
+async def _behavioral_backfill_block(day_strs: list[str]) -> dict:
+    """Backfill progress (``ag:backfill:behavioral:progress``) + the window's backfill
+    and trigger counters, for the ``backfill`` key of /admin/metrics/behavioral."""
+    from src.jobs.behavioral_backfill import read_backfill_progress
+
+    names = [f"backfill:{n}" for n in BACKFILL_DAILY]
+    names += [f"trigger:{r}" for r in TRIGGER_REASONS]
+    names += [f"trigger:{r}:started" for r in TRIGGER_REASONS]
+    daily, _ = await read_behavioral_counters(day_strs, names)
+    progress = await read_backfill_progress()
+
+    def tot(name: str) -> int:
+        return int(sum(daily.get(name, [])))
+
+    total = int(progress.get("total_eligible") or 0)
+    done = int(progress.get("done") or 0)
+    return {
+        **progress,
+        "pct_done": round(100.0 * done / total, 1) if total else None,
+        **{n: tot(f"backfill:{n}") for n in BACKFILL_DAILY},
+        "triggers": {
+            r: {"enqueued": tot(f"trigger:{r}"), "started": tot(f"trigger:{r}:started")}
+            for r in TRIGGER_REASONS
+        },
+        "series": {n: [int(v) for v in daily[f"backfill:{n}"]] for n in ("started", "deferred")},
+    }
+
+
 async def _behavioral_aggregate(window: str) -> dict:
     from src.config import settings
 
@@ -767,6 +799,7 @@ async def _behavioral_aggregate(window: str) -> dict:
             getattr(settings, "scanner_behavioral_max_concurrent", 2) or 2
         ),
         "scaling_hint": behavioral_scaling_hint(runs, slot_rejected, killed),
+        "backfill": await _behavioral_backfill_block(day_strs),
     }
 
 
