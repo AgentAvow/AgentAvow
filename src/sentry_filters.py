@@ -37,6 +37,21 @@ def _is_scan_timeout(exc: BaseException | None) -> bool:
     )
 
 
+def _is_unattributed_disconnect(event: dict, exc: BaseException | None) -> bool:
+    """Starlette's BaseHTTPMiddleware raises RuntimeError("No response returned.") only
+    when the client went away before the app produced a response. When uvicorn logs
+    that as "Exception in ASGI application" the event carries no request URL, so the
+    /mcp gate below cannot see it (Sentry BACKEND-28, 2026-10-03: a GET /mcp SSE
+    stream closed by the client, nginx 499). With no URL there is nothing to attribute
+    the disconnect to, and the exception itself is the whole story: drop it."""
+    if (event.get("request") or {}).get("url"):
+        return False
+    return any(
+        isinstance(e, RuntimeError) and _MCP_DISCONNECT_MESSAGES[0] in str(e)
+        for e in _exception_chain(exc)
+    )
+
+
 def _is_mcp_client_disconnect(event: dict, exc: BaseException | None) -> bool:
     path = urlsplit((event.get("request") or {}).get("url") or "").path
     logger_name = event.get("logger") or ""
@@ -54,6 +69,10 @@ def _is_mcp_client_disconnect(event: dict, exc: BaseException | None) -> bool:
 def before_send(event: dict, hint: dict | None) -> dict | None:
     exc_info = hint.get("exc_info") if hint else None
     exc = exc_info[1] if exc_info else None
-    if _is_scan_timeout(exc) or _is_mcp_client_disconnect(event, exc):
+    if (
+        _is_scan_timeout(exc)
+        or _is_mcp_client_disconnect(event, exc)
+        or _is_unattributed_disconnect(event, exc)
+    ):
         return None
     return event

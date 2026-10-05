@@ -213,3 +213,15 @@ requirements file.
 This directory (the vector file, `source.json`, `generate.mjs`, `verify.mjs` and this README) is licensed under
 Apache-2.0; see [`LICENSE`](./LICENSE) here. The repository LICENSE grants a subdirectory with its own LICENSE file
 its own terms, so these vectors can be vendored and redistributed by any implementer.
+
+## Run it yourself and report
+
+Nothing here needs permission or guidance from AgentAvow. The inputs are pinned in this directory,
+the procedure is `node verify.mjs` (Node 18+, no dependencies, no network), and the classification
+rules are the ones the verifier prints: every check is `ok` or `FAIL`, and the run exits non-zero on any
+failure. To report a run, state the commit of this directory you ran, your Node version and OS, the
+verifier output verbatim, and whether you wrote your own implementation of the derivation or used
+`verify.mjs`. A run by someone who authored neither these vectors nor the implementation under test is
+the only kind that counts as independent; a run of your own reader is a separate implementation, run by
+its author, and should be labelled that way. The claim ceiling above applies to every run regardless of
+who performs it.

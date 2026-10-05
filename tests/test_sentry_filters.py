@@ -80,6 +80,19 @@ def test_same_exception_elsewhere_still_reports(url):
     assert before_send(ev, _hint(RuntimeError("No response returned."))) is ev
 
 
+def test_disconnect_logged_by_uvicorn_without_a_request_url_is_dropped():
+    """BACKEND-28: uvicorn's 'Exception in ASGI application' log event carries no
+    request context, so the /mcp path gate never sees it. The RuntimeError only exists
+    when the client went away; with no URL it is dropped on the exception alone."""
+    ev = _event(logger="uvicorn.error", logentry={"message": "Exception in ASGI application"})
+    assert before_send(ev, _hint(RuntimeError("No response returned."))) is None
+
+
+def test_other_runtime_errors_without_a_url_still_report():
+    ev = _event(logger="uvicorn.error")
+    assert before_send(ev, _hint(RuntimeError("boom"))) is ev
+
+
 def test_designed_scan_timeout_is_dropped():
     exc = HTTPException(status_code=503, detail="Scan is taking longer than usual.")
     assert before_send(_event("https://agentavow.com/api/v1/public/scan/x/y"), _hint(exc)) is None
