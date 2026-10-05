@@ -788,6 +788,7 @@ async def _track_checker(request) -> None:
         await bump_metric_by_client("scan_request", request.headers.get("user-agent", ""))
     except Exception:
         pass
+
     try:
         from src.api.rate_limit import _get_client_ip, _get_entity_id
         from src.scanner.adoption_sources import checker_identity, record_global_checker

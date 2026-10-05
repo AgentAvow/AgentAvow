@@ -148,7 +148,12 @@ async def usage_scope_middleware(request, call_next):
 
 
 async def _finish(scope: UsageScope, status_code: int, request) -> None:
-    from src.api.metrics_dashboard_router import bump_metric, record_human_visitor
+    from src.api.metrics_dashboard_router import (
+        bump_metric,
+        is_hook_request,
+        record_hook_checkin,
+        record_human_visitor,
+    )
 
     names = settle(scope, status_code)
     if scope.excluded:
@@ -163,3 +168,9 @@ async def _finish(scope: UsageScope, status_code: int, request) -> None:
         from src.api.rate_limit import _get_client_ip
 
         await record_human_visitor(_get_client_ip(request), user_agent)
+    # The Claude Code plugin's session-start hook: counted here, after the handler,
+    # so a cached scan (the common case) still registers the machine it ran on.
+    if is_hook_request(request.url.path, user_agent):
+        from src.api.rate_limit import _get_client_ip
+
+        await record_hook_checkin(_get_client_ip(request), user_agent)

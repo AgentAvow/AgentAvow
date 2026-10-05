@@ -156,6 +156,15 @@ async def _bump(metric: str) -> None:
 _SURFACE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "agentavow_mcp_surface", default="other"
 )
+# The caller's IP and User-Agent, for the distinct-callers-per-day HLL (see
+# src/api/metrics_dashboard_router.record_unique). Captured in mcp_asgi_app; the IP
+# is the one uvicorn already resolved through --proxy-headers. Never logged.
+_CLIENT_IP: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "agentavow_mcp_client_ip", default=""
+)
+_CLIENT_UA: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "agentavow_mcp_client_ua", default=""
+)
 
 # Order matters: "claude-code" must be tested before "claude" (it contains it).
 _SURFACE_MATCHERS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -194,6 +203,20 @@ async def _bump_s(metric: str) -> None:
     except Exception:
         surface = "other"
     await _bump(f"{metric}:{surface}")
+
+
+async def _record_caller() -> None:
+    """Add this tool call's machine to today's distinct-callers HLL, overall and per
+    surface, so the dashboard can say how many machines invoked the connector rather
+    than how many calls arrived. Best-effort — never raises."""
+    try:
+        from src.api.metrics_dashboard_router import record_unique
+
+        ip, ua = _CLIENT_IP.get(), _CLIENT_UA.get()
+        await record_unique("mcp:callers", ip, ua)
+        await record_unique(f"mcp:callers:{_SURFACE.get()}", ip, ua)
+    except Exception:
+        pass
 
 
 def _trust_bar(score: int) -> str:
@@ -1448,6 +1471,7 @@ async def _call_tool(
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
     await _bump_s("calls:total")
     await _bump(f"tool:{name}")
+    await _record_caller()
     try:
         if name == "about_agentavow":
             return _text(_ABOUT)
@@ -1638,6 +1662,9 @@ async def mcp_asgi_app(scope, receive, send) -> None:
                 ua = v.decode("latin-1", "replace")
                 break
         _SURFACE.set(_surface_from_ua(ua))
+        _CLIENT_UA.set(ua)
+        client = scope.get("client")
+        _CLIENT_IP.set(str(client[0]) if client else "")
     except Exception:
         pass
     await session_manager.handle_request(scope, receive, send)
