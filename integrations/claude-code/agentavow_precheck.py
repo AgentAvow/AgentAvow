@@ -416,8 +416,10 @@ def _intro_message() -> str:
         if _install_source() == "plugin"
         else 'ask Claude "is <tool> safe?" or open https://agentavow.com/check'
     )
-    return ("AgentAvow: no remote MCP servers to scan yet; new ones are graded at your next "
-            f"session start. To check a tool before you connect it, {how}.")
+    return ("AgentAvow: no remote MCP servers to scan yet. Add one (for example "
+            "`claude mcp add <name> <https url>` or `claude mcp add <name> -- npx <package>`) "
+            "and it is graded before it is added, and again at your next session start. "
+            f"To check any tool right now, {how}.")
 
 
 def _show_intro_once() -> None:

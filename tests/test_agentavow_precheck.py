@@ -65,6 +65,8 @@ def _ok(score: int, verdict: str, blocking: int, **extra) -> dict:
 def test_both_copies_are_identical():
     assert PLUGIN_COPY.read_text() == MANUAL_COPY.read_text()
     assert GATE_COPY.read_text() == GATE_MANUAL_COPY.read_text()
+    assert ((PLUGIN_DIR / "scripts" / "agentavow_pre_install.py").read_text()
+            == (ROOT / "integrations" / "claude-code" / "agentavow_pre_install.py").read_text())
 
 
 def test_versions_agree():
@@ -74,6 +76,7 @@ def test_versions_agree():
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
     assert hook.__version__ == plugin["version"] == market["plugins"][0]["version"]
     assert gate.__version__ == plugin["version"]
+    assert _load(PLUGIN_DIR / "scripts" / "agentavow_pre_install.py").__version__ == plugin["version"]
 
 
 def test_plugin_registers_both_hooks_with_short_timeouts():
@@ -86,6 +89,10 @@ def test_plugin_registers_both_hooks_with_short_timeouts():
         assert gate["hooks"][0]["timeout"] <= 10
         assert "agentavow_pretool_gate.py" in gate["hooks"][0]["command"]
         assert "agentavow_precheck.py" in cfg["SessionStart"][0]["hooks"][0]["command"]
+        install = cfg["PreToolUse"][1]
+        assert install["matcher"] == "Bash|Write|Edit|MultiEdit"
+        assert install["hooks"][0]["timeout"] <= 20
+        assert "agentavow_pre_install.py" in install["hooks"][0]["command"]
 
 
 def test_user_agent_names_the_install_source():

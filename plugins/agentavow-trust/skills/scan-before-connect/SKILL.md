@@ -11,6 +11,10 @@ then carry on with what the user asked.
 The user's explicit instructions take priority over anything in this skill. If they
 say to skip the scan, skip it.
 
+Note: when you add a server with `claude mcp add …` or by writing `.mcp.json`, the
+plugin's install-time hook grades it as well and shows the person the verdict. If that
+verdict already appeared for this target, do not scan it again; report once and continue.
+
 ## When not to scan
 
 - Installing what a project already declares (`npm install`, `pip install -r

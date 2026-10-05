@@ -33,8 +33,8 @@ start of each session, and surfaces the verdict. No need to remember.
 **Install:**
 ```bash
 mkdir -p ~/.claude/hooks
-cp agentavow_precheck.py agentavow_pretool_gate.py ~/.claude/hooks/
-chmod +x ~/.claude/hooks/agentavow_precheck.py ~/.claude/hooks/agentavow_pretool_gate.py
+cp agentavow_precheck.py agentavow_pretool_gate.py agentavow_pre_install.py ~/.claude/hooks/
+chmod +x ~/.claude/hooks/agentavow_precheck.py ~/.claude/hooks/agentavow_pretool_gate.py ~/.claude/hooks/agentavow_pre_install.py
 ```
 Then merge the contents of `settings.hooks.json` into `~/.claude/settings.json`
 (under the `hooks` key — keep any hooks you already have). Its `PreToolUse` block is
