@@ -119,12 +119,53 @@ _ABOUT = (
     "invoked on request; Desktop has no user CLAUDE.md or hooks.)"
 )
 
+# Served ONLY to Claude clients (claude.ai connector, Claude Code, Cursor, VS Code), on
+# top of _INSTRUCTIONS. Nothing here auto-invokes a tool: each line is conditioned on
+# what the user asks. Claude never sees a hook or install event for a connector, so
+# this is the one place to say what to do when a tool question comes up. ChatGPT and
+# unknown clients keep the base text byte-for-byte (its initialize is under review).
+_INSTRUCTIONS_CLAUDE_ADDENDUM = (
+    "When the user asks whether a tool, package, MCP server, or plugin is safe, or says "
+    "they are about to install or connect one, run the matching scan first and lead your "
+    "answer with the one-line verdict (score, safe / needs review, the top finding). "
+    "If the user asks what AgentAvow does or how to get started, and other MCP servers or "
+    "connectors are enabled in this conversation, name them and offer to check them; "
+    "scan a server by its public https URL or its npm / PyPI package, and say which ones "
+    "you would need a URL or package name for. The 'agentavow_check_my_connections' "
+    "prompt does the same on request."
+)
+_DIRECTIVE_SURFACES = frozenset({"claude", "claude-code", "cursor", "vscode"})
+
+
+def _instructions_for(surface: str) -> str:
+    if surface in _DIRECTIVE_SURFACES:
+        return _INSTRUCTIONS + "\n\n" + _INSTRUCTIONS_CLAUDE_ADDENDUM
+    return _INSTRUCTIONS
+
+
 server: Server = Server(
     "agentavow-trust",
     version="0.16.0",
     website_url="https://agentavow.com",
     instructions=_INSTRUCTIONS,
 )
+
+# The stateless transport builds InitializeResult per request from
+# create_initialization_options(); pick the instructions for the calling surface there
+# (the surface contextvar is set in mcp_asgi_app before the request is handled).
+_base_create_initialization_options = server.create_initialization_options
+
+
+def _create_initialization_options(*args, **kwargs):
+    opts = _base_create_initialization_options(*args, **kwargs)
+    try:
+        opts.instructions = _instructions_for(_SURFACE.get())
+    except Exception:
+        pass
+    return opts
+
+
+server.create_initialization_options = _create_initialization_options  # type: ignore[method-assign]
 
 
 # --------------------------------------------------------------------------- #
@@ -1441,6 +1482,19 @@ _GET_STARTED = (
 )
 
 
+# User-invoked (a prompt is picked by the person, never run on its own): grade the
+# other servers/connectors in the conversation. The closest thing a connector has to
+# "scan after install".
+_CHECK_MY_CONNECTIONS = (
+    "List every MCP server, connector, or plugin enabled in this conversation other than "
+    "AgentAvow. For each one you can identify by a public https URL, run scan_mcp_server; "
+    "for each one you can identify by an npm or PyPI package, run scan_package; give each "
+    "a one-line verdict (score, safe / needs review, top finding, report link). For any you "
+    "cannot identify that way, say so and ask for its URL or package name. Finish with one "
+    "line: how many checked, how many safe, which to review first."
+)
+
+
 @server.list_prompts()
 async def _list_prompts() -> list[types.Prompt]:
     return [
@@ -1448,12 +1502,28 @@ async def _list_prompts() -> list[types.Prompt]:
             name="agentavow_get_started",
             title="AgentAvow: get started",
             description="What AgentAvow checks and how to read a verdict, with examples.",
-        )
+        ),
+        types.Prompt(
+            name="agentavow_check_my_connections",
+            title="AgentAvow: check my connections",
+            description="Grade the other MCP servers and connectors enabled in this "
+                        "conversation and say which to review first.",
+        ),
     ]
 
 
 @server.get_prompt()
 async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResult:
+    if name == "agentavow_check_my_connections":
+        return types.GetPromptResult(
+            description="AgentAvow: check my connections",
+            messages=[
+                types.PromptMessage(
+                    role="user",
+                    content=types.TextContent(type="text", text=_CHECK_MY_CONNECTIONS),
+                )
+            ],
+        )
     return types.GetPromptResult(
         description="AgentAvow quick start",
         messages=[

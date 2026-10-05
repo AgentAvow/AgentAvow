@@ -15,7 +15,7 @@ Scanning is free and needs no account.
 | MCP connector | The AgentAvow tools: `scan_mcp_server`, `scan_package`, `scan_repo`, and identity lookups. All read-only, no sign-in. | Chat, Cowork, Claude Code |
 | `/scan` command | `/scan npm chalk`, `/scan owner/repo`, `/scan https://mcp.example.com/mcp` | Chat, Cowork, Claude Code |
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the verdict before it goes ahead. | Chat, Cowork, Claude Code |
-| SessionStart hook | At the start of a session, grades each MCP server in your config that it has not seen before and adds one line per server to the session. | Claude Code, Cowork |
+| SessionStart hook | At the start of a session, grades each MCP server in your config that it has not seen before. Claude opens its first reply with a one-line summary (how many graded, how many safe, the lowest), and keeps one line per server for when you ask. | Claude Code, Cowork |
 | PreToolUse gate | Before each MCP tool call, checks the grade on file for that server. Denies a call to a server in the blocked tier; asks before a tool whose definition changed since it was graded. | Claude Code, Cowork |
 
 The session-start hook and the skill warn; a low score adds context and you decide.
