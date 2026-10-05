@@ -191,6 +191,81 @@ async def _read_unique_humans(day_strs: list[str]) -> int:
         return 0
 
 
+# Distinct callers per UTC day for any named metric — the same salted HLL as
+# ``unique_humans`` (same daily salt, same privacy properties: nothing stored can
+# name a machine, days cannot be joined), keyed by a metric name so the dashboard
+# can say "N distinct machines invoked the connector from Claude Code today"
+# rather than "N calls". A caller is sha256(daily salt | client IP | User-Agent).
+# Limitation: traffic that reaches us through a vendor proxy (the claude.ai
+# connector arrives from a few Anthropic egress IPs with one User-Agent) collapses
+# to a handful of callers; the direct surfaces (Claude Code, Cursor, the hook)
+# are per-machine and read true.
+_UNIQ_PREFIX = f"{_METRICS_PREFIX}uniq:"
+
+
+async def record_unique(name: str, client_ip: str | None, user_agent: str | None) -> None:
+    """PFADD this caller's salted identity to today's HLL for ``name``. Best-effort —
+    never raises, stores nothing identifying (see ``record_human_visitor``)."""
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        salt = await _daily_salt(r, day)
+        if not salt:
+            return
+        raw = f"{salt}|{client_ip or ''}|{user_agent or ''}".encode("utf-8", "ignore")
+        key = f"{_UNIQ_PREFIX}{name}:{day}"
+        await r.pfadd(key, hashlib.sha256(raw).hexdigest())
+        await r.expire(key, _COUNTER_TTL)
+    except Exception:
+        pass
+
+
+# The Claude Code plugin's session-start hook identifies itself as
+# ``agentavow-precheck/<version> (plugin|manual)``. Its scans go through the
+# public scan API and never touch the MCP tool counters; and most of what it
+# grades is already cached, so it is counted from the request middleware
+# (src/usage_scope) on EVERY scan request, not from the cache-miss path.
+HOOK_UA_PREFIX = "agentavow-precheck"
+HOOK_PATH_PREFIX = "/api/v1/public/scan"
+
+
+def is_hook_request(path: str | None, user_agent: str | None) -> bool:
+    return bool(
+        path and path.startswith(HOOK_PATH_PREFIX)
+        and (user_agent or "").strip().lower().startswith(HOOK_UA_PREFIX)
+    )
+
+
+async def record_hook_checkin(client_ip: str | None, user_agent: str | None) -> None:
+    """One hook scan today, on one more distinct machine (salted per-day HLL, nothing
+    identifying stored). Best-effort — never raises."""
+    try:
+        await bump_metric("hook_scan")
+        await record_unique("hook:machines", client_ip, user_agent)
+    except Exception:
+        pass
+
+
+async def _read_unique_by_day(name: str, day_strs: list[str]) -> dict[str, int]:
+    """``{day: distinct callers}`` for ``name`` (missing days 0; {} on failure).
+    Each day is counted on its own: salts differ per day, so a window total is
+    the SUM of days, like ``unique_humans``."""
+    if not day_strs:
+        return {}
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        out: dict[str, int] = {}
+        for d in day_strs:
+            out[d] = int(await r.pfcount(f"{_UNIQ_PREFIX}{name}:{d}"))
+        return out
+    except Exception:
+        return {}
+
+
 async def _read_daily_counter(name: str, day_strs: list[str]) -> dict[str, int]:
     """Return ``{day: count}`` for the given days. Best-effort ({} on failure)."""
     if not day_strs:
@@ -420,11 +495,30 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     # Per-surface attribution (from the request User-Agent, tagged in
     # src/bridges/mcp_streamable._bump_s). Surfaces sum back to the aggregate.
     mcp_surfaces = ["claude", "chatgpt", "claude-code", "cursor", "vscode", "other"]
+    # Per-day calls and distinct callers per surface (the trend lines). Callers come
+    # from the salted per-day HLL fed by src/bridges/mcp_streamable._record_caller.
+    mcp_calls_by_surface_day = {
+        s: await _read_daily_counter(f"mcp:calls:total:{s}", day_strs) for s in mcp_surfaces
+    }
+    mcp_callers_by_surface_day = {
+        s: await _read_unique_by_day(f"mcp:callers:{s}", day_strs) for s in mcp_surfaces
+    }
+    mcp_callers_by_day = await _read_unique_by_day("mcp:callers", day_strs)
+    mcp_callers_window = sum(mcp_callers_by_day.values())
+    # The Claude Code plugin's session-start hook grades servers through the public
+    # scan API (never the MCP tool counter), so it is its own adoption signal: scans
+    # it ran, and distinct machines it ran on.
+    hook_scans_by_day = await _read_daily_counter("hook_scan", day_strs)
+    hook_machines_by_day = await _read_unique_by_day("hook:machines", day_strs)
+    from src.traffic_class import CLIENT_CLASSES
+
+    scan_requests_by_class_day = {
+        c: await _read_daily_counter(f"scan_request:client:{c}", day_strs) for c in CLIENT_CLASSES
+    }
     mcp_by_surface = {
         s: {
-            "calls": sum(
-                (await _read_daily_counter(f"mcp:calls:total:{s}", day_strs)).values()
-            ),
+            "calls": sum(mcp_calls_by_surface_day[s].values()),
+            "callers": sum(mcp_callers_by_surface_day[s].values()),
             "errors": sum(
                 (await _read_daily_counter(f"mcp:result:error:{s}", day_strs)).values()
             ),
@@ -471,7 +565,18 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "force_rescans": _align(rescan_by_day),
         "install_clicks": _align(install_by_day),
         "requests_redirected": _align(redirected_by_day),
+        # Adoption trend lines (daily). ``mcp_callers*`` and ``hook_machines`` are
+        # distinct machines per day; the rest are request counts.
+        "mcp_calls": _align(mcp_calls_by_day),
+        "mcp_callers": _align(mcp_callers_by_day),
+        "hook_scans": _align(hook_scans_by_day),
+        "hook_machines": _align(hook_machines_by_day),
     }
+    for s_name in mcp_surfaces:
+        series[f"mcp_calls:{s_name}"] = _align(mcp_calls_by_surface_day[s_name])
+        series[f"mcp_callers:{s_name}"] = _align(mcp_callers_by_surface_day[s_name])
+    for c_name in CLIENT_CLASSES:
+        series[f"scan_requests:{c_name}"] = _align(scan_requests_by_class_day[c_name])
 
     # --- Surface breakdown: static launch corpus + live community scans ---
     surface_breakdown: dict[str, int] = {}
@@ -513,6 +618,15 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         "usage: it reaches no counter above and is tallied once as "
         "'requests_redirected'. Only redirects the backend itself serves are seen "
         "here; the ones nginx answers never reach the app.",
+        "'mcp_callers' (total and per surface) and 'hook_machines' are distinct "
+        "callers per UTC day from the same salted HyperLogLog as unique_humans: "
+        "sha256(daily salt + IP + User-Agent). Over a window they are the sum of each "
+        "day's distinct callers. Surfaces that arrive through a vendor proxy (the "
+        "claude.ai connector) share a few IPs and one User-Agent, so their caller "
+        "count is a floor; Claude Code, Cursor and the hook are per-machine. "
+        "'hook_scans' / 'hook_machines' count the Claude Code plugin's session-start "
+        "hook (User-Agent agentavow-precheck) grading servers through the public scan "
+        "API — automated use that the MCP call counters never see.",
         "'unique_humans' is distinct browser-UA visitors per UTC day from a salted "
         "HyperLogLog: sha256(daily random salt + IP + UA), salt kept only in Redis "
         "for 48h and never logged. Days cannot be joined, so over a window it is the "
@@ -536,6 +650,9 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "install_clicks": int(install_clicks_window),
             "unique_checkers": int(unique_checkers_window),
             "mcp_calls": int(mcp_calls_window),
+            "mcp_callers": int(mcp_callers_window),
+            "hook_scans": int(sum(hook_scans_by_day.values())),
+            "hook_machines": int(sum(hook_machines_by_day.values())),
             "requests_redirected": int(requests_redirected_window),
             "unique_humans": int(unique_humans_window),
         },
@@ -575,6 +692,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
         },
         "mcp": {
             "calls_window": int(mcp_calls_window),
+            "callers_window": int(mcp_callers_window),
             "errors_window": int(mcp_errors_window),
             "ok_window": int(max(0, mcp_calls_window - mcp_errors_window)),
             "safe_window": int(mcp_safe_window),
@@ -604,6 +722,11 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "static_corpus": int(catalog_static_total),
             "by_surface": surface_breakdown,
             "by_category": category_breakdown,
+        },
+        # The Claude Code plugin's session-start hook: scans it ran + machines it ran on.
+        "hook": {
+            "scans_window": int(sum(hook_scans_by_day.values())),
+            "machines_window": int(sum(hook_machines_by_day.values())),
         },
         # Adoption funnel — how far users travel: scan → watch → claim (the drop-off).
         "funnel": {

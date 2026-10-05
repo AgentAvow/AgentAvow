@@ -30,7 +30,8 @@ interface Metrics {
   badges?: { readme_renders_window?: number; leaderboard?: { repo: string; renders: number }[] }
   catalog?: { by_surface?: Record<string, number>; by_category?: Record<string, number>; size_total?: number }
   funnel?: { scanned?: number; watched?: number; claimed?: number; installs?: number }
-  mcp?: { calls_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; by_tool?: Record<string, number>; by_surface?: Record<string, { calls?: number; errors?: number; safe?: number; needs_review?: number }> }
+  mcp?: { calls_window?: number; callers_window?: number; ok_window?: number; errors_window?: number; safe_window?: number; needs_review_window?: number; by_tool?: Record<string, number>; by_surface?: Record<string, { calls?: number; callers?: number; errors?: number; safe?: number; needs_review?: number }> }
+  hook?: { scans_window?: number; machines_window?: number }
   private_repos?: { app_scans?: number; published_to_search?: number; app_installs_active?: number; onetime_scans_window?: number }
   alert_webhooks?: { active?: number }
   traffic_quality?: Record<string, { total?: number; human?: number; agent?: number; automated?: number }>
@@ -74,6 +75,69 @@ function Sparkline({ data }: { data?: number[] }) {
       <polyline points={pts} fill="none" stroke="url(#spark)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
       <defs><linearGradient id="spark" x1="0" x2="1"><stop offset="0" stopColor="#2dd4bf" /><stop offset="1" stopColor="#818cf8" /></linearGradient></defs>
     </svg>
+  )
+}
+
+interface TrendLine { key: string; label: string; color: string; data?: number[]; dashed?: boolean }
+
+/** A daily multi-line chart with axes, so a trend is readable at a glance (the
+ *  Sparkline above is a 24px hint; this is the real thing). Pure SVG, no library.
+ *  Every line is listed in the legend with its latest value and window total, so a
+ *  flat zero line still says what it is. Hover a point for the exact day/value. */
+function TrendChart({ days, lines, empty }: { days?: string[]; lines: TrendLine[]; empty: string }) {
+  const n = days?.length ?? 0
+  const live = lines.map((l) => ({ ...l, data: (l.data ?? []).slice(-n) }))
+  const max = Math.max(1, ...live.flatMap((l) => l.data))
+  if (!n || n < 2 || max <= 1 && live.every((l) => l.data.every((v) => v === 0))) {
+    return <p className="text-[12.5px] text-text-muted/70 py-6 text-center">{empty}</p>
+  }
+  // Nice y-axis ceiling: 1-2-5 steps so gridlines land on round numbers.
+  const mag = Math.pow(10, Math.floor(Math.log10(max)))
+  const step = [1, 2, 5, 10].map((m) => m * mag).find((v) => v * 4 >= max) ?? mag * 10
+  const top = step * 4
+  const W = 640, H = 200, L = 36, R = 12, T = 10, B = 26
+  const x = (i: number) => L + (i / (n - 1)) * (W - L - R)
+  const y = (v: number) => T + (1 - v / top) * (H - T - B)
+  const every = n > 14 ? Math.ceil(n / 7) : n > 7 ? 2 : 1
+  const day = (d: string) => d.slice(5)
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Daily trend">
+        {[0, 1, 2, 3, 4].map((k) => (
+          <g key={k}>
+            <line x1={L} x2={W - R} y1={y(k * step)} y2={y(k * step)} stroke="currentColor" strokeOpacity={k === 0 ? 0.25 : 0.08} />
+            <text x={L - 6} y={y(k * step) + 3.5} textAnchor="end" fontSize="10" fill="currentColor" fillOpacity="0.55" fontFamily="ui-monospace, monospace">{k * step}</text>
+          </g>
+        ))}
+        {days!.map((d, i) => (i % every === 0 || i === n - 1) && (
+          <text key={d} x={x(i)} y={H - 8} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="10" fill="currentColor" fillOpacity="0.55" fontFamily="ui-monospace, monospace">{day(d)}</text>
+        ))}
+        {live.map((l) => (
+          <g key={l.key}>
+            <polyline points={l.data.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke={l.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={l.dashed ? '4 4' : undefined} />
+            {l.data.map((v, i) => (
+              <circle key={i} cx={x(i)} cy={y(v)} r={v > 0 ? 2.5 : 1.5} fill={l.color} fillOpacity={v > 0 ? 1 : 0.4}>
+                <title>{`${l.label} · ${days![i]} · ${v.toLocaleString()}`}</title>
+              </circle>
+            ))}
+          </g>
+        ))}
+      </svg>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px]">
+        {live.map((l) => {
+          const total = l.data.reduce((a, b) => a + b, 0)
+          const last = l.data[l.data.length - 1] ?? 0
+          return (
+            <span key={l.key} className={`inline-flex items-center gap-1.5 tabular-nums${total === 0 ? ' opacity-50' : ''}`}>
+              <span className="inline-block w-3 h-0.5 rounded" style={{ background: l.color }} />
+              <span className="text-text-muted">{l.label}</span>
+              <span className="text-text">{fmt(last)}</span>
+              <span className="text-text-muted/60">({fmt(total)} total)</span>
+            </span>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -375,6 +439,7 @@ function BehavioralPanel({ win }: { win: Win }) {
 // ── METRICS TAB ──────────────────────────────────────────────────────────────
 function MetricsTab() {
   const [win, setWin] = useState<Win>('7d')
+  const [trend, setTrend] = useState<'callers' | 'calls'>('callers')
   const { data } = useQuery<Metrics>({
     queryKey: ['admin-dash-metrics', win],
     queryFn: async () => (await api.get('/admin/metrics', { params: { window: win } })).data,
@@ -415,7 +480,9 @@ function MetricsTab() {
           <Stat label="Active watches" value={fmt(data?.watches?.active)} sub={`${fmt(data?.watches?.total)} all-time`} />
           <Stat label="Verified claims" value={fmt(data?.claims?.verified_total)} sub={`${fmt(data?.claims?.public)} public · ${fmt(data?.claims?.private)} private`} />
           <Stat label="Active badges" value={fmt(data?.attestations?.verification_badges_active)} />
-          <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.needs_review_window)} needs-review · ${fmt(data?.mcp?.errors_window)} err`} />
+          <Stat label="MCP connector calls" value={fmt(h.mcp_calls)} sub={`${fmt(data?.mcp?.needs_review_window)} needs-review · ${fmt(data?.mcp?.errors_window)} err`} series={s.mcp_calls} />
+          <Stat label="MCP distinct callers" value={fmt(h.mcp_callers)} sub="machines that invoked a tool · per-day" series={s.mcp_callers} />
+          <Stat label="Plugin hook scans" value={fmt(h.hook_scans)} sub={`${fmt(h.hook_machines)} machines · session-start hook`} series={s.hook_scans} />
           <Stat label="Private repo scans (GitHub App)" value={fmt(data?.private_repos?.app_scans)} sub={`${fmt(data?.private_repos?.app_installs_active)} installs · ${fmt(data?.private_repos?.published_to_search)} published`} />
           <Stat label="One-time private scans" value={fmt(data?.private_repos?.onetime_scans_window)} sub="token scans (window)" />
           <Stat label="Alert webhooks" value={fmt(data?.alert_webhooks?.active)} sub="active" />
@@ -476,13 +543,14 @@ function MetricsTab() {
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] font-mono uppercase tracking-wide text-text-muted/60 pb-1">
                     <span>Surface</span>
-                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-16 text-right">Errors</span><span className="w-20 text-right">Safe/Rev</span></span>
+                    <span className="flex gap-4"><span className="w-16 text-right">Calls</span><span className="w-16 text-right">Callers</span><span className="w-16 text-right">Errors</span><span className="w-20 text-right">Safe/Rev</span></span>
                   </div>
                   {surfaces.map((r) => (
                     <div key={r.s} className={`flex justify-between text-[12.5px] py-0.5${r.calls === 0 ? ' opacity-50' : ''}`}>
                       <span className="text-text-muted truncate">{r.label}</span>
                       <span className="flex gap-4 tabular-nums text-text-muted/70">
                         <span className="w-16 text-right">{fmt(r.calls)}</span>
+                        <span className="w-16 text-right">{fmt(r.callers ?? 0)}</span>
                         <span className="w-16 text-right">{fmt(r.errors ?? 0)}</span>
                         <span className="w-20 text-right">{fmt(r.safe ?? 0)}/{fmt(r.needs_review ?? 0)}</span>
                       </span>
@@ -492,6 +560,45 @@ function MetricsTab() {
               ) : (
                 <p className="text-[12.5px] text-text-muted/70">No per-surface traffic yet. Once the connector is used from Claude, ChatGPT, or the plugin, each surface shows here.</p>
               )}
+            </div>
+          </Section>
+        )
+      })()}
+
+      {(() => {
+        const key = (sfc: string) => `mcp_${trend}:${sfc}`
+        const surfaceLines: TrendLine[] = [
+          { key: 'claude-code', label: 'Claude Code', color: '#2dd4bf', data: s[key('claude-code')] },
+          { key: 'claude', label: 'Claude Directory', color: '#818cf8', data: s[key('claude')] },
+          { key: 'chatgpt', label: 'ChatGPT', color: '#e879f9', data: s[key('chatgpt')] },
+          { key: 'cursor', label: 'Cursor', color: '#fbbf24', data: s[key('cursor')] },
+          { key: 'vscode', label: 'VS Code', color: '#f87171', data: s[key('vscode')] },
+          { key: 'hook', label: trend === 'callers' ? 'Plugin hook (machines)' : 'Plugin hook (scans)', color: '#94a3b8', dashed: true, data: trend === 'callers' ? s.hook_machines : s.hook_scans },
+        ]
+        const callerLines: TrendLine[] = [
+          { key: 'human', label: 'People (browser)', color: '#2dd4bf', data: s['scan_requests:human'] },
+          { key: 'agent', label: 'Agents (Claude, ChatGPT, plugin)', color: '#818cf8', data: s['scan_requests:agent'] },
+          { key: 'automated', label: 'Automated (crawlers, scripts)', color: '#94a3b8', dashed: true, data: s['scan_requests:automated'] },
+          { key: 'badge', label: 'Badge fetches', color: '#fbbf24', data: s.badge_fetches },
+        ]
+        const toggle = (
+          <div className="flex gap-1 font-mono text-[12px]">
+            {(['callers', 'calls'] as const).map((m) => (
+              <button key={m} onClick={() => setTrend(m)} className={`px-2.5 py-1 rounded-lg transition-colors ${trend === m ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>
+                {m === 'callers' ? 'Machines' : 'Calls'}
+              </button>
+            ))}
+          </div>
+        )
+        return (
+          <Section title="Adoption trend — day by day" note={win === 'today' ? 'Pick L7 or L30 above to see a trend; one day is a point, not a line.' : `Who is actually using the connector, per UTC day. "Machines" is distinct callers (salted per-day hash of IP + User-Agent, nothing identifying stored) — the honest adoption number; "Calls" is raw tool invocations. Claude Directory traffic arrives through Anthropic's proxy, so its machine count is a floor. The plugin hook is the session-start auto-scan: it never touches the MCP counters, so it is drawn on its own (dashed). Crawlers are left out.`} right={toggle}>
+            <div className="glass rounded-2xl p-5">
+              <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Connector use by surface · {trend === 'callers' ? 'distinct machines' : 'tool calls'} per day</div>
+              <TrendChart days={data?.days} lines={surfaceLines} empty="No connector use in this window yet. Lines appear once a surface invokes a tool." />
+            </div>
+            <div className="glass rounded-2xl p-5 mt-3">
+              <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Public scan requests by caller type · per day</div>
+              <TrendChart days={data?.days} lines={callerLines} empty="No scan requests recorded in this window." />
             </div>
           </Section>
         )
