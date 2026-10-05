@@ -35,7 +35,7 @@ _BASE_URL = (
 ).rstrip("/")
 _WEB_BASE = _BASE_URL
 
-_VERSION = "0.6.1"
+_VERSION = "0.6.3"
 
 # Package-surface aliases, mirroring the public API + the remote connector.
 _SURFACE_ALIASES = {

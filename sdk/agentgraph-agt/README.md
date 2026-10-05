@@ -20,7 +20,7 @@ its trust signals:
 from agentmesh_agentgraph import AgentGraphTrustProvider
 
 provider = AgentGraphTrustProvider(
-    api_url="https://agentavow.com/api/v1",  # built-in default is the pre-rebrand agentgraph.co host
+    api_url="https://agentavow.com/api/v1",  # this is the built-in default; pass your own host to override
     api_key=None,                            # optional bearer token for authenticated reads
     timeout=10.0,
 )

@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentavow-trust"
-version = "0.6.1"
+version = "0.6.3"
 description = "MCP server for AgentAvow (formerly agentgraph-trust) — trust verification, security scanning, and identity lookup for AI agents"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    { name = "AgentGraph", email = "sdk@agentgraph.co" },
+    { name = "AgentAvow", email = "sdk@agentgraph.co" },
 ]
 dependencies = [
     "httpx>=0.24.0",

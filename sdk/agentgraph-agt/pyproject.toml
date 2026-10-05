@@ -1,6 +1,6 @@
 [project]
 name = "agentavow-agt"
-version = "0.2.0"
+version = "0.2.1"
 description = "AgentAvow (formerly agentgraph-agt) trust provider for Microsoft Agent Governance Toolkit"
 readme = "README.md"
 requires-python = ">=3.9"

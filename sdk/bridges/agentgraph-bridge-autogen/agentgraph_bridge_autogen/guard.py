@@ -17,7 +17,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_GATEWAY_URL = "https://agentgraph.co/api/v1/gateway/check"
+_GATEWAY_URL = "https://agentavow.com/api/v1/gateway/check"
 _TIMEOUT = 30.0
 
 
