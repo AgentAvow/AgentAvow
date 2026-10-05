@@ -208,6 +208,13 @@ def test_catalog_key_configured_publishes_es256_in_did_and_jwks(client, monkeypa
     assert by_kid[ED_KID] == signing.get_jwk()
     assert by_kid[ES_KID] == es_jwk
     assert jwks["keys"][0]["kid"] == ED_KID, "platform key stays first"
+    # The same Ed25519 key is also published under its RFC 7638 thumbprint, for
+    # profiles that require a key-derived kid (ATD provenance signing §2).
+    thumb = signing.jwk_thumbprint(signing.get_jwk())
+    assert jwks["keys"][1]["kid"] == thumb
+    assert {k: v for k, v in by_kid[thumb].items() if k != "kid"} == \
+        {k: v for k, v in signing.get_jwk().items() if k != "kid"}
+    assert thumb != ED_KID and "=" not in thumb and len(thumb) == 43
 
 
 def test_malformed_catalog_key_does_not_break_did_or_jwks(client, monkeypatch, caplog):

@@ -14,7 +14,21 @@ from src.signing import (
     get_jwk,
     get_trust_v2_jwks,
     has_dedicated_trust_v2_key,
+    jwk_thumbprint,
 )
+
+
+def platform_thumbprint_jwk() -> dict:
+    """The platform Ed25519 key published a second time under its RFC 7638 thumbprint.
+
+    Profiles that require a key-derived ``kid`` (agent-trust-discovery provenance
+    signing, §2) cannot use the stable name ``agentgraph-security-v1``; a
+    thumbprint ``kid`` means a rotation is a new ``kid``, one cache miss, and no
+    staleness window. Same key, same ``x``; only the ``kid`` differs. The stable
+    name stays for every surface that already pins it.
+    """
+    jwk = get_jwk()
+    return {**jwk, "kid": jwk_thumbprint(jwk)}
 
 router = APIRouter(tags=["jwks"])
 
@@ -56,7 +70,7 @@ async def jwks() -> JSONResponse:
     published here. Includes the ES256 catalog key (kid ``catalog-es256-v1``,
     signs /.well-known/ai-catalog.json) iff CATALOG_SIGNING_KEY_P256 is set.
     """
-    keys = [get_jwk()]
+    keys = [get_jwk(), platform_thumbprint_jwk()]
     if has_dedicated_trust_v2_key():
         keys.extend(get_trust_v2_jwks())
     catalog_jwk = get_catalog_es256_jwk()
