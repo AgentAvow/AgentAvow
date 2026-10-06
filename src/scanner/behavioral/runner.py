@@ -629,6 +629,12 @@ def _resource_args() -> list[str]:
     return out
 
 
+# Wall clock for the retry: twice the run's (an MCP plan runs 135 s by default, so a
+# retry gets 270 s), capped at 300 s. The per-coordinate lock in public_scan_router
+# (_BEHAVIORAL_LOCK_TTL) must cover first run + retry + SSM polling slack.
+_RETRY_WALL_MAX = 300
+
+
 def _retry_memory_mb(resource: list[str]) -> int:
     """The retry cap when it is above the cap the run used; 0 = no retry."""
     from src.config import settings
@@ -735,18 +741,18 @@ async def run_behavioral(
         cmd = cmd_tmpl.format(name=shlex.quote(spec) if "-git" in plan else coordinate,
                               import_name=_import_name(coordinate))
 
-    def _args(resource: list[str]) -> list[str]:
+    def _args(resource: list[str], wall: int) -> list[str]:
         out: list[str] = []
         if v2:
             out += ["--mode", mode, "--canary", canary, *resource]
             if files_b64:
                 out += ["--files-b64", files_b64]
-        out += [image, cmd, str(timeout)]
+        out += [image, cmd, str(wall)]
         return out
 
-    async def _run_once(runner_args: list[str]) -> tuple[dict | None, str | None]:
+    async def _run_once(runner_args: list[str], wall: int) -> tuple[dict | None, str | None]:
         """Execute and parse one runner invocation → (data, None) or (None, error)."""
-        stdout_text, exec_error = await _execute(runner_args, timeout, v2=v2)
+        stdout_text, exec_error = await _execute(runner_args, wall, v2=v2)
         if exec_error or stdout_text is None:
             return None, exec_error or "runner_unavailable"
         try:
@@ -769,19 +775,23 @@ async def run_behavioral(
         return parsed, None
 
     resource = _resource_args()
-    data, err = await _run_once(_args(resource))
+    data, err = await _run_once(_args(resource, timeout), timeout)
     if err or data is None:
         return _fail(err or "runner_unavailable")
     if data.get("exit_code") == _RESOURCE_LIMIT_EXIT:
         notes.append("killed_resource_limit")
         # The container was SIGKILLed by its memory / pids cap before the tool could be
         # observed. Heavy-but-legitimate servers (task-master, anything that bundles a
-        # browser) do this at the default cap; give them ONE more run at the retry cap so
-        # the grade rests on an observation, not on static analysis alone.
+        # browser) do this at the default cap; give them ONE more run at the retry cap
+        # AND twice the wall clock (a package that needs 2 GB to install also needs
+        # longer than 45 s to start), so the grade rests on an observation, not on
+        # static analysis alone.
         retry_mb = _retry_memory_mb(resource)
         if v2 and retry_mb:
+            retry_wall = min(timeout * 2, _RETRY_WALL_MAX)
             notes.append(f"retried_at_{retry_mb}mb")
-            data2, err2 = await _run_once(_args(_with_memory(resource, retry_mb)))
+            data2, err2 = await _run_once(
+                _args(_with_memory(resource, retry_mb), retry_wall), retry_wall)
             if data2 is not None and not err2:
                 data = data2
                 if data.get("exit_code") != _RESOURCE_LIMIT_EXIT:

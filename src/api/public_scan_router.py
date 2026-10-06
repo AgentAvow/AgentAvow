@@ -757,7 +757,10 @@ async def _count_behavioral_run(block: dict, duration: float = 0.0) -> None:
         pass
 
 
-_BEHAVIORAL_LOCK_TTL = 240  # seconds; > the longest sandbox wall clock (mcp_timeout + 45)
+# seconds; > the longest sandbox wall clock INCLUDING the one memory retry
+# (135 s first run + up to 300 s retry + SSM polling slack; see runner._RETRY_WALL_MAX).
+# Only matters if a worker dies mid-run: the coordinate stays 'pending' this long.
+_BEHAVIORAL_LOCK_TTL = 600
 
 
 async def _acquire_behavioral_lock(surface: str, name: str, expected_hosts: set[str] | None,
