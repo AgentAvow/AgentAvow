@@ -81,6 +81,52 @@ def test_inline_code_not_treated_as_markdown():
     assert "<strong>" not in h
 
 
+def test_table_renders_as_html_table():
+    md = (
+        "Intro line.\n"
+        "| Finding | Severity |\n"
+        "|---|:--:|\n"
+        "| **Undeclared** egress | high |\n"
+        "| `a \\| b` literal pipe |\n"
+        "\n"
+        "After.\n"
+    )
+    h = mod._render_body(md)
+    assert "<p>Intro line.</p>" in h
+    assert "<thead><tr><th>Finding</th>" in h
+    assert '<th style="text-align:center">Severity</th>' in h
+    assert "<td><strong>Undeclared</strong> egress</td>" in h
+    # an escaped pipe stays inside its cell; a short row is padded to the header width
+    assert '<td><code>a | b</code> literal pipe</td><td style="text-align:center"></td>' in h
+    assert "<p>After.</p>" in h
+    assert "|---|" not in h
+
+
+def test_pipe_in_prose_is_not_a_table():
+    h = mod._render_body("Use `a | b` here.\n\n---\n")
+    assert "<table>" not in h
+    assert "<hr>" in h
+
+
+@pytest.mark.parametrize("slug,title", mod.DOCS)
+def test_no_doc_leaves_a_raw_table_row(slug, title):
+    """Every table in the shipped docs must render; none may fall through as text."""
+    md = mod._load(slug) or ""
+    body = mod._render_body(md)
+    in_fence = False
+    table_blocks = 0
+    prev_was_row = False
+    for line in md.split("\n"):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        is_row = not in_fence and line.lstrip().startswith("|")
+        if is_row and not prev_was_row:
+            table_blocks += 1
+        prev_was_row = is_row
+    assert body.count("<table>") == table_blocks
+    assert "<p>|" not in body
+
+
 def test_external_and_mailto_links_preserved():
     h = mod._render_body("See [site](https://example.com) or [mail](mailto:a@b.com).\n")
     assert 'href="https://example.com"' in h

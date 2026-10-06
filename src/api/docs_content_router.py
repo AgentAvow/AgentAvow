@@ -152,6 +152,43 @@ def _inline(text: str) -> str:
     return text
 
 
+_TABLE_DELIM_CELL_RE = re.compile(r":?-+:?")
+
+
+def _table_cells(line: str) -> list[str]:
+    """Split one GFM table row into cells: unescaped pipes divide, `\\|` is a literal pipe."""
+    row = line.strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|") and not row.endswith("\\|"):
+        row = row[:-1]
+    return [c.replace("\\|", "|").strip() for c in re.split(r"(?<!\\)\|", row)]
+
+
+def _table_aligns(line: str) -> list[str] | None:
+    """Column alignments if `line` is a GFM delimiter row (`|---|:--:|`), else None."""
+    if "|" not in line or "-" not in line:
+        return None
+    cells = _table_cells(line)
+    if not cells or not all(_TABLE_DELIM_CELL_RE.fullmatch(c) for c in cells):
+        return None
+    return [
+        "center" if c.startswith(":") and c.endswith(":")
+        else "right" if c.endswith(":")
+        else "left" if c.startswith(":")
+        else ""
+        for c in cells
+    ]
+
+
+def _is_table_start(lines: list[str], i: int) -> bool:
+    """A header row followed by a delimiter row with the same number of columns."""
+    if i + 1 >= len(lines) or "|" not in lines[i]:
+        return False
+    aligns = _table_aligns(lines[i + 1])
+    return aligns is not None and len(aligns) == len(_table_cells(lines[i]))
+
+
 def _render_body(md: str) -> str:
     """Render the supported Markdown subset to an HTML body string."""
     lines = md.replace("\r\n", "\n").split("\n")
@@ -216,6 +253,31 @@ def _render_body(md: str) -> str:
             out.append(f"<blockquote>{_inline(' '.join(q.strip() for q in quote))}</blockquote>")
             continue
 
+        # table (GFM): header row, delimiter row, then body rows until a non-row line
+        if _is_table_start(lines, i):
+            _close_lists()
+            aligns = _table_aligns(lines[i + 1]) or []
+
+            def _cell(tag: str, col: int, text: str) -> str:
+                align = aligns[col] if col < len(aligns) else ""
+                attr = f' style="text-align:{align}"' if align else ""
+                return f"<{tag}{attr}>{_inline(text)}</{tag}>"
+
+            head = "".join(_cell("th", c, t) for c, t in enumerate(_table_cells(lines[i])))
+            i += 2
+            rows: list[str] = []
+            while i < n and lines[i].strip() and "|" in lines[i]:
+                # Short rows are padded and long rows cut to the header's width, as GFM does.
+                cells = (_table_cells(lines[i]) + [""] * len(aligns))[: len(aligns)]
+                rows.append("<tr>" + "".join(_cell("td", c, t) for c, t in enumerate(cells)) + "</tr>")
+                i += 1
+            out.append(
+                '<div class="table-wrap"><table>'
+                f"<thead><tr>{head}</tr></thead><tbody>{''.join(rows)}</tbody>"
+                "</table></div>"
+            )
+            continue
+
         # unordered list item
         um = re.match(r"[-*]\s+(.*)$", stripped)
         if um:
@@ -245,7 +307,8 @@ def _render_body(md: str) -> str:
             s = lines[i].strip()
             if (not s or s.startswith(("#", ">", "```"))
                     or re.match(r"[-*]\s+", s) or re.match(r"\d+\.\s+", s)
-                    or re.fullmatch(r"-{3,}|\*{3,}|_{3,}", s)):
+                    or re.fullmatch(r"-{3,}|\*{3,}|_{3,}", s)
+                    or _is_table_start(lines, i)):
                 break
             para.append(s)
             i += 1
@@ -277,6 +340,10 @@ _STYLE = """
   pre code { color:var(--fg); background:none; padding:0; font-size:12.5px; }
   blockquote { border-left:3px solid var(--line); margin:16px 0; padding:2px 0 2px 16px; color:var(--muted); font-size:14px; }
   hr { border:none; border-top:1px solid var(--line); margin:32px 0; }
+  .table-wrap { overflow-x:auto; margin:16px 0; }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:8px 12px; text-align:left; vertical-align:top; color:var(--muted); }
+  th { color:var(--fg); font-weight:600; background:var(--surface); }
   .index { list-style:none; padding:0; margin:24px 0 0; }
   .index li { margin:0; border-top:1px solid var(--line); }
   .index a { display:block; padding:16px 0; color:var(--fg); text-decoration:none; font-weight:600; }
