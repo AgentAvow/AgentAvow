@@ -629,6 +629,29 @@ def _resource_args() -> list[str]:
     return out
 
 
+def _retry_memory_mb(resource: list[str]) -> int:
+    """The retry cap when it is above the cap the run used; 0 = no retry."""
+    from src.config import settings
+    try:
+        retry = int(getattr(settings, "scanner_behavioral_memory_retry_mb", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    try:
+        current = int(resource[resource.index("--memory-mb") + 1])
+    except (ValueError, IndexError):
+        current = 0
+    return retry if retry > current else 0
+
+
+def _with_memory(resource: list[str], mem_mb: int) -> list[str]:
+    out = list(resource)
+    if "--memory-mb" in out:
+        out[out.index("--memory-mb") + 1] = str(mem_mb)
+    else:
+        out += ["--memory-mb", str(mem_mb)]
+    return out
+
+
 async def run_behavioral(
     surface: str,
     coordinate: str,
@@ -712,35 +735,58 @@ async def run_behavioral(
         cmd = cmd_tmpl.format(name=shlex.quote(spec) if "-git" in plan else coordinate,
                               import_name=_import_name(coordinate))
 
-    runner_args: list[str] = []
-    if v2:
-        runner_args += ["--mode", mode, "--canary", canary, *_resource_args()]
-        if files_b64:
-            runner_args += ["--files-b64", files_b64]
-    runner_args += [image, cmd, str(timeout)]
+    def _args(resource: list[str]) -> list[str]:
+        out: list[str] = []
+        if v2:
+            out += ["--mode", mode, "--canary", canary, *resource]
+            if files_b64:
+                out += ["--files-b64", files_b64]
+        out += [image, cmd, str(timeout)]
+        return out
 
-    stdout_text, exec_error = await _execute(runner_args, timeout, v2=v2)
-    if exec_error or stdout_text is None:
-        return _fail(exec_error or "runner_unavailable")
-
-    try:
-        data = json.loads(stdout_text or "{}")
-    except json.JSONDecodeError:
-        notes.append(f"runner_output_len={len(stdout_text)}")
-        # SSM caps a command's stdout at 24,000 chars; a cut-off JSON is this, not junk.
-        return _fail("runner_output_truncated" if len(stdout_text) >= _SSM_STDOUT_CAP - 200
-                     else "runner_bad_output")
-    if isinstance(data, dict) and isinstance(data.get("gz"), str):
+    async def _run_once(runner_args: list[str]) -> tuple[dict | None, str | None]:
+        """Execute and parse one runner invocation → (data, None) or (None, error)."""
+        stdout_text, exec_error = await _execute(runner_args, timeout, v2=v2)
+        if exec_error or stdout_text is None:
+            return None, exec_error or "runner_unavailable"
         try:
-            data = json.loads(gzip.decompress(base64.b64decode(data["gz"])).decode("utf-8"))
-        except Exception:  # noqa: BLE001
-            return _fail("runner_bad_output")
-    if not isinstance(data, dict):
-        return _fail("runner_bad_output")
-    if data.get("error"):
-        return _fail(str(data["error"]))
+            parsed = json.loads(stdout_text or "{}")
+        except json.JSONDecodeError:
+            notes.append(f"runner_output_len={len(stdout_text)}")
+            # SSM caps a command's stdout at 24,000 chars; a cut-off JSON is this, not junk.
+            return None, ("runner_output_truncated"
+                          if len(stdout_text) >= _SSM_STDOUT_CAP - 200 else "runner_bad_output")
+        if isinstance(parsed, dict) and isinstance(parsed.get("gz"), str):
+            try:
+                parsed = json.loads(
+                    gzip.decompress(base64.b64decode(parsed["gz"])).decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                return None, "runner_bad_output"
+        if not isinstance(parsed, dict):
+            return None, "runner_bad_output"
+        if parsed.get("error"):
+            return None, str(parsed["error"])
+        return parsed, None
+
+    resource = _resource_args()
+    data, err = await _run_once(_args(resource))
+    if err or data is None:
+        return _fail(err or "runner_unavailable")
     if data.get("exit_code") == _RESOURCE_LIMIT_EXIT:
         notes.append("killed_resource_limit")
+        # The container was SIGKILLed by its memory / pids cap before the tool could be
+        # observed. Heavy-but-legitimate servers (task-master, anything that bundles a
+        # browser) do this at the default cap; give them ONE more run at the retry cap so
+        # the grade rests on an observation, not on static analysis alone.
+        retry_mb = _retry_memory_mb(resource)
+        if v2 and retry_mb:
+            notes.append(f"retried_at_{retry_mb}mb")
+            data2, err2 = await _run_once(_args(_with_memory(resource, retry_mb)))
+            if data2 is not None and not err2:
+                data = data2
+                if data.get("exit_code") != _RESOURCE_LIMIT_EXIT:
+                    notes.remove("killed_resource_limit")
+            # else: keep the first run's result (fail-open; the retry never makes it worse)
     hosts = [str(h) for h in (data.get("egress_hosts") or [])
              if not _is_search_domain_artifact(str(h))]
     allow = expected | _SYNTHETIC_HOSTS | (_IMAGE_ALLOW if mode == "image" else set())
