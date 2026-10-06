@@ -16,7 +16,7 @@ Scanning is free and needs no account.
 | `/scan` command | `/scan npm chalk`, `/scan owner/repo`, `/scan https://mcp.example.com/mcp` | Chat, Cowork, Claude Code |
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the verdict before it goes ahead. | Chat, Cowork, Claude Code |
 | Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. A critical or high finding, or a blocked/restricted tier: Claude Code asks you, with the verdict as the reason. Anything else (safe, a soft needs-review with no findings, not scannable): a one-line verdict and the add proceeds. Never denies. | Claude Code, Cowork |
-| SessionStart hook | At the start of a session, grades each MCP server in your config that it has not seen before. Claude opens its first reply with a one-line summary (how many graded, how many safe, the lowest), and keeps one line per server for when you ask. | Claude Code, Cowork |
+| SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project) that it has not seen before; servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many graded, how many safe, the lowest), and keeps one line per server for when you ask. | Claude Code, Cowork |
 | PreToolUse gate | Before each MCP tool call, checks the grade on file for that server. Denies a call to a server in the blocked tier; asks before a tool whose definition changed since it was graded. | Claude Code, Cowork |
 
 The session-start hook and the skill warn; a low score adds context and you decide.

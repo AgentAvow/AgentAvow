@@ -416,6 +416,49 @@ def test_intro_is_skipped_rather_than_repeated_when_the_cache_is_unwritable(
     assert _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: None) == {}
 
 
+def _claude_json(tmp_path, monkeypatch, user=None, projects=None):
+    monkeypatch.setattr(hook_pathlib_home_target(), "home", lambda: tmp_path)
+    (tmp_path / ".claude.json").write_text(json.dumps(
+        {"mcpServers": user or {}, "projects": projects or {}}))
+
+
+def hook_pathlib_home_target():
+    import pathlib as _pl
+    return _pl.Path
+
+
+def test_targets_are_scoped_to_this_session(hook, monkeypatch, tmp_path):
+    here = tmp_path / "proj"
+    here.mkdir()
+    monkeypatch.chdir(here)
+    _claude_json(tmp_path, monkeypatch,
+                 user={"u": {"url": "https://u.example/mcp"}},
+                 projects={str(here): {"mcpServers": {"local1": {"url": "https://l1.example/mcp"}}},
+                           str(tmp_path / "other"): {"mcpServers": {
+                               "taskmaster": {"command": "npx", "args": ["-y", "task-master-ai"]},
+                               "u": {"url": "https://u.example/mcp"}}}})
+    (here / ".mcp.json").write_text(json.dumps({"mcpServers": {"p": {"url": "https://p.example/mcp"}}}))
+    names = sorted(t["name"] for t in hook._targets())
+    assert names == ["local1", "p", "u"]  # user + this project's local + .mcp.json; not 'taskmaster'
+    # The other project's distinct server is counted, the shared one is not double-counted.
+    assert hook._servers_elsewhere(hook._targets()) == 1
+
+
+def test_elsewhere_is_zero_without_projects_or_on_error(hook, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _claude_json(tmp_path, monkeypatch, user={"u": {"url": "https://u.example/mcp"}})
+    assert hook._servers_elsewhere(hook._targets()) == 0
+    (tmp_path / ".claude.json").write_text("{ not json")
+    assert hook._targets() == [] and hook._servers_elsewhere([]) == 0
+
+
+def test_summary_mentions_servers_in_other_projects(hook):
+    s = hook._summary([("a", _ok(90, "safe", 0))], elsewhere=2)
+    assert s.endswith("2 more configured for other projects, graded when you open them.")
+    assert "graded 1 MCP server — 1 safe" in s
+    assert "other projects" not in hook._summary([("a", _ok(90, "safe", 0))])
+
+
 def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_path):
     cfg = {"mcpServers": {hook.META_KEY: {"url": "https://mcp.example.com/mcp"},
                           "real": {"url": "https://mcp.example.com/mcp"}}}
