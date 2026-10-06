@@ -1,6 +1,6 @@
 """Unique human visitors per day: a salted HyperLogLog, nothing identifying stored.
 
-Pins the privacy properties, not just the count: the HLL member is a sha256 of
+Pins the privacy properties, not just the count: the _hll() member is a sha256 of
 (daily random salt, IP, UA); the salt lives only in Redis under a 48h TTL; a new
 day gets a new salt so the same person is not joinable across days; and the
 middleware only feeds it for requests that are both usage and from a browser.
@@ -19,9 +19,19 @@ from httpx import ASGITransport, AsyncClient
 import src.api.metrics_dashboard_router as md
 from src import usage_scope as us
 
-TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-HLL = f"ag:metrics:unique_humans:{TODAY}"
-SALT = f"ag:metrics:unique_humans:salt:{TODAY}"
+
+def _today() -> str:
+    """Call-time, not import-time: a run that straddles 00:00 UTC must not compare
+    keys from one day against writes on the next."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _hll() -> str:
+    return f"ag:metrics:unique_humans:{_today()}"
+
+
+def _salt_key() -> str:
+    return f"ag:metrics:unique_humans:salt:{_today()}"
 
 BROWSER = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -98,20 +108,20 @@ def redis(monkeypatch):
 async def test_same_visitor_counts_once_and_different_visitors_add(redis):
     await md.record_human_visitor("203.0.113.7", BROWSER)
     await md.record_human_visitor("203.0.113.7", BROWSER)
-    assert await md._read_unique_humans([TODAY]) == 1
+    assert await md._read_unique_humans([_today()]) == 1
     await md.record_human_visitor("203.0.113.8", BROWSER)
     await md.record_human_visitor("203.0.113.7", BROWSER + " Edg/154.0")
-    assert await md._read_unique_humans([TODAY]) == 3
+    assert await md._read_unique_humans([_today()]) == 3
 
 
 @pytest.mark.asyncio
 async def test_member_is_a_salted_sha256_with_nothing_identifying(redis):
     await md.record_human_visitor("203.0.113.7", BROWSER)
-    (member,) = redis.hll[HLL]
+    (member,) = redis.hll[_hll()]
     assert len(member) == 64 and int(member, 16) >= 0  # hex sha256
     assert "203.0.113.7" not in member and "Mozilla" not in member
     # It is exactly sha256(salt|ip|ua): no unsalted hash of the IP is stored.
-    salt = redis.kv[SALT]
+    salt = redis.kv[_salt_key()]
     assert member == hashlib.sha256(f"{salt}|203.0.113.7|{BROWSER}".encode()).hexdigest()
     assert member != hashlib.sha256(f"203.0.113.7|{BROWSER}".encode()).hexdigest()
 
@@ -119,17 +129,17 @@ async def test_member_is_a_salted_sha256_with_nothing_identifying(redis):
 @pytest.mark.asyncio
 async def test_salt_is_random_redis_only_and_expires_in_48h(redis):
     await md.record_human_visitor("203.0.113.7", BROWSER)
-    salt = redis.kv[SALT]
+    salt = redis.kv[_salt_key()]
     assert len(salt) == 32 and int(salt, 16) >= 0  # 16 random bytes, hex
-    assert redis.ttl[SALT] == 48 * 3600
+    assert redis.ttl[_salt_key()] == 48 * 3600
     # A fresh process (empty cache) reuses the Redis salt rather than minting one.
     md._salt_cache.clear()
     await md.record_human_visitor("203.0.113.9", BROWSER)
-    assert redis.kv[SALT] == salt
+    assert redis.kv[_salt_key()] == salt
     # Two processes racing: SET NX makes them agree.
     md._salt_cache.clear()
-    del redis.kv[SALT]
-    assert await md._daily_salt(redis, TODAY) != salt  # new day-salt once the old expires
+    del redis.kv[_salt_key()]
+    assert await md._daily_salt(redis, _today()) != salt  # new day-salt once the old expires
 
 
 @pytest.mark.asyncio
@@ -151,14 +161,14 @@ async def test_days_are_not_joinable(redis):
 async def test_salt_is_never_logged(redis, caplog):
     caplog.set_level(logging.DEBUG)
     await md.record_human_visitor("203.0.113.7", BROWSER)
-    assert redis.kv[SALT] not in caplog.text
+    assert redis.kv[_salt_key()] not in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_degrades_to_zero_without_redis(redis):
     redis.fail = True
     await md.record_human_visitor("203.0.113.7", BROWSER)  # no raise
-    assert await md._read_unique_humans([TODAY]) == 0
+    assert await md._read_unique_humans([_today()]) == 0
     assert await md._read_unique_humans([]) == 0
 
 
@@ -197,12 +207,12 @@ async def test_middleware_records_browsers_only(redis):
     assert (await _get("/page", BOT)).status_code == 200
     assert (await _get("/page", AGENT)).status_code == 200
     assert (await _get("/page", "")).status_code == 200
-    assert await md._read_unique_humans([TODAY]) == 1
+    assert await md._read_unique_humans([_today()]) == 1
 
 
 @pytest.mark.asyncio
 async def test_middleware_skips_redirects_and_legacy_hosts(redis):
     assert (await _get("/moved", BROWSER)).status_code == 301
     assert (await _get("/page", BROWSER, host="agentgraph.co")).status_code == 200
-    assert HLL not in redis.hll
-    assert await md._read_unique_humans([TODAY]) == 0
+    assert _hll() not in redis.hll
+    assert await md._read_unique_humans([_today()]) == 0

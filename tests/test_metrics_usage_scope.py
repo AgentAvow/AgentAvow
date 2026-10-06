@@ -16,11 +16,15 @@ from httpx import ASGITransport, AsyncClient
 import src.api.metrics_dashboard_router as md
 from src import usage_scope as us
 
-TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+def _today() -> str:
+    """Computed at call time, not import time: a run that straddles 00:00 UTC must
+    not compare keys from one day against writes on the next."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 def _key(name: str) -> str:
-    return f"ag:metrics:{name}:{TODAY}"
+    return f"ag:metrics:{name}:{_today()}"
 
 
 class _FakeRedis:
@@ -90,6 +94,15 @@ def _app() -> FastAPI:
         await md.bump_metric("badge_fetch")
         return {"ok": True}
 
+    @app.get("/api/v1/public/scan/package/npm/{name}")
+    async def public_scan(name: str):
+        return {"cached": True}  # the handler counts nothing; the middleware does
+
+    @app.get("/api/v1/public/scan/missing")
+    async def public_scan_missing():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "no such target"}, status_code=404)
+
     @app.get("/late")
     async def late():
         # A bump after the scope settled must still count (background work).
@@ -101,11 +114,39 @@ def _app() -> FastAPI:
     return app
 
 
-async def _get(path: str, host: str = "agentavow.com"):
+async def _get(path: str, host: str = "agentavow.com", ua: str | None = None):
+    headers = {"host": host}
+    if ua is not None:
+        headers["user-agent"] = ua
     async with AsyncClient(
-        transport=ASGITransport(app=_app()), base_url="http://t", headers={"host": host}
+        transport=ASGITransport(app=_app()), base_url="http://t", headers=headers
     ) as c:
         return await c.get(path)
+
+
+BROWSER = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36")
+
+
+# --- every answered public scan request is counted once, by the middleware ------
+
+@pytest.mark.asyncio
+async def test_public_scan_request_is_counted_by_the_middleware_cached_or_not(redis):
+    assert (await _get("/api/v1/public/scan/package/npm/chalk", ua=BROWSER)).status_code == 200
+    assert (await _get("/api/v1/public/scan/package/npm/chalk", ua="claude-code/2.1 (cli)")).status_code == 200
+    assert (await _get("/api/v1/public/scan/package/npm/chalk", ua="curl/8.4")).status_code == 200
+    assert redis.store[_key("scan_request")] == 3
+    assert redis.store[_key("scan_request:client:human")] == 1
+    assert redis.store[_key("scan_request:client:agent")] == 1
+    assert redis.store[_key("scan_request:client:automated")] == 1
+
+
+@pytest.mark.asyncio
+async def test_public_scan_404_legacy_host_and_other_paths_are_not_scan_requests(redis):
+    assert (await _get("/api/v1/public/scan/missing", ua=BROWSER)).status_code == 404
+    assert (await _get("/api/v1/public/scan/package/npm/chalk", host="agentgraph.co", ua=BROWSER)).status_code == 200
+    assert (await _get("/late", ua=BROWSER)).status_code == 200
+    assert not any(k.startswith("ag:metrics:scan_request") for k in redis.store)
 
 
 # --- pure helpers -----------------------------------------------------------
@@ -267,8 +308,8 @@ async def test_scope_does_not_leak_between_requests(redis):
 @pytest.mark.asyncio
 async def test_metrics_reads_requests_redirected(redis):
     redis.store[_key(us.REDIRECTED_METRIC)] = 42
-    by_day = await md._read_daily_counter(us.REDIRECTED_METRIC, [TODAY])
-    assert by_day == {TODAY: 42}
+    by_day = await md._read_daily_counter(us.REDIRECTED_METRIC, [_today()])
+    assert by_day == {_today(): 42}
 
 
 @pytest.mark.asyncio

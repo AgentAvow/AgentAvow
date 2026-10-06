@@ -53,7 +53,7 @@ A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before
 
 ```python
 from langchain.agents import create_agent
-from src.bridges.langchain.middleware import AgentAvowGate   # pip install agentgraph[langchain]
+from src.bridges.langchain.middleware import AgentAvowGate   # from the AgentAvow repo; not on PyPI yet
 
 gate = AgentAvowGate(
     servers={"deepwiki": "https://mcp.deepwiki.com/mcp"},    # or tool_to_server={tool: server}
@@ -72,7 +72,7 @@ The same gate is a `before_tool_callback`. For an `McpToolset` over HTTP it need
 ```python
 from google.adk.agents import LlmAgent
 from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
-from src.bridges.google_adk import AgentAvowToolGate            # pip install agentgraph[adk]
+from src.bridges.google_adk import AgentAvowToolGate            # from the AgentAvow repo; not on PyPI yet
 
 agent = LlmAgent(
     name="assistant", model="gemini-2.5-flash",
