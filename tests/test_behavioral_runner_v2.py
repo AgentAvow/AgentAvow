@@ -609,6 +609,9 @@ def test_resource_limit_kill_is_retried_once_at_the_retry_cap(v2_on, exerciser_f
     assert len(calls) == 2
     assert _opts(calls[0])["--memory-mb"] == "1024"
     assert _opts(calls[1])["--memory-mb"] == "2048"
+    # The retry also gets twice the wall clock (positional timeout arg): an MCP plan
+    # runs 135 s (mcp_timeout 90 + 45), so the retry runs 270 s.
+    assert _opts(calls[0])["pos"][-1] == "135" and _opts(calls[1])["pos"][-1] == "270"
     assert res.ran and res.exit_code == 0
     assert "retried_at_2048mb" in res.notes
     assert "killed_resource_limit" not in res.notes  # the retry succeeded
@@ -656,3 +659,17 @@ def test_clean_run_is_never_retried(v2_on, exerciser_files, monkeypatch):
 def test_retry_helpers():
     assert runner._with_memory(["--memory-mb", "1024", "--pids", "512"], 2048) == ["--memory-mb", "2048", "--pids", "512"]
     assert runner._with_memory(["--pids", "512"], 2048) == ["--pids", "512", "--memory-mb", "2048"]
+
+
+def test_retry_wall_clock_is_doubled_but_capped(v2_on, exerciser_files, monkeypatch):
+    monkeypatch.setattr(config.settings, "scanner_behavioral_memory_retry_mb", 2048, raising=False)
+    seen = []
+
+    async def fake_execute(runner_args, timeout, *, v2=False):
+        seen.append((list(runner_args), timeout))
+        return (_v2_output(exit_code=137, exercise=None) if len(seen) == 1 else _v2_output(exit_code=0)), None
+
+    monkeypatch.setattr(runner, "_execute", fake_execute)
+    _run("npm", "heavy", plan="npm-mcp", timeout=200)  # caller asks for 200 > the 135 floor
+    assert seen[0][1] == 200 and _opts(seen[0][0])["pos"][-1] == "200"
+    assert seen[1][1] == 300 and _opts(seen[1][0])["pos"][-1] == "300"  # min(400, cap 300)

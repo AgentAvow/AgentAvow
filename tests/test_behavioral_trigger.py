@@ -351,7 +351,7 @@ async def test_on_watch_rescan_uses_watchscan_data_and_the_stored_digest(
                                          new_digest="sha256:new",
                                          last_manifest_digest="sha256:new") is None
     # previous cached scan present: the version moved → change. The per-coordinate lock
-    # from the first run would still be held (240 s TTL in prod); simulate its expiry.
+    # from the first run would still be held (600 s TTL in prod); simulate its expiry.
     for k in [k for k in fake_redis.store if k.endswith(":lock")]:
         del fake_redis.store[k]
     out = await trigger.on_watch_rescan("npm", "npm", "left-pad", NPM, ws_data)
