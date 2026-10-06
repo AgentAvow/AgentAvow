@@ -2,6 +2,7 @@ import { isValidElement, useEffect, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import SEOHead from '../../components/SEOHead'
 import { slugify } from '../lib/slugify'
 import howGradingWorks from '../docs/how-grading-works.md?raw'
@@ -76,6 +77,9 @@ const PROSE = [
   '[&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[12.5px] [&_:not(pre)>code]:text-primary-light [&_:not(pre)>code]:bg-surface [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:rounded',
   '[&_pre]:font-mono [&_pre]:text-[12.5px] [&_pre]:bg-surface [&_pre]:border [&_pre]:border-border [&_pre]:rounded-xl [&_pre]:p-4 [&_pre]:my-4 [&_pre]:overflow-x-auto',
   '[&_hr]:my-8 [&_hr]:border-border/60',
+  '[&_table]:w-full [&_table]:border-collapse [&_table]:text-[14px]',
+  '[&_th]:border [&_th]:border-border [&_th]:bg-surface [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:align-top [&_th]:font-semibold [&_th]:text-text',
+  '[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-text-muted',
 ].join(' ')
 
 export default function RebrandDocs() {
@@ -131,7 +135,10 @@ export default function RebrandDocs() {
       </aside>
 
       <article className={`min-w-0 ${PROSE}`}>
-        <Markdown components={{
+        {/* GFM for tables. singleTilde off: the docs use "~" for "about", never strikethrough. */}
+        <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={{
+          // Wide tables scroll inside their own box instead of widening the page.
+          table: ({ children }) => <div className="my-4 overflow-x-auto"><table>{children}</table></div>,
           // GitHub-style ids on h2/h3 so #anchor links resolve (same ids as the SSR render).
           h2: ({ children }) => <h2 id={slugify(textOf(children))} className="scroll-mt-24">{children}</h2>,
           h3: ({ children }) => <h3 id={slugify(textOf(children))} className="scroll-mt-24">{children}</h3>,
