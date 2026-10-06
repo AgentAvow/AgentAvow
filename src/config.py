@@ -265,6 +265,10 @@ class Settings(BaseSettings):
     # 1 CPU and scanner_behavioral_memory_mb). Excess requests stay 'pending' and retry.
     scanner_behavioral_max_concurrent: int = 2
     scanner_behavioral_memory_mb: int = 1024   # docker --memory for v2 runs (MB)
+    # A run SIGKILLed by its cgroup (exit 137: task-master, browser-bundling servers)
+    # is re-run ONCE at this cap so a popular heavy tool gets a real observation
+    # instead of a static-only grade. 0 disables the retry.
+    scanner_behavioral_memory_retry_mb: int = 2048
     scanner_behavioral_pids: int = 512         # docker --pids-limit for v2 runs
     # --- Behavioral backfill (src/jobs/behavioral_backfill.py) --------------------
     # Sandboxes the browse catalog's long tail at LOW priority: every

@@ -478,8 +478,11 @@ def test_exit_137_is_noted_as_a_resource_kill(executed, v2_on, exerciser_files):
     executed.state["out"] = _v2_output(exit_code=137, exercise=None)
     r = _run("npm", "@modelcontextprotocol/server-puppeteer", plan="npm-mcp")
     assert r.ran is True and r.exit_code == 137 and r.transcript is None
-    assert r.notes == ["killed_resource_limit"]
-    assert r.to_public_dict()["notes"] == ["killed_resource_limit"]
+    # Killed at the default cap, retried once at the retry cap, killed again: both
+    # facts are on the record and the grade still says resource_limit, not a finding.
+    assert r.notes == ["killed_resource_limit", "retried_at_2048mb"]
+    assert len(executed) == 2
+    assert r.to_public_dict()["notes"] == ["killed_resource_limit", "retried_at_2048mb"]
     assert grade(r) == []
     s = grade_summary(r)
     assert s["start_reason"] == "resource_limit" and s["exercised"] is False
@@ -581,3 +584,75 @@ def test_resolver_search_domain_artifacts_are_not_egress():
     assert r._classify_egress(["github.com.ec2.internal", "evil.net", "x.compute.internal"],
                               set()) == ["evil.net"]
     assert r._is_search_domain_artifact("api.tavily.com") is False
+
+
+# ── exit 137 → one retry at the higher memory cap ──────────────────────────────
+
+def _sequence(monkeypatch, outputs):
+    """A runner seam that returns the queued outputs in order and records every call."""
+    calls = []
+
+    async def fake_execute(runner_args, timeout, *, v2=False):
+        calls.append(list(runner_args))
+        return outputs.pop(0), None
+
+    monkeypatch.setattr(runner, "_execute", fake_execute)
+    return calls
+
+
+def test_resource_limit_kill_is_retried_once_at_the_retry_cap(v2_on, exerciser_files, monkeypatch):
+    monkeypatch.setattr(config.settings, "scanner_behavioral_memory_mb", 1024, raising=False)
+    monkeypatch.setattr(config.settings, "scanner_behavioral_memory_retry_mb", 2048, raising=False)
+    calls = _sequence(monkeypatch, [_v2_output(exit_code=137, exercise=None),
+                                    _v2_output(exit_code=0)])
+    res = _run("npm", "task-master-ai", plan="npm-mcp")
+    assert len(calls) == 2
+    assert _opts(calls[0])["--memory-mb"] == "1024"
+    assert _opts(calls[1])["--memory-mb"] == "2048"
+    assert res.ran and res.exit_code == 0
+    assert "retried_at_2048mb" in res.notes
+    assert "killed_resource_limit" not in res.notes  # the retry succeeded
+    assert res.transcript is not None
+
+
+def test_retry_that_is_also_killed_keeps_the_resource_limit_note(v2_on, exerciser_files, monkeypatch):
+    monkeypatch.setattr(config.settings, "scanner_behavioral_memory_retry_mb", 2048, raising=False)
+    calls = _sequence(monkeypatch, [_v2_output(exit_code=137, exercise=None),
+                                    _v2_output(exit_code=137, exercise=None)])
+    res = _run("npm", "puppeteer-mcp", plan="npm-mcp")
+    assert len(calls) == 2
+    assert res.ran and res.exit_code == 137
+    assert "killed_resource_limit" in res.notes and "retried_at_2048mb" in res.notes
+
+
+def test_no_retry_when_disabled_or_not_above_the_current_cap(v2_on, exerciser_files, monkeypatch):
+    for retry in (0, 1024, 512):
+        monkeypatch.setattr(config.settings, "scanner_behavioral_memory_retry_mb", retry, raising=False)
+        calls = _sequence(monkeypatch, [_v2_output(exit_code=137, exercise=None)])
+        res = _run("npm", "heavy", plan="npm-mcp")
+        assert len(calls) == 1, retry
+        assert "killed_resource_limit" in res.notes
+        assert not any(n.startswith("retried_at") for n in res.notes)
+
+
+def test_a_failed_retry_keeps_the_first_result(v2_on, exerciser_files, monkeypatch):
+    monkeypatch.setattr(config.settings, "scanner_behavioral_memory_retry_mb", 2048, raising=False)
+    outputs = [_v2_output(exit_code=137, exercise=None), "not json at all"]
+    calls = _sequence(monkeypatch, outputs)
+    res = _run("npm", "heavy", plan="npm-mcp")
+    assert len(calls) == 2
+    assert res.ran and res.exit_code == 137  # fail-open: the retry never makes it worse
+    assert "killed_resource_limit" in res.notes
+
+
+def test_clean_run_is_never_retried(v2_on, exerciser_files, monkeypatch):
+    monkeypatch.setattr(config.settings, "scanner_behavioral_memory_retry_mb", 2048, raising=False)
+    calls = _sequence(monkeypatch, [_v2_output(exit_code=0)])
+    res = _run("npm", "demo", plan="npm-mcp")
+    assert len(calls) == 1 and res.exit_code == 0
+    assert not any(n.startswith("retried_at") for n in res.notes)
+
+
+def test_retry_helpers():
+    assert runner._with_memory(["--memory-mb", "1024", "--pids", "512"], 2048) == ["--memory-mb", "2048", "--pids", "512"]
+    assert runner._with_memory(["--pids", "512"], 2048) == ["--pids", "512", "--memory-mb", "2048"]
