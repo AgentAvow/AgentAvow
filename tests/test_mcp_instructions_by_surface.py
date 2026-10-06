@@ -52,3 +52,15 @@ async def test_check_my_connections_prompt_is_listed_and_user_invoked():
     assert "other than AgentAvow" in text and "scan_mcp_server" in text and "scan_package" in text
     started = await ms._get_prompt("agentavow_get_started", None)
     assert started.messages[0].content.text == ms._GET_STARTED
+
+
+@pytest.mark.asyncio
+async def test_about_tool_offers_to_check_other_connectors_on_claude_surfaces_only():
+    ms._SURFACE.set("claude")
+    out = await ms._call_tool("about_agentavow", {})
+    text = (out[0] if isinstance(out, tuple) else out)[0].text
+    assert text.startswith(ms._ABOUT) and "check my connections" in text
+    ms._SURFACE.set("chatgpt")
+    out = await ms._call_tool("about_agentavow", {})
+    assert (out[0] if isinstance(out, tuple) else out)[0].text == ms._ABOUT
+    ms._SURFACE.set("other")

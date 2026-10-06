@@ -9,12 +9,15 @@ a ``claude mcp add`` / ``claude mcp add-json`` command (Bash) and a write to a
 ``.mcp.json`` file (Write / Edit / MultiEdit) — grades the server through the public
 scan API, and puts the verdict where the person sees it:
 
-  • safe            -> a one-line systemMessage; the command proceeds as normal (the
-                       hook never grants permission, so Claude Code's own prompt, if
-                       any, still runs).
-  • needs review    -> permissionDecision "ask": Claude Code shows the verdict as the
+  • blocking findings (critical/high), or a blocked / restricted tier
+                    -> permissionDecision "ask": Claude Code shows the verdict as the
                        reason and the person decides. The install is never denied.
-  • not scannable   -> "ask" too, saying it was not scanned (neither safe nor unsafe).
+  • everything else (safe; needs review with no blocking finding, e.g. thin
+    coverage on a small server; not scannable)
+                    -> a one-line systemMessage and the command proceeds as normal (the
+                       hook never grants permission, so Claude Code's own prompt, if
+                       any, still runs). A legitimate server with little to inspect
+                       must not get the same prompt a poisoned one gets.
   • anything else   -> silent, exit 0 (fail-open). A hook bug can never block a command.
 
 The graded server is written to the same cache the session-start hook reads, so it is
@@ -31,7 +34,7 @@ import shlex
 import sys
 import time
 
-__version__ = "0.1.10"
+__version__ = "0.1.11"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -160,13 +163,32 @@ def _report_url(t: dict, pc) -> str:
                           "deprecated": False}, 0)["report_url"]
 
 
+_ASK_TIERS = frozenset({"blocked", "restricted"})
+_RESTRICTED_FLOOR = 31  # src/trust_tiers: restricted is 11-30, blocked 0-10
+
+
+def _needs_decision(r: dict | None) -> bool:
+    """Ask the person only when the grade carries real risk: a critical/high finding,
+    or a blocked/restricted tier. A soft needs-review (no findings) and an
+    unscannable target are reported, not prompted."""
+    if r is None:
+        return False
+    if int(r.get("blocking") or 0) > 0:
+        return True
+    tier = str(r.get("tier") or "")
+    if tier:
+        return tier in _ASK_TIERS
+    return int(r.get("score") or 0) < _RESTRICTED_FLOOR
+
+
 def _line(t: dict, r: dict | None, pc) -> str:
     coord = _coord(t)
     if r is None:
         return (f"➖ MCP '{t['name']}' ({coord}): not scanned — AgentAvow couldn't read it "
                 "(it may need sign-in). That is neither safe nor unsafe.")
     flag = "✅" if r["verdict"] == "safe" else "⚠️"
-    extra = f", {r['blocking']} blocking finding(s)" if r["blocking"] else ""
+    extra = f", {r['blocking']} blocking finding(s)" if r["blocking"] else (
+        "" if r["verdict"] == "safe" else ", no blocking findings")
     dep = "; DEPRECATED by its maintainer" if r.get("deprecated") else ""
     sandbox = f"; {r['sandbox']}" if r.get("sandbox") else ""
     return (f"{flag} MCP '{t['name']}' ({coord}): AgentAvow {r['score']}/100 — "
@@ -202,11 +224,9 @@ def main() -> None:
         lines.append(_line(t, r, pc))
         if r is None:
             cache[t["name"]] = {"id": t["id"], "retry_after": now + pc.RETRY_UNSCANNABLE}
-            needs_decision = True
         else:
             cache[t["name"]] = pc._record(t, r, now)
-            if r["verdict"] != "safe":
-                needs_decision = True
+        needs_decision = needs_decision or _needs_decision(r)
     if not lines:
         return
     pc._save_cache(cache)
@@ -223,7 +243,7 @@ def main() -> None:
     if needs_decision:
         out["hookSpecificOutput"]["permissionDecision"] = "ask"
         out["hookSpecificOutput"]["permissionDecisionReason"] = (
-            body + "\nReview before you connect. Continue anyway?")
+            body + "\nThis grade carries real risk. Continue anyway?")
     print(json.dumps(out))
 
 
