@@ -39,9 +39,11 @@ echo "Database: agentgraph_staging"
 echo "Redis DB: 1"
 echo ""
 
-# Start backend
-echo "Starting backend on port 8001..."
-"$ROOT_DIR/.venv/bin/uvicorn" src.main:app --host 0.0.0.0 --port 8001 &
+# Start backend. Prefer the Python 3.12 venv (.venv is 3.9 and lacks the mcp package).
+UVICORN="$ROOT_DIR/.venv312/bin/uvicorn"
+[ -x "$UVICORN" ] || UVICORN="$ROOT_DIR/.venv/bin/uvicorn"
+echo "Starting backend on port 8001 ($UVICORN)..."
+"$UVICORN" src.main:app --host 0.0.0.0 --port 8001 --reload &
 BACKEND_PID=$!
 
 # Give backend a moment to start
