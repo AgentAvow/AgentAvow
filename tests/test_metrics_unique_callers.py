@@ -23,8 +23,14 @@ import src.api.metrics_dashboard_router as md
 from src import usage_scope as us
 from src.bridges import mcp_streamable as ms
 
-TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-SALT = f"ag:metrics:unique_humans:salt:{TODAY}"
+
+def _today() -> str:
+    """Call-time, not import-time (see test_metrics_unique_humans)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _salt_key() -> str:
+    return f"ag:metrics:unique_humans:salt:{_today()}"
 CC = "claude-code/2.1.287 (cli)"
 HOOK = "agentavow-precheck/0.1.9 (plugin)"
 BROWSER = (
@@ -100,26 +106,26 @@ async def test_same_machine_counts_once_per_name_and_names_are_independent(redis
     await md.record_unique("mcp:callers:claude-code", "203.0.113.7", CC)
     await md.record_unique("mcp:callers:claude-code", "203.0.113.8", CC)
     await md.record_unique("hook:machines", "203.0.113.7", HOOK)
-    assert await md._read_unique_by_day("mcp:callers:claude-code", [TODAY]) == {TODAY: 2}
-    assert await md._read_unique_by_day("hook:machines", [TODAY]) == {TODAY: 1}
-    assert await md._read_unique_by_day("mcp:callers:cursor", [TODAY]) == {TODAY: 0}
+    assert await md._read_unique_by_day("mcp:callers:claude-code", [_today()]) == {_today(): 2}
+    assert await md._read_unique_by_day("hook:machines", [_today()]) == {_today(): 1}
+    assert await md._read_unique_by_day("mcp:callers:cursor", [_today()]) == {_today(): 0}
 
 
 @pytest.mark.asyncio
 async def test_member_is_salted_sha256_sharing_the_daily_salt(redis):
     await md.record_unique("mcp:callers", "203.0.113.7", CC)
-    (member,) = redis.hll[f"ag:metrics:uniq:mcp:callers:{TODAY}"]
-    salt = redis.kv[SALT]
+    (member,) = redis.hll[f"ag:metrics:uniq:mcp:callers:{_today()}"]
+    salt = redis.kv[_salt_key()]
     assert member == hashlib.sha256(f"{salt}|203.0.113.7|{CC}".encode()).hexdigest()
     assert "203.0.113.7" not in member and "claude" not in member
-    assert redis.ttl[f"ag:metrics:uniq:mcp:callers:{TODAY}"] == md._COUNTER_TTL
+    assert redis.ttl[f"ag:metrics:uniq:mcp:callers:{_today()}"] == md._COUNTER_TTL
 
 
 @pytest.mark.asyncio
 async def test_read_is_per_day_and_missing_days_are_zero(redis):
     await md.record_unique("mcp:callers", "203.0.113.7", CC)
-    out = await md._read_unique_by_day("mcp:callers", ["2000-01-01", TODAY])
-    assert out == {"2000-01-01": 0, TODAY: 1}
+    out = await md._read_unique_by_day("mcp:callers", ["2000-01-01", _today()])
+    assert out == {"2000-01-01": 0, _today(): 1}
     assert await md._read_unique_by_day("mcp:callers", []) == {}
 
 
@@ -127,7 +133,7 @@ async def test_read_is_per_day_and_missing_days_are_zero(redis):
 async def test_redis_outage_is_silent_on_write_and_empty_on_read(redis):
     redis.fail = True
     await md.record_unique("mcp:callers", "203.0.113.7", CC)  # must not raise
-    assert await md._read_unique_by_day("mcp:callers", [TODAY]) == {}
+    assert await md._read_unique_by_day("mcp:callers", [_today()]) == {}
 
 
 # --- MCP server: caller per surface on every tool call ------------------------
@@ -239,16 +245,16 @@ async def test_hook_scan_counts_a_scan_and_a_machine_even_when_cached(redis):
     assert (await _get("/api/v1/public/scan/package/npm/chalk", HOOK)).status_code == 200
     assert (await _get("/api/v1/public/scan/package/npm/chalk", HOOK)).status_code == 200
     assert (await _get("/api/v1/public/scan/package/npm/chalk", HOOK, ip="203.0.113.10")).status_code == 200
-    assert redis.counters[f"ag:metrics:hook_scan:{TODAY}"] == 3
-    assert await md._read_unique_by_day("hook:machines", [TODAY]) == {TODAY: 2}
+    assert redis.counters[f"ag:metrics:hook_scan:{_today()}"] == 3
+    assert await md._read_unique_by_day("hook:machines", [_today()]) == {_today(): 2}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ua", [BROWSER, CC, "Claude-User", "curl/8.4", ""])
 async def test_other_callers_never_count_as_the_hook(redis, ua):
     assert (await _get("/api/v1/public/scan/package/npm/chalk", ua)).status_code == 200
-    assert f"ag:metrics:hook_scan:{TODAY}" not in redis.counters
-    assert await md._read_unique_by_day("hook:machines", [TODAY]) == {TODAY: 0}
+    assert f"ag:metrics:hook_scan:{_today()}" not in redis.counters
+    assert await md._read_unique_by_day("hook:machines", [_today()]) == {_today(): 0}
 
 
 @pytest.mark.asyncio
@@ -256,8 +262,8 @@ async def test_hook_on_a_non_scan_path_or_a_redirect_or_legacy_host_does_not_cou
     assert (await _get("/docs/auto-scan", HOOK)).status_code == 200
     assert (await _get("/api/v1/public/scan/moved", HOOK)).status_code == 301
     assert (await _get("/api/v1/public/scan/package/npm/chalk", HOOK, host="agentgraph.co")).status_code == 200
-    assert f"ag:metrics:hook_scan:{TODAY}" not in redis.counters
-    assert await md._read_unique_by_day("hook:machines", [TODAY]) == {TODAY: 0}
+    assert f"ag:metrics:hook_scan:{_today()}" not in redis.counters
+    assert await md._read_unique_by_day("hook:machines", [_today()]) == {_today(): 0}
 
 
 @pytest.mark.asyncio
