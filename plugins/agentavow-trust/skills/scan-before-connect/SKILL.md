@@ -61,10 +61,17 @@ re-check in about a minute. Do not call the score "static analysis only" without
 that the sandbox is pending or what it observed.
 
 - **Safe:** say so in one line and go ahead with what the user asked.
-- **Needs review:** show the findings and ask whether to continue. Do not install or
-  connect until the user answers.
+- **Needs review with a critical or high finding, or a blocked / restricted tier:**
+  show the findings and ask whether to continue. Do not install or connect until the
+  user answers. This is the only case that stops.
+- **Needs review with no critical or high finding** (a low score from thin coverage,
+  deprecation, provenance, or adoption): give the one-line verdict with the reason, then
+  go ahead with what the user asked. It is advice, not a stop.
 - **Not scanned** (an error, a timeout, or a target AgentAvow cannot reach): say it was
-  not scanned. That is neither safe nor unsafe. Ask whether to continue.
+  not scanned, that this is neither safe nor unsafe, and go ahead.
+
+The plugin's install-time hook applies the same rule, so a target is never asked about
+twice.
 
 ## Limits
 

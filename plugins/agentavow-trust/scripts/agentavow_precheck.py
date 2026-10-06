@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """AgentAvow SessionStart pre-check — OPT-IN, warn-only, fail-open.
 
-Scans MCP servers configured for Claude Code that haven't been scanned yet and
+Scans the MCP servers THIS session can use (user scope, this project's local
+scope, and the project's .mcp.json / settings) that haven't been scanned yet and
 injects a one-line AgentAvow trust verdict into the session, so you see it BEFORE
-you rely on a newly added tool. Covers both:
+you rely on a newly added tool. Servers configured for other projects are counted
+in the summary and graded when those projects are opened. Covers both:
   • Remote HTTP(S) MCP servers  -> scan_mcp_server (the live tool definitions).
   • Local stdio servers run from an npm or PyPI package (npx / uvx / pipx / bunx)
     -> scan_package on the resolved package coordinate.
@@ -45,7 +47,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.11"
+__version__ = "0.1.12"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -191,36 +193,91 @@ def _resolve_target(name: str, cfg: dict) -> dict | None:
     return None
 
 
-def _targets() -> list[dict]:
-    """Best-effort scannable targets from Claude Code config files. Paths/shape vary
-    by version, so each file is walked defensively and unknown shapes are skipped."""
-    seen: dict[str, dict] = {}
-    candidates = [
-        pathlib.Path.home() / ".claude.json",
-        pathlib.Path.cwd() / ".mcp.json",
-        pathlib.Path.cwd() / ".claude" / "settings.json",
-    ]
-    for path in candidates:
-        try:
-            data = json.loads(path.read_text())
-        except Exception:
+def _take(servers: object, seen: dict[str, dict]) -> None:
+    if not isinstance(servers, dict):
+        return
+    for sname, cfg in servers.items():
+        if sname in seen or sname == META_KEY or not isinstance(cfg, dict):
             continue
-        stack = [data]
-        while stack:
-            node = stack.pop()
-            if isinstance(node, dict):
-                servers = node.get("mcpServers")
-                if isinstance(servers, dict):
-                    for sname, cfg in servers.items():
-                        if sname in seen or sname == META_KEY or not isinstance(cfg, dict):
-                            continue
-                        t = _resolve_target(sname, cfg)
-                        if t:
-                            seen[sname] = t
-                stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
-            elif isinstance(node, list):
-                stack.extend(v for v in node if isinstance(v, (dict, list)))
+        t = _resolve_target(sname, cfg)
+        if t:
+            seen[sname] = t
+
+
+def _walk_for_servers(data: object, seen: dict[str, dict]) -> None:
+    """Defensive walk of a project-level config file: every ``mcpServers`` map, at
+    any depth (shapes vary by Claude Code version)."""
+    stack = [data]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            _take(node.get("mcpServers"), seen)
+            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+        elif isinstance(node, list):
+            stack.extend(v for v in node if isinstance(v, (dict, list)))
+
+
+def _read_json(path: pathlib.Path) -> object:
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _cwd_keys() -> set[str]:
+    cwd = pathlib.Path.cwd()
+    keys = {str(cwd)}
+    try:
+        keys.add(str(cwd.resolve()))
+    except Exception:
+        pass
+    return keys
+
+
+def _targets() -> list[dict]:
+    """The servers THIS session can connect to — what ``claude mcp list`` shows here:
+    user scope (``~/.claude.json`` top-level ``mcpServers``), this project's local
+    scope (``~/.claude.json`` → ``projects[cwd].mcpServers``), and project scope
+    (``./.mcp.json``, ``./.claude/settings*.json``). Servers configured for other
+    projects are graded when those projects are opened (see _servers_elsewhere), so
+    the summary matches the list the person can see."""
+    seen: dict[str, dict] = {}
+    data = _read_json(pathlib.Path.home() / ".claude.json")
+    if isinstance(data, dict):
+        _take(data.get("mcpServers"), seen)
+        projects = data.get("projects")
+        if isinstance(projects, dict):
+            for key in _cwd_keys():
+                proj = projects.get(key)
+                if isinstance(proj, dict):
+                    _take(proj.get("mcpServers"), seen)
+    for path in (pathlib.Path.cwd() / ".mcp.json",
+                 pathlib.Path.cwd() / ".claude" / "settings.json",
+                 pathlib.Path.cwd() / ".claude" / "settings.local.json"):
+        node = _read_json(path)
+        if node is not None:
+            _walk_for_servers(node, seen)
     return list(seen.values())
+
+
+def _servers_elsewhere(here: list[dict]) -> int:
+    """How many scannable servers are configured for OTHER projects on this machine
+    (not in this session's list). Reported as a count only; they are graded when
+    those projects are opened. 0 on any error."""
+    try:
+        data = _read_json(pathlib.Path.home() / ".claude.json")
+        if not isinstance(data, dict) or not isinstance(data.get("projects"), dict):
+            return 0
+        skip = _cwd_keys()
+        have = {t["id"] for t in here}
+        elsewhere: dict[str, dict] = {}
+        for key, proj in data["projects"].items():
+            if key in skip or not isinstance(proj, dict):
+                continue
+            _take(proj.get("mcpServers"), elsewhere)
+        return len({t["id"] for t in elsewhere.values()} - have)
+    except Exception:
+        return 0
 
 
 def _verdict(data: dict) -> dict:
@@ -436,14 +493,17 @@ def _show_intro_once() -> None:
         print(json.dumps({"systemMessage": _intro_message()}))
 
 
-def _summary(graded: list[tuple[str, dict]]) -> str:
+def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0) -> str:
     """One line a person can act on: how many servers were graded, how many are safe,
     and the one that needs attention most. Shown as the hook's systemMessage and
-    relayed by Claude at the top of its first reply."""
+    relayed by Claude at the top of its first reply. ``elsewhere`` = servers
+    configured for other projects, mentioned so nothing looks silently skipped."""
     n = len(graded)
+    tail = (f" {elsewhere} more configured for other projects, graded when you open them."
+            if elsewhere else "")
     if not n:
         return ("AgentAvow pre-check: a configured MCP server could not be scanned; "
-                "ask for the AgentAvow pre-check for details.")
+                "ask for the AgentAvow pre-check for details." + tail)
     safe = sum(1 for _, r in graded if r["verdict"] == "safe")
     review = n - safe
     parts = [f"AgentAvow pre-check: graded {n} MCP server{'' if n == 1 else 's'} — "
@@ -452,7 +512,7 @@ def _summary(graded: list[tuple[str, dict]]) -> str:
         name, worst = min(graded, key=lambda g: g[1]["score"])
         extra = f", {worst['blocking']} blocking" if worst["blocking"] else ""
         parts.append(f" (lowest: '{name}' {worst['score']}/100{extra})")
-    parts.append(". Ask for the AgentAvow pre-check for details.")
+    parts.append(". Ask for the AgentAvow pre-check for details." + tail)
     return "".join(parts)
 
 
@@ -537,7 +597,11 @@ def main() -> None:
     if not lines:
         return
 
-    summary = _summary(graded)
+    try:
+        elsewhere = _servers_elsewhere(targets)
+    except Exception:
+        elsewhere = 0
+    summary = _summary(graded, elsewhere)
     context = (
         "AgentAvow pre-check — new MCP servers scanned before you rely on them.\n"
         "The user has NOT seen this (hook output is not displayed to them). At the very "
