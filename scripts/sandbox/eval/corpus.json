@@ -63,7 +63,9 @@
     },
     {
       "surface": "pypi",
-      "name": "mcp-server-fetch"
+      "name": "mcp-server-fetch",
+      "expect_rules": ["ssrf_internal_fetch"],
+      "_note": "TRUE positive, not an FP: the official fetch server follows a caller-supplied URL to the link-local sentinel with no target-IP validation (the CVE-2026-14540 / JPMorgan SSRF class). Confirmed live 2026-10-06; it connected to 169.254.254.254."
     },
     {
       "surface": "pypi",
