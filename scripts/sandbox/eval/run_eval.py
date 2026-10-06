@@ -180,15 +180,19 @@ async def run_fixture_sandbox(entry: dict, *, timeout: int = 60) -> BehavioralRe
     except Exception as e:  # noqa: BLE001
         return BehavioralResult(ran=False, surface="fixture", coordinate=entry["file"],
                                 plan="pypi-mcp", error=f"unparseable_runner_output: {e}")
+    from src.scanner.behavioral.runner import _SYNTHETIC_HOSTS
     hosts = [h for h in data.get("egress_hosts") or [] if isinstance(h, str)]
     tr = parse_transcript(data.get("exercise"))
+    # Allow the synthetic hosts our own args point a tool at (example.com), exactly as
+    # run_behavioral does — otherwise a fetch fixture calling example.com reads as egress.
     return BehavioralResult(
         ran=True, surface="fixture", coordinate=entry["file"], plan="pypi-mcp",
         timed_out=bool(data.get("timed_out")), exit_code=data.get("exit_code"),
-        egress_hosts=hosts, unexpected_egress=_classify_egress(hosts, set()),
+        egress_hosts=hosts, unexpected_egress=_classify_egress(hosts, set(_SYNTHETIC_HOSTS)),
         fs_writes=[p for p in data.get("fs_writes") or [] if isinstance(p, str)],
         transcript=tr, canary_exfil=[c for c in data.get("canary_exfil") or []
                                      if isinstance(c, dict)],
+        ssrf_hits=[h for h in data.get("ssrf_hits") or [] if isinstance(h, str)],
     )
 
 
