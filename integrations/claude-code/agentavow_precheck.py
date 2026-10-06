@@ -47,7 +47,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.12"
+__version__ = "0.1.13"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -309,6 +309,7 @@ _REGISTRY_HOSTS = frozenset({
 # A behavioral rule in a few words, for "sandbox: CAUGHT <...>".
 _RULE_SHORT = {
     "credential_canary_exfiltrated": "a planted credential leaving the sandbox",
+    "ssrf_internal_fetch": "following a caller-supplied URL to an internal address",
     "behavioral_undeclared_egress": "undeclared network egress",
     "annotation_readonly_violated": "a read-only tool writing files",
     "annotation_open_world_violated": "closed-world tools reaching the network",

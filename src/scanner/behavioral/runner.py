@@ -236,6 +236,17 @@ _IMAGE_ALLOW = {
     "index.docker.io", "ghcr.io", "pkg-containers.githubusercontent.com",
 }
 
+# SSRF probe sentinel. A URL-taking tool is handed this link-local address; if the server
+# actually connects to it, the host-side capture sees a packet to the sentinel IP and the
+# ``ssrf_internal_fetch`` grader fires — the tool follows a caller-supplied URL to an
+# internal target without validating it (CVE-2026-14540 and the JPMorgan/DINUM class).
+# 169.254.254.254 is link-local (RFC 3927): routers never forward it, so the packet dies
+# at the sandbox host and can reach no real system — and it is NOT 169.254.169.254, so it
+# never collides with a cloud SDK's own metadata probe. The matching dst-IP grep lives in
+# scripts/sandbox/behavioral_run_v2.sh; keep the two in sync.
+SSRF_SENTINEL_IP = "169.254.254.254"
+SSRF_SENTINEL_URL = "http://169.254.254.254/agentavow-ssrf"
+
 
 @dataclass
 class BehavioralResult:
@@ -257,6 +268,9 @@ class BehavioralResult:
     notes: list[str] = field(default_factory=list)
     # Hosts reached that belong to the tool's own vendor by name (observed, not a finding).
     vendor_egress: list[str] = field(default_factory=list)
+    # SSRF sentinel targets the server actually connected to (see SSRF_SENTINEL_IP). A
+    # non-empty list means a tool followed a caller-supplied URL to a link-local address.
+    ssrf_hits: list[str] = field(default_factory=list)
 
     def to_public_dict(self) -> dict:
         return {
@@ -271,6 +285,7 @@ class BehavioralResult:
             "exercise": self.transcript.to_public_dict() if self.transcript else None,
             "notes": self.notes,
             "vendor_egress": self.vendor_egress,
+            "ssrf_hits": self.ssrf_hits,
             # the container command's exit status: for install plans a non-zero value
             # means the install/import step itself failed (the MCP launcher always exits 0)
             "exit_code": self.exit_code,
@@ -554,7 +569,7 @@ def _canary_env_names(env_names: list[str]) -> list[str]:
 def _exerciser_args(*, timeout: int, max_tools: int, canary: str, env_names: list[str],
                     readme: bool) -> str:
     args = ["--timeout", str(timeout), "--per-call-timeout", "10", "--max-tools",
-            str(max_tools), "--canary-value", canary]
+            str(max_tools), "--canary-value", canary, "--ssrf-url", SSRF_SENTINEL_URL]
     names = _canary_env_names(env_names)
     if names:
         args += ["--canary-env", ",".join(names)]
@@ -737,6 +752,7 @@ async def run_behavioral(
         {"via": str(h.get("via") or ""), "host": str(h.get("host") or "")}
         for h in (data.get("canary_exfil") or []) if isinstance(h, dict)
     ][:32]
+    ssrf_hits = [str(h) for h in (data.get("ssrf_hits") or []) if h][:8]
     return BehavioralResult(
         ran=True, surface=surface, coordinate=coordinate,
         timed_out=bool(data.get("timed_out")),
@@ -746,6 +762,7 @@ async def run_behavioral(
         fs_writes=[str(f) for f in (data.get("fs_writes") or [])],
         plan=plan, transcript=transcript, canary_exfil=canary_exfil, notes=notes,
         vendor_egress=[h for h in vendor if h not in allow],
+        ssrf_hits=ssrf_hits,
     )
 
 

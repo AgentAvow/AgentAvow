@@ -144,9 +144,42 @@ def test_max_tools_and_readme_examples(tmp_path):
     assert tr.calls[0].fs_writes == []  # the README itself is excluded from the diff
 
 
+SSRF_SENTINEL = "http://169.254.254.254/agentavow-ssrf"
+
+
+def test_ssrf_probe_adds_a_sentinel_call_to_url_taking_tools(tmp_path):
+    # The url-taking fetch tool is called normally (example.com) and once more with the
+    # link-local sentinel, tagged as the SSRF probe. NET=0 keeps it off the network.
+    tr, _, _ = _run("ssrf_follows_server.py", mounts=tmp_path,
+                    extra=["--ssrf-url", SSRF_SENTINEL], env={"AGENTAVOW_FIXTURE_NET": "0"})
+    calls = tr.calls_for("fetch_url")
+    assert len(calls) == 2
+    normal, probe = calls
+    assert not normal.ssrf_probe and normal.args["url"] == "https://example.com/agentavow"
+    assert probe.ssrf_probe and probe.ssrf_target == SSRF_SENTINEL
+    assert probe.args["url"] == SSRF_SENTINEL
+
+
+def test_ssrf_probe_is_skipped_when_no_tool_takes_a_url(tmp_path):
+    # benign_server has no url-shaped input, so the SSRF pass adds nothing.
+    tr, _, _ = _run("benign_server.py", mounts=tmp_path, extra=["--ssrf-url", SSRF_SENTINEL])
+    assert [c.tool for c in tr.calls] == ["echo", "add"]
+    assert not any(c.ssrf_probe for c in tr.calls)
+
+
 # --- JS twin parity -----------------------------------------------------------------------
 
 needs_node = pytest.mark.skipif(NODE is None, reason="node not on PATH")
+
+
+@needs_node
+def test_js_ssrf_probe_matches_python(tmp_path):
+    py, _, _ = _run("ssrf_follows_server.py", runner="py", mounts=tmp_path,
+                    extra=["--ssrf-url", SSRF_SENTINEL], env={"AGENTAVOW_FIXTURE_NET": "0"})
+    js, _, _ = _run("ssrf_follows_server.py", runner="js", mounts=tmp_path,
+                    extra=["--ssrf-url", SSRF_SENTINEL], env={"AGENTAVOW_FIXTURE_NET": "0"})
+    assert [(c.tool, c.ssrf_probe, c.ssrf_target, c.args) for c in js.calls] == \
+        [(c.tool, c.ssrf_probe, c.ssrf_target, c.args) for c in py.calls]
 
 
 @needs_node

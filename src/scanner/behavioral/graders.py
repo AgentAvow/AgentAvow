@@ -6,6 +6,8 @@ recomputable from the stored result alone. Nothing here looks at the network, th
 or settings.
 
 Rules (id → severity):
+  ssrf_internal_fetch            followed a caller-supplied URL to a link-local  high
+                                 sentinel (no target-IP validation; SSRF)
   behavioral_undeclared_egress   egress outside registries + declared hosts   high / critical
   annotation_readonly_violated   readOnlyHint=true tool wrote files           high
   annotation_open_world_violated every tool says openWorldHint=false, egress  medium
@@ -113,6 +115,35 @@ def grade_cloud_metadata(result, transcript: ExerciseTranscript) -> list[Behavio
             "Normal for tools built on a cloud SDK (AWS/GCP/Azure look for credentials "
             "there by default). If this tool is not meant to use a cloud SDK, treat it as "
             "a red flag: metadata services hand out cloud credentials."
+        ),
+    )]
+
+
+def grade_ssrf_internal_fetch(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
+    """A tool followed a caller-supplied URL to a link-local sentinel address: the server
+    builds an outbound request from a URL the caller controls and does not validate where
+    it resolves (CVE-2026-14540 and the JPMorgan/DINUM class). ``result.ssrf_hits`` is set
+    only by the sandbox, which hands URL-taking tools the sentinel and watches the host-side
+    capture for a connection to it. Attributed to a single tool when exactly one SSRF probe
+    call ran; otherwise the tool is named only if unambiguous."""
+    hits = [h for h in (getattr(result, "ssrf_hits", None) or []) if h]
+    if not hits:
+        return []
+    probed = sorted({c.tool for c in transcript.calls if getattr(c, "ssrf_probe", False)})
+    who = f"Tool '{probed[0]}'" if len(probed) == 1 else "A tool"
+    where = ", ".join(sorted(set(hits))[:4])
+    return [_finding(
+        "ssrf_internal_fetch", category="data_handling",
+        name=f"{who} followed a caller-supplied URL to an internal address",
+        severity="high",
+        evidence=f"the server connected to the link-local sentinel {where} after being "
+                 f"handed it as a URL argument",
+        remediation=(
+            "The tool takes a URL from the caller and makes the request without checking "
+            "where the address resolves, so an agent can steer it at cloud-metadata or "
+            "internal services (server-side request forgery). Resolve the host first and "
+            "reject private, link-local and metadata ranges; disable automatic redirects; "
+            "and allowlist the destinations the tool legitimately needs."
         ),
     )]
 
@@ -341,6 +372,7 @@ def grade_skill_script_egress(result, transcript: ExerciseTranscript) -> list[Be
 
 
 GRADERS: tuple[tuple[str, Callable[..., list[BehavioralFinding]]], ...] = (
+    ("ssrf_internal_fetch", grade_ssrf_internal_fetch),
     ("behavioral_undeclared_egress", grade_undeclared_egress),
     ("annotation_readonly_violated", grade_readonly_violated),
     ("annotation_open_world_violated", grade_open_world_violated),
@@ -533,6 +565,7 @@ def grade_summary(result) -> dict:
         "egress_hosts": len(getattr(result, "egress_hosts", None) or []),
         "unexpected_egress": len(getattr(result, "unexpected_egress", None) or []),
         "canary_exfil": len(getattr(result, "canary_exfil", None) or []),
+        "ssrf_hits": len(getattr(result, "ssrf_hits", None) or []),
         "findings": dict(by_sev, total=len(findings)),
         "rules": [f.rule for f in findings],
     }

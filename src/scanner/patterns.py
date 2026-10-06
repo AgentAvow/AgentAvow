@@ -369,6 +369,43 @@ OUTBOUND_SEND_RE = re.compile(
     re.IGNORECASE,
 )
 
+# --- SSRF: a caller-supplied URL reaches an outbound request unvalidated (MCP class) ---
+# The structural flaw behind CVE-2026-14540 and the JPMorgan/DINUM reports: an MCP tool
+# takes a URL/endpoint from the caller and builds an outbound request from it without
+# checking where it resolves. Low-confidence, MEDIUM: the sandbox SSRF probe is the
+# high-confidence detector. Three legs, whole-file, only on an MCP-tool surface:
+#   SSRF_TOOL_SURFACE_RE  the file exposes MCP tools (so a "url" input is caller-controlled)
+#   SSRF_URL_INPUT_RE     a parameter/field named url/uri/endpoint/target/webhook
+#   SSRF_DYNAMIC_FETCH_RE an outbound request built from a VARIABLE (not a string literal)
+# fired only when NO SSRF guard token (SSRF_GUARD_RE) appears anywhere in the file.
+SSRF_TOOL_SURFACE_RE = re.compile(
+    r"""@(?:mcp\.)?tool\b|@server\.tool\b|\.tool\s*\(|CallToolRequest|"""
+    r"""setRequestHandler\s*\(\s*['"]?tools/call|list_tools|inputSchema|input_schema""",
+    re.IGNORECASE,
+)
+SSRF_URL_INPUT_RE = re.compile(
+    r"""\b(?:url|uri|endpoint|target[_-]?url|callback[_-]?url|webhook[_-]?url|href|"""
+    r"""fetch[_-]?url|request[_-]?url|link)\b""",
+    re.IGNORECASE,
+)
+SSRF_DYNAMIC_FETCH_RE = re.compile(
+    r"""(?:requests|httpx|aiohttp|session)\.(?:get|post|put|request)\s*\(\s*[A-Za-z_]|"""
+    r"""urllib\.request\.urlopen\s*\(\s*[A-Za-z_]|\burlopen\s*\(\s*[A-Za-z_]|"""
+    r"""\bfetch\s*\(\s*[A-Za-z_`]|axios\s*\(\s*[A-Za-z_{]|axios\.(?:get|post)\s*\(\s*[A-Za-z_`]|"""
+    r"""httpx\.(?:Async)?Client\([^)]*\)\.\w+\(\s*[A-Za-z_]""",
+)
+# Any sign the code validates the destination → suppress the heuristic (too much to be a
+# naive SSRF). Hostname/IP range checks, allow/deny lists, an SSRF-safe client, or a
+# library whose name says so.
+SSRF_GUARD_RE = re.compile(
+    r"""ipaddress\b|is_private\b|is_loopback\b|is_link_local\b|is_reserved\b|"""
+    r"""ssrf|allow_?list|allowed_?hosts|deny_?list|block_?list|validate_url|"""
+    r"""is_global\b|private_?ip|internal_?ip|169\.254|metadata|"""
+    r"""URLValidator|validators\.url|new URL\(|require\(['"]ip['"]\)|"""
+    r"""hostname\s*(?:in|not in)\b|parsed?\.hostname""",
+    re.IGNORECASE,
+)
+
 # --- Insecure deserialization (#7) ---
 # category="insecure_deserialization". Deserializing untrusted data with a format that
 # can construct arbitrary objects = RCE. Distinct from unsafe_exec (NOT discounted for

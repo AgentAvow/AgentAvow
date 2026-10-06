@@ -37,6 +37,10 @@ from src.scanner.patterns import (
     SKIP_DIRS,
     SKIP_EXTENSIONS,
     SOURCE_EXTENSIONS,
+    SSRF_DYNAMIC_FETCH_RE,
+    SSRF_GUARD_RE,
+    SSRF_TOOL_SURFACE_RE,
+    SSRF_URL_INPUT_RE,
     UNSAFE_EXEC_PATTERNS,
     UNTRUSTED_INPUT_RE,
 )
@@ -1486,6 +1490,32 @@ def _scan_content(
                 snippet="network read + exec sink co-occur — remote payload may be swappable",
             ))
 
+    # SSRF (structural): an MCP tool that builds an outbound request from a caller-supplied
+    # URL with no destination validation (CVE-2026-14540 class). Whole-file, MEDIUM,
+    # low-confidence — the sandbox SSRF probe is the high-confidence detector. Fire once per
+    # file, only on an MCP-tool surface with a url-shaped input, a variable-built request,
+    # and NO guard token anywhere in the file.
+    if (SSRF_TOOL_SURFACE_RE.search(content) and SSRF_URL_INPUT_RE.search(content)
+            and SSRF_DYNAMIC_FETCH_RE.search(content)
+            and not SSRF_GUARD_RE.search(content)):
+        m = SSRF_DYNAMIC_FETCH_RE.search(content)
+        line_no = content[:m.start()].count("\n") + 1
+        findings.append(Finding(
+            category="ssrf",
+            name="MCP tool fetches a caller-supplied URL without validation (possible SSRF)",
+            severity="medium",
+            file_path=file_path,
+            line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            remediation=(
+                "A tool input names a URL/endpoint and the file issues an outbound request "
+                "built from a variable with no check on where it resolves, so an agent can "
+                "steer it at internal or cloud-metadata addresses. Resolve the host and "
+                "reject private/link-local/metadata ranges, disable redirects, and allowlist "
+                "the destinations the tool needs. AgentAvow's sandbox confirms this at runtime."
+            ),
+        ))
+
     # Manifest command/args rug-pull (#4, MCPoison) — structural, not per-line
     if is_metadata and Path(file_path).name.lower().endswith(".json"):
         findings.extend(_scan_manifest_exec(content, file_path))
@@ -2209,6 +2239,9 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         "insecure_deserialization": "code_safety",
         "exfiltration": "data_handling",
         "toxic_flow": "data_handling",
+        # Caller-supplied URL reaches an outbound request unvalidated (SSRF, CVE-2026-14540
+        # class): a data-handling axis concern.
+        "ssrf": "data_handling",
         "fs_access": "filesystem_access",
         "dependency": "dependency_health",
         "install_hook": "dependency_health",

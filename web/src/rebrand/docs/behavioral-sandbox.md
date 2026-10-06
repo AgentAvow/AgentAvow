@@ -46,10 +46,23 @@ in the package's README are used when they name the tool. The same tool with the
 gets the same arguments, so a run can be repeated and compared. No language model writes the calls;
 a model's output is not reproducible, and the result has to be.
 
+## The SSRF probe
+
+Any tool that takes a URL is also handed one extra argument: a sentinel pointing at a link-local
+address (`169.254.254.254`), an address a router never forwards, so the request can reach no real
+system. A well-behaved tool resolves the host, sees it is internal, and refuses. A tool that builds
+the request without checking where the URL resolves connects to it, and the sandbox's host-side
+capture records the attempt. That is the exact flaw behind the 2026 wave of MCP server-side request
+forgery reports (Google's `MCP Toolbox for Databases`, CVE-2026-14540, and others): a server that
+turns a caller-supplied URL into an outbound request with no target validation, so an agent can
+steer it at cloud-metadata or internal services. Only package-shipped servers are probed this way;
+a remote server you point us at is never handed the sentinel.
+
 ## What the findings mean
 
 | Finding | Meaning | Severity |
 |---|---|---|
+| Followed a caller-supplied URL to an internal address | A tool was handed a link-local URL and connected to it, so it builds outbound requests from URLs the caller controls without checking the target (server-side request forgery) | high |
 | Undeclared egress | Contacted a host outside the registry, the tool's own vendor, and the declared scope | high |
 | Read-only annotation violated | A tool declared `readOnlyHint: true` and wrote files when called | high |
 | Open-world annotation violated | Every tool declares `openWorldHint: false`, yet the server reached undeclared hosts | medium |
@@ -82,7 +95,7 @@ Only a **signed, completed** run counts. Applied to the score from the static sc
 | What the sandbox observed | Effect on the trust score |
 |---|---|
 | A canary credential left the sandbox, or any critical behavioral finding | Capped at 45, the same as a shipped critical in code |
-| Any high behavioral finding (undeclared egress, a read-only tool that wrote files) | −10 and capped at 70, so the verdict is always "needs review" |
+| Any high behavioral finding (undeclared egress, a read-only tool that wrote files, following a caller-supplied URL to an internal address) | −10 and capped at 70, so the verdict is always "needs review" |
 | Medium behavioral findings only | −5 |
 | Low findings (a crash) | No change |
 | A clean, full exercise: the server started, tools were called, nothing was found | +3, for evidence nobody else has |

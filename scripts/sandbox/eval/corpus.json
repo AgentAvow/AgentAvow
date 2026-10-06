@@ -172,6 +172,35 @@
       "expect": {
         "launch_ok": false
       }
+    },
+    {
+      "file": "ssrf_follows_server.py",
+      "label": "ssrf_follows_caller_url",
+      "must_not_raise": [
+        "credential_canary_exfiltrated"
+      ],
+      "must_raise_sandbox": [
+        "ssrf_internal_fetch"
+      ],
+      "expect": {
+        "launch_ok": true,
+        "min_calls": 1
+      }
+    },
+    {
+      "file": "ssrf_guarded_server.py",
+      "label": "ssrf_validates_target",
+      "must_not_raise": [
+        "ssrf_internal_fetch",
+        "credential_canary_exfiltrated"
+      ],
+      "must_not_raise_sandbox": [
+        "ssrf_internal_fetch"
+      ],
+      "expect": {
+        "launch_ok": true,
+        "min_calls": 1
+      }
     }
   ],
   "known_good_skills": [

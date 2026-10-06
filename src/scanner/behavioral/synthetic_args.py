@@ -361,6 +361,31 @@ def _clean(args: object) -> dict:
     return {k: v for k, v in args.items() if isinstance(k, str)}
 
 
+def ssrf_variant(args: object, sentinel: str) -> tuple[object, bool]:
+    """A copy of ``args`` with every URL-shaped value we generated (equal to
+    :data:`SAMPLE_URL`) replaced by ``sentinel`` — an internal/link-local URL. Returns
+    ``(new_args, changed)``; ``changed`` is False when the tool takes no URL we filled, so
+    the caller can skip the SSRF probe call entirely. Deterministic; only rewrites values
+    WE chose (``SAMPLE_URL``), never a mined example, so a tool is probed exactly where it
+    advertises a URL input. ``mcp_exercise.js`` ports this line for line."""
+    changed = False
+
+    def _walk(v: object) -> object:
+        nonlocal changed
+        if isinstance(v, str):
+            if v == SAMPLE_URL:
+                changed = True
+                return sentinel
+            return v
+        if isinstance(v, dict):
+            return {k: _walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [_walk(x) for x in v]
+        return v
+
+    return _walk(args), changed
+
+
 def args_for_tool(name: str, schema: dict | None, mined: dict | None) -> dict:
     """Arguments to call ``name`` with: generated from its schema, then a mined README
     example merged over it (so required keys are always present). Never raises."""

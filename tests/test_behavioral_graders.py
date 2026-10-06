@@ -11,6 +11,7 @@ from src.scanner.behavioral.graders import (
     grade_crashed_server,
     grade_open_world_violated,
     grade_readonly_violated,
+    grade_ssrf_internal_fetch,
     grade_summary,
 )
 from src.scanner.behavioral.runner import BehavioralResult, behavioral_findings
@@ -107,6 +108,43 @@ def test_canary_exfiltration_is_critical_and_names_the_channel():
     assert "http:collector.example" in fs[0].snippet
 
 
+def test_ssrf_internal_fetch_is_high_and_names_the_probed_tool():
+    t = _transcript(
+        tools=[{"name": "fetch_url", "annotations": {"readOnlyHint": True}}],
+        calls=[
+            {"tool": "fetch_url", "args": {"url": "https://example.com/agentavow"}, "ok": True},
+            {"tool": "fetch_url", "args": {"url": "http://169.254.254.254/agentavow-ssrf"},
+             "ok": True, "ssrf_probe": True, "ssrf_target": "http://169.254.254.254/agentavow-ssrf"},
+        ])
+    r = _result(t, ssrf_hits=["169.254.254.254"])
+    fs = grade_ssrf_internal_fetch(r, t)
+    assert len(fs) == 1
+    assert fs[0].severity == "high" and fs[0].rule == "ssrf_internal_fetch"
+    assert "fetch_url" in fs[0].name
+    assert "169.254.254.254" in fs[0].snippet
+    # it also shows up in the full grade() and bumps the summary counter
+    assert "ssrf_internal_fetch" in {f.rule for f in grade(r)}
+    assert grade_summary(r)["ssrf_hits"] == 1
+
+
+def test_no_ssrf_finding_without_a_sentinel_hit():
+    t = _transcript(
+        tools=[{"name": "fetch_url", "annotations": {"readOnlyHint": True}}],
+        calls=[{"tool": "fetch_url", "args": {"url": "http://169.254.254.254/agentavow-ssrf"},
+                "ok": True, "ssrf_probe": True}])
+    # the server was PROBED but never connected (guarded): no ssrf_hits → no finding
+    assert grade_ssrf_internal_fetch(_result(t, ssrf_hits=[]), t) == []
+
+
+def test_ssrf_finding_is_generic_when_more_than_one_tool_probed():
+    t = _transcript(
+        tools=[{"name": "a"}, {"name": "b"}],
+        calls=[{"tool": "a", "ok": True, "ssrf_probe": True},
+               {"tool": "b", "ok": True, "ssrf_probe": True}])
+    fs = grade_ssrf_internal_fetch(_result(t, ssrf_hits=["169.254.254.254"]), t)
+    assert len(fs) == 1 and fs[0].name.startswith("A tool followed")
+
+
 def test_canary_echoed_in_result_is_medium():
     t = _transcript(canary={"env_names": ["API_TOKEN"], "seen_in_result": ["API_TOKEN"]})
     fs = grade_canary_echoed(_result(t), t)
@@ -164,9 +202,11 @@ def test_grade_is_deterministic_and_in_rule_order():
         "annotation_open_world_violated", "credential_canary_exfiltrated",
         "canary_echoed_in_result", "tool_call_crashed_server",
     ]
-    # no IMDS here, and the skill-only grader never fires on an MCP plan
+    # no IMDS here, no SSRF sentinel hit, and the skill-only grader never fires on an MCP
+    # plan — those three produce nothing for this transcript
     assert rules == [name for name, _ in GRADERS
-                     if name not in ("cloud_metadata_probe", "skill_script_egress")]
+                     if name not in ("cloud_metadata_probe", "skill_script_egress",
+                                     "ssrf_internal_fetch")]
     s = grade_summary(r)
     assert s["findings"] == {"critical": 1, "high": 2, "medium": 2, "low": 1, "total": 6}
     assert s["rules"] == rules

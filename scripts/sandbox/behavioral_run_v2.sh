@@ -42,6 +42,8 @@
 #     "egress_hosts": [str],             # DNS names + TLS SNI + HTTP Host, lower-cased, unique
 #     "fs_writes": [str],                # added/changed paths outside the tmpfs mounts (≤100)
 #     "canary_exfil": [{"via": "dns"|"http", "host": str}],   # [] when no canary / clean
+#     "ssrf_hits": [str],                # sentinel IP(s) the target connected to (SSRF probe);
+#                                        # [] = it did not follow a caller-supplied URL to one
 #     "exercise": {...} | null,          # the exerciser's transcript, slimmed (no input
 #                                        # schemas, capped strings); if the whole result
 #                                        # exceeds 20,000 chars it is emitted instead as
@@ -222,11 +224,19 @@ FS_JSON="$(docker diff "$NAME" 2>/dev/null | grep -E '^[AC] ' \
 tcpdump -nn -r "$PCAP" "${PF}udp port 53" 2>/dev/null | grep -oiE 'A\? [a-z0-9._-]+' | awk '{print $2}' | head -2000 > "$DNS_TXT" || true
 tcpdump -nn -A -r "$PCAP" "${PF}tcp port 80" 2>/dev/null | head -c 2000000 > "$HTTP_TXT" || true
 
+# SSRF sentinel: a packet to 169.254.254.254 means a tool followed a caller-supplied URL to
+# a link-local address (see SSRF_SENTINEL_IP in src/scanner/behavioral/runner.py). The IP is
+# link-local so the packet never leaves the host; we only need to see that it was attempted.
+SSRF_JSON='[]'
+if tcpdump -nn -r "$PCAP" "${PF}dst host 169.254.254.254" 2>/dev/null | grep -q .; then
+  SSRF_JSON='["169.254.254.254"]'
+fi
+
 python3 - "$IMAGE" "$MODE" "$EXIT_CODE" "$TIMED_OUT" "$HOSTS_JSON" "$FS_JSON" "$CANARY" "$LOGS" \
-  "$IMAGE_PULLED" "$FILES_JSON" "$DNS_TXT" "$HTTP_TXT" <<'PY'
+  "$IMAGE_PULLED" "$FILES_JSON" "$DNS_TXT" "$HTTP_TXT" "$SSRF_JSON" <<'PY'
 import sys, json, re
 (image, mode, exit_code, timed_out, hosts, fs, canary, logs_path, image_pulled, files_json,
- dns_path, http_path) = sys.argv[1:13]
+ dns_path, http_path, ssrf_json) = sys.argv[1:14]
 
 def _read(path, limit):
     try:
@@ -315,6 +325,7 @@ result = {
     "egress_hosts": _arr(hosts),
     "fs_writes": _arr(fs),
     "canary_exfil": canary_exfil[:32],
+    "ssrf_hits": _arr(ssrf_json),
     "exercise": _slim(exercise),
     "image_pulled": image_pulled == "true",
     "files_materialized": _arr(files_json),

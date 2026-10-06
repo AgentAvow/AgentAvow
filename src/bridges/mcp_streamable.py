@@ -708,6 +708,9 @@ def _finding_phrase(f: dict) -> str:
         if len(parts) > 2:
             out.append(f"+{len(parts) - 2} more tools")
         return _clip("; ".join(out), 160)
+    if rule == "ssrf_internal_fetch":
+        return _clip(f"followed a URL it was handed to an internal address — {ev}"
+                     if ev else "followed a caller-supplied URL to an internal address", 160)
     if rule == "behavioral_undeclared_egress":
         hosts = ev[len("egress to "):] if ev.startswith("egress to ") else ev
         return _clip(f"contacted undeclared hosts: {hosts}", 140)

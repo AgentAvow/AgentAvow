@@ -31,6 +31,8 @@ JSON shape (version 1):
                   "duration_ms": 120,
                   "fs_writes": ["/tmp/x"],                         # NEW paths under the
                                                                   # writable mounts, per call
+                  "ssrf_probe": false,       # this call handed the tool a sentinel URL (SSRF)
+                  "ssrf_target": "",         # the sentinel URL, present when ssrf_probe
                   "result_sample": "first 300 chars of text content"} ],
       "canary": {"env_names": ["GITHUB_TOKEN"], "seen_in_result": ["GITHUB_TOKEN"]},
       "timed_out": false,                                            # global wall clock hit
@@ -95,6 +97,10 @@ class ToolCall:
     duration_ms: int = 0
     fs_writes: list[str] = field(default_factory=list)
     result_sample: str = ""
+    # True when this call handed the tool a sentinel URL pointing at a link-local address
+    # to see whether it follows a caller-supplied URL without validating the target (SSRF).
+    ssrf_probe: bool = False
+    ssrf_target: str = ""
 
 
 @dataclass
@@ -137,7 +143,8 @@ class ExerciseTranscript:
             "calls": [
                 {"tool": c.tool, "ok": c.ok, "is_error": c.is_error,
                  "duration_ms": c.duration_ms, "fs_writes": c.fs_writes[:10],
-                 "error": c.error}
+                 "error": c.error,
+                 **({"ssrf_probe": True, "ssrf_target": c.ssrf_target} if c.ssrf_probe else {})}
                 for c in self.calls
             ],
             "canary": {"env_names": self.canary_env_names,
@@ -202,6 +209,7 @@ def parse_transcript(doc: str | dict | None) -> ExerciseTranscript:
                 ok=bool(c.get("ok")), is_error=bool(c.get("is_error")),
                 error=_s(c.get("error")) or None, duration_ms=_i(c.get("duration_ms")),
                 fs_writes=_strs(c.get("fs_writes")), result_sample=_s(c.get("result_sample")),
+                ssrf_probe=bool(c.get("ssrf_probe")), ssrf_target=_s(c.get("ssrf_target"), 200),
             ))
     return ExerciseTranscript(
         launch_ok=bool(launch.get("ok")),

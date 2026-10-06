@@ -29,7 +29,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 sys.path.insert(1, os.path.join(_HERE, "..", "..", "src", "scanner", "behavioral"))
 try:
-    from synthetic_args import args_for_tool, generate_args, mine_examples
+    from synthetic_args import args_for_tool, generate_args, mine_examples, ssrf_variant
 except ImportError:  # the copy next to us is missing; still exercise with empty args
     def generate_args(schema):
         return {}
@@ -39,6 +39,9 @@ except ImportError:  # the copy next to us is missing; still exercise with empty
 
     def args_for_tool(name, schema, mined):
         return {}
+
+    def ssrf_variant(args, sentinel):
+        return args, False
 
 BEGIN, END = "AGENTAVOW_TRANSCRIPT_BEGIN", "AGENTAVOW_TRANSCRIPT_END"
 INIT_WAIT_MAX = 15.0  # seconds to wait for `initialize` before giving up on a candidate
@@ -61,6 +64,8 @@ class Options:
         self.canary_value = ""
         self.mounts = DEFAULT_MOUNTS.split(",")
         self.gen_args: str | None = None
+        self.ssrf_url = ""        # sentinel internal URL for the SSRF probe (empty = off)
+        self.max_ssrf = 6         # cap the SSRF probe to this many URL-taking tools
         self.command: list[str] = []
 
 
@@ -88,6 +93,10 @@ def parse_cli(argv: list[str]) -> Options:
             o.mounts = [m.strip() for m in val.split(",") if m.strip()]
         elif flag == "--gen-args":
             o.gen_args = val
+        elif flag == "--ssrf-url":
+            o.ssrf_url = val
+        elif flag == "--max-ssrf":
+            o.max_ssrf = int(val)
         else:
             i -= 1  # unknown flag: skip just the flag
         i += 2
@@ -315,14 +324,38 @@ def exercise(o: Options, out: dict) -> None:
             if call["error"] == "server_exited":
                 out["error"] = "server_exited"
                 break
+
+        # SSRF probe: call each URL-taking tool once more with a sentinel link-local URL,
+        # so the host-side capture can see whether the server follows a caller-supplied URL
+        # to an internal target without validating it. Only tools whose synthetic args hold
+        # a URL we generated are probed; bounded by --max-ssrf and the overall deadline.
+        if o.ssrf_url and client.alive():
+            probed = 0
+            for spec in out["tools"]:
+                if probed >= o.max_ssrf or time.monotonic() >= deadline or not client.alive():
+                    break
+                base = args_for_tool(spec["name"], spec.get("input_schema"), mined)
+                variant, changed = ssrf_variant(base, o.ssrf_url)
+                if not changed:
+                    continue
+                probed += 1
+                call = call_tool(client, spec, o, mined, exclude, deadline,
+                                 out["canary"]["seen_in_result"],
+                                 override_args=variant, ssrf_target=o.ssrf_url)
+                out["calls"].append(call)
+                if call["error"] == "server_exited":
+                    out["error"] = "server_exited"
+                    break
     finally:
         out.pop("_client", None)
         client.kill()
 
 
 def call_tool(client: StdioClient, spec: dict, o: Options, mined: dict,
-              exclude: set[str], deadline: float, canary_seen: list[str]) -> dict:
-    args = args_for_tool(spec["name"], spec.get("input_schema"), mined)
+              exclude: set[str], deadline: float, canary_seen: list[str],
+              override_args: dict | None = None, ssrf_target: str = "") -> dict:
+    args = override_args if override_args is not None else \
+        args_for_tool(spec["name"], spec.get("input_schema"), mined)
     before = walk_mounts(o.mounts, exclude)
     budget = min(o.per_call_timeout, max(0.05, deadline - time.monotonic()))
     t0 = time.monotonic()
@@ -332,6 +365,9 @@ def call_tool(client: StdioClient, spec: dict, o: Options, mined: dict,
     call = {"tool": spec["name"], "args": args, "ok": err is None, "error": None,
             "is_error": False, "duration_ms": duration, "fs_writes": writes,
             "result_sample": ""}
+    if ssrf_target:
+        call["ssrf_probe"] = True
+        call["ssrf_target"] = ssrf_target
     if err:
         call["error"] = "call_timeout" if err == "timeout" else err
         return call

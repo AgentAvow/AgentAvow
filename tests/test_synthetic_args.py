@@ -17,6 +17,7 @@ from src.scanner.behavioral.synthetic_args import (
     args_for_tool,
     generate_args,
     mine_examples,
+    ssrf_variant,
 )
 
 SCHEMAS = Path(__file__).parent / "fixtures" / "behavioral" / "schemas"
@@ -252,3 +253,29 @@ def test_args_for_tool_merges_mined_over_generated():
     assert args_for_tool("other", schema, mined) == {"path": SAMPLE_PATH, "limit": 1}
     assert args_for_tool("read_file", None, {"read_file": "junk"}) == {}
     assert args_for_tool("read_file", None, None) == {}
+
+
+SENTINEL = "http://169.254.254.254/agentavow-ssrf"
+
+
+def test_ssrf_variant_rewrites_only_generated_urls():
+    args = {"url": SAMPLE_URL, "limit": 5, "path": SAMPLE_PATH, "nested": {"href": SAMPLE_URL}}
+    variant, changed = ssrf_variant(args, SENTINEL)
+    assert changed is True
+    assert variant == {"url": SENTINEL, "limit": 5, "path": SAMPLE_PATH,
+                       "nested": {"href": SENTINEL}}
+    # the original is untouched (a copy is returned)
+    assert args["url"] == SAMPLE_URL
+
+
+def test_ssrf_variant_reports_no_change_when_no_url_field():
+    args = {"path": SAMPLE_PATH, "count": 1, "flag": False}
+    variant, changed = ssrf_variant(args, SENTINEL)
+    assert changed is False and variant == args
+
+
+def test_ssrf_variant_walks_lists():
+    args = {"urls": [SAMPLE_URL, "literal-string", SAMPLE_URL]}
+    variant, changed = ssrf_variant(args, SENTINEL)
+    assert changed is True
+    assert variant == {"urls": [SENTINEL, "literal-string", SENTINEL]}

@@ -57,15 +57,25 @@ def load_corpus() -> dict:
 # expectations
 # ---------------------------------------------------------------------------
 
-def check_expectations(entry: dict, result: BehavioralResult) -> list[str]:
-    """Human-readable failures for one fixture, [] when every expectation holds."""
+def check_expectations(entry: dict, result: BehavioralResult,
+                       *, sandbox: bool = False) -> list[str]:
+    """Human-readable failures for one fixture, [] when every expectation holds.
+
+    ``must_raise_sandbox`` / ``must_not_raise_sandbox`` are checked ONLY under ``sandbox``
+    (real gVisor box): egress and the SSRF sentinel are observed from the host-side capture,
+    which the local exerciser cannot produce."""
     rules = {f.rule for f in grade(result)}
     tr = result.transcript
     fails: list[str] = []
-    for r in entry.get("must_raise", []):
+    must_raise = list(entry.get("must_raise", []))
+    must_not_raise = list(entry.get("must_not_raise", []))
+    if sandbox:
+        must_raise += entry.get("must_raise_sandbox", [])
+        must_not_raise += entry.get("must_not_raise_sandbox", [])
+    for r in must_raise:
         if r not in rules:
             fails.append(f"expected rule {r!r} not raised (raised: {sorted(rules) or 'none'})")
-    for r in entry.get("must_not_raise", []):
+    for r in must_not_raise:
         if r in rules:
             fails.append(f"rule {r!r} raised but must not")
     exp = entry.get("expect") or {}
@@ -89,7 +99,8 @@ def run_fixture_local(entry: dict, *, per_call: float = 2.0, timeout: float = 20
     fixture = FIXTURE_DIR / entry["file"]
     canary = CANARY_PREFIX + "evalfixture0"
     with tempfile.TemporaryDirectory(prefix="agentavow-eval-") as mount:
-        env = dict(os.environ, AGENTAVOW_FIXTURE_TMP=mount, AGENTAVOW_FIXTURE_SLEEP="6")
+        env = dict(os.environ, AGENTAVOW_FIXTURE_TMP=mount, AGENTAVOW_FIXTURE_SLEEP="6",
+                   AGENTAVOW_FIXTURE_NET="0")  # local: never touch the network
         cmd = [PY, str(SANDBOX_DIR / "mcp_exercise.py"), "--timeout", str(timeout),
                "--per-call-timeout", str(per_call), "--mounts", mount,
                "--canary-value", canary]
@@ -150,8 +161,10 @@ async def run_fixture_sandbox(entry: dict, *, timeout: int = 60) -> BehavioralRe
         "_mcp_stdio.py": (FIXTURE_DIR / "_mcp_stdio.py").read_bytes(),
         entry["file"]: fixture.read_bytes(),
     }
+    from src.scanner.behavioral.runner import SSRF_SENTINEL_URL
     ex = ["python3", "/work/mcp_exercise.py", "--timeout", str(timeout - 10),
-          "--per-call-timeout", "5", "--canary-value", canary]
+          "--per-call-timeout", "5", "--canary-value", canary,
+          "--ssrf-url", SSRF_SENTINEL_URL]
     if entry.get("env_names"):
         ex += ["--canary-env", ",".join(entry["env_names"])]
     ex += ["--", "python3", f"/work/{entry['file']}"]
@@ -301,8 +314,8 @@ def main(argv: list[str] | None = None) -> int:
             res = runner(entry)
             rows.append({"file": name, "label": entry["label"],
                          "rules": sorted({f.rule for f in grade(res)}),
-                         "failures": check_expectations(entry, res) if res.ran
-                         else [f"did not run: {res.error}"],
+                         "failures": check_expectations(entry, res, sandbox="sandbox" in mode)
+                         if res.ran else [f"did not run: {res.error}"],
                          "summary": grade_summary(res)})
         print(f"\n== {mode} ==")
         return rows

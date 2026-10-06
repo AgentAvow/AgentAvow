@@ -264,6 +264,20 @@ function argsForTool(name, schema, mined) {
   return out;
 }
 
+// A copy of args with every URL-shaped value we generated (=== SAMPLE_URL) replaced by the
+// SSRF sentinel. Returns [variant, changed]; mirrors synthetic_args.ssrf_variant.
+function ssrfVariant(args, sentinel) {
+  let changed = false;
+  const walk = (v) => {
+    if (typeof v === "string") { if (v === SAMPLE_URL) { changed = true; return sentinel; } return v; }
+    if (Array.isArray(v)) return v.map(walk);
+    if (isObj(v)) { const o = {}; for (const [k, x] of Object.entries(v)) o[k] = walk(x); return o; }
+    return v;
+  };
+  const variant = walk(args);
+  return [variant, changed];
+}
+
 // ---- exerciser --------------------------------------------------------------------------
 const BEGIN = "AGENTAVOW_TRANSCRIPT_BEGIN", END = "AGENTAVOW_TRANSCRIPT_END";
 const INIT_WAIT_MAX = 15; // seconds to wait for `initialize` before giving up on a candidate
@@ -274,7 +288,8 @@ const now = () => Date.now();
 
 function parseCli(argv) {
   const o = { timeout: 60, perCallTimeout: 8, maxTools: 25, readme: null, canaryEnv: [],
-    canaryValue: "", mounts: ["/tmp", "/work", "/run"], genArgs: null, command: [] };
+    canaryValue: "", mounts: ["/tmp", "/work", "/run"], genArgs: null, ssrfUrl: "",
+    maxSsrf: 6, command: [] };
   const split = argv.indexOf("--");
   if (split >= 0) { o.command = argv.slice(split + 1); argv = argv.slice(0, split); }
   for (let i = 0; i < argv.length; i += 2) {
@@ -287,6 +302,8 @@ function parseCli(argv) {
     else if (flag === "--canary-value") o.canaryValue = val;
     else if (flag === "--mounts") o.mounts = val.split(",").map((s) => s.trim()).filter(Boolean);
     else if (flag === "--gen-args") o.genArgs = val;
+    else if (flag === "--ssrf-url") o.ssrfUrl = val;
+    else if (flag === "--max-ssrf") o.maxSsrf = parseInt(val, 10);
     else i -= 1;
   }
   return o;
@@ -400,8 +417,9 @@ async function listTools(client, deadline, perCall) {
   return [tools, null];
 }
 
-async function callTool(client, spec, o, mined, exclude, deadline, canarySeen) {
-  const args = argsForTool(spec.name, spec.input_schema, mined);
+async function callTool(client, spec, o, mined, exclude, deadline, canarySeen, overrideArgs, ssrfTarget) {
+  const args = overrideArgs !== undefined && overrideArgs !== null
+    ? overrideArgs : argsForTool(spec.name, spec.input_schema, mined);
   const before = walkMounts(o.mounts, exclude);
   const budget = Math.min(o.perCallTimeout, Math.max(0.05, (deadline - now()) / 1000));
   const t0 = now();
@@ -410,6 +428,7 @@ async function callTool(client, spec, o, mined, exclude, deadline, canarySeen) {
   const writes = [...walkMounts(o.mounts, exclude)].filter((p) => !before.has(p)).sort().slice(0, MAX_WRITES_PER_CALL);
   const call = { tool: spec.name, args, ok: err === null, error: null, is_error: false,
     duration_ms: duration, fs_writes: writes, result_sample: "" };
+  if (ssrfTarget) { call.ssrf_probe = true; call.ssrf_target = ssrfTarget; }
   if (err) { call.error = err === "timeout" ? "call_timeout" : err; return call; }
   const text = resultText(result);
   call.is_error = Boolean(result.isError);
@@ -465,6 +484,22 @@ async function exercise(o, out) {
       const call = await callTool(client, spec, o, mined, exclude, deadline, out.canary.seen_in_result);
       out.calls.push(call);
       if (call.error === "server_exited") { out.error = "server_exited"; break; }
+    }
+
+    // SSRF probe: each URL-taking tool once more with a sentinel link-local URL.
+    if (o.ssrfUrl && client.alive()) {
+      let probed = 0;
+      for (const spec of out.tools) {
+        if (probed >= o.maxSsrf || now() >= deadline || !client.alive()) break;
+        const base = argsForTool(spec.name, spec.input_schema, mined);
+        const [variant, changed] = ssrfVariant(base, o.ssrfUrl);
+        if (!changed) continue;
+        probed += 1;
+        const call = await callTool(client, spec, o, mined, exclude, deadline,
+          out.canary.seen_in_result, variant, o.ssrfUrl);
+        out.calls.push(call);
+        if (call.error === "server_exited") { out.error = "server_exited"; break; }
+      }
     }
   } finally {
     delete out._client;
