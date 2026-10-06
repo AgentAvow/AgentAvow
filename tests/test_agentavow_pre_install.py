@@ -119,7 +119,7 @@ def test_safe_server_gives_a_visible_verdict_and_never_grants_permission(hook, m
     assert cached["score"] == 88 and cached["id"] == "https://mcp.deepwiki.com/mcp"
 
 
-def test_needs_review_asks_the_person_with_the_verdict_as_the_reason(hook, monkeypatch, capsys):
+def test_blocking_findings_ask_the_person_with_the_verdict_as_the_reason(hook, monkeypatch, capsys):
     mod, _ = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add tm -- npx -y task-master-ai"),
                lambda t, force=False: _ok(36, "needs review", 5, deprecated=False))
@@ -130,16 +130,43 @@ def test_needs_review_asks_the_person_with_the_verdict_as_the_reason(hook, monke
     assert "https://agentavow.com/check/pkg/npm/task-master-ai" in out["systemMessage"]
 
 
-def test_unscannable_server_asks_and_says_it_was_not_scanned(hook, monkeypatch, capsys):
+@pytest.mark.parametrize("tier,score", [("blocked", 4), ("restricted", 22), ("", 12)])
+def test_blocked_or_restricted_tier_asks_even_without_findings(hook, monkeypatch, capsys, tier, score):
+    mod, _ = hook
+    out = _run(mod, monkeypatch, capsys, _bash("claude mcp add bad https://bad.example/mcp"),
+               lambda t, force=False: _ok(score, "needs review", 0, tier=tier))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_soft_needs_review_without_findings_notes_and_proceeds(hook, monkeypatch, capsys):
+    """DeepWiki-style: 74/100, zero findings, 'thin coverage'. A legitimate server must
+    not get the prompt a poisoned one gets — the verdict is shown, the add goes on."""
+    mod, _ = hook
+    out = _run(mod, monkeypatch, capsys, _bash("claude mcp add deepwiki https://mcp.deepwiki.com/mcp"),
+               lambda t, force=False: _ok(74, "needs review", 0, tier="standard"))
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+    assert "74/100 — needs review, no blocking findings" in out["systemMessage"]
+
+
+def test_unscannable_server_notes_it_was_not_scanned_and_proceeds(hook, monkeypatch, capsys):
     mod, pc = hook
 
     def refuse(t, force=False):
         raise pc._UnscannableError("422")
 
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add figma https://mcp.figma.com/mcp"), refuse)
-    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert "permissionDecision" not in out["hookSpecificOutput"]
     assert "not scanned" in out["systemMessage"]
     assert "retry_after" in json.loads(pc.CACHE.read_text())["figma"]
+
+
+def test_needs_decision_rule_directly(hook):
+    mod, _ = hook
+    assert mod._needs_decision(None) is False
+    assert mod._needs_decision(_ok(74, "needs review", 0, tier="standard")) is False
+    assert mod._needs_decision(_ok(60, "needs review", 1, tier="standard")) is True
+    assert mod._needs_decision(_ok(8, "needs review", 0, tier="blocked")) is True
+    assert mod._needs_decision(_ok(40, "needs review", 0, tier="")) is False
 
 
 def test_transient_failure_and_non_install_commands_are_silent(hook, monkeypatch, capsys):
