@@ -33,8 +33,8 @@ start of each session, and surfaces the verdict. No need to remember.
 **Install:**
 ```bash
 mkdir -p ~/.claude/hooks
-cp agentavow_precheck.py agentavow_pretool_gate.py ~/.claude/hooks/
-chmod +x ~/.claude/hooks/agentavow_precheck.py ~/.claude/hooks/agentavow_pretool_gate.py
+cp agentavow_precheck.py agentavow_pretool_gate.py agentavow_pre_install.py ~/.claude/hooks/
+chmod +x ~/.claude/hooks/agentavow_precheck.py ~/.claude/hooks/agentavow_pretool_gate.py ~/.claude/hooks/agentavow_pre_install.py
 ```
 Then merge the contents of `settings.hooks.json` into `~/.claude/settings.json`
 (under the `hooks` key — keep any hooks you already have). Its `PreToolUse` block is
@@ -45,7 +45,8 @@ the per-call gate (below); leave it out for session-start verdicts only.
    ```bash
    echo '{}' | python3 ~/.claude/hooks/agentavow_precheck.py
    ```
-   You should see a JSON object whose `additionalContext` lists each new MCP server
+   You should see a JSON object with a one-line `systemMessage` summary and an
+   `additionalContext` block that lists each new MCP server
    with its AgentAvow score and verdict. Run it again — already-scanned servers are
    cached (`~/.cache/agentavow/scanned.json`), so the second run is silent.
 2. End to end: add a new MCP server (`claude mcp add --transport http foo <url>`),

@@ -16,6 +16,10 @@ The first time there is nothing to scan at all, the hook shows one line saying s
 (and how to scan a tool on demand), then never repeats it. That line makes no request.
 Each verdict (score, tier, grade, the signed per-tool digests) is kept in the cache
 file so the per-call gate (agentavow_pretool_gate.py) can act on it without a request.
+How the result reaches the person: Claude Code never displays a SessionStart hook's
+``additionalContext`` (it goes to the model only), and ``systemMessage`` is not rendered
+by every client. So the hook does both, and the context block asks Claude to open its
+first reply with the one-line summary — the one channel every surface shows.
 A server whose tool definitions the gate saw change since the grade is re-graded here
 at the next session start, and reported again.
 
@@ -41,7 +45,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.9"
+__version__ = "0.1.10"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -412,8 +416,10 @@ def _intro_message() -> str:
         if _install_source() == "plugin"
         else 'ask Claude "is <tool> safe?" or open https://agentavow.com/check'
     )
-    return ("AgentAvow: no remote MCP servers to scan yet; new ones are graded at your next "
-            f"session start. To check a tool before you connect it, {how}.")
+    return ("AgentAvow: no remote MCP servers to scan yet. Add one (for example "
+            "`claude mcp add <name> <https url>` or `claude mcp add <name> -- npx <package>`) "
+            "and it is graded before it is added, and again at your next session start. "
+            f"To check any tool right now, {how}.")
 
 
 def _show_intro_once() -> None:
@@ -428,6 +434,26 @@ def _show_intro_once() -> None:
     cache[META_KEY] = {"intro_shown": __version__}
     if _save_cache(cache):
         print(json.dumps({"systemMessage": _intro_message()}))
+
+
+def _summary(graded: list[tuple[str, dict]]) -> str:
+    """One line a person can act on: how many servers were graded, how many are safe,
+    and the one that needs attention most. Shown as the hook's systemMessage and
+    relayed by Claude at the top of its first reply."""
+    n = len(graded)
+    if not n:
+        return ("AgentAvow pre-check: a configured MCP server could not be scanned; "
+                "ask for the AgentAvow pre-check for details.")
+    safe = sum(1 for _, r in graded if r["verdict"] == "safe")
+    review = n - safe
+    parts = [f"AgentAvow pre-check: graded {n} MCP server{'' if n == 1 else 's'} — "
+             f"{safe} safe, {review} need{'s' if review == 1 else ''} review"]
+    if review:
+        name, worst = min(graded, key=lambda g: g[1]["score"])
+        extra = f", {worst['blocking']} blocking" if worst["blocking"] else ""
+        parts.append(f" (lowest: '{name}' {worst['score']}/100{extra})")
+    parts.append(". Ask for the AgentAvow pre-check for details.")
+    return "".join(parts)
 
 
 def _is_cached(entry: object, target_id: str, now: float) -> bool:
@@ -467,6 +493,7 @@ def main() -> None:
     now = time.time()
     results: dict[str, dict | None] = {}  # id -> verdict, None = unscannable
     lines: list[str] = []
+    graded: list[tuple[str, dict]] = []  # (server name, verdict) for the summary line
     for t in targets:
         entry = cache.get(t["name"])
         if _is_cached(entry, t["id"], now):
@@ -494,6 +521,7 @@ def main() -> None:
                          "couldn't read it (it may need sign-in).")
             continue
         cache[t["name"]] = _record(t, result, now)
+        graded.append((t["name"], result))
         score, verdict, blocking = result["score"], result["verdict"], result["blocking"]
         flag = "✅" if verdict == "safe" else "⚠️"
         extra = f", {blocking} blocking finding(s)" if blocking else ""
@@ -509,12 +537,18 @@ def main() -> None:
     if not lines:
         return
 
+    summary = _summary(graded)
     context = (
-        "AgentAvow pre-check — new MCP servers scanned before you rely on them:\n"
+        "AgentAvow pre-check — new MCP servers scanned before you rely on them.\n"
+        "The user has NOT seen this (hook output is not displayed to them). At the very "
+        "start of your first reply in this session, before anything else, tell them in one "
+        f"or two lines: \"{summary}\" Then carry on with whatever they asked. If they want "
+        "details, use the lines below; do not repeat the summary in later replies.\n"
         + "\n".join(lines)
         + "\nReview any ⚠️ before trusting it. Full reports: https://agentavow.com/check"
     )
     print(json.dumps({
+        "systemMessage": summary,
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
             "additionalContext": context,

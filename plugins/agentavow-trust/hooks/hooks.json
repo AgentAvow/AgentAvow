@@ -22,6 +22,16 @@
             "timeout": 8
           }
         ]
+      },
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/agentavow_pre_install.py\"",
+            "timeout": 20
+          }
+        ]
       }
     ]
   }

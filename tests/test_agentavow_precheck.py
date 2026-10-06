@@ -65,6 +65,8 @@ def _ok(score: int, verdict: str, blocking: int, **extra) -> dict:
 def test_both_copies_are_identical():
     assert PLUGIN_COPY.read_text() == MANUAL_COPY.read_text()
     assert GATE_COPY.read_text() == GATE_MANUAL_COPY.read_text()
+    assert ((PLUGIN_DIR / "scripts" / "agentavow_pre_install.py").read_text()
+            == (ROOT / "integrations" / "claude-code" / "agentavow_pre_install.py").read_text())
 
 
 def test_versions_agree():
@@ -74,6 +76,7 @@ def test_versions_agree():
     market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text())
     assert hook.__version__ == plugin["version"] == market["plugins"][0]["version"]
     assert gate.__version__ == plugin["version"]
+    assert _load(PLUGIN_DIR / "scripts" / "agentavow_pre_install.py").__version__ == plugin["version"]
 
 
 def test_plugin_registers_both_hooks_with_short_timeouts():
@@ -86,6 +89,10 @@ def test_plugin_registers_both_hooks_with_short_timeouts():
         assert gate["hooks"][0]["timeout"] <= 10
         assert "agentavow_pretool_gate.py" in gate["hooks"][0]["command"]
         assert "agentavow_precheck.py" in cfg["SessionStart"][0]["hooks"][0]["command"]
+        install = cfg["PreToolUse"][1]
+        assert install["matcher"] == "Bash|Write|Edit|MultiEdit"
+        assert install["hooks"][0]["timeout"] <= 20
+        assert "agentavow_pre_install.py" in install["hooks"][0]["command"]
 
 
 def test_user_agent_names_the_install_source():
@@ -354,11 +361,49 @@ def test_manual_copy_intro_points_at_the_site_not_the_plugin_command(tmp_path, m
     assert "/agentavow-trust:scan" not in msg
 
 
+def test_graded_servers_produce_a_visible_summary_and_a_first_reply_instruction(
+        hook, monkeypatch, capsys):
+    """Claude Code shows the model, not the person, a SessionStart hook's context. So
+    the hook also emits a one-line systemMessage, and the context block tells Claude to
+    open its first reply with that same line."""
+    targets = [_mcp("a", "https://a.example/mcp"), _mcp("b", "https://b.example/mcp"),
+               _mcp("c", "https://c.example/mcp")]
+    scores = {"https://a.example/mcp": _ok(92, "safe", 0),
+              "https://b.example/mcp": _ok(36, "needs review", 5),
+              "https://c.example/mcp": _ok(74, "needs review", 0)}
+    out = _run_raw(hook, monkeypatch, capsys, targets, lambda t, force=False: scores[t["id"]])
+    msg = out["systemMessage"]
+    assert msg.startswith("AgentAvow pre-check: graded 3 MCP servers — 1 safe, 2 need review")
+    assert "(lowest: 'b' 36/100, 5 blocking)" in msg
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "has NOT seen this" in ctx and "first reply" in ctx
+    assert msg in ctx  # Claude relays the very line the person may or may not have seen
+    assert "MCP 'b'" in ctx and "36/100" in ctx  # the per-server detail stays available
+    assert "no remote MCP servers to scan yet" not in msg
+
+
+def test_summary_wording_for_one_safe_server_and_for_none_graded(hook):
+    assert hook._summary([("a", _ok(90, "safe", 0))]).startswith(
+        "AgentAvow pre-check: graded 1 MCP server — 1 safe, 0 need review.")
+    assert hook._summary([("a", _ok(70, "needs review", 0))]) == (
+        "AgentAvow pre-check: graded 1 MCP server — 0 safe, 1 needs review "
+        "(lowest: 'a' 70/100). Ask for the AgentAvow pre-check for details.")
+    assert "could not be scanned" in hook._summary([])
+
+
+def test_unscannable_only_run_still_tells_the_person(hook, monkeypatch, capsys):
+    def refuse(t, force=False):
+        raise hook._UnscannableError("422")
+    out = _run_raw(hook, monkeypatch, capsys, [_mcp("figma", "https://mcp.figma.com/mcp")], refuse)
+    assert "could not be scanned" in out["systemMessage"]
+    assert "couldn't read it" in out["hookSpecificOutput"]["additionalContext"]
+
+
 def test_intro_is_not_shown_when_there_are_targets(hook, monkeypatch, capsys):
     out = _run_raw(hook, monkeypatch, capsys,
                    [_mcp("a", "https://mcp.example.com/mcp")],
                    lambda t, force=False: _ok(92, "safe", 0))
-    assert "systemMessage" not in out
+    assert "no remote MCP servers to scan yet" not in out.get("systemMessage", "")
     assert "92/100" in out["hookSpecificOutput"]["additionalContext"]
 
 
