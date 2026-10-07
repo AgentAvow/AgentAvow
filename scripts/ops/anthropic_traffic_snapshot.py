@@ -192,16 +192,25 @@ def snapshot(day: str, since_hours: int) -> dict:
                 if is_owner:
                     n["owner_scans_200"] += 1
 
-    # new machines vs the rolling 30-day hashed set (no raw IPs stored)
-    seen = _load_seen()
+    # New machines vs the rolling 30-day hashed set (no raw IPs stored). Each entry is
+    # [first_seen, last_seen]; a machine is "new" on the day it was first seen, which keeps
+    # a re-run of any past day idempotent whatever order days were processed in.
+    seen_raw = _load_seen()
     cutoff = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=SEEN_WINDOW_DAYS)).strftime("%Y-%m-%d")
-    seen = {h: d for h, d in seen.items() if d >= cutoff}
+    seen: dict[str, list[str]] = {}
+    for h, v in seen_raw.items():
+        first, last = (v if isinstance(v, list) and len(v) == 2 else [str(v), str(v)])
+        if last >= cutoff:
+            seen[h] = [first, last]
     new = 0
     for ip in cc_ips:
         h = hashlib.sha256(f"{salt}|{ip}".encode()).hexdigest()[:24]
-        if h not in seen or seen[h] < cutoff:
+        first, last = seen.get(h, [day, day])
+        first = min(first, day)
+        last = max(last, day)
+        seen[h] = [first, last]
+        if first == day:
             new += 1
-        seen[h] = max(seen.get(h, ""), day)
     os.makedirs(DATA, exist_ok=True)
     with open(SEEN_PATH, "w") as fh:
         json.dump(seen, fh)
