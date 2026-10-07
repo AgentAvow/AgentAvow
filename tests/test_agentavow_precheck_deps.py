@@ -126,7 +126,7 @@ def test_deps_are_graded_reported_and_summarized(hook, monkeypatch, capsys, tmp_
         "chalk": "5.3.0", "left-pad": "1.3.0", "lodash": "4.17.21"}}))
     scores = {"chalk": _ok(90, "safe"), "left-pad": _ok(70, "needs review", 0, deprecated=True),
               "lodash": _ok(88, "safe")}
-    out = _run(hook, monkeypatch, capsys, lambda t, force=False: scores[t["pkg"]])
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
     msg = out["systemMessage"]
     assert msg.startswith("AgentAvow pre-check: no MCP servers in this project.")
     assert "Dependencies: graded all 3 — 2 OK, 1 needs a look (lowest: 'left-pad' 70/100, deprecated)." in msg
@@ -142,7 +142,7 @@ def test_cap_per_session_and_the_rest_next_time(hook, monkeypatch, capsys, tmp_p
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {f"p{i}": "1.0.0" for i in range(20)}}))
     calls = []
 
-    def scan(t, force=False):
+    def scan(t, force=False, stored=False):
         calls.append(t["pkg"])
         return _ok(85, "safe")
 
@@ -164,7 +164,7 @@ def test_rate_limit_stops_the_pass_and_says_so(hook, monkeypatch, capsys, tmp_pa
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"a": "1", "b": "1", "c": "1"}}))
     calls = []
 
-    def scan(t, force=False):
+    def scan(t, force=False, stored=False):
         calls.append(t["pkg"])
         if t["pkg"] == "b":
             raise urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
@@ -183,7 +183,7 @@ def test_regraded_only_when_the_declared_version_changes(hook, monkeypatch, caps
     pj.write_text(json.dumps({"dependencies": {"chalk": "5.3.0"}}))
     calls = []
 
-    def scan(t, force=False):
+    def scan(t, force=False, stored=False):
         calls.append(t["id"])
         return _ok(85, "safe")
 
@@ -198,7 +198,7 @@ def test_regraded_only_when_the_declared_version_changes(hook, monkeypatch, caps
 def test_unscannable_and_transient_failures_fail_open(hook, monkeypatch, capsys, tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"a": "1", "b": "1", "c": "1"}}))
 
-    def scan(t, force=False):
+    def scan(t, force=False, stored=False):
         if t["pkg"] == "a":
             raise hook._UnscannableError("422")
         if t["pkg"] == "b":
@@ -219,7 +219,7 @@ def test_servers_and_deps_share_one_summary_line(hook, monkeypatch, capsys, tmp_
     monkeypatch.setattr(hook, "_targets", lambda: [
         {"name": "dw", "kind": "mcp", "id": "https://mcp.deepwiki.com/mcp", "url": "https://mcp.deepwiki.com/mcp"}])
 
-    def scan(t, force=False):
+    def scan(t, force=False, stored=False):
         return _ok(74, "needs review") if t["kind"] == "mcp" and "url" in t else _ok(90, "safe")
 
     out = _run(hook, monkeypatch, capsys, scan)
@@ -233,12 +233,12 @@ def test_dependency_pass_errors_never_break_the_server_report(hook, monkeypatch,
     monkeypatch.setattr(hook, "_targets", lambda: [
         {"name": "dw", "kind": "mcp", "id": "https://mcp.deepwiki.com/mcp", "url": "https://mcp.deepwiki.com/mcp"}])
     monkeypatch.setattr(hook, "_dependency_targets", lambda: [{"broken": True}])
-    out = _run(hook, monkeypatch, capsys, lambda t, force=False: _ok(90, "safe"))
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
     assert "graded 1 MCP server — 1 safe" in out["systemMessage"]
 
 
 def test_intro_only_when_neither_servers_nor_manifests(hook, monkeypatch, capsys):
-    out = _run(hook, monkeypatch, capsys, lambda t, force=False: _ok(90, "safe"))
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
     assert "nothing to grade here yet" in out["systemMessage"]
     assert "package.json / requirements.txt" in out["systemMessage"]
 
@@ -250,7 +250,7 @@ def test_pattern_only_highs_are_reported_but_not_flagged(hook, monkeypatch, caps
     scores = {"fastapi": _ok(40, "needs review", 30),
               "evil-pkg": _ok(20, "needs review", 3, critical=2),
               "old-pkg": _ok(60, "needs review", 0, advisories=1)}
-    out = _run(hook, monkeypatch, capsys, lambda t, force=False: scores[t["pkg"]])
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
     msg = out["systemMessage"]
     assert "Dependencies: graded all 3 — 1 OK, 2 need a look (lowest: 'evil-pkg' 20/100, 2 critical)." in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
@@ -306,7 +306,7 @@ def test_session_cwd_from_the_hook_payload_wins_over_the_process_cwd(hook, monke
     monkeypatch.chdir(scratch)  # process cwd: nothing here
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart",
                                                              "source": "clear", "cwd": str(project)})))
-    out = _run(hook, monkeypatch, capsys, lambda t, force=False: _ok(90, "safe"))
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
     assert "Dependencies: graded all 1 — 1 OK, 0 need a look." in out["systemMessage"]
     assert hook._cwd() == project
 
@@ -321,3 +321,99 @@ def test_bad_or_missing_cwd_falls_back_to_the_process_cwd(hook, tmp_path):
     hook._set_session_cwd({"cwd": str(tmp_path)})
     assert hook._cwd() == tmp_path
     hook._set_session_cwd(None)
+
+
+# --- stored grades: the dependency pass never triggers a fresh scan ---------------------
+
+def test_dependencies_ask_for_the_stored_grade(hook, monkeypatch, capsys, tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"chalk": "5"}}))
+    seen = []
+
+    def scan(t, force=False, stored=False):
+        seen.append(stored)
+        return _ok(90, "safe")
+
+    _run(hook, monkeypatch, capsys, scan)
+    assert seen == [True]
+
+
+def test_scan_passes_stored_only_for_packages_and_fetch_raises_queued_on_202(hook, monkeypatch):
+    calls = []
+
+    def fetch(path, params):
+        calls.append((path, params))
+        return {"trust_score": 90, "findings": {"items": []}}
+
+    monkeypatch.setattr(hook, "_fetch", fetch)
+    hook._scan({"kind": "package", "registry": "npm", "pkg": "chalk"}, stored=True)
+    hook._scan({"kind": "package", "registry": "npm", "pkg": "chalk"})
+    hook._scan({"kind": "mcp", "url": "https://a.example/mcp"}, stored=True)
+    assert calls == [("/package/npm/chalk", {"stored": "true"}), ("/package/npm/chalk", {}),
+                     ("/mcp", {"endpoint": "https://a.example/mcp"})]
+
+
+def test_fetch_raises_queued_on_a_202(hook, monkeypatch):
+    class _Resp:
+        status = 202
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"status": "queued", "detail": "No stored grade yet"}'
+
+    monkeypatch.setattr(hook.urllib.request, "urlopen", lambda req, timeout=0: _Resp())
+    with pytest.raises(hook._QueuedError):
+        hook._fetch("/package/npm/new-pkg", {"stored": "true"})
+
+
+def test_queued_dependencies_are_counted_retried_soon_and_never_block(hook, monkeypatch, capsys, tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"a": "1", "b": "1", "c": "1"}}))
+    calls = []
+
+    def scan(t, force=False, stored=False):
+        calls.append(t["pkg"])
+        if t["pkg"] in ("b", "c"):
+            raise hook._QueuedError("queued")
+        return _ok(90, "safe")
+
+    out = _run(hook, monkeypatch, capsys, scan)
+    msg = out["systemMessage"]
+    assert "Dependencies: graded 1 of 3 — 1 OK, 0 need a look (2 queued for grading)." in msg
+    cache = json.loads(hook.CACHE.read_text())
+    assert cache["dep:npm:b"]["retry_after"] - hook.time.time() < hook.RETRY_QUEUED + 5
+    # Next session (within the retry window): nothing new is asked about, so silence.
+    assert _run(hook, monkeypatch, capsys, scan) == {}
+    assert calls == ["a", "b", "c"]
+    # Only queued items and no graded ones → one explanatory line, no empty report.
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"d": "1"}}))
+
+    def all_queued(t, force=False, stored=False):
+        raise hook._QueuedError("queued")
+
+    out = _run(hook, monkeypatch, capsys, all_queued)
+    assert "1 dependency not graded yet" in out["hookSpecificOutput"]["additionalContext"]
+    assert "Dependencies: 0 of 1 graded yet (1 queued for grading)." in out["systemMessage"]
+
+
+# --- summary wording ------------------------------------------------------------------
+
+def test_summary_does_not_claim_a_server_failed_when_only_dependencies_are_new(hook, monkeypatch, capsys, tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"chalk": "5"}}))
+    dw = {"name": "dw", "kind": "mcp", "id": "https://mcp.deepwiki.com/mcp", "url": "https://mcp.deepwiki.com/mcp"}
+    monkeypatch.setattr(hook, "_targets", lambda: [dw])
+    monkeypatch.setattr(hook, "_servers_elsewhere", lambda here: 3)
+    # Session 1: server + dependency both new.
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(74, "needs review", 0, reason="thin_coverage")
+               if t["kind"] == "mcp" and "url" in t else _ok(90, "safe"))
+    assert out["systemMessage"].startswith("AgentAvow pre-check: graded 1 MCP server — 0 safe, 1 needs review (lowest: 'dw' 74/100).")
+    assert out["systemMessage"].endswith("3 more MCP servers configured for other projects, graded when you open them.")
+    assert "⚠️ MCP 'dw' (https://mcp.deepwiki.com/mcp): AgentAvow 74/100 — needs review (no findings; limited coverage)." in out["hookSpecificOutput"]["additionalContext"]
+    # Session 2: a NEW dependency appears, the server is unchanged → no "could not be scanned".
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"chalk": "5", "lodash": "4"}}))
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
+    assert out["systemMessage"].startswith("AgentAvow pre-check: MCP servers unchanged. Dependencies: graded all 2 — 2 OK, 0 need a look.")
+    assert "could not be scanned" not in out["systemMessage"]
