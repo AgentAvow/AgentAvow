@@ -63,6 +63,13 @@ export interface PublicScanResponse {
   trust_tier: string
   recommended_limits: RecommendedLimits
   scan_result: string
+  // The three-phrase headline every surface leads with (src/scanner/verdict.decide):
+  // safe (Safe to connect) | review (Review before you connect) | do_not_connect
+  // (Do not connect). Unsigned; absent on older cached responses — read it through
+  // gradeSystem.decisionOf(), which falls back to the same rule.
+  decision?: 'safe' | 'review' | 'do_not_connect'
+  decision_final?: boolean
+  decision_reason?: string
   findings: FindingsSummary
   positive_signals: string[]
   // Letter grade with the A+ "Certified" gate applied (roadmap §7). May be absent

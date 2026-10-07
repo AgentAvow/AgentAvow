@@ -5,6 +5,7 @@ import { getTrustTier } from '../../components/trust/gradeSystem'
 import api from '../../lib/api'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
+import { DecisionLine } from '../components/TrustMark'
 import SEOHead from '../../components/SEOHead'
 
 /**
@@ -27,6 +28,8 @@ interface Preflight {
   surface: string
   directory_ready: boolean
   headline: string
+  decision?: 'safe' | 'review' | 'do_not_connect'
+  decision_reason?: string
   trust_score: number
   trust_tier: string
   certified: boolean
@@ -152,6 +155,7 @@ export default function RebrandPreflight() {
                   {data.directory_ready ? '● Directory-Ready' : '● Needs changes before you submit'}
                 </div>
                 <h2 className="mt-1 text-2xl font-extrabold">{data.target}</h2>
+                <DecisionLine row={{ trust_score: data.trust_score, decision: data.decision, decision_reason: data.decision_reason, certified: { eligible: data.certified } }} className="mt-1 text-[14px]" />
                 <p className="text-[13px] text-text-muted mt-0.5">
                   {data.summary.blockers_total - data.summary.blockers_failed}/{data.summary.blockers_total} blockers pass
                   {data.summary.warnings > 0 && ` · ${data.summary.warnings} warning${data.summary.warnings === 1 ? '' : 's'}`}
@@ -159,7 +163,7 @@ export default function RebrandPreflight() {
               </div>
               <div className="text-right">
                 <div className="font-mono text-[34px] font-bold tabular-nums leading-none" style={{ color: tier.color }}>{data.trust_score}</div>
-                <div className="text-[11px] text-text-muted mt-1">{tier.name}{data.certified && ' · Certified'}</div>
+                <div className="text-[11px] text-text-muted mt-1">tier {tier.name}{data.certified && ' · Certified'}</div>
               </div>
             </div>
           </div>

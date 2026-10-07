@@ -3,7 +3,7 @@
  * straight from the scan data (no LLM, nothing to leak, nothing to hallucinate).
  * The goal: anyone can read this and decide "is this safe for me?" in ten seconds.
  */
-import { getTrustTier } from '../../components/trust/gradeSystem'
+import { decisionOf, decisionPhrase, isCertified, type DecisionValue } from '../../components/trust/gradeSystem'
 
 const CAT_HUMAN: Record<string, { good: string; weak: string }> = {
   secret_hygiene: { good: 'keeps secrets and API keys out of its code', weak: 'may expose secrets or API keys' },
@@ -16,6 +16,10 @@ const CAT_HUMAN: Record<string, { good: string; weak: string }> = {
 export interface ScanLike {
   trust_score: number
   trust_tier?: string
+  decision?: string | null
+  decision_final?: boolean | null
+  decision_reason?: string | null
+  certified?: { eligible?: boolean } | null
   findings?: { total?: number; critical?: number; high?: number } | null
   category_scores?: Record<string, number> | null
   positive_signals?: string[] | null
@@ -23,8 +27,12 @@ export interface ScanLike {
 }
 
 export interface PlainSummary {
-  verdict: 'safe' | 'ok' | 'caution' | 'risky'
+  /** The three-phrase decision — the same value the verdict banner (VerdictBadge) shows. */
+  verdict: DecisionValue
+  /** "Safe to connect" / "Review before you connect" / "Do not connect" (+ " · Certified"). */
   headline: string
+  /** The one condition that triggered the decision. */
+  reason: string
   paragraph: string
   goodPractices: string[]
   risks: string[]
@@ -32,26 +40,18 @@ export interface PlainSummary {
 }
 
 export function summarize(s: ScanLike, repo: string): PlainSummary {
-  const score = s.trust_score
   const crit = s.findings?.critical ?? 0
   const high = s.findings?.high ?? 0
   const total = s.findings?.total ?? 0
   const cats = s.category_scores ?? {}
 
-  // Aligned to the six trust tiers (gradeSystem.ts getTrustTier): Verified / Trusted
-  // read as safe, Standard as ok, Minimal as caution, Restricted / Blocked as risky.
-  // A solid Standard-tier tool reads as "generally safe", not "caution".
-  const tier = getTrustTier(score).value
-  const verdict: PlainSummary['verdict'] =
-    tier === 'verified' || tier === 'trusted' ? 'safe'
-    : tier === 'standard' ? 'ok'
-    : tier === 'minimal' ? 'caution'
-    : 'risky'
-  const headline =
-    verdict === 'safe' ? 'Looks safe to connect'
-    : verdict === 'ok' ? 'Generally safe to connect'
-    : verdict === 'caution' ? 'Connect with caution'
-    : 'Think twice before connecting'
+  // ONE decision drives the headline AND the verdict banner (gradeSystem.decisionOf
+  // reads the API's `decision`, else applies the same rule), so the two can never
+  // disagree. The score and tier are evidence underneath, not the headline.
+  const d = decisionOf(s)
+  const verdict = d.decision
+  const headline = decisionPhrase(verdict).phrase + (isCertified(s) ? ' · Certified' : '')
+  const reason = d.reason
 
   // Good practices — from the categories it scored well on, plus any clean signals.
   const goodPractices: string[] = []
@@ -76,20 +76,18 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
   const short = repo.split('/').pop() || repo
   let paragraph: string
   if (verdict === 'safe' && total === 0) {
-    paragraph = `We scanned ${short} across 12 safety categories and found nothing alarming. It follows good security practices and carries a signed, verifiable score — reasonable to connect to your agent.`
+    paragraph = `We scanned ${short} across 12 safety categories and found nothing blocking. It carries a signed, verifiable score — safe to connect to your agent.`
   } else if (verdict === 'safe') {
-    paragraph = `${short} scored well overall. We found ${total} minor thing${total === 1 ? '' : 's'} but no critical risks — it follows solid security practices and is generally safe to connect.`
-  } else if (verdict === 'ok') {
-    paragraph = `${short} scored solidly. We flagged ${total} thing${total === 1 ? '' : 's'} worth a glance${high ? `, ${high} of them higher-severity` : ''} but nothing critical — generally safe to connect once you've skimmed the details below.`
-  } else if (verdict === 'caution') {
-    paragraph = `${short} is a mixed bag. It does some things well, but we flagged ${total} issue${total === 1 ? '' : 's'}${high ? `, including ${high} worth reviewing` : ''}. Read the details below before you connect it to anything sensitive.`
+    paragraph = `${short} has no critical or high findings. We noted ${total} minor thing${total === 1 ? '' : 's'}, listed below for context — safe to connect.`
+  } else if (verdict === 'review') {
+    paragraph = `Review ${short} before you connect it: ${reason}. ${high ? `The high-severity finding${high === 1 ? ' is' : 's are'} listed below with the file and line.` : 'The details below say what to check.'}`
   } else {
-    paragraph = `We'd be careful with ${short}. Our scan found ${total} issue${total === 1 ? '' : 's'}${crit ? `, including ${crit} critical one${crit > 1 ? 's' : ''}` : ''}. Unless you know exactly what you're doing, this isn't one to connect to your agent.`
+    paragraph = `Do not connect ${short}: ${reason}. ${crit ? `The critical finding${crit === 1 ? ' is' : 's are'} listed below with the file and line.` : 'The details below say what was found.'}`
   }
 
   const facts: string[] = ['Scanned across 12 safety categories', 'Result is signed (Ed25519) and verifiable offline']
   if (s.metadata?.files_scanned) facts.unshift(`${s.metadata.files_scanned.toLocaleString()} files analyzed`)
   if (s.metadata?.primary_language) facts.unshift(`Mostly ${s.metadata.primary_language}`)
 
-  return { verdict, headline, paragraph, goodPractices: goodPractices.slice(0, 5), risks: risks.slice(0, 5), facts }
+  return { verdict, headline, reason, paragraph, goodPractices: goodPractices.slice(0, 5), risks: risks.slice(0, 5), facts }
 }

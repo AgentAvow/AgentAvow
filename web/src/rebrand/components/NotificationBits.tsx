@@ -3,7 +3,7 @@
  * alerts a compact before→after score visual, echoing the score-page trend UX. */
 import { Link } from 'react-router-dom'
 
-import { getTrustTier } from '../../components/trust/gradeSystem'
+import { DECISIONS, getTrustTier, type DecisionPhrase } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 
 export interface Notif {
@@ -43,6 +43,24 @@ export const ago = (iso: string) => {
   return `${Math.floor(s / 86400)}d`
 }
 
+/** The three-phrase headline a watch alert carries ("Now: Review before you connect
+ * (one high finding: …)."), so the row can lead with it as a coloured chip. */
+export function parsePhrase(body: string): { phrase: DecisionPhrase; reason: string } | null {
+  for (const p of DECISIONS) {
+    const i = body.indexOf(p.phrase)
+    if (i >= 0) {
+      const m = body.slice(i + p.phrase.length).match(/^(?: · Certified)?\s*\(([^)]*)\)/)
+      return { phrase: p, reason: m ? m[1] : '' }
+    }
+  }
+  return null
+}
+
+/** Drop the "Now: <phrase> (<reason>)." clause from the sentence when the chip shows it. */
+export function stripPhrase(body: string): string {
+  return body.replace(/\s*Now: [^.]*\)\.?/, '').trim()
+}
+
 /** Compact before→after score, colored by tier — the score-page trend UX, notification-sized. */
 export function ScoreChange({ from, to }: { from: number; to: number }) {
   const down = to < from
@@ -64,6 +82,7 @@ export function NotifRow({ n, compact, onRead, onDelete, onNavigate }: {
   onRead: (id: string) => void; onDelete: (id: string) => void; onNavigate?: () => void
 }) {
   const scores = parseScores(n.body)
+  const phrase = parsePhrase(n.body)
   const good = n.kind === 'watch_good_news'
   return (
     <div className={`glass rounded-xl px-3.5 py-3 border-l-4 ${n.is_read ? 'border-border/50' : good ? 'border-success' : 'border-warning'}`}>
@@ -73,9 +92,14 @@ export function NotifRow({ n, compact, onRead, onDelete, onNavigate }: {
         <span className="text-[11px] text-text-muted/70 ml-auto shrink-0">{ago(n.created_at)} ago</span>
       </div>
       <div className="mt-1.5 flex flex-col gap-1.5">
+        {phrase && (
+          <span className="text-[13px] font-bold" style={{ color: phrase.phrase.color }} data-decision={phrase.phrase.value}>
+            {phrase.phrase.phrase}{phrase.reason && <span className="ml-1.5 font-normal text-text-muted">{phrase.reason}</span>}
+          </span>
+        )}
         {scores && <ScoreChange from={scores.from} to={scores.to} />}
         <p className={`text-[12.5px] leading-snug text-text-muted ${compact ? 'line-clamp-2' : ''}`}>
-          {scores ? stripScores(n.body) : n.body}
+          {(() => { const b = phrase ? stripPhrase(n.body) : n.body; return scores ? stripScores(b) : b })()}
         </p>
       </div>
       <div className="mt-2 flex gap-3 text-[12px] font-semibold">

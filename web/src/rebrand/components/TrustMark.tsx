@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { getTrustTier, binaryVerdict } from '../../components/trust/gradeSystem'
+import { getTrustTier, decisionOf, decisionPhrase, isCertified } from '../../components/trust/gradeSystem'
 
 /**
  * The AgentAvow dual mark (0–100 pivot 2026-08).
@@ -146,6 +146,26 @@ export function TrustMini({ score }: { score: number }) {
   )
 }
 
+/** The three-phrase headline for a list row / card: "Safe to connect · Certified" in the
+ * phrase colour, with the reason (when known) muted beside it. Reads the row's own
+ * `decision` (catalog / API) or decides from what the row carries. */
+export function DecisionLine({ row, className = '' }: {
+  row: { trust_score?: number | null; decision?: string | null; decision_reason?: string | null
+    critical?: number | null; high?: number | null; grade?: string | null
+    certified?: { eligible?: boolean } | null }
+  className?: string
+}) {
+  const d = decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } })
+  const p = decisionPhrase(d.decision)
+  const cert = isCertified(row) || row.grade === 'A+'
+  return (
+    <div className={`text-[12.5px] font-semibold ${className}`} style={{ color: p.color }} data-decision={p.value}>
+      {p.phrase}{cert && <span className="ml-1" style={GRAD_TEXT}>· Certified</span>}
+      {row.decision_reason && <span className="ml-1.5 font-normal text-text-muted">— {row.decision_reason}</span>}
+    </div>
+  )
+}
+
 /** Adoption — mini VU needle + compact count, for list rows. */
 export function AdoptionMini({ count }: { count?: number | null }) {
   const gid = useId()
@@ -198,10 +218,13 @@ export function TrustPill({ score, className = '' }: { score: number; showTier?:
  * gate). Verb is surface-aware (connect / install / use).
  */
 export function VerdictBadge(
-  { scan, verb = 'connect', className = '' }: {
+  { scan, className = '' }: {
     scan: {
       trust_score?: number | null
-      certified?: { checks?: { no_critical_or_high?: boolean } }
+      decision?: string | null
+      decision_final?: boolean | null
+      decision_reason?: string | null
+      certified?: { eligible?: boolean; checks?: { no_critical_or_high?: boolean } }
       findings?: unknown
       critical?: number | null
       high?: number | null
@@ -217,79 +240,54 @@ export function VerdictBadge(
       } | null
       behavioral_score_effect?: { applied?: boolean; delta?: number } | null
     }
+    /** Kept for call-site compatibility; the three phrases are fixed wording. */
     verb?: 'connect' | 'install' | 'use'
     className?: string
   },
 ) {
-  const score = scan.trust_score ?? 0
-  const raw = scan.findings
-  const findings: Array<{ severity?: string }> = Array.isArray(raw)
-    ? (raw as Array<{ severity?: string }>)
-    : Array.isArray((raw as { items?: unknown } | null | undefined)?.items)
-      ? (raw as { items: Array<{ severity?: string }> }).items
-      : []
-  let crit: number
-  let high: number
-  if (findings.length) {
-    crit = findings.filter((f) => f.severity === 'critical').length
-    high = findings.filter((f) => f.severity === 'high').length
-  } else {
-    crit = scan.critical ?? 0
-    high = scan.high ?? 0
-  }
-  const noBlocking = typeof scan.certified?.checks?.no_critical_or_high === 'boolean'
-    ? scan.certified.checks.no_critical_or_high
-    : crit === 0 && high === 0
-  const safe = binaryVerdict(score, noBlocking) === 'safe'
-  const blocking = crit + high
-  // Three visual treatments over the strict two-state verdict: a clean result that only
-  // missed the bar on coverage/signals must not wear the same warning as real findings.
-  // (Adoption is context elsewhere on the page, never a verdict input.)
-  // The sandbox and the registry can override: a high/critical behavioral finding or a
-  // leaked canary is a review, never "clean"; a retired package is never "clean" either.
+  // The headline is ONE of three phrases plus the one reason that triggered it —
+  // the API's own `decision` when present, else the same rule here (gradeSystem.decide).
+  // Certified rides beside the phrase; the score and tier sit underneath elsewhere.
+  const d = decisionOf(scan)
+  const p = decisionPhrase(d.decision)
+  const certified = isCertified(scan)
   const b = scan.behavioral
   const bFindings = (b?.ran && !b.pending ? b.findings : []) ?? []
-  const leaked = !!(b?.ran && (b.canary_exfil?.length ?? 0) > 0)
-  const bAlarm = leaked || bFindings.some((f) => f.severity === 'critical' || f.severity === 'high')
-  const deprecated = !!(scan.deprecation && scan.deprecation.trim())
-  const mode: 'safe' | 'risk' | 'limited' | 'sandbox' | 'deprecated' =
-    bAlarm ? 'sandbox' : safe ? 'safe' : blocking > 0 ? 'risk' : deprecated ? 'deprecated' : 'limited'
-  const caught = leaked
-    ? 'a planted credential left the sandbox'
-    : (bFindings.find((f) => f.severity === 'critical') ?? bFindings.find((f) => f.severity === 'high'))?.name ?? 'a behavioral finding'
-  // One line about the sandbox for the card, whatever the mode.
+  // One line about the sandbox for the card, whatever the decision.
   const calls = b?.exercise?.calls?.length ?? 0
   const reason = (b?.grade_summary?.start_reason ?? '').replace(/_/g, ' ')
   const delta = scan.behavioral_score_effect?.applied ? scan.behavioral_score_effect.delta ?? 0 : 0
   const deltaTxt = delta ? ` · score ${delta > 0 ? '+' : ''}${delta}` : ''
+  const severe = bFindings.filter((f) => f.severity === 'critical' || f.severity === 'high')
+  const leaked = !!(b?.ran && (b.canary_exfil?.length ?? 0) > 0)
   const sandboxLine = !b ? null
-    : b.pending ? 'Sandbox: running now — observed behavior appears here in about a minute'
+    : b.pending ? 'Sandbox: still running — this answer may move to Review when it lands'
     : !b.ran ? null
-    : bAlarm ? `Sandbox: caught — ${caught}${deltaTxt}`
+    : leaked ? `Sandbox: caught — a planted credential left the sandbox${deltaTxt}`
+    : severe.length ? `Sandbox: caught — ${severe[0].name ?? 'a behavioral finding'}${deltaTxt}`
     : bFindings.length ? `Sandbox: ran, ${bFindings.length} minor finding${bFindings.length === 1 ? '' : 's'}${deltaTxt}`
     : b.exercise?.launch_ok ? `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'}, clean${deltaTxt}`
     : reason && reason !== 'not applicable' && reason !== 'started' ? `Sandbox: installed; server not started (${reason}) — not a finding`
     : 'Sandbox: installed and imported, clean'
-  const files = scan.metadata?.files_scanned
-  const limitedReason = (typeof files === 'number' && files > 0 && files < 8)
-    ? `No risks found — the score is capped by limited coverage (${files} file${files === 1 ? '' : 's'} to inspect), not detected risk.`
-    : 'No risks found — the score is held below the bar by non-finding signals, not detected risk.'
   const cfg = {
-    safe: { box: 'bg-success/10 border-success/30', fg: 'text-success', icon: '✓', title: `Safe to ${verb}`, reason: 'No blocking issues found.' },
-    risk: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠', title: `Review before you ${verb}`, reason: `${blocking} blocking finding${blocking === 1 ? '' : 's'} to review below.` },
-    limited: { box: 'bg-surface border-border', fg: 'text-text-muted', icon: '◍', title: 'Clean — limited coverage', reason: limitedReason },
-    sandbox: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠', title: `Review before you ${verb} — caught in the sandbox`, reason: `${caught}. The static scan found ${blocking ? `${blocking} blocking finding${blocking === 1 ? '' : 's'}` : 'no blocking issues'}; what the tool did when run is what to weigh.` },
-    deprecated: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠', title: `Deprecated — don't adopt for new work`, reason: 'The maintainer retired this package, so it won\'t get security fixes. The code itself showed no blocking issues.' },
-  }[mode]
+    safe: { box: 'bg-success/10 border-success/30', fg: 'text-success', icon: '✓' },
+    review: { box: 'bg-warning/10 border-warning/30', fg: 'text-warning', icon: '⚠' },
+    do_not_connect: { box: 'bg-danger/10 border-danger/30', fg: 'text-danger', icon: '✕' },
+  }[d.decision]
+  const why = d.reason ? d.reason[0].toUpperCase() + d.reason.slice(1) + '.' : ''
   return (
-    <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${cfg.box} ${className}`}>
+    <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${cfg.box} ${className}`} data-decision={d.decision}>
       <span className={`text-lg leading-none ${cfg.fg}`} aria-hidden="true">{cfg.icon}</span>
       <div className="min-w-0">
-        <div className={`font-bold text-[15px] ${cfg.fg}`}>{cfg.title}</div>
-        <div className="text-[12.5px] text-text-muted">{cfg.reason}</div>
+        <div className={`font-bold text-[15px] ${cfg.fg}`}>
+          {p.phrase}
+          {certified && <span className="ml-1.5 font-semibold" style={GRAD_TEXT}>· Certified</span>}
+          {!d.final && <span className="ml-2 align-middle font-mono text-[10px] uppercase tracking-wide text-text-muted">provisional</span>}
+        </div>
+        <div className="text-[12.5px] text-text-muted">{why}</div>
         {sandboxLine && <div className="text-[12px] text-text-muted mt-0.5"><span className="font-mono text-[10px] uppercase tracking-wide mr-1.5">gVisor</span>{sandboxLine}</div>}
       </div>
-      <span className="ml-auto font-mono text-[10px] text-text-muted/60 shrink-0 hidden sm:block">derived from the signed score</span>
+      <span className="ml-auto font-mono text-[10px] text-text-muted/60 shrink-0 hidden sm:block">from the signed findings</span>
     </div>
   )
 }
