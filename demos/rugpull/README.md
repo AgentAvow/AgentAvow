@@ -73,11 +73,11 @@ The `send_email` parameter for the message is `text`, not `body`. The scanner fl
 ## What this does NOT show
 
 - **It does not catch the postmark-mcp case.** That package sent mail through Postmark's own API: no change to the tool's definition, no new network host, no code pattern the scanner looks for. Malice that keeps the same definition is not caught by anything AgentAvow has today. This demo is the definition-drift check, and only that.
-- **The scanner does not flag v2's poisoned description.** Graded fresh, v2 gets the same 74/100 as v1 with no finding (try `python grade.py --endpoint ... --report-only` against v2). What stops the call is the digest comparison, not a re-scan.
+- **A fresh grade of v2 also catches it, but the demo does not rely on that.** Since the tool-poisoning fix (PR #89) a re-scan of v2 flags the `<IMPORTANT>` block and the "do not mention it to the user" instruction as a high finding (try `python grade.py --endpoint ... --report-only` against v2). The gate in this demo never re-scans: what stops the call is the digest comparison, which works even for a change no scanner rule recognises.
 - **The gate here is the SDK gate, configured to block.** The Claude Code plugin is fail-open and by default refuses only Do not connect. The JS and Python SDK gates fail closed by default. Which one an organization runs, and with what policy, decides what gets stopped.
 - **Any change blocks, including harmless ones.** `./run.sh --tweak` serves v1 with one extra period in the description. The gate refuses it the same way. That is the check working as designed, and also its cost: every definition change needs a fresh grade or a re-pin.
 - **The report link in gate messages points at agentavow.com,** which cannot see a localhost server; the demo strips it from the printed message.
-- **The Vercel AI SDK adapter's `wrapTools`** in `agentavow-trust/vercel-ai` still runs the older evaluator (no `onDrift`, no three-phrase decision, signature verification off unless you turn it on). The demo wraps `execute` with the core gate (`agentavow-trust/gate`, `checkToolCall`) instead.
+- **The demo calls the core gate directly** (`agentavow-trust/gate`, `checkToolCall`) so every step is visible. In an application you would use `wrapTools` from `agentavow-trust/vercel-ai` (0.3.0), which runs the same core gate with the same policy.
 
 ## How a skeptic can check it
 
