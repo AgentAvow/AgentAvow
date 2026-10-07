@@ -132,7 +132,11 @@ _INSTRUCTIONS_CLAUDE_ADDENDUM = (
     "connectors are enabled in this conversation, name them and offer to check them; "
     "scan a server by its public https URL or its npm / PyPI package, and say which ones "
     "you would need a URL or package name for. The 'agentavow_check_my_connections' "
-    "prompt does the same on request."
+    "prompt does the same on request. scan_mcp_server also accepts a connector or server "
+    "NAME (for example 'DeepWiki') when you cannot see its URL: it is matched against the "
+    "AgentAvow catalog of scanned MCP servers, and you are given the candidates if the "
+    "match is not clear. A forced re-scan runs in the background: the cached grade is "
+    "returned at once and the fresh one on the next call."
 )
 _DIRECTIVE_SURFACES = frozenset({"claude", "claude-code", "cursor", "vscode"})
 
@@ -187,13 +191,123 @@ server.create_initialization_options = _create_initialization_options  # type: i
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+def _internal_headers() -> dict[str, str]:
+    """Prove to the API that this call is the bridge's own, and say who it is for.
+    The API then rate-limits per end user (and per surface) instead of lumping every
+    connector call into one loopback bucket. Empty when no token is configured."""
+    try:
+        from src.config import settings
+        token = settings.mcp_internal_token or ""
+    except Exception:
+        token = ""
+    if not token:
+        return {}
+    return {
+        "X-AgentAvow-Internal": token,
+        "X-AgentAvow-Client-Ip": _CLIENT_IP.get() or "",
+        "X-AgentAvow-Surface": _SURFACE.get() or "other",
+    }
+
+
 async def _get(path: str, params: dict | None = None) -> dict:
     # Above the API's ~90s scan budget (so we receive its graceful 503 rather than
     # timing out first), below nginx's 120s /mcp read timeout.
-    async with httpx.AsyncClient(timeout=110.0) as client:
+    async with httpx.AsyncClient(timeout=110.0, headers=_internal_headers()) as client:
         resp = await client.get(f"{_API_BASE}{path}", params=params)
         resp.raise_for_status()
         return resp.json()
+
+
+# --- forced re-scans run in the background -----------------------------------
+# A forced re-scan of a large package runs inline for minutes on the API side and
+# outlives the tool call. The tool therefore answers with the cached grade at once,
+# starts the fresh scan here (same process as the API, so the task survives the
+# request), and says so; the next call returns the new grade. One in flight per target.
+_RESCANS_IN_FLIGHT: set[str] = set()
+RESCAN_NOTE = ("🔄 A fresh re-scan was started in the background; this is the cached grade. "
+               "Ask again in a minute or two for the new one.")
+
+
+async def _background_rescan(path: str, params: dict) -> None:
+    try:
+        await _get(path, params={**params, "force": "true"})
+    except Exception:
+        pass  # best-effort; the next ordinary call shows whatever the API has
+    finally:
+        _RESCANS_IN_FLIGHT.discard(_rescan_key(path, params))
+
+
+def _rescan_key(path: str, params: dict) -> str:
+    return path + "?" + "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+
+
+def _schedule_rescan(path: str, params: dict | None) -> bool:
+    """Start a forced re-scan for ``path`` unless one is already running. Returns
+    whether a new one was started (False = one is already in flight)."""
+    params = {k: v for k, v in (params or {}).items() if k != "force"}
+    key = _rescan_key(path, params)
+    if key in _RESCANS_IN_FLIGHT:
+        return False
+    _RESCANS_IN_FLIGHT.add(key)
+    try:
+        asyncio.get_running_loop().create_task(_background_rescan(path, params))
+    except RuntimeError:
+        _RESCANS_IN_FLIGHT.discard(key)
+        return False
+    return True
+
+
+def _with_rescan_note(card: list, struct: dict) -> tuple[list, dict]:
+    card = list(card)
+    if card and getattr(card[0], "text", None) is not None:
+        card[0] = types.TextContent(type="text", text=card[0].text + "\n\n" + RESCAN_NOTE,
+                                    **({"annotations": card[0].annotations}
+                                       if getattr(card[0], "annotations", None) else {}))
+    struct = dict(struct)
+    struct["rescan_pending"] = True
+    return card, struct
+
+
+# --- MCP server names → endpoint URLs (claude.ai cannot see a connector's URL) ----
+def _norm_name(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+async def _resolve_mcp_name(name: str) -> tuple[str | None, list[dict]]:
+    """A connector/server NAME (not a URL) → its endpoint URL from the AgentAvow catalog
+    of scanned MCP servers. Returns (url, candidates): url when there is one clear
+    match (exact normalized name, or a single hit); otherwise None and up to five
+    candidates so the person can pick."""
+    try:
+        data = await _get("/public/scan-catalog", params={"surface": "mcp", "q": name, "limit": 8})
+    except Exception:
+        return None, []
+    rows = [r for r in (data.get("rows") or []) if isinstance(r, dict) and r.get("endpoint_url")]
+    if not rows:
+        return None, []
+    want = _norm_name(name)
+    exact = [r for r in rows if _norm_name(str(r.get("name") or "")) == want
+             or _norm_name(str(r.get("full_name") or "")).endswith(want)]
+    if len(exact) == 1:
+        return str(exact[0]["endpoint_url"]), []
+    if len(rows) == 1:
+        return str(rows[0]["endpoint_url"]), []
+    return None, (exact or rows)[:5]
+
+
+def _name_not_resolved(name: str, candidates: list[dict]) -> str:
+    lines = [f"I could not match '{name}' to one MCP server in the AgentAvow catalog."]
+    if candidates:
+        lines.append("Closest matches — pass the endpoint_url of the right one to scan_mcp_server:")
+        for r in candidates:
+            score = r.get("trust_score")
+            lines.append(f"• {r.get('name')} — {r.get('endpoint_url')}"
+                         + (f" (AgentAvow {score}/100)" if isinstance(score, int) else ""))
+    else:
+        lines.append("Give me its https endpoint URL (in claude.ai: Settings → Connectors shows "
+                     "it; in Claude Code: `claude mcp get <name>`), or its npm / PyPI package "
+                     "name for scan_package.")
+    return "\n".join(lines)
 
 
 async def _bump(metric: str) -> None:
@@ -1565,7 +1679,7 @@ async def _call_tool(
         if name == "about_agentavow":
             return _text(_about_for(_SURFACE.get()))
         force = bool(arguments.get("force"))
-        fp = {"force": "true"} if force else None
+        fp = None  # a forced re-scan runs in the background (see _schedule_rescan)
         if name == "scan_repo":
             repo = (arguments.get("repo") or "").strip().strip("/")
             owner = (arguments.get("owner") or "").strip()
@@ -1579,14 +1693,18 @@ async def _call_tool(
                 return _text("Give the repo as 'owner/name' (e.g. 'vercel/next.js'), "
                              "or pass owner and repo separately.")
             data = await _get(f"/public/scan/{owner}/{repo}", params=fp)
+            rescan = force and _schedule_rescan(f"/public/scan/{owner}/{repo}", None)
             await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption("github", owner, repo)
             rp = f"/check/{owner}/{repo}"
             api = f"/api/v1/public/scan/{owner}/{repo}"
-            return (
+            card, struct = (
                 _card_text(_scan_block(data, "connect", rp, f"{owner}/{repo}", adoption)),
                 _scan_struct(data, f"{owner}/{repo}", "github", rp, api, adoption),
             )
+            if rescan:
+                card, struct = _with_rescan_note(card, struct)
+            return card, struct
         if name == "scan_package":
             surface = (arguments.get("registry") or arguments.get("surface")
                        or arguments.get("ecosystem") or "").strip().lower()
@@ -1604,6 +1722,7 @@ async def _call_tool(
             if version:
                 params["version"] = version
             data = await _get(f"/public/scan/package/{surface}/{pkg}", params=params)
+            rescan = force and _schedule_rescan(f"/public/scan/package/{surface}/{pkg}", params)
             await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             adoption = await _adoption(surface, surface, pkg)
             vq = f"?version={quote(version, safe='')}" if version else ""
@@ -1614,16 +1733,25 @@ async def _call_tool(
                 "pypi": f"pip install {pkg}",
                 "crates": f"cargo add {pkg}",
             }.get(surface, "")
-            return (
+            card, struct = (
                 _card_text(_scan_block(data, "use", rp, f"{pkg} · {surface}", adoption, hint)),
                 _scan_struct(data, pkg, surface, rp, api, adoption),
             )
+            if rescan:
+                card, struct = _with_rescan_note(card, struct)
+            return card, struct
         if name == "scan_mcp_server":
-            url = arguments["endpoint_url"]
+            url = str(arguments.get("endpoint_url") or "").strip()
+            if not url.lower().startswith(("http://", "https://")):
+                # A connector / server NAME (claude.ai never shows a connector's URL):
+                # resolve it against the catalog of scanned MCP servers.
+                resolved, candidates = await _resolve_mcp_name(url)
+                if not resolved:
+                    return _text(_name_not_resolved(url, candidates))
+                url = resolved
             params = {"endpoint": url}
-            if force:
-                params["force"] = "true"
             data = await _get("/public/scan/mcp", params=params)
+            rescan = force and _schedule_rescan("/public/scan/mcp", params)
             await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             # A bare MCP endpoint has no registry/stars adoption signal — omit it rather
             # than fabricate one.
@@ -1631,10 +1759,13 @@ async def _call_tool(
             api = f"/api/v1/public/scan/mcp?endpoint={quote(url, safe='')}"
             # Target-specific report page (the web reads ?endpoint=) — not the bare /check.
             rp = f"/check/mcp?endpoint={quote(url, safe='')}"
-            return (
+            card, struct = (
                 _card_text(_scan_block(data, "connect", rp, label)),
                 _scan_struct(data, url, "mcp", rp, api, None),
             )
+            if rescan:
+                card, struct = _with_rescan_note(card, struct)
+            return card, struct
         if name == "verify_trust":
             eid = arguments["entity_id"]
             min_trust = float(arguments.get("min_trust", 0.3))
