@@ -255,6 +255,25 @@ def test_blocked_tier_denies_with_score_and_report(gate, monkeypatch, capsys):
     assert "4/100" in reason and "tier blocked" in reason and REPORT in reason and "'ask'" in reason
 
 
+def test_do_not_connect_denies_and_leads_with_the_answer(gate, monkeypatch, capsys):
+    gate.CACHE.write_text(json.dumps({"srv": _record(
+        score=88, tier="trusted", decision="do_not_connect",
+        decision_reason="a planted credential left the sandbox")}))
+    decision, reason = _decision(_run(gate, monkeypatch, capsys, _call()))
+    assert decision == "deny"
+    assert reason.startswith("AgentAvow: Do not connect — a planted credential left the sandbox.")
+    assert "88/100" in reason and REPORT in reason
+
+
+def test_review_never_denies_and_off_disables_the_decision_deny(gate):
+    assert gate.denies(_record(score=60, tier="standard", decision="review"), "") is False
+    assert gate.denies(_record(score=95, tier="verified", decision="safe"), "") is False
+    assert gate.denies(_record(score=88, tier="trusted", decision="do_not_connect"), "") is True
+    assert gate.denies(_record(score=88, tier="trusted", decision="do_not_connect"), "off") is False
+    # the blocked tier still denies on its own (a record cached before 0.1.20 has no decision)
+    assert gate.denies(_record(score=4, tier="blocked", decision="review"), "") is True
+
+
 def test_default_threshold_denies_only_the_blocked_tier(gate):
     assert gate.denies(_record(score=10, tier="blocked"), "") is True
     assert gate.denies(_record(score=11, tier="restricted"), "") is False

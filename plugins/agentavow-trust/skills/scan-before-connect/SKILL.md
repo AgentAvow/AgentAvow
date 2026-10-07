@@ -46,10 +46,15 @@ an hour; pass `force: true` only when the user says the target changed.
 
 ## 3. Report, then continue
 
-Give both scores: the trust score out of 100 with its verdict, and the adoption score
+Lead with one of three answers and its reason: **Safe to connect**, **Review before you
+connect**, or **Do not connect** (add " · Certified" when the result says the tool is
+certified). Use the result's `decision` / `decision_reason` when it has them. When it does
+not: Do not connect if it reports a critical finding, a planted credential leaving the
+sandbox, or a known-malicious package or dependency; Safe to connect if its verdict is
+safe; otherwise Review before you connect, with the reason it gives. Then give both scores: the trust score out of 100, and the adoption score
 (the count and unit in `adoption`, such as downloads per week or stars; say when it is
 absent). Then the top findings with where they are, and the report link from the result.
-Adoption never changes the trust verdict. Give the version and publish date from the
+Adoption never changes the answer. Give the version and publish date from the
 result's `Version … · published …` line; do not look them up in the registry.
 
 If the result has an **Observed in the sandbox** block, report it as its own short
@@ -60,13 +65,12 @@ not a finding. If the result says the sandbox is running now, say so and offer t
 re-check in about a minute. Do not call the score "static analysis only" without saying
 that the sandbox is pending or what it observed.
 
-- **Safe:** say so in one line and go ahead with what the user asked.
-- **Needs review with a critical or high finding, or a blocked / restricted tier:**
-  show the findings and ask whether to continue. Do not install or connect until the
-  user answers. This is the only case that stops.
-- **Needs review with no critical or high finding** (a low score from thin coverage,
-  deprecation, provenance, or adoption): give the one-line verdict with the reason, then
-  go ahead with what the user asked. It is advice, not a stop.
+- **Safe to connect:** say so in one line and go ahead with what the user asked.
+- **Do not connect:** show the findings and ask whether to continue. Do not install or
+  connect until the user answers. This is the only case that stops.
+- **Review before you connect** (a high finding, an advisory for this version,
+  deprecation, a low score, or little code to inspect): give the one-line answer with
+  the reason, then go ahead with what the user asked. It is advice, not a stop.
 - **Not scanned** (an error, a timeout, or a target AgentAvow cannot reach): say it was
   not scanned, that this is neither safe nor unsafe, and go ahead.
 
@@ -77,8 +81,8 @@ twice.
 
 - Report only what the tool returned. Do not add a score, a finding, or a cause that
   is not in the result.
-- "Needs review" means look before you connect. It does not mean malicious.
-- "Safe" means the scan found no blocking issue. It is not a guarantee.
+- "Review before you connect" means look before you connect. It does not mean malicious.
+- "Safe to connect" means the scan found nothing blocking. It is not a guarantee.
 - The scan is advice. The user decides whether to install or connect.
 
 

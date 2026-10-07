@@ -11,7 +11,11 @@ requirements.txt / pyproject [project].dependencies), up to DEPS_CAP per session
 start in manifest order, the rest on later starts, re-graded only when the declared
 version changes. Most projects have no MCP servers but every project has
 dependencies, so this is what gives a first session something to say. Dependencies
-are already installed, so a low grade is advice ("needs a look"), never a stop.
+are already installed, so their answer is advice, never a stop.
+Every line leads with one of three answers — "Safe to connect", "Review before you
+connect" or "Do not connect" — and the one reason behind it, read from the API's
+``decision`` (decided here by the same rule when an older response lacks it), then
+the 0-100 score; " · Certified" rides beside the answer when the tool carries the mark.
 AGENTAVOW_PRECHECK_DEPS=off turns the pass off. "This project" is the ``cwd`` Claude Code
 passes in the hook payload (the session's folder), so a session moved into a project
 and then cleared (/clear) is graded for that project. Covers both:
@@ -56,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.19"
+__version__ = "0.1.20"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -87,6 +91,14 @@ class _QueuedError(Exception):
     """No stored grade yet; the API queued a scan (HTTP 202). Ask again next session."""
 
 
+# The three headline phrases (src/trust_tiers.py DECISIONS; tests/test_trust_tiers.py pins
+# every copy) and the flag each line starts with.
+DECISION_PHRASES = {
+    "safe": "Safe to connect",
+    "review": "Review before you connect",
+    "do_not_connect": "Do not connect",
+}
+_DECISION_FLAG = {"safe": "✅", "review": "⚠️", "do_not_connect": "⛔"}
 RETRY_QUEUED = 10 * 60  # seconds before a queued dependency is asked about again
 
 
@@ -437,26 +449,10 @@ def _dependency_targets() -> list[dict]:
     return list(seen.values())
 
 
-_DEP_RISK_TIERS = frozenset({"blocked", "restricted"})
-
-
 def _dep_needs_look(r: dict) -> bool:
-    """A dependency is already installed, so its grade is advice; and the static
-    scanner's high-severity PATTERN hits (exec / fs / deserialization regexes) fire
-    all over large, legitimate frameworks (fastapi: 30 highs, 0 critical). So a
-    dependency 'needs a look' only on evidence that is not a pattern hit: a critical
-    finding, a published advisory for the installed version, a deprecation, a known
-    incident, or a blocked / restricted tier. Everything else is reported with its
-    score and counted OK."""
-    if r.get("verdict") == "safe":
-        return False
-    return bool(
-        int(r.get("critical") or 0) > 0
-        or int(r.get("advisories") or 0) > 0
-        or r.get("deprecated")
-        or r.get("incident")
-        or str(r.get("tier") or "") in _DEP_RISK_TIERS
-    )
+    """A dependency whose answer is not "Safe to connect". Dependencies are already
+    installed, so this is advice for the summary count, never a stop."""
+    return _dval(r) in ("review", "do_not_connect")
 
 
 def _dep_coord(t: dict) -> str:
@@ -511,28 +507,9 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
         rec["spec"] = t.get("spec", "")
         cache[t["name"]] = rec
         sandbox = f"; {r['sandbox']}" if r.get("sandbox") else ""
-        coord = _dep_coord(t)
-        if r["verdict"] == "safe":
-            lines.append(f"✅ dependency '{t['pkg']}' ({coord}): AgentAvow {r['score']}/100 — "
-                         f"safe{sandbox}.")
-        elif _dep_needs_look(r):
-            why = []
-            if r.get("critical"):
-                why.append(f"{r['critical']} critical finding(s)")
-            if r.get("advisories"):
-                why.append(f"{r['advisories']} advisory(ies) for this version")
-            if r.get("deprecated"):
-                why.append("DEPRECATED by its maintainer (no more security fixes)")
-            if r.get("incident"):
-                why.append("a known incident")
-            if not why:
-                why.append(f"{r.get('tier') or 'low'} tier")
-            lines.append(f"📦 dependency '{t['pkg']}' ({coord}): AgentAvow {r['score']}/100 — "
-                         f"needs a look: {'; '.join(why)}{sandbox}.")
-        else:
-            lines.append(f"ℹ️ dependency '{t['pkg']}' ({coord}): AgentAvow {r['score']}/100 — "
-                         f"no critical findings, no advisories; {r['blocking']} high-severity "
-                         f"pattern hit(s) (common in large frameworks), see the report{sandbox}.")
+        # Already installed: the answer is advice, never a stop.
+        lines.append(f"{_flag(r)} dependency '{t['pkg']}' ({_dep_coord(t)}): "
+                     f"{_answer(r)}{sandbox}.")
     graded: list[tuple[str, dict]] = []
     unscannable = 0
     for t in deps:
@@ -554,7 +531,7 @@ _UNSCANNABLE_COUNT = [0]  # dependencies AgentAvow refused (set by _dep_lines_an
 
 def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = False,
                  queued: int = 0) -> str:
-    """' Dependencies: graded 12 of 38 — 11 OK, 1 needs a look (lowest: ...).'"""
+    """' Dependencies: graded 12 of 38 — 11 Safe, 1 Review (needs attention: ...).'"""
     if not total:
         return ""
     paused = " (paused: rate limited; continues next session)" if throttled else ""
@@ -566,19 +543,35 @@ def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = F
     done = len(graded) + nos
     if not done:
         return f" Dependencies: 0 of {total} graded yet{paused}."
-    risky = [(n, r) for n, r in graded if _dep_needs_look(r)]
-    look = len(risky)
-    ok = len(graded) - look
     of = f"{done} of {total}" if done < total else f"all {total}"
-    out = f" Dependencies: graded {of} — {ok} OK, {look} need{'s' if look == 1 else ''} a look"
-    if look:
-        name, worst = min(risky, key=lambda g: int(g[1].get("score") or 0))
-        tag = (", deprecated" if worst.get("deprecated") else
-               f", {worst['critical']} critical" if worst.get("critical") else
-               ", advisory" if worst.get("advisories") else
-               ", incident" if worst.get("incident") else "")
-        out += f" (lowest: '{name}' {worst.get('score')}/100{tag})"
+    out = f" Dependencies: graded {of} — " + _counts(graded)
+    worst = _worst(graded)
+    if worst:
+        name, r = worst
+        out += f" (needs attention: '{name}' {_headline(r)}{_why(r)})"
     return out + paused + "."
+
+
+_RANK = {"do_not_connect": 0, "review": 1, "safe": 2}
+
+
+def _counts(graded: list[tuple[str, dict]]) -> str:
+    """'3 Safe, 1 Review, 0 Blocked' — the short labels of the three answers."""
+    n = {k: 0 for k in _RANK}
+    for _, r in graded:
+        n[_dval(r)] += 1
+    out = f"{n['safe']} Safe, {n['review']} Review"
+    return out + (f", {n['do_not_connect']} Blocked" if n["do_not_connect"] else "")
+
+
+def _worst(graded: list[tuple[str, dict]]) -> tuple[str, dict] | None:
+    """The graded item that needs attention most (Do not connect first, then Review,
+    lowest score breaking ties); None when every one is Safe to connect."""
+    risky = [g for g in graded if _dval(g[1]) != "safe"]
+    if not risky:
+        return None
+    return min(risky, key=lambda g: (_RANK[_dval(g[1])],
+                                     int(g[1].get("score") or 0)))
 
 
 def _previously_graded(cache: dict, targets: list[dict], deps: list[dict],
@@ -593,31 +586,26 @@ def _previously_graded(cache: dict, targets: list[dict], deps: list[dict],
             continue
         if any(f"MCP '{t['name']}'" in ln for ln in new_lines):
             continue
-        flag = "✅" if e.get("verdict") == "safe" else "⚠️"
-        out.append(f"  {flag} MCP '{t['name']}': {e.get('score')}/100 {e.get('verdict')}")
+        out.append(f"  {_flag(e)} MCP '{t['name']}': {_answer(e)}")
     for t in deps:
         e = cache.get(t["name"])
         if any(f"dependency '{t['pkg']}'" in ln for ln in new_lines):
             continue
         if isinstance(e, dict) and e.get("id") == t["id"] and "score" in e:
-            if e.get("verdict") == "safe":
-                flag, word = "✅", "safe"
-            elif _dep_needs_look(e):
-                flag, word = "📦", "needs a look"
-            else:
-                flag, word = "ℹ️", "pattern hits only, counted OK"
-            out.append(f"  {flag} dependency '{t['pkg']}': {e.get('score')}/100 {word}")
+            out.append(f"  {_flag(e)} dependency '{t['pkg']}': {_answer(e)}")
         elif isinstance(e, dict) and e.get("id") == t["id"] and e.get("reason"):
             out.append(f"  ➖ dependency '{t['pkg']}': not graded ({e['reason']})")
     return out
 
 
-_LEGEND = ("Legend: ✅ safe. ⚠️ server needs review (see its reason). ℹ️ dependency with only "
-           "high-severity PATTERN hits, no critical finding and no advisory: counted OK. "
-           "📦 dependency that needs a look (critical finding, advisory for this version, "
-           "deprecation or incident). ➖ not graded, with the reason. Dependencies are already "
-           "installed: their grades are advice. Do not interpret the raw cache file; this list "
-           "is the pre-check.")
+_LEGEND = ("Legend: each line leads with one of three answers and its reason. ✅ Safe to "
+           "connect. ⚠️ Review before you connect (a high finding, an advisory for this "
+           "version, deprecation, a score under 51, or little code to inspect). ⛔ Do not "
+           "connect (a critical finding, a planted credential leaving the sandbox, or a "
+           "known-malicious package). '· Certified' marks a tool that passed the full "
+           "Certified gate. ➖ not graded, with the reason. Dependencies are already "
+           "installed: their answer is advice, never a stop. Do not interpret the raw cache "
+           "file; this list is the pre-check.")
 
 
 def _quiet_context(cache: dict, targets: list[dict], deps: list[dict]) -> None:
@@ -671,6 +659,106 @@ def _advisory_applies(a: object) -> bool:
     return not (a.get("fixed_in") or a.get("fixed") or a.get("fixed_version"))
 
 
+def _sev(i: dict) -> str:
+    return str(i.get("severity") or "").lower()
+
+
+def _blocking_item(i: dict) -> bool:
+    """Item-level mirror of the scanner's blocking rule (src/scanner/verdict.py)."""
+    if "malicious" in str(i.get("name") or "").lower() and i.get("kind") != "capability":
+        return True
+    if i.get("kind") == "capability" or i.get("installed") is False:
+        return False
+    if i.get("category") == "install_hook":
+        return True
+    if i.get("category") in ("dependency", "known_vulnerability"):
+        return False
+    return i.get("shipped") is not False
+
+
+def _decision(data: dict, advisories: int, incident: bool) -> tuple[str, str, bool]:
+    """(decision, reason, final): the API's own ``decision`` when the response carries
+    one; else the same rule over what this response has (src/scanner/verdict.decide):
+    do_not_connect on a critical finding, a planted credential leaving the sandbox,
+    a critical sandbox finding or a malicious package; review on a high finding, an
+    advisory for this version, deprecation, a score under 51, or little code with
+    nothing found; safe otherwise. Adoption is never an input."""
+    dec = data.get("decision")
+    if dec in DECISION_PHRASES:
+        return (dec, str(data.get("decision_reason") or ""),
+                data.get("decision_final") is not False)
+    score = int(data.get("trust_score") or 0)
+    f = data.get("findings") if isinstance(data.get("findings"), dict) else {}
+    items = [i for i in (f.get("items") or []) if isinstance(i, dict)]
+    b = data.get("behavioral") if isinstance(data.get("behavioral"), dict) else {}
+    pending = bool(b.get("pending"))
+    live = bool(b.get("ran")) and not pending and b.get("plan") != "live-probe" \
+        and b.get("advisory") is not True
+    b_items = [x for x in (b.get("findings") or []) if isinstance(x, dict)] if live else []
+    suffix = "; sandbox still running" if pending else ""
+
+    def out(d: str, why: str) -> tuple[str, str, bool]:
+        return d, why + suffix, not pending
+
+    def count(sev: str) -> int:
+        n = f.get(sev)
+        if isinstance(n, int) and not isinstance(n, bool):
+            return n
+        return sum(1 for i in items if _sev(i) == sev and _blocking_item(i))
+
+    if live and (b.get("canary_exfil") or any(
+            x.get("rule") == "credential_canary_exfiltrated" for x in b_items)):
+        return out("do_not_connect", "a planted credential left the sandbox")
+    if incident or any("malicious" in str(i.get("name") or "").lower() for i in items):
+        return out("do_not_connect", "a known-malicious package or dependency")
+    if count("critical"):
+        return out("do_not_connect", f"{count('critical')} critical finding(s)")
+    if any(_sev(x) == "critical" for x in b_items):
+        return out("do_not_connect", "the sandbox caught a critical behavior")
+    if count("high") or any(_sev(x) == "high" for x in b_items):
+        return out("review", "a high finding")
+    if advisories:
+        return out("review", "a published advisory affects this version")
+    if data.get("deprecation"):
+        return out("review", "the maintainer has deprecated this package")
+    if score < 51:
+        return out("review", f"trust score {score}/100 is under 51")
+    files = (data.get("metadata") or {}).get("files_scanned")
+    found = any(_sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
+                for i in items)
+    if isinstance(files, int) and 0 < files < 8 and not found:
+        return out("review", "nothing found, but little code to inspect")
+    return out("safe", "no critical or high findings")
+
+
+def _dval(r: dict) -> str:
+    """The decision value of a verdict / cache record. A record written before 0.1.20
+    has none: its old binary verdict maps to safe, anything else to review."""
+    d = r.get("decision")
+    if d in DECISION_PHRASES:
+        return d
+    return "safe" if r.get("verdict") == "safe" else "review"
+
+
+def _headline(r: dict) -> str:
+    """'Safe to connect · Certified' — the answer, with the mark when earned."""
+    phrase = DECISION_PHRASES[_dval(r)]
+    return phrase + (" · Certified" if r.get("certified") else "")
+
+
+def _why(r: dict) -> str:
+    return f" — {r['decision_reason']}" if r.get("decision_reason") else ""
+
+
+def _answer(r: dict) -> str:
+    """'Review before you connect — one high finding: … · AgentAvow 85/100'."""
+    return f"{_headline(r)}{_why(r)} · AgentAvow {r.get('score')}/100"
+
+
+def _flag(r: dict) -> str:
+    return _DECISION_FLAG[_dval(r)]
+
+
 def _verdict(data: dict) -> dict:
     """The parts of a scan response the hook reports and the gate acts on."""
     score = int(data.get("trust_score") or 0)
@@ -691,8 +779,14 @@ def _verdict(data: dict) -> dict:
     ih = data.get("incident_history") if isinstance(data.get("incident_history"), dict) else {}
     incident = bool(data.get("incident")) or bool(ih.get("current_version_affected"))
     digests = data.get("tool_digests")
+    decision, decision_reason, decision_final = _decision(data, advisories, incident)
     return {
         "score": score,
+        # The three-phrase answer every line leads with; the gate denies on do_not_connect.
+        "decision": decision,
+        "decision_reason": decision_reason,
+        "decision_final": decision_final,
+        "certified": bool((data.get("certified") or {}).get("eligible") is True),
         "verdict": "safe" if (score >= 81 and blocking == 0) else "needs review",
         "reason": str(data.get("verdict_reason") or ""),
         "blocking": blocking,
@@ -940,14 +1034,12 @@ def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
     if not n:
         return ("AgentAvow pre-check: a configured MCP server could not be scanned; "
                 "ask for the AgentAvow pre-check for details." + deps + tail)
-    safe = sum(1 for _, r in graded if r["verdict"] == "safe")
-    review = n - safe
     parts = [f"AgentAvow pre-check: graded {n} MCP server{'' if n == 1 else 's'} — "
-             f"{safe} safe, {review} need{'s' if review == 1 else ''} review"]
-    if review:
-        name, worst = min(graded, key=lambda g: g[1]["score"])
-        extra = f", {worst['blocking']} blocking" if worst["blocking"] else ""
-        parts.append(f" (lowest: '{name}' {worst['score']}/100{extra})")
+             + _counts(graded)]
+    worst = _worst(graded)
+    if worst:
+        name, r = worst
+        parts.append(f" (needs attention: '{name}' {_headline(r)}{_why(r)})")
     parts.append("." + deps + " Ask for the AgentAvow pre-check for details." + tail)
     return "".join(parts)
 
@@ -1027,23 +1119,11 @@ def main() -> None:
             continue
         cache[t["name"]] = _record(t, result, now)
         graded.append((t["name"], result))
-        score, verdict, blocking = result["score"], result["verdict"], result["blocking"]
-        flag = "✅" if verdict == "safe" else "⚠️"
-        if blocking:
-            extra = f", {blocking} blocking finding(s)"
-        elif verdict != "safe":
-            why = ("limited coverage" if result.get("reason") == "thin_coverage"
-                   else "non-finding signals")
-            extra = f" (no findings; {why})"
-        else:
-            extra = ""
         changed = ("its tool definitions changed since the last grade; re-graded: "
                    if regraded else "")
         sandbox = f"; {result['sandbox']}" if result.get("sandbox") else ""
-        if result.get("deprecated"):
-            sandbox = "; DEPRECATED by its maintainer (no more security fixes)" + sandbox
-        lines.append(f"{flag} MCP '{t['name']}' ({coord}): {changed}AgentAvow {score}/100 — "
-                     f"{verdict}{extra}{sandbox}.")
+        lines.append(f"{_flag(result)} MCP '{t['name']}' ({coord}): {changed}"
+                     f"{_answer(result)}{sandbox}.")
 
     server_lines = len(lines)
     dep_clause = ""

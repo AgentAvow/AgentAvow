@@ -4,8 +4,10 @@
 Runs before Claude Code calls an MCP tool (tool names `mcp__<server>__<tool>`). It
 reads the verdict the SessionStart pre-check (agentavow_precheck.py) stored for that
 server in ~/.cache/agentavow/scanned.json and decides:
-  • deny  — the server's grade is in the "blocked" tier (score 0-10). The reason names
-            the score and the report. The threshold is adjustable (below).
+  • deny  — the server's answer is "Do not connect" (a critical finding, a planted
+            credential leaving the sandbox, a known-malicious package), or its grade is
+            in the "blocked" tier (score 0-10). The reason leads with the answer and
+            names the score and the report. The threshold is adjustable (below).
   • ask   — a remote (HTTP) server now serves a definition for this tool that differs
             from the one AgentAvow graded (or a tool the grade never saw). The gate
             re-fetches `tools/list` from the server itself, at most once per server
@@ -22,8 +24,10 @@ Settings (environment, all OPTIONAL, read only, never sent anywhere):
   AGENTAVOW_GATE_DENY_BELOW            deny when the server's score is below this:
                                        a number 0-100, or a tier name (restricted,
                                        minimal, standard, trusted, verified) meaning
-                                       that tier's floor; "off" never denies.
-                                       Default: deny only the "blocked" tier.
+                                       that tier's floor; "off" never denies (not
+                                       even on "Do not connect").
+                                       Default: deny on "Do not connect" and on the
+                                       "blocked" tier.
   AGENTAVOW_GATE_RECHECK_SECONDS       how often a remote server's tools/list is
                                        re-fetched for drift (default 900).
 
@@ -35,7 +39,8 @@ never written to the cache or printed. Nothing is sent to AgentAvow.
 
 Design guarantees (deliberate):
   • FAIL-OPEN — any error, timeout, or unexpected shape means allow, silently.
-  • NEVER BLOCKS ON DRIFT — drift asks; only a blocked-tier grade denies.
+  • NEVER BLOCKS ON DRIFT — drift asks; only "Do not connect" or a blocked-tier grade
+    denies. "Review before you connect" never prompts here.
   • ONE SHORT BUDGET — the whole run stays under the hook's 8-second timeout.
 
 Install / test: https://agentavow.com/docs/auto-scan-claude-code
@@ -52,7 +57,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.19"
+__version__ = "0.1.20"
 
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 META_KEY = "_agentavow"  # cache entry holding hook state; never a server name
@@ -72,6 +77,14 @@ BUDGET = 6.0  # for the whole tools/list fetch; the hook times out at 8
 # Score floor of each tier (src/api/public_scan_router.py TRUST_TIERS).
 TIER_FLOORS = {
     "blocked": 0, "restricted": 11, "minimal": 31, "standard": 51, "trusted": 81, "verified": 96,
+}
+
+
+# The three headline phrases (src/trust_tiers.py DECISIONS; pinned by tests).
+DECISION_PHRASES = {
+    "safe": "Safe to connect",
+    "review": "Review before you connect",
+    "do_not_connect": "Do not connect",
 }
 
 
@@ -314,7 +327,12 @@ def _setting(name: str) -> str:
 
 
 def denies(record: dict, setting: str) -> bool:
-    """Whether the grade on file is low enough to deny. Default: the blocked tier."""
+    """Whether to deny: the answer on file is "Do not connect", or the grade is low
+    enough (default: the blocked tier). ``off`` never denies."""
+    if setting in ("off", "none", "never"):
+        return False
+    if record.get("decision") == "do_not_connect":
+        return True
     try:
         score = int(record.get("score"))
     except (TypeError, ValueError):
@@ -554,8 +572,11 @@ def decide(payload: dict, cache: dict) -> tuple[str, str] | None:
     if denies(record, _setting("AGENTAVOW_GATE_DENY_BELOW")):
         report = record.get("report_url") or "https://agentavow.com/check"
         tier = record.get("tier") or "blocked"
-        return "deny", (f"AgentAvow: MCP '{name}' is graded {record.get('score')}/100 "
-                        f"(tier {tier}); '{tool}' was not run. Report: {report}")
+        why = f" — {record['decision_reason']}" if record.get("decision_reason") else ""
+        cert = " · Certified" if record.get("certified") else ""
+        return "deny", (f"AgentAvow: {DECISION_PHRASES['do_not_connect']}{cert}{why}. "
+                        f"MCP '{name}' is graded {record.get('score')}/100 (tier {tier}); "
+                        f"'{tool}' was not run. Report: {report}")
     if record.get("kind") == "mcp":
         return drift_decision(name, record, cfg, tool, cache)
     return None

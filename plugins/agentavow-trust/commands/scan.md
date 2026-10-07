@@ -9,7 +9,7 @@ Choose the tool by what `$ARGUMENTS` looks like:
 - a package — "npm chalk", "pypi requests", "crates serde", "docker …", "hf org/model" → `scan_package`
 - a GitHub repo "owner/name" (e.g. `modelcontextprotocol/servers`) → `scan_repo`
 
-Report both scores: the 0-100 trust score with its plain safe / needs-review verdict, and the adoption score (downloads, stars, or installs), then the top findings (with where and how to fix), and the signed, offline-verifiable report link. If `$ARGUMENTS` is empty, ask what to scan.
+Lead with one of three answers and its reason — Safe to connect, Review before you connect, or Do not connect (the result's `decision` / `decision_reason` when present; otherwise Do not connect on a critical finding, a planted credential leaving the sandbox or a known-malicious package, Safe to connect when the verdict is safe, else Review before you connect) — adding " · Certified" when the tool is certified. Then report both scores: the 0-100 trust score, and the adoption score (downloads, stars, or installs), then the top findings (with where and how to fix), and the signed, offline-verifiable report link. If `$ARGUMENTS` is empty, ask what to scan.
 
 Give the version and publish date from the result's `Version … · published …` line. Do not look them up in the registry.
 

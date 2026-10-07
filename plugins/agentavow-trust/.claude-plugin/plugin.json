@@ -1,7 +1,7 @@
 {
   "name": "agentavow-trust",
   "displayName": "AgentAvow Trust",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Know which of your MCP servers and dependencies are safe before Claude uses them. At your next session start, Claude opens with one line: how many of your servers AgentAvow graded, how many are safe, and the one to look at first, plus the same for your project's direct dependencies. Add a server with `claude mcp add` and it is graded before it is added; a critical finding asks you first, anything else just tells you. Every grade is a signed 0-100 trust score you can verify offline, with the findings behind it. Also bundles the AgentAvow connector (scan any MCP server, package, or repo on demand), a /scan command, and a per-call gate that stops tools on a blocked server or whose definition changed since it was graded. Warn-only, fail-open; only the server URL or package name being graded leaves your machine.",
   "author": {
     "name": "AgentAvow",
