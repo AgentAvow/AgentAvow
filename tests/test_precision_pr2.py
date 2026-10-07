@@ -125,9 +125,10 @@ class TestShellTrueCalibration:
         assert _one_exec_defect(code).severity == "critical"
 
     def test_constant_argv_next_to_untrusted_input_is_not_calibrated(self):
-        # Untrusted input nearby: no calibration — today's verdict (critical) is unchanged.
+        # Untrusted input nearby: no calibration (stays high) — but it does not REACH
+        # the call, so no critical lift either (flow, not proximity).
         code = "data = requests.get(u).json()\nsubprocess.run(['git', 'status'], shell=True)\n"
-        assert _one_exec_defect(code).severity == "critical"
+        assert _one_exec_defect(code).severity == "high"
 
     def test_cli_argv_bound_to_a_decoded_payload_stays_high(self):
         code = (
@@ -438,3 +439,99 @@ class TestInstallHookInlineNode:
     def test_dangerous_hooks_stay_critical(self, cmd):
         f = self._hook(cmd)
         assert f and f[0].severity == "critical", cmd
+
+
+# ── untrusted input must REACH the call for the critical lift ─────────────────
+
+class TestUntrustedFlow:
+    @pytest.mark.parametrize("code", [
+        'body = request.json()\nsubprocess.run(body["cmd"], shell=True)\n',
+        'body = request.json\ncmd = body["c"]\nos.system(cmd)\n',
+        'subprocess.run(f"ping {request.args[\'h\']}", shell=True)\n',
+        'with urlopen(u) as resp:\n    script = resp.read().decode()\n'
+        'subprocess.run(script, shell=True)\n',
+    ])
+    def test_python_flow_is_critical(self, code):
+        assert _one_exec_defect(code).severity == "critical", code
+
+    def test_python_unrelated_fetch_is_not_a_flow(self):
+        code = ("def sync():\n    data = requests.get(URL).json()\n    return data\n\n"
+                "def clean(d):\n    target = os.path.join(ROOT, d)\n"
+                "    subprocess.run(f\"rm -rf {target}\", shell=True)\n")
+        assert _one_exec_defect(code).severity == "high"
+
+    def test_js_flow_is_critical(self):
+        code = ("const { execSync } = require('child_process')\n"
+                "app.post('/x', (req, res) => {\n  const name = req.body.file\n"
+                "  execSync(`convert ${name} out.png`)\n})\n")
+        assert _one_exec_defect(code, "server.js").severity == "critical"
+
+    def test_nextjs_shape_is_not_critical(self):
+        # vercel/next.js run-tests.js: a fetch elsewhere in the file, but testDir comes
+        # from the test file path — the shell string stays high, not critical.
+        code = ("const { exec: execOrig } = require('child_process')\n"
+                "const exec = promisify(execOrig)\n"
+                "async function getTimings() {\n  const res = await fetch(TIMINGS_URL)\n"
+                "  return res.json()\n}\n"
+                "async function retry(test) {\n"
+                "  let testDir = path.dirname(path.join(__dirname, test.file))\n"
+                "  await exec(`git clean -fdx \"${testDir}\"`)\n}\n")
+        assert _one_exec_defect(code, "run-tests.js").severity == "high"
+
+
+NEXTJS = Path(__file__).parent / "fixtures/static/regressions/nextjs_run_tests/run-tests.js"
+
+
+class TestNextJsRegression:
+    """vercel/next.js @ eda426e1 run-tests.js (MIT, LICENSE.md alongside). Live on
+    2026-10-07 the repo read "Do not connect" (11/100) because :981-982 were lifted to
+    critical by an unrelated fetch() within 45 lines."""
+
+    def test_git_clean_lines_are_high_not_critical(self):
+        findings = _scan(NEXTJS.read_text(), "run-tests.js")
+        hits = {f.line_number: f.severity for f in _exec_defects(findings)}
+        assert hits.get(981) == "high" and hits.get(982) == "high", hits
+        assert not [f for f in findings if f.severity == "critical" and f.kind == "defect"]
+
+
+# ── JS: the program's own CLI / environment → medium ───────────────────────────
+
+class TestJsCliCalibration:
+    @pytest.mark.parametrize("code", [
+        "const { execSync } = require('child_process')\n"
+        "const argv = require('minimist')(process.argv.slice(2))\n"
+        "execSync(`git checkout ${argv.branch}`)\n",
+        "const { execSync } = require('child_process')\n"
+        "execSync('git log ' + process.env.GIT_LOG_ARGS)\n",
+        "const { execSync } = require('child_process')\n"
+        "const argv = require('yargs/yargs')(process.argv.slice(2)).argv\n"
+        "const dir = path.resolve(argv.dir)\n"
+        "execSync(`git -C ${dir} status`)\n",
+        "const { execSync } = require('child_process')\n"
+        "const { program } = require('commander')\n"
+        "program.command('clone <repo>').action((repo) => {\n"
+        "  execSync(`git clone ${repo}`)\n})\n",
+    ])
+    def test_cli_derived_shell_string_is_medium(self, code):
+        f = _one_exec_defect(code, "cli.js")
+        assert f.severity == "medium" and "own command line" in f.remediation, f.remediation
+
+    @pytest.mark.parametrize("code,sev", [
+        # metacharacters / downloader / shell in the constant text
+        ("const argv = require('minimist')(process.argv.slice(2))\n"
+         "execSync(`cat ${argv.f} | sh`)\n", "high"),
+        ("const argv = require('minimist')(process.argv.slice(2))\n"
+         "execSync(`curl -O ${argv.url}`)\n", "high"),
+        ("const argv = require('minimist')(process.argv.slice(2))\n"
+         "execSync(`bash -c ${argv.cmd}`)\n", "high"),
+        # a dynamic part not traced to the CLI
+        ("const argv = require('minimist')(process.argv.slice(2))\n"
+         "execSync(`git ${argv.sub} ${other}`)\n", "high"),
+        # untrusted input reaching it wins
+        ("const argv = require('minimist')(process.argv.slice(2))\n"
+         "app.post('/x', (req, res) => {\n  const b = req.body.branch\n"
+         "  execSync(`git checkout ${b}`)\n})\n", "critical"),
+    ])
+    def test_outside_the_rule_keeps_today(self, code, sev):
+        code = "const { execSync } = require('child_process')\n" + code
+        assert _one_exec_defect(code, "cli.js").severity == sev, code

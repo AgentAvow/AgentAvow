@@ -1044,6 +1044,120 @@ def _near(idxs: list[int], idx: int, window: int) -> bool:
     return any(abs(i - idx) <= window for i in idxs)
 
 
+# --- Flow, not proximity (precision PR 2) ------------------------------------------
+# A tiny line-level taint pass: a name is tainted when it is assigned (or bound by
+# `with … as x` / an arrow-callback parameter) on a line that reads a source, or from an
+# expression that uses an already-tainted name. Regex-level, language-agnostic
+# (Python / JS / TS); it errs toward "flows" only through explicit assignments.
+_TAINT_ASSIGN_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:(?:const|let|var)\s+)?"
+    r"(?P<lhs>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*,\s*[A-Za-z_$][\w$]*)*"
+    r"|\{[^}]*\}|\[[^\]]*\]|\([^)]*\))"
+    r"\s*(?::\s*[^=]+?)?=(?![=>])\s*(?P<rhs>.*)$",
+)
+_TAINT_AS_RE = re.compile(r"\bas\s+([A-Za-z_]\w*)\s*:")
+_TAINT_ARROW_RE = re.compile(
+    r"(?:\(\s*([^()]*?)\s*\)|\b([A-Za-z_$][\w$]*))\s*=>|"
+    r"\bfunction\s*[\w$]*\s*\(\s*([^()]*?)\s*\)",
+)
+_TAINT_SKIP_NAMES = frozenset({
+    "const", "let", "var", "await", "async", "function", "return", "new", "this", "self",
+    "true", "false", "null", "None", "undefined",
+})
+
+
+def _names_in(text: str) -> set[str]:
+    return {n for n in re.findall(r"[A-Za-z_$][\w$]*", text) if n not in _TAINT_SKIP_NAMES}
+
+
+def _uses_name(text: str, name: str) -> bool:
+    return bool(re.search(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])", text))
+
+
+def _tainted_names(lines: list[str], start: int, end: int, is_source) -> set[str]:
+    """Names tainted by a source between ``lines[start:end]`` (in order, two passes so
+    a module-level parse below a function still counts for whole-file windows)."""
+    tainted: set[str] = set()
+    for _pass in range(2):
+        before = len(tainted)
+        for n in range(max(0, start), min(end, len(lines))):
+            ln = lines[n]
+            src_here = is_source(n, ln)
+            m = _TAINT_ASSIGN_RE.match(ln)
+            if m:
+                rhs = m.group("rhs")
+                if src_here or any(_uses_name(rhs, t) for t in tainted):
+                    lhs = m.group("lhs")
+                    tainted |= {lhs} if "." in lhs and "," not in lhs else _names_in(lhs)
+            if src_here:
+                am = _TAINT_AS_RE.search(ln)
+                if am:
+                    tainted.add(am.group(1))
+                for pm in _TAINT_ARROW_RE.finditer(ln):
+                    tainted |= _names_in(next(g for g in pm.groups() if g is not None)
+                                         if any(pm.groups()) else "")
+        if len(tainted) == before:
+            break
+    return tainted
+
+
+def _untrusted_flows(lines: list[str], idx: int, call_src: str, untrusted: list[int]) -> bool:
+    """Does an untrusted value (request body / query / fetched content) REACH the call?
+    Direct inline use in the call, or a name assigned from such a value within the
+    ``_UNTRUSTED_WINDOW`` lines above. An unrelated ``fetch(`` nearby is not a flow."""
+    if UNTRUSTED_INPUT_RE.search(call_src):
+        return True
+    src = set(untrusted)
+    tainted = _tainted_names(lines, idx - _UNTRUSTED_WINDOW, idx + 1,
+                             lambda n, _ln: n in src)
+    return any(_uses_name(call_src, t) for t in tainted)
+
+
+# JS: the program's OWN command line / environment.
+_JS_CLI_SOURCE_RE = re.compile(
+    r"process\.argv|process\.env|\bminimist\s*\(|\byargs\b|\.opts\s*\(\s*\)|"
+    r"\bparseArgs\s*\(|\bmeow\s*\(|\bcac\s*\(|\bprogram\.args\b",
+)
+_JS_CLI_FILE_RE = re.compile(
+    r"process\.argv|process\.env|['\"](?:minimist|yargs(?:/[\w/]+)?|commander|meow|cac|"
+    r"node:util)['\"]",
+)
+_JS_ACTION_RE = re.compile(r"\.action\s*\(\s*(?:async\s+)?(?:function\s*[\w$]*\s*)?"
+                           r"\(?\s*([^()=]*?)\s*\)?\s*(?:=>|\{)")
+# Pure helpers / globals that may wrap a CLI value without making it something else.
+_JS_CLI_NEUTRAL = frozenset({
+    "path", "JSON", "String", "Number", "Math", "Object", "Array", "encodeURIComponent",
+    "quote", "shellQuote", "shellEscape", "escape", "join", "dirname", "resolve",
+    "basename", "relative", "normalize", "slice", "trim", "toString", "process", "argv",
+    "env", "cwd",
+})
+
+
+def _js_cli_expr_checker(content: str, lines: list[str]):
+    """``is_cli_expr(expr)`` for a JS file that reads its own CLI / environment, else
+    ``None``. An expression counts when it reads ``process.argv`` / ``process.env`` /
+    a minimist / yargs / commander result directly, or every identifier it roots in is
+    a name bound to one (whole file: options are parsed once, used far below)."""
+    if not _JS_CLI_FILE_RE.search(content):
+        return None
+    names = _tainted_names(lines, 0, len(lines),
+                           lambda _n, ln: bool(_JS_CLI_SOURCE_RE.search(ln)))
+    for m in _JS_ACTION_RE.finditer(content):  # commander `.action((dir, opts) => …)`
+        names |= _names_in(m.group(1))
+
+    def is_cli_expr(expr: str) -> bool:
+        if _JS_CLI_SOURCE_RE.search(expr) and not UNTRUSTED_INPUT_RE.search(expr):
+            return True
+        stripped = re.sub(r"(['\"`])(?:\\.|(?!\1).)*\1", " ", expr)
+        roots = set(re.findall(r"(?<![\w$.])([A-Za-z_$][\w$]*)", stripped))
+        roots -= _TAINT_SKIP_NAMES
+        if not roots:
+            return False
+        return all(r in names or r in _JS_CLI_NEUTRAL for r in roots) and \
+            any(r in names for r in roots)
+    return is_cli_expr
+
+
 _CLI_IMPORT_RE = re.compile(r"^\s*(?:import|from)\s+(?:typer|click|argparse)\b", re.MULTILINE)
 _CLI_DECORATOR_RE = re.compile(
     r"^\s*@(?:(?:click|typer)\.|[\w.]+\.(?:command|callback|group)\s*(?:\(|$))",
@@ -1110,7 +1224,7 @@ def _in_py_string_literal(line: str, pos: int) -> bool:
 
 def _classify_exec_match(
     lines: list[str], idx: int, match: re.Match, file_lang: str | None,
-    untrusted: list[int], has_cli_import: bool = False,
+    untrusted: list[int], has_cli_import: bool = False, js_cli=None,
 ):
     """Run the exec classifier for a matched subprocess/os.system/child_process call."""
     from src.scanner.exec_classify import (
@@ -1126,14 +1240,16 @@ def _classify_exec_match(
     start = match.start() if lang == "python" else match.start(1)
     got = extract_call(lines, idx, start, lang=lang)
     call_src, consumed = (got if got else (lines[idx][start:], 1))
+    flow = near and _untrusted_flows(lines, idx, call_src, untrusted)
     if lang == "python":
         func = next(g for g in match.groups() if g)
         return classify_python_exec(
             call_src, func, untrusted_near=near, consumed=consumed,
             resolve_name=lambda nm: _resolve_py_assignment(lines, idx, nm),
-            cli_origin=_cli_origin(lines, idx, has_cli_import),
+            cli_origin=_cli_origin(lines, idx, has_cli_import), untrusted_flow=flow,
         )
-    return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed)
+    return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed,
+                            untrusted_flow=flow, is_cli_expr=js_cli)
 
 
 def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted: list[int]):
@@ -1904,6 +2020,8 @@ def _scan_content(
     untrusted = _untrusted_lines(lines)
     js_cp_call_re = _js_cp_call_re(content) if file_lang != "python" else None
     has_cli_import = file_lang == "python" and bool(_CLI_IMPORT_RE.search(content))
+    js_cli = (_js_cli_expr_checker(content, lines)
+              if file_lang in ("javascript", "typescript") else None)
     # Precision PR 2: a bare JS `exec(` / `spawn(` / `fork(` is child_process only when
     # the file references the module at all — otherwise it is a local function (a
     # wrapAnsi helper, a `$exec` RegExp binding, an `exec` callback parameter).
@@ -2045,9 +2163,11 @@ def _scan_content(
                     sm = pattern.search(line)
                     if sm and _in_py_string_literal(line, sm.start()):
                         continue
-                    if _near(untrusted, idx, _UNTRUSTED_WINDOW):
+                    stmt = "\n".join(lines[max(0, idx - 6): idx + 1])
+                    if (_near(untrusted, idx, _UNTRUSTED_WINDOW)
+                            and _untrusted_flows(lines, idx, stmt, untrusted)):
                         verdict = ("defect", "critical",
-                                   "shell=True next to untrusted input", "")
+                                   "shell=True on untrusted input", "")
                     else:
                         verdict = ("defect", "high", "shell=True runs a shell command", "")
                 elif name in ("subprocess.run / Popen (Python)", "os.system / os.popen (Python)"):
@@ -2065,7 +2185,8 @@ def _scan_content(
                             and m.group(0).startswith(m.group(1))):
                         continue  # a local exec()/spawn()/fork(), not child_process
                     if m:
-                        v = _classify_exec_match(lines, idx, m, file_lang, untrusted)
+                        v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
+                                                 js_cli=js_cli)
                         verdict = (v.kind, v.severity, v.label, v.capability)
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name in ("eval() call (Python)", "exec() call (Python)"):

@@ -112,6 +112,15 @@
         "name_prefix": "subprocess.run / Popen (Python)",
         "min_severity": "critical"
       }
+    },
+    {
+      "dir": "js_exec_request_flow",
+      "ecosystem": "npm",
+      "mirrors": "CWE-78 OS command injection (no specific MAL id); PR 2 flow-not-proximity counter-test",
+      "must_raise": {
+        "name_prefix": "execSync / spawn (Node.js)",
+        "min_severity": "critical"
+      }
     }
   ]
 }
