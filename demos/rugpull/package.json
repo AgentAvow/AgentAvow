@@ -1,0 +1,24 @@
+{
+  "name": "agentavow-rugpull-demo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Rug-pull at the call: an MCP tool redefined after approval, blocked by the AgentAvow gate. Local only, canary data only.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "pretest": "npm --prefix ../../sdk/js run build --silent",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "agentavow-trust": "file:../../sdk/js"
+  },
+  "optionalDependencies": {
+    "@ai-sdk/anthropic": "4.0.75",
+    "@ai-sdk/mcp": "2.0.69",
+    "ai": "7.0.131"
+  }
+}

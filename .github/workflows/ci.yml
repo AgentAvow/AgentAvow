@@ -105,6 +105,37 @@ jobs:
         working-directory: web
         run: npx vite build
 
+  rugpull-demo:
+    name: JS gate + rug-pull demo (localhost, no network after install)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend (the demo grades with the real scanner)
+        run: pip install -e ".[prod]"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: JS gate tests
+        working-directory: sdk/js
+        run: npm ci && npm test
+
+      - name: Rug-pull demo test
+        working-directory: demos/rugpull
+        env:
+          DEBUG: "true"
+          PYTHON: python
+        run: npm ci --omit=optional && npm test
+
   security:
     name: Security Scanning
     runs-on: ubuntu-latest
