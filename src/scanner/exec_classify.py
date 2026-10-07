@@ -368,10 +368,31 @@ def _shell_argv_calibration(
     if all(e is not None for e in elements):
         return _defect("medium", "shell=True with a constant argv (no shell metacharacters)",
                        consumed)
-    if cli_origin:
+    if cli_origin and not _dynamic_parts_look_dangerous(raw_elements or [node], resolve_name):
         return _defect("medium", "shell=True with arguments from the program's own command "
                        "line (no untrusted input nearby)", consumed)
     return None
+
+
+def _dynamic_parts_look_dangerous(nodes: list[ast.AST], resolve_name) -> bool:
+    """Inside a CLI command, a dynamic argv part that is (or is bound to) a decode /
+    fetch / exec expression — `payload = b64decode(BLOB).decode()` — is not "the user's
+    own argument": keep today's verdict."""
+    for el in nodes:
+        if isinstance(el, ast.Constant):
+            continue
+        expr = el
+        if isinstance(el, ast.Name) and resolve_name is not None:
+            resolved = resolve_name(el.id)
+            if resolved is not None:
+                expr = resolved
+        try:
+            src = ast.unparse(expr)
+        except Exception:  # noqa: BLE001 — unreadable: be conservative
+            return True
+        if INLINE_CODE_DANGER_RE.search(src) or _URL_RE.search(src):
+            return True
+    return False
 
 
 def _argv_nodes(node: ast.AST, _depth: int = 0) -> list[ast.AST] | None:

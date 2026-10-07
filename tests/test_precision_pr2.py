@@ -129,6 +129,18 @@ class TestShellTrueCalibration:
         code = "data = requests.get(u).json()\nsubprocess.run(['git', 'status'], shell=True)\n"
         assert _one_exec_defect(code).severity == "critical"
 
+    def test_cli_argv_bound_to_a_decoded_payload_stays_high(self):
+        code = (
+            "import base64, subprocess\nimport typer\napp = typer.Typer()\n\n"
+            "@app.command()\n"
+            "def go() -> None:\n"
+            "    payload = base64.b64decode(BLOB).decode()\n"
+            "    subprocess.run([payload], shell=True)\n"
+        )
+        d = _exec_defects(_scan(code))
+        assert d and all(f.severity in ("high", "critical") for f in d), [
+            (f.name, f.severity) for f in d]
+
     def test_bot_command_decorator_is_not_a_cli(self):
         # discord.py-style `@bot.command` takes arguments from chat users, not the CLI.
         code = (
