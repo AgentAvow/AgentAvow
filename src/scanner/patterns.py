@@ -103,10 +103,12 @@ DANGEROUS_ARGV_FLAGS = frozenset({
 # Constant inline code (`python -c "<this>"`) that is more than a one-liner helper:
 # anything that itself execs/decodes/fetches/spawns keeps the spawn a defect.
 INLINE_CODE_DANGER_RE = re.compile(
-    r"\b(?:exec|eval|compile|b64decode|a85decode|b32decode|fromhex|unhexlify|decompress|"
-    r"urlopen|urlretrieve|requests\.|httpx\.|socket|subprocess|os\.system|os\.popen|"
-    r"__import__|importlib|marshal|pickle|ctypes|child_process|require\s*\(|"
-    r"fetch\s*\(|Function\s*\()\b",
+    r"\b(?:(?:exec|eval|compile|b64decode|a85decode|b32decode|fromhex|unhexlify|decompress|"
+    r"urlopen|urlretrieve|socket|subprocess|__import__|importlib|marshal|pickle|ctypes|"
+    r"child_process)\b"
+    # Tokens ending in `.` / `(` carry no trailing \b: `require('x')` has no word
+    # boundary between `(` and the quote, so a trailing \b silently missed it.
+    r"|requests\.|httpx\.|os\.system|os\.popen|require\s*\(|fetch\s*\(|Function\s*\()",
 )
 # Shell metacharacters / download tokens inside a LITERAL shell command string.
 SHELL_DANGER_RE = re.compile(

@@ -2519,17 +2519,22 @@ _NODE_EVAL_SEGMENT_RE = re.compile(
 )
 
 
-def _strip_inert_node_eval(cmd: str) -> str:
-    """Remove ``node -e "<constant>"`` segments whose code does nothing dangerous
-    (``node -e "process.exit(0)"`` as an `|| ` fallback) before the danger check.
-    Code that requires/execs/fetches/decodes, or contains shell expansion, stays."""
-    from src.scanner.patterns import INLINE_CODE_DANGER_RE
+# The only inline snippets treated as inert: an exit code or a constant log line.
+_INERT_NODE_SNIPPET_RE = re.compile(
+    r"""^\s*(?:process\.exit\(\s*\d*\s*\)|console\.(?:log|warn|error)\(\s*(?:'[^'$`\\]*'|"""
+    r"""\\?"[^"$`\\]*\\?"|\d+)?\s*\))\s*;?\s*$""",
+)
 
+
+def _strip_inert_node_eval(cmd: str) -> str:
+    """Remove ``node -e "<snippet>"`` segments whose snippet is a known no-op
+    (``process.exit(0)`` as an ``||`` fallback, a constant ``console.log``) before the
+    danger check. Anything else (``require(…)``, fetch, eval, shell expansion) stays."""
     def _inert(m: re.Match) -> str:
         code = m.group(1) if m.group(1) is not None else m.group(2)
-        if INLINE_CODE_DANGER_RE.search(code) or re.search(r"\$\(|`|\$\{|https?://", code):
-            return m.group(0)
-        return "node <inert-inline>"
+        if _INERT_NODE_SNIPPET_RE.match(code):
+            return "node <inert-inline>"
+        return m.group(0)
     return _NODE_EVAL_SEGMENT_RE.sub(_inert, cmd)
 
 

