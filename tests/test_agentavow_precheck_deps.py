@@ -43,11 +43,17 @@ def _ok(score, verdict, blocking=0, **extra):
     return base
 
 
-def _run(hook, monkeypatch, capsys, scan):
+def _run(hook, monkeypatch, capsys, scan, raw=False):
+    """Hook output. A quiet start (nothing new: context for Claude only, nothing shown to
+    the person) reads as {} unless ``raw`` — most tests ask "was anything reported"."""
     monkeypatch.setattr(hook, "_scan", scan)
     hook.main()
     out = capsys.readouterr().out
-    return json.loads(out) if out else {}
+    data = json.loads(out) if out else {}
+    ctx = data.get("hookSpecificOutput", {}).get("additionalContext", "")
+    if not raw and "systemMessage" not in data and ctx.startswith("AgentAvow pre-check: nothing new"):
+        return {}
+    return data
 
 
 # --- manifests -----------------------------------------------------------------
@@ -133,7 +139,7 @@ def test_deps_are_graded_reported_and_summarized(hook, monkeypatch, capsys, tmp_
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "📦 dependency 'left-pad' (npm:left-pad@1.3.0): AgentAvow 70/100 — needs a look: DEPRECATED" in ctx
     assert "✅ dependency 'chalk' (npm:chalk@5.3.0): AgentAvow 90/100 — safe." in ctx
-    assert "already installed: its grade is advice, not a stop" in ctx
+    assert "already installed: their grades are advice" in ctx and "Do not interpret the raw cache file" in ctx
     cache = json.loads(hook.CACHE.read_text())
     assert cache["dep:npm:left-pad"]["spec"] == "1.3.0" and cache["dep:npm:left-pad"]["score"] == 70
 
@@ -472,3 +478,33 @@ def test_detail_view_includes_items_graded_at_earlier_starts(hook, monkeypatch, 
     assert "  ℹ️ dependency 'fastapi-like': 40/100 pattern hits only, counted OK" in ctx
     earlier = ctx.split("Graded at an earlier session start (unchanged since):", 1)[1]
     assert "httpx-like" not in earlier  # the re-graded one is not repeated in the earlier list
+
+
+
+def test_quiet_start_is_silent_for_the_person_but_gives_claude_the_full_list(hook, monkeypatch, capsys, tmp_path):
+    (tmp_path / "requirements.txt").write_text("uvicorn\nfastapi\nsqlalchemy\n")
+
+    def scan(t, force=False, stored=False):
+        if t["pkg"] == "sqlalchemy":
+            raise hook._UnscannableError("Not scannable: artifact exceeds unpacked-size cap (zip bomb?)")
+        return _ok(92, "safe") if t["pkg"] == "uvicorn" else _ok(40, "needs review", 30)
+
+    _run(hook, monkeypatch, capsys, scan)
+    out = _run(hook, monkeypatch, capsys, scan, raw=True)  # nothing new
+    assert "systemMessage" not in out  # the person sees nothing
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert ctx.startswith("AgentAvow pre-check: nothing new since the last session start. Do NOT mention")
+    assert "  ✅ dependency 'uvicorn': 92/100 safe" in ctx
+    assert "  ℹ️ dependency 'fastapi': 40/100 pattern hits only, counted OK" in ctx
+    assert "  ➖ dependency 'sqlalchemy': not graded (artifact exceeds unpacked-size cap (zip bomb?))" in ctx
+    assert "Do not interpret the raw cache file" in ctx
+
+
+def test_quiet_start_with_nothing_graded_prints_nothing(hook, monkeypatch, capsys, tmp_path):
+    (tmp_path / "requirements.txt").write_text("x\n")
+
+    def queued(t, force=False, stored=False):
+        raise hook._QueuedError("q")
+
+    _run(hook, monkeypatch, capsys, queued)
+    assert _run(hook, monkeypatch, capsys, queued, raw=True) == {}

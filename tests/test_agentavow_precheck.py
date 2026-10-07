@@ -42,7 +42,13 @@ def _run(hook, monkeypatch, capsys, targets, scan):
     out = capsys.readouterr().out
     if not out:
         return ""
-    return json.loads(out).get("hookSpecificOutput", {}).get("additionalContext", "")
+    data = json.loads(out)
+    ctx = data.get("hookSpecificOutput", {}).get("additionalContext", "")
+    # A quiet start (nothing new) gives Claude the list but shows the person nothing;
+    # these tests ask "was anything reported", so treat it as no report.
+    if "systemMessage" not in data and ctx.startswith("AgentAvow pre-check: nothing new"):
+        return ""
+    return ctx
 
 
 def _run_raw(hook, monkeypatch, capsys, targets, scan) -> dict:
@@ -50,7 +56,11 @@ def _run_raw(hook, monkeypatch, capsys, targets, scan) -> dict:
     monkeypatch.setattr(hook, "_scan", scan)
     hook.main()
     out = capsys.readouterr().out
-    return json.loads(out) if out else {}
+    data = json.loads(out) if out else {}
+    ctx = data.get("hookSpecificOutput", {}).get("additionalContext", "")
+    if "systemMessage" not in data and ctx.startswith("AgentAvow pre-check: nothing new"):
+        return {}
+    return data
 
 
 def _mcp(name: str, url: str) -> dict:
