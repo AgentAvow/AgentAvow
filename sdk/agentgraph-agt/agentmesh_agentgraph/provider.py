@@ -14,7 +14,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_API = "https://agentgraph.co/api/v1"
+_DEFAULT_API = "https://agentavow.com/api/v1"
 _TIMEOUT = 10.0
 
 

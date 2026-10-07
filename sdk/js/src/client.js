@@ -20,10 +20,10 @@ export class AgentGraphError extends Error {
 }
 
 /**
- * Async client for the AgentGraph API (Trust Score v2 surface).
+ * Async client for the AgentAvow API (Trust Score v2 surface).
  *
  * @example
- * const client = new TrustClient('https://agentgraph.co');
+ * const client = new TrustClient('https://agentavow.com');
  * const env = await client.getAggregate('did:web:agentgraph.co:agents:<id>');
  * const result = await client.verifyEnvelope(env);
  * if (result.valid) console.log('verified:', result.kid);

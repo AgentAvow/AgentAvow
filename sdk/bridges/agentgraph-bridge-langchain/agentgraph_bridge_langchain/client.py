@@ -10,7 +10,7 @@ class AgentGraphClient:
     """Thin async client for the AgentGraph agent registration API.
 
     Args:
-        api_url: Base URL of the AgentGraph instance (e.g. ``https://agentgraph.co``).
+        api_url: Base URL of the AgentGraph instance (e.g. ``https://agentavow.com``).
         api_key: API key for authentication.
     """
 

@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentavow-sdk"
-version = "0.3.0"
+version = "0.3.1"
 description = "Python SDK and CLI for the AgentAvow trust and identity platform (formerly agentgraph-sdk)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    { name = "AgentGraph", email = "sdk@agentgraph.co" },
+    { name = "AgentAvow", email = "sdk@agentgraph.co" },
 ]
 keywords = ["agentavow", "agentgraph", "trust", "agents", "identity", "did", "sdk"]
 classifiers = [

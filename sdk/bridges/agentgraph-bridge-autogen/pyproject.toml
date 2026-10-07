@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentavow-bridge-autogen"
-version = "0.2.0"
+version = "0.2.1"
 description = "AgentAvow bridge for Microsoft AutoGen (formerly agentgraph-bridge-autogen) — trust-gated tools and agent registration for the AgentAvow trust network"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    { name = "AgentGraph", email = "sdk@agentgraph.co" },
+    { name = "AgentAvow", email = "sdk@agentgraph.co" },
 ]
 keywords = ["agentavow", "agentgraph", "autogen", "trust", "agents", "bridge"]
 classifiers = [

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Final release of the pre-rebrand name. It ships no code: it only depends on
+# the renamed distribution so `pip install agentgraph-trust` keeps working and
+# the PyPI page points people at the new name. Keep this name published and
+# never delete it (so nobody can squat it). Do not add modules here.
+[project]
+name = "agentgraph-trust"
+version = "0.3.2"
+description = "Renamed to agentavow-trust. This is a pointer release that installs agentavow-trust (the AgentAvow MCP server)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+    { name = "AgentAvow", email = "sdk@agentgraph.co" },
+]
+keywords = ["agentavow", "agentgraph", "mcp", "renamed"]
+classifiers = [
+    "Development Status :: 7 - Inactive",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "agentavow-trust>=0.6.3",
+]
+
+[project.urls]
+Homepage = "https://agentavow.com"
+Documentation = "https://agentavow.com/docs"
+Repository = "https://github.com/AgentAvow/AgentAvow"
+"Renamed to" = "https://pypi.org/project/agentavow-trust/"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.sdist]
+include = ["pyproject.toml", "README.md"]
