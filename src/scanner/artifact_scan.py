@@ -163,7 +163,7 @@ def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
     ``shell=True``, and whose classification is a capability (benign binary, no
     inline-code flag, no URL) — psutil's ``Popen([sys.executable, script, readme])``
     README converter. ``os.system`` / ``os.popen`` / network calls are never fixed."""
-    from src.scanner.exec_classify import _argv_elements, classify_argv
+    from src.scanner.exec_classify import _argv_sequence, classify_argv
 
     if fname in ("system", "popen") or fname in _AST_NET_CALLS:
         return False
@@ -179,13 +179,41 @@ def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
                 first = kw.value
     if first is None:
         return False
-    seq = _argv_elements(first)
+    seq = _argv_sequence(first)  # `["git", "add"] + files` is still an argv
     if seq is None:
         return False
     elements, dynamic = seq
     if elements and elements[0] is None:
         return False
     return classify_argv(elements, dynamic, untrusted_near=False).kind == "capability"
+
+
+# Receivers whose `.run()` / `.system()` / `.call()` is not a process or network call:
+# a setuptools command's `super().run()` / `self.run_command()`, `platform.system()`.
+_NON_EXEC_RECEIVERS = frozenset({"self", "cls", "platform"})
+
+
+def _is_non_exec_receiver(node: ast.Call) -> bool:
+    """``super().run()`` / ``build_ext.run(self)`` (a build_ext / editable_wheel
+    override chaining to setuptools), ``self.run()``, ``platform.system()`` (the OS
+    name). ``os.system`` /
+    ``subprocess.run`` / ``__import__('os').system`` are unaffected."""
+    func = node.func
+    if not isinstance(func, ast.Attribute):
+        return False
+    # Every process / network call needs its command or URL: a zero-argument `.run()` is
+    # a setuptools command object (`build_cmd.run()`), never subprocess / os.
+    if not node.args and not node.keywords:
+        return True
+    # `build_ext.run(self)` / `_build_py.run(self)`: an unbound base-class method call.
+    if node.args and isinstance(node.args[0], ast.Name) and node.args[0].id == "self":
+        return True
+    recv = func.value
+    if isinstance(recv, ast.Name):
+        return recv.id in _NON_EXEC_RECEIVERS
+    if isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name):
+        return recv.func.id == "super"
+    return False
 
 
 class _InstallExecVisitor(ast.NodeVisitor):
@@ -218,7 +246,7 @@ class _InstallExecVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         fname = _call_name(node)
-        if fname in _AST_EXEC_CALLS:
+        if fname in _AST_EXEC_CALLS and not _is_non_exec_receiver(node):
             if self._guard_depth > 0:
                 self.guarded.append((fname, getattr(node, "lineno", 1)))
             else:
@@ -367,7 +395,9 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # publish/CLI helper code (os.system behind `if sys.argv[-1]=='publish'`)
         # that the guard-unaware regex engine would false-flag as unsafe_exec. The
         # dedicated detector understands install-time vs maintainer-only reachability.
-        if name_lower == "setup.py":
+        # Only the ROOT setup.py runs at `pip install`; a nested one (a test fixture
+        # package, a vendored C-runtime build script) is ordinary source below.
+        if name_lower == "setup.py" and path == "setup.py":
             if af.text:
                 ast_findings = detect_pypi_install_exec(af.text, path)
                 if ast_findings:

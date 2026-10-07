@@ -1,5 +1,5 @@
 {
-  "_doc": "Static recall fixtures: SYNTHETIC reproductions of the technique behind a known-malicious package (tagged with the OSV id it mirrors). Each must raise its rule at or above the given severity as a BLOCKING defect (kind=defect, installed=true) after the precision pass. tests/test_static_corpus.py runs them through scan_artifact_files; nothing is ever executed or installed. The 400-package known-good corpus and its CI job are PR 2.",
+  "_doc": "Static recall fixtures: SYNTHETIC reproductions of the technique behind a known-malicious package (tagged with the OSV id it mirrors). Each must raise its rule at or above the given severity as a BLOCKING defect (kind=defect, installed=true) after the precision pass. tests/test_static_corpus.py runs them through scan_artifact_files; nothing is ever executed or installed. The known-good corpus is tests/corpus/static/ (PR 2).",
   "fixtures": [
     {
       "dir": "postinstall_curl_sh",
@@ -93,6 +93,24 @@
       "must_raise": {
         "name_prefix": "execSync / spawn (Node.js)",
         "min_severity": "high"
+      }
+    },
+    {
+      "dir": "shell_true_metachar",
+      "ecosystem": "pypi",
+      "mirrors": "technique: shell metacharacter chaining under shell=True (no specific MAL id); PR 2 calibration counter-test",
+      "must_raise": {
+        "name_prefix": "subprocess.run / Popen (Python)",
+        "min_severity": "high"
+      }
+    },
+    {
+      "dir": "shell_true_request_input",
+      "ecosystem": "pypi",
+      "mirrors": "CWE-78 OS command injection (no specific MAL id); PR 2 calibration counter-test",
+      "must_raise": {
+        "name_prefix": "subprocess.run / Popen (Python)",
+        "min_severity": "critical"
       }
     }
   ]

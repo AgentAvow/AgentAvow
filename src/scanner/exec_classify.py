@@ -164,11 +164,13 @@ def _is_sys_executable(node: ast.AST) -> bool:
 
 
 def _is_dynamic_string(node: ast.AST) -> bool:
-    """f-string / concatenation / ``%`` / ``.format(`` — a command built from parts."""
+    """f-string / concatenation / ``%`` / ``.format(`` — a command built from parts.
+    A LIST concatenation (``["git", "log"] + args``, ``shlex.split(cc) + [...]``) is an
+    argv, not a string: see :func:`_argv_sequence`."""
     if isinstance(node, ast.JoinedStr):
         return True
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod)):
-        return True
+        return _argv_sequence(node) is None
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
             and node.func.attr in ("format", "join", "replace"):
         return True
@@ -194,6 +196,53 @@ def _argv_elements(node: ast.AST) -> tuple[list[str | None], bool] | None:
                 pass
         out.append(s)
     return out, dynamic
+
+
+# Calls that return an argv LIST (so `shlex.split(x) + [...]` is list concatenation).
+_LIST_CALLS = frozenset({"split", "list", "sorted"})
+
+
+def _is_list_expr(node: ast.AST) -> bool:
+    if isinstance(node, (ast.List, ast.Tuple, ast.ListComp)):
+        return True
+    if isinstance(node, ast.Call):
+        f = node.func
+        name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+        # `shlex.split(...)` / `list(...)` — but NOT `"a b".split()` style string calls
+        # on a constant, which still yield a list (fine either way).
+        return name in _LIST_CALLS
+    return False
+
+
+def _argv_sequence(node: ast.AST, _depth: int = 0) -> tuple[list[str | None], bool] | None:
+    """Like :func:`_argv_elements` but also flattens list CONCATENATION
+    (``[npx, "@x/inspector"] + uv_cmd``): known literal parts keep their text, any
+    other operand contributes one unknown (``None``) element. ``None`` when the node is
+    not argv-shaped (a string command)."""
+    seq = _argv_elements(node)
+    if seq is not None:
+        return seq
+    if _depth > 40:  # pathological concatenation chain: not an argv we can read
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = node.left, node.right
+        # Each operand is evaluated ONCE (a long `"a" + b + "c" + …` chain must stay
+        # linear, not exponential).
+        subs = [_argv_sequence(left, _depth + 1), _argv_sequence(right, _depth + 1)]
+        if not (_is_list_expr(left) or _is_list_expr(right)
+                or subs[0] is not None or subs[1] is not None):
+            return None
+        out: list[str | None] = []
+        dynamic = False
+        for sub in subs:
+            if sub is None:
+                out.append(None)
+                dynamic = True
+            else:
+                out.extend(sub[0])
+                dynamic = dynamic or sub[1]
+        return out, dynamic
+    return None
 
 
 def _basename(argv0: str) -> str:
@@ -259,12 +308,112 @@ def classify_argv(
     return _cap("info", f"runs a fixed command: {' '.join(consts)[:60]}", CAP_SPAWN, consumed)
 
 
+# Shell metacharacters that make a shell=True argv do more than run one program.
+_SHELL_METACHAR_RE = re.compile(r"[|;&$()<>`\n\r]")
+
+
+def _shell_argv_calibration(
+    first: ast.AST | None, *, untrusted_near: bool, cli_origin: bool, resolve_name,
+    consumed: int,
+) -> ExecVerdict | None:
+    """Precision PR 2 (founder-approved calibration, tracked item #2): ``shell=True``
+    whose command is an argv LIST is a medium defect, not high, when
+
+    * every element is a constant (a literal, a name bound to one, or a loop variable
+      over a literal list) free of shell metacharacters (``| ; & $ ( ) < >`` backtick);
+      or
+    * the dynamic elements come only from the program's OWN command line (the call sits
+      in a typer/click command or an argparse/sys.argv main) — the user is attacking
+      themselves.
+
+    ``None`` = no calibration: a string command, metacharacters, a shell / downloader /
+    inline-interpreter argv0 (``sh -c``, ``curl``, ``python -c``), a URL in the argv,
+    or untrusted input (request body / fetched content) nearby keep today's high or
+    critical verdict."""
+    if first is None or untrusted_near:
+        return None
+    node = first
+    if isinstance(node, ast.Name) and resolve_name is not None:
+        resolved = resolve_name(node.id)
+        if resolved is not None:
+            node = resolved
+    seq = _argv_sequence(node)
+    if seq is None:
+        return None
+    raw_elements = _argv_nodes(node)
+    elements: list[str | None] = list(seq[0])
+    # Resolve bare-name elements (`[cmd, "--version"]` with `for cmd in [...]` above).
+    if raw_elements is not None and len(raw_elements) == len(elements):
+        for i, el in enumerate(raw_elements):
+            if elements[i] is None and isinstance(el, ast.Name) and resolve_name is not None:
+                vals = _const_values(resolve_name(el.id))
+                if vals:
+                    elements[i] = " ".join(vals)  # every candidate is metachar-checked
+    if not elements:
+        return None
+    consts = [e for e in elements if e is not None]
+    if any(_SHELL_METACHAR_RE.search(c) for c in consts):
+        return None
+    if any(_URL_RE.search(c) for c in consts):
+        return None
+    for c in consts:
+        for tok in c.split():
+            if tok in DANGEROUS_ARGV_FLAGS:
+                return None
+    argv0_candidates = elements[0].split() if elements[0] is not None else []
+    for cand in argv0_candidates:
+        base = _basename(cand)
+        if base in DANGEROUS_ARGV0_SHELLS or base in DANGEROUS_ARGV0_NET:
+            return None
+    if all(e is not None for e in elements):
+        return _defect("medium", "shell=True with a constant argv (no shell metacharacters)",
+                       consumed)
+    if cli_origin:
+        return _defect("medium", "shell=True with arguments from the program's own command "
+                       "line (no untrusted input nearby)", consumed)
+    return None
+
+
+def _argv_nodes(node: ast.AST, _depth: int = 0) -> list[ast.AST] | None:
+    """The element nodes of a literal argv list/tuple (flattening list concatenation
+    the same way as :func:`_argv_sequence`; an opaque operand is one element)."""
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return list(node.elts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and _depth <= 40:
+        out: list[ast.AST] = []
+        for part in (node.left, node.right):
+            sub = _argv_nodes(part, _depth + 1)
+            out.extend(sub if sub is not None else [part])
+        return out
+    return None
+
+
+def _const_values(node: ast.AST | None) -> list[str] | None:
+    """Constant string value(s) a name can hold: ``x = "npx"`` → ``["npx"]``;
+    ``for x in ["npx.cmd", "npx.exe"]`` (resolved to the list) → both."""
+    if node is None:
+        return None
+    s = _const_str(node)
+    if s is not None:
+        return [s]
+    if isinstance(node, (ast.List, ast.Tuple)):
+        vals = [_const_str(e) for e in node.elts]
+        if vals and all(v is not None for v in vals):
+            return vals  # type: ignore[return-value]
+    return None
+
+
 def _shell_verdict(arg: ast.AST | None, *, untrusted_near: bool, consumed: int,
                    how: str) -> ExecVerdict:
     """A shell IS being invoked (os.system / shell=True / string command). A literal is
     high (a reviewer should see a shell); a dynamic string next to untrusted input is
     the command-injection critical."""
     s = _const_str(arg) if arg is not None else None
+    if s is not None and not s.strip() and how.startswith("os."):
+        # `os.system("")` — the well-known no-op that enables ANSI escape handling in a
+        # Windows console. It runs nothing.
+        return _cap("info", f"{how}(\"\") no-op (enables ANSI escapes on Windows)",
+                    CAP_SPAWN, consumed)
     if s is not None:
         if SHELL_DANGER_RE.search(s):
             return _defect("high", f"{how} runs a literal shell command with pipe/subshell/"
@@ -276,7 +425,7 @@ def _shell_verdict(arg: ast.AST | None, *, untrusted_near: bool, consumed: int,
 
 def classify_python_exec(
     call_src: str, func_name: str, *, untrusted_near: bool,
-    resolve_name=None, consumed: int = 1,
+    resolve_name=None, consumed: int = 1, cli_origin: bool = False,
 ) -> ExecVerdict:
     """Classify one ``subprocess.*`` / ``os.system`` / ``os.popen`` call.
 
@@ -302,6 +451,12 @@ def classify_python_exec(
             pass
         else:
             # shell=True, or shell=<variable> (treated as True — conservative)
+            calibrated = _shell_argv_calibration(
+                first, untrusted_near=untrusted_near, cli_origin=cli_origin,
+                resolve_name=resolve_name, consumed=consumed,
+            )
+            if calibrated is not None:
+                return calibrated
             return _shell_verdict(first, untrusted_near=untrusted_near, consumed=consumed,
                                   how="shell=True")
 
@@ -310,11 +465,11 @@ def classify_python_exec(
         # the caller hands in. A capability unless untrusted input sits nearby.
         return classify_argv([None], True, untrusted_near=untrusted_near, consumed=consumed)
 
-    seq = _argv_elements(first)
+    seq = _argv_sequence(first)
     if seq is None and isinstance(first, ast.Name) and resolve_name is not None:
         resolved = resolve_name(first.id)
         if resolved is not None:
-            seq = _argv_elements(resolved)
+            seq = _argv_sequence(resolved)
             if seq is None and _is_dynamic_string(resolved):
                 first = resolved
     if seq is not None:
