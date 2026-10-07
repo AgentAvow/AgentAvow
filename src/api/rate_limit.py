@@ -13,6 +13,7 @@ applies different limits based on entity type and trust score:
 from __future__ import annotations
 
 import enum
+import hmac
 import logging
 import time
 
@@ -153,9 +154,45 @@ class RedisRateLimiter:
 _limiter = RedisRateLimiter()
 
 
+# Surfaces whose traffic reaches us through a handful of vendor egress addresses
+# (every claude.ai user looks like the same few IPs). Their per-IP MCP limits are
+# multiplied so one busy vendor proxy is not throttled as if it were one person.
+_SHARED_EGRESS_SURFACES = frozenset({"claude", "chatgpt"})
+_SHARED_EGRESS_MULTIPLIER = 5
+_LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+
+
+def _internal_call(request: Request) -> tuple[str, str] | None:
+    """``(client_ip, surface)`` when this request is the MCP bridge's own call to the
+    API, proven by the shared token AND arriving from loopback; otherwise None. The
+    bridge forwards the end user's address and surface so limits apply per user
+    instead of to one shared bucket. Without a configured token nothing changes."""
+    from src.config import settings
+
+    token = settings.mcp_internal_token or ""
+    if not token:
+        return None
+    given = request.headers.get("x-agentavow-internal") or ""
+    if not given or not hmac.compare_digest(given, token):
+        return None
+    direct_ip = request.client.host if request.client else ""
+    if direct_ip not in _LOOPBACK:
+        return None
+    ip = (request.headers.get("x-agentavow-client-ip") or "").strip() or "mcp-unknown"
+    surface = (request.headers.get("x-agentavow-surface") or "other").strip().lower()
+    return ip, surface
+
+
+def _mcp_limit(base: int, surface: str) -> int:
+    return base * (_SHARED_EGRESS_MULTIPLIER if surface in _SHARED_EGRESS_SURFACES else 1)
+
+
 def _get_client_ip(request: Request) -> str:
     from src.config import settings
 
+    internal = _internal_call(request)
+    if internal:
+        return internal[0]
     direct_ip = request.client.host if request.client else "unknown"
     # Only trust X-Forwarded-For when the direct client is a known proxy
     if direct_ip in settings.trusted_proxies:
@@ -204,6 +241,11 @@ async def rate_limit_reads(request: Request) -> None:
     ip = _get_client_ip(request)
     limit = settings.rate_limit_reads_per_minute
     key = f"read:{ip}"
+    internal = _internal_call(request)
+    if internal:
+        # An MCP tool call on behalf of one end user: their own bucket, agent-tier rate.
+        limit = _mcp_limit(settings.rate_limit_mcp_reads_per_minute, internal[1])
+        key = f"read:mcp:{ip}"
     if not await _limiter.check(key, limit):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -273,6 +315,10 @@ async def rate_limit_scans(request: Request) -> None:
     ip = _get_client_ip(request)
     limit = settings.rate_limit_scans_per_minute
     key = f"scan:{ip}"
+    internal = _internal_call(request)
+    if internal:
+        limit = _mcp_limit(settings.rate_limit_mcp_scans_per_minute, internal[1])
+        key = f"scan:mcp:{ip}"
     if not await _limiter.check(key, limit):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

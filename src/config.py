@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     # authenticated callers get 3x (see rate_limit_scans). Cache hits still count,
     # but 20/min/IP is generous for humans and stops abuse.
     rate_limit_scans_per_minute: int = 20
+    # The MCP bridge calls this same API from inside the container, so without these
+    # every tool call from every user shared one 127.0.0.1 bucket. With
+    # MCP_INTERNAL_TOKEN set, the bridge proves it is the bridge and forwards the real
+    # client address; limits then apply per end user at these (agent-tier) rates. The
+    # claude.ai / ChatGPT surfaces arrive through a few vendor egress IPs, so they get a
+    # multiplier on top (see rate_limit._SHARED_EGRESS_MULTIPLIER).
+    mcp_internal_token: str = ""              # env MCP_INTERNAL_TOKEN (prod: .env.secrets)
+    rate_limit_mcp_reads_per_minute: int = 300
+    rate_limit_mcp_scans_per_minute: int = 60
 
     # Rate limiting — provisional agent tier (unclaimed agents)
     rate_limit_provisional_reads_per_minute: int = 50
