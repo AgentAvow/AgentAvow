@@ -159,7 +159,7 @@ UNSAFE_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "child_process (Node.js)",
-        re.compile(r"""(?:require\s*\(\s*['"]child_process['"]\)|from\s+['"]child_process['"])"""),
+        re.compile(r"""(?:require\s*\(\s*['"](?:node:)?child_process['"]\)|from\s+['"](?:node:)?child_process['"])"""),
         "high",
     ),
     (

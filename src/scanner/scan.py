@@ -645,6 +645,28 @@ _JS_EXEC_CALL_RE = re.compile(
     r"(?:(?<![.\w])|(?:child_process|cp)\s*\.\s*)"
     r"(execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)\s*\(",
 )
+_JS_CP_FUNCS = r"(execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)"
+_JS_CP_MODULE = r"""['"](?:node:)?child_process['"]"""
+# Names a file binds to the child_process module: `const proc = require('child_process')`,
+# `import * as proc from 'node:child_process'`, `import proc from 'child_process'`.
+_JS_CP_ALIAS_RE = re.compile(
+    r"(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*" + _JS_CP_MODULE + r"\s*\)"
+    r"|\bimport\s+(?:\*\s+as\s+)?([A-Za-z_$][\w$]*)\s+from\s+" + _JS_CP_MODULE + r")",
+)
+
+
+def _js_cp_call_re(content: str) -> re.Pattern[str]:
+    """Calls through the child_process module that `_JS_EXEC_CALL_RE` cannot see because
+    they are method calls: the inline `require('child_process').exec(...)` one-liner and
+    `<alias>.spawn(...)` for any alias this file binds. Before the precision pass the
+    bare import was a file-wide high, which hid these; now that the import is only a
+    capability, the calls themselves must be classified. Group 1 is the function name."""
+    aliases = {a for m in _JS_CP_ALIAS_RE.finditer(content) for a in m.groups() if a}
+    quals = [r"require\s*\(\s*" + _JS_CP_MODULE + r"\s*\)"]
+    quals += [r"(?<![\w$.])" + re.escape(a) for a in sorted(aliases)]
+    return re.compile(r"(?:" + "|".join(quals) + r")\s*\.\s*" + _JS_CP_FUNCS + r"\s*\(")
+
+
 _PY_EVAL_CALL_RE = re.compile(r"(?<![.\w])(eval|exec)\s*\(")
 _PY_DESER_CALL_RE = re.compile(
     r"\b(?:cPickle|_pickle|pickle|marshal|dill|jsonpickle)\.(loads?|decode)\s*\(",
@@ -1008,8 +1030,11 @@ def _classify_exec_match(
 
     near = _near(untrusted, idx, _UNTRUSTED_WINDOW)
     lang = "python" if file_lang == "python" else "js"
-    got = extract_call(lines, idx, match.start(), lang=lang)
-    call_src, consumed = (got if got else (lines[idx][match.start():], 1))
+    # JS: start at the function name, so `require('child_process').spawn(...)` yields
+    # spawn's argument list, not require's.
+    start = match.start() if lang == "python" else match.start(1)
+    got = extract_call(lines, idx, start, lang=lang)
+    call_src, consumed = (got if got else (lines[idx][start:], 1))
     if lang == "python":
         func = next(g for g in match.groups() if g)
         return classify_python_exec(
@@ -1740,6 +1765,7 @@ def _scan_content(
     # Untrusted-input lines (request body / fetched content) for the "dynamic argv or
     # eval NEXT TO untrusted input" rules.
     untrusted = _untrusted_lines(lines)
+    js_cp_call_re = _js_cp_call_re(content) if file_lang != "python" else None
     # Lines swallowed by a multi-line exec call already classified at its first line —
     # the per-line `shell=True` rule must not double-report inside that call.
     consumed_until = -1
@@ -1831,7 +1857,10 @@ def _scan_content(
         # definition, not the builtin).
         if not is_prose and not _DEF_EVAL_EXEC_RE.search(stripped):
             for name, pattern, severity in UNSAFE_EXEC_PATTERNS:
-                if not pattern.search(line):
+                if not pattern.search(line) and not (
+                    name == "execSync / spawn (Node.js)"
+                    and js_cp_call_re is not None and js_cp_call_re.search(line)
+                ):
                     continue
                 # Language dispatch (#2): skip a language-specific pattern on a
                 # non-matching file (e.g. Python exec() on a .mjs file).
@@ -1854,6 +1883,10 @@ def _scan_content(
                 verdict = None
                 if name == "child_process (Node.js)":
                     # Importing child_process is a capability; the calls are what count.
+                    # One finding per line: when this line also CALLS through the module
+                    # (`require('child_process').exec(...)`), let the call rule classify it.
+                    if js_cp_call_re is not None and js_cp_call_re.search(line):
+                        continue
                     verdict = ("capability", "info", "imports child_process", "process:spawn")
                 elif name in ("subprocess.run / Popen (Python)", "os.system / os.popen (Python)"):
                     m = _PY_EXEC_CALL_RE.search(line)
@@ -1862,7 +1895,9 @@ def _scan_content(
                         verdict = (v.kind, v.severity, v.label, v.capability)
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name == "execSync / spawn (Node.js)":
-                    m = _JS_EXEC_CALL_RE.search(line)
+                    m = _JS_EXEC_CALL_RE.search(line) or (
+                        js_cp_call_re.search(line) if js_cp_call_re is not None else None
+                    )
                     if m:
                         v = _classify_exec_match(lines, idx, m, file_lang, untrusted)
                         verdict = (v.kind, v.severity, v.label, v.capability)
