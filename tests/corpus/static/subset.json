@@ -1,0 +1,25 @@
+{
+ "_doc": "20-package subset of the static corpus run by tests/test_static_corpus.py from the archive cache (skipped when the cache is absent; no network). The precision-scope \u00a71 sample (minus npm/lodash) plus pypi/mcp.",
+ "ids": [
+  "pypi/mcp",
+  "pypi/psutil",
+  "pypi/google-auth",
+  "pypi/fastapi",
+  "pypi/pytest",
+  "pypi/pydantic",
+  "pypi/cryptography",
+  "pypi/paramiko",
+  "pypi/requests",
+  "pypi/httpx",
+  "pypi/boto3",
+  "npm/task-master-ai",
+  "npm/typescript",
+  "npm/vite",
+  "npm/@modelcontextprotocol/sdk",
+  "npm/puppeteer",
+  "npm/express",
+  "npm/axios",
+  "npm/chalk",
+  "npm/commander"
+ ]
+}

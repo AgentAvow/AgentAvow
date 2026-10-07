@@ -1,0 +1,76 @@
+name: Static corpus
+
+# Precision gate for the scanner: the top 200 PyPI + top 200 npm packages (pinned in
+# tests/corpus/static/manifest.json) are scanned through the production package path and
+# must never read "do not connect"; every "review" must rest on an installed defect; the
+# results must match the committed tests/corpus/static/expected.json (update it in the
+# same PR with `--write-expected` so the drift is reviewed). Archives are downloaded into
+# a cache keyed on the manifest hash and are NEVER executed or installed.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/scanner/**"
+      - "scripts/corpus/**"
+      - "tests/corpus/static/**"
+      - "tests/fixtures/static/**"
+      - ".github/workflows/static-corpus.yml"
+  schedule:
+    - cron: "17 6 * * *"   # nightly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-corpus-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  corpus:
+    name: Static corpus (400 packages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEBUG: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[prod,dev]"
+
+      - name: Restore archive cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/agentavow-static-corpus
+          key: static-corpus-${{ hashFiles('tests/corpus/static/manifest.json') }}
+          restore-keys: |
+            static-corpus-
+
+      - name: Run the corpus gate
+        run: >-
+          python -I scripts/corpus/run_static_corpus.py
+          --workers 4
+          --fail-on-diff
+          --report "$RUNNER_TEMP/static-corpus-report.md"
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/static-corpus-report.md" ]; then
+            head -c 900000 "$RUNNER_TEMP/static-corpus-report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-corpus-report
+          path: ${{ runner.temp }}/static-corpus-report.md
+          if-no-files-found: ignore

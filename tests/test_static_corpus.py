@@ -5,7 +5,14 @@ Fixtures live in ``tests/fixtures/static/known_bad/<technique>/`` — synthetic
 reproductions of the technique behind a known-malicious package (tagged with the OSV
 id they mirror in ``manifest.json``). They are scanned through the artifact path
 (``scan_artifact_files``) exactly like a downloaded package; nothing is executed or
-installed. The 400-package known-good corpus and its CI job are PR 2.
+installed.
+
+The known-good side (PR 2): ``tests/corpus/static/`` pins the top 200 PyPI + top 200 npm
+packages; ``scripts/corpus/run_static_corpus.py`` runs all of them in CI. Here, a
+20-package subset (``subset.json``) is re-scanned from the archive cache and must match
+the committed ``expected.json`` exactly. No network: when the cache
+(``AGENTAVOW_CORPUS_CACHE`` or ``~/.cache/agentavow-static-corpus``) lacks an archive,
+that package is skipped.
 """
 from __future__ import annotations
 
@@ -95,3 +102,56 @@ def test_manifest_tags_every_fixture_with_its_osv_mirror():
     assert dirs == listed, f"fixture dirs {dirs ^ listed} missing from manifest or disk"
     for e in MANIFEST["fixtures"]:
         assert e["mirrors"], e["dir"]
+
+
+# ── known-good subset (from the archive cache; skipped without it) ─────────────
+
+CORPUS = Path(__file__).parent / "corpus" / "static"
+_CORPUS_MANIFEST = {e["id"]: e for e in json.loads((CORPUS / "manifest.json").read_text())
+                    ["packages"]}
+_EXPECTED = json.loads((CORPUS / "expected.json").read_text())["packages"]
+_SUBSET = json.loads((CORPUS / "subset.json").read_text())["ids"]
+
+
+def _cache_dir() -> Path:
+    from scripts.corpus.corpus_lib import default_cache_dir
+
+    return default_cache_dir()
+
+
+def _cached(entry: dict) -> bool:
+    from scripts.corpus.corpus_lib import cache_path
+
+    shas = [entry["archive"]["sha256"]]
+    if entry.get("wheel"):
+        shas.append(entry["wheel"]["sha256"])
+    return all(cache_path(_cache_dir(), s).is_file() for s in shas)
+
+
+def test_subset_is_twenty_pinned_packages_with_snapshots():
+    assert len(_SUBSET) == 20 and "pypi/mcp" in _SUBSET
+    for pid in _SUBSET:
+        assert pid in _CORPUS_MANIFEST and pid in _EXPECTED, pid
+
+
+def test_no_known_good_package_is_do_not_connect_in_the_snapshot():
+    """The committed snapshot itself honours the gate: do_not_connect only where the
+    manifest records a reviewed, open false-positive class."""
+    for pid, r in _EXPECTED.items():
+        if r.get("label") == "do_not_connect":
+            assert (_CORPUS_MANIFEST[pid].get("known_fp") or {}).get("label") == \
+                "do_not_connect", pid
+        exp = _CORPUS_MANIFEST.get(pid, {}).get("expect")
+        if exp:
+            assert r["label"] == exp, (pid, r["label"], exp)
+
+
+@pytest.mark.parametrize("pid", _SUBSET)
+def test_subset_package_matches_snapshot(pid):
+    entry = _CORPUS_MANIFEST[pid]
+    if not _cached(entry):
+        pytest.skip(f"{pid}: archive not in the corpus cache (no network in the unit suite)")
+    from scripts.corpus.run_static_corpus import public, scan_entry
+
+    got = public(scan_entry(entry, str(_cache_dir()), offline=True))
+    assert got == _EXPECTED[pid], f"{pid} drifted from expected.json: {got}"

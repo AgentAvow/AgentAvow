@@ -103,10 +103,12 @@ DANGEROUS_ARGV_FLAGS = frozenset({
 # Constant inline code (`python -c "<this>"`) that is more than a one-liner helper:
 # anything that itself execs/decodes/fetches/spawns keeps the spawn a defect.
 INLINE_CODE_DANGER_RE = re.compile(
-    r"\b(?:exec|eval|compile|b64decode|a85decode|b32decode|fromhex|unhexlify|decompress|"
-    r"urlopen|urlretrieve|requests\.|httpx\.|socket|subprocess|os\.system|os\.popen|"
-    r"__import__|importlib|marshal|pickle|ctypes|child_process|require\s*\(|"
-    r"fetch\s*\(|Function\s*\()\b",
+    r"\b(?:(?:exec|eval|compile|b64decode|a85decode|b32decode|fromhex|unhexlify|decompress|"
+    r"urlopen|urlretrieve|socket|subprocess|__import__|importlib|marshal|pickle|ctypes|"
+    r"child_process)\b"
+    # Tokens ending in `.` / `(` carry no trailing \b: `require('x')` has no word
+    # boundary between `(` and the quote, so a trailing \b silently missed it.
+    r"|requests\.|httpx\.|os\.system|os\.popen|require\s*\(|fetch\s*\(|Function\s*\()",
 )
 # Shell metacharacters / download tokens inside a LITERAL shell command string.
 SHELL_DANGER_RE = re.compile(
@@ -131,7 +133,7 @@ DANGEROUS_DELETE_ROOT_RE = re.compile(
 UNSAFE_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "subprocess.run / Popen (Python)",
-        re.compile(r"subprocess\.(run|Popen|call|check_output)\s*\("),
+        re.compile(r"subprocess\.(run|Popen|call|check_output|check_call)\s*\("),
         "high",
     ),
     (
@@ -167,17 +169,19 @@ UNSAFE_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         # child_process exec/spawn — but NOT `re.exec(...)` (RegExp.prototype.exec),
         # the dominant false positive in any regex-heavy JS lib. Match the Node
         # forms when they're bare/destructured (`exec(cmd)`, `execSync(...)`) — the
-        # lookbehind excludes `x.exec(` method calls — OR when explicitly qualified
+        # lookbehind excludes `x.exec(` method calls and `$exec(` (a bound
+        # RegExp.prototype.exec, get-intrinsic) — OR when explicitly qualified
         # as `child_process.exec(` / `cp.spawn(`.
         re.compile(
-            r"(?<![.\w])(?:execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)\s*\("
+            r"(?<![.\w$])(?:execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)\s*\("
             r"|(?:child_process|cp)\s*\.\s*(?:execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)\s*\("
         ),
         "high",
     ),
     (
         "shell=True (Python)",
-        re.compile(r"shell\s*=\s*True"),
+        # `(?<!\w)`: a project's own `in_shell=True` / `use_shell=True` kwarg is not it.
+        re.compile(r"(?<!\w)shell\s*=\s*True"),
         "critical",
     ),
     (

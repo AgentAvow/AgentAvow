@@ -642,7 +642,7 @@ _PY_EXEC_CALL_RE = re.compile(
     r"(?:subprocess\.(run|Popen|call|check_output|check_call)|os\.(system|popen))\s*\(",
 )
 _JS_EXEC_CALL_RE = re.compile(
-    r"(?:(?<![.\w])|(?:child_process|cp)\s*\.\s*)"
+    r"(?:(?<![.\w$])|(?:child_process|cp)\s*\.\s*)"
     r"(execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)\s*\(",
 )
 _JS_CP_FUNCS = r"(execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)"
@@ -667,6 +667,23 @@ def _js_cp_call_re(content: str) -> re.Pattern[str]:
     return re.compile(r"(?:" + "|".join(quals) + r")\s*\.\s*" + _JS_CP_FUNCS + r"\s*\(")
 
 
+# Child-process function names that are also common local identifiers.
+_JS_AMBIGUOUS_CP = frozenset({"exec", "spawn", "fork"})
+
+
+def _js_defines_locally(content: str, name: str) -> bool:
+    """Does this JS file bind ``name`` itself — ``function exec(``, ``const exec = (…)
+    =>`` (not a ``require``/``import``), or a parameter ``function (exec)`` /
+    ``(exec) =>``? Used only when the file never mentions child_process: then a bare
+    ``exec(…)`` is that local function (wrap-ansi's line wrapper, a callback)."""
+    n = re.escape(name)
+    if re.search(r"\bfunction\s*\*?\s*" + n + r"\s*\(", content):
+        return True
+    for m in re.finditer(r"\b(?:const|let|var)\s+" + n + r"\s*=([^;\n]{0,120})", content):
+        if not re.search(r"\brequire\s*\(|\bimport\s*\(|\bprocess\b", m.group(1)):
+            return True
+    param = r"\(\s*(?:[^()]*?[,\s])?" + n + r"\s*(?:[,=)][^()]*)?\)"
+    return bool(re.search(r"\bfunction\b[^(\n]{0,40}" + param + r"|" + param + r"\s*=>", content))
 _PY_EVAL_CALL_RE = re.compile(r"(?<![.\w])(eval|exec)\s*\(")
 _PY_DESER_CALL_RE = re.compile(
     r"\b(?:cPickle|_pickle|pickle|marshal|dill|jsonpickle)\.(loads?|decode)\s*\(",
@@ -923,7 +940,17 @@ def _resolve_py_assignment(lines: list[str], idx: int, name: str):
     if rx is None:
         rx = re.compile(r"^\s*" + re.escape(name) + r"\s*(?::[^=\n]+)?=(?!=)\s*(.*)$")
         _PY_ASSIGN_RE_CACHE[name] = rx
+    loop_rx = _PY_ASSIGN_RE_CACHE.get("for " + name)
+    if loop_rx is None:
+        # `for cmd in ["npx.cmd", "npx.exe", "npx"]:` binds `cmd` to each element; the
+        # list node is returned and read as "one of these constants".
+        loop_rx = re.compile(r"^\s*(?:async\s+)?for\s+" + re.escape(name)
+                             + r"\s+in\s+([\[(].*[\])])\s*:\s*(?:#.*)?$")
+        _PY_ASSIGN_RE_CACHE["for " + name] = loop_rx
     for n in range(idx - 1, max(-1, idx - 80), -1):
+        lm = loop_rx.match(lines[n])
+        if lm:
+            return _parse_expr(lm.group(1))
         m = rx.match(lines[n])
         if not m:
             continue
@@ -1017,9 +1044,187 @@ def _near(idxs: list[int], idx: int, window: int) -> bool:
     return any(abs(i - idx) <= window for i in idxs)
 
 
+# --- Flow, not proximity (precision PR 2) ------------------------------------------
+# A tiny line-level taint pass: a name is tainted when it is assigned (or bound by
+# `with … as x` / an arrow-callback parameter) on a line that reads a source, or from an
+# expression that uses an already-tainted name. Regex-level, language-agnostic
+# (Python / JS / TS); it errs toward "flows" only through explicit assignments.
+_TAINT_ASSIGN_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:(?:const|let|var)\s+)?"
+    r"(?P<lhs>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\s*,\s*[A-Za-z_$][\w$]*)*"
+    r"|\{[^}]*\}|\[[^\]]*\]|\([^)]*\))"
+    r"\s*(?::\s*[^=]+?)?=(?![=>])\s*(?P<rhs>.*)$",
+)
+_TAINT_AS_RE = re.compile(r"\bas\s+([A-Za-z_]\w*)\s*:")
+_TAINT_ARROW_RE = re.compile(
+    r"(?:\(\s*([^()]*?)\s*\)|\b([A-Za-z_$][\w$]*))\s*=>|"
+    r"\bfunction\s*[\w$]*\s*\(\s*([^()]*?)\s*\)",
+)
+_TAINT_SKIP_NAMES = frozenset({
+    "const", "let", "var", "await", "async", "function", "return", "new", "this", "self",
+    "true", "false", "null", "None", "undefined",
+})
+
+
+def _names_in(text: str) -> set[str]:
+    return {n for n in re.findall(r"[A-Za-z_$][\w$]*", text) if n not in _TAINT_SKIP_NAMES}
+
+
+def _uses_name(text: str, name: str) -> bool:
+    return bool(re.search(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])", text))
+
+
+def _tainted_names(lines: list[str], start: int, end: int, is_source) -> set[str]:
+    """Names tainted by a source between ``lines[start:end]`` (in order, two passes so
+    a module-level parse below a function still counts for whole-file windows)."""
+    tainted: set[str] = set()
+    for _pass in range(2):
+        before = len(tainted)
+        for n in range(max(0, start), min(end, len(lines))):
+            ln = lines[n]
+            src_here = is_source(n, ln)
+            m = _TAINT_ASSIGN_RE.match(ln)
+            if m:
+                rhs = m.group("rhs")
+                if src_here or any(_uses_name(rhs, t) for t in tainted):
+                    lhs = m.group("lhs")
+                    tainted |= {lhs} if "." in lhs and "," not in lhs else _names_in(lhs)
+            if src_here:
+                am = _TAINT_AS_RE.search(ln)
+                if am:
+                    tainted.add(am.group(1))
+                for pm in _TAINT_ARROW_RE.finditer(ln):
+                    tainted |= _names_in(next(g for g in pm.groups() if g is not None)
+                                         if any(pm.groups()) else "")
+        if len(tainted) == before:
+            break
+    return tainted
+
+
+def _untrusted_flows(lines: list[str], idx: int, call_src: str, untrusted: list[int]) -> bool:
+    """Does an untrusted value (request body / query / fetched content) REACH the call?
+    Direct inline use in the call, or a name assigned from such a value within the
+    ``_UNTRUSTED_WINDOW`` lines above. An unrelated ``fetch(`` nearby is not a flow."""
+    if UNTRUSTED_INPUT_RE.search(call_src):
+        return True
+    src = set(untrusted)
+    tainted = _tainted_names(lines, idx - _UNTRUSTED_WINDOW, idx + 1,
+                             lambda n, _ln: n in src)
+    return any(_uses_name(call_src, t) for t in tainted)
+
+
+# JS: the program's OWN command line / environment.
+_JS_CLI_SOURCE_RE = re.compile(
+    r"process\.argv|process\.env|\bminimist\s*\(|\byargs\b|\.opts\s*\(\s*\)|"
+    r"\bparseArgs\s*\(|\bmeow\s*\(|\bcac\s*\(|\bprogram\.args\b",
+)
+_JS_CLI_FILE_RE = re.compile(
+    r"process\.argv|process\.env|['\"](?:minimist|yargs(?:/[\w/]+)?|commander|meow|cac|"
+    r"node:util)['\"]",
+)
+_JS_ACTION_RE = re.compile(r"\.action\s*\(\s*(?:async\s+)?(?:function\s*[\w$]*\s*)?"
+                           r"\(?\s*([^()=]*?)\s*\)?\s*(?:=>|\{)")
+# Pure helpers / globals that may wrap a CLI value without making it something else.
+_JS_CLI_NEUTRAL = frozenset({
+    "path", "JSON", "String", "Number", "Math", "Object", "Array", "encodeURIComponent",
+    "quote", "shellQuote", "shellEscape", "escape", "join", "dirname", "resolve",
+    "basename", "relative", "normalize", "slice", "trim", "toString", "process", "argv",
+    "env", "cwd",
+})
+
+
+def _js_cli_expr_checker(content: str, lines: list[str]):
+    """``is_cli_expr(expr)`` for a JS file that reads its own CLI / environment, else
+    ``None``. An expression counts when it reads ``process.argv`` / ``process.env`` /
+    a minimist / yargs / commander result directly, or every identifier it roots in is
+    a name bound to one (whole file: options are parsed once, used far below)."""
+    if not _JS_CLI_FILE_RE.search(content):
+        return None
+    names = _tainted_names(lines, 0, len(lines),
+                           lambda _n, ln: bool(_JS_CLI_SOURCE_RE.search(ln)))
+    for m in _JS_ACTION_RE.finditer(content):  # commander `.action((dir, opts) => …)`
+        names |= _names_in(m.group(1))
+
+    def is_cli_expr(expr: str) -> bool:
+        if _JS_CLI_SOURCE_RE.search(expr) and not UNTRUSTED_INPUT_RE.search(expr):
+            return True
+        stripped = re.sub(r"(['\"`])(?:\\.|(?!\1).)*\1", " ", expr)
+        roots = set(re.findall(r"(?<![\w$.])([A-Za-z_$][\w$]*)", stripped))
+        roots -= _TAINT_SKIP_NAMES
+        if not roots:
+            return False
+        return all(r in names or r in _JS_CLI_NEUTRAL for r in roots) and \
+            any(r in names for r in roots)
+    return is_cli_expr
+
+
+_CLI_IMPORT_RE = re.compile(r"^\s*(?:import|from)\s+(?:typer|click|argparse)\b", re.MULTILINE)
+_CLI_DECORATOR_RE = re.compile(
+    r"^\s*@(?:(?:click|typer)\.|[\w.]+\.(?:command|callback|group)\s*(?:\(|$))",
+)
+_CLI_ARGS_RE = re.compile(r"\bsys\.argv\b|\.parse_(?:known_)?args\s*\(")
+
+
+def _cli_origin(lines: list[str], idx: int, has_cli_import: bool) -> bool:
+    """Is the call at ``lines[idx]`` inside the program's OWN command-line entry point —
+    a typer/click command (decorated function, file imports typer/click) or an
+    argparse / ``sys.argv`` main? Arguments there come from the person running the CLI,
+    not from a remote party (precision PR 2 calibration). A bot framework's
+    ``@bot.command`` does not count: the file must import typer, click or argparse."""
+    if not has_cli_import or idx >= len(lines):
+        return False
+    cur = len(lines[idx]) - len(lines[idx].lstrip())
+    for n in range(idx - 1, max(-1, idx - 600), -1):
+        st = lines[n].lstrip()
+        # Blank, comment, and closing-bracket lines (the `) -> None:` that ends a
+        # multi-line signature) say nothing about the enclosing block.
+        if not st or st.startswith(("#", ")", "]", "}")):
+            continue
+        ind = len(lines[n]) - len(st)
+        if ind >= cur:
+            continue
+        cur = ind
+        if st.startswith(("def ", "async def ")):
+            for k in range(n - 1, max(-1, n - 15), -1):
+                dst = lines[k].lstrip()
+                dind = len(lines[k]) - len(dst)
+                if dind == ind and not dst.startswith(("@", ")")):
+                    break
+                if _CLI_DECORATOR_RE.match(lines[k]):
+                    return True
+            return any(_CLI_ARGS_RE.search(ln) for ln in lines[n: idx + 1])
+        if st.startswith("if __name__"):
+            return any(_CLI_ARGS_RE.search(ln) for ln in lines)
+        if ind == 0 and not st.startswith(("class ", "try", "with ", "for ", "if ", "else",
+                                            "elif ", "except", "finally")):
+            return False
+    return False
+
+
+def _in_py_string_literal(line: str, pos: int) -> bool:
+    """Is ``line[pos]`` inside a single-line ``'…'`` / ``"…"`` literal? (A matched
+    ``shell=True`` inside an error message is text, not a keyword argument.)"""
+    q: str | None = None
+    i = 0
+    while i < pos:
+        ch = line[i]
+        if q is not None:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == q:
+                q = None
+        elif ch == "#":
+            return True  # trailing comment
+        elif ch in "'\"":
+            q = ch
+        i += 1
+    return q is not None
+
+
 def _classify_exec_match(
     lines: list[str], idx: int, match: re.Match, file_lang: str | None,
-    untrusted: list[int],
+    untrusted: list[int], has_cli_import: bool = False, js_cli=None,
 ):
     """Run the exec classifier for a matched subprocess/os.system/child_process call."""
     from src.scanner.exec_classify import (
@@ -1035,13 +1240,16 @@ def _classify_exec_match(
     start = match.start() if lang == "python" else match.start(1)
     got = extract_call(lines, idx, start, lang=lang)
     call_src, consumed = (got if got else (lines[idx][start:], 1))
+    flow = near and _untrusted_flows(lines, idx, call_src, untrusted)
     if lang == "python":
         func = next(g for g in match.groups() if g)
         return classify_python_exec(
             call_src, func, untrusted_near=near, consumed=consumed,
             resolve_name=lambda nm: _resolve_py_assignment(lines, idx, nm),
+            cli_origin=_cli_origin(lines, idx, has_cli_import), untrusted_flow=flow,
         )
-    return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed)
+    return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed,
+                            untrusted_flow=flow, is_cli_expr=js_cli)
 
 
 def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted: list[int]):
@@ -1726,6 +1934,51 @@ def _looks_like_oauth(lines: list[str], line_num: int) -> bool:
     return any(h in window for h in _OAUTH_ENDPOINT_HINTS)
 
 
+# Emoji tag sequence (UTS #51): WAVING BLACK FLAG + tag digits / lowercase tag letters +
+# CANCEL TAG — the England / Scotland / Wales flags. Data, not smuggled ASCII.
+_EMOJI_TAG_SEQ_RE = re.compile(
+    "\U0001F3F4[\U000E0030-\U000E0039\U000E0061-\U000E007A]{1,32}\U000E007F"
+)
+
+
+def _benign_zero_width(line: str, pos: int) -> bool:
+    """ZWJ / ZWNJ doing its typographic job: joining an emoji sequence (man ZWJ woman ZWJ girl),
+    following a combining mark in an Indic script (virama + ZWJ), or ZWNJ between two
+    non-Latin letters (Persian). ZWSP / WORD JOINER / MVS, and any joiner between Latin
+    letters (the steganography / token-splitting shape), are never benign."""
+    import unicodedata
+
+    ch = line[pos]
+    if ch not in "\u200c\u200d" or pos == 0 or pos + 1 >= len(line):
+        return False
+    prev, nxt = line[pos - 1], line[pos + 1]
+    pc, nc = unicodedata.category(prev), unicodedata.category(nxt)
+    # A joiner that ENDS a string literal (a grapheme-table key like `'<virama>\u200d'`)
+    # is judged by what it follows.
+    closes = nxt in "'\""
+
+    def emojiish(c: str, cat: str) -> bool:
+        # Emoji blocks count even when this Python's Unicode DB predates them (Cn).
+        return (cat == "So" or c == "\ufe0f" or 0x1F000 <= ord(c) <= 0x1FAFF
+                or (cat == "Sm" and ord(c) >= 0x2000))  # face ZWJ left-right arrow (head shaking)
+    if ch == "\u200d" and emojiish(prev, pc) and (closes or emojiish(nxt, nc)):
+        return True
+    if pc in ("Mn", "Mc") and ord(prev) >= 0x0900 and (closes or nc[0] in "LM"):
+        return True
+    return ch == "\u200c" and pc == "Lo" and (closes or nc == "Lo")
+
+
+def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
+    """True when every hit of an invisible-Unicode rule on this line is a well-formed
+    emoji tag sequence or a typographic joiner (precision PR 2: wcwidth's grapheme
+    tables). Smuggled tag text (no flag base / uppercase tags) still fires."""
+    if name.startswith("Unicode Tags"):
+        return not pattern.search(_EMOJI_TAG_SEQ_RE.sub("", line))
+    if name.startswith("Zero-width"):
+        return all(_benign_zero_width(line, m.start()) for m in pattern.finditer(line))
+    return False
+
+
 def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
@@ -1766,6 +2019,19 @@ def _scan_content(
     # eval NEXT TO untrusted input" rules.
     untrusted = _untrusted_lines(lines)
     js_cp_call_re = _js_cp_call_re(content) if file_lang != "python" else None
+    has_cli_import = file_lang == "python" and bool(_CLI_IMPORT_RE.search(content))
+    js_cli = (_js_cli_expr_checker(content, lines)
+              if file_lang in ("javascript", "typescript") else None)
+    # Precision PR 2: a bare JS `exec(` / `spawn(` / `fork(` is child_process only when
+    # the file references the module at all — otherwise it is a local function (a
+    # wrapAnsi helper, a `$exec` RegExp binding, an `exec` callback parameter).
+    js_has_child_process = file_lang != "python" and "child_process" in content
+    js_local_cp_names = (
+        {n for n in _JS_AMBIGUOUS_CP if _js_defines_locally(content, n)}
+        if file_lang != "python" and not js_has_child_process else set()
+    )
+    # A TypeScript declaration file is types only: no code runs from it.
+    is_declaration = file_path.lower().endswith((".d.ts", ".d.mts", ".d.cts"))
     # Lines swallowed by a multi-line exec call already classified at its first line —
     # the per-line `shell=True` rule must not double-report inside that call.
     consumed_until = -1
@@ -1777,7 +2043,7 @@ def _scan_content(
         stripped = line.strip()
         if stripped.startswith(("#", "//", "*", "/*")):
             continue
-        is_prose = idx in prose_lines
+        is_prose = idx in prose_lines or is_declaration
         # NOTE: (#6) we deliberately do NOT skip an entire line just because it contains
         # the word "example"/"placeholder" — that let an attacker neutralize any rule with
         # `# example` and silently ignored real code like
@@ -1888,18 +2154,39 @@ def _scan_content(
                     if js_cp_call_re is not None and js_cp_call_re.search(line):
                         continue
                     verdict = ("capability", "info", "imports child_process", "process:spawn")
+                elif name == "shell=True (Python)":
+                    # A `shell=True` the call classifier did not read (a wrapper such as
+                    # `trio.lowlevel.open_process`, a bare `Popen`): a shell IS invoked,
+                    # so it stays a defect — critical only next to untrusted input, the
+                    # same rule the classifier applies. Text inside a string literal
+                    # (an error message) is not a keyword argument.
+                    sm = pattern.search(line)
+                    if sm and _in_py_string_literal(line, sm.start()):
+                        continue
+                    stmt = "\n".join(lines[max(0, idx - 6): idx + 1])
+                    if (_near(untrusted, idx, _UNTRUSTED_WINDOW)
+                            and _untrusted_flows(lines, idx, stmt, untrusted)):
+                        verdict = ("defect", "critical",
+                                   "shell=True on untrusted input", "")
+                    else:
+                        verdict = ("defect", "high", "shell=True runs a shell command", "")
                 elif name in ("subprocess.run / Popen (Python)", "os.system / os.popen (Python)"):
                     m = _PY_EXEC_CALL_RE.search(line)
                     if m:
-                        v = _classify_exec_match(lines, idx, m, file_lang, untrusted)
+                        v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
+                                                 has_cli_import)
                         verdict = (v.kind, v.severity, v.label, v.capability)
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name == "execSync / spawn (Node.js)":
                     m = _JS_EXEC_CALL_RE.search(line) or (
                         js_cp_call_re.search(line) if js_cp_call_re is not None else None
                     )
+                    if (m and m.group(1) in js_local_cp_names
+                            and m.group(0).startswith(m.group(1))):
+                        continue  # a local exec()/spawn()/fork(), not child_process
                     if m:
-                        v = _classify_exec_match(lines, idx, m, file_lang, untrusted)
+                        v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
+                                                 js_cli=js_cli)
                         verdict = (v.kind, v.severity, v.label, v.capability)
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name in ("eval() call (Python)", "exec() call (Python)"):
@@ -2081,7 +2368,7 @@ def _scan_content(
 
         # Check invisible / smuggled Unicode (dangerous anywhere — no downgrade)
         for name, pattern, severity in INVISIBLE_UNICODE_PATTERNS:
-            if pattern.search(line):
+            if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
                 findings.append(Finding(
@@ -2348,6 +2635,30 @@ def _scan_manifest_exec(content: str, file_path: str) -> list[Finding]:
     return findings
 
 
+_NODE_EVAL_SEGMENT_RE = re.compile(
+    r"""\bnode\s+(?:-e|--eval)\s+(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE,
+)
+
+
+# The only inline snippets treated as inert: an exit code or a constant log line.
+_INERT_NODE_SNIPPET_RE = re.compile(
+    r"""^\s*(?:process\.exit\(\s*\d*\s*\)|console\.(?:log|warn|error)\(\s*(?:'[^'$`\\]*'|"""
+    r"""\\?"[^"$`\\]*\\?"|\d+)?\s*\))\s*;?\s*$""",
+)
+
+
+def _strip_inert_node_eval(cmd: str) -> str:
+    """Remove ``node -e "<snippet>"`` segments whose snippet is a known no-op
+    (``process.exit(0)`` as an ``||`` fallback, a constant ``console.log``) before the
+    danger check. Anything else (``require(…)``, fetch, eval, shell expansion) stays."""
+    def _inert(m: re.Match) -> str:
+        code = m.group(1) if m.group(1) is not None else m.group(2)
+        if _INERT_NODE_SNIPPET_RE.match(code):
+            return "node <inert-inline>"
+        return m.group(0)
+    return _NODE_EVAL_SEGMENT_RE.sub(_inert, cmd)
+
+
 def _scan_install_hooks(content: str, file_path: str) -> list[Finding]:
     """#5 — flag npm pre/post/install lifecycle scripts (a top supply-chain vector).
 
@@ -2366,7 +2677,7 @@ def _scan_install_hooks(content: str, file_path: str) -> list[Finding]:
         cmd = scripts.get(hook)
         if not isinstance(cmd, str) or not cmd.strip():
             continue
-        if INSTALL_SCRIPT_DANGER_RE.search(cmd):
+        if INSTALL_SCRIPT_DANGER_RE.search(_strip_inert_node_eval(cmd)):
             severity, label = "critical", "runs remote/shell/eval content"
         else:
             severity, label = "medium", "auto-runs on install"
@@ -3750,13 +4061,7 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         fetch_npm_artifact,
         fetch_pypi_artifact,
     )
-    from src.scanner.artifact_scan import (
-        _registry_snapshot,
-        docker_config_findings,
-        huggingface_weight_findings,
-        scan_artifact_files,
-    )
-    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT
 
     eco = (surface or "").strip().lower()
     if eco == "python":
@@ -3799,6 +4104,64 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     if not fetched.ok:
         result.error = fetched.error or "artifact fetch failed"
         return result
+
+    apply_artifact_scan(result, eco, fetched)
+
+    # Provenance verification on the exact coordinate — this is what makes A+
+    # reachable for a package that publishes Sigstore/PEP-740 provenance.
+    if getattr(settings, "scanner_verify_provenance", False):
+        try:
+            from src.scanner.provenance import analyze_provenance
+
+            claimed_repo = _repo_from_manifest(fetched.packaged_manifest)
+            filename = (
+                Path(str(fetched.download_url).split("?", 1)[0]).name
+                if (eco == "pypi" and fetched.download_url) else None
+            )
+            res = await analyze_provenance(
+                eco, fetched.name, fetched.version,
+                filename=filename,
+                claimed_repo=claimed_repo,
+                artifact_digest=fetched.digest,
+                scan_depth=SCAN_DEPTH_ARTIFACT,
+            )
+            _apply_provenance_result(result, res, claimed_repo)
+        except Exception:
+            logger.warning(
+                "scan_package provenance wiring failed for %s:%s", eco, name, exc_info=True
+            )
+
+    # OSV for the package itself: MAL- incident history (context only, never scored) and
+    # its own published advisories — one that affects the scanned version IS a finding.
+    # Fetched BEFORE scoring so those findings count. Fail-open.
+    try:
+        from src.scanner.incident_history import fetch_incident_history
+        _ver = (result.artifact_scan or {}).get("version") or version
+        result.incident_history = await fetch_incident_history(surface, name, _ver)
+        result.findings = result.findings + _own_advisory_findings(
+            name, _ver, (result.incident_history or {}).get("advisories") or [])
+    except Exception:
+        pass
+
+    result.trust_score = _calculate_trust_score(result)
+    result.category_scores = _calculate_category_scores(result)
+    result.certified = _certified_status(result)
+    return result
+
+
+def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
+    """The offline part of :func:`scan_package`: run the static engine over an unpacked
+    artifact and fill ``result`` (findings, coverage, artifact metadata). Pure — no
+    network — so the static corpus gate (``scripts/corpus/run_static_corpus.py``) runs
+    exactly the code production runs. Provenance, OSV advisories and scoring follow in
+    the caller."""
+    from src.scanner.artifact_scan import (
+        _registry_snapshot,
+        docker_config_findings,
+        huggingface_weight_findings,
+        scan_artifact_files,
+    )
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
 
     findings, files_scanned, has_hook = scan_artifact_files(fetched)
     if eco == "huggingface":
@@ -3850,47 +4213,6 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         scan_depth=SCAN_DEPTH_ARTIFACT,
         db_snapshots={"registry": _registry_snapshot()},
     )
-
-    # Provenance verification on the exact coordinate — this is what makes A+
-    # reachable for a package that publishes Sigstore/PEP-740 provenance.
-    if getattr(settings, "scanner_verify_provenance", False):
-        try:
-            from src.scanner.provenance import analyze_provenance
-
-            claimed_repo = _repo_from_manifest(fetched.packaged_manifest)
-            filename = (
-                Path(str(fetched.download_url).split("?", 1)[0]).name
-                if (eco == "pypi" and fetched.download_url) else None
-            )
-            res = await analyze_provenance(
-                eco, fetched.name, fetched.version,
-                filename=filename,
-                claimed_repo=claimed_repo,
-                artifact_digest=fetched.digest,
-                scan_depth=SCAN_DEPTH_ARTIFACT,
-            )
-            _apply_provenance_result(result, res, claimed_repo)
-        except Exception:
-            logger.warning(
-                "scan_package provenance wiring failed for %s:%s", eco, name, exc_info=True
-            )
-
-    # OSV for the package itself: MAL- incident history (context only, never scored) and
-    # its own published advisories — one that affects the scanned version IS a finding.
-    # Fetched BEFORE scoring so those findings count. Fail-open.
-    try:
-        from src.scanner.incident_history import fetch_incident_history
-        _ver = (result.artifact_scan or {}).get("version") or version
-        result.incident_history = await fetch_incident_history(surface, name, _ver)
-        result.findings = result.findings + _own_advisory_findings(
-            name, _ver, (result.incident_history or {}).get("advisories") or [])
-    except Exception:
-        pass
-
-    result.trust_score = _calculate_trust_score(result)
-    result.category_scores = _calculate_category_scores(result)
-    result.certified = _certified_status(result)
-    return result
 
 
 def _own_advisory_findings(name: str, version: str | None, advisories: list[dict]) -> list:

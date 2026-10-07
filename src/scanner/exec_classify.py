@@ -63,6 +63,16 @@ class ExecVerdict:
     consumed_lines: int = 1   # how many source lines the call spanned (>=1)
 
 
+def _flow(untrusted_near: bool, untrusted_flow: bool | None) -> bool:
+    """Does untrusted input REACH this call? Precision PR 2: the critical lift needs a
+    flow (the call uses a request / fetched value, directly or through a name assigned
+    from one), not mere proximity. ``None`` = the caller did no flow analysis -> fall
+    back to proximity (unit callers, older paths)."""
+    if untrusted_flow is None:
+        return untrusted_near
+    return untrusted_near and untrusted_flow
+
+
 def _defect(severity: str, label: str, consumed: int = 1) -> ExecVerdict:
     return ExecVerdict("defect", severity, label, "", consumed)
 
@@ -164,11 +174,13 @@ def _is_sys_executable(node: ast.AST) -> bool:
 
 
 def _is_dynamic_string(node: ast.AST) -> bool:
-    """f-string / concatenation / ``%`` / ``.format(`` — a command built from parts."""
+    """f-string / concatenation / ``%`` / ``.format(`` — a command built from parts.
+    A LIST concatenation (``["git", "log"] + args``, ``shlex.split(cc) + [...]``) is an
+    argv, not a string: see :func:`_argv_sequence`."""
     if isinstance(node, ast.JoinedStr):
         return True
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod)):
-        return True
+        return _argv_sequence(node) is None
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
             and node.func.attr in ("format", "join", "replace"):
         return True
@@ -196,6 +208,53 @@ def _argv_elements(node: ast.AST) -> tuple[list[str | None], bool] | None:
     return out, dynamic
 
 
+# Calls that return an argv LIST (so `shlex.split(x) + [...]` is list concatenation).
+_LIST_CALLS = frozenset({"split", "list", "sorted"})
+
+
+def _is_list_expr(node: ast.AST) -> bool:
+    if isinstance(node, (ast.List, ast.Tuple, ast.ListComp)):
+        return True
+    if isinstance(node, ast.Call):
+        f = node.func
+        name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+        # `shlex.split(...)` / `list(...)` — but NOT `"a b".split()` style string calls
+        # on a constant, which still yield a list (fine either way).
+        return name in _LIST_CALLS
+    return False
+
+
+def _argv_sequence(node: ast.AST, _depth: int = 0) -> tuple[list[str | None], bool] | None:
+    """Like :func:`_argv_elements` but also flattens list CONCATENATION
+    (``[npx, "@x/inspector"] + uv_cmd``): known literal parts keep their text, any
+    other operand contributes one unknown (``None``) element. ``None`` when the node is
+    not argv-shaped (a string command)."""
+    seq = _argv_elements(node)
+    if seq is not None:
+        return seq
+    if _depth > 40:  # pathological concatenation chain: not an argv we can read
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = node.left, node.right
+        # Each operand is evaluated ONCE (a long `"a" + b + "c" + …` chain must stay
+        # linear, not exponential).
+        subs = [_argv_sequence(left, _depth + 1), _argv_sequence(right, _depth + 1)]
+        if not (_is_list_expr(left) or _is_list_expr(right)
+                or subs[0] is not None or subs[1] is not None):
+            return None
+        out: list[str | None] = []
+        dynamic = False
+        for sub in subs:
+            if sub is None:
+                out.append(None)
+                dynamic = True
+            else:
+                out.extend(sub[0])
+                dynamic = dynamic or sub[1]
+        return out, dynamic
+    return None
+
+
 def _basename(argv0: str) -> str:
     base = argv0.replace("\\", "/").rsplit("/", 1)[-1].lower()
     if base.endswith(".exe"):
@@ -207,6 +266,7 @@ def _basename(argv0: str) -> str:
 
 def classify_argv(
     elements: list[str | None], dynamic: bool, *, untrusted_near: bool, consumed: int = 1,
+    untrusted_flow: bool | None = None,
 ) -> ExecVerdict:
     """Shared Python/JS rule set over an argv (``None`` = non-constant element).
 
@@ -214,12 +274,13 @@ def classify_argv(
     ``curl``: those stay defects whatever the argv shape; a URL in the argv stays a
     defect; a dynamic binary near untrusted input is a medium defect.
     """
+    flow = _flow(untrusted_near, untrusted_flow)
     argv0 = elements[0] if elements else None
     base = _basename(argv0) if argv0 is not None else None
     consts = [e for e in elements if e is not None]
 
     if base is not None and base in DANGEROUS_ARGV0_SHELLS:
-        sev = "critical" if (dynamic and untrusted_near) else "high"
+        sev = "critical" if (dynamic and flow) else "high"
         return _defect(sev, f"spawns a shell ({base}) — a shell string is evaluated", consumed)
     if base is not None and base in DANGEROUS_ARGV0_NET:
         return _defect("high", f"spawns a downloader/decoder binary ({base})", consumed)
@@ -228,7 +289,7 @@ def classify_argv(
             if el in DANGEROUS_ARGV_FLAGS:
                 code = elements[i + 1] if i + 1 < len(elements) else None
                 if code is None:
-                    sev = "critical" if untrusted_near else "high"
+                    sev = "critical" if flow else "high"
                     return _defect(
                         sev, f"inline interpreter eval ({base} {el}) of a dynamic string", consumed,
                     )
@@ -259,24 +320,146 @@ def classify_argv(
     return _cap("info", f"runs a fixed command: {' '.join(consts)[:60]}", CAP_SPAWN, consumed)
 
 
+# Shell metacharacters that make a shell=True argv do more than run one program.
+_SHELL_METACHAR_RE = re.compile(r"[|;&$()<>`\n\r]")
+
+
+def _shell_argv_calibration(
+    first: ast.AST | None, *, untrusted_near: bool, cli_origin: bool, resolve_name,
+    consumed: int,
+) -> ExecVerdict | None:
+    """Precision PR 2 (founder-approved calibration, tracked item #2): ``shell=True``
+    whose command is an argv LIST is a medium defect, not high, when
+
+    * every element is a constant (a literal, a name bound to one, or a loop variable
+      over a literal list) free of shell metacharacters (``| ; & $ ( ) < >`` backtick);
+      or
+    * the dynamic elements come only from the program's OWN command line (the call sits
+      in a typer/click command or an argparse/sys.argv main) — the user is attacking
+      themselves.
+
+    ``None`` = no calibration: a string command, metacharacters, a shell / downloader /
+    inline-interpreter argv0 (``sh -c``, ``curl``, ``python -c``), a URL in the argv,
+    or untrusted input (request body / fetched content) nearby keep today's high or
+    critical verdict."""
+    if first is None or untrusted_near:
+        return None
+    node = first
+    if isinstance(node, ast.Name) and resolve_name is not None:
+        resolved = resolve_name(node.id)
+        if resolved is not None:
+            node = resolved
+    seq = _argv_sequence(node)
+    if seq is None:
+        return None
+    raw_elements = _argv_nodes(node)
+    elements: list[str | None] = list(seq[0])
+    # Resolve bare-name elements (`[cmd, "--version"]` with `for cmd in [...]` above).
+    if raw_elements is not None and len(raw_elements) == len(elements):
+        for i, el in enumerate(raw_elements):
+            if elements[i] is None and isinstance(el, ast.Name) and resolve_name is not None:
+                vals = _const_values(resolve_name(el.id))
+                if vals:
+                    elements[i] = " ".join(vals)  # every candidate is metachar-checked
+    if not elements:
+        return None
+    consts = [e for e in elements if e is not None]
+    if any(_SHELL_METACHAR_RE.search(c) for c in consts):
+        return None
+    if any(_URL_RE.search(c) for c in consts):
+        return None
+    for c in consts:
+        for tok in c.split():
+            if tok in DANGEROUS_ARGV_FLAGS:
+                return None
+    argv0_candidates = elements[0].split() if elements[0] is not None else []
+    for cand in argv0_candidates:
+        base = _basename(cand)
+        if base in DANGEROUS_ARGV0_SHELLS or base in DANGEROUS_ARGV0_NET:
+            return None
+    if all(e is not None for e in elements):
+        return _defect("medium", "shell=True with a constant argv (no shell metacharacters)",
+                       consumed)
+    if cli_origin and not _dynamic_parts_look_dangerous(raw_elements or [node], resolve_name):
+        return _defect("medium", "shell=True with arguments from the program's own command "
+                       "line (no untrusted input nearby)", consumed)
+    return None
+
+
+def _dynamic_parts_look_dangerous(nodes: list[ast.AST], resolve_name) -> bool:
+    """Inside a CLI command, a dynamic argv part that is (or is bound to) a decode /
+    fetch / exec expression — `payload = b64decode(BLOB).decode()` — is not "the user's
+    own argument": keep today's verdict."""
+    for el in nodes:
+        if isinstance(el, ast.Constant):
+            continue
+        expr = el
+        if isinstance(el, ast.Name) and resolve_name is not None:
+            resolved = resolve_name(el.id)
+            if resolved is not None:
+                expr = resolved
+        try:
+            src = ast.unparse(expr)
+        except Exception:  # noqa: BLE001 — unreadable: be conservative
+            return True
+        if INLINE_CODE_DANGER_RE.search(src) or _URL_RE.search(src):
+            return True
+    return False
+
+
+def _argv_nodes(node: ast.AST, _depth: int = 0) -> list[ast.AST] | None:
+    """The element nodes of a literal argv list/tuple (flattening list concatenation
+    the same way as :func:`_argv_sequence`; an opaque operand is one element)."""
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return list(node.elts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and _depth <= 40:
+        out: list[ast.AST] = []
+        for part in (node.left, node.right):
+            sub = _argv_nodes(part, _depth + 1)
+            out.extend(sub if sub is not None else [part])
+        return out
+    return None
+
+
+def _const_values(node: ast.AST | None) -> list[str] | None:
+    """Constant string value(s) a name can hold: ``x = "npx"`` → ``["npx"]``;
+    ``for x in ["npx.cmd", "npx.exe"]`` (resolved to the list) → both."""
+    if node is None:
+        return None
+    s = _const_str(node)
+    if s is not None:
+        return [s]
+    if isinstance(node, (ast.List, ast.Tuple)):
+        vals = [_const_str(e) for e in node.elts]
+        if vals and all(v is not None for v in vals):
+            return vals  # type: ignore[return-value]
+    return None
+
+
 def _shell_verdict(arg: ast.AST | None, *, untrusted_near: bool, consumed: int,
-                   how: str) -> ExecVerdict:
+                   how: str, untrusted_flow: bool | None = None) -> ExecVerdict:
     """A shell IS being invoked (os.system / shell=True / string command). A literal is
     high (a reviewer should see a shell); a dynamic string next to untrusted input is
     the command-injection critical."""
     s = _const_str(arg) if arg is not None else None
+    if s is not None and not s.strip() and how.startswith("os."):
+        # `os.system("")` — the well-known no-op that enables ANSI escape handling in a
+        # Windows console. It runs nothing.
+        return _cap("info", f"{how}(\"\") no-op (enables ANSI escapes on Windows)",
+                    CAP_SPAWN, consumed)
     if s is not None:
         if SHELL_DANGER_RE.search(s):
             return _defect("high", f"{how} runs a literal shell command with pipe/subshell/"
                            "download tokens", consumed)
         return _defect("high", f"{how} runs a literal shell command", consumed)
-    sev = "critical" if untrusted_near else "high"
+    sev = "critical" if _flow(untrusted_near, untrusted_flow) else "high"
     return _defect(sev, f"{how} runs a shell command built at runtime", consumed)
 
 
 def classify_python_exec(
     call_src: str, func_name: str, *, untrusted_near: bool,
-    resolve_name=None, consumed: int = 1,
+    resolve_name=None, consumed: int = 1, cli_origin: bool = False,
+    untrusted_flow: bool | None = None,
 ) -> ExecVerdict:
     """Classify one ``subprocess.*`` / ``os.system`` / ``os.popen`` call.
 
@@ -285,7 +468,8 @@ def classify_python_exec(
     read (never silently to "capability")."""
     node = _parse_expr(call_src)
     if not isinstance(node, ast.Call):
-        return _regex_fallback(call_src, untrusted_near=untrusted_near, consumed=consumed)
+        return _regex_fallback(call_src, untrusted_near=untrusted_near, consumed=consumed,
+                               untrusted_flow=untrusted_flow)
 
     kw = {k.arg: k.value for k in node.keywords if k.arg}
     first = node.args[0] if node.args else kw.get("args")
@@ -293,7 +477,8 @@ def classify_python_exec(
         first = None
 
     if func_name in _PY_SHELL_FUNCS:
-        return _shell_verdict(first, untrusted_near=untrusted_near, consumed=consumed,
+        return _shell_verdict(first, untrusted_near=untrusted_near,
+                              untrusted_flow=untrusted_flow, consumed=consumed,
                               how=f"os.{func_name}")
 
     shell = kw.get("shell")
@@ -302,25 +487,33 @@ def classify_python_exec(
             pass
         else:
             # shell=True, or shell=<variable> (treated as True — conservative)
-            return _shell_verdict(first, untrusted_near=untrusted_near, consumed=consumed,
+            calibrated = _shell_argv_calibration(
+                first, untrusted_near=untrusted_near, cli_origin=cli_origin,
+                resolve_name=resolve_name, consumed=consumed,
+            )
+            if calibrated is not None:
+                return calibrated
+            return _shell_verdict(first, untrusted_near=untrusted_near,
+                                  untrusted_flow=untrusted_flow, consumed=consumed,
                                   how="shell=True")
 
     if first is None:
         # `Popen(*args, **kwargs)` — a pass-through wrapper: the command is whatever
         # the caller hands in. A capability unless untrusted input sits nearby.
-        return classify_argv([None], True, untrusted_near=untrusted_near, consumed=consumed)
+        return classify_argv([None], True, untrusted_near=untrusted_near, consumed=consumed,
+                             untrusted_flow=untrusted_flow)
 
-    seq = _argv_elements(first)
+    seq = _argv_sequence(first)
     if seq is None and isinstance(first, ast.Name) and resolve_name is not None:
         resolved = resolve_name(first.id)
         if resolved is not None:
-            seq = _argv_elements(resolved)
+            seq = _argv_sequence(resolved)
             if seq is None and _is_dynamic_string(resolved):
                 first = resolved
     if seq is not None:
         elements, dynamic = seq
         return classify_argv(elements, dynamic, untrusted_near=untrusted_near,
-                             consumed=consumed)
+                             consumed=consumed, untrusted_flow=untrusted_flow)
 
     s = _const_str(first)
     if s is not None:
@@ -329,23 +522,26 @@ def classify_python_exec(
         if re.search(r"[\s|&;$`<>]", s):
             return _defect("high", "string command without shell=True — probable shell intent",
                            consumed)
-        return classify_argv([s], False, untrusted_near=untrusted_near, consumed=consumed)
+        return classify_argv([s], False, untrusted_near=untrusted_near, consumed=consumed,
+                             untrusted_flow=untrusted_flow)
     if _is_dynamic_string(first):
-        sev = "critical" if untrusted_near else "high"
+        sev = "critical" if _flow(untrusted_near, untrusted_flow) else "high"
         return _defect(sev, "command built from a dynamic string (f-string/concat/format)",
                        consumed)
     # Name / Call (shlex.split(...)) / Attribute / Subscript / BinOp(list + list) / …
-    return classify_argv([None], True, untrusted_near=untrusted_near, consumed=consumed)
+    return classify_argv([None], True, untrusted_near=untrusted_near, consumed=consumed,
+                             untrusted_flow=untrusted_flow)
 
 
 _FALLBACK_ARGV0_RE = re.compile(r"""^\s*[\w.]+\s*\(\s*[\[(]\s*['"]([^'"]+)['"]""")
 
 
-def _regex_fallback(call_src: str, *, untrusted_near: bool, consumed: int) -> ExecVerdict:
+def _regex_fallback(call_src: str, *, untrusted_near: bool, consumed: int,
+                    untrusted_flow: bool | None = None) -> ExecVerdict:
     """When the call cannot be parsed (truncated, Python 2, odd syntax), keep today's
     conservative read: a defect unless the argv0 is a visible, benign literal."""
     if re.search(r"shell\s*=\s*True", call_src):
-        return _defect("critical" if untrusted_near else "high",
+        return _defect("critical" if _flow(untrusted_near, untrusted_flow) else "high",
                        "shell=True (unparsed call)", consumed)
     m = _FALLBACK_ARGV0_RE.match(call_src)
     if m and not _URL_RE.search(call_src):
@@ -425,8 +621,104 @@ def _js_array_elements(arg: str) -> tuple[list[str | None], bool] | None:
     return out, dynamic
 
 
+_JS_INTERP_RE = re.compile(r"\$\{((?:[^{}]|\{[^{}]*\})*)\}")
+
+
+def _js_command_parts(arg: str) -> tuple[list[str], list[str]] | None:
+    """Split a JS shell-command argument into (constant text pieces, dynamic
+    expressions): a template literal's text vs its ``${...}`` parts, or a ``+``
+    concatenation of string literals and expressions. ``None`` if unreadable."""
+    a = arg.strip()
+    if len(a) >= 2 and a[0] == a[-1] == "`":
+        body = a[1:-1]
+        dyn = [m.group(1).strip() for m in _JS_INTERP_RE.finditer(body)]
+        return [_JS_INTERP_RE.sub(" ", body)], dyn
+    pieces = split_top_level_plus(a)
+    if len(pieces) < 2:
+        return None
+    consts: list[str] = []
+    dyn: list[str] = []
+    for p in pieces:
+        lit = _js_literal(p)
+        if lit is not None:
+            consts.append(lit)
+            continue
+        sub = _js_command_parts(p) if p.startswith("`") else None
+        if sub is not None:
+            consts += sub[0]
+            dyn += sub[1]
+        else:
+            dyn.append(p)
+    return consts, dyn
+
+
+def split_top_level_plus(expr: str) -> list[str]:
+    """Split a JS expression on top-level ``+`` (strings / brackets respected)."""
+    out: list[str] = []
+    depth = 0
+    in_str: str | None = None
+    escape = False
+    cur: list[str] = []
+    for ch in expr:
+        if in_str is not None:
+            cur.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+            continue
+        if ch in "\"'`":
+            in_str = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "+" and depth == 0:
+            out.append("".join(cur).strip())
+            cur = []
+            continue
+        cur.append(ch)
+    tail = "".join(cur).strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def _js_cli_calibration(arg: str, is_cli_expr, consumed: int) -> ExecVerdict | None:
+    """JS counterpart of the Python own-CLI calibration (founder-approved, tracked #2):
+    ``exec``/``execSync`` of a shell string whose dynamic parts ALL come from the
+    program's own command line or environment (``process.argv``, ``process.env``, a
+    minimist / yargs / commander option, or a name bound to one) is a medium defect.
+    Shell metacharacters in the constant text, a shell / downloader / inline
+    interpreter as the program, a URL, or any dynamic part not traced to the CLI keep
+    today's verdict."""
+    if is_cli_expr is None:
+        return None
+    parts = _js_command_parts(arg)
+    if parts is None:
+        return None
+    consts, dyn = parts
+    if not dyn:
+        return None
+    const_text = " ".join(consts)
+    if re.search(r"[|;&<>`]|\$\(", const_text) or SHELL_DANGER_RE.search(const_text):
+        return None
+    words = const_text.split()
+    base = _basename(words[0]) if words else ""
+    if base in DANGEROUS_ARGV0_SHELLS or base in DANGEROUS_ARGV0_NET or \
+            base in INTERPRETER_ARGV0:
+        return None
+    if not all(is_cli_expr(d) for d in dyn):
+        return None
+    return _defect("medium", "shell command built from the program's own command line / "
+                   "environment (no untrusted input reaches it)", consumed)
+
+
 def classify_js_exec(
     call_src: str, func_name: str, *, untrusted_near: bool, consumed: int = 1,
+    untrusted_flow: bool | None = None, is_cli_expr=None,
 ) -> ExecVerdict:
     """Classify a child_process call: ``exec``/``execSync`` always go through a shell;
     ``spawn``/``execFile``/``fork`` take an argv (plus an options object whose
@@ -443,11 +735,16 @@ def classify_js_exec(
                 return _defect("high", f"{func_name} runs a literal shell command with "
                                "pipe/subshell/download tokens", consumed)
             return _defect("high", f"{func_name} runs a literal shell command", consumed)
-        sev = "critical" if untrusted_near else "high"
+        flow = _flow(untrusted_near, untrusted_flow)
+        if not flow and args:
+            cal = _js_cli_calibration(args[0], is_cli_expr, consumed)
+            if cal is not None:
+                return cal
+        sev = "critical" if flow else "high"
         return _defect(sev, f"{func_name} runs a shell command built at runtime", consumed)
 
     if re.search(r"\bshell\s*:\s*(?:true|['\"][^'\"]+['\"])", inner):
-        sev = "critical" if untrusted_near else "high"
+        sev = "critical" if _flow(untrusted_near, untrusted_flow) else "high"
         return _defect(sev, f"{func_name} with shell: true", consumed)
 
     if func_name == "fork":
@@ -461,7 +758,7 @@ def classify_js_exec(
         elif len(args) > 1 and not args[1].strip().startswith("{"):
             dynamic = True
         return classify_argv(elements, dynamic, untrusted_near=untrusted_near,
-                             consumed=consumed)
+                             consumed=consumed, untrusted_flow=untrusted_flow)
 
     argv0 = _js_literal(args[0]) if args else None
     elements = [argv0]
@@ -473,4 +770,5 @@ def classify_js_exec(
             dynamic = dynamic or arr[1]
         elif not args[1].strip().startswith("{"):
             dynamic = True
-    return classify_argv(elements, dynamic, untrusted_near=untrusted_near, consumed=consumed)
+    return classify_argv(elements, dynamic, untrusted_near=untrusted_near, consumed=consumed,
+                         untrusted_flow=untrusted_flow)
