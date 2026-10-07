@@ -56,7 +56,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.17"
+__version__ = "0.1.18"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -481,15 +481,18 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
         if new >= DEPS_CAP or time.monotonic() - started > BUDGET:
             break
         new += 1
+        unscannable_reason = ""
         try:
             r: dict | None = _scan(t, stored=True)
+        except _UnscannableError as e:
+            r = None
+            unscannable_reason = str(e) if not str(e).isdigit() else ""
+            unscannable_reason = unscannable_reason.replace("Not scannable: ", "")[:120]
         except _QueuedError:
             # Not graded yet; the API queued it. Ask again in a few minutes, not next week.
             cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_QUEUED}
             queued += 1
             continue
-        except _UnscannableError:
-            r = None
         except urllib.error.HTTPError as e:
             if e.code == 429 or e.code >= 500:
                 throttled = True
@@ -498,9 +501,11 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
         except Exception:
             continue  # transient; next session
         if r is None:
-            cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_UNSCANNABLE}
+            cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_UNSCANNABLE,
+                                "reason": unscannable_reason}
+            why = f" ({unscannable_reason})" if unscannable_reason else ""
             lines.append(f"➖ dependency '{t['pkg']}' ({_dep_coord(t)}): not scanned — "
-                         "AgentAvow couldn't read it.")
+                         f"AgentAvow couldn't grade it{why}. Neither safe nor unsafe.")
             continue
         rec = _record(t, r, now)
         rec["spec"] = t.get("spec", "")
@@ -529,14 +534,22 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
                          f"no critical findings, no advisories; {r['blocking']} high-severity "
                          f"pattern hit(s) (common in large frameworks), see the report{sandbox}.")
     graded: list[tuple[str, dict]] = []
+    unscannable = 0
     for t in deps:
         e = cache.get(t["name"])
         if isinstance(e, dict) and e.get("id") == t["id"] and "score" in e:
             graded.append((t["pkg"], e))
+        elif (isinstance(e, dict) and e.get("id") == t["id"] and "retry_after" in e
+              and "reason" in e):
+            unscannable += 1
+    _UNSCANNABLE_COUNT[0] = unscannable
     if queued and not lines:
         lines.append(f"⏳ {queued} dependenc{'y' if queued == 1 else 'ies'} not graded yet: "
                      "AgentAvow has queued the scans; they are reported at a later session start.")
     return lines, graded, throttled, queued
+
+
+_UNSCANNABLE_COUNT = [0]  # dependencies AgentAvow refused (set by _dep_lines_and_graded)
 
 
 def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = False,
@@ -547,12 +560,15 @@ def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = F
     paused = " (paused: rate limited; continues next session)" if throttled else ""
     if queued:
         paused += f" ({queued} queued for grading)"
-    done = len(graded)
+    nos = _UNSCANNABLE_COUNT[0]
+    if nos:
+        paused += f" ({nos} could not be graded)"
+    done = len(graded) + nos
     if not done:
         return f" Dependencies: 0 of {total} graded yet{paused}."
     risky = [(n, r) for n, r in graded if _dep_needs_look(r)]
     look = len(risky)
-    ok = done - look
+    ok = len(graded) - look
     of = f"{done} of {total}" if done < total else f"all {total}"
     out = f" Dependencies: graded {of} — {ok} OK, {look} need{'s' if look == 1 else ''} a look"
     if look:
@@ -563,6 +579,37 @@ def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = F
                ", incident" if worst.get("incident") else "")
         out += f" (lowest: '{name}' {worst.get('score')}/100{tag})"
     return out + paused + "."
+
+
+def _previously_graded(cache: dict, targets: list[dict], deps: list[dict],
+                       new_lines: list[str]) -> list[str]:
+    """One compact line per server / dependency of THIS session already graded at an
+    earlier start, so "show the pre-check" can always answer in full, not only for
+    what changed today. Items reported in ``new_lines`` are skipped."""
+    out: list[str] = []
+    for t in targets:
+        e = cache.get(t["name"])
+        if not (isinstance(e, dict) and e.get("id") == t["id"] and "score" in e):
+            continue
+        if any(f"MCP '{t['name']}'" in ln for ln in new_lines):
+            continue
+        flag = "✅" if e.get("verdict") == "safe" else "⚠️"
+        out.append(f"  {flag} MCP '{t['name']}': {e.get('score')}/100 {e.get('verdict')}")
+    for t in deps:
+        e = cache.get(t["name"])
+        if any(f"dependency '{t['pkg']}'" in ln for ln in new_lines):
+            continue
+        if isinstance(e, dict) and e.get("id") == t["id"] and "score" in e:
+            if e.get("verdict") == "safe":
+                flag, word = "✅", "safe"
+            elif _dep_needs_look(e):
+                flag, word = "📦", "needs a look"
+            else:
+                flag, word = "ℹ️", "pattern hits only, counted OK"
+            out.append(f"  {flag} dependency '{t['pkg']}': {e.get('score')}/100 {word}")
+        elif isinstance(e, dict) and e.get("id") == t["id"] and e.get("reason"):
+            out.append(f"  ➖ dependency '{t['pkg']}': not graded ({e['reason']})")
+    return out
 
 
 def _servers_elsewhere(here: list[dict]) -> int:
@@ -773,7 +820,13 @@ def _fetch(path: str, params: dict) -> dict:
     except urllib.error.HTTPError as e:
         # 4xx (bar rate limiting) is the API's answer about the target, not a hiccup.
         if 400 <= e.code < 500 and e.code not in (408, 429):
-            raise _UnscannableError(str(e.code)) from e
+            reason = ""
+            try:
+                body = json.loads(e.read() or b"{}")
+                reason = str(body.get("detail") or "") if isinstance(body, dict) else ""
+            except Exception:
+                reason = ""
+            raise _UnscannableError(reason or str(e.code)) from e
         raise
 
 
@@ -989,6 +1042,13 @@ def main() -> None:
         elsewhere = 0
     summary = _summary(graded, elsewhere, dep_clause, servers_present=bool(targets),
                        server_news=bool(server_lines))
+    try:
+        earlier = _previously_graded(cache, targets, deps, lines)
+    except Exception:
+        earlier = []
+    if earlier:
+        lines.append("Graded at an earlier session start (unchanged since):")
+        lines += earlier
     context = (
         "AgentAvow pre-check — new MCP servers and direct dependencies graded before you "
         "rely on them.\n"
