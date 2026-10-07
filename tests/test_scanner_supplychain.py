@@ -13,18 +13,28 @@ def _dep(content, path="package.json", cat=None):
 
 
 # ── #7 insecure deserialization ──────────────────────────────────────────────
-def test_pickle_loads_high():
+# Precision pass: pickle/marshal/dill of a LOCAL source (own cache, caller-chosen
+# protocol — pytest's assertion cache, pydantic's parse_raw) is a capability; next to
+# untrusted input (request body / fetched content) it is the original high.
+def test_pickle_loads_high_next_to_untrusted_input():
+    f = _cat("raw = request.body\nobj = pickle.loads(raw)", cat="insecure_deserialization")
+    assert f and f[0].severity == "high" and f[0].kind == "defect"
+
+
+def test_pickle_loads_local_source_is_a_capability():
     f = _cat("obj = pickle.loads(user_bytes)", cat="insecure_deserialization")
-    assert f and f[0].severity == "high"
+    assert f and f[0].kind == "capability" and f[0].capability == "data:deserialize"
+    assert f[0].severity == "low"
 
 
-def test_marshal_load_high():
+def test_marshal_load_local_cache_is_a_capability():
     f = _cat("x = marshal.load(fh)", cat="insecure_deserialization")
-    assert f and f[0].severity == "high"
+    assert f and f[0].kind == "capability"
 
 
-def test_dill_loads_high():
-    f = _cat("m = dill.loads(blob)", cat="insecure_deserialization")
+def test_dill_loads_high_next_to_fetched_content():
+    f = _cat("blob = requests.get(url).content\nm = dill.loads(blob)",
+             cat="insecure_deserialization")
     assert f and f[0].severity == "high"
 
 
@@ -58,7 +68,7 @@ def test_deserialization_not_discounted_for_mcp():
 
 
 def test_deserialization_test_file_downgraded():
-    f = _cat("pickle.loads(x)", "tests/test_x.py", "insecure_deserialization")
+    f = _cat("x = request.body\npickle.loads(x)", "tests/test_x.py", "insecure_deserialization")
     assert f and f[0].severity == "medium"
 
 

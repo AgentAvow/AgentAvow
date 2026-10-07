@@ -1,0 +1,24 @@
+{
+  "_doc": "Static recall fixtures: SYNTHETIC reproductions of the technique behind a known-malicious package (tagged with the OSV id it mirrors). Each must raise its rule at or above the given severity as a BLOCKING defect (kind=defect, installed=true) after the precision pass. tests/test_static_corpus.py runs them through scan_artifact_files; nothing is ever executed or installed. The 400-package known-good corpus and its CI job are PR 2.",
+  "fixtures": [
+    {"dir": "postinstall_curl_sh", "ecosystem": "npm", "mirrors": "MAL-2025-2731",
+     "must_raise": {"name_prefix": "npm 'postinstall' lifecycle script", "min_severity": "high"}},
+    {"dir": "setup_urlopen_exec", "ecosystem": "pypi", "mirrors": "MAL-2024-10141",
+     "must_raise": {"name_prefix": "setup.py executes code at install time", "min_severity": "critical"}},
+    {"dir": "env_dump_post", "ecosystem": "pypi", "mirrors": "GHSA-4g82-3jcr-q52w",
+     "must_raise": {"name_prefix": "Environment variable exfil", "min_severity": "critical"}},
+    {"dir": "base64_exec", "ecosystem": "pypi", "mirrors": "MAL-2024-5748",
+     "must_raise": {"name_prefix": "Decoded payload fed to exec/eval", "min_severity": "high"},
+     "must_also_raise": {"name_prefix": "Decoded payload + dynamic exec in same file", "min_severity": "high"}},
+    {"dir": "pem_private_key_body", "ecosystem": "pypi", "mirrors": "secret-scanning (no MAL id)",
+     "must_raise": {"name_prefix": "Private Key block", "min_severity": "critical"}},
+    {"dir": "spawn_sh_c", "ecosystem": "npm", "mirrors": "MAL-2025-47141",
+     "must_raise": {"name_prefix": "execSync / spawn (Node.js)", "min_severity": "high"}},
+    {"dir": "node_e", "ecosystem": "npm", "mirrors": "MAL-2025-47141",
+     "must_raise": {"name_prefix": "execSync / spawn (Node.js)", "min_severity": "high"}},
+    {"dir": "fetch_eval", "ecosystem": "npm", "mirrors": "GHSA-pjwm-rvh2-c87w",
+     "must_raise": {"name_prefix": "Remote fetch + dynamic exec in same file", "min_severity": "high"}},
+    {"dir": "child_process_exec_subshell", "ecosystem": "npm", "mirrors": "MAL-2025-20690",
+     "must_raise": {"name_prefix": "execSync / spawn (Node.js)", "min_severity": "high"}}
+  ]
+}

