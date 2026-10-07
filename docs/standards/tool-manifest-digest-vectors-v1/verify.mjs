@@ -78,7 +78,19 @@ for (const t of set.observed_tools)
 check('served tool count equals signed tool count',
   set.observed_tools.length, Object.keys(set.attestation.toolDigests).length);
 
+// The unsigned convenience map in the file must be the signed one: a consumer that reads
+// set.attestation.toolDigests instead of the JWS payload must not be checking a map that
+// could have been edited together with observed_tools while the signature stayed valid.
+{
+  const [, p] = set.attestation.jws.split('.');
+  const signedMap = JSON.parse(Buffer.from(p, 'base64url').toString('utf8')).scan?.toolDigests ?? {};
+  check('unsigned toolDigests map equals the signed scan.toolDigests',
+    jcs(set.attestation.toolDigests), jcs(signedMap));
+}
+
 console.log('\nkey encoding');
+// Thirteen pairs are part of the pinned set; a file with fewer is not this fixture.
+check('key_encoding pair count', (set.key_encoding ?? []).length, 13);
 for (const kv of set.key_encoding ?? []) check(`${JSON.stringify(kv.name)} -> ${kv.key}`, toolKey(kv.name), kv.key);
 
 console.log('\nvectors');
