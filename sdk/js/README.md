@@ -104,7 +104,7 @@ Ed25519 signature over the digest, then (7) checks
 
 ## The gate: `agentavow-trust/gate`
 
-> New in 0.3.0 (not yet on npm; ships with the next publish).
+> New in 0.3.0.
 
 ```ts
 import { createGate } from 'agentavow-trust/gate'
@@ -285,7 +285,7 @@ Notes:
 
 ## Vercel AI SDK tool gate — `agentavow-trust/vercel-ai`
 
-> Shipped in 0.2.2. From 0.3.0 it is a thin adapter over `agentavow-trust/gate`,
+> Shipped in 0.2.2. From **0.3.1** it is a thin adapter over `agentavow-trust/gate`,
 > the same core as the Flue adapter: one policy object, the three-phrase
 > decision, signature verification on by default, and drift blocked by default.
 
@@ -362,9 +362,10 @@ or other fields the AI SDK drops and the server cannot be fetched, pass
 
 ### Upgrading from 0.2.x
 
-0.2.x options still work as deprecated aliases (a 0.3.0 name wins when both are given):
+0.2.x options still work as deprecated aliases (a 0.3.1 name wins when both are given).
+0.3.0 shipped `wrapTools` still on the 0.2.x evaluator; upgrade to 0.3.1 for the behaviour below:
 
-| 0.2.x | 0.3.0 |
+| 0.2.x | 0.3.1 |
 |-------|-------|
 | `minScore: n` | `allowFloor: n` |
 | `onFail: 'block'` | `onReview: 'block'` |
