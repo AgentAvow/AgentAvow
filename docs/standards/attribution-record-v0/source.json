@@ -38,7 +38,7 @@
       "label": "consumed-artifact-record.v0 test key: record-attester",
       "valid_from": "2026-10-01T00:00:00Z",
       "valid_until": null,
-      "note": "The party that attests the positive record. A test identity: in a real record this is the consumer that performed the consumption, or a party that observed it."
+      "note": "The party that attests the positive record. A test identity standing in for the consumer that performed the consumption, which is who signs a real record. A producer may attest its own separate record under the same action.ref."
     },
     {
       "id": "did:example:other-party",

@@ -36,7 +36,8 @@ are, and the only new signature is the record's own, under a test key.
 One action, the APS `action_ref` the permit receipts carry. Three claims, one per APS
 permit file the adapter loaded, all in the role `decision.pre_action` (the systems map's
 id for "decide permit or deny for one proposed action before it runs"). One attester,
-`did:example:record-attester`, a test identity.
+`did:example:record-attester`, a test identity standing in for the consumer that
+performed the consumption, which is who signs a real record (RECORD.md, rule 1).
 
 ```jsonc
 {
@@ -119,8 +120,9 @@ offline:
   imokokok. Unmodified.
 
 Both licences permit redistribution with their notices kept, which is what is done
-here. Every `ref` in the record is the raw URL of the file at its commit, so a reader
-who prefers not to trust this copy can fetch the same bytes and compare digests.
+here, and is the rule for any fixture of this record (RECORD.md, rule 7). Every `ref`
+in the record is the raw URL of the file at its commit, so a reader who prefers not to
+trust this copy can fetch the same bytes and compare digests.
 
 ## Keys
 
@@ -139,7 +141,7 @@ Nothing about whether the action ran. Nothing about whether the APS receipts or 
 PriorSeal authorization are valid under their own producers' rules: that is what the
 lab record in
 [aps-conformance-suite#139](https://github.com/Agent-Authority-Conformance/aps-conformance-suite/pull/139)
-is for, and this record points at that pair rather than restating it.
+is for; a record MAY cite such a record as evidence and this one does not.
 
 ## Second journey
 

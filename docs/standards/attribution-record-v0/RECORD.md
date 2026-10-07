@@ -30,16 +30,16 @@ field someone wrote.
 | Field | Type | Meaning |
 |---|---|---|
 | `profile` | string, constant `consumed-artifact-record.v0` | Versions the shape. A changed field set gets a new value. |
-| `action.ref` | string | What action the record is about. Opaque to the verifier. The fixture reuses the identifier the producer edge already carries (the APS `action_ref`). |
+| `action.ref` | string | What action the record is about. Opaque to the verifier, chosen by the attester; MAY be tool-scoped when the artifacts share no action id (rule 2). The fixture reuses the APS `action_ref`. |
 | `consumed[]` | array, at least one | One claim per artifact: "this artifact was consumed in this role". |
 | `consumed[].artifact.ref` | string | Where the artifact bytes are published, pinned to an immutable revision. Opaque to the verifier: it is the key into the verifier's byte store. |
 | `consumed[].artifact.digest` | `sha256:` + 64 lowercase hex | SHA-256 over the exact bytes at `artifact.ref`. |
-| `consumed[].role` | string | The job the artifact did in the action. The fixture uses the capability ids of the systems map proposed in #186/#187 (`decision.pre_action`). |
+| `consumed[].role` | string | The job the artifact did in the action. Free string; SHOULD be the systems map's capability id where one exists (rule 3). The fixture uses `decision.pre_action`. |
 | `consumed[].evidence[]` | array, at least one | References a verifier recomputes from. |
 | `consumed[].evidence[].ref` | string | Where the evidence bytes are published, pinned. Opaque; key into the byte store. |
 | `consumed[].evidence[].digest` | `sha256:` + 64 lowercase hex | SHA-256 over the exact evidence bytes. |
-| `consumed[].evidence[].binding` | object | How the evidence binds the artifact. See below. |
-| `attester.id` | string | Who attested. |
+| `consumed[].evidence[].binding` | object, required | How the evidence binds the artifact. See below. |
+| `attester.id` | string | Who attested: the consumer that performed the consumption (rule 1). |
 | `attester.kid` | string | The key the attester signed with. The verifier resolves it from its own pins for that attester. |
 | `attested_at` | RFC 3339 instant | When the attester made the statement. The attester's key pin must cover it. |
 
@@ -58,8 +58,10 @@ states:
   the artifact bytes. The fixture uses this to show that the PriorSeal report cites
   each APS input it loaded.
 
-Pointers are RFC 6901 JSON pointers. `normalize: "hex"` lowercases and strips a
-leading `0x` or `sha256:`; it is implied for `digest_cited`. The pinned pair needed it:
+A binding is required on every evidence item; without one, `evidence_binds` cannot be
+evaluated and the record does not hold. Pointers are RFC 6901 JSON pointers.
+`normalize: "hex"` lowercases and strips a leading `0x` or `sha256:`; it is implied for
+`digest_cited`. The pinned pair needed it:
 APS carries the decision reference as bare hex and PriorSeal carries it with a `0x`
 prefix. A binding over a non-JSON artifact or evidence is out of scope for v0.
 
@@ -117,8 +119,8 @@ It establishes nothing about:
 - whether the action ran, or ran as authorized;
 - whether the artifact or the evidence is valid under its own producer's rules (an APS
   receipt signature, a PriorSeal principal signature, an AgentAvow grade): those are
-  separate checks with their own verifiers and their own records, and this record
-  points at them rather than restating them;
+  separate checks with their own verifiers and their own records, and a record MAY cite
+  such a record as evidence but never restates it;
 - any artifact the record does not name. Absence from a record is not evidence of
   non-consumption.
 
@@ -129,11 +131,10 @@ position on that.
 
 ## Composition
 
-One record has one attester. Several parties can each attest to the same action under
-the same `action.ref`; a verifier evaluates each record on its own, and a record never
-speaks for an attester other than the one it names. A consumer that performed the
-consumption is the natural attester; a party that observed it is another. The fixture's
-attester is a test identity standing in for either.
+One record has one attester: the consumer that performed the consumption. A producer
+MAY attest its own, separate record under the same `action.ref`. A verifier evaluates
+each record on its own, and a record never speaks for an attester other than the one it
+names. The fixture's attester is a test identity standing in for the consumer side.
 
 ## Two edges, one shape
 
@@ -157,18 +158,30 @@ decision record carrying the per-tool digest it relied on. The fixture file carr
   output would be this record, and `consumed[].role` would draw on the map's
   capability ids.
 
-## Open questions
+## Rules stated in v0
 
-Stated here so they are not hidden in a field default.
+These were open questions in the first draft and are now rules, so that nothing is
+hidden in a field default.
 
-1. Who signs a real record: the consumer that performed the consumption, the producer
-   whose artifact was consumed, or both as separate records? The format allows all
-   three; the fixture uses one test attester.
-2. How is `action.ref` chosen when the consumed artifacts carry no shared action
-   identifier (a pre-connect tool check runs once per tool, not once per action)?
-3. Is `role` a free string, or bound to the systems map's capability ids? The fixture
-   uses the map's id; the map has no id for the tool-safety evidence a gate consumes.
-4. Should the artifact's own validity under its producer's rules be a reference in the
-   record (a pointer to the lab record that checked it), or stay entirely outside?
-5. Is a binding descriptor acceptable as part of an evidence reference, or should
-   bindings be a separate, named profile per edge?
+1. **Who signs.** The consumer that performed the consumption signs the record. A
+   producer whose artifact was consumed MAY attest its own, separate record under the
+   same `action.ref`. One record, one attester; a verifier evaluates each on its own.
+2. **Naming the action.** `action.ref` is an opaque string chosen by the attester. When
+   the consumed artifacts carry a shared action identifier, the attester SHOULD reuse
+   it (the fixture reuses the APS `action_ref`). When they share none, for example a
+   pre-connect tool check that runs once per tool rather than once per action, the ref
+   MAY be tool-scoped, for example `mcp:<server>#<tool>`.
+3. **Role.** `role` is a free string. It SHOULD be the shared systems map's capability
+   id where one exists, and a locally defined id where none does, stated as such. The
+   fixture keeps three claims, one per APS permit file the adapter loaded, all under
+   `decision.pre_action`.
+4. **Bindings.** The binding descriptor is part of the evidence reference in v0 and is
+   required: an evidence item without a binding leaves `evidence_binds` unevaluable
+   and the record does not hold.
+5. **Producer-rule validity.** Whether an artifact or its evidence is valid under its
+   own producer's rules is outside the claim ceiling. A record MAY cite a lab record or
+   another verification record as evidence; it is never required.
+6. **Claims per record.** As many as the action consumed. The fixture keeps three.
+7. **Retained bytes.** A fixture retains the referenced bytes under their upstream
+   licences, with the notices those licences require kept next to them, and references
+   each by the raw URL at its commit so the copy can be checked against the source.
