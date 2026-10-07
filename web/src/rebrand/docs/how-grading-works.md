@@ -1,8 +1,28 @@
 # How scoring works
 
-AgentAvow answers one question: **is this tool safe for your agent to connect to?** We point a scanner at a tool — a GitHub repo, a package (npm, PyPI, crates), a Hugging Face model, a container image, a live MCP server, or an Agent Skill — and return a **signed, offline-verifiable 0–100 trust score** with the findings behind it.
+AgentAvow answers one question: **is this tool safe for your agent to connect to?** We point a scanner at a tool — a GitHub repo, a package (npm, PyPI, crates), a Hugging Face model, a container image, a live MCP server, or an Agent Skill — and answer with one of three phrases and the one reason behind it. Under the answer sit the evidence: a **signed, offline-verifiable 0–100 trust score**, the adoption score, and the findings.
 
-The score is the product. **The signature under it is the proof.** Anyone can recompute the verdict byte-for-byte and check it against our public keys, without trusting us.
+**The signature under it is the proof.** Anyone can recompute the verdict byte-for-byte and check it against our public keys, without trusting us.
+
+## The answer: three phrases
+
+| Answer | Short label | `decision` | When |
+|---|---|---|---|
+| **Safe to connect** | Safe | `safe` | nothing below applies |
+| **Review before you connect** | Review | `review` | a high finding, a published advisory on this version, a deprecated package, a score under 51, or nothing found in very little code |
+| **Do not connect** | Blocked | `do_not_connect` | a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package |
+
+The reason always rides next to the phrase: "one high finding: undeclared network call", "nothing found in 1,200 files", "nothing found, but little code to inspect", "a planted credential left the sandbox". The API returns it as `decision_reason`.
+
+The rule, in the order it is checked (the first match wins):
+
+1. **Do not connect** — a canary credential left the [sandbox](./behavioral-sandbox.md); this version is listed as malicious (OpenSSF MAL advisory); a known-malicious dependency; a blocking critical finding in the code (shipped, installed, a defect — never a capability); any other critical sandbox finding.
+2. **Review before you connect** — a blocking high finding in the code; a high sandbox finding (undeclared network call, an internal address fetched, a read-only tool that wrote files); a published advisory that affects the scanned version; a deprecated package; a trust score under 51; or fewer than 8 files scanned with no critical, high or medium finding.
+3. **Safe to connect** — everything else.
+
+Adoption is never an input. Advisory results never count either: a live probe of a remote server, a sandbox that did not run, needed credentials or timed out adds no finding. While the sandbox is still running, the answer comes from the static scan, says "sandbox still running", and carries `decision_final: false`; it can move to Review when the run lands, shown as an update.
+
+The answer is unsigned and sits beside the signed verdict; the score, tier and findings it reads are the signed ones. Certified is a separate axis: a Certified tool reads **Safe to connect · Certified**.
 
 ## Two separate scores
 
@@ -11,20 +31,20 @@ We publish **two** scores and never mix them:
 - **Trust** — *is it safe?* The signed 0–100 score, from static analysis + supply-chain + provenance.
 - **Adoption** — *do real, independent parties rely on it?* A distinct signal (with "rising" vs "established" states) from downloads, reverse-dependents, stars, and first-party data.
 
-A widely-adopted tool can still be a serious trust risk (bigger blast radius, not higher trust). A pristine unknown can be top-tier **Trusted** with near-zero adoption. **Popular is not the same as safe** — so adoption is never an input to the trust score or to the safe / needs-review verdict. A CVE costs the same points in a package with 40k dependents as in one with none. Adoption is the second score, reported beside the first: it tells you how many independent parties rely on the tool, which is what is at stake if the trust score is wrong.
+A widely-adopted tool can still be a serious trust risk (bigger blast radius, not higher trust). A pristine unknown can be top-tier **Trusted** with near-zero adoption. **Popular is not the same as safe** — so adoption is never an input to the trust score, the three-phrase answer, or the safe / needs-review verdict. A CVE costs the same points in a package with 40k dependents as in one with none. Adoption is the second score, reported beside the first: it tells you how many independent parties rely on the tool, which is what is at stake if the trust score is wrong.
 
 ## The trust score: 0–100
 
-The score maps to one of **six tiers** (the API's `trust_tier`) and a recommended execution posture (`recommended_limits`: requests per minute, token budget per call, whether to confirm first):
+The score is evidence under the answer. It also maps to one of **six tiers** (the API's `trust_tier`), shown as detail, and a recommended execution posture (`recommended_limits`: requests per minute, token budget per call, whether to confirm first):
 
 - **96–100 · Verified** — connect normally; no limits.
 - **81–95 · Trusted** — auto-approve within budget (60 requests/min, 8192 tokens/call).
 - **51–80 · Standard** — standard rate + token limits (30 requests/min, 4096 tokens/call).
 - **31–50 · Minimal** — confirm on sensitive calls (15 requests/min, 2048 tokens/call).
 - **11–30 · Restricted** — gated, manual approval (5 requests/min, 1024 tokens/call).
-- **0–10 · Blocked** — do not connect.
+- **0–10 · Blocked** — execution denied (0 requests/min, 0 tokens).
 
-A **Blocked** score and any **known-malicious (MAL)** dependency block execution.
+The tier tells a gateway how hard to throttle; the phrase tells a person what to do. A known-malicious (MAL) dependency is **Do not connect** whatever the score.
 
 ### Findings vs. capabilities
 
@@ -60,7 +80,7 @@ A package can be clean and still a bad choice: its maintainer has retired it and
 - **npm** — the resolved version is marked `deprecated`.
 - **PyPI** — the release is **yanked** (with its reason, when given), or the project carries the `Development Status :: 7 - Inactive` classifier.
 
-The finding lowers the score like any medium finding. It is not a blocker and does not cap the score the way a critical does. The score page shows a deprecation banner, and the MCP server and Claude Code plugin lead with "deprecated by its maintainer" instead of "clean". GitHub repos already carry the equivalent signal when the repo is **archived**.
+The finding lowers the score like any medium finding, and the answer reads **Review before you connect** ("the maintainer has deprecated this package"). It does not cap the score the way a critical does. The score page shows a deprecation banner, and the MCP server and Claude Code plugin lead with "deprecated by its maintainer" instead of "clean". GitHub repos already carry the equivalent signal when the repo is **archived**.
 
 ## The behavioral sandbox
 

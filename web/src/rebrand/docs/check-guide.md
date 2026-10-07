@@ -1,8 +1,8 @@
 # Is this tool safe? Reading your AgentAvow scan
 
-AgentAvow scans the tools, MCP servers, packages, and skills your AI agents connect to, and returns a
-**signed 0–100 safety score** you can verify yourself. This guide explains what the score means and how to
-read a result.
+AgentAvow scans the tools, MCP servers, packages, and skills your AI agents connect to, and answers with one
+of three phrases — **Safe to connect**, **Review before you connect**, or **Do not connect** — plus the reason,
+backed by a **signed 0–100 trust score** you can verify yourself. This guide explains how to read a result.
 
 > Staged rebrand doc. Product/serving URLs use `agentavow.com` (the post-cutover host). Verification
 > identifiers (JWKS, `@context`) stay on `agentgraph.co` — those are permanent and never move.
@@ -36,10 +36,27 @@ reported as a finding only when it affects the version scanned, with the fixed r
 remediation. In the [MCP connector](./mcp-connector.md), pin the same way inside the package name:
 `chalk@5.3.0`, `@scope/name@1.2.3`, `requests==2.32.5`, `serde@1.0.200`.
 
+## The answer
+
+Every result leads with one answer and the one condition that triggered it (`decision` and
+`decision_reason` in the response):
+
+- **Safe to connect** (`safe`, short label *Safe*) — nothing blocking found, e.g. "nothing found in 340 files".
+- **Review before you connect** (`review`, *Review*) — a high finding in the code or the sandbox, a published
+  advisory affecting the version scanned, a deprecated package, a score under 51, or nothing found in very
+  little code ("nothing found, but little code to inspect").
+- **Do not connect** (`do_not_connect`, *Blocked*) — a critical finding, a planted credential leaving the
+  sandbox, a critical sandbox finding, or a known-malicious package or dependency.
+
+The popularity of a tool never changes the answer. While the sandbox is still running the reason ends
+"sandbox still running" and `decision_final` is `false`; the answer can move once the run lands. The exact
+rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases).
+
 ## The score
 
-Every scan returns a single **0–100 trust score**. The score is the headline; the subscores tell you *why*.
-It maps to one of **six tiers** — the `trust_tier` field in the response (higher is safer):
+Under the answer sits the evidence: a **0–100 trust score** and the separate adoption score. The subscores
+tell you *why* the trust score is what it is. It maps to one of **six tiers**, shown as detail — the
+`trust_tier` field in the response (higher is safer):
 
 - **96–100 · Verified** (`verified`) — nothing to fix; clean findings and dependencies.
 - **81–95 · Trusted** (`trusted`) — no high or critical findings, clean dependencies.
@@ -48,7 +65,8 @@ It maps to one of **six tiers** — the `trust_tier` field in the response (high
 - **11–30 · Restricted** (`restricted`) — high-severity issues present; human-in-the-loop.
 - **0–10 · Blocked** (`blocked`) — critical issues; do not connect.
 
-**Certified** is not a score band. It is a separate set of checks the response reports under
+**Certified** is not a score band and not one of the three answers. It rides beside the answer ("Safe to
+connect · Certified") and is a separate set of checks the response reports under
 `certified.checks` — the published artifact was scanned, build provenance is verified, no drift, no
 critical or high finding, the verdict recomputes offline, and the whole tree was read — and every check must
 pass (see [How scoring works](./how-grading-works.md)).
@@ -88,8 +106,8 @@ of a tool: recomputable scan evidence, not a star rating.
 
 **Deprecated packages.** If the maintainer has retired an npm or PyPI package (npm `deprecated`, a yanked
 PyPI release, or the `Development Status :: 7 - Inactive` classifier), you'll see a **medium maintenance
-finding** quoting their message and a deprecation banner on the result. It lowers the score but is not a
-blocker. No more security fixes are coming, so don't adopt it for new work.
+finding** quoting their message and a deprecation banner on the result, and the answer reads **Review before
+you connect**. No more security fixes are coming, so don't adopt it for new work.
 
 False positive? See [how scoring works](./how-grading-works.md).
 
@@ -124,7 +142,7 @@ you can recompute it. See [Verify an AgentAvow attestation](./verify-attestation
 ## Stay safe over time
 
 Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its score drops
-or its signed definition changes — the rug-pull you'd otherwise miss. For an MCP server the attestation pins
+or its signed definition changes (every alert leads with the tool's current answer) — the rug-pull you'd otherwise miss. For an MCP server the attestation pins
 one digest per served tool (`scan.toolDigests`, keyed `tool:<name>`) plus a digest of the whole set, and a
 re-scan reports `toolDrift` — which tools were added, removed or changed since the last grade — so you can
 see exactly what moved, not just that something did. A gate can recompute the digest of the tool it is about
@@ -132,8 +150,10 @@ to call from the server's own `tools/list` and refuse on mismatch; see
 [Verify an AgentAvow attestation](./verify-attestations.md#tool-definitions-per-tool-digests-and-drift). Once the sandbox has run a watched tool, a
 later run that adds behavioral findings (a leaked canary, a new undeclared host) raises an alert too.
 
-In CI, the [GitHub Action](https://github.com/AgentAvow/AgentAvow/tree/main/github-action) prints a `Sandbox:`
-line with the result, and `fail_on_behavioral: true` fails the build on a high or critical sandbox finding.
+In CI, the [GitHub Action](https://github.com/AgentAvow/AgentAvow/tree/main/github-action) prints the answer
+first, then a `Sandbox:` line with the result; it fails the build on **Do not connect** by default
+(`fail_on`), and `fail_on_behavioral: true` also fails it on a high or critical sandbox finding. See
+[Gate on the score](./gate-on-the-grade.md).
 
 ## Next
 
