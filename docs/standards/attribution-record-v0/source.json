@@ -1,0 +1,106 @@
+{
+  "profile": "consumed-artifact-record.v0",
+  "note": "Inputs for generate.mjs. Nothing here is a digest: every digest in the vector file is computed from the bytes under pins/ at build time, and the build refuses to run if the pinned manifest or report does not hash to the value the thread agreed on.",
+  "action": {
+    "ref": "aps-action-ref-v2:c3aacbd7ff29a9b580fac641989e298a1199cf2924a2e44a746b4128ab3487b2",
+    "note": "The permit case of the APS x PriorSeal pair: one paid call within a delegated spend limit. The identifier is the APS action_ref carried by both permit receipts. The record does not define how actions are named; it reuses the identifier the producer edge already carries."
+  },
+  "pins": {
+    "aps": {
+      "repo": "aeoess/agent-passport-system",
+      "commit": "948f99b85343bef2c6fa677c8543965caacfc087",
+      "tag": "fixtures/priorseal-decision-binding-v1",
+      "dir": "fixtures/priorseal-decision-binding",
+      "manifest_sha256": "2bf365bc9124ecfc943d5be86c34e8e0cacd51a5929b8d0c906e633a017231f9",
+      "licence": "Apache-2.0, copyright 2026 Tymofii Pidlisnyi; LICENSE and NOTICE retained next to the bytes"
+    },
+    "priorseal": {
+      "repo": "imokokok/PriorSeal",
+      "commit": "d749d2691c3e6be139de4020e7b27cdafca2c428",
+      "dir": "examples/aps-priorseal-decision-binding-v1",
+      "report_sha256": "d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+      "reference_time": "2026-09-19T10:05:00.000Z",
+      "licence": "MIT, copyright 2026 imokokok; LICENSE retained next to the bytes"
+    }
+  },
+  "byte_store": [
+    { "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/MANIFEST.sha256", "path": "pins/aps-948f99b8/MANIFEST.sha256" },
+    { "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/action-intent-receipt.json", "path": "pins/aps-948f99b8/cases/permit/action-intent-receipt.json" },
+    { "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/policy-decision-receipt.json", "path": "pins/aps-948f99b8/cases/permit/policy-decision-receipt.json" },
+    { "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/decision-evidence.json", "path": "pins/aps-948f99b8/cases/permit/decision-evidence.json" },
+    { "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.json", "path": "pins/priorseal-d749d269/priorseal-inputs/payment-within-limit.json" },
+    { "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json", "path": "pins/priorseal-d749d269/PAYMENT-LIMIT-REPORT.json" }
+  ],
+  "attesters": [
+    {
+      "id": "did:example:record-attester",
+      "kid": "car-v0-test-attester-1",
+      "label": "consumed-artifact-record.v0 test key: record-attester",
+      "valid_from": "2026-10-01T00:00:00Z",
+      "valid_until": null,
+      "note": "The party that attests the positive record. A test identity standing in for the consumer that performed the consumption, which is who signs a real record. A producer may attest its own separate record under the same action.ref."
+    },
+    {
+      "id": "did:example:other-party",
+      "kid": "car-v0-test-other-1",
+      "label": "consumed-artifact-record.v0 test key: other-party",
+      "valid_from": "2026-10-01T00:00:00Z",
+      "valid_until": null,
+      "note": "A second test identity that signs the attester-not-signer negative. It is never named as attester by any record."
+    }
+  ],
+  "attested_at": "2026-10-07T00:00:00Z",
+  "evaluation_time": "2026-10-07T12:00:00Z",
+  "claims": [
+    {
+      "artifact_ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/policy-decision-receipt.json",
+      "role": "decision.pre_action",
+      "evidence": [
+        {
+          "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.json",
+          "binding": {
+            "kind": "value_equals",
+            "artifact_pointer": "/decision_ref",
+            "evidence_pointer": "/authorizationEvidence/authorization/intent/contextCommitments/0/digest",
+            "normalize": "hex"
+          }
+        },
+        {
+          "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+          "binding": {
+            "kind": "digest_cited",
+            "evidence_pointer": "/producer/permitSourceSha256/policy-decision-receipt.json"
+          }
+        }
+      ]
+    },
+    {
+      "artifact_ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/decision-evidence.json",
+      "role": "decision.pre_action",
+      "evidence": [
+        {
+          "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+          "binding": {
+            "kind": "digest_cited",
+            "evidence_pointer": "/producer/permitSourceSha256/decision-evidence.json"
+          }
+        }
+      ]
+    },
+    {
+      "artifact_ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/action-intent-receipt.json",
+      "role": "decision.pre_action",
+      "evidence": [
+        {
+          "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+          "binding": {
+            "kind": "digest_cited",
+            "evidence_pointer": "/producer/permitSourceSha256/action-intent-receipt.json"
+          }
+        }
+      ]
+    }
+  ],
+  "missing_evidence_ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.observation-receipt.json",
+  "missing_evidence_note": "A reference that resolves nowhere: not in this fixture's byte store, and no such file exists at the upstream pin either. The digest it carries is sha256 over the string 'consumed-artifact-record.v0: no such bytes', so it is well formed and matches nothing."
+}

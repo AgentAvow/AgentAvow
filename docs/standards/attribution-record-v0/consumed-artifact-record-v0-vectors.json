@@ -1,0 +1,563 @@
+{
+  "suite": "consumed-artifact-record-v0",
+  "spec": "aeoess/agent-governance-vocabulary#185 (record first, money later) over #179 E2 (APS -> PriorSeal): a signed per-action record of which artifacts one action consumed, in which role, with the evidence a verifier recomputes from",
+  "status": "proposed, a first cut for review under the process #185 settles; one pinned fixture and four expected outcomes, not an adopted federation format",
+  "claim_ceiling": "holds=true establishes exactly this: the named attester signed a statement that each named artifact (by digest, over the pinned bytes) was consumed in the named role for the named action, and each piece of evidence the statement points to is present, hashes to its stated digest, and binds the artifact the way the statement says. It establishes nothing about the value or importance of the artifact, nothing about payment, nothing about whether the action ran, nothing about whether the artifact or the evidence is valid under its own producer's rules (a record MAY cite a lab record as evidence, never required), and nothing about any artifact the record does not name.",
+  "record": {
+    "profile": "consumed-artifact-record.v0",
+    "signing": "compact JWS (RFC 7515), alg EdDSA (Ed25519), header {alg, kid}, payload = RFC 8785 JCS canonical bytes of the record; signature over ASCII(BASE64URL(header) || \".\" || BASE64URL(payload)). The verifier resolves the signing key from the attester the record names, never from the header alone; header.kid must agree with record.attester.kid.",
+    "fields": {
+      "profile": "string, constant \"consumed-artifact-record.v0\".",
+      "action.ref": "string. What action this record is about. Opaque to the verifier, chosen by the attester; SHOULD reuse a shared action identifier the artifacts carry, and MAY be tool-scoped (for example mcp:<server>#<tool>) when they share none.",
+      "consumed[]": "one claim per artifact: \"this artifact was consumed in this role\".",
+      "consumed[].artifact.ref": "string. Where the bytes are published, pinned to an immutable revision. Opaque to the verifier; it is the key into the byte store.",
+      "consumed[].artifact.digest": "\"sha256:\" + 64 lowercase hex, over the exact bytes at artifact.ref.",
+      "consumed[].role": "string. The job the artifact did in the action. Free string; SHOULD be the shared systems map's capability id where one exists (#186/#187), a locally defined id stated as such where none does.",
+      "consumed[].evidence[]": "one or more references a verifier recomputes from. At least one.",
+      "consumed[].evidence[].ref": "string. Where the evidence bytes are published, pinned. Opaque; key into the byte store.",
+      "consumed[].evidence[].digest": "\"sha256:\" + 64 lowercase hex, over the exact evidence bytes.",
+      "consumed[].evidence[].binding": "required. How the evidence binds the artifact; without it evidence_binds cannot be evaluated and the record does not hold. kind \"value_equals\": the value at artifact_pointer in the artifact equals the value at evidence_pointer in the evidence, after normalize. kind \"digest_cited\": the value at evidence_pointer in the evidence equals sha256 over the artifact bytes, after normalize. Both kinds are measured against the bytes, never against the digest the record states. Pointers are RFC 6901 JSON pointers. normalize \"hex\" lowercases and strips a leading \"0x\" or \"sha256:\"; it is implied for digest_cited.",
+      "attester.id": "string. Who attested: the consumer that performed the consumption. A producer MAY attest its own separate record under the same action.ref.",
+      "attester.kid": "string. The key the attester signed with, resolved from the verifier's own pins for that attester.",
+      "attested_at": "RFC 3339 instant at which the attester made the statement. The attester's key pin must cover it."
+    },
+    "not_fields": "No status label, no verification result, no value, weight, share, price or importance, no statement that the action ran. Whether the record holds is the output of a verifier, never a field."
+  },
+  "checks": {
+    "canonical_bytes": "jcs(JSON.parse(payload)) equals the payload bytes. Recomputability; independent of the signature.",
+    "attester_signed": "header.alg is EdDSA, header.kid equals record.attester.kid, the verifier holds a key pinned for (attester.id, kid) whose window covers attested_at, and the Ed25519 signature verifies under it. Binds the named attester to what it signed, and no further.",
+    "claims[i].artifact_digest": "sha256 over the bytes the byte store holds for artifact.ref equals artifact.digest. false when the store holds nothing for the ref.",
+    "claims[i].evidence_resolves": "the byte store holds bytes for every evidence ref of the claim.",
+    "claims[i].evidence_digest": "every evidence item's bytes hash to its stated digest. not_evaluated when evidence_resolves is false.",
+    "claims[i].evidence_binds": "every binding of the claim holds, evaluated against the bytes. not_evaluated when evidence_resolves is false or the store holds nothing for the artifact.",
+    "holds": "canonical_bytes, attester_signed, and every check of every claim are true. None of the checks is derived from another."
+  },
+  "action": {
+    "ref": "aps-action-ref-v2:c3aacbd7ff29a9b580fac641989e298a1199cf2924a2e44a746b4128ab3487b2",
+    "note": "The permit case of the APS x PriorSeal pair: one paid call within a delegated spend limit. The identifier is the APS action_ref carried by both permit receipts. The record does not define how actions are named; it reuses the identifier the producer edge already carries."
+  },
+  "pins": {
+    "aps": {
+      "repo": "aeoess/agent-passport-system",
+      "commit": "948f99b85343bef2c6fa677c8543965caacfc087",
+      "tag": "fixtures/priorseal-decision-binding-v1",
+      "dir": "fixtures/priorseal-decision-binding",
+      "manifest_sha256": "2bf365bc9124ecfc943d5be86c34e8e0cacd51a5929b8d0c906e633a017231f9",
+      "licence": "Apache-2.0, copyright 2026 Tymofii Pidlisnyi; LICENSE and NOTICE retained next to the bytes"
+    },
+    "priorseal": {
+      "repo": "imokokok/PriorSeal",
+      "commit": "d749d2691c3e6be139de4020e7b27cdafca2c428",
+      "dir": "examples/aps-priorseal-decision-binding-v1",
+      "report_sha256": "d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+      "reference_time": "2026-09-19T10:05:00.000Z",
+      "licence": "MIT, copyright 2026 imokokok; LICENSE retained next to the bytes"
+    }
+  },
+  "byte_store": [
+    {
+      "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/MANIFEST.sha256",
+      "path": "pins/aps-948f99b8/MANIFEST.sha256",
+      "sha256": "2bf365bc9124ecfc943d5be86c34e8e0cacd51a5929b8d0c906e633a017231f9",
+      "bytes": 1692
+    },
+    {
+      "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/action-intent-receipt.json",
+      "path": "pins/aps-948f99b8/cases/permit/action-intent-receipt.json",
+      "sha256": "f8f86af4de9d52bcc202ab186e091966dd568a19859587449844fe81f2ecb9d2",
+      "bytes": 835
+    },
+    {
+      "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/policy-decision-receipt.json",
+      "path": "pins/aps-948f99b8/cases/permit/policy-decision-receipt.json",
+      "sha256": "09263d4d4e55f0507f5b553e6c3b3b03e40548e828029d1f432f1b25b1529d77",
+      "bytes": 1175
+    },
+    {
+      "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/decision-evidence.json",
+      "path": "pins/aps-948f99b8/cases/permit/decision-evidence.json",
+      "sha256": "1586229b8275a6658f049f16d96b2a4f31b58f29823e8c57e4d37970e906b09f",
+      "bytes": 2719
+    },
+    {
+      "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.json",
+      "path": "pins/priorseal-d749d269/priorseal-inputs/payment-within-limit.json",
+      "sha256": "c8dd05f412b3d1dd957f66deaf231a8becb9656e8bd1960ba88638cf9ad4c6da",
+      "bytes": 5496
+    },
+    {
+      "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+      "path": "pins/priorseal-d749d269/PAYMENT-LIMIT-REPORT.json",
+      "sha256": "d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+      "bytes": 2350
+    }
+  ],
+  "attesters": [
+    {
+      "id": "did:example:record-attester",
+      "kid": "car-v0-test-attester-1",
+      "jwk": {
+        "crv": "Ed25519",
+        "x": "xnHwxGMH4vjSjgE2cxXGDovzuELkcE8osVIwripTFjs",
+        "kty": "OKP",
+        "kid": "car-v0-test-attester-1",
+        "use": "sig",
+        "alg": "EdDSA"
+      },
+      "valid_from": "2026-10-01T00:00:00Z",
+      "valid_until": null,
+      "derived_from_label": "consumed-artifact-record.v0 test key: record-attester",
+      "note": "The party that attests the positive record. A test identity standing in for the consumer that performed the consumption, which is who signs a real record. A producer may attest its own separate record under the same action.ref."
+    },
+    {
+      "id": "did:example:other-party",
+      "kid": "car-v0-test-other-1",
+      "jwk": {
+        "crv": "Ed25519",
+        "x": "87Jc6FofI7OHL8W85GpqzueEEPFtxUWDiAysNuPsUtQ",
+        "kty": "OKP",
+        "kid": "car-v0-test-other-1",
+        "use": "sig",
+        "alg": "EdDSA"
+      },
+      "valid_from": "2026-10-01T00:00:00Z",
+      "valid_until": null,
+      "derived_from_label": "consumed-artifact-record.v0 test key: other-party",
+      "note": "A second test identity that signs the attester-not-signer negative. It is never named as attester by any record."
+    }
+  ],
+  "vectors": [
+    {
+      "name": "consumed-and-attested",
+      "note": "The positive case. Three APS permit artifacts are named as consumed in the role decision.pre_action; each digest matches the pinned bytes; the PriorSeal authorization carries the APS decision_ref as a context commitment and the PriorSeal report cites all three artifact digests; the named attester signed. Every check passes and the record holds.",
+      "evaluation_time": "2026-10-07T12:00:00Z",
+      "record": {
+        "profile": "consumed-artifact-record.v0",
+        "action": {
+          "ref": "aps-action-ref-v2:c3aacbd7ff29a9b580fac641989e298a1199cf2924a2e44a746b4128ab3487b2"
+        },
+        "consumed": [
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/policy-decision-receipt.json",
+              "digest": "sha256:09263d4d4e55f0507f5b553e6c3b3b03e40548e828029d1f432f1b25b1529d77"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.json",
+                "digest": "sha256:c8dd05f412b3d1dd957f66deaf231a8becb9656e8bd1960ba88638cf9ad4c6da",
+                "binding": {
+                  "kind": "value_equals",
+                  "artifact_pointer": "/decision_ref",
+                  "evidence_pointer": "/authorizationEvidence/authorization/intent/contextCommitments/0/digest",
+                  "normalize": "hex"
+                }
+              },
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/policy-decision-receipt.json"
+                }
+              }
+            ]
+          },
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/decision-evidence.json",
+              "digest": "sha256:1586229b8275a6658f049f16d96b2a4f31b58f29823e8c57e4d37970e906b09f"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/decision-evidence.json"
+                }
+              }
+            ]
+          },
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/action-intent-receipt.json",
+              "digest": "sha256:f8f86af4de9d52bcc202ab186e091966dd568a19859587449844fe81f2ecb9d2"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/action-intent-receipt.json"
+                }
+              }
+            ]
+          }
+        ],
+        "attester": {
+          "id": "did:example:record-attester",
+          "kid": "car-v0-test-attester-1"
+        },
+        "attested_at": "2026-10-07T00:00:00Z"
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImNhci12MC10ZXN0LWF0dGVzdGVyLTEifQ.eyJhY3Rpb24iOnsicmVmIjoiYXBzLWFjdGlvbi1yZWYtdjI6YzNhYWNiZDdmZjI5YTliNTgwZmFjNjQxOTg5ZTI5OGExMTk5Y2YyOTI0YTJlNDRhNzQ2YjQxMjhhYjM0ODdiMiJ9LCJhdHRlc3RlZF9hdCI6IjIwMjYtMTAtMDdUMDA6MDA6MDBaIiwiYXR0ZXN0ZXIiOnsiaWQiOiJkaWQ6ZXhhbXBsZTpyZWNvcmQtYXR0ZXN0ZXIiLCJraWQiOiJjYXItdjAtdGVzdC1hdHRlc3Rlci0xIn0sImNvbnN1bWVkIjpbeyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6MDkyNjNkNGQ0ZTU1ZjA1MDdmNWI1NTNlNmMzYjNiMDNlNDA1NDhlODI4MDI5ZDFmNDMyZjFiMjViMTUyOWQ3NyIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L3BvbGljeS1kZWNpc2lvbi1yZWNlaXB0Lmpzb24ifSwiZXZpZGVuY2UiOlt7ImJpbmRpbmciOnsiYXJ0aWZhY3RfcG9pbnRlciI6Ii9kZWNpc2lvbl9yZWYiLCJldmlkZW5jZV9wb2ludGVyIjoiL2F1dGhvcml6YXRpb25FdmlkZW5jZS9hdXRob3JpemF0aW9uL2ludGVudC9jb250ZXh0Q29tbWl0bWVudHMvMC9kaWdlc3QiLCJraW5kIjoidmFsdWVfZXF1YWxzIiwibm9ybWFsaXplIjoiaGV4In0sImRpZ2VzdCI6InNoYTI1NjpjOGRkMDVmNDEyYjNkMWRkOTU3ZjY2ZGVhZjIzMWE4YmVjYjk2NTZlOGJkMTk2MGJhODg2MzhjZjlhZDRjNmRhIiwicmVmIjoiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2ltb2tva29rL1ByaW9yU2VhbC9kNzQ5ZDI2OTFjM2U2YmUxMzlkZTQwMjBlN2IyN2NkYWZjYTJjNDI4L2V4YW1wbGVzL2Fwcy1wcmlvcnNlYWwtZGVjaXNpb24tYmluZGluZy12MS9wcmlvcnNlYWwtaW5wdXRzL3BheW1lbnQtd2l0aGluLWxpbWl0Lmpzb24ifSx7ImJpbmRpbmciOnsiZXZpZGVuY2VfcG9pbnRlciI6Ii9wcm9kdWNlci9wZXJtaXRTb3VyY2VTaGEyNTYvcG9saWN5LWRlY2lzaW9uLXJlY2VpcHQuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OmQyYzFiZWE1ZjBhY2YwYWZlMDZjOTQ0Mzc2YzVhNDcxNDAyYWI1ZDQ4YmY4NWNhMjY3ZWQ5YjU4NzYzMzZhZTQiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL1BBWU1FTlQtTElNSVQtUkVQT1JULmpzb24ifV0sInJvbGUiOiJkZWNpc2lvbi5wcmVfYWN0aW9uIn0seyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6MTU4NjIyOWI4Mjc1YTY2NThmMDQ5ZjE2ZDk2YjJhNGYzMWI1OGYyOTgyM2U4YzU3ZTRkMzc5NzBlOTA2YjA5ZiIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L2RlY2lzaW9uLWV2aWRlbmNlLmpzb24ifSwiZXZpZGVuY2UiOlt7ImJpbmRpbmciOnsiZXZpZGVuY2VfcG9pbnRlciI6Ii9wcm9kdWNlci9wZXJtaXRTb3VyY2VTaGEyNTYvZGVjaXNpb24tZXZpZGVuY2UuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OmQyYzFiZWE1ZjBhY2YwYWZlMDZjOTQ0Mzc2YzVhNDcxNDAyYWI1ZDQ4YmY4NWNhMjY3ZWQ5YjU4NzYzMzZhZTQiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL1BBWU1FTlQtTElNSVQtUkVQT1JULmpzb24ifV0sInJvbGUiOiJkZWNpc2lvbi5wcmVfYWN0aW9uIn0seyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6ZjhmODZhZjRkZTlkNTJiY2MyMDJhYjE4NmUwOTE5NjZkZDU2OGExOTg1OTU4NzQ0OTg0NGZlODFmMmVjYjlkMiIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L2FjdGlvbi1pbnRlbnQtcmVjZWlwdC5qc29uIn0sImV2aWRlbmNlIjpbeyJiaW5kaW5nIjp7ImV2aWRlbmNlX3BvaW50ZXIiOiIvcHJvZHVjZXIvcGVybWl0U291cmNlU2hhMjU2L2FjdGlvbi1pbnRlbnQtcmVjZWlwdC5qc29uIiwia2luZCI6ImRpZ2VzdF9jaXRlZCJ9LCJkaWdlc3QiOiJzaGEyNTY6ZDJjMWJlYTVmMGFjZjBhZmUwNmM5NDQzNzZjNWE0NzE0MDJhYjVkNDhiZjg1Y2EyNjdlZDliNTg3NjMzNmFlNCIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9pbW9rb2tvay9QcmlvclNlYWwvZDc0OWQyNjkxYzNlNmJlMTM5ZGU0MDIwZTdiMjdjZGFmY2EyYzQyOC9leGFtcGxlcy9hcHMtcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmctdjEvUEFZTUVOVC1MSU1JVC1SRVBPUlQuanNvbiJ9XSwicm9sZSI6ImRlY2lzaW9uLnByZV9hY3Rpb24ifV0sInByb2ZpbGUiOiJjb25zdW1lZC1hcnRpZmFjdC1yZWNvcmQudjAifQ.ApUF08LZxwfvuVrx6q7H0S4EdTmH0a9Ver62n0V4dl57soAhVTQhx_a5WTOr_t-7tRWvHUNnEftKwrp1eZ3jCw",
+      "expect": {
+        "canonical_bytes": true,
+        "attester_signed": true,
+        "claims": [
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          },
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          },
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          }
+        ],
+        "holds": true
+      }
+    },
+    {
+      "name": "wrong-digest",
+      "note": "The first claim names a digest the pinned bytes do not hash to (one hex digit changed). The attester signed it, the evidence resolves, and the bindings still hold, because they are measured against the bytes, not against the digest the record states. Only artifact_digest fails, on that claim.",
+      "evaluation_time": "2026-10-07T12:00:00Z",
+      "record": {
+        "profile": "consumed-artifact-record.v0",
+        "action": {
+          "ref": "aps-action-ref-v2:c3aacbd7ff29a9b580fac641989e298a1199cf2924a2e44a746b4128ab3487b2"
+        },
+        "consumed": [
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/policy-decision-receipt.json",
+              "digest": "sha256:09263d4d4e55f0507f5b553e6c3b3b03e40548e828029d1f432f1b25b1529d76"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.json",
+                "digest": "sha256:c8dd05f412b3d1dd957f66deaf231a8becb9656e8bd1960ba88638cf9ad4c6da",
+                "binding": {
+                  "kind": "value_equals",
+                  "artifact_pointer": "/decision_ref",
+                  "evidence_pointer": "/authorizationEvidence/authorization/intent/contextCommitments/0/digest",
+                  "normalize": "hex"
+                }
+              },
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/policy-decision-receipt.json"
+                }
+              }
+            ]
+          },
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/decision-evidence.json",
+              "digest": "sha256:1586229b8275a6658f049f16d96b2a4f31b58f29823e8c57e4d37970e906b09f"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/decision-evidence.json"
+                }
+              }
+            ]
+          },
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/action-intent-receipt.json",
+              "digest": "sha256:f8f86af4de9d52bcc202ab186e091966dd568a19859587449844fe81f2ecb9d2"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/action-intent-receipt.json"
+                }
+              }
+            ]
+          }
+        ],
+        "attester": {
+          "id": "did:example:record-attester",
+          "kid": "car-v0-test-attester-1"
+        },
+        "attested_at": "2026-10-07T00:00:00Z"
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImNhci12MC10ZXN0LWF0dGVzdGVyLTEifQ.eyJhY3Rpb24iOnsicmVmIjoiYXBzLWFjdGlvbi1yZWYtdjI6YzNhYWNiZDdmZjI5YTliNTgwZmFjNjQxOTg5ZTI5OGExMTk5Y2YyOTI0YTJlNDRhNzQ2YjQxMjhhYjM0ODdiMiJ9LCJhdHRlc3RlZF9hdCI6IjIwMjYtMTAtMDdUMDA6MDA6MDBaIiwiYXR0ZXN0ZXIiOnsiaWQiOiJkaWQ6ZXhhbXBsZTpyZWNvcmQtYXR0ZXN0ZXIiLCJraWQiOiJjYXItdjAtdGVzdC1hdHRlc3Rlci0xIn0sImNvbnN1bWVkIjpbeyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6MDkyNjNkNGQ0ZTU1ZjA1MDdmNWI1NTNlNmMzYjNiMDNlNDA1NDhlODI4MDI5ZDFmNDMyZjFiMjViMTUyOWQ3NiIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L3BvbGljeS1kZWNpc2lvbi1yZWNlaXB0Lmpzb24ifSwiZXZpZGVuY2UiOlt7ImJpbmRpbmciOnsiYXJ0aWZhY3RfcG9pbnRlciI6Ii9kZWNpc2lvbl9yZWYiLCJldmlkZW5jZV9wb2ludGVyIjoiL2F1dGhvcml6YXRpb25FdmlkZW5jZS9hdXRob3JpemF0aW9uL2ludGVudC9jb250ZXh0Q29tbWl0bWVudHMvMC9kaWdlc3QiLCJraW5kIjoidmFsdWVfZXF1YWxzIiwibm9ybWFsaXplIjoiaGV4In0sImRpZ2VzdCI6InNoYTI1NjpjOGRkMDVmNDEyYjNkMWRkOTU3ZjY2ZGVhZjIzMWE4YmVjYjk2NTZlOGJkMTk2MGJhODg2MzhjZjlhZDRjNmRhIiwicmVmIjoiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2ltb2tva29rL1ByaW9yU2VhbC9kNzQ5ZDI2OTFjM2U2YmUxMzlkZTQwMjBlN2IyN2NkYWZjYTJjNDI4L2V4YW1wbGVzL2Fwcy1wcmlvcnNlYWwtZGVjaXNpb24tYmluZGluZy12MS9wcmlvcnNlYWwtaW5wdXRzL3BheW1lbnQtd2l0aGluLWxpbWl0Lmpzb24ifSx7ImJpbmRpbmciOnsiZXZpZGVuY2VfcG9pbnRlciI6Ii9wcm9kdWNlci9wZXJtaXRTb3VyY2VTaGEyNTYvcG9saWN5LWRlY2lzaW9uLXJlY2VpcHQuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OmQyYzFiZWE1ZjBhY2YwYWZlMDZjOTQ0Mzc2YzVhNDcxNDAyYWI1ZDQ4YmY4NWNhMjY3ZWQ5YjU4NzYzMzZhZTQiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL1BBWU1FTlQtTElNSVQtUkVQT1JULmpzb24ifV0sInJvbGUiOiJkZWNpc2lvbi5wcmVfYWN0aW9uIn0seyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6MTU4NjIyOWI4Mjc1YTY2NThmMDQ5ZjE2ZDk2YjJhNGYzMWI1OGYyOTgyM2U4YzU3ZTRkMzc5NzBlOTA2YjA5ZiIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L2RlY2lzaW9uLWV2aWRlbmNlLmpzb24ifSwiZXZpZGVuY2UiOlt7ImJpbmRpbmciOnsiZXZpZGVuY2VfcG9pbnRlciI6Ii9wcm9kdWNlci9wZXJtaXRTb3VyY2VTaGEyNTYvZGVjaXNpb24tZXZpZGVuY2UuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OmQyYzFiZWE1ZjBhY2YwYWZlMDZjOTQ0Mzc2YzVhNDcxNDAyYWI1ZDQ4YmY4NWNhMjY3ZWQ5YjU4NzYzMzZhZTQiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL1BBWU1FTlQtTElNSVQtUkVQT1JULmpzb24ifV0sInJvbGUiOiJkZWNpc2lvbi5wcmVfYWN0aW9uIn0seyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6ZjhmODZhZjRkZTlkNTJiY2MyMDJhYjE4NmUwOTE5NjZkZDU2OGExOTg1OTU4NzQ0OTg0NGZlODFmMmVjYjlkMiIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L2FjdGlvbi1pbnRlbnQtcmVjZWlwdC5qc29uIn0sImV2aWRlbmNlIjpbeyJiaW5kaW5nIjp7ImV2aWRlbmNlX3BvaW50ZXIiOiIvcHJvZHVjZXIvcGVybWl0U291cmNlU2hhMjU2L2FjdGlvbi1pbnRlbnQtcmVjZWlwdC5qc29uIiwia2luZCI6ImRpZ2VzdF9jaXRlZCJ9LCJkaWdlc3QiOiJzaGEyNTY6ZDJjMWJlYTVmMGFjZjBhZmUwNmM5NDQzNzZjNWE0NzE0MDJhYjVkNDhiZjg1Y2EyNjdlZDliNTg3NjMzNmFlNCIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9pbW9rb2tvay9QcmlvclNlYWwvZDc0OWQyNjkxYzNlNmJlMTM5ZGU0MDIwZTdiMjdjZGFmY2EyYzQyOC9leGFtcGxlcy9hcHMtcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmctdjEvUEFZTUVOVC1MSU1JVC1SRVBPUlQuanNvbiJ9XSwicm9sZSI6ImRlY2lzaW9uLnByZV9hY3Rpb24ifV0sInByb2ZpbGUiOiJjb25zdW1lZC1hcnRpZmFjdC1yZWNvcmQudjAifQ.q3sJ6MhTLP3_Loz1OKx1gca8CkNDq-UpjVGExrcpkJeWnjMjcy2AI4F-b-zy-LmD6A5-lH7j4EGmtQL62Fx3Bw",
+      "expect": {
+        "canonical_bytes": true,
+        "attester_signed": true,
+        "claims": [
+          {
+            "artifact_digest": false,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          },
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          },
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          }
+        ],
+        "holds": false
+      }
+    },
+    {
+      "name": "missing-evidence",
+      "note": "The second claim references evidence that resolves nowhere. The verifier cannot hash what it does not have and cannot evaluate a binding against it, so evidence_resolves fails and evidence_digest and evidence_binds are not_evaluated on that claim. Nothing else changes.",
+      "evaluation_time": "2026-10-07T12:00:00Z",
+      "record": {
+        "profile": "consumed-artifact-record.v0",
+        "action": {
+          "ref": "aps-action-ref-v2:c3aacbd7ff29a9b580fac641989e298a1199cf2924a2e44a746b4128ab3487b2"
+        },
+        "consumed": [
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/policy-decision-receipt.json",
+              "digest": "sha256:09263d4d4e55f0507f5b553e6c3b3b03e40548e828029d1f432f1b25b1529d77"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.json",
+                "digest": "sha256:c8dd05f412b3d1dd957f66deaf231a8becb9656e8bd1960ba88638cf9ad4c6da",
+                "binding": {
+                  "kind": "value_equals",
+                  "artifact_pointer": "/decision_ref",
+                  "evidence_pointer": "/authorizationEvidence/authorization/intent/contextCommitments/0/digest",
+                  "normalize": "hex"
+                }
+              },
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/policy-decision-receipt.json"
+                }
+              }
+            ]
+          },
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/decision-evidence.json",
+              "digest": "sha256:1586229b8275a6658f049f16d96b2a4f31b58f29823e8c57e4d37970e906b09f"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.observation-receipt.json",
+                "digest": "sha256:355346cd833fa75d3359546602d3c5fbbc16d30d8906419467a93c68ea5adf15",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/decision-evidence.json"
+                }
+              }
+            ]
+          },
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/action-intent-receipt.json",
+              "digest": "sha256:f8f86af4de9d52bcc202ab186e091966dd568a19859587449844fe81f2ecb9d2"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/action-intent-receipt.json"
+                }
+              }
+            ]
+          }
+        ],
+        "attester": {
+          "id": "did:example:record-attester",
+          "kid": "car-v0-test-attester-1"
+        },
+        "attested_at": "2026-10-07T00:00:00Z"
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImNhci12MC10ZXN0LWF0dGVzdGVyLTEifQ.eyJhY3Rpb24iOnsicmVmIjoiYXBzLWFjdGlvbi1yZWYtdjI6YzNhYWNiZDdmZjI5YTliNTgwZmFjNjQxOTg5ZTI5OGExMTk5Y2YyOTI0YTJlNDRhNzQ2YjQxMjhhYjM0ODdiMiJ9LCJhdHRlc3RlZF9hdCI6IjIwMjYtMTAtMDdUMDA6MDA6MDBaIiwiYXR0ZXN0ZXIiOnsiaWQiOiJkaWQ6ZXhhbXBsZTpyZWNvcmQtYXR0ZXN0ZXIiLCJraWQiOiJjYXItdjAtdGVzdC1hdHRlc3Rlci0xIn0sImNvbnN1bWVkIjpbeyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6MDkyNjNkNGQ0ZTU1ZjA1MDdmNWI1NTNlNmMzYjNiMDNlNDA1NDhlODI4MDI5ZDFmNDMyZjFiMjViMTUyOWQ3NyIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L3BvbGljeS1kZWNpc2lvbi1yZWNlaXB0Lmpzb24ifSwiZXZpZGVuY2UiOlt7ImJpbmRpbmciOnsiYXJ0aWZhY3RfcG9pbnRlciI6Ii9kZWNpc2lvbl9yZWYiLCJldmlkZW5jZV9wb2ludGVyIjoiL2F1dGhvcml6YXRpb25FdmlkZW5jZS9hdXRob3JpemF0aW9uL2ludGVudC9jb250ZXh0Q29tbWl0bWVudHMvMC9kaWdlc3QiLCJraW5kIjoidmFsdWVfZXF1YWxzIiwibm9ybWFsaXplIjoiaGV4In0sImRpZ2VzdCI6InNoYTI1NjpjOGRkMDVmNDEyYjNkMWRkOTU3ZjY2ZGVhZjIzMWE4YmVjYjk2NTZlOGJkMTk2MGJhODg2MzhjZjlhZDRjNmRhIiwicmVmIjoiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2ltb2tva29rL1ByaW9yU2VhbC9kNzQ5ZDI2OTFjM2U2YmUxMzlkZTQwMjBlN2IyN2NkYWZjYTJjNDI4L2V4YW1wbGVzL2Fwcy1wcmlvcnNlYWwtZGVjaXNpb24tYmluZGluZy12MS9wcmlvcnNlYWwtaW5wdXRzL3BheW1lbnQtd2l0aGluLWxpbWl0Lmpzb24ifSx7ImJpbmRpbmciOnsiZXZpZGVuY2VfcG9pbnRlciI6Ii9wcm9kdWNlci9wZXJtaXRTb3VyY2VTaGEyNTYvcG9saWN5LWRlY2lzaW9uLXJlY2VpcHQuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OmQyYzFiZWE1ZjBhY2YwYWZlMDZjOTQ0Mzc2YzVhNDcxNDAyYWI1ZDQ4YmY4NWNhMjY3ZWQ5YjU4NzYzMzZhZTQiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL1BBWU1FTlQtTElNSVQtUkVQT1JULmpzb24ifV0sInJvbGUiOiJkZWNpc2lvbi5wcmVfYWN0aW9uIn0seyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6MTU4NjIyOWI4Mjc1YTY2NThmMDQ5ZjE2ZDk2YjJhNGYzMWI1OGYyOTgyM2U4YzU3ZTRkMzc5NzBlOTA2YjA5ZiIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L2RlY2lzaW9uLWV2aWRlbmNlLmpzb24ifSwiZXZpZGVuY2UiOlt7ImJpbmRpbmciOnsiZXZpZGVuY2VfcG9pbnRlciI6Ii9wcm9kdWNlci9wZXJtaXRTb3VyY2VTaGEyNTYvZGVjaXNpb24tZXZpZGVuY2UuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OjM1NTM0NmNkODMzZmE3NWQzMzU5NTQ2NjAyZDNjNWZiYmMxNmQzMGQ4OTA2NDE5NDY3YTkzYzY4ZWE1YWRmMTUiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL3ByaW9yc2VhbC1pbnB1dHMvcGF5bWVudC13aXRoaW4tbGltaXQub2JzZXJ2YXRpb24tcmVjZWlwdC5qc29uIn1dLCJyb2xlIjoiZGVjaXNpb24ucHJlX2FjdGlvbiJ9LHsiYXJ0aWZhY3QiOnsiZGlnZXN0Ijoic2hhMjU2OmY4Zjg2YWY0ZGU5ZDUyYmNjMjAyYWIxODZlMDkxOTY2ZGQ1NjhhMTk4NTk1ODc0NDk4NDRmZTgxZjJlY2I5ZDIiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vYWVvZXNzL2FnZW50LXBhc3Nwb3J0LXN5c3RlbS85NDhmOTliODUzNDNiZWYyYzZmYTY3N2M4NTQzOTY1Y2FhY2ZjMDg3L2ZpeHR1cmVzL3ByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nL2Nhc2VzL3Blcm1pdC9hY3Rpb24taW50ZW50LXJlY2VpcHQuanNvbiJ9LCJldmlkZW5jZSI6W3siYmluZGluZyI6eyJldmlkZW5jZV9wb2ludGVyIjoiL3Byb2R1Y2VyL3Blcm1pdFNvdXJjZVNoYTI1Ni9hY3Rpb24taW50ZW50LXJlY2VpcHQuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OmQyYzFiZWE1ZjBhY2YwYWZlMDZjOTQ0Mzc2YzVhNDcxNDAyYWI1ZDQ4YmY4NWNhMjY3ZWQ5YjU4NzYzMzZhZTQiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL1BBWU1FTlQtTElNSVQtUkVQT1JULmpzb24ifV0sInJvbGUiOiJkZWNpc2lvbi5wcmVfYWN0aW9uIn1dLCJwcm9maWxlIjoiY29uc3VtZWQtYXJ0aWZhY3QtcmVjb3JkLnYwIn0.65HxaNBdowgGozXJYDwJWMoVIo1TcSaUXDTTNqMeWIN1KM_NaxXs418JkzhqhX3wTScSlUR5MxfelvqnKRPXAg",
+      "expect": {
+        "canonical_bytes": true,
+        "attester_signed": true,
+        "claims": [
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          },
+          {
+            "artifact_digest": true,
+            "evidence_resolves": false,
+            "evidence_digest": "not_evaluated",
+            "evidence_binds": "not_evaluated"
+          },
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          }
+        ],
+        "holds": false
+      }
+    },
+    {
+      "name": "attester-not-signer",
+      "note": "The record names did:example:record-attester, but the JWS was produced by did:example:other-party under its own kid. The payload is canonical and every claim checks against the bytes; the named attester simply did not sign. Only attester_signed fails.",
+      "evaluation_time": "2026-10-07T12:00:00Z",
+      "record": {
+        "profile": "consumed-artifact-record.v0",
+        "action": {
+          "ref": "aps-action-ref-v2:c3aacbd7ff29a9b580fac641989e298a1199cf2924a2e44a746b4128ab3487b2"
+        },
+        "consumed": [
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/policy-decision-receipt.json",
+              "digest": "sha256:09263d4d4e55f0507f5b553e6c3b3b03e40548e828029d1f432f1b25b1529d77"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/priorseal-inputs/payment-within-limit.json",
+                "digest": "sha256:c8dd05f412b3d1dd957f66deaf231a8becb9656e8bd1960ba88638cf9ad4c6da",
+                "binding": {
+                  "kind": "value_equals",
+                  "artifact_pointer": "/decision_ref",
+                  "evidence_pointer": "/authorizationEvidence/authorization/intent/contextCommitments/0/digest",
+                  "normalize": "hex"
+                }
+              },
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/policy-decision-receipt.json"
+                }
+              }
+            ]
+          },
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/decision-evidence.json",
+              "digest": "sha256:1586229b8275a6658f049f16d96b2a4f31b58f29823e8c57e4d37970e906b09f"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/decision-evidence.json"
+                }
+              }
+            ]
+          },
+          {
+            "artifact": {
+              "ref": "https://raw.githubusercontent.com/aeoess/agent-passport-system/948f99b85343bef2c6fa677c8543965caacfc087/fixtures/priorseal-decision-binding/cases/permit/action-intent-receipt.json",
+              "digest": "sha256:f8f86af4de9d52bcc202ab186e091966dd568a19859587449844fe81f2ecb9d2"
+            },
+            "role": "decision.pre_action",
+            "evidence": [
+              {
+                "ref": "https://raw.githubusercontent.com/imokokok/PriorSeal/d749d2691c3e6be139de4020e7b27cdafca2c428/examples/aps-priorseal-decision-binding-v1/PAYMENT-LIMIT-REPORT.json",
+                "digest": "sha256:d2c1bea5f0acf0afe06c944376c5a471402ab5d48bf85ca267ed9b5876336ae4",
+                "binding": {
+                  "kind": "digest_cited",
+                  "evidence_pointer": "/producer/permitSourceSha256/action-intent-receipt.json"
+                }
+              }
+            ]
+          }
+        ],
+        "attester": {
+          "id": "did:example:record-attester",
+          "kid": "car-v0-test-attester-1"
+        },
+        "attested_at": "2026-10-07T00:00:00Z"
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImNhci12MC10ZXN0LW90aGVyLTEifQ.eyJhY3Rpb24iOnsicmVmIjoiYXBzLWFjdGlvbi1yZWYtdjI6YzNhYWNiZDdmZjI5YTliNTgwZmFjNjQxOTg5ZTI5OGExMTk5Y2YyOTI0YTJlNDRhNzQ2YjQxMjhhYjM0ODdiMiJ9LCJhdHRlc3RlZF9hdCI6IjIwMjYtMTAtMDdUMDA6MDA6MDBaIiwiYXR0ZXN0ZXIiOnsiaWQiOiJkaWQ6ZXhhbXBsZTpyZWNvcmQtYXR0ZXN0ZXIiLCJraWQiOiJjYXItdjAtdGVzdC1hdHRlc3Rlci0xIn0sImNvbnN1bWVkIjpbeyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6MDkyNjNkNGQ0ZTU1ZjA1MDdmNWI1NTNlNmMzYjNiMDNlNDA1NDhlODI4MDI5ZDFmNDMyZjFiMjViMTUyOWQ3NyIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L3BvbGljeS1kZWNpc2lvbi1yZWNlaXB0Lmpzb24ifSwiZXZpZGVuY2UiOlt7ImJpbmRpbmciOnsiYXJ0aWZhY3RfcG9pbnRlciI6Ii9kZWNpc2lvbl9yZWYiLCJldmlkZW5jZV9wb2ludGVyIjoiL2F1dGhvcml6YXRpb25FdmlkZW5jZS9hdXRob3JpemF0aW9uL2ludGVudC9jb250ZXh0Q29tbWl0bWVudHMvMC9kaWdlc3QiLCJraW5kIjoidmFsdWVfZXF1YWxzIiwibm9ybWFsaXplIjoiaGV4In0sImRpZ2VzdCI6InNoYTI1NjpjOGRkMDVmNDEyYjNkMWRkOTU3ZjY2ZGVhZjIzMWE4YmVjYjk2NTZlOGJkMTk2MGJhODg2MzhjZjlhZDRjNmRhIiwicmVmIjoiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2ltb2tva29rL1ByaW9yU2VhbC9kNzQ5ZDI2OTFjM2U2YmUxMzlkZTQwMjBlN2IyN2NkYWZjYTJjNDI4L2V4YW1wbGVzL2Fwcy1wcmlvcnNlYWwtZGVjaXNpb24tYmluZGluZy12MS9wcmlvcnNlYWwtaW5wdXRzL3BheW1lbnQtd2l0aGluLWxpbWl0Lmpzb24ifSx7ImJpbmRpbmciOnsiZXZpZGVuY2VfcG9pbnRlciI6Ii9wcm9kdWNlci9wZXJtaXRTb3VyY2VTaGEyNTYvcG9saWN5LWRlY2lzaW9uLXJlY2VpcHQuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OmQyYzFiZWE1ZjBhY2YwYWZlMDZjOTQ0Mzc2YzVhNDcxNDAyYWI1ZDQ4YmY4NWNhMjY3ZWQ5YjU4NzYzMzZhZTQiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL1BBWU1FTlQtTElNSVQtUkVQT1JULmpzb24ifV0sInJvbGUiOiJkZWNpc2lvbi5wcmVfYWN0aW9uIn0seyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6MTU4NjIyOWI4Mjc1YTY2NThmMDQ5ZjE2ZDk2YjJhNGYzMWI1OGYyOTgyM2U4YzU3ZTRkMzc5NzBlOTA2YjA5ZiIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L2RlY2lzaW9uLWV2aWRlbmNlLmpzb24ifSwiZXZpZGVuY2UiOlt7ImJpbmRpbmciOnsiZXZpZGVuY2VfcG9pbnRlciI6Ii9wcm9kdWNlci9wZXJtaXRTb3VyY2VTaGEyNTYvZGVjaXNpb24tZXZpZGVuY2UuanNvbiIsImtpbmQiOiJkaWdlc3RfY2l0ZWQifSwiZGlnZXN0Ijoic2hhMjU2OmQyYzFiZWE1ZjBhY2YwYWZlMDZjOTQ0Mzc2YzVhNDcxNDAyYWI1ZDQ4YmY4NWNhMjY3ZWQ5YjU4NzYzMzZhZTQiLCJyZWYiOiJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vaW1va29rb2svUHJpb3JTZWFsL2Q3NDlkMjY5MWMzZTZiZTEzOWRlNDAyMGU3YjI3Y2RhZmNhMmM0MjgvZXhhbXBsZXMvYXBzLXByaW9yc2VhbC1kZWNpc2lvbi1iaW5kaW5nLXYxL1BBWU1FTlQtTElNSVQtUkVQT1JULmpzb24ifV0sInJvbGUiOiJkZWNpc2lvbi5wcmVfYWN0aW9uIn0seyJhcnRpZmFjdCI6eyJkaWdlc3QiOiJzaGEyNTY6ZjhmODZhZjRkZTlkNTJiY2MyMDJhYjE4NmUwOTE5NjZkZDU2OGExOTg1OTU4NzQ0OTg0NGZlODFmMmVjYjlkMiIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9hZW9lc3MvYWdlbnQtcGFzc3BvcnQtc3lzdGVtLzk0OGY5OWI4NTM0M2JlZjJjNmZhNjc3Yzg1NDM5NjVjYWFjZmMwODcvZml4dHVyZXMvcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmcvY2FzZXMvcGVybWl0L2FjdGlvbi1pbnRlbnQtcmVjZWlwdC5qc29uIn0sImV2aWRlbmNlIjpbeyJiaW5kaW5nIjp7ImV2aWRlbmNlX3BvaW50ZXIiOiIvcHJvZHVjZXIvcGVybWl0U291cmNlU2hhMjU2L2FjdGlvbi1pbnRlbnQtcmVjZWlwdC5qc29uIiwia2luZCI6ImRpZ2VzdF9jaXRlZCJ9LCJkaWdlc3QiOiJzaGEyNTY6ZDJjMWJlYTVmMGFjZjBhZmUwNmM5NDQzNzZjNWE0NzE0MDJhYjVkNDhiZjg1Y2EyNjdlZDliNTg3NjMzNmFlNCIsInJlZiI6Imh0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9pbW9rb2tvay9QcmlvclNlYWwvZDc0OWQyNjkxYzNlNmJlMTM5ZGU0MDIwZTdiMjdjZGFmY2EyYzQyOC9leGFtcGxlcy9hcHMtcHJpb3JzZWFsLWRlY2lzaW9uLWJpbmRpbmctdjEvUEFZTUVOVC1MSU1JVC1SRVBPUlQuanNvbiJ9XSwicm9sZSI6ImRlY2lzaW9uLnByZV9hY3Rpb24ifV0sInByb2ZpbGUiOiJjb25zdW1lZC1hcnRpZmFjdC1yZWNvcmQudjAifQ.ZgNWOSfRNu3fxk8B4SWC4ABCE7a9y1xobo3gg1PST9wppWT8sdmiiTqZ6E7JKJMwI9KE1VseS-0oftfNyFcgCw",
+      "expect": {
+        "canonical_bytes": true,
+        "attester_signed": false,
+        "claims": [
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          },
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          },
+          {
+            "artifact_digest": true,
+            "evidence_resolves": true,
+            "evidence_digest": true,
+            "evidence_binds": true
+          }
+        ],
+        "holds": false
+      }
+    }
+  ],
+  "hooks": {
+    "e1": {
+      "edge": "#179 E1, AgentAvow -> a pre-execution gate: the second journey, once the first holds.",
+      "artifact": {
+        "ref": "https://raw.githubusercontent.com/AgentAvow/AgentAvow/36426cfd/docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+        "note": "The signed static verdict is the compact JWS at /attestation/jws inside that file; its payload sha256 is 5e159675e62845bd5411932a1f970ed08bb0ea768043cb898a8c2656bfd000fa. A record would name the attestation by the digest of the bytes it consumed."
+      },
+      "role": "enforcement.tool_boundary is the gate's own role in the systems map; no capability there names the tool-safety evidence the gate consumes. The record needs a role id for that, local or added to the map.",
+      "evidence_needed": "A gate-side decision record, pinned, that carries the signed per-tool digest it relied on (for example the value at /scan/toolDigests/tool:ask_wiki_question). Binding would be value_equals between that pointer in the attestation payload and the gate record's copy. No such pinned gate record exists yet: the E1 consumers published so far are readers that re-check the fixture, not gates that authorized a call on it.",
+      "not_a_vector": "Nothing in this hook is verified by verify.mjs. It states what the second fixture would reference and what is missing."
+    }
+  }
+}

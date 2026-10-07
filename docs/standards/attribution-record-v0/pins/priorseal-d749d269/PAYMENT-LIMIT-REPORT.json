@@ -1,0 +1,62 @@
+{
+  "profile": "aps-priorseal-payment-limit-offline-report.v1",
+  "producer": {
+    "commit": "948f99b85343bef2c6fa677c8543965caacfc087",
+    "manifestSha256": "2bf365bc9124ecfc943d5be86c34e8e0cacd51a5929b8d0c906e633a017231f9",
+    "manifestFiles": 17,
+    "permitSourceSha256": {
+      "action-intent-receipt.json": "f8f86af4de9d52bcc202ab186e091966dd568a19859587449844fe81f2ecb9d2",
+      "policy-decision-receipt.json": "09263d4d4e55f0507f5b553e6c3b3b03e40548e828029d1f432f1b25b1529d77",
+      "decision-evidence.json": "1586229b8275a6658f049f16d96b2a4f31b58f29823e8c57e4d37970e906b09f"
+    }
+  },
+  "dependencies": {
+    "aps": "6.0.1",
+    "priorseal": "0.4.0"
+  },
+  "referenceTime": "2026-09-19T10:05:00.000Z",
+  "payment": {
+    "unit": "eip155:31337:native:wei",
+    "apsPerActionCapWei": "5000000000000000",
+    "apsRequestedCallWei": "1000000000000000",
+    "priorSealSignedCallWei": "1000000000000000",
+    "sharedAuthorizationHash": "4716e77ef9f90a3b3d9d0f9365500820d4e0e49a012c6556ddf85486e05648cb",
+    "sharedDecisionRef": "703dcfd7ad517d89cdcddaa76a886ff179416679af315c67a35e778fc710a6fa"
+  },
+  "positive": {
+    "file": "payment-within-limit.json",
+    "sha256": "c8dd05f412b3d1dd957f66deaf231a8becb9656e8bd1960ba88638cf9ad4c6da",
+    "observedNativeValueWei": "1000000000000000",
+    "withinApsCap": true,
+    "matchesSignedCall": true,
+    "aps": "APS_VERIFIED_AT_REFERENCE",
+    "priorSealReceiptValid": true,
+    "priorSealCompliance": "COMPLIANT",
+    "composition": "DECISION_AUTHORIZATION_CORRELATED",
+    "pass": true
+  },
+  "overLimitNegative": {
+    "file": "payment-over-limit.json",
+    "sha256": "cb45a8378a5c9f1f7f2695c4d1fb5cbe344d9c840b799cf0ecb786e5ddf3c226",
+    "observedNativeValueWei": "6000000000000000",
+    "aboveApsCap": true,
+    "matchesSignedCall": false,
+    "aps": "APS_VERIFIED_AT_REFERENCE",
+    "priorSealReceiptValid": true,
+    "priorSealCompliance": "NON_COMPLIANT",
+    "reasonCodes": [
+      "TRANSACTION_VALUE_MISMATCH"
+    ],
+    "composition": "DECISION_AUTHORIZATION_CORRELATED",
+    "pass": true
+  },
+  "scope": {
+    "syntheticObservations": true,
+    "independentlyVerifiedChainExecution": false,
+    "liveApsCurrencyEstablished": false,
+    "apsDecisionSingleUseEstablished": false,
+    "newApsFixtureRequired": false,
+    "realTransactionSent": false
+  },
+  "allChecksPassed": true
+}
