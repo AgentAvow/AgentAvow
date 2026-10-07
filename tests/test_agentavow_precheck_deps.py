@@ -273,5 +273,13 @@ def test_verdict_carries_the_risk_signals_from_either_api_shape(hook):
     v = hook._verdict({"trust_score": 50, "advisories": [{"id": "GHSA-2", "affects_current_version": False},
                                                           {"id": "GHSA-3"}],
                        "incident_history": {"has_incident": True, "current_version_affected": True}})
-    assert v["advisories"] == 1 and v["incident"] is True
+    assert v["advisories"] == 1 and v["incident"] is True  # GHSA-3: no fix, no flag → counts
     assert hook._verdict({"trust_score": 90})["advisories"] == 0
+    # fastapi as the raw API returns it: two advisories, both FIXED long ago, no flag.
+    # History, not evidence against 0.142.2 → 0.
+    v = hook._verdict({"trust_score": 40, "package_version": "0.142.2", "advisories": [
+        {"id": "GHSA-2jv5-9r88-3w3p", "severity": "medium", "fixed_in": "9d34ad0e"},
+        {"id": "GHSA-8h2j-cgx8-6xv7", "severity": "high", "fixed_in": "0.65.2"}]})
+    assert v["advisories"] == 0
+    assert hook._advisory_applies({"id": "x", "affects_current_version": True, "fixed_in": "1.0"})
+    assert not hook._advisory_applies("GHSA-string")

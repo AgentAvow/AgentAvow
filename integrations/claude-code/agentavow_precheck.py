@@ -511,20 +511,34 @@ def _servers_elsewhere(here: list[dict]) -> int:
         return 0
 
 
+def _advisory_applies(a: object) -> bool:
+    """Does a raw advisory entry apply to the installed version? An explicit flag wins;
+    otherwise only an advisory with no fix counts. A fixed one with no version match
+    is history, not evidence against this version."""
+    if not isinstance(a, dict):
+        return False
+    for key in ("affects_current_version", "current_version_affected"):
+        if key in a:
+            return bool(a[key])
+    return not (a.get("fixed_in") or a.get("fixed") or a.get("fixed_version"))
+
+
 def _verdict(data: dict) -> dict:
     """The parts of a scan response the hook reports and the gate acts on."""
     score = int(data.get("trust_score") or 0)
     items = (data.get("findings") or {}).get("items") or []
     blocking = sum(1 for i in items if i.get("severity") in ("critical", "high"))
     critical = sum(1 for i in items if i.get("severity") == "critical")
-    # Advisories for the installed version: the API lists them under
-    # ``advisories_affecting_version`` (MCP shape) or ``advisories`` (raw shape); an
-    # entry that says it does not affect the current version is not counted.
+    # Advisories for the installed version. ``advisories_affecting_version`` (MCP shape)
+    # is already filtered: count it all. The raw ``advisories`` list is the package's
+    # HISTORY (fastapi: a CSRF fixed in 0.65.2, current 0.142.2), so an entry counts
+    # only if it says it affects the current version, or has no fix at all.
     adv = data.get("advisories_affecting_version")
-    if not isinstance(adv, list):
-        adv = data.get("advisories") if isinstance(data.get("advisories"), list) else []
-    advisories = sum(1 for a in adv if not isinstance(a, dict)
-                     or a.get("affects_current_version", a.get("current_version_affected", True)))
+    if isinstance(adv, list):
+        advisories = len(adv)
+    else:
+        raw = data.get("advisories") if isinstance(data.get("advisories"), list) else []
+        advisories = sum(1 for a in raw if _advisory_applies(a))
     # A past incident (chalk, Sep 2025) only matters if the installed version is affected.
     ih = data.get("incident_history") if isinstance(data.get("incident_history"), dict) else {}
     incident = bool(data.get("incident")) or bool(ih.get("current_version_affected"))
