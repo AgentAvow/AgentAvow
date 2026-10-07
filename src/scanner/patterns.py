@@ -43,8 +43,12 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "high",
     ),
     (
+        # Any PEM private-key header (RSA / EC / OPENSSH / ENCRYPTED / DSA / plain PKCS#8).
+        # The scanner only keeps this CRITICAL when a key BODY follows the marker (see
+        # PEM_BODY_RE + _pem_has_body in scan.py); a bare marker in a tuple / startswith /
+        # regex is key-HANDLING code and is reported as an informational capability.
         "Private Key block",
-        re.compile(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----"),
+        re.compile(r"-----BEGIN\s+(?:[A-Z]+\s+)*PRIVATE\s+KEY-----"),
         "critical",
     ),
     (
@@ -66,6 +70,62 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "medium",
     ),
 ]
+
+# A PEM key BODY: a run of base64 the length of a real key line. "Private Key block"
+# stays critical only when one of these follows the marker (same line after a `\n`
+# escape, or within the next 2 lines), or the file holds >= 3 such lines near a marker
+# (a key assembled with "".join([...])). Markers alone are key-handling code.
+PEM_BODY_RE = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+
+# --- Exec-family argv classification (#2 / #7 of the precision pass) -----------------
+# A fixed-argv spawn with no shell (`subprocess.run(["git", "status"])`,
+# `spawn('node', [script])`) is a CAPABILITY the tool has, not a defect; it is reported
+# (kind="capability") but never scored or blocking. These lists are what keep a spawn a
+# DEFECT regardless of argv shape: a shell binary, a downloader/decoder, an interpreter
+# handed inline code, or a remote URL in the argv. See src/scanner/exec_classify.py.
+DANGEROUS_ARGV0_SHELLS = frozenset({
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh", "ash", "busybox",
+    "cmd", "cmd.exe", "command.com", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+})
+DANGEROUS_ARGV0_NET = frozenset({
+    "curl", "wget", "nc", "ncat", "netcat", "socat", "base64", "osascript",
+    "certutil", "certutil.exe", "bitsadmin", "mshta", "rundll32", "regsvr32",
+})
+INTERPRETER_ARGV0 = frozenset({
+    "python", "python2", "python3", "py", "pypy", "pypy3", "node", "nodejs", "deno", "bun",
+    "ruby", "perl", "php", "lua", "osascript",
+})
+# Flags that make an interpreter evaluate the NEXT argv element as code.
+DANGEROUS_ARGV_FLAGS = frozenset({
+    "-c", "-e", "--eval", "-p", "--print", "-E", "-EncodedCommand", "-enc", "-ec",
+    "-Command", "-command",
+})
+# Constant inline code (`python -c "<this>"`) that is more than a one-liner helper:
+# anything that itself execs/decodes/fetches/spawns keeps the spawn a defect.
+INLINE_CODE_DANGER_RE = re.compile(
+    r"\b(?:exec|eval|compile|b64decode|a85decode|b32decode|fromhex|unhexlify|decompress|"
+    r"urlopen|urlretrieve|requests\.|httpx\.|socket|subprocess|os\.system|os\.popen|"
+    r"__import__|importlib|marshal|pickle|ctypes|child_process|require\s*\(|"
+    r"fetch\s*\(|Function\s*\()\b",
+)
+# Shell metacharacters / download tokens inside a LITERAL shell command string.
+SHELL_DANGER_RE = re.compile(
+    r"""\||\$\(|`|&&|;|>\s*/dev|\bcurl\b|\bwget\b|https?://|\bbase64\b|\bnc\b|"""
+    r"""\bchmod\s+\+x\b|\beval\b|\b(?:ba)?sh\s+-c\b|\bpython3?\s+-c\b|\bnode\s+-e\b""",
+    re.IGNORECASE,
+)
+# An eval/exec argument that is DECODED first (base64 / hex / zlib / reversed) is the
+# obfuscated-loader shape, never a legitimate library pattern.
+DECODE_SINK_RE = re.compile(
+    r"""b64decode|a85decode|b32decode|b16decode|unhexlify|fromhex|decompress|"""
+    r"""codecs\.decode|\[::-1\]|rot13|zlib\.|lzma\.|bz2\.|atob\s*\(|Buffer\.from\s*\([^)]*['"](?:base64|hex)['"]""",
+)
+# Literal paths that make a recursive delete a defect rather than a capability.
+DANGEROUS_DELETE_ROOT_RE = re.compile(
+    r"""^(?:/|~|/etc|/usr|/home|/root|/var|/bin|/opt|/Users|/System|[A-Za-z]:\\?|\$HOME|\$\{HOME\}|%USERPROFILE%)/?$"""
+    r"""|expanduser\s*\(\s*['"]~['"]\s*\)\s*$|Path\.home\s*\(\s*\)\s*$|os\.homedir\s*\(\s*\)\s*$"""
+    r"""|process\.env\.HOME\s*$|environ\s*\[\s*['"]HOME['"]\s*\]\s*$""",
+)
 
 # --- Unsafe execution patterns ---
 UNSAFE_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
@@ -140,13 +200,14 @@ UNSAFE_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
 # --- File system access patterns (without explicit sandboxing) ---
 FS_ACCESS_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
+        # `(?<![A-Za-z0-9_])` keeps `os.fdopen(fd, "w")` (a descriptor, not a path) out.
         "Unrestricted file read (Python)",
-        re.compile(r"open\s*\([^)]*\)\s*\.?\s*read"),
+        re.compile(r"(?<![A-Za-z0-9_])open\s*\([^)]*\)\s*\.?\s*read"),
         "medium",
     ),
     (
         "Unrestricted file write (Python)",
-        re.compile(r"open\s*\([^)]*['\"]w['\"][^)]*\)"),
+        re.compile(r"(?<![A-Za-z0-9_])open\s*\([^)]*['\"]w['\"][^)]*\)"),
         "medium",
     ),
     (
@@ -176,9 +237,13 @@ EXFILTRATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "high",
     ),
     (
+        # HOSTNAME forms only: the bare words matched identifiers (`apiRequestBinary`
+        # in typescript's own dist/ read as `requestbin`).
         "Outbound webhook/exfil URL",
         re.compile(
-            r"""(?:webhook\.site|requestbin|pipedream|ngrok|burp|interact\.sh)""",
+            r"""(?<![A-Za-z0-9_])(?:webhook\.site|requestbin\.(?:com|net)|pipedream\.net|"""
+            r"""ngrok(?:-free)?\.(?:io|app|dev)|burpcollaborator\.net|oastify\.com|"""
+            r"""interact\.sh|canarytokens\.com)(?![A-Za-z0-9_])""",
             re.IGNORECASE,
         ),
         "critical",
@@ -289,7 +354,7 @@ DYNAMIC_REMOTE_LOAD_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "Unpinned remote resource (branch/latest/HEAD)",
         re.compile(
-            r"""https?://[^\s'"]+/(?:raw/)?(?:main|master|HEAD|latest)/[^\s'"]+\.(?:py|js|ts|sh|json)""",
+            r"""https?://[^\s'"`]+/(?:raw/)?(?:main|master|HEAD|latest)/[^\s'"`]+\.(?:py|js|ts|sh|json)""",
             re.IGNORECASE,
         ),
         "medium",
@@ -317,7 +382,8 @@ NET_READ_RE = re.compile(
     r"""fetch\s*\(|axios\.(?:get|post)""",
 )
 EXEC_SINK_RE = re.compile(
-    r"""\beval\s*\(|\bexec\s*\(|new\s+Function\s*\(|vm\.run|"""
+    # bare eval/exec only — `re.exec(` / `fileRE.exec(` is RegExp.prototype.exec
+    r"""(?<![.\w])eval\s*\(|(?<![.\w])exec\s*\(|new\s+Function\s*\(|vm\.run|"""
     r"""(?:pickle|marshal)\.loads?\s*\(|importlib\.""",
 )
 
@@ -607,8 +673,25 @@ AGENT_METADATA_FILES = frozenset({
 # --- Code obfuscation patterns ---
 OBFUSCATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
+        # A long `\x..` run is only EXECUTION when an exec/decode sink sits within 3
+        # lines (scan.py checks); a plain byte constant (crypto test vectors, EC-curve
+        # parameters, magic numbers) is reported as the informational capability
+        # "Long hex-escaped byte literal". Skipped on Rust/Go/Java, where byte
+        # constants are the normal way to write binary data.
         "Hex-encoded string execution",
         re.compile(r"""\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){10,}"""),
+        "high",
+    ),
+    (
+        # exec(base64.b64decode(...)) / eval(bytes.fromhex(...)) / exec(zlib.decompress(...))
+        # on ONE line: the decoded-payload loader (OSV MAL- family). The split form
+        # (decode on one line, exec a few lines later) is the co-occurrence pass in scan.py.
+        "Decoded payload fed to exec/eval",
+        re.compile(
+            r"""(?<![.\w])(?:exec|eval|Function)\s*\(\s*(?:[\w.]+\.)?"""
+            r"""(?:b64decode|a85decode|b32decode|b16decode|unhexlify|fromhex|decompress|"""
+            r"""atob)\s*\("""
+        ),
         "high",
     ),
     (
