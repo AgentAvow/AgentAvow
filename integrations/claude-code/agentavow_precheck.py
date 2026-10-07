@@ -54,7 +54,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.14"
+__version__ = "0.1.15"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -328,9 +328,35 @@ def _requirements_deps(text: str) -> list[dict]:
     return out
 
 
+def _toml_string_list(text: str, start: int) -> list[str]:
+    """The quoted strings of a TOML array that opens at ``text[start] == '['``, read
+    with quote awareness so a ']' inside an entry ("uvicorn[standard]>=0.24") does
+    not end the list. Stops at the matching close bracket; comments are skipped."""
+    out: list[str] = []
+    i, n = start + 1, len(text)
+    while i < n:
+        c = text[i]
+        if c == "]":
+            break
+        if c == "#":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c in "\"'":
+            j = text.find(c, i + 1)
+            if j < 0:
+                break
+            out.append(text[i + 1:j])
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
 def _pyproject_deps(text: str) -> list[dict]:
     """[project].dependencies from pyproject.toml. tomllib when available (3.11+),
-    else a narrow fallback that reads the quoted strings of that one list."""
+    else a fallback that finds the [project] table's ``dependencies = [`` and reads
+    the list quote-aware (the system python3 on many Macs is 3.9)."""
     deps: list[str] = []
     try:
         import tomllib  # type: ignore[import-not-found]
@@ -338,11 +364,12 @@ def _pyproject_deps(text: str) -> list[dict]:
         raw = (data.get("project") or {}).get("dependencies") or []
         deps = [d for d in raw if isinstance(d, str)]
     except Exception:
-        m = re.search(r"^\[project\](.*?)(?=^\[|\Z)", text, re.S | re.M)
+        m = re.search(r"^\[project\][ \t]*\n(.*?)(?=^\[|\Z)", text, re.S | re.M)
         if m:
-            m2 = re.search(r"^dependencies\s*=\s*\[(.*?)\]", m.group(1), re.S | re.M)
+            body = m.group(1)
+            m2 = re.search(r"^dependencies\s*=\s*\[", body, re.M)
             if m2:
-                deps = re.findall(r"[\"']([^\"']+)[\"']", m2.group(1))
+                deps = _toml_string_list(body, m2.end() - 1)
     out = []
     for d in deps:
         hit = _pypi_name_spec(d)
