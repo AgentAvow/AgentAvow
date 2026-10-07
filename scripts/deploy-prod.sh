@@ -252,7 +252,7 @@ else:
     print(f\"LOGIN_FAIL status={r.status_code} body={r.text[:200]}\")
     sys.exit(1)
 '" 2>&1) || true
-    if echo "$LOGIN_RESULT" | grep -q "LOGIN_OK"; then
+    if echo "$LOGIN_RESULT" | grep -q -e "LOGIN_OK" -e "LOGIN_SKIP"; then
       break
     fi
     echo "    Attempt $attempt/5 — retrying in 2s..."
@@ -261,6 +261,17 @@ else:
 
   if echo "$LOGIN_RESULT" | grep -q "LOGIN_OK"; then
     ok "Login verified"
+  elif echo "$LOGIN_RESULT" | grep -q "LOGIN_SKIP"; then
+    # No admin credentials in the container: a real login can't be tried, which is not
+    # a failure. Still prove the auth route is alive: bad credentials must get a 401.
+    # (Straight to the backend, like the login test: through nginx plain http is a 301.)
+    PROBE=$(remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} exec -T backend python3 -c 'import httpx; print(httpx.post(\"http://localhost:8000/api/v1/auth/login\", json={\"email\": \"deploy-probe@example.com\", \"password\": \"not-a-real-password\"}).status_code)'" 2>/dev/null | tail -1 | tr -d '[:space:]')
+    PROBE="${PROBE:-000}"
+    if [ "$PROBE" = "401" ]; then
+      warn "Login not verified (no ADMIN_EMAIL/ADMIN_PASSWORD in the container); login endpoint answers 401 to bad credentials"
+    else
+      fail "Login endpoint returned $PROBE to bad credentials (expected 401). Check backend logs."
+    fi
   else
     echo "    $LOGIN_RESULT"
     fail "Login verification failed. Check backend logs."
