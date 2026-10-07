@@ -1,4 +1,4 @@
-.PHONY: setup dev test lint ast-verify migrate db-start db-stop db-status clean
+.PHONY: setup dev test lint ast-verify migrate db-start db-stop db-status clean corpus
 
 # Development setup
 setup: db-start
@@ -17,6 +17,11 @@ dev:
 # Run tests
 test:
 	.venv/bin/pytest tests/ -v
+
+# Static known-good corpus gate (top 200 PyPI + npm, pinned). Downloads archives into
+# ~/.cache/agentavow-static-corpus (override: AGENTAVOW_CORPUS_CACHE); never executes them.
+corpus:
+	.venv/bin/python3 -I scripts/corpus/run_static_corpus.py --workers 4 --fail-on-diff
 
 # Lint
 lint:

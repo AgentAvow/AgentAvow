@@ -1,0 +1,6843 @@
+{
+ "_doc": "Committed snapshot of the static corpus gate (score, provisional label, defect counts per severity on the installed surface, rule counts). Regenerate with run_static_corpus.py --write-expected and review the diff in the same PR.",
+ "packages": {
+  "npm/@babel/compat-data": {
+   "version": "8.0.5",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/core": {
+   "version": "8.0.7",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/generator": {
+   "version": "8.0.6",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/helper-compilation-targets": {
+   "version": "8.0.7",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/helper-module-imports": {
+   "version": "8.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/helper-module-transforms": {
+   "version": "8.0.6",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/helper-plugin-utils": {
+   "version": "8.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/helper-string-parser": {
+   "version": "8.0.6",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/helper-validator-identifier": {
+   "version": "8.0.6",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/helpers": {
+   "version": "8.0.7",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/parser": {
+   "version": "8.0.7",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/runtime": {
+   "version": "8.0.7",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 192,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/template": {
+   "version": "8.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/types": {
+   "version": "8.0.6",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@brave/brave-search-mcp-server": {
+   "version": "2.1.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 40,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@esbuild/linux-x64": {
+   "version": "0.28.2",
+   "label": "unscannable",
+   "error": "member exceeds per-file cap: package/bin/esbuild"
+  },
+  "npm/@jest/types": {
+   "version": "30.5.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@jridgewell/resolve-uri": {
+   "version": "3.1.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@jridgewell/trace-mapping": {
+   "version": "0.3.31",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@modelcontextprotocol/sdk": {
+   "version": "1.32.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 247,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@modelcontextprotocol/server-everything": {
+   "version": "2026.8.31",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 39,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@modelcontextprotocol/server-filesystem": {
+   "version": "2026.8.31",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@modelcontextprotocol/server-memory": {
+   "version": "2026.8.31",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@modelcontextprotocol/server-puppeteer": {
+   "version": "2025.5.12",
+   "score": 67,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/@modelcontextprotocol/server-sequential-thinking": {
+   "version": "2026.8.31",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@notionhq/notion-mcp-server": {
+   "version": "2.5.2",
+   "score": 88,
+   "label": "review",
+   "files_scanned": 23,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "high: Lethal trifecta: private-data read + untrusted input + outbound network": 1
+   }
+  },
+  "npm/@playwright/mcp": {
+   "version": "0.0.83",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@radix-ui/react-primitive": {
+   "version": "2.1.11",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@supabase/mcp-server-supabase": {
+   "version": "0.13.0",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 23,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/estree": {
+   "version": "1.0.9",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/node": {
+   "version": "26.6.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 89,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@upstash/context7-mcp": {
+   "version": "4.2.0",
+   "score": 70,
+   "label": "safe",
+   "files_scanned": 25,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Unpinned npx/uvx package (no @version pin)": 2
+   }
+  },
+  "npm/@wonderwhy-er/desktop-commander": {
+   "version": "0.2.52",
+   "score": 50,
+   "label": "review",
+   "files_scanned": 237,
+   "severity": {
+    "critical": 0,
+    "high": 8,
+    "medium": 5,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 60,
+   "not_installed": 0,
+   "rules": {
+    "high: execSync / spawn (Node.js)": 8,
+    "medium: fs.readFileSync / writeFileSync (Node.js)": 4,
+    "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
+   }
+  },
+  "npm/acorn": {
+   "version": "8.19.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/agent-base": {
+   "version": "9.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/ajv": {
+   "version": "8.20.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 358,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 6,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned remote resource (branch/latest/HEAD)": 6
+   }
+  },
+  "npm/ansi-regex": {
+   "version": "6.4.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/ansi-styles": {
+   "version": "7.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/argparse": {
+   "version": "3.0.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/axios": {
+   "version": "1.20.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 74,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/balanced-match": {
+   "version": "4.0.4",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/brace-expansion": {
+   "version": "5.0.12",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/braces": {
+   "version": "3.0.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/browserslist": {
+   "version": "4.29.3",
+   "score": 50,
+   "label": "review",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 11,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "medium: Unpinned npx/uvx package (no @version pin)": 11
+   }
+  },
+  "npm/buffer": {
+   "version": "6.0.3",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/call-bind-apply-helpers": {
+   "version": "1.0.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/callsites": {
+   "version": "4.2.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/camelcase": {
+   "version": "9.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/caniuse-lite": {
+   "version": "1.0.30001815",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 839,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/chalk": {
+   "version": "6.0.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/chokidar": {
+   "version": "5.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/cliui": {
+   "version": "9.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/color-convert": {
+   "version": "3.1.3",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/color-name": {
+   "version": "2.1.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/commander": {
+   "version": "15.0.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/concat-map": {
+   "version": "0.0.2",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/convert-source-map": {
+   "version": "2.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/cookie": {
+   "version": "2.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/cross-spawn": {
+   "version": "7.0.6",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/csstype": {
+   "version": "3.2.3",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/debug": {
+   "version": "4.4.3",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/detect-libc": {
+   "version": "2.1.2",
+   "score": 60,
+   "label": "review",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 2,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "high: execSync / spawn (Node.js)": 2
+   }
+  },
+  "npm/dotenv": {
+   "version": "18.0.6",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/dunder-proto": {
+   "version": "1.0.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/electron-to-chromium": {
+   "version": "1.5.450",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/emoji-regex": {
+   "version": "11.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/entities": {
+   "version": "8.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/es-define-property": {
+   "version": "1.0.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/es-errors": {
+   "version": "1.3.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/esbuild": {
+   "version": "0.28.2",
+   "score": 45,
+   "label": "do_not_connect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 1,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {
+    "critical: execSync / spawn (Node.js)": 1,
+    "medium: execSync / spawn (Node.js)": 1,
+    "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
+   }
+  },
+  "npm/escalade": {
+   "version": "3.2.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/escape-string-regexp": {
+   "version": "5.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint": {
+   "version": "10.12.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 419,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-scope": {
+   "version": "9.1.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-visitor-keys": {
+   "version": "5.0.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/espree": {
+   "version": "11.2.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/estraverse": {
+   "version": "5.3.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/estree-walker": {
+   "version": "3.0.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eventemitter3": {
+   "version": "5.0.4",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/exa-mcp-server": {
+   "version": "3.4.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/execa": {
+   "version": "10.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 144,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/express": {
+   "version": "5.2.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fast-deep-equal": {
+   "version": "3.1.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fast-glob": {
+   "version": "3.3.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 53,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fast-json-stable-stringify": {
+   "version": "2.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fast-levenshtein": {
+   "version": "3.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fastq": {
+   "version": "1.20.3",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fdir": {
+   "version": "6.5.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/file-entry-cache": {
+   "version": "11.1.5",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fill-range": {
+   "version": "7.1.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/find-up": {
+   "version": "8.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/firecrawl-mcp": {
+   "version": "3.28.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/flat-cache": {
+   "version": "6.1.23",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/flatted": {
+   "version": "3.4.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/form-data": {
+   "version": "4.0.6",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fs-extra": {
+   "version": "11.4.1",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 30,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {
+    "high: Vulnerable dependency: minimist": 1
+   }
+  },
+  "npm/function-bind": {
+   "version": "1.1.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/get-intrinsic": {
+   "version": "1.3.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/get-proto": {
+   "version": "1.0.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/get-stream": {
+   "version": "9.0.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/glob": {
+   "version": "13.0.6",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/glob-parent": {
+   "version": "6.0.2",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/globals": {
+   "version": "17.13.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/gopd": {
+   "version": "1.2.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/graceful-fs": {
+   "version": "4.2.11",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/has-flag": {
+   "version": "5.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/has-symbols": {
+   "version": "1.1.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/hasown": {
+   "version": "2.0.4",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/http-errors": {
+   "version": "2.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/http-proxy-agent": {
+   "version": "9.1.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/https-proxy-agent": {
+   "version": "9.1.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/iconv-lite": {
+   "version": "0.7.3",
+   "score": 70,
+   "label": "safe",
+   "files_scanned": 25,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Zero-width / invisible character": 2
+   }
+  },
+  "npm/ignore": {
+   "version": "7.0.12",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/import-fresh": {
+   "version": "4.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/imurmurhash": {
+   "version": "0.1.4",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/inherits": {
+   "version": "2.0.4",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/is-core-module": {
+   "version": "2.17.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/is-extglob": {
+   "version": "2.1.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/is-fullwidth-code-point": {
+   "version": "5.1.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/is-glob": {
+   "version": "4.0.3",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/is-number": {
+   "version": "7.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/is-stream": {
+   "version": "4.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/isarray": {
+   "version": "2.0.5",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/isexe": {
+   "version": "4.0.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 19,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/jiti": {
+   "version": "2.7.0",
+   "score": 71,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Zero-width / invisible character": 1
+   }
+  },
+  "npm/js-tokens": {
+   "version": "10.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/js-yaml": {
+   "version": "5.4.3",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/jsesc": {
+   "version": "3.1.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/json-schema-traverse": {
+   "version": "1.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/json5": {
+   "version": "2.2.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/keyv": {
+   "version": "6.1.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/kind-of": {
+   "version": "6.0.3",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/levn": {
+   "version": "0.4.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/lines-and-columns": {
+   "version": "2.0.4",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/locate-path": {
+   "version": "8.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/lodash": {
+   "version": "4.18.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 1042,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/lru-cache": {
+   "version": "11.5.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 51,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/magic-string": {
+   "version": "1.4.3",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/math-intrinsics": {
+   "version": "1.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/mcp-remote": {
+   "version": "0.14.3",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/micromatch": {
+   "version": "4.0.8",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/mime": {
+   "version": "4.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 20,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/mime-db": {
+   "version": "1.54.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/mime-types": {
+   "version": "3.0.2",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/minimatch": {
+   "version": "10.2.6",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 27,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/minimist": {
+   "version": "1.2.8",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/minipass": {
+   "version": "7.1.3",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/mkdirp": {
+   "version": "3.0.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/ms": {
+   "version": "2.1.3",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/nanoid": {
+   "version": "6.0.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/negotiator": {
+   "version": "1.1.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/node-fetch": {
+   "version": "3.3.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/node-releases": {
+   "version": "2.0.57",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/normalize-path": {
+   "version": "3.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/npm-run-path": {
+   "version": "6.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/object-assign": {
+   "version": "4.1.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/object-inspect": {
+   "version": "1.13.4",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/onetime": {
+   "version": "8.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/optionator": {
+   "version": "0.9.4",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/p-limit": {
+   "version": "7.3.3",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/p-locate": {
+   "version": "7.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/path-exists": {
+   "version": "5.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/path-key": {
+   "version": "4.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/path-parse": {
+   "version": "1.0.7",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/path-scurry": {
+   "version": "2.0.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/path-to-regexp": {
+   "version": "8.4.2",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/picocolors": {
+   "version": "1.1.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/picomatch": {
+   "version": "4.0.7",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/pify": {
+   "version": "6.1.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/postcss": {
+   "version": "8.5.29",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 52,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/postcss-selector-parser": {
+   "version": "7.1.6",
+   "score": 71,
+   "label": "safe",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Unpinned npx/uvx package (no @version pin)": 1
+   }
+  },
+  "npm/pretty-format": {
+   "version": "30.5.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/punycode": {
+   "version": "2.3.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/puppeteer": {
+   "version": "25.12.0",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
+   }
+  },
+  "npm/qs": {
+   "version": "6.16.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/react-is": {
+   "version": "19.3.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/readable-stream": {
+   "version": "4.7.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/readdirp": {
+   "version": "5.1.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/resolve": {
+   "version": "1.22.13",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
+   }
+  },
+  "npm/resolve-from": {
+   "version": "5.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/reusify": {
+   "version": "1.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/rimraf": {
+   "version": "6.1.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 68,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/safe-buffer": {
+   "version": "5.2.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/safer-buffer": {
+   "version": "2.1.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/semver": {
+   "version": "7.8.5",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 50,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/shebang-command": {
+   "version": "2.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/shebang-regex": {
+   "version": "4.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/signal-exit": {
+   "version": "4.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/source-map": {
+   "version": "0.8.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/source-map-js": {
+   "version": "1.2.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/statuses": {
+   "version": "2.0.2",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/string-width": {
+   "version": "8.3.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/string_decoder": {
+   "version": "1.3.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/strip-ansi": {
+   "version": "7.2.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/strip-json-comments": {
+   "version": "5.0.3",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/supports-color": {
+   "version": "11.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/task-master-ai": {
+   "version": "0.43.1",
+   "score": 71,
+   "label": "safe",
+   "files_scanned": 24,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned remote resource (branch/latest/HEAD)": 1,
+    "medium: Unpinned npx/uvx package (no @version pin)": 1
+   }
+  },
+  "npm/tavily-mcp": {
+   "version": "0.2.22",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/tinyglobby": {
+   "version": "0.2.17",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/to-regex-range": {
+   "version": "5.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/tr46": {
+   "version": "7.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/tslib": {
+   "version": "2.8.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/type-fest": {
+   "version": "5.10.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 219,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/typescript": {
+   "version": "7.0.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 187,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/undici-types": {
+   "version": "8.11.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 46,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/universalify": {
+   "version": "2.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/update-browserslist-db": {
+   "version": "1.3.4",
+   "score": 30,
+   "label": "review",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 13,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "high: execSync / spawn (Node.js)": 13,
+    "medium: Unpinned npx/uvx package (no @version pin)": 1
+   }
+  },
+  "npm/uri-js": {
+   "version": "4.4.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 27,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/util-deprecate": {
+   "version": "1.0.2",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/uuid": {
+   "version": "14.0.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 67,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/vite": {
+   "version": "8.3.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 34,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/webidl-conversions": {
+   "version": "8.0.1",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/whatwg-url": {
+   "version": "17.2.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/which": {
+   "version": "7.0.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/wrap-ansi": {
+   "version": "10.0.2",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/ws": {
+   "version": "8.22.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/y18n": {
+   "version": "5.0.8",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/yallist": {
+   "version": "5.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/yaml": {
+   "version": "2.9.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 216,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/yargs": {
+   "version": "18.2.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 57,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/yargs-parser": {
+   "version": "22.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/yocto-queue": {
+   "version": "1.2.2",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/aiobotocore": {
+   "version": "3.9.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 39,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/aiohappyeyeballs": {
+   "version": "2.7.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/aiohttp": {
+   "version": "3.14.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 67,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/aiosignal": {
+   "version": "1.4.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/alembic": {
+   "version": "1.20.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 64,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/annotated-doc": {
+   "version": "0.0.5",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/annotated-types": {
+   "version": "0.8.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/anthropic": {
+   "version": "1.12.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 2231,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 1,
+   "rules": {}
+  },
+  "pypi/anyio": {
+   "version": "4.15.1",
+   "score": 69,
+   "label": "review",
+   "files_scanned": 58,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "high: shell=True (Python)": 1
+   }
+  },
+  "pypi/attrs": {
+   "version": "26.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 34,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 1,
+   "rules": {}
+  },
+  "pypi/azure-core": {
+   "version": "1.41.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 76,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/bcrypt": {
+   "version": "5.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/beautifulsoup4": {
+   "version": "4.15.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 27,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/boto3": {
+   "version": "1.43.109",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 42,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/botocore": {
+   "version": "1.43.109",
+   "label": "unscannable",
+   "error": "artifact exceeds unpacked-size cap (zip bomb?)"
+  },
+  "pypi/cachetools": {
+   "version": "7.2.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/certifi": {
+   "version": "2026.7.22",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/cffi": {
+   "version": "2.1.1",
+   "score": 84,
+   "label": "review",
+   "files_scanned": 56,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {
+    "high: setup.py executes code at install time (Popen...)": 1
+   }
+  },
+  "pypi/cfgv": {
+   "version": "3.5.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/chardet": {
+   "version": "7.6.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 58,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 42,
+   "not_installed": 2,
+   "rules": {}
+  },
+  "pypi/charset-normalizer": {
+   "version": "3.5.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/click": {
+   "version": "8.5.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 18,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/cloudpickle": {
+   "version": "3.1.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/colorama": {
+   "version": "0.4.6",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/coverage": {
+   "version": "7.16.2",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 42,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 2,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1
+   }
+  },
+  "pypi/cryptography": {
+   "version": "50.0.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 223,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 3,
+   "rules": {}
+  },
+  "pypi/decorator": {
+   "version": "5.3.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/defusedxml": {
+   "version": "0.7.1",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 36,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "medium: setup.py executes code at install time (call...)": 1
+   }
+  },
+  "pypi/dill": {
+   "version": "0.4.1",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 21,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 29,
+   "not_installed": 0,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1
+   }
+  },
+  "pypi/distlib": {
+   "version": "0.4.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 17,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/distro": {
+   "version": "1.9.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/dnspython": {
+   "version": "2.8.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 152,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/docstring-parser": {
+   "version": "0.18.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/editables": {
+   "version": "0.6",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/email-validator": {
+   "version": "2.3.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/et-xmlfile": {
+   "version": "2.0.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/exceptiongroup": {
+   "version": "1.3.1",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/fastapi": {
+   "version": "0.142.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 81,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 41,
+   "not_installed": 2,
+   "rules": {}
+  },
+  "pypi/filelock": {
+   "version": "4.0.12",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 1,
+   "rules": {}
+  },
+  "pypi/fonttools": {
+   "version": "4.66.1",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 374,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 23,
+   "not_installed": 1,
+   "rules": {
+    "medium: setup.py executes code at install time (check_call...)": 1
+   }
+  },
+  "pypi/frozenlist": {
+   "version": "1.8.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/fsspec": {
+   "version": "2026.9.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 59,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/ghapi": {
+   "version": "2.1.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 2,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned remote resource (branch/latest/HEAD)": 2
+   }
+  },
+  "pypi/gitdb": {
+   "version": "4.0.12",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 18,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/gitpython": {
+   "version": "3.2.0",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 39,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {
+    "medium: setup.py overrides install/build commands (cmdclass)": 1
+   }
+  },
+  "pypi/google-api-core": {
+   "version": "2.41.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 73,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/google-auth": {
+   "version": "2.61.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 78,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/google-cloud-bigquery": {
+   "version": "3.46.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 55,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/google-cloud-core": {
+   "version": "2.8.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/google-cloud-storage": {
+   "version": "3.16.0",
+   "label": "unscannable",
+   "error": "member exceeds per-file cap: google_cloud_storage-3.16.0/tests/data/random_9_MiB_file"
+  },
+  "pypi/googleapis-common-protos": {
+   "version": "1.75.5",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 70,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/greenlet": {
+   "version": "3.5.6",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/grpcio": {
+   "version": "1.84.0",
+   "label": "unscannable",
+   "error": "member exceeds per-file cap: grpcio-1.84.0/src/python/grpcio/grpc/_cython/cygrpc.cpp"
+  },
+  "pypi/grpcio-status": {
+   "version": "1.84.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/h11": {
+   "version": "0.16.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/h2": {
+   "version": "4.4.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/hatchling": {
+   "version": "1.32.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 51,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/hf-xet": {
+   "version": "1.7.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 276,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 1,
+   "rules": {}
+  },
+  "pypi/hpack": {
+   "version": "4.2.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/httpcore": {
+   "version": "1.0.9",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/httpcore2": {
+   "version": "2.13.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/httptools": {
+   "version": "0.8.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: setup.py overrides install/build commands (cmdclass)": 1
+   }
+  },
+  "pypi/httpx": {
+   "version": "0.28.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 24,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/httpx-sse": {
+   "version": "0.4.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/httpx2": {
+   "version": "2.13.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/huggingface-hub": {
+   "version": "2.1.1",
+   "score": 2,
+   "label": "do_not_connect",
+   "files_scanned": 179,
+   "severity": {
+    "critical": 3,
+    "high": 1,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 27,
+   "not_installed": 0,
+   "rules": {
+    "critical: curl/wget piped to shell": 3,
+    "high: subprocess.run / Popen (Python)": 1,
+    "medium: torch.load (pickle-backed) (Python)": 1
+   }
+  },
+  "pypi/hyperframe": {
+   "version": "6.1.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/identify": {
+   "version": "2.6.20",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/idna": {
+   "version": "3.20",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/importlib-metadata": {
+   "version": "9.0.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 27,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/iniconfig": {
+   "version": "2.3.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/isodate": {
+   "version": "0.7.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/itsdangerous": {
+   "version": "2.2.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jaraco-classes": {
+   "version": "3.4.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jinja2": {
+   "version": "3.1.6",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 27,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jiter": {
+   "version": "0.17.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 48,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jmespath": {
+   "version": "1.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/joblib": {
+   "version": "1.6.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 45,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 16,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jsonschema": {
+   "version": "4.26.0",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 146,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 3,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1
+   }
+  },
+  "pypi/jsonschema-specifications": {
+   "version": "2025.9.1",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 2,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1
+   }
+  },
+  "pypi/keyring": {
+   "version": "25.7.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 39,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/kiwisolver": {
+   "version": "1.5.1",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: setup.py overrides install/build commands (cmdclass)": 1
+   }
+  },
+  "pypi/langchain": {
+   "version": "1.4.3",
+   "score": 65,
+   "label": "review",
+   "files_scanned": 44,
+   "severity": {
+    "critical": 0,
+    "high": 2,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "high: Injected system/role directive": 2
+   }
+  },
+  "pypi/langchain-core": {
+   "version": "1.6.7",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 187,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/lxml": {
+   "version": "6.1.3",
+   "label": "unscannable",
+   "error": "member exceeds per-file cap: lxml-6.1.3/src/lxml/etree.c"
+  },
+  "pypi/mako": {
+   "version": "1.4.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 11,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/markdown-it-py": {
+   "version": "4.2.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 81,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 1,
+   "rules": {}
+  },
+  "pypi/markitdown-mcp": {
+   "version": "0.0.1a7",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/markupsafe": {
+   "version": "3.0.4",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: setup.py overrides install/build commands (cmdclass)": 1
+   }
+  },
+  "pypi/matplotlib": {
+   "version": "3.11.2",
+   "label": "unscannable",
+   "error": "artifact exceeds unpacked-size cap (zip bomb?)"
+  },
+  "pypi/mcp": {
+   "version": "2.3.0",
+   "score": 70,
+   "label": "safe",
+   "files_scanned": 180,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 2
+   }
+  },
+  "pypi/mcp-server-fetch": {
+   "version": "2026.8.18",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/mcp-server-git": {
+   "version": "2026.8.18",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/mcp-server-sqlite": {
+   "version": "2025.4.25",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/mcp-server-time": {
+   "version": "2026.8.18",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/mdurl": {
+   "version": "0.1.2",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/more-itertools": {
+   "version": "11.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/msal": {
+   "version": "1.39.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 25,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/msgpack": {
+   "version": "1.2.3",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/multidict": {
+   "version": "7.0.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/mypy": {
+   "version": "2.4.0",
+   "score": 69,
+   "label": "review",
+   "files_scanned": 310,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 29,
+   "not_installed": 0,
+   "rules": {
+    "high: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/mypy-extensions": {
+   "version": "1.1.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/networkx": {
+   "version": "3.7",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 290,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/nodeenv": {
+   "version": "1.11.0",
+   "score": 45,
+   "label": "do_not_connect",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 1,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {
+    "critical: subprocess.run / Popen (Python)": 1,
+    "high: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/numpy": {
+   "version": "2.5.3",
+   "label": "unscannable",
+   "error": "artifact exceeds unpacked-size cap (zip bomb?)"
+  },
+  "pypi/oauthlib": {
+   "version": "4.0.0",
+   "score": 69,
+   "label": "review",
+   "files_scanned": 74,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "high: Base64 encode + send": 1
+   }
+  },
+  "pypi/openai": {
+   "version": "3.26.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 1950,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 40,
+   "not_installed": 6,
+   "rules": {}
+  },
+  "pypi/openpyxl": {
+   "version": "3.1.5",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 191,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/opentelemetry-api": {
+   "version": "1.45.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/opentelemetry-exporter-otlp-proto-common": {
+   "version": "1.45.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/opentelemetry-exporter-otlp-proto-http": {
+   "version": "1.45.1",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1
+   }
+  },
+  "pypi/opentelemetry-instrumentation": {
+   "version": "0.66b1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 19,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/opentelemetry-proto": {
+   "version": "1.45.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/opentelemetry-sdk": {
+   "version": "1.45.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 61,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/opentelemetry-semantic-conventions": {
+   "version": "0.66b1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 125,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/orjson": {
+   "version": "3.13.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 1005,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 30,
+   "rules": {}
+  },
+  "pypi/packaging": {
+   "version": "26.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 23,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pandas": {
+   "version": "3.0.6",
+   "score": 69,
+   "label": "review",
+   "files_scanned": 290,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 22,
+   "not_installed": 0,
+   "rules": {
+    "high: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/paramiko": {
+   "version": "5.0.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 44,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pathspec": {
+   "version": "1.1.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 85,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pillow": {
+   "version": "12.3.0",
+   "label": "unscannable",
+   "error": "member exceeds per-file cap: pillow-12.3.0/Tests/images/fujifilm.mpo"
+  },
+  "pypi/pip": {
+   "version": "26.2.1",
+   "score": 69,
+   "label": "review",
+   "files_scanned": 398,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 48,
+   "not_installed": 0,
+   "rules": {
+    "high: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/platformdirs": {
+   "version": "4.12.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pluggy": {
+   "version": "1.6.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 25,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pre-commit": {
+   "version": "4.6.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 69,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 22,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/prompt-toolkit": {
+   "version": "3.0.53",
+   "score": 69,
+   "label": "review",
+   "files_scanned": 145,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "high: shell=True (Python)": 1
+   }
+  },
+  "pypi/propcache": {
+   "version": "0.5.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 20,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/proto-plus": {
+   "version": "1.29.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 28,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/protobuf": {
+   "version": "7.36.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 57,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/psutil": {
+   "version": "7.2.2",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 53,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 15,
+   "not_installed": 5,
+   "rules": {
+    "medium: setup.py executes code at install time (Popen...)": 1
+   }
+  },
+  "pypi/psycopg2-binary": {
+   "version": "2.9.13",
+   "score": 82,
+   "label": "review",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 2,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 3,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1,
+    "high: setup.py executes code at install time (run...)": 1
+   }
+  },
+  "pypi/pyarrow": {
+   "version": "25.0.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 46,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyasn1": {
+   "version": "0.6.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 34,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyasn1-modules": {
+   "version": "0.4.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 148,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pycparser": {
+   "version": "3.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pydantic": {
+   "version": "2.13.5",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 105,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pydantic-core": {
+   "version": "2.49.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 143,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 1,
+   "rules": {}
+  },
+  "pypi/pydantic-settings": {
+   "version": "2.15.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 30,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pygments": {
+   "version": "2.21.0",
+   "score": 71,
+   "label": "safe",
+   "files_scanned": 362,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 16,
+   "not_installed": 0,
+   "rules": {
+    "medium: Unrestricted file write (Python)": 1
+   }
+  },
+  "pypi/pyjwt": {
+   "version": "2.15.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 18,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pynacl": {
+   "version": "1.6.2",
+   "score": 84,
+   "label": "review",
+   "files_scanned": 78,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 4,
+   "rules": {
+    "high: setup.py executes code at install time (check_call...)": 1
+   }
+  },
+  "pypi/pyopenssl": {
+   "version": "26.4.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyparsing": {
+   "version": "3.3.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest": {
+   "version": "9.1.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 110,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 20,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest-asyncio": {
+   "version": "1.4.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest-cov": {
+   "version": "7.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/python-dateutil": {
+   "version": "2.9.0.post0",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 35,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "medium: Vulnerable dependency: setuptools": 1
+   }
+  },
+  "pypi/python-discovery": {
+   "version": "1.6.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 25,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 1,
+   "rules": {}
+  },
+  "pypi/python-dotenv": {
+   "version": "1.2.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/python-multipart": {
+   "version": "0.0.32",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytz": {
+   "version": "2026.5",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyyaml": {
+   "version": "6.0.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 22,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/redis": {
+   "version": "8.1.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 116,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/referencing": {
+   "version": "0.37.0",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 22,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 3,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1
+   }
+  },
+  "pypi/regex": {
+   "version": "2026.9.29",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/requests": {
+   "version": "2.34.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 21,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/requests-oauthlib": {
+   "version": "2.0.0",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1
+   }
+  },
+  "pypi/requests-toolbelt": {
+   "version": "1.0.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/rich": {
+   "version": "15.0.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 101,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/rpds-py": {
+   "version": "2026.9.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 3,
+   "rules": {}
+  },
+  "pypi/rsa": {
+   "version": "4.9.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 12,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/ruamel-yaml": {
+   "version": "0.19.1",
+   "score": 84,
+   "label": "review",
+   "files_scanned": 34,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 1,
+   "rules": {
+    "high: setup.py executes code at install time (check_output...)": 1
+   }
+  },
+  "pypi/ruff": {
+   "version": "0.16.10",
+   "label": "unscannable",
+   "error": "artifact exceeds file-count cap (zip bomb?)"
+  },
+  "pypi/s3fs": {
+   "version": "2026.9.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/s3transfer": {
+   "version": "0.19.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 18,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/scikit-learn": {
+   "version": "1.9.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 348,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 20,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/scipy": {
+   "version": "1.18.1",
+   "label": "unscannable",
+   "error": "artifact exceeds unpacked-size cap (zip bomb?)"
+  },
+  "pypi/setuptools": {
+   "version": "84.0.0",
+   "score": 66,
+   "label": "review",
+   "files_scanned": 234,
+   "severity": {
+    "critical": 0,
+    "high": 2,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 50,
+   "not_installed": 0,
+   "rules": {
+    "high: os.system / os.popen (Python)": 1,
+    "high: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/shellingham": {
+   "version": "1.5.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/six": {
+   "version": "1.17.0",
+   "score": 64,
+   "label": "review",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "high: exec() call (Python)": 1
+   }
+  },
+  "pypi/smmap": {
+   "version": "5.0.3",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/sniffio": {
+   "version": "1.3.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/sortedcontainers": {
+   "version": "2.4.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/soupsieve": {
+   "version": "2.10",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/sqlalchemy": {
+   "version": "2.1.4",
+   "label": "unscannable",
+   "error": "artifact exceeds unpacked-size cap (zip bomb?)"
+  },
+  "pypi/sse-starlette": {
+   "version": "3.5.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/starlette": {
+   "version": "1.7.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 59,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tabulate": {
+   "version": "0.10.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tenacity": {
+   "version": "9.2.1",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 79,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 1,
+   "rules": {}
+  },
+  "pypi/threadpoolctl": {
+   "version": "3.7.0",
+   "score": 74,
+   "label": "safe",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tiktoken": {
+   "version": "0.14.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 1,
+   "rules": {
+    "low: Unpinned remote resource (branch/latest/HEAD)": 1
+   }
+  },
+  "pypi/tokenizers": {
+   "version": "0.23.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 127,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tomli": {
+   "version": "2.5.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tomlkit": {
+   "version": "0.15.1",
+   "score": 84,
+   "label": "safe",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "high: Vulnerable dependency: requests": 1
+   }
+  },
+  "pypi/tqdm": {
+   "version": "4.70.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 42,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 10,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/trove-classifiers": {
+   "version": "2026.9.21.13",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/truststore": {
+   "version": "0.10.4",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/typer": {
+   "version": "0.27.3",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 46,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 15,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/typing-extensions": {
+   "version": "4.16.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/typing-inspection": {
+   "version": "0.4.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 2,
+   "rules": {}
+  },
+  "pypi/tzdata": {
+   "version": "2026.5",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tzlocal": {
+   "version": "5.4.4",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/urllib3": {
+   "version": "2.8.0",
+   "score": 82,
+   "label": "safe",
+   "files_scanned": 42,
+   "severity": {
+    "critical": 1,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "critical: Vulnerable dependency: cryptography": 1
+   }
+  },
+  "pypi/uvicorn": {
+   "version": "0.54.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 40,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/uvloop": {
+   "version": "0.23.0",
+   "label": "unscannable",
+   "error": "member exceeds per-file cap: uvloop-0.23.0/uvloop/loop.c"
+  },
+  "pypi/virtualenv": {
+   "version": "21.14.5",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 107,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 16,
+   "not_installed": 2,
+   "rules": {}
+  },
+  "pypi/watchfiles": {
+   "version": "1.3.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/wcwidth": {
+   "version": "0.9.2",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 58,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 2,
+   "rules": {
+    "medium: setup.py overrides install/build commands (cmdclass)": 1
+   }
+  },
+  "pypi/websocket-client": {
+   "version": "1.9.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/websockets": {
+   "version": "17.2",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 51,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/werkzeug": {
+   "version": "3.1.9",
+   "score": 65,
+   "label": "review",
+   "files_scanned": 52,
+   "severity": {
+    "critical": 0,
+    "high": 2,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {
+    "high: Remote fetch + dynamic exec in same file (possible rug-pull)": 1,
+    "high: exec() call (Python)": 1
+   }
+  },
+  "pypi/wheel": {
+   "version": "0.48.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/wrapt": {
+   "version": "2.5.0",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/yarl": {
+   "version": "1.25.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 26,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/zipp": {
+   "version": "4.1.1",
+   "score": 88,
+   "label": "safe",
+   "files_scanned": 21,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/zstandard": {
+   "version": "0.25.0",
+   "score": 86,
+   "label": "safe",
+   "files_scanned": 29,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "medium: setup.py overrides install/build commands (cmdclass)": 1
+   }
+  }
+ }
+}
