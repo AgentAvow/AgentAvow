@@ -55,10 +55,10 @@
 import {
   GateError, captureRpc, createGate, parseCoordinate,
   type Decision, type Gate, type GateHooks, type GatePolicy,
-} from './gate.ts';
+} from './gate.js';
 
-export { GateError } from './gate.ts';
-export type { Decision, GatePolicy, GateHooks } from './gate.ts';
+export { GateError } from './gate.js';
+export type { Decision, GatePolicy, GateHooks } from './gate.js';
 
 /** The fields of Flue's `McpConnectionDefinition` the adapter reads; everything
  *  else passes through untouched. Structural, so there is no `@flue/runtime` import. */
@@ -99,7 +99,7 @@ export interface FlueToolRef {
 
 export interface FlueGate extends Gate {
   /** Seam (a): the same definition with `fetch` wrapped by the gate. */
-  connection<T extends FlueMcpConnectionLike>(definition: T): T;
+  connection<T extends FlueMcpConnectionLike>(definition: T): T & { fetch: typeof fetch };
   /** Seam (b): the instrumentation for `instrument(...)`. */
   instrumentation(): FlueInstrumentationLike;
   /** The fetch wrapper itself, for a transport you build by hand. */

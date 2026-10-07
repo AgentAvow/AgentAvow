@@ -2,8 +2,7 @@
 //
 // No network: AgentAvow and the MCP server are a fake `fetch`. Signatures come
 // from an Ed25519 key generated in this process with WebCrypto; nothing is
-// committed. The TypeScript source is imported directly, which needs Node's
-// native type stripping (22.18+ / 23.6+); on an older Node the file skips.
+// committed. Runs against the built output (`npm run build`, which `pretest` does).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,13 +10,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const [major, minor] = process.versions.node.split('.').map(Number);
-const canStripTypes = major > 23 || (major === 23 && minor >= 6) || (major === 22 && minor >= 18);
-const skip = canStripTypes ? false : 'needs Node 22.18+ for native TypeScript';
+const skip = false;
 
-const mod = canStripTypes ? await import('../src/gate.ts') : null;
-const jws = canStripTypes ? await import('../src/jws.ts') : null;
-const sha = canStripTypes ? await import('../src/sha256.ts') : null;
+const mod = await import('../dist/gate.js');
+const jws = await import('../dist/jws.js');
+const sha = await import('../dist/sha256.js');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const VECTORS = path.resolve(here, '../../../docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json');

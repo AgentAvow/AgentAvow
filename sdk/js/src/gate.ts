@@ -37,10 +37,10 @@
 // `canonicalize` (RFC 8785), for the per-tool digest.
 
 import canonicalizeImport from 'canonicalize';
-import { sha256Hex } from './sha256.ts';
+import { sha256Hex } from './sha256.js';
 import {
   DEFAULT_JWKS_URL, JwksCache, decodeJws, verifyJws, type Jwks,
-} from './jws.ts';
+} from './jws.js';
 
 // `canonicalize` is CommonJS (`module.exports = fn`), but its .d.ts says `export default`,
 // so under NodeNext the default import is typed as the module namespace. At runtime

@@ -39,8 +39,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test",
     "build": "tsc -p tsconfig.json",
+    "pretest": "npm run build",
+    "test": "node --test",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

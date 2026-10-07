@@ -3,7 +3,11 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "declaration": true,
     "outDir": "dist",
     "rootDir": "src",
@@ -13,9 +17,15 @@
     "skipLibCheck": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
-    "allowImportingTsExtensions": true,
-    "rewriteRelativeImportExtensions": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/sha256.ts", "src/jws.ts", "src/gate.ts", "src/vercel-ai.ts", "src/flue.ts"]
+  "include": [
+    "src/sha256.ts",
+    "src/jws.ts",
+    "src/gate.ts",
+    "src/vercel-ai.ts",
+    "src/flue.ts"
+  ]
 }

@@ -356,7 +356,7 @@ JCS-canonical, proof-stripped envelope), `isFresh(envelope, { now? })`,
 ```bash
 npm install
 npm run build     # tsc -> dist/ (the gate, flue, jws and vercel-ai entry points)
-npm test          # node --test
+npm test          # builds first (pretest), then node --test against dist/
 ```
 
 The gate tests use no network: the API, the JWKS and the MCP server are a fake

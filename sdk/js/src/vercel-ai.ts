@@ -35,16 +35,16 @@
 import {
   DEFAULT_BLOCK_ON, DEFAULT_MIN_SCORE, GradeClient, ToolGateError, evaluate, parseCoordinate,
   type ClientOptions, type GateDecision, type Outcome, type ToolDefinition,
-} from './gate.ts';
+} from './gate.js';
 
 export {
   DEFAULT_BASE_URL, DEFAULT_MIN_SCORE, DEFAULT_BLOCK_ON, DEFAULT_CACHE_TTL_MS,
   PROFILE, DIGEST_FIELDS, toolKey, toolDigest, parseCoordinate, gradeUrl, reportUrl,
   gradeFromResponse, evaluate, ToolGateError, GradeClient as TrustGateClient,
-} from './gate.ts';
+} from './gate.js';
 export type {
   ToolDefinition, Grade, Outcome, GateDecision, EvaluateOptions, ClientOptions,
-} from './gate.ts';
+} from './gate.js';
 
 // ── the gate ─────────────────────────────────────────────────────────────────
 

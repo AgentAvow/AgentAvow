@@ -1,8 +1,7 @@
 // Tests for the Vercel AI SDK tool-call gate (src/vercel-ai.ts).
 //
 // No network: AgentAvow and the MCP server are a fake `fetch` injected through
-// options. The TypeScript source is imported directly, which needs Node's native
-// type stripping (22.18+ / 23.6+); on an older Node the file skips.
+// options. Runs against the built output (`npm run build`, which `pretest` does).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,11 +9,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const [major, minor] = process.versions.node.split('.').map(Number);
-const canStripTypes = major > 23 || (major === 23 && minor >= 6) || (major === 22 && minor >= 18);
 
-const mod = canStripTypes ? await import('../src/vercel-ai.ts') : null;
-const skip = canStripTypes ? false : 'needs Node 22.18+ for native TypeScript';
+const mod = await import('../dist/vercel-ai.js');
+const skip = false;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const VECTORS = path.resolve(here, '../../../docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json');

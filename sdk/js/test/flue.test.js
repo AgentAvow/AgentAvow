@@ -13,12 +13,10 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const [major, minor] = process.versions.node.split('.').map(Number);
-const canStripTypes = major > 23 || (major === 23 && minor >= 6) || (major === 22 && minor >= 18);
-const skip = canStripTypes ? false : 'needs Node 22.18+ for native TypeScript';
+const skip = false;
 
-const flue = canStripTypes ? await import('../src/flue.ts') : null;
-const core = canStripTypes ? await import('../src/gate.ts') : null;
+const flue = await import('../dist/flue.js');
+const core = await import('../dist/gate.js');
 
 const SERVER = 'https://mcp.example.com/mcp';
 const API = 'https://agentavow.test/api/v1';
