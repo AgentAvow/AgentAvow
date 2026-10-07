@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
+import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
@@ -703,10 +704,15 @@ function PublishStoredCTA({ owner, repo, published }: { owner: string; repo: str
 
 function Hero() {
   const [value, setValue] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
   const navigate = useNavigate()
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const go = (raw?: string) => {
     const v = (raw ?? value).trim()
+    setNotice(null)
+    // A repo host we know but can't read yet: say so instead of scanning the same-named GitHub repo.
+    const host = unsupportedRepoHost(v)
+    if (host) { setNotice(unsupportedRepoHostMessage(host)); return }
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
@@ -763,6 +769,7 @@ function Hero() {
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px] text-text placeholder:text-text-muted" />
         <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check</button>
       </form>
+      {notice && <p role="alert" className="mt-3 mx-auto max-w-[560px] text-[13px] text-amber-300">{notice}</p>}
       <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
         <span className="text-[11.5px] text-text-muted/70">Try:</span>
         {EXAMPLES.map(([label, coord]) => (

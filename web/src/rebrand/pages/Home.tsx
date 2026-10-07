@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
+import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity } from '../catalog'
@@ -77,11 +78,16 @@ function HeroSeal() {
 
 export default function RebrandHome() {
   const [value, setValue] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
   const navigate = useNavigate()
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
     const v = input.trim()
     if (v) trackEvent('guest_cta_click', '/rebrand', 'check_a_tool')
+    setNotice(null)
+    // A repo host we know but can't read yet: say so instead of scanning the same-named GitHub repo.
+    const host = unsupportedRepoHost(v)
+    if (host) { setNotice(unsupportedRepoHostMessage(host)); return }
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
@@ -190,6 +196,7 @@ export default function RebrandHome() {
               Check
             </button>
           </form>
+          {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-amber-300">{notice}</p>}
 
           <div className="mt-4 flex flex-wrap gap-2 justify-center items-center">
             <span className="font-mono text-[11.5px] text-text-muted/70">try one:</span>

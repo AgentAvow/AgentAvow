@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
+import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
 import { publicApi } from '../../lib/scanApi'
 import SEOHead from '../../components/SEOHead'
 
@@ -56,6 +57,8 @@ export default function Submit() {
 
   async function submit() {
     setError(null)
+    const host = unsupportedRepoHost(value)
+    if (host) { setError(unsupportedRepoHostMessage(host)); return }
     const coord = parseCoordinate(value)
     if (!coord) { setError("We couldn't read that. Try github.com/owner/repo, npm:chalk, hf:org/model, docker:nginx, or an MCP URL."); return }
     setBusy(true)
