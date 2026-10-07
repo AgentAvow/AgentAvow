@@ -1326,6 +1326,7 @@ def _package_response(
         surface_detail=data.get("surface_detail", {}),
         declared_scope=data.get("declared_scope", {}),
         env_reads=data.get("env_reads", []) or [],
+        capabilities=data.get("capabilities", []) or [],
         positive_signals=data.get("positive_signals", []),
         package_coordinate=data.get("package_coordinate", {}),
         tool_description=data.get("tool_description", ""),
