@@ -5,7 +5,14 @@ Scans the MCP servers THIS session can use (user scope, this project's local
 scope, and the project's .mcp.json / settings) that haven't been scanned yet and
 injects a one-line AgentAvow trust verdict into the session, so you see it BEFORE
 you rely on a newly added tool. Servers configured for other projects are counted
-in the summary and graded when those projects are opened. Covers both:
+in the summary and graded when those projects are opened.
+It also grades the project's DIRECT dependencies (package.json "dependencies";
+requirements.txt / pyproject [project].dependencies), up to DEPS_CAP per session
+start in manifest order, the rest on later starts, re-graded only when the declared
+version changes. Most projects have no MCP servers but every project has
+dependencies, so this is what gives a first session something to say. Dependencies
+are already installed, so a low grade is advice ("needs a look"), never a stop.
+AGENTAVOW_PRECHECK_DEPS=off turns the pass off. Covers both:
   • Remote HTTP(S) MCP servers  -> scan_mcp_server (the live tool definitions).
   • Local stdio servers run from an npm or PyPI package (npx / uvx / pipx / bunx)
     -> scan_package on the resolved package coordinate.
@@ -47,7 +54,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.13"
+__version__ = "0.1.14"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -56,6 +63,12 @@ TIMEOUT = 8  # seconds per scan; short so startup is never held up
 BUDGET = 20  # seconds for the whole run; stays inside the hook's 30s timeout
 RETRY_UNSCANNABLE = 7 * 24 * 3600  # re-try a server the API refused after a week
 META_KEY = "_agentavow"  # cache entry holding hook state; never treated as a server name
+# Direct dependencies graded per session start; the rest follow next time. The public
+# scan routes allow 20 requests/min per IP, and the server pass runs first, so 8 keeps
+# a normal start (a handful of servers + 8) under the limit.
+DEPS_CAP = 8
+DEPS_ENV = "AGENTAVOW_PRECHECK_DEPS"  # set to "off" to skip the dependency pass
+DEP_PREFIX = "dep:"  # cache keys for dependencies, so they never collide with server names
 
 # stdio runners we can map to a package registry. node/python/etc. are hand-written
 # scripts with no published package to grade, so they're intentionally absent.
@@ -260,6 +273,224 @@ def _targets() -> list[dict]:
     return list(seen.values())
 
 
+# --------------------------------------------------------------------------- #
+# Direct dependencies of the project in cwd
+# --------------------------------------------------------------------------- #
+_PY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _deps_enabled() -> bool:
+    return os.environ.get(DEPS_ENV, "").strip().lower() not in ("off", "0", "false", "no")
+
+
+def _dep(registry: str, pkg: str, spec: str) -> dict:
+    spec = (spec or "").strip()
+    return {"name": f"{DEP_PREFIX}{registry}:{pkg}", "kind": "package", "registry": registry,
+            "pkg": pkg, "spec": spec, "id": f"{DEP_PREFIX}{registry}:{pkg}@{spec}"}
+
+
+def _npm_deps(data: object) -> list[dict]:
+    """package.json → direct runtime dependencies only (not devDependencies, not
+    transitive). Local / git / URL specs have no registry grade and are skipped."""
+    if not isinstance(data, dict) or not isinstance(data.get("dependencies"), dict):
+        return []
+    out = []
+    for name, spec in data["dependencies"].items():
+        if not isinstance(name, str) or not isinstance(spec, str):
+            continue
+        low = spec.strip().lower()
+        if low.startswith(("file:", "link:", "git", "http", "workspace:", "npm:", ".", "/")):
+            continue
+        out.append(_dep("npm", name, spec))
+    return out
+
+
+def _pypi_name_spec(line: str) -> tuple[str, str] | None:
+    line = line.split("#", 1)[0].strip()
+    if not line or line.startswith("-") or "://" in line or line.startswith((".", "/")):
+        return None
+    m = _PY_NAME.match(line)
+    if not m:
+        return None
+    name = m.group(0)
+    rest = line[m.end():].split(";", 1)[0].strip()  # drop environment markers
+    if rest.startswith("["):  # extras: requests[security]>=2
+        rest = rest.split("]", 1)[1].strip() if "]" in rest else ""
+    return name, rest
+
+
+def _requirements_deps(text: str) -> list[dict]:
+    out = []
+    for raw in text.splitlines():
+        hit = _pypi_name_spec(raw)
+        if hit:
+            out.append(_dep("pypi", hit[0], hit[1]))
+    return out
+
+
+def _pyproject_deps(text: str) -> list[dict]:
+    """[project].dependencies from pyproject.toml. tomllib when available (3.11+),
+    else a narrow fallback that reads the quoted strings of that one list."""
+    deps: list[str] = []
+    try:
+        import tomllib  # type: ignore[import-not-found]
+        data = tomllib.loads(text)
+        raw = (data.get("project") or {}).get("dependencies") or []
+        deps = [d for d in raw if isinstance(d, str)]
+    except Exception:
+        m = re.search(r"^\[project\](.*?)(?=^\[|\Z)", text, re.S | re.M)
+        if m:
+            m2 = re.search(r"^dependencies\s*=\s*\[(.*?)\]", m.group(1), re.S | re.M)
+            if m2:
+                deps = re.findall(r"[\"']([^\"']+)[\"']", m2.group(1))
+    out = []
+    for d in deps:
+        hit = _pypi_name_spec(d)
+        if hit:
+            out.append(_dep("pypi", hit[0], hit[1]))
+    return out
+
+
+def _dependency_targets() -> list[dict]:
+    """Direct dependencies declared by the project in cwd, in manifest order; [] when
+    there is no manifest or the pass is off. Same package under two manifests → once."""
+    if not _deps_enabled():
+        return []
+    cwd = pathlib.Path.cwd()
+    found: list[dict] = []
+    pj = _read_json(cwd / "package.json")
+    if pj is not None:
+        found += _npm_deps(pj)
+    try:
+        found += _requirements_deps((cwd / "requirements.txt").read_text())
+    except Exception:
+        pass
+    try:
+        found += _pyproject_deps((cwd / "pyproject.toml").read_text())
+    except Exception:
+        pass
+    seen: dict[str, dict] = {}
+    for t in found:
+        seen.setdefault(t["name"], t)
+    return list(seen.values())
+
+
+_DEP_RISK_TIERS = frozenset({"blocked", "restricted"})
+
+
+def _dep_needs_look(r: dict) -> bool:
+    """A dependency is already installed, so its grade is advice; and the static
+    scanner's high-severity PATTERN hits (exec / fs / deserialization regexes) fire
+    all over large, legitimate frameworks (fastapi: 30 highs, 0 critical). So a
+    dependency 'needs a look' only on evidence that is not a pattern hit: a critical
+    finding, a published advisory for the installed version, a deprecation, a known
+    incident, or a blocked / restricted tier. Everything else is reported with its
+    score and counted OK."""
+    if r.get("verdict") == "safe":
+        return False
+    return bool(
+        int(r.get("critical") or 0) > 0
+        or int(r.get("advisories") or 0) > 0
+        or r.get("deprecated")
+        or r.get("incident")
+        or str(r.get("tier") or "") in _DEP_RISK_TIERS
+    )
+
+
+def _dep_coord(t: dict) -> str:
+    return f"{t['registry']}:{t['pkg']}" + (f"@{t['spec']}" if t.get("spec") else "")
+
+
+def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: float
+                          ) -> tuple[list[str], list[tuple[str, dict]], bool]:
+    """Grade up to DEPS_CAP not-yet-graded dependencies within the shared time budget.
+    Returns (report lines for the newly graded ones, (name, verdict) for EVERY graded
+    dependency of this manifest incl. cached ones, whether the API throttled us). A
+    429 or a 5xx stops the pass for this session: burning the budget on refused
+    requests helps nobody, and the rest are picked up next time."""
+    lines: list[str] = []
+    new = 0
+    throttled = False
+    for t in deps:
+        entry = cache.get(t["name"])
+        if _is_cached(entry, t["id"], now):
+            continue
+        if new >= DEPS_CAP or time.monotonic() - started > BUDGET:
+            break
+        new += 1
+        try:
+            r: dict | None = _scan(t)
+        except _UnscannableError:
+            r = None
+        except urllib.error.HTTPError as e:
+            if e.code == 429 or e.code >= 500:
+                throttled = True
+                break
+            continue
+        except Exception:
+            continue  # transient; next session
+        if r is None:
+            cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_UNSCANNABLE}
+            lines.append(f"➖ dependency '{t['pkg']}' ({_dep_coord(t)}): not scanned — "
+                         "AgentAvow couldn't read it.")
+            continue
+        rec = _record(t, r, now)
+        rec["spec"] = t.get("spec", "")
+        cache[t["name"]] = rec
+        sandbox = f"; {r['sandbox']}" if r.get("sandbox") else ""
+        coord = _dep_coord(t)
+        if r["verdict"] == "safe":
+            lines.append(f"✅ dependency '{t['pkg']}' ({coord}): AgentAvow {r['score']}/100 — "
+                         f"safe{sandbox}.")
+        elif _dep_needs_look(r):
+            why = []
+            if r.get("critical"):
+                why.append(f"{r['critical']} critical finding(s)")
+            if r.get("advisories"):
+                why.append(f"{r['advisories']} advisory(ies) for this version")
+            if r.get("deprecated"):
+                why.append("DEPRECATED by its maintainer (no more security fixes)")
+            if r.get("incident"):
+                why.append("a known incident")
+            if not why:
+                why.append(f"{r.get('tier') or 'low'} tier")
+            lines.append(f"📦 dependency '{t['pkg']}' ({coord}): AgentAvow {r['score']}/100 — "
+                         f"needs a look: {'; '.join(why)}{sandbox}.")
+        else:
+            lines.append(f"ℹ️ dependency '{t['pkg']}' ({coord}): AgentAvow {r['score']}/100 — "
+                         f"no critical findings, no advisories; {r['blocking']} high-severity "
+                         f"pattern hit(s) (common in large frameworks), see the report{sandbox}.")
+    graded: list[tuple[str, dict]] = []
+    for t in deps:
+        e = cache.get(t["name"])
+        if isinstance(e, dict) and e.get("id") == t["id"] and "score" in e:
+            graded.append((t["pkg"], e))
+    return lines, graded, throttled
+
+
+def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = False) -> str:
+    """' Dependencies: graded 12 of 38 — 11 safe, 1 needs a look (lowest: ...).'"""
+    if not total:
+        return ""
+    paused = " (paused: rate limited; continues next session)" if throttled else ""
+    done = len(graded)
+    if not done:
+        return f" Dependencies: 0 of {total} graded yet{paused}."
+    risky = [(n, r) for n, r in graded if _dep_needs_look(r)]
+    look = len(risky)
+    ok = done - look
+    of = f"{done} of {total}" if done < total else f"all {total}"
+    out = f" Dependencies: graded {of} — {ok} OK, {look} need{'s' if look == 1 else ''} a look"
+    if look:
+        name, worst = min(risky, key=lambda g: int(g[1].get("score") or 0))
+        tag = (", deprecated" if worst.get("deprecated") else
+               f", {worst['critical']} critical" if worst.get("critical") else
+               ", advisory" if worst.get("advisories") else
+               ", incident" if worst.get("incident") else "")
+        out += f" (lowest: '{name}' {worst.get('score')}/100{tag})"
+    return out + paused + "."
+
+
 def _servers_elsewhere(here: list[dict]) -> int:
     """How many scannable servers are configured for OTHER projects on this machine
     (not in this session's list). Reported as a count only; they are graded when
@@ -280,16 +511,45 @@ def _servers_elsewhere(here: list[dict]) -> int:
         return 0
 
 
+def _advisory_applies(a: object) -> bool:
+    """Does a raw advisory entry apply to the installed version? An explicit flag wins;
+    otherwise only an advisory with no fix counts. A fixed one with no version match
+    is history, not evidence against this version."""
+    if not isinstance(a, dict):
+        return False
+    for key in ("affects_current_version", "current_version_affected"):
+        if key in a:
+            return bool(a[key])
+    return not (a.get("fixed_in") or a.get("fixed") or a.get("fixed_version"))
+
+
 def _verdict(data: dict) -> dict:
     """The parts of a scan response the hook reports and the gate acts on."""
     score = int(data.get("trust_score") or 0)
     items = (data.get("findings") or {}).get("items") or []
     blocking = sum(1 for i in items if i.get("severity") in ("critical", "high"))
+    critical = sum(1 for i in items if i.get("severity") == "critical")
+    # Advisories for the installed version. ``advisories_affecting_version`` (MCP shape)
+    # is already filtered: count it all. The raw ``advisories`` list is the package's
+    # HISTORY (fastapi: a CSRF fixed in 0.65.2, current 0.142.2), so an entry counts
+    # only if it says it affects the current version, or has no fix at all.
+    adv = data.get("advisories_affecting_version")
+    if isinstance(adv, list):
+        advisories = len(adv)
+    else:
+        raw = data.get("advisories") if isinstance(data.get("advisories"), list) else []
+        advisories = sum(1 for a in raw if _advisory_applies(a))
+    # A past incident (chalk, Sep 2025) only matters if the installed version is affected.
+    ih = data.get("incident_history") if isinstance(data.get("incident_history"), dict) else {}
+    incident = bool(data.get("incident")) or bool(ih.get("current_version_affected"))
     digests = data.get("tool_digests")
     return {
         "score": score,
         "verdict": "safe" if (score >= 81 and blocking == 0) else "needs review",
         "blocking": blocking,
+        "critical": critical,
+        "advisories": advisories,
+        "incident": incident,
         "tier": str(data.get("trust_tier") or ""),
         "grade": str(data.get("grade") or ""),
         "tool_digests": digests if isinstance(digests, dict) else {},
@@ -474,10 +734,12 @@ def _intro_message() -> str:
         if _install_source() == "plugin"
         else 'ask Claude "is <tool> safe?" or open https://agentavow.com/check'
     )
-    return ("AgentAvow: no remote MCP servers to scan yet. Add one (for example "
+    return ("AgentAvow: nothing to grade here yet — no remote MCP servers and no "
+            "package.json / requirements.txt in this folder. Add a server (for example "
             "`claude mcp add <name> <https url>` or `claude mcp add <name> -- npx <package>`) "
-            "and it is graded before it is added, and again at your next session start. "
-            f"To check any tool right now, {how}.")
+            "and it is graded before it is added and again at your next session start; open "
+            "a project and its direct dependencies are graded too. To check any tool right "
+            f"now, {how}.")
 
 
 def _show_intro_once() -> None:
@@ -494,17 +756,23 @@ def _show_intro_once() -> None:
         print(json.dumps({"systemMessage": _intro_message()}))
 
 
-def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0) -> str:
+def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
+             servers_present: bool = True) -> str:
     """One line a person can act on: how many servers were graded, how many are safe,
-    and the one that needs attention most. Shown as the hook's systemMessage and
-    relayed by Claude at the top of its first reply. ``elsewhere`` = servers
-    configured for other projects, mentioned so nothing looks silently skipped."""
+    and the one that needs attention most, then the dependency clause. Shown as the
+    hook's systemMessage and relayed by Claude at the top of its first reply.
+    ``elsewhere`` = servers configured for other projects, mentioned so nothing looks
+    silently skipped. ``servers_present`` False = this project has no MCP servers and
+    the line is about dependencies only."""
     n = len(graded)
     tail = (f" {elsewhere} more configured for other projects, graded when you open them."
             if elsewhere else "")
+    if not servers_present:
+        return ("AgentAvow pre-check: no MCP servers in this project." + deps
+                + " Ask for the AgentAvow pre-check for details." + tail)
     if not n:
         return ("AgentAvow pre-check: a configured MCP server could not be scanned; "
-                "ask for the AgentAvow pre-check for details." + tail)
+                "ask for the AgentAvow pre-check for details." + deps + tail)
     safe = sum(1 for _, r in graded if r["verdict"] == "safe")
     review = n - safe
     parts = [f"AgentAvow pre-check: graded {n} MCP server{'' if n == 1 else 's'} — "
@@ -513,7 +781,7 @@ def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0) -> str:
         name, worst = min(graded, key=lambda g: g[1]["score"])
         extra = f", {worst['blocking']} blocking" if worst["blocking"] else ""
         parts.append(f" (lowest: '{name}' {worst['score']}/100{extra})")
-    parts.append(". Ask for the AgentAvow pre-check for details." + tail)
+    parts.append("." + deps + " Ask for the AgentAvow pre-check for details." + tail)
     return "".join(parts)
 
 
@@ -545,7 +813,11 @@ def main() -> None:
         targets = _targets()
     except Exception:
         return
-    if not targets:
+    try:
+        deps = _dependency_targets()
+    except Exception:
+        deps = []
+    if not targets and not deps:
         _show_intro_once()
         return
 
@@ -594,6 +866,18 @@ def main() -> None:
         lines.append(f"{flag} MCP '{t['name']}' ({coord}): {changed}AgentAvow {score}/100 — "
                      f"{verdict}{extra}{sandbox}.")
 
+    dep_clause = ""
+    if deps:
+        try:
+            dep_lines, dep_graded, throttled = _dep_lines_and_graded(cache, deps, now, started)
+            lines += dep_lines
+            dep_clause = _deps_clause(dep_graded, len(deps), throttled)
+            if throttled and not lines:
+                lines.append("➖ dependencies: the AgentAvow API rate-limited this session start; "
+                             "grading continues next session.")
+        except Exception:
+            pass  # fail-open: the dependency pass can never break the server report
+
     _save_cache(cache)
     if not lines:
         return
@@ -602,15 +886,18 @@ def main() -> None:
         elsewhere = _servers_elsewhere(targets)
     except Exception:
         elsewhere = 0
-    summary = _summary(graded, elsewhere)
+    summary = _summary(graded, elsewhere, dep_clause, servers_present=bool(targets))
     context = (
-        "AgentAvow pre-check — new MCP servers scanned before you rely on them.\n"
+        "AgentAvow pre-check — new MCP servers and direct dependencies graded before you "
+        "rely on them.\n"
         "The user has NOT seen this (hook output is not displayed to them). At the very "
         "start of your first reply in this session, before anything else, tell them in one "
         f"or two lines: \"{summary}\" Then carry on with whatever they asked. If they want "
         "details, use the lines below; do not repeat the summary in later replies.\n"
         + "\n".join(lines)
-        + "\nReview any ⚠️ before trusting it. Full reports: https://agentavow.com/check"
+        + "\nReview any ⚠️ before trusting it. A 📦 dependency is already installed: its grade "
+          "is advice, not a stop; an ℹ️ dependency has only pattern hits, no critical finding "
+          "or advisory. Full reports: https://agentavow.com/check"
     )
     print(json.dumps({
         "systemMessage": summary,

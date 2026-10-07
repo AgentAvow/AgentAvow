@@ -1,5 +1,13 @@
 # AgentAvow Trust
 
+**What you'll see.** Install the plugin and start a session. Claude's first reply opens with
+one line, for example: "AgentAvow pre-check: graded 8 MCP servers — 2 safe, 6 need review
+(lowest: 'task-master' 36/100, 5 blocking). Dependencies: graded 12 of 38 — 11 safe, 1 needs
+a look (lowest: 'left-pad' 70/100, deprecated)." Ask for the pre-check and you get one line
+per server and per dependency with its score, verdict, and report link. From then on, a
+server you add with `claude mcp add` is graded before it is added: a critical finding asks
+you first; a clean-but-thin result just tells you. Nothing blocks; you decide.
+
 Check whether a tool is safe before your agent connects to it. AgentAvow scans an MCP
 server, a package, or a GitHub repo and returns two scores: a 0–100 trust score, with a
 plain safe or needs-review verdict and the findings behind it, and an adoption score
@@ -16,7 +24,7 @@ Scanning is free and needs no account.
 | `/scan` command | `/scan npm chalk`, `/scan owner/repo`, `/scan https://mcp.example.com/mcp` | Chat, Cowork, Claude Code |
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the verdict before it goes ahead. | Chat, Cowork, Claude Code |
 | Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. A critical or high finding, or a blocked/restricted tier: Claude Code asks you, with the verdict as the reason. Anything else (safe, a soft needs-review with no findings, not scannable): a one-line verdict and the add proceeds. Never denies. | Claude Code, Cowork |
-| SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project) that it has not seen before; servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many graded, how many safe, the lowest), and keeps one line per server for when you ask. | Claude Code, Cowork |
+| SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project) that it has not seen before, and the project's direct dependencies (package.json `dependencies`, requirements.txt, pyproject `[project].dependencies`; up to 15 per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns it off). Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many graded, how many safe, the lowest), and keeps one line per server for when you ask. | Claude Code, Cowork |
 | PreToolUse gate | Before each MCP tool call, checks the grade on file for that server. Denies a call to a server in the blocked tier; asks before a tool whose definition changed since it was graded. | Claude Code, Cowork |
 
 The session-start hook and the skill warn; a low score adds context and you decide.

@@ -29,6 +29,9 @@ def hook(tmp_path, monkeypatch):
     mod = _load(PLUGIN_COPY)
     monkeypatch.setattr(mod, "CACHE", tmp_path / "scanned.json")
     monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
+    # The repo root has a pyproject.toml; run from an empty folder so the dependency
+    # pass has nothing to grade unless a test writes a manifest.
+    monkeypatch.chdir(tmp_path)
     return mod
 
 
@@ -346,7 +349,7 @@ def test_nothing_to_scan_shows_the_intro_once_and_makes_no_request(hook, monkeyp
     calls = []
     first = _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: calls.append(t))
     second = _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: calls.append(t))
-    assert "no remote MCP servers to scan yet" in first["systemMessage"]
+    assert "nothing to grade here yet" in first["systemMessage"]
     assert "/agentavow-trust:scan" in first["systemMessage"]  # the plugin copy names the command
     assert "hookSpecificOutput" not in first  # user-facing only; nothing enters Claude's context
     assert second == {}
@@ -403,7 +406,7 @@ def test_intro_is_not_shown_when_there_are_targets(hook, monkeypatch, capsys):
     out = _run_raw(hook, monkeypatch, capsys,
                    [_mcp("a", "https://mcp.example.com/mcp")],
                    lambda t, force=False: _ok(92, "safe", 0))
-    assert "no remote MCP servers to scan yet" not in out.get("systemMessage", "")
+    assert "nothing to grade here yet" not in out.get("systemMessage", "")
     assert "92/100" in out["hookSpecificOutput"]["additionalContext"]
 
 

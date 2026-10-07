@@ -1,6 +1,9 @@
 {
   "name": "agentavow",
-  "owner": { "name": "AgentAvow", "url": "https://agentavow.com" },
+  "owner": {
+    "name": "AgentAvow",
+    "url": "https://agentavow.com"
+  },
   "metadata": {
     "description": "AgentAvow — signed, verifiable safety grades for the tools your AI agent connects to."
   },
@@ -8,8 +11,8 @@
     {
       "name": "agentavow-trust",
       "source": "./plugins/agentavow-trust",
-      "description": "Scan any MCP server, package, or repo for a signed 0-100 trust score before you trust it. Bundles the AgentAvow MCP connector, a /scan command, a scan-before-connect skill, a session-start hook that grades newly added MCP servers, and a per-call gate for blocked servers and changed tool definitions.",
-      "version": "0.1.13"
+      "description": "At your next session, Claude tells you which of your MCP servers and direct dependencies are safe. Anything you add with `claude mcp add` is graded before it is added. Signed 0-100 trust scores you can verify offline, plus the AgentAvow connector, a /scan command, and a per-call gate for blocked or changed tools.",
+      "version": "0.1.14"
     }
   ]
 }
