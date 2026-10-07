@@ -550,3 +550,20 @@ def test_child_process_method_calls_stay_defects(code):
 def test_child_process_method_calls_benign_stay_capabilities(code):
     assert not [f for f in _defects(_scan(code, "index.js"))
                 if f.severity in ("critical", "high", "medium")]
+
+
+def test_capabilities_summary_reaches_the_api_response():
+    """`_package_response` is the single builder for every PublicScanResponse; it must
+    carry the capability chips the scan dict computed (it dropped them at first)."""
+    from src.api.public_scan_router import _package_response, _scan_result_to_dict
+
+    r = ScanResult(repo="pypi:x", stars=0, description="", framework="")
+    r.findings = [Finding(
+        category="unsafe_exec", name="subprocess.run / Popen (Python)", severity="info",
+        file_path="x/a.py", line_number=1, snippet="", kind="capability",
+        capability="process:spawn",
+    )]
+    data = _scan_result_to_dict(r)
+    assert data["capabilities"], "the dict should already carry the summary"
+    resp = _package_response("pypi:x", data, "jws", cached=False)
+    assert [c["capability"] for c in resp.capabilities] == ["process:spawn"]
