@@ -25,6 +25,7 @@ Useful flags:
 agentavow scan .              # human summary
 agentavow scan . --json out.json      # structured findings (file · line · severity · remediation)
 agentavow scan . --sarif out.sarif    # SARIF 2.1.0 for code-scanning tools
+agentavow scan . --gitlab-code-quality gl-code-quality-report.json   # GitLab MR widget
 agentavow scan . --min-score 60       # exit non-zero below 60 (gate a commit hook)
 agentavow scan . --fail-on high       # exit non-zero on any high/critical finding
 ```
@@ -54,9 +55,69 @@ jobs:
 
 Findings show up as inline PR annotations (via code scanning) and a job-summary; `trust-score` and `tier` are exposed as step outputs. Full reference: [local-scan-action](https://github.com/AgentAvow/AgentAvow/tree/main/local-scan-action).
 
+## GitLab CI (self-managed, behind a firewall)
+
+If your GitLab instance cannot be reached from the internet, the hosted scanner cannot see your repositories. The same scan runs inside your own runner instead, from a slim image you mirror into your registry. Nothing leaves your network.
+
+The image is `docker/scanner.Dockerfile` in the AgentAvow repository (intended name `ghcr.io/agentavow/scanner`): `python:3.12-slim` plus `git`, `httpx`, `pyyaml` and the scanner package. Build it from the repository root and push it to a registry your runners can pull from.
+
+```bash
+docker build -f docker/scanner.Dockerfile -t registry.example.internal/mirrors/agentavow/scanner:0.1 .
+docker push registry.example.internal/mirrors/agentavow/scanner:0.1
+```
+
+### Component
+
+GitLab 17.0 or newer can include the scan as a CI/CD component. Pin the version after `@`; it is a git tag on the component project.
+
+```yaml
+include:
+  - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@1.0.0
+    inputs:
+      min_score: 81          # fail below the "Safe to connect" floor
+      fail_on_findings: high # also fail on any high or critical finding (optional)
+      image: registry.example.internal/mirrors/agentavow/scanner:0.1
+```
+
+Self-managed instances cannot reach components hosted on gitlab.com. Mirror the AgentAvow repository into your instance and point the include at the mirror, or use the plain job below.
+
+### Plain include
+
+For older instances, or when you want to own the YAML, include the job file from a mirror at a pinned tag, or copy it into your repository.
+
+```yaml
+include:
+  - project: <group>/agentavow
+    ref: v0.1.0
+    file: /gitlab/agentavow-scan.gitlab-ci.yml
+
+variables:
+  AGENTAVOW_IMAGE: registry.example.internal/mirrors/agentavow/scanner:0.1
+  AGENTAVOW_MIN_SCORE: "81"
+```
+
+### What you get
+
+The job log leads with the verdict phrase and the trust score. Two artifacts are published on every run, pass or fail: `agentavow-scan.json` (every finding with file, line, severity and remediation) and `gl-code-quality-report.json`, which GitLab reads as a Code Quality report and shows in the merge-request widget on every tier. The job runs on merge-request pipelines and on the default branch; the default-branch run is the baseline GitLab diffs an MR against.
+
+### What a local scan does not include
+
+Each of these needs a network, a key, or infrastructure the runner does not have, so a local or CI scan leaves them out:
+
+- dependency CVE enrichment (advisory lookups against OSV)
+- published-artifact diffing (comparing the registry package to the source)
+- maintainer signals
+- the behavioral sandbox
+- the adoption score
+- a signature
+
+The static score is computed exactly as the hosted service computes it, so the number you see in CI is the number a hosted scan of the same tree starts from. For a signed attestation a third party can verify, run the hosted scan on top.
+
+Full reference, including inputs, exit codes and the report format: [gitlab/README.md](https://github.com/AgentAvow/AgentAvow/tree/main/gitlab).
+
 ## Actioning the output
 
-`--json` emits every finding with `category`, `severity`, `file`, `line`, and a `remediation` string — enough to drive a fix in your inner loop or fail a check. `--sarif` feeds GitHub code scanning (or any SARIF viewer) so findings land as annotations on the exact line.
+`--json` emits every finding with `category`, `severity`, `file`, `line`, and a `remediation` string — enough to drive a fix in your inner loop or fail a check. `--sarif` feeds GitHub code scanning (or any SARIF viewer) so findings land as annotations on the exact line. `--gitlab-code-quality` writes the GitLab Code Quality report for the merge-request widget.
 
 ## Tuning false positives
 

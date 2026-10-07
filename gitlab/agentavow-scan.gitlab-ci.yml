@@ -1,0 +1,51 @@
+# AgentAvow scan: plain includable job for self-managed GitLab.
+#
+# Same job as the CI/CD component (templates/scan.yml) without the component
+# machinery, for instances that cannot reference components or run an older
+# GitLab. Copy this file into your repository (or mirror the AgentAvow project)
+# and include it:
+#
+#   include:
+#     - local: /ci/agentavow-scan.gitlab-ci.yml
+#   # or, from a mirrored project at a pinned tag:
+#     - project: <group>/agentavow
+#       ref: v0.1.0
+#       file: /gitlab/agentavow-scan.gitlab-ci.yml
+#
+# Override the AGENTAVOW_* variables in your own `variables:` block or on the job.
+
+variables:
+  # The scanner image. Behind a firewall, point this at your internal registry.
+  AGENTAVOW_IMAGE: "ghcr.io/agentavow/scanner:0.1"
+  # Fail below this trust score (0-100). 81 is the floor of "Safe to connect".
+  AGENTAVOW_MIN_SCORE: "81"
+  # Also fail on any finding at or above this severity: none | critical | high | medium
+  AGENTAVOW_FAIL_ON: "none"
+  # Directory to scan, relative to the repository root.
+  AGENTAVOW_PATH: "."
+
+agentavow-scan:
+  stage: test
+  image:
+    name: $AGENTAVOW_IMAGE
+    entrypoint: [""]
+  interruptible: true
+  script:
+    - |
+      set -- "$AGENTAVOW_PATH" \
+        --json agentavow-scan.json \
+        --gitlab-code-quality gl-code-quality-report.json \
+        --min-score "$AGENTAVOW_MIN_SCORE"
+      if [ "$AGENTAVOW_FAIL_ON" != "none" ]; then set -- "$@" --fail-on "$AGENTAVOW_FAIL_ON"; fi
+      agentavow scan "$@"
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - agentavow-scan.json
+      - gl-code-quality-report.json
+    reports:
+      codequality: gl-code-quality-report.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
