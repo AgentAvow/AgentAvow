@@ -229,6 +229,38 @@ def snapshot(day: str, since_hours: int) -> dict:
     return row
 
 
+REDIS_WRITE_PROGRAM = r"""
+import asyncio, json, sys
+from src.redis_client import get_redis
+day = sys.argv[1]
+row = json.loads(sys.stdin.read())
+async def main():
+    r = get_redis()
+    key = f"ag:metrics:traffic:{day}"
+    await r.delete(key)
+    await r.hset(key, mapping={k: str(v) for k, v in row.items()})
+    # no expiry: this is the durable copy the admin dashboard reads
+    await r.sadd("ag:metrics:traffic:days", day)
+    print("ok")
+asyncio.run(main())
+"""
+
+
+def write_redis(row: dict) -> bool:
+    """Mirror the row into Redis (hash ``ag:metrics:traffic:<day>``, no TTL) so the admin
+    dashboard can show the series without reading host files. Best-effort."""
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", "-i", "-w", "/app", BACKEND_CONTAINER, "python", "-c",
+             REDIS_WRITE_PROGRAM, row["day"]],
+            input=json.dumps(row).encode(), capture_output=True, timeout=120,
+        )
+        return proc.stdout.decode().strip().endswith("ok")
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"redis mirror failed: {exc}\n")
+        return False
+
+
 def write_row(row: dict, path: str = CSV_PATH) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     existing: list[dict] = []
@@ -256,6 +288,7 @@ def main() -> int:
     day = a.day or (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     row = snapshot(day, a.since_hours)
     write_row(row, a.csv)
+    row["redis_mirrored"] = write_redis(row)
     print(json.dumps(row, separators=(",", ":")))
     return 0
 

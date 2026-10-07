@@ -436,6 +436,98 @@ function BehavioralPanel({ win }: { win: Win }) {
   )
 }
 
+// ── CLAUDE TRAFFIC (durable series from the daily snapshot cron) ─────────────
+interface TrafficRow {
+  day: string; cc_machines?: number | null; cc_new_machines_30d?: number | null; cc_sessions?: number | null
+  claudeai_reqs?: number | null; hook_machines_nginx?: number | null; hook_reqs?: number | null
+  calls_claude_code?: number | null; callers_claude_code?: number | null; calls_claude?: number | null
+  callers_claude?: number | null; calls_chatgpt?: number | null; hook_top_version?: string
+  cc_machines_excl_owner?: number | null; hook_machines_excl_owner?: number | null; log_complete?: number | null
+}
+interface Traffic { days?: string[]; rows?: TrafficRow[]; series?: Record<string, (number | null)[]>; latest?: TrafficRow | null; covered_days?: number; notes?: string[] }
+
+function ClaudeTrafficPanel() {
+  const [days, setDays] = useState<14 | 30 | 90>(14)
+  const [mode, setMode] = useState<'machines' | 'calls'>('machines')
+  const { data } = useQuery<Traffic>({
+    queryKey: ['admin-dash-claude-traffic', days],
+    queryFn: async () => { try { return (await api.get('/admin/metrics/traffic', { params: { days } })).data } catch { return {} } },
+  })
+  const s = data?.series || {}
+  const num = (a?: (number | null)[]) => (a ?? []).map((v) => v ?? 0)
+  const lines: TrendLine[] = mode === 'machines'
+    ? [
+        { key: 'cc', label: 'Claude Code machines connecting', color: '#2dd4bf', data: num(s.cc_machines) },
+        { key: 'new', label: 'New machines (30d)', color: '#fbbf24', data: num(s.cc_new_machines_30d) },
+        { key: 'hook', label: 'Plugin hook machines', color: '#94a3b8', dashed: true, data: num(s.hook_machines_nginx) },
+        { key: 'ccx', label: 'Claude Code machines · excl. owner', color: '#818cf8', dashed: true, data: num(s.cc_machines_excl_owner) },
+      ]
+    : [
+        { key: 'cai', label: 'claude.ai connector requests', color: '#818cf8', data: num(s.claudeai_reqs) },
+        { key: 'cc-calls', label: 'Claude Code tool calls', color: '#2dd4bf', data: num(s.calls_claude_code) },
+        { key: 'claude-calls', label: 'claude.ai tool calls', color: '#e879f9', data: num(s.calls_claude) },
+        { key: 'hook-scans', label: 'Plugin hook scans', color: '#94a3b8', dashed: true, data: num(s.hook_reqs) },
+      ]
+  const rows = (data?.rows || []).slice(-10).reverse()
+  const latest = data?.latest
+  const toggle = (
+    <div className="flex items-center gap-3 font-mono text-[12px]">
+      <div className="flex gap-1">
+        {(['machines', 'calls'] as const).map((m) => (
+          <button key={m} onClick={() => setMode(m)} className={`px-2.5 py-1 rounded-lg transition-colors ${mode === m ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>
+            {m === 'machines' ? 'Machines' : 'Requests & calls'}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-1">
+        {([14, 30, 90] as const).map((d) => (
+          <button key={d} onClick={() => setDays(d)} className={`px-2.5 py-1 rounded-lg transition-colors ${days === d ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>L{d}</button>
+        ))}
+      </div>
+    </div>
+  )
+  return (
+    <Section title="Claude traffic — day by day" note="Traffic that originates in Anthropic surfaces, one row per UTC day, written by the nightly snapshot and kept without expiry (the nginx log itself only holds four days). 'Machines connecting' is distinct IPs that opened the plugin's MCP server from Claude Code — the headline adoption number — and is an nginx-origin count, NOT the tool-call counters in the panels above. 'excl. owner' strips the listed test machines. A row marked partial did not cover all 24 hours." right={toggle}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
+        <Stat label="Machines connecting" value={fmt(latest?.cc_machines)} sub={`${fmt(latest?.cc_new_machines_30d)} new · ${latest?.day ?? '—'}${latest?.log_complete === 0 ? ' (partial)' : ''}`} series={num(s.cc_machines)} />
+        <Stat label="claude.ai connector reqs" value={fmt(latest?.claudeai_reqs)} sub="via Anthropic's proxy" series={num(s.claudeai_reqs)} />
+        <Stat label="Hook machines" value={fmt(latest?.hook_machines_nginx)} sub={`${fmt(latest?.hook_reqs)} scans · top ${latest?.hook_top_version ?? '—'}`} series={num(s.hook_machines_nginx)} />
+        <Stat label="Claude Code tool calls" value={fmt(latest?.calls_claude_code)} sub={`${fmt(latest?.callers_claude_code)} distinct machines`} series={num(s.calls_claude_code)} />
+        <Stat label="Days covered" value={fmt(data?.covered_days)} sub={`of last ${days}`} />
+      </div>
+      <div className="glass rounded-2xl p-5">
+        <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">{mode === 'machines' ? 'Machines per day' : 'Requests and tool calls per day'}</div>
+        <TrendChart days={data?.days} lines={lines} empty="No snapshot rows yet. The nightly cron writes the first row at 00:40 UTC." />
+      </div>
+      {rows.length > 0 && (
+        <div className="glass rounded-2xl p-5 mt-3 overflow-x-auto">
+          <div className="text-[11.5px] font-mono uppercase tracking-wide text-text-muted mb-2">Last {rows.length} days</div>
+          <table className="w-full text-[12.5px] tabular-nums">
+            <thead>
+              <tr className="text-[11px] font-mono uppercase tracking-wide text-text-muted/60">
+                <th className="text-left py-1">Day</th><th className="text-right">Machines</th><th className="text-right">New</th><th className="text-right">Sessions</th>
+                <th className="text-right">claude.ai reqs</th><th className="text-right">Hook machines</th><th className="text-right">Hook scans</th>
+                <th className="text-right">CC calls / machines</th><th className="text-right">claude.ai calls</th><th className="text-right">ChatGPT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.day} className={`border-t border-border/40${r.log_complete === 0 ? ' opacity-70' : ''}`}>
+                  <td className="py-1 font-mono text-text-muted">{r.day}{r.log_complete === 0 ? ' *' : ''}</td>
+                  <td className="text-right text-text">{fmt(r.cc_machines)}</td><td className="text-right">{fmt(r.cc_new_machines_30d)}</td><td className="text-right">{fmt(r.cc_sessions)}</td>
+                  <td className="text-right">{fmt(r.claudeai_reqs)}</td><td className="text-right">{fmt(r.hook_machines_nginx)}</td><td className="text-right">{fmt(r.hook_reqs)}</td>
+                  <td className="text-right">{fmt(r.calls_claude_code)} / {fmt(r.callers_claude_code)}</td><td className="text-right">{fmt(r.calls_claude)}</td><td className="text-right">{fmt(r.calls_chatgpt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-text-muted/60 mt-2">* partial day (log did not cover all 24 hours)</p>
+        </div>
+      )}
+    </Section>
+  )
+}
+
 // ── METRICS TAB ──────────────────────────────────────────────────────────────
 function MetricsTab() {
   const [win, setWin] = useState<Win>('7d')
@@ -603,6 +695,8 @@ function MetricsTab() {
           </Section>
         )
       })()}
+
+      <ClaudeTrafficPanel />
 
       <BehavioralPanel win={win} />
 

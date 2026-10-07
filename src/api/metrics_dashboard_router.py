@@ -975,6 +975,96 @@ async def behavioral_metrics(
     return await _behavioral_aggregate(window)
 
 
+_TRAFFIC_PREFIX = f"{_METRICS_PREFIX}traffic:"
+_TRAFFIC_INT_COLUMNS = (
+    "cc_machines", "cc_new_machines_30d", "cc_reqs", "cc_sessions", "claudeai_reqs",
+    "claudeai_ips", "hook_machines_nginx", "hook_reqs", "gate_machines",
+    "preinstall_machines", "scans_200", "badges_200", "calls_claude", "callers_claude",
+    "calls_claude_code", "callers_claude_code", "calls_chatgpt", "callers_chatgpt",
+    "calls_other", "callers_other", "calls_total", "hook_machines_hll",
+    "owner_cc_reqs", "owner_cc_sessions", "owner_hook_reqs", "owner_scans_200",
+    "cc_machines_excl_owner", "hook_machines_excl_owner", "log_complete",
+)
+_TRAFFIC_NOTES = [
+    "Claude-origin traffic per UTC day, written once a day by scripts/ops/"
+    "anthropic_traffic_snapshot.py on the prod host (cron 00:40 UTC for the previous day); "
+    "kept in Redis without expiry so the series outlives the 4-day nginx log window.",
+    "cc_machines = distinct client IPs that POSTed /mcp with a claude-code/* user agent "
+    "(Claude Code connecting the plugin's MCP server); cc_new_machines_30d = not seen in "
+    "the previous 30 days (salted hashes, no IPs stored). These are nginx-origin counts, "
+    "NOT the Redis tool-call counters shown elsewhere on this page.",
+    "claudeai_reqs = requests from the claude.ai connector (Claude-User UA, via Anthropic's "
+    "proxy, so claudeai_ips is a floor). hook_machines_nginx = distinct IPs running the "
+    "plugin's session-start hook; hook_machines_hll = the same from the salted HLL.",
+    "calls_*/callers_* = real MCP tool invocations and distinct machines per surface (the "
+    "same Redis counters as the MCP panel). owner_* and *_excl_owner strip IPs listed in "
+    "data/owner-ips.txt on the host (Kenne's test machines).",
+    "log_complete = 0 means the nginx log did not cover all 24 hours of that day (partial "
+    "day or a log rotation gap); treat that row as a lower bound.",
+]
+
+
+async def _traffic_rows(n_days: int) -> tuple[list[str], list[dict]]:
+    """``(days, rows)`` for the last ``n_days`` UTC days from the durable traffic hashes.
+    Missing days are absent from ``rows`` (never fabricated). Fail-open: ([], [])."""
+    days = window_day_strs(n_days)
+    rows: list[dict] = []
+    try:
+        from src.redis_client import get_redis
+
+        r = get_redis()
+        for day in days:
+            raw = await r.hgetall(f"{_TRAFFIC_PREFIX}{day}")
+            if not raw:
+                continue
+            row: dict = {"day": day}
+            for k, v in raw.items():
+                key = k.decode() if isinstance(k, bytes) else str(k)
+                val = v.decode() if isinstance(v, bytes) else str(v)
+                if key in _TRAFFIC_INT_COLUMNS:
+                    try:
+                        row[key] = int(float(val)) if val != "" else None
+                    except ValueError:
+                        row[key] = None
+                elif key != "day":
+                    row[key] = val
+            rows.append(row)
+    except Exception:
+        logging.getLogger(__name__).exception("traffic rows unavailable")
+        return [], []
+    return days, rows
+
+
+@router.get("/metrics/traffic", dependencies=[Depends(rate_limit_reads)])
+async def traffic_metrics(
+    days: int = Query(30, ge=1, le=366),
+    current_entity: Entity = Depends(get_current_entity),
+) -> dict:
+    """Durable Claude-origin traffic series (machines connecting, claude.ai connector
+    requests, plugin-hook machines, tool calls + distinct callers by surface), one row per
+    UTC day, for the admin dashboard. Admin only. See ``notes`` for what each column counts
+    and why it differs from the live MCP counters."""
+    require_admin(current_entity)
+    day_strs, rows = await _traffic_rows(days)
+    by_day = {r["day"]: r for r in rows}
+    series = {
+        col: [by_day.get(d, {}).get(col) for d in day_strs]
+        for col in ("cc_machines", "cc_new_machines_30d", "cc_sessions", "claudeai_reqs",
+                    "hook_machines_nginx", "hook_reqs", "calls_claude_code",
+                    "callers_claude_code", "calls_claude", "callers_claude", "calls_chatgpt",
+                    "cc_machines_excl_owner", "hook_machines_excl_owner")
+    }
+    latest = rows[-1] if rows else None
+    return {
+        "days": day_strs,
+        "rows": rows,
+        "series": series,
+        "latest": latest,
+        "covered_days": len(rows),
+        "notes": _TRAFFIC_NOTES,
+    }
+
+
 _EVAL_TASKS: set[asyncio.Task] = set()
 
 
