@@ -42,8 +42,15 @@ def test_self_update_from_url_high():
 
 
 def test_unpinned_remote_resource_medium():
-    f = _rugpull("URL = 'https://raw.githubusercontent.com/x/y/main/tool.py'")
+    # medium when something LOADS the mutable ref …
+    f = _rugpull("code = urlopen('https://raw.githubusercontent.com/x/y/main/tool.py').read()")
     assert f and f[0].severity == "medium"
+
+
+def test_unpinned_remote_resource_without_a_load_is_low():
+    # … and only an informational low for a bare reference ($id, homepage, docs link).
+    f = _rugpull("SCHEMA_ID = 'https://github.com/x/y/blob/main/schema.json'")
+    assert f and f[0].severity == "low"
 
 
 def test_unpinned_npx_medium():

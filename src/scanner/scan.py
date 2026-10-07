@@ -17,12 +17,15 @@ import httpx
 from src.scanner.patterns import (
     AGENT_METADATA_FILES,
     AUTH_POSITIVE_PATTERNS,
+    DANGEROUS_DELETE_ROOT_RE,
+    DECODE_SINK_RE,
     DYNAMIC_REMOTE_LOAD_PATTERNS,
     EXEC_SINK_RE,
     EXFILTRATION_PATTERNS,
     EXTENSIONLESS_SCAN_FILES,
     FILE_READ_RE,
     FS_ACCESS_PATTERNS,
+    INLINE_CODE_DANGER_RE,
     INSECURE_DESERIALIZATION_PATTERNS,
     INSTALL_SCRIPT_DANGER_RE,
     INVISIBLE_UNICODE_PATTERNS,
@@ -31,6 +34,7 @@ from src.scanner.patterns import (
     NPM_INSTALL_HOOKS,
     OBFUSCATION_PATTERNS,
     OUTBOUND_SEND_RE,
+    PEM_BODY_RE,
     PROMPT_INJECTION_PATTERNS,
     SECRET_PATTERNS,
     SENSITIVE_READ_RE,
@@ -115,6 +119,18 @@ class Finding:
     # in _dependency_penalty, since it's less reachable). Defaults "direct" so any
     # finding that can't determine reachability keeps FULL weight (never hides a CVE).
     reachability: str = "direct"
+    # Precision pass: "defect" is something a reviewer would agree is wrong;
+    # "capability" is something the tool DOES (fixed-argv spawn, eval of its own
+    # expressions, pickle of a local cache, rmtree) — reported so nothing is hidden,
+    # but never scored and never blocking. Capability severities are info|low only.
+    kind: str = "defect"
+    # Taxonomy tag for a capability (process:spawn, code:eval, data:deserialize,
+    # filesystem:delete, secret:pem_handling, binary:hex_literal); "" for defects.
+    capability: str = ""
+    # False when the file is NOT part of what a consumer installs (an sdist's
+    # Makefile / scripts/ / bench/ / tox.ini, or any file absent from the wheel).
+    # Non-installed findings are capped at severity "info" and never block.
+    installed: bool = True
 
 
 @dataclass
@@ -194,17 +210,28 @@ class ScanResult:
     env_reads: list[str] = field(default_factory=list)
     error: str | None = None
 
+    # Severity counts cover DEFECTS only: a capability finding (kind="capability") is
+    # visible in `findings` / `capabilities` but is never a critical/high/medium.
     @property
     def critical_count(self) -> int:
-        return sum(1 for f in self.findings if f.severity == "critical")
+        return sum(1 for f in self.findings
+                   if f.severity == "critical" and _is_defect(f))
 
     @property
     def high_count(self) -> int:
-        return sum(1 for f in self.findings if f.severity == "high")
+        return sum(1 for f in self.findings
+                   if f.severity == "high" and _is_defect(f))
 
     @property
     def medium_count(self) -> int:
-        return sum(1 for f in self.findings if f.severity == "medium")
+        return sum(1 for f in self.findings
+                   if f.severity == "medium" and _is_defect(f))
+
+    @property
+    def capabilities(self) -> list[dict]:
+        """What the tool DOES, grouped by taxonomy tag — the informational chips next
+        to the score. Derived from kind="capability" findings; never a score input."""
+        return _capability_summary(self.findings)
 
     # "Blocking" counts — findings in SHIPPED code (or known-malicious anywhere). These
     # drive the headline grade/tier/number so all surfaces agree about a real critical,
@@ -218,6 +245,33 @@ class ScanResult:
     def shipped_high_count(self) -> int:
         return sum(1 for f in self.findings
                    if f.severity == "high" and _finding_is_blocking(f))
+
+
+def _is_defect(f: object) -> bool:
+    """True for a finding that can move the score (everything except a capability)."""
+    return getattr(f, "kind", "defect") != "capability"
+
+
+def _capability_summary(findings: list) -> list[dict]:
+    """Group capability findings by tag: ``[{capability, label, count, files}]``."""
+    from src.scanner.exec_classify import CAPABILITY_LABELS
+
+    groups: dict[str, dict] = {}
+    for f in findings:
+        if getattr(f, "kind", "defect") != "capability":
+            continue
+        tag = getattr(f, "capability", "") or "other"
+        g = groups.setdefault(tag, {
+            "capability": tag,
+            "label": CAPABILITY_LABELS.get(tag, tag),
+            "count": 0,
+            "files": [],
+        })
+        g["count"] += 1
+        path = getattr(f, "file_path", "") or ""
+        if path and path not in g["files"] and len(g["files"]) < 5:
+            g["files"].append(path)
+    return sorted(groups.values(), key=lambda g: (-g["count"], g["capability"]))
 
 
 def _should_skip_path(path: str) -> bool:
@@ -579,18 +633,471 @@ def _is_allowlisted(
 # Context-aware checks — reduce false positives for safe usage patterns
 # ---------------------------------------------------------------------------
 
-# Regex: subprocess.run/call/etc with a hardcoded string list as first arg
-# e.g. subprocess.run(["git", "status"]) or subprocess.run("ls -la", ...)
-_SAFE_SUBPROCESS_RE = re.compile(
-    r"""subprocess\.(?:run|call|check_output|Popen)\s*\(\s*\[?\s*['"]""",
+# Exec-family argv classification (precision pass #2): the old "hardcoded string list
+# → safe" / "well-known binary → safe" regexes were replaced by
+# src/scanner/exec_classify.py, which sees the WHOLE call (multi-line), understands
+# shell=True / sh -c / node -e / python -c / curl / URLs, and reports a fixed-argv
+# spawn as a capability instead of silently skipping it.
+_PY_EXEC_CALL_RE = re.compile(
+    r"(?:subprocess\.(run|Popen|call|check_output|check_call)|os\.(system|popen))\s*\(",
+)
+_JS_EXEC_CALL_RE = re.compile(
+    r"(?:(?<![.\w])|(?:child_process|cp)\s*\.\s*)"
+    r"(execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)\s*\(",
+)
+_JS_CP_FUNCS = r"(execSync|spawnSync|execFileSync|execFile|exec|spawn|fork)"
+_JS_CP_MODULE = r"""['"](?:node:)?child_process['"]"""
+# Names a file binds to the child_process module: `const proc = require('child_process')`,
+# `import * as proc from 'node:child_process'`, `import proc from 'child_process'`.
+_JS_CP_ALIAS_RE = re.compile(
+    r"(?:\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*" + _JS_CP_MODULE + r"\s*\)"
+    r"|\bimport\s+(?:\*\s+as\s+)?([A-Za-z_$][\w$]*)\s+from\s+" + _JS_CP_MODULE + r")",
 )
 
-# Regex: subprocess with well-known safe commands (git, pip, npm, node, etc.)
-_SAFE_SUBPROCESS_CMDS_RE = re.compile(
-    r"""subprocess\.(?:run|call|check_output|Popen)\s*\(\s*\[\s*['"](git|pip|pip3|npm|npx|node|python|python3|go|cargo|make|cmake|docker|kubectl|terraform|helm|yarn|pnpm|mvn|gradle|rustc|gcc|g\+\+|clang|javac|ruby|bundle|rake|composer|dotnet|swift|xcodebuild|brew|apt|apt-get|yum|dnf|apk|conda|uv|ruff|black|isort|mypy|pytest|eslint|prettier|tsc|webpack|vite)['"]""",
+
+def _js_cp_call_re(content: str) -> re.Pattern[str]:
+    """Calls through the child_process module that `_JS_EXEC_CALL_RE` cannot see because
+    they are method calls: the inline `require('child_process').exec(...)` one-liner and
+    `<alias>.spawn(...)` for any alias this file binds. Before the precision pass the
+    bare import was a file-wide high, which hid these; now that the import is only a
+    capability, the calls themselves must be classified. Group 1 is the function name."""
+    aliases = {a for m in _JS_CP_ALIAS_RE.finditer(content) for a in m.groups() if a}
+    quals = [r"require\s*\(\s*" + _JS_CP_MODULE + r"\s*\)"]
+    quals += [r"(?<![\w$.])" + re.escape(a) for a in sorted(aliases)]
+    return re.compile(r"(?:" + "|".join(quals) + r")\s*\.\s*" + _JS_CP_FUNCS + r"\s*\(")
+
+
+_PY_EVAL_CALL_RE = re.compile(r"(?<![.\w])(eval|exec)\s*\(")
+_PY_DESER_CALL_RE = re.compile(
+    r"\b(?:cPickle|_pickle|pickle|marshal|dill|jsonpickle)\.(loads?|decode)\s*\(",
+)
+_FS_RW_RULES = frozenset({
+    "Unrestricted file read (Python)", "Unrestricted file write (Python)",
+    "fs.readFileSync / writeFileSync (Node.js)",
+})
+_RMTREE_CALL_RE = re.compile(r"(shutil\.rmtree|fs\.rm(?:Sync)?|rimraf(?:\.sync)?)\s*\(")
+_DEF_EVAL_EXEC_RE = re.compile(r"(?:async\s+)?def\s+(?:eval|exec)\s*\(")
+_PY_ASSIGN_RE_CACHE: dict[str, re.Pattern[str]] = {}
+_UNTRUSTED_WINDOW = 45   # lines: "untrusted input nearby" for the dynamic-argv rules
+_HEX_SINK_WINDOW = 3     # lines: an exec/decode sink this close makes a hex blob execution
+_HEX_SINK_RE = re.compile(
+    r"\b(?:exec|eval|Function|fromhex|unhexlify|b64decode|decompress|compile)\s*\(|vm\.run",
+)
+_HEX_SKIP_LANGS = frozenset({"rust", "go", "java"})
+_DECODED_EXEC_LINE_RE = next(
+    p for n, p, _s in OBFUSCATION_PATTERNS if n == "Decoded payload fed to exec/eval"
 )
 
-# Regex: open() on a known safe path / with Path objects / read-only config
+
+def _python_prose_lines(content: str) -> set[int]:
+    """0-based indices of lines that are INSIDE a multi-line string (docstrings, help
+    text) in a Python file, plus the opening line when it begins with the quote. Code
+    pattern groups skip these; secrets / injection / unicode still scan prose. Uses
+    ``tokenize``; falls back to a triple-quote toggle scan on tokenize errors."""
+    import io
+    import tokenize
+
+    prose: set[int] = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(content).readline):
+            if tok.type != tokenize.STRING:
+                continue
+            (srow, scol), (erow, ecol) = tok.start, tok.end
+            opens_line = tok.line[:scol].strip() == ""
+            if erow == srow:
+                # A one-line docstring / bare string statement is prose too.
+                if opens_line and tok.line[ecol:].strip() in ("", ")", ","):
+                    prose.add(srow - 1)
+                continue
+            start = srow - 1 if opens_line else srow
+            prose.update(range(start, erow))  # closing line keeps its code tail
+        return prose
+    except (tokenize.TokenError, SyntaxError, IndentationError, ValueError):
+        pass
+    prose = set()
+    in_str: str | None = None
+    for i, line in enumerate(content.split("\n")):
+        if in_str is not None:
+            prose.add(i)
+            if in_str in line:
+                in_str = None
+            continue
+        stripped = line.strip()
+        for q in ('"""', "'''"):
+            first = line.find(q)
+            if first == -1:
+                continue
+            if line.count(q) % 2 == 1:
+                in_str = q
+                if stripped.startswith(q):
+                    prose.add(i)
+            break
+    return prose
+
+
+def _js_prose_lines(content: str) -> set[int]:
+    return _js_string_state(content)[0]
+
+
+def _js_string_state(content: str) -> tuple[set[int], set[int]]:
+    """``(prose, continuation)`` for a JS/TS file, both 0-based line sets:
+
+    * ``prose`` — lines strictly INSIDE a multi-line template literal or block comment
+      (README-style text that bundles embed: install instructions with
+      `curl … | bash`, `npx …` hints);
+    * ``continuation`` — lines that BEGIN inside a template literal (prose lines plus
+      the closing line, whose code tail is still scanned) so a per-line string check
+      can start in the right state.
+
+    Nested ``${…}`` expressions are tracked so code inside them is not prose.
+    Conservative: on any confusion the walk simply ends and later lines are code."""
+    prose: set[int] = set()
+    continuation: set[int] = set()
+    i, n, line = 0, len(content), 0
+    # state stack: "tpl" (inside backtick), "expr" (inside ${…} of a template, brace depth)
+    stack: list[list] = []
+    in_str: str | None = None
+    in_block_comment = False
+    escape = False
+    while i < n:
+        ch = content[i]
+        if ch == "\n":
+            if in_block_comment or (stack and stack[-1][0] == "tpl"):
+                prose.add(line + 1)
+                continuation.add(line + 1)
+            if in_str in ("'", '"'):
+                in_str = None
+            line += 1
+            i += 1
+            escape = False
+            continue
+        if in_block_comment:
+            if content.startswith("*/", i):
+                in_block_comment = False
+                prose.discard(line)
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+            i += 1
+            continue
+        if stack and stack[-1][0] == "tpl":
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == "`":
+                stack.pop()
+                prose.discard(line)  # closing line keeps its code tail
+            elif content.startswith("${", i):
+                stack.append(["expr", 0])
+                prose.discard(line)  # this line carries code inside the template
+                i += 2
+                continue
+            i += 1
+            continue
+        # code (top level or inside a ${…} expression)
+        if content.startswith("//", i):
+            i = content.find("\n", i)
+            if i == -1:
+                break
+            continue
+        if content.startswith("/*", i):
+            in_block_comment = True
+            i += 2
+            continue
+        if ch == "/":
+            # A regex literal (`/don't/`) would desync the quote state; skip it when the
+            # previous significant char says an operand is expected here.
+            j = i - 1
+            while j >= 0 and content[j] in " \t":
+                j -= 1
+            prev = content[j] if j >= 0 else "\n"
+            if prev in "(,=:[!&|?{};+-*%<>~^\n" or content[max(0, j - 5): j + 1].endswith(
+                    ("return", "typeof")):
+                k = i + 1
+                in_class = False
+                while k < n and content[k] != "\n":
+                    c2 = content[k]
+                    if c2 == "\\":
+                        k += 2
+                        continue
+                    if in_class:
+                        if c2 == "]":
+                            in_class = False
+                    elif c2 == "[":
+                        in_class = True
+                    elif c2 == "/":
+                        break
+                    k += 1
+                if k < n and content[k] == "/":
+                    i = k + 1
+                    continue
+        if ch in "'\"":
+            in_str = ch
+        elif ch == "`":
+            stack.append(["tpl", line])
+        elif stack and stack[-1][0] == "expr":
+            if ch == "{":
+                stack[-1][1] += 1
+            elif ch == "}":
+                if stack[-1][1] == 0:
+                    stack.pop()
+                else:
+                    stack[-1][1] -= 1
+        i += 1
+    return prose, continuation
+
+
+def _in_prose_string_at(line: str, pos: int, start_in: str | None = None) -> bool:
+    r"""True if ``line[pos]`` sits inside a quoted string literal on that line AND the
+    string reads as prose up to that point (>= 3 words precede the match inside it):
+    `'Run \`npx foo\` to retry'` in an error message is advice to a human;
+    `run("npx foo")` / `URL = 'https://…'` are code. ``start_in`` seeds the state for
+    a line that begins inside a template literal opened on an earlier line."""
+    in_str: str | None = start_in
+    escape = False
+    str_start = 0
+    for i, ch in enumerate(line[:pos]):
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+        elif ch in "'\"`":
+            in_str = ch
+            str_start = i + 1
+    if in_str is None:
+        return False
+    return len(line[str_start:pos].split()) >= 3
+
+
+def _pem_has_body(lines: list[str], idx: int, marker_end: int) -> bool:
+    """True when a real key body follows the PEM header at ``lines[idx]``: a base64 run
+    of key-line length on the same line (after a ``\\n`` escape), within the next 2
+    lines, or >= 3 such lines anywhere near a marker (a key assembled from parts)."""
+    tail = lines[idx][marker_end:]
+    if PEM_BODY_RE.search(tail):
+        return True
+    for n in range(idx + 1, min(len(lines), idx + 3)):
+        if PEM_BODY_RE.search(lines[n]):
+            return True
+    lo, hi = max(0, idx - 30), min(len(lines), idx + 60)
+    body_lines = sum(1 for n in range(lo, hi) if PEM_BODY_RE.search(lines[n]))
+    return body_lines >= 3
+
+
+def _generic_secret_plausible(value: str) -> bool:
+    """A generic ``token = "…"`` value counts only if it LOOKS like a credential: letters
+    AND digits, Shannon entropy >= 3.5 bits/char, no ``/`` (path- or label-shaped
+    constants such as ``"auth-request-type/at"``). Provider rules are untouched."""
+    import math
+
+    if "/" in value:
+        return False
+    if not (re.search(r"[A-Za-z]", value) and re.search(r"\d", value)):
+        return False
+    counts: dict[str, int] = {}
+    for ch in value:
+        counts[ch] = counts.get(ch, 0) + 1
+    n = len(value)
+    entropy = -sum((c / n) * math.log2(c / n) for c in counts.values())
+    return entropy >= 3.5
+
+
+def _resolve_py_assignment(lines: list[str], idx: int, name: str):
+    """Find ``name = <expr>`` in the preceding ~80 lines and return the parsed RHS
+    (``ast`` node) — so ``cmd = ["git", "log"]`` …  ``Popen(cmd)`` reads as fixed argv."""
+    from src.scanner.exec_classify import _parse_expr, extract_call
+
+    rx = _PY_ASSIGN_RE_CACHE.get(name)
+    if rx is None:
+        rx = re.compile(r"^\s*" + re.escape(name) + r"\s*(?::[^=\n]+)?=(?!=)\s*(.*)$")
+        _PY_ASSIGN_RE_CACHE[name] = rx
+    for n in range(idx - 1, max(-1, idx - 80), -1):
+        m = rx.match(lines[n])
+        if not m:
+            continue
+        rhs = m.group(1).strip()
+        if rhs[:1] in "[(":
+            col = len(lines[n]) - len(m.group(1))
+            got = extract_call(lines, n, col, lang="python", max_lines=30)
+            if got:
+                return _parse_expr(got[0])
+            return None
+        return _parse_expr(rhs.split("#", 1)[0])
+    return None
+
+
+def _why(label: str, category: str, kind: str) -> str:
+    """Remediation text for a classified finding: a capability carries only its
+    one-line description; a defect carries the reason plus the category hint."""
+    if not label:
+        return ""
+    label = label[0].upper() + label[1:]
+    if kind == "capability":
+        return label
+    hint = _REMEDIATION_HINTS.get(category, "Review and address this finding")
+    return f"{label} — {hint}"
+
+
+# Co-occurrence composites measure "nearby" in LINES — meaningless in a bundled
+# file with 19 KB lines, where everything is within one line of everything. Cap the
+# character distance too (≈ the same 40 lines of ordinary code).
+_COOCCUR_MAX_CHARS = 4000
+
+
+def _cooccur(
+    lines: list[str], prose: set[int], re_a: re.Pattern, re_b: re.Pattern,
+    max_lines: int, exclude_b: re.Pattern | None = None,
+) -> int | None:
+    """Earliest 0-based line where an ``re_a`` hit and an ``re_b`` hit sit within
+    ``max_lines`` lines AND ``_COOCCUR_MAX_CHARS`` characters of each other (prose
+    lines excluded); None when they don't."""
+    offsets: list[int] = []
+    pos = 0
+    for ln in lines:
+        offsets.append(pos)
+        pos += len(ln) + 1
+    a_hits = [(i, offsets[i] + m.start()) for i, ln in enumerate(lines)
+              if i not in prose for m in [re_a.search(ln)] if m]
+    if not a_hits:
+        return None
+    b_hits = [(i, offsets[i] + m.start()) for i, ln in enumerate(lines)
+              if i not in prose and not (exclude_b and exclude_b.search(ln))
+              for m in [re_b.search(ln)] if m]
+    best: int | None = None
+    for ai, ap in a_hits:
+        for bi, bp in b_hits:
+            if abs(ai - bi) <= max_lines and abs(ap - bp) <= _COOCCUR_MAX_CHARS:
+                cand = min(ai, bi)
+                best = cand if best is None else min(best, cand)
+    return best
+
+
+_LOADER_CTX_RE = re.compile(
+    r"fetch\s*\(|urlopen|urlretrieve|requests\.|httpx\.|axios|https?\.get|\bcurl\b|\bwget\b|"
+    r"pip\s+install|npm\s+install|\bimport\b|\brequire\s*\(|download|\bexec\s*\(|"
+    r"\beval\s*\(|\bsource\b|<script|\bopen\s*\(",
+    re.IGNORECASE,
+)
+_LOADER_CTX_CHARS = 300
+
+
+def _has_loader_context(lines: list[str], idx: int, pos: int) -> bool:
+    """A load/fetch/exec token within ~300 characters of ``lines[idx][pos]`` (spanning
+    up to 2 neighbouring lines) — bounded by characters so a bundled 10 KB line can't
+    supply the context from unrelated code."""
+    window = lines[idx][max(0, pos - _LOADER_CTX_CHARS): pos + _LOADER_CTX_CHARS]
+    before = "\n".join(lines[max(0, idx - 2): idx])[-_LOADER_CTX_CHARS:]
+    after = "\n".join(lines[idx + 1: idx + 3])[:_LOADER_CTX_CHARS]
+    return bool(_LOADER_CTX_RE.search(before + "\n" + window + "\n" + after))
+_UNTRUSTED_DEF_RE = re.compile(
+    # a DEFINITION named fetch/webhook (`async fetch(path) {`, `def fetch(self`) is
+    # not an ingestion point
+    r"(?:\basync\s+|\bfunction\s+|\bdef\s+|^\s*)(?:fetch|webhook)\s*\([^)]*\)\s*(?:\{|:|->)",
+)
+
+
+def _untrusted_lines(lines: list[str]) -> list[int]:
+    return [i for i, ln in enumerate(lines)
+            if UNTRUSTED_INPUT_RE.search(ln) and not _UNTRUSTED_DEF_RE.search(ln)]
+
+
+def _near(idxs: list[int], idx: int, window: int) -> bool:
+    return any(abs(i - idx) <= window for i in idxs)
+
+
+def _classify_exec_match(
+    lines: list[str], idx: int, match: re.Match, file_lang: str | None,
+    untrusted: list[int],
+):
+    """Run the exec classifier for a matched subprocess/os.system/child_process call."""
+    from src.scanner.exec_classify import (
+        classify_js_exec,
+        classify_python_exec,
+        extract_call,
+    )
+
+    near = _near(untrusted, idx, _UNTRUSTED_WINDOW)
+    lang = "python" if file_lang == "python" else "js"
+    # JS: start at the function name, so `require('child_process').spawn(...)` yields
+    # spawn's argument list, not require's.
+    start = match.start() if lang == "python" else match.start(1)
+    got = extract_call(lines, idx, start, lang=lang)
+    call_src, consumed = (got if got else (lines[idx][start:], 1))
+    if lang == "python":
+        func = next(g for g in match.groups() if g)
+        return classify_python_exec(
+            call_src, func, untrusted_near=near, consumed=consumed,
+            resolve_name=lambda nm: _resolve_py_assignment(lines, idx, nm),
+        )
+    return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed)
+
+
+def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted: list[int]):
+    """eval()/exec() (Python): constant → capability; decoded payload → defect high;
+    variable → capability unless untrusted input is nearby (then the original high)."""
+    import ast as _ast
+
+    from src.scanner.exec_classify import (
+        CAP_EVAL,
+        ExecVerdict,
+        _const_str,
+        _parse_expr,
+        extract_call,
+    )
+
+    got = extract_call(lines, idx, match.start(), lang="python")
+    call_src, consumed = (got if got else (lines[idx][match.start():], 1))
+    near = _near(untrusted, idx, _UNTRUSTED_WINDOW)
+    if DECODE_SINK_RE.search(call_src):
+        # The one-line decoded-payload shape is the OBFUSCATION rule's finding
+        # ("Decoded payload fed to exec/eval"); don't report the same line twice.
+        if _DECODED_EXEC_LINE_RE.search(lines[idx]):
+            return None
+        return ExecVerdict("defect", "high", "exec/eval of a decoded payload", "", consumed)
+    node = _parse_expr(call_src)
+    if isinstance(node, _ast.Call) and node.args:
+        s = _const_str(node.args[0])
+        if s is not None:
+            if INLINE_CODE_DANGER_RE.search(s):
+                return ExecVerdict("defect", "high",
+                                   "constant code string that execs/decodes/fetches", "",
+                                   consumed)
+            return ExecVerdict("capability", "info", "evaluates a constant code string",
+                               CAP_EVAL, consumed)
+    if near:
+        return ExecVerdict("defect", "high", "dynamic code evaluation next to untrusted input",
+                           "", consumed)
+    return ExecVerdict("capability", "low",
+                       "evaluates code built at runtime (no untrusted input in reach)",
+                       CAP_EVAL, consumed)
+
+
+def _rmtree_is_dangerous(lines: list[str], idx: int, match: re.Match) -> bool:
+    """A recursive delete is a defect only when its first argument is a literal root /
+    home path; `rmtree(build_dir)` is a capability."""
+    from src.scanner.exec_classify import extract_call, split_top_level_args
+
+    got = extract_call(lines, idx, match.start(), lang="python")
+    call_src = got[0] if got else lines[idx][match.start():]
+    open_i, close_i = call_src.find("("), call_src.rfind(")")
+    inner = call_src[open_i + 1: close_i] if 0 <= open_i < close_i else call_src[open_i + 1:]
+    args = split_top_level_args(inner)
+    if not args:
+        return False
+    first = args[0].strip().strip("\"'`")
+    return bool(DANGEROUS_DELETE_ROOT_RE.search(first))
 _SAFE_OPEN_PATTERNS = [
     # Path(...).open() or Path(...).read_text() / write_text()
     re.compile(r"Path\s*\(.*\)\s*\.(?:open|read_text|write_text|read_bytes|write_bytes)\s*\("),
@@ -859,6 +1366,17 @@ def _finding_is_blocking(f: object) -> bool:
     name = (getattr(f, "name", "") or "")
     if name.startswith("Known-malicious") or "malicious" in name.lower():
         return True
+    # A capability (what the tool does, reported for visibility) never blocks, and
+    # neither does a finding in a file the consumer never installs (sdist-only
+    # Makefile / scripts/ / bench/, anything absent from the wheel).
+    if not _is_defect(f) or not getattr(f, "installed", True):
+        return False
+    # An install hook is the package's OWN code running at install time (npm
+    # lifecycle script, setup.py) — a critical/high there (fetch, pipe-to-shell,
+    # eval, node -e) is the supply-chain entry point and must floor the score, even
+    # though its deduction is still the bounded dependency penalty.
+    if getattr(f, "category", "") == "install_hook":
+        return getattr(f, "severity", "") in ("critical", "high")
     # Dependency/supply-chain vulns do NOT hard-block: a CVE in a dependency (often
     # transitive, unreachable, or severity-inflated) shouldn't floor a reputable tool to
     # the Minimal tier the way a first-party code RCE does. They flow through the separate,
@@ -953,6 +1471,26 @@ def _select_scan_files(
     return scannable[:_MAX_FILES_PER_REPO], total, sampled
 
 
+# Developer/build tooling that is NEVER part of an installed package: `pip install`
+# never runs a Makefile, tox.ini, noxfile.py or .pre-commit-config.yaml, and `bench/`
+# / `_cffi_src/` (cffi build inputs compiled into the wheel) ship nothing. Used both
+# for repo-scan downgrading (_is_infra_file) and the artifact `installed` gate.
+_BUILD_TOOLING_NAMES = frozenset({
+    "makefile", "gnumakefile", "tox.ini", "noxfile.py", "justfile",
+    ".pre-commit-config.yaml", ".pre-commit-config.yml", "manifest.in",
+})
+_BUILD_TOOLING_DIRS = frozenset({"bench", "benches", "benchmark", "benchmarks", "_cffi_src"})
+
+
+def _is_build_tooling_file(file_path: str) -> bool:
+    """True for build/dev tooling a consumer never installs or runs (see above)."""
+    lname = Path(file_path).name.lower()
+    if lname in _BUILD_TOOLING_NAMES:
+        return True
+    parts = [p.lower() for p in Path(file_path).parts[:-1]]
+    return any(p in _BUILD_TOOLING_DIRS for p in parts)
+
+
 def _is_infra_file(file_path: str) -> bool:
     """Check if a file is CI/infra config (graded like tests/docs, not shipped code).
 
@@ -970,6 +1508,10 @@ def _is_infra_file(file_path: str) -> bool:
         return True
     # Common root-level CI config files
     if lname in (".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml", "cloudbuild.yaml"):
+        return True
+    # Build / developer tooling that never runs for a consumer (`pip install` does not
+    # run the Makefile, tox, nox, or pre-commit): graded like CI config.
+    if _is_build_tooling_file(file_path):
         return True
     # Workflow YAMLs (e.g. under a workflows/ directory)
     if any(p == "workflows" for p in parts) and lname.endswith((".yml", ".yaml")):
@@ -1047,34 +1589,11 @@ def _line_has_blocking_match(line: str, file_lang: str | None) -> bool:
 def _is_safe_exec_context(
     line: str, finding_name: str, file_path: str = "",
 ) -> bool:
-    """Check if an unsafe_exec match is actually a safe usage pattern."""
+    """Check if an eval/exec match is actually a safe usage pattern (DB ``.execute``,
+    ``ast.literal_eval``, a ``def exec(`` definition, version reads). The subprocess /
+    os.system argv rules moved to ``src/scanner/exec_classify.py``."""
     stripped = line.strip()
     filename = Path(file_path).name.lower() if file_path else ""
-
-    # subprocess with hardcoded args → safe (but NOT if shell=True is present)
-    if "subprocess" in finding_name.lower():
-        has_shell_true = "shell=True" in stripped or "shell = True" in stripped
-        # Shell-completion / shell-detection helpers spawn a shell binary in list form
-        # over MULTIPLE lines (so the single-line safe-subprocess regex misses them) —
-        # e.g. click/typer/shellingham installing tab-completion. No shell=True, no
-        # tainted input; a ubiquitous, safe internal pattern that shouldn't read high.
-        if not has_shell_true and (
-            "completion" in filename
-            or filename in ("shellingham.py", "_bashcomplete.py", "bashcomplete.py")
-            or "shell_completion" in (file_path or "").lower()
-        ):
-            return True
-        if not has_shell_true and _SAFE_SUBPROCESS_RE.search(stripped):
-            return True
-        # subprocess with well-known safe commands (git, pip, npm, etc.)
-        if not has_shell_true and _SAFE_SUBPROCESS_CMDS_RE.search(stripped):
-            return True
-        # Also safe: subprocess with shell=False (explicit)
-        if "shell=False" in stripped or "shell = False" in stripped:
-            return True
-        # subprocess.run with capture_output (typically safe tooling)
-        if "capture_output=True" in stripped and not has_shell_true:
-            return True
 
     # eval/exec — skip if it's ast.literal_eval or similar safe wrappers
     if "eval" in finding_name.lower() or "exec" in finding_name.lower():
@@ -1123,6 +1642,14 @@ def _is_safe_fs_context(
         if safe_pat.search(stripped):
             return True
 
+    # open(os.devnull, "w") — a sink, not a file write
+    if re.search(r"open\s*\(\s*os\.devnull\b", stripped):
+        return True
+    # A path rooted in the package's OWN install dir (its package.json, a bundled
+    # asset): `path.join(__dirname, …)`, `fileURLToPath(import.meta.url)`, `__file__`.
+    if re.search(r"__dirname|import\.meta\.url|__file__|importlib\.resources", stripped):
+        return True
+
     # Path.write_text / read_text (already method-chained on Path object)
     if re.search(r"\.(?:read_text|write_text|read_bytes|write_bytes)\s*\(", stripped):
         return True
@@ -1162,17 +1689,6 @@ def _downgrade_fs_severity(
             return "medium"
         if severity == "medium":
             return "low"
-    return severity
-
-
-def _upgrade_shell_true_severity(
-    line: str, severity: str,
-) -> str:
-    """Upgrade severity when shell=True is present — always dangerous."""
-    stripped = line.strip()
-    if "shell=True" in stripped or "shell = True" in stripped:
-        # shell=True is always critical regardless of original severity
-        return "critical"
     return severity
 
 
@@ -1236,12 +1752,32 @@ def _scan_content(
     # prompt-injection / hidden-unicode there even if they look doc-ish.
     is_metadata = Path(file_path).name.lower() in AGENT_METADATA_FILES
     lines = content.split("\n")
+    # Precision pass #6: lines inside a Python docstring / multi-line string are prose
+    # for the CODE pattern groups (exec, deserialization, fs, remote-load, exfil,
+    # obfuscation). Secrets, hidden unicode and prompt injection still scan them.
+    tpl_continuation: set[int] = set()
+    if file_lang == "python":
+        prose_lines = _python_prose_lines(content)
+    elif file_lang in ("javascript", "typescript"):
+        prose_lines, tpl_continuation = _js_string_state(content)
+    else:
+        prose_lines = set()
+    # Untrusted-input lines (request body / fetched content) for the "dynamic argv or
+    # eval NEXT TO untrusted input" rules.
+    untrusted = _untrusted_lines(lines)
+    js_cp_call_re = _js_cp_call_re(content) if file_lang != "python" else None
+    # Lines swallowed by a multi-line exec call already classified at its first line —
+    # the per-line `shell=True` rule must not double-report inside that call.
+    consumed_until = -1
+    suppressed_lines: set[int] = set()
 
     for line_num, line in enumerate(lines, 1):
+        idx = line_num - 1
         # Skip comments (basic heuristic)
         stripped = line.strip()
         if stripped.startswith(("#", "//", "*", "/*")):
             continue
+        is_prose = idx in prose_lines
         # NOTE: (#6) we deliberately do NOT skip an entire line just because it contains
         # the word "example"/"placeholder" — that let an attacker neutralize any rule with
         # `# example` and silently ignored real code like
@@ -1257,6 +1793,7 @@ def _scan_content(
         # no longer free. Every suppression still counts toward the suppression penalty.
         if _SUPPRESSION_COMMENT in line:
             suppressed_count += 1
+            suppressed_lines.add(line_num)
             if not _line_has_blocking_match(line, file_lang):
                 continue
             # else: fall through — the critical/high finding is created below.
@@ -1287,6 +1824,25 @@ def _scan_content(
                     if name.startswith("Generic"):
                         continue
                     sev = "medium" if severity in ("critical", "high") else "low"
+                # Precision pass #4: a generic key must LOOK like a credential (entropy,
+                # letters+digits, no path separator) — `TOKEN = "auth-request-type/at"`
+                # is a protocol constant, not a secret.
+                if name == "Generic API Key assignment" and not _generic_secret_plausible(val):
+                    continue
+                # Precision pass #3: a PEM HEADER with no key body is key-HANDLING code
+                # (marker tuples, startswith(), regexes) — reported as a capability.
+                if name == "Private Key block" and not _pem_has_body(lines, idx, match.end()):
+                    findings.append(Finding(
+                        category="secret",
+                        name="Private Key block marker (no key body)",
+                        severity="info",
+                        file_path=file_path,
+                        line_number=line_num,
+                        snippet=stripped[:120],
+                        kind="capability",
+                        capability="secret:pem_handling",
+                    ))
+                    break
                 findings.append(Finding(
                     category="secret",
                     name=name,
@@ -1297,9 +1853,15 @@ def _scan_content(
                 ))
                 break  # one finding per line for secrets
 
-        # Check unsafe exec
-        for name, pattern, severity in UNSAFE_EXEC_PATTERNS:
-            if pattern.search(line):
+        # Check unsafe exec (code group — skipped in docstrings; and a `def eval(` is a
+        # definition, not the builtin).
+        if not is_prose and not _DEF_EVAL_EXEC_RE.search(stripped):
+            for name, pattern, severity in UNSAFE_EXEC_PATTERNS:
+                if not pattern.search(line) and not (
+                    name == "execSync / spawn (Node.js)"
+                    and js_cp_call_re is not None and js_cp_call_re.search(line)
+                ):
+                    continue
                 # Language dispatch (#2): skip a language-specific pattern on a
                 # non-matching file (e.g. Python exec() on a .mjs file).
                 if not _lang_ok(name, file_lang):
@@ -1307,17 +1869,52 @@ def _scan_content(
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
-                # --- Option 3: Context-aware check ---
+                # --- Option 3: Context-aware check (eval/exec exemptions) ---
                 if _is_safe_exec_context(line, name, file_path):
                     continue
-                # Downgrade severity in test/doc/infra files
+                # Inside a multi-line call already classified above (its `shell=True`
+                # line, say): never double-report.
+                if idx <= consumed_until and name == "shell=True (Python)":
+                    continue
                 effective_severity = severity
-                if is_downgraded and severity in ("critical", "high"):
+                kind = "defect"
+                capability = ""
+                label = ""
+                verdict = None
+                if name == "child_process (Node.js)":
+                    # Importing child_process is a capability; the calls are what count.
+                    # One finding per line: when this line also CALLS through the module
+                    # (`require('child_process').exec(...)`), let the call rule classify it.
+                    if js_cp_call_re is not None and js_cp_call_re.search(line):
+                        continue
+                    verdict = ("capability", "info", "imports child_process", "process:spawn")
+                elif name in ("subprocess.run / Popen (Python)", "os.system / os.popen (Python)"):
+                    m = _PY_EXEC_CALL_RE.search(line)
+                    if m:
+                        v = _classify_exec_match(lines, idx, m, file_lang, untrusted)
+                        verdict = (v.kind, v.severity, v.label, v.capability)
+                        consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
+                elif name == "execSync / spawn (Node.js)":
+                    m = _JS_EXEC_CALL_RE.search(line) or (
+                        js_cp_call_re.search(line) if js_cp_call_re is not None else None
+                    )
+                    if m:
+                        v = _classify_exec_match(lines, idx, m, file_lang, untrusted)
+                        verdict = (v.kind, v.severity, v.label, v.capability)
+                        consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
+                elif name in ("eval() call (Python)", "exec() call (Python)"):
+                    m = _PY_EVAL_CALL_RE.search(line)
+                    if m:
+                        v = _classify_eval_match(lines, idx, m, untrusted)
+                        if v is None:
+                            break  # reported by the obfuscation rule on this line
+                        verdict = (v.kind, v.severity, v.label, v.capability)
+                if verdict is not None:
+                    kind, effective_severity, label, capability = verdict
+                # Downgrade severity in test/doc/infra files (defects only)
+                if (kind == "defect" and is_downgraded
+                        and effective_severity in ("critical", "high")):
                     effective_severity = "medium"
-                # Upgrade severity for shell=True (always dangerous)
-                effective_severity = _upgrade_shell_true_severity(
-                    line, effective_severity,
-                )
                 findings.append(Finding(
                     category="unsafe_exec",
                     name=name,
@@ -1325,18 +1922,33 @@ def _scan_content(
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
+                    remediation=_why(label, "unsafe_exec", kind),
+                    kind=kind,
+                    capability=capability,
                 ))
                 break
 
-        # Check insecure deserialization (#7) — RCE class; NOT discounted for MCP
-        for name, pattern, severity in INSECURE_DESERIALIZATION_PATTERNS:
-            if pattern.search(line):
+        # Check insecure deserialization (#7) — RCE class; NOT discounted for MCP.
+        # pickle/marshal/dill of a LOCAL source (own cache, caller-chosen protocol) is a
+        # capability; next to untrusted input it stays the original high. yaml.load /
+        # allow_pickle / torch.load are unchanged.
+        if not is_prose:
+            for name, pattern, severity in INSECURE_DESERIALIZATION_PATTERNS:
+                if not pattern.search(line):
+                    continue
                 if not _lang_ok(name, file_lang):
                     continue
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
                 effective_severity = severity
-                if is_downgraded and severity in ("critical", "high"):
+                kind = "defect"
+                capability = ""
+                label = ""
+                if _PY_DESER_CALL_RE.search(line) and not _near(untrusted, idx, _UNTRUSTED_WINDOW):
+                    kind, effective_severity, capability = "capability", "low", "data:deserialize"
+                    label = "deserializes pickle/marshal data from a local source"
+                if (kind == "defect" and is_downgraded
+                        and effective_severity in ("critical", "high")):
                     effective_severity = "medium"
                 findings.append(Finding(
                     category="insecure_deserialization",
@@ -1345,12 +1957,17 @@ def _scan_content(
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
+                    remediation=_why(label, "insecure_deserialization", kind),
+                    kind=kind,
+                    capability=capability,
                 ))
                 break
 
         # Check file system access
-        for name, pattern, severity in FS_ACCESS_PATTERNS:
-            if pattern.search(line):
+        if not is_prose:
+            for name, pattern, severity in FS_ACCESS_PATTERNS:
+                if not pattern.search(line):
+                    continue
                 # Language dispatch (#2)
                 if not _lang_ok(name, file_lang):
                     continue
@@ -1360,14 +1977,35 @@ def _scan_content(
                 # --- Option 3: Context-aware check ---
                 if _is_safe_fs_context(line, name, file_path):
                     continue
-                # Downgrade severity in test/doc/infra files
                 effective_severity = severity
-                if is_downgraded and severity in ("critical", "high"):
+                kind = "defect"
+                capability = ""
+                label = ""
+                if name == "rmrf / recursive delete":
+                    m = _RMTREE_CALL_RE.search(line)
+                    if m and not _rmtree_is_dangerous(lines, idx, m):
+                        kind, effective_severity = "capability", "low"
+                        capability = "filesystem:delete"
+                        label = "deletes a directory tree (non-root path)"
+                    else:
+                        label = "recursive delete of a root/home path"
+                elif name in _FS_RW_RULES and not _near(untrusted, idx, _UNTRUSTED_WINDOW):
+                    # Reading / writing a caller- or config-named path is what a file
+                    # tool does (paramiko's save_host_keys, pytest's --junitxml). Next
+                    # to untrusted input (request body → open(path)) it stays a medium.
+                    is_write = "write" in name.lower() or re.search(
+                        r"""writeFile|['"][wax]b?\+?['"]""", line) is not None
+                    capability = "filesystem:write" if is_write else "filesystem:read"
+                    kind, effective_severity = "capability", "low"
+                    label = ("writes a file at a runtime path" if is_write
+                             else "reads a file at a runtime path")
+                # Downgrade severity in test/doc/infra files
+                if (kind == "defect" and is_downgraded
+                        and effective_severity in ("critical", "high")):
                     effective_severity = "medium"
                 # Downgrade for safer pathlib patterns
-                effective_severity = _downgrade_fs_severity(
-                    line, effective_severity,
-                )
+                if kind == "defect":
+                    effective_severity = _downgrade_fs_severity(line, effective_severity)
                 findings.append(Finding(
                     category="fs_access",
                     name=name,
@@ -1375,11 +2013,16 @@ def _scan_content(
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
+                    remediation=_why(label, "fs_access", kind),
+                    kind=kind,
+                    capability=capability,
                 ))
                 break
 
         # Check data exfiltration
         for name, pattern, severity in EXFILTRATION_PATTERNS:
+            if is_prose:
+                break
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
@@ -1402,15 +2045,29 @@ def _scan_content(
 
         # Check dynamic remote payload / rug-pull (external-URL-swap)
         for name, pattern, severity in DYNAMIC_REMOTE_LOAD_PATTERNS:
-            if pattern.search(line):
+            if is_prose:
+                break
+            dm = pattern.search(line)
+            if dm:
                 # Language dispatch (#2) — untagged patterns (e.g. curl|sh) stay agnostic.
                 if not _lang_ok(name, file_lang):
                     continue
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
-                # Downgrade in test/doc/infra files like other groups
+                # An `npx …` / branch-URL hint inside a string literal (an error
+                # message, a docstring line) is advice to a human, not a load.
+                if name.startswith("Unpinned") and _in_prose_string_at(
+                        line, dm.start(), "`" if idx in tpl_continuation else None):
+                    continue
+                # A mutable branch URL is a rug-pull only when something LOADS it
+                # (fetch/urlopen/curl/pip/import within 2 lines); a `$id`, homepage
+                # or docs link is reported as low.
                 effective_severity = severity
-                if is_downgraded and severity in ("critical", "high"):
+                if (name.startswith("Unpinned remote resource")
+                        and not _has_loader_context(lines, idx, dm.start())):
+                    effective_severity = "low"
+                # Downgrade in test/doc/infra files like other groups
+                if is_downgraded and effective_severity in ("critical", "high"):
                     effective_severity = "medium"
                 findings.append(Finding(
                     category="dynamic_remote_load",
@@ -1459,35 +2116,85 @@ def _scan_content(
 
         # Check code obfuscation
         for name, pattern, severity in OBFUSCATION_PATTERNS:
+            if is_prose:
+                break
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
+                effective_severity = severity
+                kind = "defect"
+                capability = ""
+                emitted_name = name
+                if (name == "Dynamic import with variable"
+                        and not _near(untrusted, idx, _UNTRUSTED_WINDOW)):
+                    # Plugin / backend loading by name (pytest, requests.packages) is
+                    # what the tool does; next to untrusted input it stays a medium.
+                    kind, effective_severity, capability = "capability", "low", "code:eval"
+                if name == "Hex-encoded string execution":
+                    # Precision pass #5: a long `\x..` run is only EXECUTION with an
+                    # exec/decode sink within 3 lines; Rust/Go/Java byte constants are
+                    # skipped; a plain byte literal is an informational capability.
+                    if file_lang in _HEX_SKIP_LANGS:
+                        break
+                    lo = max(0, idx - _HEX_SINK_WINDOW)
+                    hi = min(len(lines), idx + _HEX_SINK_WINDOW + 1)
+                    if not any(_HEX_SINK_RE.search(lines[n]) for n in range(lo, hi)):
+                        kind, effective_severity = "capability", "info"
+                        capability = "binary:hex_literal"
+                        emitted_name = "Long hex-escaped byte literal"
                 findings.append(Finding(
                     category="obfuscation",
-                    name=name,
-                    severity=severity,
+                    name=emitted_name,
+                    severity=effective_severity,
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
+                    kind=kind,
+                    capability=capability,
                 ))
                 break
+
+    # A suppressed line that fell through (it matched a critical/high PATTERN) but
+    # classified as a capability or a low/medium is what the suppression was for.
+    # Only a critical/high DEFECT survives `ag-scan:ignore`.
+    if suppressed_lines:
+        findings = [
+            f for f in findings
+            if f.line_number not in suppressed_lines
+            or (f.kind == "defect" and f.severity in ("critical", "high"))
+        ]
 
     # Split fetch->exec across lines: a network read + an exec sink co-occurring in
     # one file is the classic rug-pull loader the per-line scan can't see. Fire only
     # when they're within ~40 lines of each other (keeps the composite finding tight).
+    # Docstring lines (prose) don't count as either leg.
     if not is_downgraded and NET_READ_RE.search(content) and EXEC_SINK_RE.search(content):
-        net_lines = [i for i, ln in enumerate(lines) if NET_READ_RE.search(ln)]
-        exec_lines = [i for i, ln in enumerate(lines) if EXEC_SINK_RE.search(ln)]
-        if net_lines and exec_lines and any(
-            abs(n - e) <= 40 for n in net_lines for e in exec_lines
-        ):
+        hit = _cooccur(lines, prose_lines, NET_READ_RE, EXEC_SINK_RE, 40)
+        if hit is not None:
             findings.append(Finding(
                 category="dynamic_remote_load",
                 name="Remote fetch + dynamic exec in same file (possible rug-pull)",
                 severity="high",
                 file_path=file_path,
-                line_number=min(net_lines) + 1,
+                line_number=hit + 1,
                 snippet="network read + exec sink co-occur — remote payload may be swappable",
+            ))
+
+    # Split decode->exec across lines: `payload = base64.b64decode(...)` then
+    # `exec(payload)` a few lines later is the obfuscated loader (OSV MAL- family); the
+    # one-line form is the "Decoded payload fed to exec/eval" pattern above.
+    if (not is_downgraded and DECODE_SINK_RE.search(content) and EXEC_SINK_RE.search(content)
+            and not any(f.name == "Decoded payload fed to exec/eval" for f in findings)):
+        hit = _cooccur(lines, prose_lines, DECODE_SINK_RE, _PY_EVAL_CALL_RE, 10,
+                       exclude_b=_DEF_EVAL_EXEC_RE)
+        if hit is not None:
+            findings.append(Finding(
+                category="obfuscation",
+                name="Decoded payload + dynamic exec in same file (obfuscated loader)",
+                severity="high",
+                file_path=file_path,
+                line_number=hit + 1,
+                snippet="base64/hex/zlib decode and exec/eval within 10 lines",
             ))
 
     # SSRF (structural): an MCP tool that builds an outbound request from a caller-supplied
@@ -1529,9 +2236,16 @@ def _scan_content(
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
     findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
 
-    # Add remediation hints to all findings
+    # Add remediation hints to all findings. A capability carries its description
+    # (nothing to remediate — it's what the tool does), never the category hint.
     for f in findings:
-        if not f.remediation:
+        if f.remediation:
+            continue
+        if f.kind == "capability":
+            from src.scanner.exec_classify import CAPABILITY_LABELS
+            f.remediation = CAPABILITY_LABELS.get(
+                f.capability, "Reported for visibility; not scored")
+        else:
             f.remediation = _REMEDIATION_HINTS.get(f.category, "Review and address this finding")
 
     # Check positive signals per-line, skipping comments and examples
@@ -1877,11 +2591,19 @@ def _composite_findings(
     # places — that whole-file co-occurrence is not a real exfil chain (the requests
     # false-"high"). Require a read↔send pair within a small window.
     _prox = 45
+    # Character distance too: in a bundled file with multi-KB lines, "within 45 lines"
+    # is satisfied by everything (see _cooccur).
+    offsets: list[int] = []
+    pos = 0
+    for ln in lines:
+        offsets.append(pos)
+        pos += len(ln) + 1
 
     def _near(reads: list[int], sends: list[int]) -> int | None:
         for r in reads:
             for s in sends:
-                if abs(r - s) <= _prox:
+                if (abs(r - s) <= _prox
+                        and abs(offsets[r - 1] - offsets[s - 1]) <= _COOCCUR_MAX_CHARS):
                     return min(r, s)
         return None
 
@@ -2084,8 +2806,10 @@ def _calculate_trust_score(result: ScanResult) -> int:
     - File ratio: if findings are concentrated in few files, reduce penalty
     """
     # Dependency vulns are scored separately (bounded); the general severity
-    # model applies only to first-party CODE findings.
-    code_findings = [f for f in result.findings if f.category not in _DEP_CATEGORIES]
+    # model applies only to first-party CODE findings. Capabilities (what the tool
+    # does — fixed-argv spawn, eval of its own expressions, …) are never a score input.
+    code_findings = [f for f in result.findings
+                     if f.category not in _DEP_CATEGORIES and _is_defect(f)]
     # Weight by shipped-vs-non-shipped: a finding in tests/fixtures/examples counts at
     # a fraction, so a big monorepo's test noise can't tank the grade of what it ships.
     code_critical = sum(_finding_grade_weight(f) for f in code_findings if f.severity == "critical")
@@ -2260,7 +2984,7 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         "annotation_lie": "code_safety",
         "lethal_trifecta": "data_handling",
     }
-    severity_weights = {"critical": 25, "high": 15, "medium": 8, "low": 3}
+    severity_weights = {"critical": 25, "high": 15, "medium": 8, "low": 3, "info": 0}
 
     scores: dict[str, int] = {
         "secret_hygiene": 100,
@@ -2280,6 +3004,9 @@ def _calculate_category_scores(result: ScanResult) -> dict[str, int]:
         # Dependency/supply-chain vulns use the bounded model below, not the
         # linear per-finding deduction (which would floor a monorepo to 0).
         if finding.category in _DEP_CATEGORIES:
+            continue
+        # A capability is reported, never deducted (same rule as the overall score).
+        if not _is_defect(finding):
             continue
         score_cat = category_map.get(finding.category)
         if score_cat:

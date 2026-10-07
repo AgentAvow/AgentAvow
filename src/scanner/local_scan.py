@@ -325,6 +325,7 @@ def result_to_dict(result: ScanResult) -> dict:
             "total": len(result.findings),
         },
         "category_scores": result.category_scores,
+        "capabilities": result.capabilities,
         "findings": [
             {
                 "category": f.category,
@@ -334,6 +335,9 @@ def result_to_dict(result: ScanResult) -> dict:
                 "line": f.line_number,
                 "remediation": f.remediation,
                 "shipped": _is_shipped(f.file_path),
+                "kind": f.kind,
+                "capability": f.capability,
+                "installed": f.installed,
             }
             # shipped findings first, then by severity — lead with what an agent runs
             for f in sorted(

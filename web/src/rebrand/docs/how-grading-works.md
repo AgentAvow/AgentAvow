@@ -26,6 +26,10 @@ The score maps to one of **six tiers** (the API's `trust_tier`) and a recommende
 
 A **Blocked** score and any **known-malicious (MAL)** dependency block execution.
 
+### Findings vs. capabilities
+
+Every static finding carries a `kind`. A **defect** is something a reviewer would agree is wrong — a shell command built from a variable, `node -e` / `python -c` with dynamic code, a `curl … | sh`, a PEM key body, a payload decoded and exec'd — and it moves the trust score. A **capability** is something the tool *does* — runs a fixed command (`git status`), evaluates its own expressions, writes a file at a path you give it, unpickles its own cache — and is listed in `capabilities` so you can see it, but it never moves the score and never blocks. A finding in a file a consumer never installs (an sdist's `Makefile`, `scripts/`, `bench/`; anything absent from the wheel) is reported with `installed: false` and is informational only.
+
 ### Certified — the earned top tier
 
 **Certified is a distinct, cryptographically-earned tier** — not just a high number. A clean 100 we only saw the *repo* for is **Trusted, not Certified**. Certification requires **all six** of:

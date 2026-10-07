@@ -62,28 +62,41 @@ class TestAllowlist:
         assert len(findings) > 0
 
 
-class TestContextAwareExec:
-    """Option 3: Context-aware scanning for safe exec patterns."""
+def _defects(findings):
+    return [f for f in findings if f.kind == "defect"]
 
-    def test_subprocess_hardcoded_args_safe(self):
+
+class TestContextAwareExec:
+    """Context-aware exec classification (precision pass #2): a fixed-argv, no-shell
+    spawn is a CAPABILITY (visible, unscored), not a defect and not silently dropped."""
+
+    def test_subprocess_hardcoded_args_is_a_capability(self):
         code = 'subprocess.run(["git", "status"])\n'
         findings, _, _ = _scan_content(code, "deploy.py")
-        assert len(findings) == 0
+        assert not _defects(findings)
+        assert [f.capability for f in findings] == ["process:spawn"]
 
-    def test_subprocess_hardcoded_string_safe(self):
+    def test_subprocess_hardcoded_string_is_a_capability(self):
         code = "subprocess.run(['pip', 'install', 'requests'])\n"
         findings, _, _ = _scan_content(code, "setup.py")
-        assert len(findings) == 0
+        assert not _defects(findings)
 
-    def test_subprocess_variable_arg_flagged(self):
+    def test_subprocess_variable_arg_is_a_capability_without_untrusted_input(self):
         code = 'subprocess.run(user_input)\n'
         findings, _, _ = _scan_content(code, "handler.py")
         assert any(f.category == "unsafe_exec" for f in findings)
+        assert not _defects(findings)
 
-    def test_subprocess_shell_false_safe(self):
+    def test_subprocess_variable_arg_next_to_untrusted_input_is_a_defect(self):
+        code = 'args = request.json["cmd"]\nsubprocess.run(args)\n'
+        findings, _, _ = _scan_content(code, "handler.py")
+        d = _defects(findings)
+        assert d and d[0].severity == "medium"
+
+    def test_subprocess_shell_false_is_a_capability(self):
         code = 'subprocess.run(cmd, shell=False)\n'
         findings, _, _ = _scan_content(code, "runner.py")
-        assert len(findings) == 0
+        assert not _defects(findings)
 
     def test_ast_literal_eval_safe(self):
         code = 'result = ast.literal_eval(data)\n'
