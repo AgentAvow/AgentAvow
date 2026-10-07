@@ -107,7 +107,7 @@ A stdio server has no URL — give it a coordinate with `tool_to_server={"tool":
 
 ### Vercel AI SDK
 
-`wrapTools` from `agentavow-trust` wraps each tool's `execute` with the same check — the SDK's `onToolExecutionStart` callback can watch a call but can't stop it, so the gate sits on the hook that decides. A blocked tool returns `{ error, agentavow }` as its output; `onFail: 'confirm'` instead sets `needsApproval` so `generateText`, `streamText` and `ToolLoopAgent` pause for the user through the SDK's own approval flow.
+`wrapTools` from `agentavow-trust/vercel-ai` runs the same gate as the Flue adapter below: one policy object, the three answers, the attestation verified against AgentAvow's public JWKS by default, and a tool whose definition changed since it was graded blocked by default. It wraps each tool's `execute`, because the SDK's `onToolExecutionStart` callback can watch a call but can't stop it. A tool that is not allowed returns `{ error, agentavow }` as its output: `error` leads with the answer ("Do not connect — 'send_email' was not run. …", with "· Certified" beside the answer when the tool carries the mark) and `agentavow` is the decision. `onReview: 'confirm'` sets `needsApproval`, so `generateText`, `streamText` and `ToolLoopAgent` pause for the user on a Review before you connect answer through the SDK's own approval flow. Do not connect is never put to the user.
 
 ```ts
 import { createMCPClient } from '@ai-sdk/mcp'
@@ -115,15 +115,18 @@ import { generateText } from 'ai'
 import { wrapTools } from 'agentavow-trust/vercel-ai'
 
 const mcp = await createMCPClient({ transport: { type: 'http', url: SERVER_URL } })
-const tools = wrapTools(await mcp.tools(), {
-  server: SERVER_URL,        // every tool in this set came from one server
-  minScore: 81,              // Trusted floor
-  onFail: 'block',           // or 'confirm' | 'warn' | 'throw'
+const listing = await mcp.listTools()
+const tools = wrapTools(mcp.toolsFromDefinitions(listing), {
+  server: SERVER_URL,     // every tool in this set came from one server
+  servedTools: listing,   // the exact definitions, for the drift check
+  allowFloor: 51,         // trust score that is safe without review (81 is strict)
+  onReview: 'confirm',    // or 'block' | 'warn'
+  onDrift: 'block',       // a tool whose definition changed since it was graded
 })
 const { text } = await generateText({ model, tools, prompt })
 ```
 
-Tools from `createMCPClient().tools()` don't carry their server's URL, so name it once per set (`server`), per tool (`toolToServer`), or with `resolveServer`. Your own function tools map to no server and run ungated. The drift check compares the definition the server serves now (or the `tools/list` you pass as `servedTools`) against the digest in the attestation; `failClosed: false` lets a call through, with a warning, when AgentAvow itself can't answer.
+Tools from `createMCPClient().tools()` don't carry their server's URL, so name it once per set (`server`), per tool (`toolToServer`), or with `resolveServer`. Your own function tools map to no server and run ungated. The drift check compares the definition this agent was handed (the `tools/list` you pass as `servedTools`, else the wrapped tool itself, else the server's own listing when it shows the model the same thing) with the per-tool digest in the attestation, so a server that shows the check one definition and the agent another is caught. `onApiError: 'allow'` lets a call through, with a warning, when AgentAvow itself can't answer. Code written for 0.2.x keeps working: `minScore`, `onFail` and `failClosed` are accepted as `allowFloor`, `onReview` and `onApiError`; the default floor is now 51, so pass `allowFloor: 81` to keep the old one.
 
 ### Flue
 
