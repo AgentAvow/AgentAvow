@@ -174,3 +174,26 @@ def test_claude_addendum_mentions_names_and_background_rescans():
     a = ms._INSTRUCTIONS_CLAUDE_ADDENDUM
     assert "connector or server NAME" in a and "background" in a
     assert ms._instructions_for("chatgpt") == ms._INSTRUCTIONS  # ChatGPT text untouched
+
+
+# --- card polish: hosted-endpoint adoption wording, scan time, re-scan note on top -----
+
+def test_hosted_endpoint_says_no_public_adoption_data_instead_of_new():
+    data = dict(SCAN, scanned_at="2026-10-07T18:02:11+00:00")
+    hosted = ms._scan_block(data, "connect", "/check/mcp?endpoint=x", "mcp.deepwiki.com", None, hosted=True)
+    assert "Adoption: no public data for a hosted endpoint." in hosted
+    assert "n/a (hosted endpoint)" in hosted and "new" not in hosted.split("```")[0]
+    assert "scanned   2026-10-07 18:02 UTC" in hosted
+    pkg = ms._scan_block(data, "use", "/check/pkg/npm/x", "x · npm", None)
+    assert "Adoption: new (no established public data yet)." in pkg
+
+
+def test_struct_carries_scanned_at_and_rescan_note_leads_the_card():
+    struct = ms._scan_struct(dict(SCAN, scanned_at="2026-10-07T18:02:11+00:00"), "x", "npm", "/r", "/a", None)
+    assert struct["scanned_at"] == "2026-10-07T18:02:11+00:00"
+    card = ms._card_text("◍ Clean — x, 74/100.")
+    card2, struct2 = ms._with_rescan_note(card, struct)
+    assert card2[0].text.startswith("🔄 Fresh re-scan STARTED in the background")
+    assert "(previous grade from 2026-10-07 18:02 UTC)" in card2[0].text
+    assert card2[0].text.endswith("◍ Clean — x, 74/100.")
+    assert struct2["rescan_pending"] is True

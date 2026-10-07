@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -140,6 +140,7 @@ class ScanHistoryResponse(BaseModel):
 
 
 class PublicScanResponse(BaseModel):
+    stale: bool = False  # served from the 7-day copy while a background refresh runs
     repo: str
     trust_score: int  # Security scan score (0-100) — code-level analysis only
     security_score: int = 0  # Alias for trust_score (clearer naming)
@@ -1321,6 +1322,41 @@ def _package_response(
     )
 
 
+# --- background package refresh (for ``stored=true`` callers) -----------------------
+# One refresh per coordinate at a time (Redis lock), at most a few concurrent in this
+# process, no fresh-scan budget: this is the catalog keeping itself warm for hooks.
+_REFRESH_LOCK_TTL = 300
+_refresh_sem = asyncio.Semaphore(3)
+
+
+def _schedule_package_refresh(surface: str, name: str, version: str | None,
+                              cache_owner: str, cache_repo: str) -> None:
+    try:
+        asyncio.get_running_loop().create_task(
+            _refresh_package(surface, name, version, cache_owner, cache_repo))
+    except RuntimeError:
+        pass
+
+
+async def _refresh_package(surface: str, name: str, version: str | None,
+                           cache_owner: str, cache_repo: str) -> None:
+    try:
+        from src.redis_client import get_redis
+        lock = f"public_scan_refresh:{cache_owner}/{cache_repo}"
+        if not await get_redis().set(lock, "1", nx=True, ex=_REFRESH_LOCK_TTL):
+            return  # another worker is on it
+    except Exception:
+        pass  # no Redis: still refresh, just without the dedupe
+    try:
+        async with _refresh_sem:
+            from src.scanner.scan import scan_package
+            result = await asyncio.wait_for(scan_package(surface, name, version), timeout=90)
+            if not result.error:
+                await _set_cached(cache_owner, cache_repo, _scan_result_to_dict(result))
+    except Exception:
+        pass  # best-effort; the next stored read serves whatever exists
+
+
 @router.get(
     "/package/{surface}/{name:path}",
     response_model=PublicScanResponse,
@@ -1333,6 +1369,12 @@ async def scan_package_endpoint(
     force: bool = Query(False, description="Bypass cache and force a fresh scan"),
     behavioral: bool = Query(False, description="Force a fresh behavioral sandbox run (npm/PyPI)"),
     version: str | None = Query(None, description="Exact version; default = latest"),
+    stored: bool = Query(
+        False,
+        description="Return the last STORED grade (up to 7 days old) at once and never run a "
+                    "fresh scan inline; a grade older than 1h is refreshed in the background. "
+                    "202 {status: queued} when nothing is stored yet (a scan is queued). For "
+                    "hooks and bulk callers that must not block or burn the fresh-scan budget."),
     db: AsyncSession = Depends(get_db),
 ) -> PublicScanResponse:
     """Grade a PUBLISHED **npm** or **PyPI** package directly by coordinate — no
@@ -1379,6 +1421,23 @@ async def scan_package_endpoint(
         resp = _package_response(full, scored, jws, cached=cached)
         resp.behavioral = block
         return resp
+
+    if stored and not force:
+        # Serve what we have, instantly: the fresh (1h) copy, else the stale (7d) copy
+        # while a background refresh runs, else queue a scan and say so. Never a fresh
+        # scan inline, never the fresh-scan budget.
+        cached = await _get_cached(cache_owner, cache_repo)
+        if cached:
+            return await _signed_response(cached, cached=True)
+        stale = await _get_stale_cached(cache_owner, cache_repo)
+        _schedule_package_refresh(surface, name, version, cache_owner, cache_repo)
+        if stale:
+            resp = await _signed_response(stale, cached=True)
+            resp.stale = True
+            return resp
+        return JSONResponse(status_code=202, content={
+            "status": "queued", "surface": surface, "name": name,
+            "detail": "No stored grade yet; a scan has been queued. Ask again shortly."})
 
     if not force:
         cached = await _get_cached(cache_owner, cache_repo)

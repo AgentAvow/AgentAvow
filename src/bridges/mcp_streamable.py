@@ -224,8 +224,8 @@ async def _get(path: str, params: dict | None = None) -> dict:
 # starts the fresh scan here (same process as the API, so the task survives the
 # request), and says so; the next call returns the new grade. One in flight per target.
 _RESCANS_IN_FLIGHT: set[str] = set()
-RESCAN_NOTE = ("🔄 A fresh re-scan was started in the background; this is the cached grade. "
-               "Ask again in a minute or two for the new one.")
+RESCAN_NOTE = ("🔄 Fresh re-scan STARTED in the background (you asked for one). Shown below is "
+               "the previous grade; ask again in a minute or two for the new one.")
 
 
 async def _background_rescan(path: str, params: dict) -> None:
@@ -260,7 +260,9 @@ def _schedule_rescan(path: str, params: dict | None) -> bool:
 def _with_rescan_note(card: list, struct: dict) -> tuple[list, dict]:
     card = list(card)
     if card and getattr(card[0], "text", None) is not None:
-        card[0] = types.TextContent(type="text", text=card[0].text + "\n\n" + RESCAN_NOTE,
+        when = str(struct.get("scanned_at") or "")[:16].replace("T", " ")
+        note = RESCAN_NOTE + (f" (previous grade from {when} UTC)" if when else "")
+        card[0] = types.TextContent(type="text", text=note + "\n\n" + card[0].text,
                                     **({"annotations": card[0].annotations}
                                        if getattr(card[0], "annotations", None) else {}))
     struct = dict(struct)
@@ -517,6 +519,7 @@ def _scan_block(
     target: str,
     adoption: tuple[int, str, int] | None = None,
     install_hint: str = "",
+    hosted: bool = False,
 ) -> str:
     """Shape a /public/scan response into a response that leads with a plain verdict
     (which survives the model summarizing the tool output), followed by a compact 8-bit
@@ -599,6 +602,10 @@ def _scan_block(
     if adoption:
         count, unit, _ = adoption
         adopt_clause = f" Adoption: {_compact_int(count)} {unit}."
+    elif hosted:
+        # A hosted MCP endpoint has no registry downloads or stars to count. Say that,
+        # not "new": a widely used server would otherwise read as unproven.
+        adopt_clause = " Adoption: no public data for a hosted endpoint."
     else:
         adopt_clause = " Adoption: new (no established public data yet)."
     # Line 1 carries the whole verdict in words, so it survives even if a client only
@@ -616,8 +623,13 @@ def _scan_block(
     if adoption:
         count, unit, ascore = adoption
         card.append(f"  ADOPTION  {_trust_bar(ascore)}  {_compact_int(count)} {unit}".rstrip())
+    elif hosted:
+        card.append(f"  ADOPTION  {_trust_bar(0)}  n/a (hosted endpoint)")
     else:
         card.append(f"  ADOPTION  {_trust_bar(0)}  new")
+    _when = str(data.get("scanned_at") or "")[:16].replace("T", " ")
+    if _when:
+        card.append(f"  scanned   {_when} UTC")
     if bool(data.get("jws")):
         card.append("  signed ✔ Ed25519 · recompute offline")
     card += ["─────────────────────────────────────────", "```"]
@@ -1274,6 +1286,7 @@ def _scan_struct(
     dep = data.get("deprecation")
     return {
         "target": target,
+        "scanned_at": data.get("scanned_at"),
         "target_type": target_type,
         "trust_score": score,
         # NOTE: no letter grade — external output is 0-100 score + tier + certified only.
@@ -1760,7 +1773,7 @@ async def _call_tool(
             # Target-specific report page (the web reads ?endpoint=) — not the bare /check.
             rp = f"/check/mcp?endpoint={quote(url, safe='')}"
             card, struct = (
-                _card_text(_scan_block(data, "connect", rp, label)),
+                _card_text(_scan_block(data, "connect", rp, label, hosted=True)),
                 _scan_struct(data, url, "mcp", rp, api, None),
             )
             if rescan:

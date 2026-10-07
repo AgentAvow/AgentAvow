@@ -56,7 +56,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.16"
+__version__ = "0.1.17"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -81,6 +81,13 @@ _PYPI_RUNNERS = {"uvx", "pipx"}
 class _UnscannableError(Exception):
     """The API refused this target (needs sign-in, not publicly reachable, unknown
     coordinate). Retrying every session can't change that, so it is cached."""
+
+
+class _QueuedError(Exception):
+    """No stored grade yet; the API queued a scan (HTTP 202). Ask again next session."""
+
+
+RETRY_QUEUED = 10 * 60  # seconds before a queued dependency is asked about again
 
 
 def _strip_npm_version(spec: str) -> str:
@@ -466,6 +473,7 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
     lines: list[str] = []
     new = 0
     throttled = False
+    queued = 0
     for t in deps:
         entry = cache.get(t["name"])
         if _is_cached(entry, t["id"], now):
@@ -474,7 +482,12 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
             break
         new += 1
         try:
-            r: dict | None = _scan(t)
+            r: dict | None = _scan(t, stored=True)
+        except _QueuedError:
+            # Not graded yet; the API queued it. Ask again in a few minutes, not next week.
+            cache[t["name"]] = {"id": t["id"], "retry_after": now + RETRY_QUEUED}
+            queued += 1
+            continue
         except _UnscannableError:
             r = None
         except urllib.error.HTTPError as e:
@@ -520,14 +533,20 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
         e = cache.get(t["name"])
         if isinstance(e, dict) and e.get("id") == t["id"] and "score" in e:
             graded.append((t["pkg"], e))
-    return lines, graded, throttled
+    if queued and not lines:
+        lines.append(f"⏳ {queued} dependenc{'y' if queued == 1 else 'ies'} not graded yet: "
+                     "AgentAvow has queued the scans; they are reported at a later session start.")
+    return lines, graded, throttled, queued
 
 
-def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = False) -> str:
-    """' Dependencies: graded 12 of 38 — 11 safe, 1 needs a look (lowest: ...).'"""
+def _deps_clause(graded: list[tuple[str, dict]], total: int, throttled: bool = False,
+                 queued: int = 0) -> str:
+    """' Dependencies: graded 12 of 38 — 11 OK, 1 needs a look (lowest: ...).'"""
     if not total:
         return ""
     paused = " (paused: rate limited; continues next session)" if throttled else ""
+    if queued:
+        paused += f" ({queued} queued for grading)"
     done = len(graded)
     if not done:
         return f" Dependencies: 0 of {total} graded yet{paused}."
@@ -601,6 +620,7 @@ def _verdict(data: dict) -> dict:
     return {
         "score": score,
         "verdict": "safe" if (score >= 81 and blocking == 0) else "needs review",
+        "reason": str(data.get("verdict_reason") or ""),
         "blocking": blocking,
         "critical": critical,
         "advisories": advisories,
@@ -745,7 +765,11 @@ def _fetch(path: str, params: dict) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": _user_agent()})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:  # noqa: S310 (https only)
-            return json.load(resp)
+            data = json.load(resp)
+            if resp.status == 202 or (isinstance(data, dict) and data.get("status") == "queued"):
+                raise _QueuedError(str((data.get("detail") if isinstance(data, dict) else "")
+                                       or "queued"))
+            return data
     except urllib.error.HTTPError as e:
         # 4xx (bar rate limiting) is the API's answer about the target, not a hiccup.
         if 400 <= e.code < 500 and e.code not in (408, 429):
@@ -753,13 +777,17 @@ def _fetch(path: str, params: dict) -> dict:
         raise
 
 
-def _scan(target: dict, force: bool = False) -> dict:
+def _scan(target: dict, force: bool = False, stored: bool = False) -> dict:
+    """``stored``: ask for the last stored grade only (instant, no fresh scan, no
+    fresh-scan budget); the API refreshes in the background and answers 202 → _QueuedError
+    when it has nothing yet. Used for dependencies, which are many and already installed."""
     if target["kind"] == "mcp":
         params = {"endpoint": target["url"]}
         if force:
             params["force"] = "true"  # the definitions changed; a cached grade is stale
         return _verdict(_fetch("/mcp", params))
-    return _verdict(_fetch(f"/package/{target['registry']}/{target['pkg']}", {}))
+    params = {"stored": "true"} if stored else {}
+    return _verdict(_fetch(f"/package/{target['registry']}/{target['pkg']}", params))
 
 
 def _load_cache() -> dict:
@@ -812,7 +840,7 @@ def _show_intro_once() -> None:
 
 
 def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
-             servers_present: bool = True) -> str:
+             servers_present: bool = True, server_news: bool = True) -> str:
     """One line a person can act on: how many servers were graded, how many are safe,
     and the one that needs attention most, then the dependency clause. Shown as the
     hook's systemMessage and relayed by Claude at the top of its first reply.
@@ -820,10 +848,14 @@ def _summary(graded: list[tuple[str, dict]], elsewhere: int = 0, deps: str = "",
     silently skipped. ``servers_present`` False = this project has no MCP servers and
     the line is about dependencies only."""
     n = len(graded)
-    tail = (f" {elsewhere} more configured for other projects, graded when you open them."
-            if elsewhere else "")
+    tail = (f" {elsewhere} more MCP server{'' if elsewhere == 1 else 's'} configured for other "
+            "projects, graded when you open them." if elsewhere else "")
     if not servers_present:
         return ("AgentAvow pre-check: no MCP servers in this project." + deps
+                + " Ask for the AgentAvow pre-check for details." + tail)
+    if not n and not server_news:
+        # Every server was already graded; only dependencies are new this time.
+        return ("AgentAvow pre-check: MCP servers unchanged." + deps
                 + " Ask for the AgentAvow pre-check for details." + tail)
     if not n:
         return ("AgentAvow pre-check: a configured MCP server could not be scanned; "
@@ -917,7 +949,14 @@ def main() -> None:
         graded.append((t["name"], result))
         score, verdict, blocking = result["score"], result["verdict"], result["blocking"]
         flag = "✅" if verdict == "safe" else "⚠️"
-        extra = f", {blocking} blocking finding(s)" if blocking else ""
+        if blocking:
+            extra = f", {blocking} blocking finding(s)"
+        elif verdict != "safe":
+            why = ("limited coverage" if result.get("reason") == "thin_coverage"
+                   else "non-finding signals")
+            extra = f" (no findings; {why})"
+        else:
+            extra = ""
         changed = ("its tool definitions changed since the last grade; re-graded: "
                    if regraded else "")
         sandbox = f"; {result['sandbox']}" if result.get("sandbox") else ""
@@ -926,12 +965,14 @@ def main() -> None:
         lines.append(f"{flag} MCP '{t['name']}' ({coord}): {changed}AgentAvow {score}/100 — "
                      f"{verdict}{extra}{sandbox}.")
 
+    server_lines = len(lines)
     dep_clause = ""
     if deps:
         try:
-            dep_lines, dep_graded, throttled = _dep_lines_and_graded(cache, deps, now, started)
+            dep_lines, dep_graded, throttled, queued = _dep_lines_and_graded(
+                cache, deps, now, started)
             lines += dep_lines
-            dep_clause = _deps_clause(dep_graded, len(deps), throttled)
+            dep_clause = _deps_clause(dep_graded, len(deps), throttled, queued)
             if throttled and not lines:
                 lines.append("➖ dependencies: the AgentAvow API rate-limited this session start; "
                              "grading continues next session.")
@@ -946,7 +987,8 @@ def main() -> None:
         elsewhere = _servers_elsewhere(targets)
     except Exception:
         elsewhere = 0
-    summary = _summary(graded, elsewhere, dep_clause, servers_present=bool(targets))
+    summary = _summary(graded, elsewhere, dep_clause, servers_present=bool(targets),
+                       server_news=bool(server_lines))
     context = (
         "AgentAvow pre-check — new MCP servers and direct dependencies graded before you "
         "rely on them.\n"

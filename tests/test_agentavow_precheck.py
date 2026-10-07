@@ -458,7 +458,7 @@ def test_elsewhere_is_zero_without_projects_or_on_error(hook, monkeypatch, tmp_p
 
 def test_summary_mentions_servers_in_other_projects(hook):
     s = hook._summary([("a", _ok(90, "safe", 0))], elsewhere=2)
-    assert s.endswith("2 more configured for other projects, graded when you open them.")
+    assert s.endswith("2 more MCP servers configured for other projects, graded when you open them.")
     assert "graded 1 MCP server — 1 safe" in s
     assert "other projects" not in hook._summary([("a", _ok(90, "safe", 0))])
 
