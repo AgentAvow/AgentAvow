@@ -1112,12 +1112,12 @@
   },
   "npm/esbuild": {
    "version": "0.28.2",
-   "score": 45,
-   "label": "do_not_connect",
+   "score": 59,
+   "label": "review",
    "files_scanned": 4,
    "severity": {
-    "critical": 1,
-    "high": 0,
+    "critical": 0,
+    "high": 1,
     "medium": 2,
     "low": 0,
     "info": 0
@@ -1125,7 +1125,7 @@
    "capabilities": 6,
    "not_installed": 0,
    "rules": {
-    "critical: execSync / spawn (Node.js)": 1,
+    "high: execSync / spawn (Node.js)": 1,
     "medium: execSync / spawn (Node.js)": 1,
     "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
    }
@@ -3328,16 +3328,17 @@
    "files_scanned": 6,
    "severity": {
     "critical": 0,
-    "high": 13,
-    "medium": 1,
+    "high": 10,
+    "medium": 4,
     "low": 0,
     "info": 0
    },
    "capabilities": 3,
    "not_installed": 0,
    "rules": {
-    "high: execSync / spawn (Node.js)": 13,
-    "medium: Unpinned npx/uvx package (no @version pin)": 1
+    "high: execSync / spawn (Node.js)": 10,
+    "medium: Unpinned npx/uvx package (no @version pin)": 1,
+    "medium: execSync / spawn (Node.js)": 3
    }
   },
   "npm/uri-js": {
@@ -5211,12 +5212,12 @@
   },
   "pypi/nodeenv": {
    "version": "1.11.0",
-   "score": 45,
-   "label": "do_not_connect",
+   "score": 61,
+   "label": "review",
    "files_scanned": 8,
    "severity": {
-    "critical": 1,
-    "high": 1,
+    "critical": 0,
+    "high": 2,
     "medium": 0,
     "low": 0,
     "info": 0
@@ -5224,8 +5225,7 @@
    "capabilities": 4,
    "not_installed": 0,
    "rules": {
-    "critical: subprocess.run / Popen (Python)": 1,
-    "high: subprocess.run / Popen (Python)": 1
+    "high: subprocess.run / Popen (Python)": 2
    }
   },
   "pypi/numpy": {

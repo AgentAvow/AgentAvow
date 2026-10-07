@@ -2918,12 +2918,7 @@
     "size": 34277
    },
    "id": "pypi/nodeenv",
-   "source": "top-pypi-30d#158",
-   "known_fp": {
-    "label": "do_not_connect",
-    "class": "untrusted-input proximity by line window, not dataflow",
-    "detail": "nodeenv.py:1167 runs ('sh','-c', '. activate && npm install -g npm@{args.npm}') (sh -c with the user's own --npm value); the 'untrusted input nearby' window (45 lines) is satisfied by urlopen(npm_url) at :1194 in another function. sh -c stays critical per the PR 2 brief."
-   }
+   "source": "top-pypi-30d#158"
   },
   {
    "ecosystem": "pypi",
@@ -4305,12 +4300,7 @@
    },
    "wheel": null,
    "id": "npm/esbuild",
-   "source": "npm-high-impact-top-download#44",
-   "known_fp": {
-    "label": "do_not_connect",
-    "class": "untrusted-input proximity by line window, not dataflow",
-    "detail": "install.js:187 execSync(`npm install ... ${pkg}@${packageJSON.version}`) (its own platform package and pinned version); the window is satisfied by fetch(res.headers.location) at :151 in the binary download helper. execSync near untrusted input stays critical per the PR 2 brief."
-   }
+   "source": "npm-high-impact-top-download#44"
   },
   {
    "ecosystem": "npm",
