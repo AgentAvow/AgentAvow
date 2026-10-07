@@ -427,37 +427,50 @@ async def fetch_npm_artifact(
             raise ArtifactFetchError(f"no dist.tarball for {name}@{version}")
 
         raw = await _download(tarball, client)
-        files = _build_file_map(_unpack_tar_gz(raw))
-
-        # The PACKAGED package.json (what actually ships) — install hooks live here.
-        packaged_manifest = None
-        pkg_json = files.get("package.json")
-        if pkg_json and pkg_json.text:
-            import json
-            try:
-                packaged_manifest = json.loads(pkg_json.text)
-            except ValueError:
-                packaged_manifest = None
-
-        return ArtifactFetchResult(
-            ecosystem="npm",
-            name=name,
-            version=version,
-            kind="tarball",
-            ok=True,
-            digest=_digest(raw),
-            download_url=tarball,
-            files=files,
-            unpacked_size=sum(f.size for f in files.values()),
-            file_count=len(files),
-            packaged_manifest=packaged_manifest,
-            description=(packaged_manifest or {}).get("description"),
-            deprecation=_npm_deprecation(vdata),
+        return npm_result_from_tarball(
+            name, version, raw, tarball_url=tarball, vdata=vdata,
             published_at=str((packument.get("time") or {}).get(version) or "")[:10] or None,
         )
     finally:
         if owns:
             await client.aclose()
+
+
+def npm_result_from_tarball(
+    name: str, version: str, raw: bytes, *, tarball_url: str | None = None,
+    vdata: dict | None = None, published_at: str | None = None,
+) -> ArtifactFetchResult:
+    """Unpack a downloaded npm tarball into the result ``fetch_npm_artifact`` returns.
+    Pure (no I/O): the static corpus runner builds the identical result from cached
+    bytes, so the gate scans exactly what production scans."""
+    files = _build_file_map(_unpack_tar_gz(raw))
+
+    # The PACKAGED package.json (what actually ships) — install hooks live here.
+    packaged_manifest = None
+    pkg_json = files.get("package.json")
+    if pkg_json and pkg_json.text:
+        import json
+        try:
+            packaged_manifest = json.loads(pkg_json.text)
+        except ValueError:
+            packaged_manifest = None
+
+    return ArtifactFetchResult(
+        ecosystem="npm",
+        name=name,
+        version=version,
+        kind="tarball",
+        ok=True,
+        digest=_digest(raw),
+        download_url=tarball_url,
+        files=files,
+        unpacked_size=sum(f.size for f in files.values()),
+        file_count=len(files),
+        packaged_manifest=packaged_manifest,
+        description=(packaged_manifest or {}).get("description"),
+        deprecation=_npm_deprecation(vdata or {}),
+        published_at=published_at,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -556,11 +569,6 @@ async def fetch_pypi_artifact(
         url, kind = picked
 
         raw = await _download(url, client)
-        if kind == "wheel" or url.endswith(".zip") or url.endswith(".whl"):
-            raw_files = _unpack_zip(raw)
-        else:
-            raw_files = _unpack_tar_gz(raw)  # sdist .tar.gz
-        files = _build_file_map(raw_files)
 
         # Installed surface (precision pass #1): when we scanned the sdist but the
         # consumer installs the wheel, read the wheel's member list (central directory
@@ -572,32 +580,56 @@ async def fetch_pypi_artifact(
             _sd, wheel_url = _pypi_sdist_and_wheel(meta.get("urls") or [])
             if wheel_url:
                 try:
-                    wheel_raw = await _download(wheel_url, client)
-                    with zipfile.ZipFile(io.BytesIO(wheel_raw)) as zf:
-                        installed_paths = _wheel_installed_paths(zf.namelist())
+                    installed_paths = wheel_installed_paths_from_bytes(
+                        await _download(wheel_url, client))
                 except (ArtifactFetchError, zipfile.BadZipFile, OSError, httpx.HTTPError) as exc:
                     logger.info("wheel namelist unavailable for %s==%s: %s", name, version, exc)
                     installed_paths = None
 
-        return ArtifactFetchResult(
-            ecosystem="pypi",
-            name=name,
-            version=version,
-            kind=kind,
-            ok=True,
-            digest=_digest(raw),
-            download_url=url,
-            files=files,
-            unpacked_size=sum(f.size for f in files.values()),
-            file_count=len(files),
-            description=(meta.get("info") or {}).get("summary"),
-            deprecation=_pypi_deprecation(meta),
-            published_at=_pypi_published(meta, url),
-            installed_paths=installed_paths,
+        return pypi_result_from_archive(
+            name, version, kind, url, raw, installed_paths=installed_paths, meta=meta,
         )
     finally:
         if owns:
             await client.aclose()
+
+
+def wheel_installed_paths_from_bytes(wheel_raw: bytes) -> set[str]:
+    """The installed-path set from a wheel's central directory (nothing is unpacked).
+    Raises ``zipfile.BadZipFile`` / ``OSError`` on a bad archive."""
+    with zipfile.ZipFile(io.BytesIO(wheel_raw)) as zf:
+        return _wheel_installed_paths(zf.namelist())
+
+
+def pypi_result_from_archive(
+    name: str, version: str, kind: str, url: str, raw: bytes, *,
+    installed_paths: set[str] | None, meta: dict | None = None,
+) -> ArtifactFetchResult:
+    """Unpack a downloaded sdist/wheel into the result ``fetch_pypi_artifact`` returns.
+    Pure (no I/O): the static corpus runner builds the identical result from cached
+    bytes."""
+    meta = meta or {}
+    if kind == "wheel" or url.endswith(".zip") or url.endswith(".whl"):
+        raw_files = _unpack_zip(raw)
+    else:
+        raw_files = _unpack_tar_gz(raw)  # sdist .tar.gz
+    files = _build_file_map(raw_files)
+    return ArtifactFetchResult(
+        ecosystem="pypi",
+        name=name,
+        version=version,
+        kind=kind,
+        ok=True,
+        digest=_digest(raw),
+        download_url=url,
+        files=files,
+        unpacked_size=sum(f.size for f in files.values()),
+        file_count=len(files),
+        description=(meta.get("info") or {}).get("summary"),
+        deprecation=_pypi_deprecation(meta),
+        published_at=_pypi_published(meta, url),
+        installed_paths=installed_paths,
+    )
 
 
 def _pypi_published(meta: dict, url: str) -> str | None:
