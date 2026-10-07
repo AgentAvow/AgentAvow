@@ -252,7 +252,7 @@ else:
     print(f\"LOGIN_FAIL status={r.status_code} body={r.text[:200]}\")
     sys.exit(1)
 '" 2>&1) || true
-    if echo "$LOGIN_RESULT" | grep -q "LOGIN_OK\|LOGIN_SKIP"; then
+    if echo "$LOGIN_RESULT" | grep -q "LOGIN_OK"; then
       break
     fi
     echo "    Attempt $attempt/5 — retrying in 2s..."
@@ -261,10 +261,6 @@ else:
 
   if echo "$LOGIN_RESULT" | grep -q "LOGIN_OK"; then
     ok "Login verified"
-  elif echo "$LOGIN_RESULT" | grep -q "LOGIN_SKIP"; then
-    # No admin credentials in the deploying shell: nothing was tested, so say so
-    # plainly instead of reporting a failure. Log in once on prod by hand.
-    echo -e "    ${YELLOW:-}SKIPPED${NC:-} login check (ADMIN_EMAIL / ADMIN_PASSWORD not exported) — do one real admin login on prod"
   else
     echo "    $LOGIN_RESULT"
     fail "Login verification failed. Check backend logs."
