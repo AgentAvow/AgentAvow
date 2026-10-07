@@ -293,3 +293,31 @@ def test_verdict_carries_the_risk_signals_from_either_api_shape(hook):
     assert v["advisories"] == 0
     assert hook._advisory_applies({"id": "x", "affects_current_version": True, "fixed_in": "1.0"})
     assert not hook._advisory_applies("GHSA-string")
+
+
+def test_session_cwd_from_the_hook_payload_wins_over_the_process_cwd(hook, monkeypatch, capsys, tmp_path):
+    """Claude Desktop's Code tab starts in a scratch workspace and the person moves into
+    the project; the SessionStart payload's ``cwd`` is the session folder."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "package.json").write_text(json.dumps({"dependencies": {"chalk": "5"}}))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.chdir(scratch)  # process cwd: nothing here
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart",
+                                                             "source": "clear", "cwd": str(project)})))
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False: _ok(90, "safe"))
+    assert "Dependencies: graded all 1 — 1 OK, 0 need a look." in out["systemMessage"]
+    assert hook._cwd() == project
+
+
+def test_bad_or_missing_cwd_falls_back_to_the_process_cwd(hook, tmp_path):
+    hook._set_session_cwd({"cwd": str(tmp_path / "does-not-exist")})
+    assert hook._cwd() == pathlib.Path.cwd()
+    hook._set_session_cwd({"cwd": 42})
+    assert hook._cwd() == pathlib.Path.cwd()
+    hook._set_session_cwd("not a dict")
+    assert hook._cwd() == pathlib.Path.cwd()
+    hook._set_session_cwd({"cwd": str(tmp_path)})
+    assert hook._cwd() == tmp_path
+    hook._set_session_cwd(None)

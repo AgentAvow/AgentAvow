@@ -6,7 +6,7 @@ one line, for example: "AgentAvow pre-check: graded 8 MCP servers — 2 safe, 6 
 a look (lowest: 'left-pad' 70/100, deprecated)." Ask for the pre-check and you get one line
 per server and per dependency with its score, verdict, and report link. From then on, a
 server you add with `claude mcp add` is graded before it is added: a critical finding asks
-you first; a clean-but-thin result just tells you. Nothing blocks; you decide. Dependencies are read from the folder the session STARTS in, so open Claude Code in the project (not a scratch folder) to have them graded.
+you first; a clean-but-thin result just tells you. Nothing blocks; you decide. Dependencies are read from the session's folder (the `cwd` Claude Code hands the hook). In Claude Desktop's Code tab, which starts in a scratch workspace, move into the project and type `/clear`: the hook runs again for that folder.
 
 Check whether a tool is safe before your agent connects to it. AgentAvow scans an MCP
 server, a package, or a GitHub repo and returns two scores: a 0–100 trust score, with a
