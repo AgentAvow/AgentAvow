@@ -1,0 +1,20 @@
+{
+  "name": "@agentavow/federation-port-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentAvow tool_admission component for the federation-port/v0 adapter contract: signed MCP server grade, per-tool definition binding, validity window.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 'test/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json",
+    "seal": "node scripts/seal.ts adapters/agentavow-mcp-admission"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}
