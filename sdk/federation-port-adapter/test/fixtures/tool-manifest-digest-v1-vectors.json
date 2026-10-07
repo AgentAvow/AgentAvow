@@ -1,0 +1,345 @@
+{
+  "suite": "tool-manifest-digest-v1",
+  "spec": "aeoess/agent-governance-vocabulary#177 / #179 E1 — tool-safety evidence consumed by a pre-execution gate, bound to one named tool by its definition digest",
+  "status": "proposed — extends tool-manifest-digest-v0 (whole-server binding) with a per-tool binding; a consumer-input shape (gate) and six expected outcomes for the boundary to refine, not a finalized schema",
+  "claim_ceiling": "rely=true establishes exactly this: at evaluation_time, the named issuer had signed a static-analysis grade for this server, the grade covered a tool of this name, the definition the gate was served for that tool is the one the scan graded, and the signature, subject and validity window all check. It establishes nothing about runtime behavior, nothing about what the tool does when invoked, nothing about other tools on the server, and nothing about definitions the scan did not observe. Whether a gate proceeds on rely=true is a separately versioned admission policy.",
+  "derivation": {
+    "attestation": "compact JWS (RFC 7515), alg EdDSA (Ed25519), payload = RFC 8785 JCS canonical bytes of the verdict; signature over ASCII(BASE64URL(header) || \".\" || BASE64URL(payload)).",
+    "subject": "subject.id = \"mcp:\" + the endpoint URL that was scanned. The subject is the server, not a tool.",
+    "tool_digest": "scan.toolDigests[\"tool:<name>\"] = \"sha256:\" + hex(sha256(JCS({ profile: \"agentavow.mcp-tool-definition.v1\", tool }))) where tool is the served definition restricted to name, title, description, inputSchema, outputSchema, annotations (a missing or null field is omitted; _meta and unknown fields are never hashed). A gate can compute observed_tool_digest from the tools/list it is served, with no call to the issuer.",
+    "tool_key": "the map key is \"tool:\" + the name with every character outside 0x21-0x7E (space, controls and all non-ASCII), plus % and =, percent-encoded as its UTF-8 bytes (uppercase hex). If the encoded body is longer than 128 characters it is cut to its first 96 characters and suffixed with \"~\" and the first 16 lowercase hex characters of sha256 over the raw UTF-8 name; the cut is a plain character count on the encoded body and may land inside a %XX triplet, whose partial bytes are kept as-is. key_encoding carries pairs for both rules.",
+    "manifest_digest": "scan.toolManifestDigest = sha-256 folded over the per-tool digests (the v0 whole-server binding; not used by the v1 gate)."
+  },
+  "author_set": "agentgraph (AgentAvow attestation layer, did:web:agentgraph.co).",
+  "axes": {
+    "signature_valid": "Ed25519 verifies under the pinned JWK whose kid matches the JWS header. Binds the signer to what it signed, and no further.",
+    "canonical_bytes": "jcs(JSON.parse(payload)) equals the payload bytes. Recomputability check; independent of the signature.",
+    "subject_binds": "payload.subject.id equals gate.subject_id.",
+    "tool_binds": "payload.scan.toolDigests has the key \"tool:<gate.tool_name>\" (encoded as above): the scan observed a tool of that name.",
+    "tool_digest_binds": "that entry equals gate.observed_tool_digest. \"not_evaluated\" when tool_binds is false: there is no signed digest to compare.",
+    "fresh": "gate.evaluation_time is within [issuedAt, expiresAt).",
+    "rely": "all six axes true. None of the six is derived from another."
+  },
+  "issuer": {
+    "id": "did:web:agentgraph.co",
+    "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
+    "jwk": {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "JwovTLVbpgk85zlMNruTiLzp85dAucsZWngs8NisBFg",
+      "kid": "agentgraph-security-v1",
+      "use": "sig",
+      "alg": "EdDSA"
+    }
+  },
+  "attestation": {
+    "source_url": "https://agentavow.com/api/v1/public/scan/mcp?endpoint=https%3A%2F%2Fmcp.deepwiki.com%2Fmcp",
+    "subject": {
+      "id": "mcp:https://mcp.deepwiki.com/mcp",
+      "repo": "mcp:https://mcp.deepwiki.com/mcp"
+    },
+    "issuedAt": "2026-10-01T21:28:34.085197+00:00",
+    "expiresAt": "2026-10-02T21:28:34.085197+00:00",
+    "trustScore": 74,
+    "toolManifestDigest": "sha256:9d4a7d42e2b6c025099570b6dfff977f9e58ea3fce98f727c58454e936025e84",
+    "toolDigests": {
+      "tool:ask_wiki_question": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+      "tool:read_wiki_contents": "sha256:3582a81089d120634d681ccf94e9ab7f15f471ddd48f4a82e06b05d10905d9c4",
+      "tool:read_wiki_structure": "sha256:9bd57ff3e9534bbed54167ef1a74b2bc0e4b46128db28218767f0eed6e8f79a8"
+    },
+    "payload_sha256": "5e159675e62845bd5411932a1f970ed08bb0ea768043cb898a8c2656bfd000fa",
+    "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTAyVDIxOjI4OjM0LjA4NTE5NyswMDowMCIsImlzc3VlZEF0IjoiMjAyNi0xMC0wMVQyMToyODozNC4wODUxOTcrMDA6MDAiLCJpc3N1ZXIiOnsiaWQiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJuYW1lIjoiQWdlbnRBdm93IiwidXJsIjoiaHR0cHM6Ly9hZ2VudGdyYXBoLmNvIn0sInJlY29tbWVuZGVkTGltaXRzIjp7Im1heF90b2tlbnNfcGVyX2NhbGwiOjQwOTYsInJlcXVlc3RzX3Blcl9taW51dGUiOjMwLCJyZXF1aXJlX3VzZXJfY29uZmlybWF0aW9uIjpmYWxzZX0sInNjYW4iOnsiY2F0ZWdvcnlTY29yZXMiOnsiY29kZV9zYWZldHkiOjEwMCwiZGF0YV9oYW5kbGluZyI6MTAwLCJkZXBlbmRlbmN5X2hlYWx0aCI6MTAwLCJmaWxlc3lzdGVtX2FjY2VzcyI6MTAwLCJzZWNyZXRfaHlnaWVuZSI6MTAwfSwiY292ZXJhZ2UiOnsiZGJfc25hcHNob3RzIjp7fSwibGl2ZV9vYnNlcnZlZCI6dHJ1ZSwicG9pbnRfaW5fdGltZSI6IjIwMjYtMTAtMDFUMjE6Mjg6MjIuNjU3MDY0WiIsInByb3ZlbmFuY2VfYmluZGluZyI6Im4vYSIsInNjYW5fZGVwdGgiOiJhcnRpZmFjdCtsaXZlIiwic3VyZmFjZSI6Im1jcCJ9LCJmaWxlc1NjYW5uZWQiOjMsImZpbGVzVG90YWwiOjMsImZpbmRpbmdzIjp7ImNhdGVnb3JpZXMiOnt9LCJjcml0aWNhbCI6MCwiY3JpdGljYWxfYWxsIjowLCJoaWdoIjowLCJoaWdoX2FsbCI6MCwiaXRlbXMiOltdLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjowfSwicG9zaXRpdmVTaWduYWxzIjpbIjMgdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0Ijoid2FybmluZ3MiLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDphc2tfd2lraV9xdWVzdGlvbiI6InNoYTI1NjoxNzFhNTNjOTcyNTg3NDI1OGIwYjExMjViYzFkMWM1MTdlMWIwMmY5MWEyMzYwOTZhMzdmNTNjYzNhNzYzZGM5IiwidG9vbDpyZWFkX3dpa2lfY29udGVudHMiOiJzaGEyNTY6MzU4MmE4MTA4OWQxMjA2MzRkNjgxY2NmOTRlOWFiN2YxNWY0NzFkZGQ0OGY0YTgyZTA2YjA1ZDEwOTA1ZDljNCIsInRvb2w6cmVhZF93aWtpX3N0cnVjdHVyZSI6InNoYTI1Njo5YmQ1N2ZmM2U5NTM0YmJlZDU0MTY3ZWYxYTc0YjJiYzBlNGI0NjEyOGRiMjgyMTg3NjdmMGVlZDZlOGY3OWE4In0sInRvb2xNYW5pZmVzdERpZ2VzdCI6InNoYTI1Njo5ZDRhN2Q0MmUyYjZjMDI1MDk5NTcwYjZkZmZmOTc3ZjllNThlYTNmY2U5OGY3MjdjNTg0NTRlOTM2MDI1ZTg0IiwidHJ1c3RTY29yZSI6NzQsInRydXN0VGllciI6InN0YW5kYXJkIn0sInNjYW5uZWRBdCI6IjIwMjYtMTAtMDFUMjE6Mjg6MjIuNjU3MjQzKzAwOjAwIiwic3ViamVjdCI6eyJpZCI6Im1jcDpodHRwczovL21jcC5kZWVwd2lraS5jb20vbWNwIiwicmVwbyI6Im1jcDpodHRwczovL21jcC5kZWVwd2lraS5jb20vbWNwIn0sInR5cGUiOiJTZWN1cml0eVBvc3R1cmVBdHRlc3RhdGlvbiJ9.YjzVmszp_aYR-Lc1YBgwMUgkZ0_nupNuxd-9eU4z62BJlnRjlgANMwSHcVKYHVe0bSXSGdk9_SOZXcWf-r9ZDQ"
+  },
+  "observed_tools": [
+    {
+      "name": "ask_wiki_question",
+      "description": "Ask any question about a GitHub repository's codebase and get an AI-powered answer\ngrounded in its DeepWiki.",
+      "inputSchema": {
+        "properties": {
+          "repoName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "GitHub repository or list of repositories (max 10) in owner/repo format."
+          },
+          "question": {
+            "description": "The question to ask about the repository.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoName",
+          "question"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "_meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "read_wiki_contents",
+      "description": "View documentation about a GitHub repository.",
+      "inputSchema": {
+        "properties": {
+          "repoName": {
+            "description": "GitHub repository in owner/repo format (e.g. \"facebook/react\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoName"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "_meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "read_wiki_structure",
+      "description": "Get a list of documentation topics for a GitHub repository.",
+      "inputSchema": {
+        "properties": {
+          "repoName": {
+            "description": "GitHub repository in owner/repo format (e.g. \"facebook/react\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repoName"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "_meta": {
+        "_fastmcp": {
+          "tags": []
+        }
+      }
+    }
+  ],
+  "key_encoding": [
+    {
+      "name": "ask_wiki_question",
+      "key": "tool:ask_wiki_question"
+    },
+    {
+      "name": "a=b",
+      "key": "tool:a%3Db"
+    },
+    {
+      "name": "x%y",
+      "key": "tool:x%25y"
+    },
+    {
+      "name": "read file",
+      "key": "tool:read%20file"
+    },
+    {
+      "name": "tab\there",
+      "key": "tool:tab%09here"
+    },
+    {
+      "name": "héllo",
+      "key": "tool:h%C3%A9llo"
+    },
+    {
+      "name": "search 🙂",
+      "key": "tool:search%20%F0%9F%99%82"
+    },
+    {
+      "name": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "key": "tool:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "name": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "key": "tool:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc~a2efa32a90eaeb9b"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "key": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~c2a908d98f5df987"
+    },
+    {
+      "name": "éééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "key": "tool:%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9~2d18fe4b61f01139"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé",
+      "key": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%~cbaf05a1cc450848"
+    },
+    {
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé",
+      "key": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%C~a1a40b6757b6805f"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "tool-match",
+      "note": "The positive case. The gate authorizes one named tool on the same server, computes the digest of the definition it was served, and that digest equals the one the scan signed for that tool, inside the validity window. Every axis passes.",
+      "gate": {
+        "subject_id": "mcp:https://mcp.deepwiki.com/mcp",
+        "tool_name": "ask_wiki_question",
+        "observed_tool_digest": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+        "evaluation_time": "2026-10-01T22:28:34.085Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": true,
+        "tool_digest_binds": true,
+        "fresh": true,
+        "rely": true
+      }
+    },
+    {
+      "name": "unknown-tool",
+      "note": "The gate authorizes a tool name the scan never observed. The server, signature and freshness all check; the attestation says nothing about this tool. tool_digest_binds is not evaluated because there is no signed digest to compare. Do not rely.",
+      "gate": {
+        "subject_id": "mcp:https://mcp.deepwiki.com/mcp",
+        "tool_name": "delete_wiki_page",
+        "observed_tool_digest": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+        "evaluation_time": "2026-10-01T22:28:34.085Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": false,
+        "tool_digest_binds": "not_evaluated",
+        "fresh": true,
+        "rely": false
+      }
+    },
+    {
+      "name": "tool-drift",
+      "note": "The named tool exists, but the definition the gate was served differs from the one the scan graded: one sentence was added to its description after the grade (the rug-pull, per tool). Do not rely.",
+      "gate": {
+        "subject_id": "mcp:https://mcp.deepwiki.com/mcp",
+        "tool_name": "ask_wiki_question",
+        "observed_tool_digest": "sha256:93eb4ba06e95b9f5f9277f7958494a3aae3e967ba0674de077d018ce1f6ce28b",
+        "evaluation_time": "2026-10-01T22:28:34.085Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": true,
+        "tool_digest_binds": false,
+        "fresh": true,
+        "rely": false
+      }
+    },
+    {
+      "name": "wrong-subject",
+      "note": "A valid grade for one server presented for another. Same tool name, same digest, wrong subject. Do not rely.",
+      "gate": {
+        "subject_id": "mcp:https://mcp.example.com/mcp",
+        "tool_name": "ask_wiki_question",
+        "observed_tool_digest": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+        "evaluation_time": "2026-10-01T22:28:34.085Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": false,
+        "tool_binds": true,
+        "tool_digest_binds": true,
+        "fresh": true,
+        "rely": false
+      }
+    },
+    {
+      "name": "past-expiry",
+      "note": "Same attestation, evaluated after expiresAt. A signed verdict does not verify forever. Treated as unsigned.",
+      "gate": {
+        "subject_id": "mcp:https://mcp.deepwiki.com/mcp",
+        "tool_name": "ask_wiki_question",
+        "observed_tool_digest": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+        "evaluation_time": "2026-10-02T22:28:34.085Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": true,
+        "tool_digest_binds": true,
+        "fresh": false,
+        "rely": false
+      }
+    },
+    {
+      "name": "tampered-payload",
+      "note": "Payload edited after signing (trustScore raised to 99), re-canonicalized, original signature kept. Canonical bytes still check; the signature does not. Canonical form is not authenticity. Do not rely.",
+      "gate": {
+        "subject_id": "mcp:https://mcp.deepwiki.com/mcp",
+        "tool_name": "ask_wiki_question",
+        "observed_tool_digest": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+        "evaluation_time": "2026-10-01T22:28:34.085Z"
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTAyVDIxOjI4OjM0LjA4NTE5NyswMDowMCIsImlzc3VlZEF0IjoiMjAyNi0xMC0wMVQyMToyODozNC4wODUxOTcrMDA6MDAiLCJpc3N1ZXIiOnsiaWQiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJuYW1lIjoiQWdlbnRBdm93IiwidXJsIjoiaHR0cHM6Ly9hZ2VudGdyYXBoLmNvIn0sInJlY29tbWVuZGVkTGltaXRzIjp7Im1heF90b2tlbnNfcGVyX2NhbGwiOjQwOTYsInJlcXVlc3RzX3Blcl9taW51dGUiOjMwLCJyZXF1aXJlX3VzZXJfY29uZmlybWF0aW9uIjpmYWxzZX0sInNjYW4iOnsiY2F0ZWdvcnlTY29yZXMiOnsiY29kZV9zYWZldHkiOjEwMCwiZGF0YV9oYW5kbGluZyI6MTAwLCJkZXBlbmRlbmN5X2hlYWx0aCI6MTAwLCJmaWxlc3lzdGVtX2FjY2VzcyI6MTAwLCJzZWNyZXRfaHlnaWVuZSI6MTAwfSwiY292ZXJhZ2UiOnsiZGJfc25hcHNob3RzIjp7fSwibGl2ZV9vYnNlcnZlZCI6dHJ1ZSwicG9pbnRfaW5fdGltZSI6IjIwMjYtMTAtMDFUMjE6Mjg6MjIuNjU3MDY0WiIsInByb3ZlbmFuY2VfYmluZGluZyI6Im4vYSIsInNjYW5fZGVwdGgiOiJhcnRpZmFjdCtsaXZlIiwic3VyZmFjZSI6Im1jcCJ9LCJmaWxlc1NjYW5uZWQiOjMsImZpbGVzVG90YWwiOjMsImZpbmRpbmdzIjp7ImNhdGVnb3JpZXMiOnt9LCJjcml0aWNhbCI6MCwiY3JpdGljYWxfYWxsIjowLCJoaWdoIjowLCJoaWdoX2FsbCI6MCwiaXRlbXMiOltdLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjowfSwicG9zaXRpdmVTaWduYWxzIjpbIjMgdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0Ijoid2FybmluZ3MiLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDphc2tfd2lraV9xdWVzdGlvbiI6InNoYTI1NjoxNzFhNTNjOTcyNTg3NDI1OGIwYjExMjViYzFkMWM1MTdlMWIwMmY5MWEyMzYwOTZhMzdmNTNjYzNhNzYzZGM5IiwidG9vbDpyZWFkX3dpa2lfY29udGVudHMiOiJzaGEyNTY6MzU4MmE4MTA4OWQxMjA2MzRkNjgxY2NmOTRlOWFiN2YxNWY0NzFkZGQ0OGY0YTgyZTA2YjA1ZDEwOTA1ZDljNCIsInRvb2w6cmVhZF93aWtpX3N0cnVjdHVyZSI6InNoYTI1Njo5YmQ1N2ZmM2U5NTM0YmJlZDU0MTY3ZWYxYTc0YjJiYzBlNGI0NjEyOGRiMjgyMTg3NjdmMGVlZDZlOGY3OWE4In0sInRvb2xNYW5pZmVzdERpZ2VzdCI6InNoYTI1Njo5ZDRhN2Q0MmUyYjZjMDI1MDk5NTcwYjZkZmZmOTc3ZjllNThlYTNmY2U5OGY3MjdjNTg0NTRlOTM2MDI1ZTg0IiwidHJ1c3RTY29yZSI6OTksInRydXN0VGllciI6InZlcmlmaWVkIn0sInNjYW5uZWRBdCI6IjIwMjYtMTAtMDFUMjE6Mjg6MjIuNjU3MjQzKzAwOjAwIiwic3ViamVjdCI6eyJpZCI6Im1jcDpodHRwczovL21jcC5kZWVwd2lraS5jb20vbWNwIiwicmVwbyI6Im1jcDpodHRwczovL21jcC5kZWVwd2lraS5jb20vbWNwIn0sInR5cGUiOiJTZWN1cml0eVBvc3R1cmVBdHRlc3RhdGlvbiJ9.YjzVmszp_aYR-Lc1YBgwMUgkZ0_nupNuxd-9eU4z62BJlnRjlgANMwSHcVKYHVe0bSXSGdk9_SOZXcWf-r9ZDQ",
+      "expect": {
+        "signature_valid": false,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": true,
+        "tool_digest_binds": true,
+        "fresh": true,
+        "rely": false
+      }
+    }
+  ]
+}

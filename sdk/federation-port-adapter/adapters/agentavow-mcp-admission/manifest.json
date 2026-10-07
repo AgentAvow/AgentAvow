@@ -1,0 +1,85 @@
+{
+  "contract": "federation-port/v0",
+  "id": "agentavow.com/mcp-tool-admission",
+  "publisher": {
+    "name": "AgentAvow",
+    "contact": "https://agentavow.com"
+  },
+  "maintainer": {
+    "name": "AgentAvow",
+    "contact": "https://github.com/AgentAvow/AgentAvow"
+  },
+  "artifact": {
+    "version": "0.1.0",
+    "entry": "adapter.ts",
+    "files": [
+      "adapter.ts"
+    ],
+    "digest": "sha256:81c18f161334aa5f5ca08ede7b5b9d5344034d2745329baebd167aa02d08cd60"
+  },
+  "role": "tool_admission",
+  "schemas": {
+    "check_evidence": {
+      "media_type": "application/json",
+      "description": "{ profile: \"agentavow.mcp-tool-definition.v1\", endpoint: <https URL of the MCP server>, tool: <the tools/list entry the caller holds for the tool being dispatched, as served> }. The tool's name must equal the action's tool (or config.tool_name)."
+    },
+    "output_evidence": {
+      "media_type": "application/json",
+      "description": "{ profile, attestation: <the compact JWS as fetched from AgentAvow>, tool_key: \"tool:<name>\", observed_tool_digest: <recomputed from the submitted definition>, signed_tool_digest: <from the signed payload, or null> }. For a failed check before an attestation was obtained: the raw HTTP body, or empty."
+    }
+  },
+  "claims": [
+    {
+      "id": "agentavow.grade",
+      "establishes": "AgentAvow signed a static-analysis grade for the MCP server named in the evidence with trust score at or above the policy minimum (default 81) and no shipped critical or high finding.",
+      "limits": [
+        "Static analysis of the server's served tool definitions only; says nothing about what the server or any tool does at runtime",
+        "The score is AgentAvow's model over the findings it observed at scan time, not a guarantee of safety",
+        "Does not bind any tool definition; that is agentavow.tool_definition_binds",
+        "Does not say the attestation is inside its validity window; that is agentavow.fresh",
+        "AgentAvow serves a cached scan for up to one hour; a change on the server after the last scan is not graded until the next scan"
+      ]
+    },
+    {
+      "id": "agentavow.tool_definition_binds",
+      "establishes": "The served definition of the named tool, as submitted by the caller, has the same agentavow.mcp-tool-definition.v1 digest as the one AgentAvow signed for that tool in the server's scan.",
+      "limits": [
+        "Nothing about other tools on the server",
+        "Nothing about definitions the scan did not observe; a tool absent from the signed scan is not_established (reason tool_not_in_signed_scan), not failed",
+        "Digest equality over name, title, description, inputSchema, outputSchema and annotations only; _meta and unknown fields are never hashed",
+        "Compares the definition the caller submitted as evidence; the server is not contacted by this component",
+        "Checked at admission, not at dispatch"
+      ]
+    },
+    {
+      "id": "agentavow.fresh",
+      "establishes": "The evaluation instant the runtime supplied lies inside the attestation's validity window [issuedAt, expiresAt).",
+      "limits": [
+        "No trusted time source; relies on the instant the runtime supplied",
+        "Says nothing about whether the server changed after the scan"
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "id": "agentavow.mcp-tool-definition.v1",
+      "description": "Per-tool digest: \"sha256:\" + hex(sha256(JCS({ profile, tool }))) where tool is the served definition restricted to name, title, description, inputSchema, outputSchema, annotations (missing or null omitted); map key \"tool:\" + the name percent-encoded per the profile. Vectors: docs/standards/tool-manifest-digest-vectors-v1 in the AgentAvow repository."
+    }
+  ],
+  "privileges_requested": [],
+  "data_destinations": [
+    "https://agentavow.com"
+  ],
+  "keys": [
+    {
+      "id": "agentgraph-security-v1",
+      "purpose": "Ed25519 public key that verifies AgentAvow scan attestations (compact JWS, alg EdDSA). Pinned in adapter.ts; also published at https://agentgraph.co/.well-known/jwks.json.",
+      "held_by": "publisher",
+      "lifecycle": "Long-lived. Rotation publishes a new kid in the JWKS and a new adapter version pins it. Customer policy may supply its own copy of the JWK (config.jwk) in place of the pin."
+    }
+  ],
+  "license": {
+    "spdx": "Apache-2.0",
+    "attribution": "AgentAvow, https://agentavow.com"
+  }
+}
