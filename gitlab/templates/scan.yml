@@ -1,0 +1,95 @@
+# AgentAvow scan: GitLab CI/CD component.
+#
+# Runs the offline AgentAvow static scan inside your runner, on the checked-out code.
+# Nothing leaves your network. The job fails below the trust-score threshold and
+# publishes a GitLab Code Quality report so findings show in the merge-request widget.
+#
+# Usage (once the component project is published; pin a version):
+#
+#   include:
+#     - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@1.0.0
+#       inputs:
+#         min_score: 81
+#         image: registry.example.internal/mirrors/agentavow/scanner:0.1
+#
+# Self-managed instances that cannot reach gitlab.com components: mirror this
+# project into your instance and include it from there, or use the plain job in
+# ../agentavow-scan.gitlab-ci.yml. See ../README.md.
+
+spec:
+  inputs:
+    min_score:
+      type: number
+      default: 81
+      description: >-
+        Fail the job when the trust score (0-100) is below this. The default, 81,
+        is the floor of "Safe to connect"; lower it to start with a softer gate.
+    fail_on_findings:
+      type: string
+      default: "none"
+      options: ["none", "critical", "high", "medium"]
+      description: >-
+        Also fail the job when any finding at or above this severity is present,
+        regardless of score. "none" gates on the score only.
+    path:
+      type: string
+      default: "."
+      description: Directory to scan, relative to the repository root.
+    image:
+      type: string
+      default: "ghcr.io/agentavow/scanner:0.1"
+      description: >-
+        The scanner image. Behind a firewall, point this at the copy in your
+        internal registry (docker/scanner.Dockerfile in the AgentAvow repository).
+    stage:
+      type: string
+      default: test
+      description: Pipeline stage to run in.
+    allow_failure:
+      type: boolean
+      default: false
+      description: >-
+        Report without blocking the pipeline. Useful for a first rollout; turn it
+        off once the baseline is known.
+    job_name:
+      type: string
+      default: agentavow-scan
+      description: Name of the generated job.
+
+---
+
+"$[[ inputs.job_name ]]":
+  stage: $[[ inputs.stage ]]
+  image:
+    name: $[[ inputs.image ]]
+    entrypoint: [""]
+  interruptible: true
+  allow_failure: $[[ inputs.allow_failure ]]
+  variables:
+    AGENTAVOW_MIN_SCORE: "$[[ inputs.min_score ]]"
+    AGENTAVOW_FAIL_ON: "$[[ inputs.fail_on_findings ]]"
+    AGENTAVOW_PATH: "$[[ inputs.path ]]"
+  script:
+    # The CLI writes both reports before it applies the gate, so the artifacts are
+    # published even when the job fails. CI_PROJECT_DIR lets the CLI prefix report
+    # paths when AGENTAVOW_PATH is a subdirectory.
+    - |
+      set -- "$AGENTAVOW_PATH" \
+        --json agentavow-scan.json \
+        --gitlab-code-quality gl-code-quality-report.json \
+        --min-score "$AGENTAVOW_MIN_SCORE"
+      if [ "$AGENTAVOW_FAIL_ON" != "none" ]; then set -- "$@" --fail-on "$AGENTAVOW_FAIL_ON"; fi
+      agentavow scan "$@"
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - agentavow-scan.json
+      - gl-code-quality-report.json
+    reports:
+      codequality: gl-code-quality-report.json
+  rules:
+    # Merge requests get the widget; the default branch keeps the baseline GitLab
+    # diffs new MR findings against.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
