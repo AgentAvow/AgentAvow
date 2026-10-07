@@ -45,7 +45,7 @@ export const ago = (iso: string) => {
 
 /** The three-phrase headline a watch alert carries ("Now: Review before you connect
  * (one high finding: …)."), so the row can lead with it as a coloured chip. */
-export function parsePhrase(body: string): { phrase: DecisionPhrase; reason: string } | null {
+function parsePhrase(body: string): { phrase: DecisionPhrase; reason: string } | null {
   for (const p of DECISIONS) {
     const i = body.indexOf(p.phrase)
     if (i >= 0) {
@@ -57,7 +57,7 @@ export function parsePhrase(body: string): { phrase: DecisionPhrase; reason: str
 }
 
 /** Drop the "Now: <phrase> (<reason>)." clause from the sentence when the chip shows it. */
-export function stripPhrase(body: string): string {
+function stripPhrase(body: string): string {
   return body.replace(/\s*Now: [^.]*\)\.?/, '').trim()
 }
 

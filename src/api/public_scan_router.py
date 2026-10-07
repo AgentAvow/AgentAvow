@@ -2658,7 +2658,7 @@ def _combined_badge_response(
         trust_text = "#fff"
     adopt_label = f"★ {_compact_int(count)}" if count else "New"
     bw = 80
-    tw = math.ceil(verdana_width(trust_label) + 14)
+    tw = math.ceil(verdana_width(trust_label) * 1.1 + 14)  # bold: ~10% wider than the table
     aw = math.ceil(verdana_width(adopt_label) + 14)
     total = bw + tw + aw
     defs = f"<defs>{cert_gradient_def()}</defs>" if cert else ""
@@ -2694,7 +2694,7 @@ def _certified_badge_response(score: int, decision: str | None = None) -> Respon
 
     from src.api.badge_style import BADGE_FONT, CERT_GRADIENT, cert_gradient_def, verdana_width
     label = f"{_decision_for(decision or score).label} · ✓ Certified {score}"
-    label_width = math.ceil(verdana_width(label) + 16)
+    label_width = math.ceil(verdana_width(label) * 1.1 + 16)  # bold: ~10% wider
     total_width = 80 + label_width
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
   <defs>{cert_gradient_def()}</defs>
