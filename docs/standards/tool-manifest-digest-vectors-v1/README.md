@@ -225,3 +225,15 @@ verifier output verbatim, and whether you wrote your own implementation of the d
 the only kind that counts as independent; a run of your own reader is a separate implementation, run by
 its author, and should be labelled that way. The claim ceiling above applies to every run regardless of
 who performs it.
+
+## The same derivation elsewhere
+
+- **agentrust-io/trace-spec** publishes this derivation as `trace.mcp-tool-definition.v1`
+  ([RFC](https://github.com/agentrust-io/trace-spec/blob/main/docs/rfcs/tool-catalog-observed-digest.md),
+  cases COMP-MCP-004 to 006, merged 2026-10-07). The rules are identical; only the profile label
+  differs, and the label is part of the preimage, so digests under the two labels are not equal.
+  A consumer that needs both computes both.
+- **Agent Authority Conformance lab** holds this set as the `tool-manifest-digest` cross-stack family
+  (merged 2026-10-07) with per-claim records: an independent record for the key encoding, per-tool
+  digests, canonical bytes, signature and case verdicts (a lab-operated run of a reader written by
+  Probity), and independently operated runs of these verifiers for v0 and the one-axis property.
