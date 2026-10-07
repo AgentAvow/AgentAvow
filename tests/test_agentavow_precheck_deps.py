@@ -209,7 +209,8 @@ def test_unscannable_and_transient_failures_fail_open(hook, monkeypatch, capsys,
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "➖ dependency 'a'" in ctx and "not scanned" in ctx
     assert "dependency 'b'" not in ctx  # transient: silent, retried next session
-    assert "Dependencies: graded 1 of 3 — 1 OK, 0 need a look." in out["systemMessage"]
+    # A refused dependency counts as done (it will not become gradable by waiting).
+    assert "Dependencies: graded 2 of 3 — 1 OK, 0 need a look (1 could not be graded)." in out["systemMessage"]
     cache = json.loads(hook.CACHE.read_text())
     assert "retry_after" in cache["dep:npm:a"] and "dep:npm:b" not in cache
 
@@ -417,3 +418,57 @@ def test_summary_does_not_claim_a_server_failed_when_only_dependencies_are_new(h
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
     assert out["systemMessage"].startswith("AgentAvow pre-check: MCP servers unchanged. Dependencies: graded all 2 — 2 OK, 0 need a look.")
     assert "could not be scanned" not in out["systemMessage"]
+
+
+
+# --- acceptance-run fixes (0.1.18) -------------------------------------------------------
+
+def test_refusal_reason_is_shown_and_the_count_completes(hook, monkeypatch, capsys, tmp_path):
+    """sqlalchemy: the API refuses it (artifact over the unpacked-size cap). It must read
+    'not scanned (reason)' and let the count reach 'all', not stay 'queued' forever."""
+    (tmp_path / "requirements.txt").write_text("sqlalchemy\nuvicorn\n")
+
+    def scan(t, force=False, stored=False):
+        if t["pkg"] == "sqlalchemy":
+            raise hook._UnscannableError("Not scannable: artifact exceeds unpacked-size cap (zip bomb?)")
+        return _ok(92, "safe")
+
+    out = _run(hook, monkeypatch, capsys, scan)
+    assert "Dependencies: graded all 2 — 1 OK, 0 need a look (1 could not be graded)." in out["systemMessage"]
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert ("➖ dependency 'sqlalchemy' (pypi:sqlalchemy): not scanned — AgentAvow couldn't grade it "
+            "(artifact exceeds unpacked-size cap (zip bomb?)). Neither safe nor unsafe.") in ctx
+    assert _run(hook, monkeypatch, capsys, scan) == {}  # done: silence next start
+
+
+def test_fetch_keeps_the_api_refusal_reason(hook, monkeypatch):
+    import io as _io
+    import urllib.error
+
+    def raise_422(req, timeout=0):
+        raise urllib.error.HTTPError("u", 422, "Unprocessable", {},
+                                     _io.BytesIO(b'{"detail": "Not scannable: too big"}'))
+
+    monkeypatch.setattr(hook.urllib.request, "urlopen", raise_422)
+    with pytest.raises(hook._UnscannableError) as ei:
+        hook._fetch("/package/pypi/sqlalchemy", {"stored": "true"})
+    assert str(ei.value) == "Not scannable: too big"
+
+
+def test_detail_view_includes_items_graded_at_earlier_starts(hook, monkeypatch, capsys, tmp_path):
+    """After a quiet start, a change to one pin re-grades only that one; the context
+    must still list everything else so 'show the pre-check' can answer in full."""
+    pj = tmp_path / "package.json"
+    pj.write_text(json.dumps({"dependencies": {"chalk": "5", "fastapi-like": "1", "httpx-like": "1"}}))
+    scores = {"chalk": _ok(90, "safe"), "fastapi-like": _ok(40, "needs review", 30),
+              "httpx-like": _ok(88, "safe")}
+    _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
+    pj.write_text(json.dumps({"dependencies": {"chalk": "5", "fastapi-like": "1", "httpx-like": "2"}}))
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "✅ dependency 'httpx-like' (npm:httpx-like@2)" in ctx  # the re-graded one, in full
+    assert "Graded at an earlier session start (unchanged since):" in ctx
+    assert "  ✅ dependency 'chalk': 90/100 safe" in ctx
+    assert "  ℹ️ dependency 'fastapi-like': 40/100 pattern hits only, counted OK" in ctx
+    earlier = ctx.split("Graded at an earlier session start (unchanged since):", 1)[1]
+    assert "httpx-like" not in earlier  # the re-graded one is not repeated in the earlier list

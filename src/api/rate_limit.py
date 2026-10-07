@@ -312,6 +312,12 @@ async def rate_limit_scans(request: Request) -> None:
     settings.rate_limit_scans_per_minute per IP (default 20/min); authenticated
     callers get 3x. Cache hits count too, but the cap is generous for real users.
     """
+    # ``stored=true`` never runs a scan inline (it serves the stored grade or queues a
+    # bounded background refresh), so it is a READ: rate_limit_reads still applies, the
+    # tighter scan limit does not. The plugin hook reads a project's dependencies this way.
+    if request.query_params.get("stored") == "true" and request.url.path.startswith(
+            "/api/v1/public/scan/package/"):
+        return
     ip = _get_client_ip(request)
     limit = settings.rate_limit_scans_per_minute
     key = f"scan:{ip}"

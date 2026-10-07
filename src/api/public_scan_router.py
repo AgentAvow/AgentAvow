@@ -1323,19 +1323,61 @@ def _package_response(
 
 
 # --- background package refresh (for ``stored=true`` callers) -----------------------
+# A coordinate whose scan fails for a reason a retry cannot fix (artifact over the
+# unpacked-size cap, not found) is remembered for a day, so stored mode answers with
+# that reason instead of "queued" forever.
+_REFRESH_ERROR_PREFIX = "public_scan_refresh_error:"
+_REFRESH_ERROR_TTL = 24 * 3600
+
+
+async def _get_refresh_error(cache_owner: str, cache_repo: str) -> str | None:
+    try:
+        from src.redis_client import get_redis
+        v = await get_redis().get(f"{_REFRESH_ERROR_PREFIX}{cache_owner}/{cache_repo}")
+        return (v.decode() if isinstance(v, bytes) else v) or None
+    except Exception:
+        return None
+
+
+async def _set_refresh_error(cache_owner: str, cache_repo: str, error: str) -> None:
+    try:
+        from src.redis_client import get_redis
+        await get_redis().set(f"{_REFRESH_ERROR_PREFIX}{cache_owner}/{cache_repo}",
+                              error[:300], ex=_REFRESH_ERROR_TTL)
+    except Exception:
+        pass
+
 # One refresh per coordinate at a time (Redis lock), at most a few concurrent in this
 # process, no fresh-scan budget: this is the catalog keeping itself warm for hooks.
 _REFRESH_LOCK_TTL = 300
 _refresh_sem = asyncio.Semaphore(3)
+# Stored reads are exempt from the scan limiter, so cap how much background work they
+# can queue in one process: past this many pending refreshes, new ones are dropped (the
+# caller still gets 202 and asks again later).
+_REFRESH_MAX_PENDING = 50
+_refresh_pending = 0
 
 
 def _schedule_package_refresh(surface: str, name: str, version: str | None,
                               cache_owner: str, cache_repo: str) -> None:
+    global _refresh_pending
+    if _refresh_pending >= _REFRESH_MAX_PENDING:
+        return
     try:
         asyncio.get_running_loop().create_task(
-            _refresh_package(surface, name, version, cache_owner, cache_repo))
+            _refresh_package_counted(surface, name, version, cache_owner, cache_repo))
+        _refresh_pending += 1
     except RuntimeError:
         pass
+
+
+async def _refresh_package_counted(surface: str, name: str, version: str | None,
+                                   cache_owner: str, cache_repo: str) -> None:
+    global _refresh_pending
+    try:
+        await _refresh_package(surface, name, version, cache_owner, cache_repo)
+    finally:
+        _refresh_pending = max(0, _refresh_pending - 1)
 
 
 async def _refresh_package(surface: str, name: str, version: str | None,
@@ -1353,6 +1395,8 @@ async def _refresh_package(surface: str, name: str, version: str | None,
             result = await asyncio.wait_for(scan_package(surface, name, version), timeout=90)
             if not result.error:
                 await _set_cached(cache_owner, cache_repo, _scan_result_to_dict(result))
+            else:
+                await _set_refresh_error(cache_owner, cache_repo, str(result.error))
     except Exception:
         pass  # best-effort; the next stored read serves whatever exists
 
@@ -1430,6 +1474,11 @@ async def scan_package_endpoint(
         if cached:
             return await _signed_response(cached, cached=True)
         stale = await _get_stale_cached(cache_owner, cache_repo)
+        if not stale:
+            err = await _get_refresh_error(cache_owner, cache_repo)
+            if err:
+                # Tried and failed for a reason a retry will not fix: say so.
+                raise HTTPException(422, f"Not scannable: {err}")
         _schedule_package_refresh(surface, name, version, cache_owner, cache_repo)
         if stale:
             resp = await _signed_response(stale, cached=True)

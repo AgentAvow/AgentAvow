@@ -145,3 +145,82 @@ async def test_refresh_runs_once_per_coordinate_and_caches_the_result(monkeypatc
     await psr._refresh_package("npm", "left-pad", None, "npm", "left-pad")
     await psr._refresh_package("npm", "left-pad", None, "npm", "left-pad")  # lock held: skipped
     assert stored == {"scanned": 1, "cached": ("npm", "left-pad", 77)}
+
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_permanent_failure_is_a_422_with_the_reason_not_queued(client, no_sandbox, refresh):
+    with patch("src.api.public_scan_router._get_cached", new=AsyncMock(return_value=None)), \
+         patch("src.api.public_scan_router._get_stale_cached", new=AsyncMock(return_value=None)), \
+         patch("src.api.public_scan_router._get_refresh_error",
+               new=AsyncMock(return_value="artifact exceeds unpacked-size cap (zip bomb?)")):
+        r = await client.get("/api/v1/public/scan/package/pypi/sqlalchemy", params={"stored": "true"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Not scannable: artifact exceeds unpacked-size cap (zip bomb?)"
+    assert refresh == []  # nothing re-queued for a failure a retry will not fix
+
+
+@pytest.mark.asyncio
+async def test_refresh_records_a_scan_error(monkeypatch):
+    held: dict = {}
+
+    class _Redis:
+        async def set(self, key, value, nx=False, ex=None):
+            if nx and key in held:
+                return None
+            held[key] = (value, ex)
+            return True
+
+    monkeypatch.setattr("src.redis_client.get_redis", lambda: _Redis())
+
+    class R:
+        error = "artifact exceeds unpacked-size cap (zip bomb?)"
+
+    async def fake_scan(surface, name, version=None):
+        return R()
+
+    monkeypatch.setattr("src.scanner.scan.scan_package", fake_scan)
+    await psr._refresh_package("pypi", "sqlalchemy", None, "pypi", "sqlalchemy")
+    assert held["public_scan_refresh_error:pypi/sqlalchemy"] == (
+        "artifact exceeds unpacked-size cap (zip bomb?)", psr._REFRESH_ERROR_TTL)
+
+
+
+@pytest.mark.asyncio
+async def test_stored_reads_skip_the_scan_limiter_but_not_the_read_limiter(monkeypatch):
+    from starlette.requests import Request
+
+    import src.api.rate_limit as rl
+    seen = []
+
+    async def check(key, limit, window_seconds=60):
+        seen.append(key)
+        return True
+
+    async def headers(request, key, limit):
+        return None
+
+    monkeypatch.setattr(rl._limiter, "check", check)
+    monkeypatch.setattr(rl, "_set_rate_limit_headers", headers)
+
+    def req(qs: bytes, path="/api/v1/public/scan/package/pypi/x"):
+        return Request({"type": "http", "method": "GET", "path": path, "headers": [],
+                        "client": ("198.51.100.4", 1), "query_string": qs,
+                        "scheme": "http", "server": ("t", 80)})
+
+    await rl.rate_limit_scans(req(b"stored=true"))
+    assert seen == []
+    await rl.rate_limit_reads(req(b"stored=true"))
+    assert seen == ["read:198.51.100.4"]
+    await rl.rate_limit_scans(req(b""))
+    await rl.rate_limit_scans(req(b"stored=true", path="/api/v1/public/scan/owner/repo"))
+    assert seen.count("scan:198.51.100.4") == 2
+
+
+def test_refresh_scheduling_is_capped(monkeypatch):
+    monkeypatch.setattr(psr, "_refresh_pending", psr._REFRESH_MAX_PENDING)
+    started = []
+    monkeypatch.setattr(psr.asyncio, "get_running_loop",
+                        lambda: type("L", (), {"create_task": lambda self, c: started.append(c)})())
+    psr._schedule_package_refresh("npm", "x", None, "npm", "x")
+    assert started == []
