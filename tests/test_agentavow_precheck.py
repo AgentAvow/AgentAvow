@@ -92,6 +92,7 @@ def test_plugin_registers_both_hooks_with_short_timeouts():
         assert gate["hooks"][0]["timeout"] <= 10
         assert "agentavow_pretool_gate.py" in gate["hooks"][0]["command"]
         assert "agentavow_precheck.py" in cfg["SessionStart"][0]["hooks"][0]["command"]
+        assert cfg["SessionStart"][0]["matcher"] == "startup|resume|clear"
         install = cfg["PreToolUse"][1]
         assert install["matcher"] == "Bash|Write|Edit|MultiEdit"
         assert install["hooks"][0]["timeout"] <= 20

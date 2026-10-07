@@ -12,7 +12,9 @@ start in manifest order, the rest on later starts, re-graded only when the decla
 version changes. Most projects have no MCP servers but every project has
 dependencies, so this is what gives a first session something to say. Dependencies
 are already installed, so a low grade is advice ("needs a look"), never a stop.
-AGENTAVOW_PRECHECK_DEPS=off turns the pass off. Covers both:
+AGENTAVOW_PRECHECK_DEPS=off turns the pass off. "This project" is the ``cwd`` Claude Code
+passes in the hook payload (the session's folder), so a session moved into a project
+and then cleared (/clear) is graded for that project. Covers both:
   • Remote HTTP(S) MCP servers  -> scan_mcp_server (the live tool definitions).
   • Local stdio servers run from an npm or PyPI package (npx / uvx / pipx / bunx)
     -> scan_package on the resolved package coordinate.
@@ -54,7 +56,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.15"
+__version__ = "0.1.16"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -237,8 +239,34 @@ def _read_json(path: pathlib.Path) -> object:
         return None
 
 
+# The folder the SESSION is in. Claude Code passes it as ``cwd`` in the hook payload;
+# that is what "this project" means, and it differs from the process directory when
+# the session was moved (Claude Desktop's Code tab starts in a scratch workspace and
+# the person cd's into the project). Set by main() from stdin; falls back to the
+# process cwd.
+_SESSION_CWD: pathlib.Path | None = None
+
+
+def _cwd() -> pathlib.Path:
+    return _SESSION_CWD or pathlib.Path.cwd()
+
+
+def _set_session_cwd(payload: object) -> None:
+    global _SESSION_CWD
+    _SESSION_CWD = None
+    if isinstance(payload, dict):
+        raw = payload.get("cwd")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                cand = pathlib.Path(raw).expanduser()
+                if cand.is_dir():
+                    _SESSION_CWD = cand
+            except Exception:
+                _SESSION_CWD = None
+
+
 def _cwd_keys() -> set[str]:
-    cwd = pathlib.Path.cwd()
+    cwd = _cwd()
     keys = {str(cwd)}
     try:
         keys.add(str(cwd.resolve()))
@@ -264,9 +292,9 @@ def _targets() -> list[dict]:
                 proj = projects.get(key)
                 if isinstance(proj, dict):
                     _take(proj.get("mcpServers"), seen)
-    for path in (pathlib.Path.cwd() / ".mcp.json",
-                 pathlib.Path.cwd() / ".claude" / "settings.json",
-                 pathlib.Path.cwd() / ".claude" / "settings.local.json"):
+    for path in (_cwd() / ".mcp.json",
+                 _cwd() / ".claude" / "settings.json",
+                 _cwd() / ".claude" / "settings.local.json"):
         node = _read_json(path)
         if node is not None:
             _walk_for_servers(node, seen)
@@ -383,7 +411,7 @@ def _dependency_targets() -> list[dict]:
     there is no manifest or the pass is off. Same package under two manifests → once."""
     if not _deps_enabled():
         return []
-    cwd = pathlib.Path.cwd()
+    cwd = _cwd()
     found: list[dict] = []
     pj = _read_json(cwd / "package.json")
     if pj is not None:
@@ -831,8 +859,13 @@ def _is_cached(entry: object, target_id: str, now: float) -> bool:
 
 
 def main() -> None:
+    payload = None
     try:
-        json.load(sys.stdin)  # consume the SessionStart payload (unused); ignore errors
+        payload = json.load(sys.stdin)  # the SessionStart payload: ``cwd`` is the session folder
+    except Exception:
+        payload = None
+    try:
+        _set_session_cwd(payload)
     except Exception:
         pass
 
