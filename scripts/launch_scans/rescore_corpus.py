@@ -16,6 +16,7 @@ Usage:
     python3 scripts/launch_scans/rescore_corpus.py --limit 150
     python3 scripts/launch_scans/rescore_corpus.py --surface npm --limit 50
     python3 scripts/launch_scans/rescore_corpus.py --retry-errors --limit 300
+    python3 scripts/launch_scans/rescore_corpus.py --max-score 50 --limit 5000   # low scorers only
 """
 from __future__ import annotations
 
@@ -64,7 +65,7 @@ def _apply_summary(surface: str, row: dict, summ: dict) -> None:
 
 async def _rescore_surface(
     surface: str, limit: int, retry_errors: bool, token: str | None,
-    min_score: int | None = None,
+    min_score: int | None = None, max_score: int | None = None,
 ) -> int:
     fn, key = SURFACES[surface]
     path = _common.DATA_DIR / fn
@@ -78,10 +79,11 @@ async def _rescore_surface(
         print(f"[{surface}] empty, skip")
         return 0
 
-    # Targeted high-priority pass (--min-score): sweep the WHOLE file for rows at or
-    # above min_score, ignoring (and never advancing) the grind's persistent cursor so
-    # a concurrent/subsequent full grind resumes exactly where it left off.
-    prioritized = min_score is not None
+    # Targeted pass (--min-score / --max-score): sweep the WHOLE file for rows in the
+    # score band, ignoring (and never advancing) the grind's persistent cursor so a
+    # concurrent/subsequent full grind resumes exactly where it left off. --max-score
+    # re-scores the low end first after a scanner change (stale "Do not connect" rows).
+    prioritized = min_score is not None or max_score is not None
     cursor_path = _common.DATA_DIR / f".rescore-cursor-{surface}.json"
     start = 0 if prioritized else int(_common.read_json(cursor_path, default={"i": 0}).get("i", 0)) % n
 
@@ -102,8 +104,12 @@ async def _rescore_surface(
             continue  # known-unfetchable; a full pass would just re-fail it
         if prioritized:
             sc = row.get("trust_score")
-            if sc is None or sc < min_score:
+            if sc is None:
+                continue
+            if min_score is not None and sc < min_score:
                 continue  # only the high-scorers this pass
+            if max_score is not None and sc > max_score:
+                continue  # only the low-scorers this pass
         print(f"[{surface}] rescore {done + 1}/{limit}: {full}")
         try:
             result = await scan_repo(full, token=token)
@@ -131,11 +137,12 @@ async def _rescore_surface(
 
 async def _main_async(
     surfaces: list[str], limit: int, retry_errors: bool, token: str | None,
-    min_score: int | None = None,
+    min_score: int | None = None, max_score: int | None = None,
 ) -> None:
     total = 0
     for s in surfaces:
-        total += await _rescore_surface(s, limit, retry_errors, token, min_score=min_score)
+        total += await _rescore_surface(s, limit, retry_errors, token,
+                                        min_score=min_score, max_score=max_score)
     print(f"[rescore] complete — {total} rows re-scored across {len(surfaces)} surface(s)")
 
 
@@ -150,10 +157,14 @@ def main() -> int:
     parser.add_argument("--min-score", type=int, default=None,
                         help="targeted pass: only re-score rows whose current trust_score >= N "
                              "(sweeps the whole file, ignores + never advances the grind cursor)")
+    parser.add_argument("--max-score", type=int, default=None,
+                        help="targeted pass: only re-score rows whose current trust_score <= N "
+                             "(e.g. after a scanner precision change); same cursor rules")
     args = parser.parse_args()
     surfaces = [args.surface] if args.surface else list(SURFACES)
     token = _common.load_secret("GITHUB_TOKEN")
-    asyncio.run(_main_async(surfaces, args.limit, args.retry_errors, token, min_score=args.min_score))
+    asyncio.run(_main_async(surfaces, args.limit, args.retry_errors, token,
+                            min_score=args.min_score, max_score=args.max_score))
     return 0
 
 
