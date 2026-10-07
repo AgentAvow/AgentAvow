@@ -1,7 +1,7 @@
 {
   "name": "agentavow-trust",
-  "version": "0.2.2",
-  "description": "Client-side verification of AgentAvow Trust Score v2 signed envelopes (JCS-canonical, Ed25519-over-SHA-256). Peer of the Python agentavow-sdk verify module. Formerly agentgraph-trust.",
+  "version": "0.3.0",
+  "description": "AgentAvow for JavaScript: a framework-agnostic gate that decides safe / review / do_not_connect for any tool, MCP server or package from AgentAvow's signed scan results (Ed25519 JWS verified offline), with adapters for Flue and the Vercel AI SDK, plus Trust Score v2 envelope verification. Formerly agentgraph-trust.",
   "type": "module",
   "license": "MIT",
   "author": "AgentAvow",
@@ -11,6 +11,18 @@
     ".": "./index.js",
     "./verify": "./src/verify.js",
     "./client": "./src/client.js",
+    "./gate": {
+      "types": "./dist/gate.d.ts",
+      "default": "./dist/gate.js"
+    },
+    "./jws": {
+      "types": "./dist/jws.d.ts",
+      "default": "./dist/jws.js"
+    },
+    "./flue": {
+      "types": "./dist/flue.d.ts",
+      "default": "./dist/flue.js"
+    },
     "./vercel-ai": {
       "types": "./dist/vercel-ai.d.ts",
       "default": "./dist/vercel-ai.js"
@@ -46,7 +58,11 @@
     "verifiable",
     "vercel-ai-sdk",
     "tool-gate",
-    "mcp"
+    "mcp",
+    "flue",
+    "gate",
+    "cloudflare-workers",
+    "webcrypto"
   ],
   "bin": {
     "agentavow-trust": "bin/cli.js"
