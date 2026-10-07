@@ -650,7 +650,7 @@ async def scan_catalog(
             filtered = [r for r in filtered if (r.grade or "") in _min_ok]
 
     # Three-phrase filter: Safe to connect / Review before you connect / Do not connect.
-    if decision:
+    if isinstance(decision, str) and decision:  # (a direct call passes the Query default)
         filtered = [r for r in filtered if r.decision == decision]
 
     if sort == "score-desc":

@@ -201,7 +201,7 @@ def test_scanned_target_is_reported_once(hook, monkeypatch, capsys):
     targets = [_mcp("a", "https://mcp.example.com/mcp")]
     first = _run(hook, monkeypatch, capsys, targets, scan)
     second = _run(hook, monkeypatch, capsys, targets, scan)
-    assert "✅ MCP 'a' (https://mcp.example.com/mcp): Safe to connect · AgentAvow 92/100" in first
+    assert "✅ MCP 'a' (https://mcp.example.com/mcp): Safe to connect — nothing found · AgentAvow 92/100" in first
     assert second == ""
     assert len(calls) == 1
     rec = json.loads(hook.CACHE.read_text())["a"]
@@ -239,8 +239,8 @@ def test_drifted_server_is_regraded_with_force_and_reported_again(hook, monkeypa
     }}))
     out = _run(hook, monkeypatch, capsys, [_mcp("a", url)], scan)
     assert calls == [True]
-    assert ("tool definitions changed since the last grade; re-graded: Review before you "
-            "connect · AgentAvow 61/100") in out
+    assert ("tool definitions changed since the last grade; re-graded: Safe to connect — "
+            "nothing found · AgentAvow 61/100") in out
     rec = json.loads(hook.CACHE.read_text())["a"]
     assert rec["tool_digests"] == {"tool:a": "sha256:new"} and "last_seen" not in rec
     assert _run(hook, monkeypatch, capsys, [_mcp("a", url)], scan) == ""
@@ -276,7 +276,7 @@ def test_unscannable_target_is_retried_after_the_retry_window(hook, monkeypatch,
     hook.CACHE.write_text(json.dumps({"figma": {"id": url, "retry_after": 1}}))
     out = _run(hook, monkeypatch, capsys, [_mcp("figma", url)],
                lambda t, force=False: _ok(88, "safe", 0))
-    assert "Safe to connect · AgentAvow 88/100" in out
+    assert "Safe to connect — nothing found · AgentAvow 88/100" in out
 
 
 def test_transient_failure_is_not_cached(hook, monkeypatch, capsys):
@@ -389,7 +389,7 @@ def test_graded_servers_produce_a_visible_summary_and_a_first_reply_instruction(
               "https://c.example/mcp": _ok(74, "needs review", 0)}
     out = _run_raw(hook, monkeypatch, capsys, targets, lambda t, force=False: scores[t["id"]])
     msg = out["systemMessage"]
-    assert msg.startswith("AgentAvow pre-check: graded 3 MCP servers — 1 Safe, 1 Review, 1 Blocked")
+    assert msg.startswith("AgentAvow pre-check: graded 3 MCP servers — 2 Safe, 0 Review, 1 Blocked")
     assert "(needs attention: 'b' Do not connect — one critical finding: eval)" in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "has NOT seen this" in ctx and "first reply" in ctx
@@ -401,10 +401,10 @@ def test_graded_servers_produce_a_visible_summary_and_a_first_reply_instruction(
 def test_summary_wording_for_one_safe_server_and_for_none_graded(hook):
     assert hook._summary([("a", _ok(90, "safe", 0))]).startswith(
         "AgentAvow pre-check: graded 1 MCP server — 1 Safe, 0 Review.")
-    assert hook._summary([("a", _ok(70, "needs review", 0))]) == (
+    assert hook._summary([("a", _ok(40, "needs review", 0))]) == (
         "AgentAvow pre-check: graded 1 MCP server — 0 Safe, 1 Review "
-        "(needs attention: 'a' Review before you connect). Ask for the AgentAvow pre-check "
-        "for details.")
+        "(needs attention: 'a' Review before you connect — trust score 40/100 is under 51). "
+        "Ask for the AgentAvow pre-check for details.")
     cert = _ok(98, "safe", 0, decision="safe", certified=True,
                decision_reason="nothing found in 40 files")
     assert hook._answer(cert) == (
@@ -545,7 +545,7 @@ def test_verdict_line_carries_the_sandbox_clause(hook, monkeypatch, capsys):
                 "tool_digests": {}, "tool_manifest_digest": None,
                 "sandbox": "sandbox: called 9 tools, network only api.x.com"}
     out = _run(hook, monkeypatch, capsys, [_mcp("a", "https://mcp.example.com/mcp")], scan)
-    assert ("Safe to connect · AgentAvow 92/100; sandbox: called 9 tools, network only "
+    assert ("Safe to connect — nothing found · AgentAvow 92/100; sandbox: called 9 tools, network only "
             "api.x.com.") in out
 
 

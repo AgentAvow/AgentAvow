@@ -731,13 +731,40 @@ def _decision(data: dict, advisories: int, incident: bool) -> tuple[str, str, bo
     return out("safe", "no critical or high findings")
 
 
+def _legacy_decision(r: dict) -> tuple[str, str]:
+    """(decision, reason) for a cache record written before 0.1.20, which stored the
+    old verdict, its machine ``reason``, the counts and the score but no decision.
+    The same rule as decide() over what the record kept: a critical finding → do not
+    connect; a high finding, an advisory, deprecation, a score under 51 or thin
+    coverage → review; nothing found → safe."""
+    score = int(r.get("score") or 0)
+    critical = int(r.get("critical") or 0)
+    blocking = int(r.get("blocking") or 0)
+    if r.get("incident"):
+        return "do_not_connect", "a known-malicious package or dependency"
+    if critical:
+        return "do_not_connect", f"{critical} critical finding(s)"
+    if blocking:
+        return "review", f"{blocking} high finding(s)"
+    if int(r.get("advisories") or 0):
+        return "review", "a published advisory affects this version"
+    if r.get("deprecated"):
+        return "review", "the maintainer has deprecated this package"
+    if score < 51:
+        return "review", f"trust score {score}/100 is under 51"
+    if r.get("reason") == "thin_coverage":
+        return "review", "nothing found, but little code to inspect"
+    return "safe", "nothing found" + (" (low signals only)" if r.get("reason") == "low_signals"
+                                      else "")
+
+
 def _dval(r: dict) -> str:
-    """The decision value of a verdict / cache record. A record written before 0.1.20
-    has none: its old binary verdict maps to safe, anything else to review."""
+    """The decision value of a verdict / cache record (a pre-0.1.20 record is
+    decided from what it stored, see _legacy_decision)."""
     d = r.get("decision")
     if d in DECISION_PHRASES:
         return d
-    return "safe" if r.get("verdict") == "safe" else "review"
+    return _legacy_decision(r)[0]
 
 
 def _headline(r: dict) -> str:
@@ -747,7 +774,12 @@ def _headline(r: dict) -> str:
 
 
 def _why(r: dict) -> str:
-    return f" — {r['decision_reason']}" if r.get("decision_reason") else ""
+    """' — <the one reason>' for a line; every line, full or compact, carries it."""
+    if r.get("decision") in DECISION_PHRASES:
+        why = str(r.get("decision_reason") or "")
+    else:
+        why = _legacy_decision(r)[1]
+    return f" — {why}" if why else ""
 
 
 def _answer(r: dict) -> str:

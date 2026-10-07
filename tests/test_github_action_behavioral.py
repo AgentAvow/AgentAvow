@@ -63,10 +63,11 @@ def test_reads_the_real_api_field_names(tmp_path):
             "deprecation": None}
     p = _run(tmp_path, live)
     assert p.returncode == 0, p.stderr
-    assert "Score: 99/100 (Verified)" in p.stdout
+    assert "Trust score: 99/100 (tier: Verified)" in p.stdout
     assert "Findings: 0 critical, 0 high, 0 medium, 1 low" in p.stdout
     summary = (tmp_path / "summary.md").read_text()
-    assert "**AgentAvow Trust: 99/100 (Verified)** — Clean — no blocking findings" in summary
+    assert "### Safe to connect" in summary  # the phrase leads (decided locally: no `decision`)
+    assert "**Trust score 99/100** (tier: Verified) — Clean — no blocking findings" in summary
     assert "| secret hygiene | 100 |" in summary and "| code safety | 97 |" in summary
     assert "No summary available" not in summary
 
@@ -148,3 +149,49 @@ def test_sandbox_line_names_a_non_start_a_leak_and_the_score_effect(tmp_path):
     p = _run(tmp_path, resp)
     assert "CANARY CREDENTIAL LEAKED" in p.stdout
     assert "trust score -45 from the sandbox" in p.stdout
+
+
+# --- the three-phrase answer and fail_on -----------------------------------------------
+
+def _decided(decision, reason, **extra):
+    return {"trust_score": 70, "scan_result": "warnings", "category_scores": {},
+            "findings": {"critical": 0, "high": 1, "medium": 0, "total": 1},
+            "decision": decision, "decision_reason": reason, "decision_final": True, **extra}
+
+
+def test_phrase_is_printed_first_with_its_reason_and_certified(tmp_path):
+    p = _run(tmp_path, _decided("safe", "nothing found in 40 files",
+                                certified={"eligible": True}))
+    assert p.returncode == 0, p.stderr
+    lines = [ln for ln in p.stdout.splitlines() if ln and not ln.startswith(("::", "Scanning"))]
+    assert lines[0] == "Safe to connect · Certified — nothing found in 40 files"
+    summary = (tmp_path / "summary.md").read_text()
+    assert "### Safe to connect · Certified\nnothing found in 40 files" in summary
+
+
+def test_fail_on_defaults_to_do_not_connect(tmp_path):
+    review = _run(tmp_path, _decided("review", "one high finding: eval"))
+    assert review.returncode == 0  # review never fails by default
+    block = _run(tmp_path, _decided("do_not_connect", "a planted credential left the sandbox"))
+    assert block.returncode == 1
+    assert "Do not connect — a planted credential left the sandbox" in block.stdout + block.stderr
+
+
+def test_fail_on_review_and_none(tmp_path):
+    assert _run(tmp_path, _decided("review", "x"), FAIL_ON="review").returncode == 1
+    assert _run(tmp_path, _decided("safe", "x"), FAIL_ON="review").returncode == 0
+    assert _run(tmp_path, _decided("do_not_connect", "x"), FAIL_ON="none").returncode == 0
+
+
+def test_min_score_no_longer_defaults_to_60_but_still_works_when_set(tmp_path):
+    # 55 with fail_on_findings alone: the legacy floor is now 51, so it passes
+    assert _run(tmp_path, _decided("safe", "x", trust_score=55),
+                FAIL_ON_FINDINGS="true").returncode == 0
+    assert _run(tmp_path, _decided("safe", "x", trust_score=55),
+                FAIL_ON_FINDINGS="true", MIN_SCORE="60").returncode == 1
+
+
+def test_older_response_without_decision_falls_back_to_the_rule(tmp_path):
+    crit = {"trust_score": 40, "findings": {"critical": 1, "high": 0, "medium": 0, "total": 1}}
+    p = _run(tmp_path, crit)
+    assert p.returncode == 1 and "Do not connect" in p.stdout + p.stderr

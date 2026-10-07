@@ -108,7 +108,7 @@ def test_safe_server_gives_a_visible_verdict_and_never_grants_permission(hook, m
     mod, pc = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add deepwiki https://mcp.deepwiki.com/mcp"),
                lambda t, force=False: _ok(88, "safe"))
-    assert "✅ MCP 'deepwiki' (https://mcp.deepwiki.com/mcp): Safe to connect · AgentAvow 88/100" \
+    assert "✅ MCP 'deepwiki' (https://mcp.deepwiki.com/mcp): Safe to connect — nothing found · AgentAvow 88/100" \
         in out["systemMessage"]
     hso = out["hookSpecificOutput"]
     assert hso["hookEventName"] == "PreToolUse"
@@ -163,9 +163,11 @@ def test_soft_needs_review_without_findings_notes_and_proceeds(hook, monkeypatch
     not get the prompt a poisoned one gets — the verdict is shown, the add goes on."""
     mod, _ = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add deepwiki https://mcp.deepwiki.com/mcp"),
-               lambda t, force=False: _ok(74, "needs review", 0, tier="standard"))
+               lambda t, force=False: _ok(74, "needs review", 0, tier="standard",
+                                          reason="thin_coverage"))
     assert "permissionDecision" not in out["hookSpecificOutput"]
-    assert "Review before you connect · AgentAvow 74/100" in out["systemMessage"]
+    assert ("Review before you connect — nothing found, but little code to inspect · "
+            "AgentAvow 74/100") in out["systemMessage"]
 
 
 def test_unscannable_server_notes_it_was_not_scanned_and_proceeds(hook, monkeypatch, capsys):

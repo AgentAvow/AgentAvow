@@ -141,7 +141,7 @@ def test_deps_are_graded_reported_and_summarized(hook, monkeypatch, capsys, tmp_
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert ("⚠️ dependency 'left-pad' (npm:left-pad@1.3.0): Review before you connect — the "
             "maintainer has deprecated this package · AgentAvow 70/100.") in ctx
-    assert "✅ dependency 'chalk' (npm:chalk@5.3.0): Safe to connect · AgentAvow 90/100." in ctx
+    assert "✅ dependency 'chalk' (npm:chalk@5.3.0): Safe to connect — nothing found · AgentAvow 90/100." in ctx
     assert "already installed: their answer is advice" in ctx and "Do not interpret the raw cache file" in ctx
     cache = json.loads(hook.CACHE.read_text())
     assert cache["dep:npm:left-pad"]["spec"] == "1.3.0" and cache["dep:npm:left-pad"]["score"] == 70
@@ -230,11 +230,11 @@ def test_servers_and_deps_share_one_summary_line(hook, monkeypatch, capsys, tmp_
         {"name": "dw", "kind": "mcp", "id": "https://mcp.deepwiki.com/mcp", "url": "https://mcp.deepwiki.com/mcp"}])
 
     def scan(t, force=False, stored=False):
-        return _ok(74, "needs review") if t["kind"] == "mcp" and "url" in t else _ok(90, "safe")
+        return _ok(74, "needs review", reason="thin_coverage") if t["kind"] == "mcp" and "url" in t else _ok(90, "safe")
 
     out = _run(hook, monkeypatch, capsys, scan)
     msg = out["systemMessage"]
-    assert msg.startswith("AgentAvow pre-check: graded 1 MCP server — 0 Safe, 1 Review (needs attention: 'dw' Review before you connect).")
+    assert msg.startswith("AgentAvow pre-check: graded 1 MCP server — 0 Safe, 1 Review (needs attention: 'dw' Review before you connect — nothing found, but little code to inspect).")
     assert "Dependencies: graded all 1 — 1 Safe, 0 Review." in msg
     assert msg.endswith("Ask for the AgentAvow pre-check for details.")
 
@@ -508,8 +508,8 @@ def test_detail_view_includes_items_graded_at_earlier_starts(hook, monkeypatch, 
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "✅ dependency 'httpx-like' (npm:httpx-like@2)" in ctx  # the re-graded one, in full
     assert "Graded at an earlier session start (unchanged since):" in ctx
-    assert "  ✅ dependency 'chalk': Safe to connect · AgentAvow 90/100" in ctx
-    assert "  ⚠️ dependency 'fastapi-like': Review before you connect · AgentAvow 40/100" in ctx
+    assert "  ✅ dependency 'chalk': Safe to connect — nothing found · AgentAvow 90/100" in ctx
+    assert "  ⚠️ dependency 'fastapi-like': Review before you connect — 30 high finding(s) · AgentAvow 40/100" in ctx
     earlier = ctx.split("Graded at an earlier session start (unchanged since):", 1)[1]
     assert "httpx-like" not in earlier  # the re-graded one is not repeated in the earlier list
 
@@ -528,8 +528,8 @@ def test_quiet_start_is_silent_for_the_person_but_gives_claude_the_full_list(hoo
     assert "systemMessage" not in out  # the person sees nothing
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert ctx.startswith("AgentAvow pre-check: nothing new since the last session start. Do NOT mention")
-    assert "  ✅ dependency 'uvicorn': Safe to connect · AgentAvow 92/100" in ctx
-    assert "  ⚠️ dependency 'fastapi': Review before you connect · AgentAvow 40/100" in ctx
+    assert "  ✅ dependency 'uvicorn': Safe to connect — nothing found · AgentAvow 92/100" in ctx
+    assert "  ⚠️ dependency 'fastapi': Review before you connect — 30 high finding(s) · AgentAvow 40/100" in ctx
     assert "Safe to connect" in ctx and "Do not connect" in ctx  # the legend names all three
     assert "  ➖ dependency 'sqlalchemy': not graded (artifact exceeds unpacked-size cap (zip bomb?))" in ctx
     assert "Do not interpret the raw cache file" in ctx
@@ -543,3 +543,43 @@ def test_quiet_start_with_nothing_graded_prints_nothing(hook, monkeypatch, capsy
 
     _run(hook, monkeypatch, capsys, queued)
     assert _run(hook, monkeypatch, capsys, queued, raw=True) == {}
+
+
+# --- compact lines carry the reason and agree with the full line ------------------
+
+def test_compact_server_line_carries_the_reason(hook, monkeypatch, capsys, tmp_path):
+    """deepwiki in Kenne's acceptance run: the compact line must say why, like the full
+    line does, including for a record cached by an older version (verdict + reason only)."""
+    dw = {"name": "dw", "kind": "mcp", "id": "https://mcp.deepwiki.com/mcp",
+          "url": "https://mcp.deepwiki.com/mcp"}
+    monkeypatch.setattr(hook, "_targets", lambda: [dw])
+    full = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(
+        74, "needs review", 0, reason="thin_coverage"))["hookSpecificOutput"]["additionalContext"]
+    want = "Review before you connect — nothing found, but little code to inspect · AgentAvow 74/100"
+    assert f"⚠️ MCP 'dw' (https://mcp.deepwiki.com/mcp): {want}" in full
+    compact = hook._previously_graded(json.loads(hook.CACHE.read_text()), [dw], [], [])
+    assert compact == [f"  ⚠️ MCP 'dw': {want}"]
+
+
+def test_no_findings_dependency_reads_safe_with_a_reason(hook, monkeypatch, capsys, tmp_path):
+    """aiosmtplib: 0 findings, verdict_reason low_signals. Under the three-phrase rule a
+    dependency with nothing found is Safe (unless coverage is thin); full line, compact
+    line and decide() agree. A dependency with only high findings says so."""
+    from src.scanner.verdict import decide
+    assert decide({"trust_score": 74, "findings": {"items": []},
+                   "metadata": {"files_scanned": 40}}).decision == "safe"
+    (tmp_path / "requirements.txt").write_text("aiosmtplib\nhighs\n")
+    scores = {"aiosmtplib": _ok(74, "needs review", 0, reason="low_signals"),
+              "highs": _ok(66, "needs review", 4, reason="blocking_findings")}
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert ("✅ dependency 'aiosmtplib' (pypi:aiosmtplib): Safe to connect — nothing found "
+            "(low signals only) · AgentAvow 74/100.") in ctx
+    assert ("⚠️ dependency 'highs' (pypi:highs): Review before you connect — 4 high "
+            "finding(s) · AgentAvow 66/100.") in ctx
+    deps = hook._dependency_targets()
+    compact = hook._previously_graded(json.loads(hook.CACHE.read_text()), [], deps, [])
+    assert ("  ✅ dependency 'aiosmtplib': Safe to connect — nothing found (low signals only) "
+            "· AgentAvow 74/100") in compact
+    assert "  ⚠️ dependency 'highs': Review before you connect — 4 high finding(s) · AgentAvow 66/100" in compact
+    assert not any("pattern hits only" in ln for ln in compact)
