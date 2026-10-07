@@ -36,7 +36,7 @@ outputs:
     description: "The computed 0–100 trust score."
     value: ${{ steps.scan.outputs.trust-score }}
   tier:
-    description: "Trust tier (Trusted / Standard / Caution / Restricted / Blocked)."
+    description: "Trust tier (Verified / Trusted / Standard / Minimal / Restricted / Blocked)."
     value: ${{ steps.scan.outputs.tier }}
 
 runs:
