@@ -56,7 +56,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.18"
+__version__ = "0.1.19"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -612,6 +612,33 @@ def _previously_graded(cache: dict, targets: list[dict], deps: list[dict],
     return out
 
 
+_LEGEND = ("Legend: ✅ safe. ⚠️ server needs review (see its reason). ℹ️ dependency with only "
+           "high-severity PATTERN hits, no critical finding and no advisory: counted OK. "
+           "📦 dependency that needs a look (critical finding, advisory for this version, "
+           "deprecation or incident). ➖ not graded, with the reason. Dependencies are already "
+           "installed: their grades are advice. Do not interpret the raw cache file; this list "
+           "is the pre-check.")
+
+
+def _quiet_context(cache: dict, targets: list[dict], deps: list[dict]) -> None:
+    """Nothing new since the last start: say nothing to the person (no systemMessage),
+    but give Claude the full graded list so "show the AgentAvow pre-check" answers from
+    the same rules as the summary instead of guessing from the cache file."""
+    try:
+        earlier = _previously_graded(cache, targets, deps, [])
+    except Exception:
+        return
+    if not earlier:
+        return
+    context = (
+        "AgentAvow pre-check: nothing new since the last session start. Do NOT mention "
+        "AgentAvow unless the user asks about it. If they ask for the pre-check, this is the "
+        "complete current list:\n" + "\n".join(earlier) + "\n" + _LEGEND
+        + " Full reports: https://agentavow.com/check")
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                             "additionalContext": context}}))
+
+
 def _servers_elsewhere(here: list[dict]) -> int:
     """How many scannable servers are configured for OTHER projects on this machine
     (not in this session's list). Reported as a count only; they are graded when
@@ -1034,6 +1061,7 @@ def main() -> None:
 
     _save_cache(cache)
     if not lines:
+        _quiet_context(cache, targets, deps)
         return
 
     try:
@@ -1057,9 +1085,7 @@ def main() -> None:
         f"or two lines: \"{summary}\" Then carry on with whatever they asked. If they want "
         "details, use the lines below; do not repeat the summary in later replies.\n"
         + "\n".join(lines)
-        + "\nReview any ⚠️ before trusting it. A 📦 dependency is already installed: its grade "
-          "is advice, not a stop; an ℹ️ dependency has only pattern hits, no critical finding "
-          "or advisory. Full reports: https://agentavow.com/check"
+        + "\n" + _LEGEND + " Full reports: https://agentavow.com/check"
     )
     print(json.dumps({
         "systemMessage": summary,
