@@ -128,7 +128,7 @@ def _scan_text_for_injection(text: str, where: str) -> list:
         return []
     from src.scanner.scan import _scan_content
     try:
-        findings, _pos, _sup = _scan_content(text, where)
+        findings, _pos, _sup = _scan_content(text, where, metadata_text=True)
     except Exception:
         return []
     # Keep only the metadata-relevant detectors; relabel path to the MCP location.

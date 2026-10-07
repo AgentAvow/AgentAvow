@@ -30,6 +30,7 @@ from src.scanner.patterns import (
     INSTALL_SCRIPT_DANGER_RE,
     INVISIBLE_UNICODE_PATTERNS,
     MANIFEST_EXEC_PATTERNS,
+    METADATA_INJECTION_PATTERNS,
     NET_READ_RE,
     NPM_INSTALL_HOOKS,
     OBFUSCATION_PATTERNS,
@@ -1729,6 +1730,7 @@ def _looks_like_oauth(lines: list[str], line_num: int) -> bool:
 def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
+    *, metadata_text: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Scan file content for security issues and positive signals.
 
@@ -2094,8 +2096,11 @@ def _scan_content(
                 ))
                 break
 
-        # Check prompt injection / tool-description poisoning
-        for name, pattern, severity in PROMPT_INJECTION_PATTERNS:
+        # Check prompt injection / tool-description poisoning (metadata files also get the
+        # wider tool-poisoning shapes that would be noisy on code lines).
+        injection_sets = PROMPT_INJECTION_PATTERNS + (
+            METADATA_INJECTION_PATTERNS if (is_metadata or metadata_text) else [])
+        for name, pattern, severity in injection_sets:
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
