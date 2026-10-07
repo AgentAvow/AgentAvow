@@ -158,6 +158,36 @@ def _is_cli_publish_guard(test: ast.AST) -> bool:
     return False
 
 
+def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
+    """True for a ``subprocess.*`` call whose argv is a literal list/tuple, no
+    ``shell=True``, and whose classification is a capability (benign binary, no
+    inline-code flag, no URL) — psutil's ``Popen([sys.executable, script, readme])``
+    README converter. ``os.system`` / ``os.popen`` / network calls are never fixed."""
+    from src.scanner.exec_classify import _argv_elements, classify_argv
+
+    if fname in ("system", "popen") or fname in _AST_NET_CALLS:
+        return False
+    for kw in node.keywords:
+        if kw.arg == "shell" and not (
+            isinstance(kw.value, ast.Constant) and kw.value.value is False
+        ):
+            return False
+    first = node.args[0] if node.args else None
+    if first is None:
+        for kw in node.keywords:
+            if kw.arg == "args":
+                first = kw.value
+    if first is None:
+        return False
+    seq = _argv_elements(first)
+    if seq is None:
+        return False
+    elements, dynamic = seq
+    if elements and elements[0] is None:
+        return False
+    return classify_argv(elements, dynamic, untrusted_near=False).kind == "capability"
+
+
 class _InstallExecVisitor(ast.NodeVisitor):
     """Collect dangerous calls, tracking whether each is reachable only under a
     publish/CLI guard (``sys.argv`` / ``__name__``). Guarded calls are maintainer
@@ -167,6 +197,9 @@ class _InstallExecVisitor(ast.NodeVisitor):
         self.unguarded: list[tuple[str, int]] = []
         self.guarded: list[tuple[str, int]] = []
         self.has_net_unguarded = False
+        # An unguarded exec that is NOT a fixed-argv, no-shell spawn of a benign binary
+        # (e.g. `os.system(...)`, `shell=True`, `Popen(cmd_var)`, `["sh", "-c", …]`).
+        self.has_dynamic_unguarded = False
         self.cmdclass = False
         self._guard_depth = 0
 
@@ -192,6 +225,8 @@ class _InstallExecVisitor(ast.NodeVisitor):
                 self.unguarded.append((fname, getattr(node, "lineno", 1)))
                 if fname in _AST_NET_CALLS:
                     self.has_net_unguarded = True
+                if not _is_fixed_argv_spawn(node, fname):
+                    self.has_dynamic_unguarded = True
         if fname == "setup":
             for kw in node.keywords:
                 if kw.arg == "cmdclass" and isinstance(kw.value, ast.Dict):
@@ -229,7 +264,14 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
     findings: list = []
     if visitor.unguarded:
         # network + exec at install time is the pip-install download-and-run pattern.
-        severity = "critical" if visitor.has_net_unguarded else "high"
+        # A fixed-argv spawn of the package's OWN helper (README converter, version
+        # script) still runs at install time, but it is auditable in place: medium.
+        if visitor.has_net_unguarded:
+            severity = "critical"
+        elif visitor.has_dynamic_unguarded:
+            severity = "high"
+        else:
+            severity = "medium"
         name, line = visitor.unguarded[0]
         findings.append(Finding(
             category="install_hook",
@@ -237,7 +279,10 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
             severity=severity,
             file_path=file_path,
             line_number=line,
-            snippet=f"install-time exec via {name}(...) in setup.py",
+            snippet=(
+                f"install-time exec via {name}(...) in setup.py"
+                + (" (fixed argv, no shell)" if severity == "medium" else "")
+            ),
             remediation=_REMEDIATION_HINTS.get("install_hook", "Audit install-time code"),
         ))
     elif visitor.cmdclass:
@@ -264,7 +309,10 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     scanner's ``_scan_content`` / ``_scan_dependencies`` verbatim, so every current
     detector gains artifact-truth for free.
     """
+    from src.scanner.artifact_fetch import is_installed_path
     from src.scanner.scan import (
+        _MAX_FILE_SIZE,
+        _is_build_tooling_file,
         _is_git_config_file,
         _is_git_hook_file,
         _is_source_file,
@@ -279,6 +327,28 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     files_scanned = 0
     has_install_hook = False
     allowlist = _load_allowlist()
+    installed_paths = getattr(fetched, "installed_paths", None)
+    is_pypi = (fetched.ecosystem or "").lower() in ("pypi", "python")
+    # A published npm tarball IS the installed tree: its `dist/` / `build/` are the
+    # code that runs (the repo-scanner skip for those dirs is for build OUTPUT in a git
+    # tree). Scan them here instead of grading 1 of 700 files.
+    is_npm_tarball = (fetched.ecosystem or "").lower() == "npm"
+
+    def _skip(path: str) -> bool:
+        if not is_npm_tarball:
+            return _should_skip_path(path)
+        parts = [p for p in Path(path).parts if p not in ("dist", "build")]
+        return _should_skip_path("/".join(parts)) if parts else False
+
+    def _installed(path: str) -> bool:
+        """Precision pass #1: is this sdist file part of what `pip install` puts on
+        disk? Build tooling (Makefile, tox.ini, bench/, _cffi_src/ …) never is; with a
+        wheel member list the list decides; without one, everything else counts."""
+        if not is_pypi:
+            return True
+        if _is_build_tooling_file(path):
+            return False
+        return is_installed_path(path, installed_paths)
 
     for path, af in fetched.files.items():
         # Dependency manifests (package.json / setup.py / requirements.txt ...) →
@@ -316,11 +386,19 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # (a published artifact should never carry a .git/ dir) — scan it like the repo tree.
         if (
             af.text
+            and len(af.text) <= _MAX_FILE_SIZE
             and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
-            and not _should_skip_path(path)
+            and not _skip(path)
             and not _is_test_or_doc_file(path)
         ):
             f, _positives, _suppressed = _scan_content(af.text, path, allowlist)
+            if not _installed(path):
+                # Not on a consumer's disk: keep the finding visible, never let it
+                # score or block (severity capped at info).
+                for item in f:
+                    item.installed = False
+                    if item.kind == "defect" and item.severity != "info":
+                        item.severity = "info"
             findings.extend(f)
             files_scanned += 1
 

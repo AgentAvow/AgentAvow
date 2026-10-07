@@ -27,6 +27,7 @@ import hashlib
 import io
 import json
 import logging
+import re
 import tarfile
 import zipfile
 from dataclasses import dataclass, field
@@ -163,6 +164,11 @@ class ArtifactFetchResult:
     # PyPI `yanked` (+ reason) or the 'Development Status :: 7 - Inactive' classifier.
     deprecation: str | None = None
     published_at: str | None = None  # ISO date the resolved version was published
+    # The INSTALLED surface, when it differs from the scanned tree: for a PyPI sdist
+    # this is the wheel's file list (what `pip install` actually puts on disk). None =
+    # unknown (sdist-only package, wheel fetch failed) → everything counts as installed.
+    # An npm tarball IS the installed tree, so it stays None there.
+    installed_paths: set[str] | None = None
     error: str | None = None
 
 
@@ -393,12 +399,26 @@ async def fetch_npm_artifact(
     if owns:
         client = httpx.AsyncClient(headers={"User-Agent": "AgentAvow-ArtifactScanner"})
     try:
-        packument = await _get_json(f"{NPM_REGISTRY}/{name}", client)
-        if version is None:
-            version = (packument.get("dist-tags") or {}).get("latest")
+        packument: dict = {}
+        vdata: dict | None = None
+        try:
+            packument = await _get_json(f"{NPM_REGISTRY}/{name}", client)
+        except ArtifactFetchError as exc:
+            # A giant packument (typescript, vite: every version ever published) trips
+            # the metadata size cap. The per-version document is small — fall back to
+            # it; only the `time` map (published_at) is lost.
+            if "size cap" not in str(exc):
+                raise
+            vdata = await _get_json(f"{NPM_REGISTRY}/{name}/{version or 'latest'}", client)
+            version = str(vdata.get("version") or version or "")
             if not version:
-                raise ArtifactFetchError(f"no latest dist-tag for npm:{name}")
-        vdata = (packument.get("versions") or {}).get(version)
+                raise ArtifactFetchError(f"no version for npm:{name}") from exc
+        if vdata is None:
+            if version is None:
+                version = (packument.get("dist-tags") or {}).get("latest")
+                if not version:
+                    raise ArtifactFetchError(f"no latest dist-tag for npm:{name}")
+            vdata = (packument.get("versions") or {}).get(version)
         if not isinstance(vdata, dict):
             raise ArtifactFetchError(f"npm version not found: {name}@{version}")
         dist = vdata.get("dist") or {}
@@ -449,8 +469,21 @@ def _pick_pypi_url(urls: list[dict]) -> tuple[str, str] | None:
 
     Returns ``(url, kind)`` where kind is ``"sdist"`` or ``"wheel"``.
     """
+    sdist, wheel = _pypi_sdist_and_wheel(urls)
+    if sdist:
+        return sdist, "sdist"
+    if wheel:
+        return wheel, "wheel"
+    return None
+
+
+def _pypi_sdist_and_wheel(urls: list[dict]) -> tuple[str | None, str | None]:
+    """``(sdist_url, wheel_url)`` from a PyPI release's ``urls`` list. The wheel is the
+    pure-Python one when present (its file list is platform-independent), else the
+    first wheel listed."""
     sdist = None
     wheel = None
+    pure_wheel = None
     for u in urls or []:
         if not isinstance(u, dict):
             continue
@@ -460,13 +493,44 @@ def _pick_pypi_url(urls: list[dict]) -> tuple[str, str] | None:
             continue
         if pt == "sdist" and sdist is None:
             sdist = url
-        elif pt == "bdist_wheel" and wheel is None:
-            wheel = url
-    if sdist:
-        return sdist, "sdist"
-    if wheel:
-        return wheel, "wheel"
-    return None
+        elif pt == "bdist_wheel":
+            if wheel is None:
+                wheel = url
+            if pure_wheel is None and "-none-any.whl" in url:
+                pure_wheel = url
+    return sdist, (pure_wheel or wheel)
+
+
+_WHEEL_META_DIR_RE = re.compile(r"^[^/]+\.(?:dist-info|data)/")
+
+
+def _wheel_installed_paths(namelist: list[str]) -> set[str]:
+    """Normalize a wheel's member list to the paths a consumer ends up with: metadata
+    (``*.dist-info/``) is dropped; ``*.data/<kind>/`` prefixes are stripped (scripts /
+    headers / data land outside the package dir)."""
+    out: set[str] = set()
+    for name in namelist:
+        if not name or name.endswith("/"):
+            continue
+        if ".dist-info/" in name:
+            continue
+        m = re.match(r"^[^/]+\.data/[^/]+/(.+)$", name)
+        out.add(m.group(1) if m else name)
+    return out
+
+
+def is_installed_path(path: str, installed: set[str] | None) -> bool:
+    """Is an sdist file part of the installed (wheel) tree? ``installed`` None = unknown
+    → True (conservative). Handles the ``src/`` / ``lib/`` layouts, where the sdist
+    nests the package one level deeper than the wheel."""
+    if installed is None:
+        return True
+    if path in installed:
+        return True
+    for prefix in ("src/", "lib/", "python/"):
+        if path.startswith(prefix) and path[len(prefix):] in installed:
+            return True
+    return False
 
 
 async def fetch_pypi_artifact(
@@ -498,6 +562,23 @@ async def fetch_pypi_artifact(
             raw_files = _unpack_tar_gz(raw)  # sdist .tar.gz
         files = _build_file_map(raw_files)
 
+        # Installed surface (precision pass #1): when we scanned the sdist but the
+        # consumer installs the wheel, read the wheel's member list (central directory
+        # only — nothing is unpacked or executed) so findings in files pip never puts
+        # on disk (scripts/, bench/, Makefile, _cffi_src/) are informational. Fail-open:
+        # any error leaves installed_paths None → everything counts as installed.
+        installed_paths: set[str] | None = None
+        if kind == "sdist":
+            _sd, wheel_url = _pypi_sdist_and_wheel(meta.get("urls") or [])
+            if wheel_url:
+                try:
+                    wheel_raw = await _download(wheel_url, client)
+                    with zipfile.ZipFile(io.BytesIO(wheel_raw)) as zf:
+                        installed_paths = _wheel_installed_paths(zf.namelist())
+                except (ArtifactFetchError, zipfile.BadZipFile, OSError, httpx.HTTPError) as exc:
+                    logger.info("wheel namelist unavailable for %s==%s: %s", name, version, exc)
+                    installed_paths = None
+
         return ArtifactFetchResult(
             ecosystem="pypi",
             name=name,
@@ -512,6 +593,7 @@ async def fetch_pypi_artifact(
             description=(meta.get("info") or {}).get("summary"),
             deprecation=_pypi_deprecation(meta),
             published_at=_pypi_published(meta, url),
+            installed_paths=installed_paths,
         )
     finally:
         if owns:
