@@ -20,8 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_db
-from src.scanner.verdict import is_safe
-from src.trust_tiers import verdict_phrase
+from src.scanner.verdict import decide
+from src.trust_tiers import headline, is_certified
 
 logger = logging.getLogger(__name__)
 
@@ -110,12 +110,12 @@ async def og_check(
         and entity_trust.get("composite_score") is not None
     ):
         score = entity_trust["composite_score"]
-        safe = None  # a composite has no findings to gate on — tier phrase as-is
+        scan_data = await _get_cached(owner, repo)  # the tool's own findings, if scanned
     else:
         cached = await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
-            safe = is_safe(cached)
+            scan_data = cached
         else:
             # No scan data available — generic tags
             title = f"Is {full_name} Safe? | AgentAvow Security Scan"
@@ -128,9 +128,10 @@ async def og_check(
                 status_code=200,
             )
 
-    verdict = verdict_phrase(score, safe=safe)
-    title = f"Is {full_name} Safe? Trust score {score}/100"
-    description = f"Security scan: {verdict}."
+    dec = decide(scan_data) if scan_data else decide({"trust_score": score})
+    verdict = headline(dec, certified=is_certified(scan_data))
+    title = f"{full_name}: {verdict} · trust score {score}/100"
+    description = f"{verdict}: {dec.reason}."
 
     # Add findings summary if from cache
     if not (
@@ -245,23 +246,34 @@ async def og_profile(
 # The newer score surfaces. nginx routes a social crawler on /check/pkg/*,
 # /check/mcp, /check/skill/* here; real users still get the SPA.
 
-def _og_image_url(title: str, grade: str, score, subtitle: str) -> str:
+def _og_image_url(title: str, grade: str, score, subtitle: str,
+                  data: dict | None = None) -> str:
     from urllib.parse import urlencode
-    q = urlencode({
+    params = {
         # Clip the title like the subtitle — a long HF/docker coordinate would otherwise
         # push it past the handler's length limit and 422 the whole image.
         "title": (title or "")[:180], "grade": grade or "",
         "score": "" if score is None else int(score), "subtitle": (subtitle or "")[:180],
-    })
+    }
+    if data:
+        params["decision"] = decide(data).decision
+        if is_certified(data):
+            params["certified"] = "1"
+    q = urlencode(params)
     return f"{BASE_URL}/api/v1/public/scan/og.png?{q}"
 
 
-def _og_verdict(score: int | None, safe: bool | None = None) -> str:
-    """The card subtitle: the tier's verdict phrase (``src.trust_tiers``), demoted by
-    the binary verdict when the caller has the scan to compute it."""
+def _og_verdict(score: int | None, data: dict | None = None) -> str:
+    """The card subtitle: the three-phrase headline + its reason (``decide``), with
+    " · Certified" when the tool carries the mark. With only a score, the phrase is
+    decided from the score alone and no reason is given."""
     if score is None:
         return "A signed safety score — verify it offline."
-    return f"{verdict_phrase(score, safe=safe)} · signed, verifiable offline."
+    if data:
+        dec = decide(data)
+        return (f"{headline(dec, certified=is_certified(data))}: {dec.reason}"
+                " · signed, verifiable offline.")
+    return f"{headline(decide({'trust_score': score}))} · signed, verifiable offline."
 
 
 @router.get("/pkg/{surface}/{name:path}", response_class=HTMLResponse)
@@ -273,21 +285,20 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
     name = (name or "").strip().strip("/")
     full = f"{surface}:{name}"
     canonical_url = f"{BASE_URL}/check/pkg/{surface}/{name}"
-    grade, score, subtitle, safe = "", None, "", None
+    grade, score, subtitle = "", None, ""
     cached = await _get_cached(surface, name)
     if cached:
         score = cached.get("trust_score")
         _elig = (cached.get("certified") or {}).get("eligible")
         grade = cached.get("grade") or _display_grade(score or 0, _elig)
         subtitle = (cached.get("tool_description") or "").strip()
-        safe = is_safe(cached)
-    verdict = _og_verdict(score, safe)
+    verdict = _og_verdict(score, cached)
     if not subtitle:
         subtitle = verdict
     title = f"{name} ({surface})"
     _shown = "—" if score is None else f"{int(score)}/100"
     description = f"{name} scored {_shown} on AgentAvow — {verdict}"
-    image_url = _og_image_url(full, grade, score, subtitle)
+    image_url = _og_image_url(full, grade, score, subtitle, cached)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 
 
@@ -298,18 +309,17 @@ async def og_skill(owner: str, repo: str, db: AsyncSession = Depends(get_db)) ->
 
     full_name = f"{owner}/{repo}"
     canonical_url = f"{BASE_URL}/check/skill/{owner}/{repo}"
-    grade, score, safe = "", None, None
+    grade, score = "", None
     cached = await _get_cached(owner, repo)
     if cached:
         score = cached.get("trust_score")
         grade = cached.get("grade") or _grade_from_score(score or 0)
-        safe = is_safe(cached)
-    verdict = _og_verdict(score, safe)
+    verdict = _og_verdict(score, cached)
     subtitle = "OpenClaw agent skill · " + verdict
     title = f"{full_name} — Agent Skill"
     _shown = "—" if score is None else f"{int(score)}/100"
     description = f"{full_name} scored {_shown} on AgentAvow — {verdict}"
-    image_url = _og_image_url(full_name, grade, score, subtitle)
+    image_url = _og_image_url(full_name, grade, score, subtitle, cached)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 
 

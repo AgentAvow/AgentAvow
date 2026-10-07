@@ -24,11 +24,24 @@ def _grade_and_color(score: int | None) -> tuple[str, str]:
     return grade_from_score(score), trust_color(score)
 
 
+def _esc(text: str) -> str:
+    """HTML-escape a value inserted through ``_raw``."""
+    import html as _html
+    return _html.escape(text or "", quote=True)
+
+
 def render_watch_notification(
     kind: str, owner: str, repo: str,
     old_score: int | None, new_score: int | None,
+    decision: dict | None = None,
 ) -> tuple[str, str]:
-    """Build (subject, html) for a watch email. ``kind`` is drop | improve | drift."""
+    """Build (subject, html) for a watch email. ``kind`` is drop | improve | drift.
+
+    ``decision`` is the watch's three-phrase decision ({decision, decision_reason,
+    certified}); the email leads with it ("Review before you connect · one high
+    finding: …"), the trust number and bar sit underneath. Absent → decided from the
+    new score alone."""
+    from src.trust_tiers import decision_for, headline
     full = f"{owner}/{repo}"
     base = settings.base_url.rstrip("/")
     grade, badge_color = _grade_and_color(new_score)
@@ -52,43 +65,55 @@ def render_watch_notification(
         + "".join(_seg) + "</tr></table>"
     )
 
+    _d = decision or {}
+    _dval = _d.get("decision") or (new_score if new_score is not None else 0)
+    phrase = headline(_dval, certified=bool(_d.get("certified")))
+    phrase_reason = str(_d.get("decision_reason") or "")
+    phrase_color = decision_for(_dval).color
+
     if kind == "improve":
         accent, tag = "#22c55e", "Good news"
-        headline = f"{repo} improved 🎉"
+        title = f"{repo} improved 🎉"
         score_line = f"{old_score} → {new_score} · up {abs(delta)} pts"
         message = (
             f"A tool you're watching got safer. <b style=\"color:#f1f5f9;\">{full}</b> "
             f"rose from {old_score} to {new_score}/100 on its latest re-scan — worth a look "
             f"at what changed."
         )
-        cta_label, subject = "See what improved", f"AgentAvow · {repo} improved 🎉"
+        cta_label, subject = (
+            "See what improved", f"AgentAvow · {repo} improved 🎉 · now {phrase}")
     elif kind == "drift":
         accent, tag = "#f59e0b", "Definition changed"
-        headline = f"{repo}'s signed definition changed"
+        title = f"{repo}'s signed definition changed"
         score_line = "tool definition changed"
         message = (
             f"The signed tool definition for <b style=\"color:#f1f5f9;\">{full}</b> changed "
             f"since your last check — the kind of silent update a rug-pull hides behind. "
             f"Review what moved before your agents keep using it."
         )
-        cta_label, subject = "Review the change", f"AgentAvow alert · {repo} definition changed"
+        cta_label, subject = (
+            "Review the change",
+            f"AgentAvow alert · {repo} definition changed · now {phrase}")
     else:  # drop
         accent, tag = "#ef4444", "Score dropped"
-        headline = f"{repo} got riskier"
+        title = f"{repo} got riskier"
         score_line = f"{old_score} → {new_score} · down {abs(delta)} pts"
         message = (
             f"A tool you're watching dropped in score. <b style=\"color:#f1f5f9;\">{full}</b> "
             f"fell from {old_score} to {new_score}/100 — review it before your agents keep "
             f"connecting to it."
         )
-        cta_label, subject = "See the report", f"AgentAvow alert · {repo} score dropped"
+        cta_label, subject = (
+            "See the report", f"AgentAvow alert · {repo} score dropped · now {phrase}")
 
     html = _load_template(
         "watch_notification.html",
         _raw={
             "accent": accent, "badge_color": badge_color, "grade": grade,
             "trust_bar": trust_bar,
-            "tag": tag, "headline": headline, "repo": full,
+            "tag": tag, "headline": title, "repo": full,
+            "phrase": _esc(phrase), "phrase_reason": _esc(phrase_reason),
+            "phrase_color": phrase_color,
             "new_score": str(new_score if new_score is not None else "—"),
             "score_line": score_line, "message": message,
             "cta_label": cta_label,

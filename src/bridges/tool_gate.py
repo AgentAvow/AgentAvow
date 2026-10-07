@@ -11,6 +11,12 @@ look up the server's signed grade on AgentAvow and decide:
   drifted since the grade (the rug-pull), a tool the grade never saw, or — when
   ``fail_closed`` is on (the default) — an AgentAvow API that could not answer.
 
+Every message leads with the tool's three-phrase decision — "Safe to connect",
+"Review before you connect" or "Do not connect" — and its one reason, read from the
+API's ``decision`` / ``decision_reason`` (decided locally by the same rule when an older
+response lacks them); the score and tier follow as evidence, and
+``GateDecision.decision`` carries the value. The allow / fail policy above is unchanged.
+
 What a *fail* does is the framework adapter's job (``on_fail``: block, confirm,
 warn or raise); this module only produces the :class:`GateDecision`. The
 LangChain middleware (``src.bridges.langchain.middleware``) and the Google ADK
@@ -239,6 +245,11 @@ class Grade:
     jws: str | None = None
     fetched_at: float = 0.0
     error: str | None = None  # set when AgentAvow could not answer
+    # The three-phrase decision: safe | review | do_not_connect (+ reason, final).
+    decision: str = ""
+    decision_reason: str = ""
+    decision_final: bool = True
+    certified: bool = False
 
     @classmethod
     def from_response(cls, server: str, data: dict) -> Grade:
@@ -249,7 +260,10 @@ class Grade:
         crit = int(findings.get("critical", 0) or 0) if isinstance(findings, dict) else 0
         high = int(findings.get("high", 0) or 0) if isinstance(findings, dict) else 0
         score = data.get("trust_score")
+        dec, dec_reason, dec_final = _decision_of(data)
         return cls(
+            decision=dec, decision_reason=dec_reason, decision_final=dec_final,
+            certified=bool((data.get("certified") or {}).get("eligible") is True),
             server=server,
             score=int(score) if isinstance(score, (int, float)) else None,
             tier=str(data.get("trust_tier") or ""),
@@ -289,14 +303,24 @@ class GateDecision:
     # definition to compare) and, for a fail-open API error, why it still allowed.
     warnings: list[str] = field(default_factory=list)
 
+    @property
+    def decision(self) -> str:
+        """The tool's three-phrase decision (safe | review | do_not_connect), or ""
+        when there is no grade to read it from."""
+        return self.grade.decision if self.grade is not None else ""
+
     def as_dict(self) -> dict:
         d = asdict(self)
+        d["decision"] = self.decision
         if self.grade is not None:
             d["grade"] = {
                 "server": self.grade.server, "score": self.grade.score,
                 "tier": self.grade.tier, "critical": self.grade.critical,
                 "high": self.grade.high, "report_url": self.grade.report_url,
-                "error": self.grade.error,
+                "error": self.grade.error, "decision": self.grade.decision,
+                "decision_reason": self.grade.decision_reason,
+                "decision_final": self.grade.decision_final,
+                "certified": self.grade.certified,
             }
         return d
 
@@ -309,11 +333,41 @@ class ToolGateBlockedError(Exception):
         self.decision = decision
 
 
+# The three headline phrases (src/trust_tiers.py DECISIONS; pinned by
+# tests/test_trust_tiers.py). Kept inline: this module depends only on httpx.
+DECISION_PHRASES = {
+    "safe": "Safe to connect",
+    "review": "Review before you connect",
+    "do_not_connect": "Do not connect",
+}
+
+
+def _decision_of(data: dict) -> tuple[str, str, bool]:
+    """(decision, reason, final) from a public scan response: the API's own fields,
+    else the shared rule (``src.scanner.verdict.decide``) when importable, else ""."""
+    dec = data.get("decision")
+    if isinstance(dec, str) and dec in DECISION_PHRASES:
+        return dec, str(data.get("decision_reason") or ""), data.get("decision_final") is not False
+    try:
+        from src.scanner.verdict import decide
+    except Exception:  # noqa: BLE001 — standalone install: no local rule
+        return "", "", True
+    d = decide(data)
+    return d.decision, d.reason, d.final
+
+
 def _score_text(grade: Grade) -> str:
+    """"Review before you connect (one high finding: …) · 85/100, tier trusted"."""
     if grade.score is None:
         return "no score"
     tier = f", tier {grade.tier}" if grade.tier else ""
-    return f"{grade.score}/100{tier}"
+    lead = ""
+    if grade.decision in DECISION_PHRASES:
+        lead = DECISION_PHRASES[grade.decision] + (" · Certified" if grade.certified else "")
+        if grade.decision_reason:
+            lead += f" ({grade.decision_reason})"
+        lead += " · "
+    return f"{lead}{grade.score}/100{tier}"
 
 
 def evaluate(

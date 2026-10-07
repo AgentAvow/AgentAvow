@@ -32,6 +32,7 @@ from src.api.rate_limit import (
 )
 from src.config import settings
 from src.database import get_db
+from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_safe as _is_safe
 from src.scanner.verdict import verdict_label as _verdict_label
 from src.scanner.verdict import verdict_reason as _verdict_reason
@@ -52,7 +53,7 @@ from src.signing import canonicalize_jcs_strict as canonicalize
 from src.trust.aggregate_sources import components_to_contributions
 from src.trust.envelope_v2 import Contribution, EnvelopeError, build_envelope, sign_envelope
 from src.trust_tiers import TRUST_TIERS, recommended_limits, trust_tier_value  # noqa: F401
-from src.trust_tiers import verdict_phrase as _tier_verdict_phrase
+from src.trust_tiers import decision_for as _decision_for
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,15 @@ class PublicScanResponse(BaseModel):
     # input — code-analysis only, matching trust_score.
     verdict: str = "needs_review"  # safe | needs_review (score >= 81 and no critical/high)
     verdict_reason: str = "low_signals"  # clean | blocking_findings | thin_coverage | low_signals
+    # The three-phrase headline every surface leads with (src/scanner/verdict.decide):
+    # safe ("Safe to connect") | review ("Review before you connect") | do_not_connect
+    # ("Do not connect"), plus the one condition that triggered it. Derived from the
+    # applied behavioral block; provisional (decision_final=false) while the sandbox is
+    # still running. UNSIGNED — rides beside `verdict`, not inside the JWS. Adoption is
+    # never an input; Certified is a separate axis (`certified`).
+    decision: str = "review"
+    decision_final: bool = True
+    decision_reason: str = ""
     findings: FindingsSummary
     # What the tool DOES, grouped by taxonomy tag: [{capability, label, count, files}].
     # Informational — never a score or verdict input.
@@ -1291,15 +1301,24 @@ def _package_response(
     entity_trust: dict | None = None,
     trust_envelope: dict | None = None,
     tool_drift: dict | None = None,
+    behavioral: dict | None = None,
 ) -> PublicScanResponse:
     """Single builder for every PublicScanResponse — package AND GitHub-repo paths.
+
+    ``behavioral`` is the sandbox block as returned to users; the three-phrase
+    ``decision`` is derived from ``data`` (already behavioral-applied) plus that block.
 
     The GitHub-repo path additionally supplies ``entity_trust``, ``trust_envelope``,
     and ``tool_drift`` (all no-ops for native packages). Routing every response
     through here is deliberate: it's what keeps a new field (e.g. ``declared_scope``)
     from silently defaulting on one path because a hand-written construction forgot it.
     """
+    _decision = _decide({**data, "behavioral": behavioral})
     return PublicScanResponse(
+        decision=_decision.decision,
+        decision_final=_decision.final,
+        decision_reason=_decision.reason,
+        behavioral=behavioral,
         entity_trust=entity_trust,
         trust_envelope=trust_envelope,
         tool_drift=tool_drift,
@@ -1480,8 +1499,7 @@ async def scan_package_endpoint(
                 force=behavioral)
         scored = _apply_behavioral_score(data, block)
         jws = create_jws(canonicalize(_build_scan_payload(full, scored)))
-        resp = _package_response(full, scored, jws, cached=cached)
-        resp.behavioral = block
+        resp = _package_response(full, scored, jws, cached=cached, behavioral=block)
         return resp
 
     if stored and not force:
@@ -1576,8 +1594,7 @@ async def scan_skill_endpoint(
             force=behavioral)
         scored = _apply_behavioral_score(data, block)
         jws = create_jws(canonicalize(_build_scan_payload(full, scored)))
-        resp = _package_response(full, scored, jws, cached=cached)
-        resp.behavioral = block
+        resp = _package_response(full, scored, jws, cached=cached, behavioral=block)
         return resp
 
     if not force:
@@ -1971,8 +1988,8 @@ async def public_scan(
             resp = _package_response(
                 full_name, scored, jws, cached=True,
                 entity_trust=entity_trust, trust_envelope=trust_envelope,
+                behavioral=block,
             )
-            resp.behavioral = block
             return resp
 
     # Fetch previous cached score before running a fresh scan (for change detection)
@@ -2116,8 +2133,8 @@ async def public_scan(
     resp = _package_response(
         full_name, scored, jws, cached=False,
         entity_trust=entity_trust, trust_envelope=trust_envelope, tool_drift=drift,
+        behavioral=block,
     )
-    resp.behavioral = block
     return resp
 
 
@@ -2312,6 +2329,16 @@ def _display_grade(
     return base
 
 
+def _badge_decision(scan_data: dict | None, score) -> str:
+    """The decision value a badge / card leads with: the scan's own ``decision`` (an API
+    response) or decided from the cached scan; a bare score when there is no scan."""
+    from src.scanner.verdict import decide
+    if isinstance(scan_data, dict):
+        d = scan_data.get("decision")
+        return d if isinstance(d, str) and d else decide(scan_data).decision
+    return decide({"trust_score": score}).decision
+
+
 def _trust_score_color(score: int) -> str:
     """0-100 Trust mark colour — delegates to the shared badge_style mapping so
     every badge/card/OG surface colours identically (green->red at 80/60/40/20)."""
@@ -2360,6 +2387,7 @@ async def scan_badge(
     # Check if this repo is imported as an AgentGraph entity
     entity_trust = await _get_entity_trust(full_name, db)
     certified = False  # the earned top tier — renders a distinct badge treatment
+    scan_data: dict | None = None  # the scan the three-phrase decision is read from
 
     # Determine which score to show: composite trust vs security scan
     if (
@@ -2373,6 +2401,7 @@ async def scan_badge(
         # Certified is a repo/artifact property — read it from the cached scan if present.
         _c = await _get_cached(owner, repo)
         certified = bool((( _c or {}).get("certified") or {}).get("eligible"))
+        scan_data = _c
     else:
         # No entity — fall back to security scan score
         cached = await _get_cached(owner, repo)
@@ -2380,6 +2409,7 @@ async def scan_badge(
             score = cached["trust_score"]
             score_type = "Scan"
             certified = bool((cached.get("certified") or {}).get("eligible"))
+            scan_data = cached
         else:
             # Cache miss: regenerate on demand rather than decaying to a grey
             # "not scanned" pill. A README badge is hit long after the 1h cache
@@ -2391,6 +2421,7 @@ async def scan_badge(
                 score = fresh.security_score
                 score_type = "Scan"
                 certified = bool((getattr(fresh, "certified", None) or {}).get("eligible"))
+                scan_data = fresh.model_dump()
             except Exception:
                 logger.warning("badge regenerate failed for %s/%s", owner, repo, exc_info=True)
                 score = None
@@ -2402,16 +2433,20 @@ async def scan_badge(
             "npm", "pypi", "crates", "huggingface", "docker",
         ) else "github"
         _as, a_count, _au = await surface_adoption_summary(a_surface, owner, repo)
-        return _combined_badge_response(score, a_count, certified=certified)
+        return _combined_badge_response(
+            score, a_count, certified=certified,
+            decision=_badge_decision(scan_data, score))
 
-    # Build badge — numbers, not letters (dual-mark pivot 2026-08).
-    # A Certified tool gets the distinct earned-tier treatment (the CertifiedMark
-    # gradient), not the plain trust pill.
+    # Build badge — the three-phrase short label leads, the 0-100 number is the
+    # evidence ("Safe · 92/100"). A Certified tool keeps the distinct earned-tier
+    # treatment (the CertifiedMark gradient), with the phrase in front of the mark.
+    _ = score_type  # composite vs scan: both read as the tool's decision + number
     if score is not None and certified:
-        return _certified_badge_response(int(score))
+        return _certified_badge_response(int(score), _badge_decision(scan_data, score))
     if score is not None:
-        color = _trust_score_color(int(score))
-        label = f"{score_type}: {score}/100"
+        _d = _decision_for(_badge_decision(scan_data, score))
+        color = _d.color
+        label = f"{_d.label} · {score}/100"
     else:
         color = "#6b7280"
         label = "not scanned"
@@ -2434,16 +2469,18 @@ async def scan_card(
     # Trust score — composite entity, else cached scan, else regenerate on demand.
     score: int | None = None
     entity_trust = await _get_entity_trust(full_name, db)
+    cached = await _get_cached(owner, repo)
+    scan_data: dict | None = cached
     if entity_trust and entity_trust.get("composite_score") is not None:
         score = entity_trust["composite_score"]
     else:
-        cached = await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
         else:
             try:
                 fresh = await public_scan(owner=owner, repo=repo, force=False, db=db)
                 score = fresh.security_score
+                scan_data = fresh.model_dump()
             except Exception:
                 score = None
 
@@ -2471,6 +2508,8 @@ async def scan_card(
         adoption_display=_compact_int(a_count) or None,
         adoption_pct=int(a_score100 or 0),
         adoption_tier=None,
+        decision=_badge_decision(scan_data, score) if score is not None else None,
+        certified=bool(((scan_data or {}).get("certified") or {}).get("eligible")),
     )
     return Response(
         content=svg,
@@ -2508,8 +2547,11 @@ async def scan_verdict(
             payload = _build_scan_payload(full_name, cached)
             jws = create_jws(canonicalize(payload))
             score100 = int(cached.get("trust_score") or 0)
+            from src.scanner.verdict import decide
             body = {
                 "coordinate": full_name,
+                **decide(cached).as_dict(),
+                "certified": bool((cached.get("certified") or {}).get("eligible")),
                 "score": score100,
                 "grade": cached.get("grade") or _grade_from_score(score100),
                 "jws": jws,
@@ -2541,6 +2583,8 @@ async def og_image(
     grade: str = Query("", max_length=3),
     score: str = Query("", max_length=4),
     subtitle: str = Query("", max_length=400),
+    decision: str = Query("", max_length=16),
+    certified: str = Query("", max_length=1),
 ) -> Response:
     """Dynamic Open Graph card (1200×630 PNG) for a score page — the grade + name +
     one-liner, so a shared link unfurls into a rich card everywhere. Query-driven so
@@ -2558,6 +2602,7 @@ async def og_image(
         png = render_og_png(
             title=title.strip() or "Is this tool safe?",
             grade=grade.strip(), score=score_val, subtitle=subtitle.strip(),
+            decision=decision.strip() or None, certified=certified.strip() == "1",
         )
         return Response(
             content=png,
@@ -2587,27 +2632,29 @@ def _compact_int(n: int | None) -> str:
 
 def _combined_badge_response(
     score: int | None, count: int | None, certified: bool = False,
+    decision: str | None = None,
 ) -> Response:
     """Three-segment [AgentAvow | trust | ★count] badge — trust + adoption in one.
-    The adoption box is neutral slate + teal (never a safety colour); adoption never
+    The trust segment leads with the three-phrase short label ("Safe · 92/100"). The
+    adoption box is neutral slate + teal (never a safety colour); adoption never
     travels alone (dual-mark rule). A Certified tool's trust segment gets the earned
-    CertifiedMark gradient (teal→magenta) + "✓ Certified NN"."""
+    CertifiedMark gradient (teal→magenta) + "Safe · ✓ Certified NN"."""
     import math
 
     from src.api.badge_style import (
         BADGE_FONT,
         cert_gradient_def,
-        trust_color,
         verdana_width,
     )
     cert = certified and score is not None
+    _d = _decision_for(decision or score) if score is not None else None
     if cert:
-        trust_label = f"✓ Certified {score}"
+        trust_label = f"{_d.label} · ✓ Certified {score}"
         trust_fill = "url(#agcert)"
         trust_text = "#06231f"
     else:
-        trust_label = f"{score}/100" if score is not None else "not scanned"
-        trust_fill = trust_color(int(score)) if score is not None else "#6b7280"
+        trust_label = f"{_d.label} · {score}/100" if _d is not None else "not scanned"
+        trust_fill = _d.color if _d is not None else "#6b7280"
         trust_text = "#fff"
     adopt_label = f"★ {_compact_int(count)}" if count else "New"
     bw = 80
@@ -2638,15 +2685,15 @@ def _combined_badge_response(
     )
 
 
-def _certified_badge_response(score: int) -> Response:
-    """The earned-tier badge: [AgentAvow | ✓ Certified NN] with the CertifiedMark
-    teal→magenta gradient (matches the on-site mark). Only rendered for a tool that
-    currently clears the conjunctive Certified gate — recomputed every scan, so it
-    can't outlive the thing it attests."""
+def _certified_badge_response(score: int, decision: str | None = None) -> Response:
+    """The earned-tier badge: [AgentAvow | Safe · ✓ Certified NN] with the CertifiedMark
+    teal→magenta gradient (matches the on-site mark). The phrase's short label leads;
+    Certified stays. Only rendered for a tool that currently clears the conjunctive
+    Certified gate — recomputed every scan, so it can't outlive the thing it attests."""
     import math
 
     from src.api.badge_style import BADGE_FONT, CERT_GRADIENT, cert_gradient_def, verdana_width
-    label = f"✓ Certified {score}"
+    label = f"{_decision_for(decision or score).label} · ✓ Certified {score}"
     label_width = math.ceil(verdana_width(label) + 16)
     total_width = 80 + label_width
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
@@ -3168,6 +3215,7 @@ def _render_og_svg(
     high: int,
     medium: int,
     verdict: str,
+    decision: str | None = None,
 ) -> str:
     """Render a 1200x630 SVG Open Graph preview card.
 
@@ -3180,6 +3228,8 @@ def _render_og_svg(
     scored = score is not None and score > 0 and verdict != "Not Yet Scanned"
     color = trust_color(int(score)) if scored else "#6b7280"
     tier = trust_word(int(score)) if scored else "Not scanned"
+    # The headline (``verdict``) is coloured by the three-phrase decision.
+    vcolor = _decision_for(decision).color if (scored and decision) else "#CBD5E1"
 
     # Escape XML entities in repo name (matches existing badge escaping)
     display_name = f"{owner}/{repo}".replace("&", "&amp;").replace("<", "&lt;")
@@ -3223,7 +3273,7 @@ def _render_og_svg(
         font-family="monospace" font-size="24">{display_name}</text>
 
   <!-- Verdict / tier (centered) -->
-  <text x="600" y="176" text-anchor="middle" fill="#CBD5E1"
+  <text x="600" y="176" text-anchor="middle" fill="{vcolor}"
         font-family="system-ui,-apple-system,sans-serif"
         font-size="34" font-weight="800">{verdict}</text>
 
@@ -3280,7 +3330,7 @@ async def scan_og_image(
     critical = 0
     high = 0
     medium = 0
-    safe: bool | None = None  # the binary verdict, when a scan is there to compute it
+    scan_data: dict | None = None  # the scan the three-phrase decision is read from
     if (
         entity_trust
         and entity_trust.get("imported")
@@ -3299,7 +3349,7 @@ async def scan_og_image(
             critical = findings.get("critical", 0)
             high = findings.get("high", 0)
             medium = findings.get("medium", 0)
-            safe = _is_safe(cached)
+            scan_data = cached
         else:
             # No scan data — return a generic "not scanned" card
             score = 0
@@ -3308,9 +3358,12 @@ async def scan_og_image(
             high = 0
             medium = 0
 
-    # The tier's verdict phrase (src.trust_tiers) — one per tier, demoted by the
-    # binary verdict when a blocking finding holds a trusted score at needs-review.
-    verdict = _tier_verdict_phrase(score, safe=safe) if grade != "?" else "Not yet scanned"
+    # The three-phrase headline (src.scanner.verdict.decide), with " · Certified" when
+    # the tool carries the mark; the score + tier ride underneath as evidence.
+    _decision = _badge_decision(scan_data, score) if grade != "?" else None
+    _cert = bool(((scan_data or {}).get("certified") or {}).get("eligible"))
+    verdict = (_decision_for(_decision).phrase + (" · Certified" if _cert else "")
+               if _decision else "Not yet scanned")
 
     # Prefer a real PNG card (SVG og:image is not rendered by Twitter/Facebook). A
     # cached scan carries the tool's description; fall back to the SVG on any failure.
@@ -3325,6 +3378,7 @@ async def scan_og_image(
         png = render_og_png(
             title=full_name, grade=grade,
             score=int(score) if score is not None else None, subtitle=subtitle,
+            decision=_decision, certified=_cert,
         )
         return Response(
             content=png, media_type="image/png",
@@ -3337,6 +3391,7 @@ async def scan_og_image(
     svg = _render_og_svg(
         owner=owner, repo=repo, grade=grade, score=score,
         critical=critical, high=high, medium=medium, verdict=verdict,
+        decision=_decision,
     )
     return Response(
         content=svg,

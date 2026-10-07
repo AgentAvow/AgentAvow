@@ -37,6 +37,7 @@ from src.scanner.scan import (
     _compute_manifest_digest,
     _dedupe_findings,
     _detect_language,
+    _finding_is_blocking,
     _is_nonshipped_path,
     _is_test_or_doc_file,
     _load_allowlist,
@@ -45,7 +46,7 @@ from src.scanner.scan import (
     _select_scan_files,
     _should_skip_path,
 )
-from src.scanner.verdict import is_safe
+from src.scanner.verdict import Decision, decide
 from src.trust_tiers import trust_word, verdict_phrase
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -277,24 +278,34 @@ def _tier(score: int) -> str:
     return trust_word(score)
 
 
-# Machine verdict values, keyed by the phrase src/trust_tiers.py emits today.
-# "Safe to connect" and "Do not connect" map 1:1; every other phrase is a flavour
-# of review.
-_VERDICT_VALUE = {"Safe to connect": "safe", "Do not connect": "do_not_connect"}
+def decision_for_result(result: ScanResult) -> Decision:
+    """The three-phrase decision (``src.scanner.verdict.decide``) for a local result.
+    Items carry the scanner's own blocking call as ``shipped`` and the headline counts
+    are the blocking counts, so the CLI and the hosted API decide alike. There is no
+    sandbox run locally, so the decision is always final."""
+    items = [
+        {"category": f.category, "name": f.name, "severity": f.severity,
+         "shipped": _finding_is_blocking(f), "kind": f.kind, "installed": f.installed}
+        for f in sorted(result.findings, key=lambda x: _SEV_RANK.get(x.severity, 5))
+    ]
+    return decide({
+        "trust_score": result.trust_score,
+        "findings": {"critical": result.shipped_critical_count,
+                     "high": result.shipped_high_count, "items": items},
+        "metadata": {"files_scanned": result.files_scanned},
+        "deprecation": getattr(result, "deprecation", None),
+        "incident_history": getattr(result, "incident_history", None) or {},
+        "supply_chain": getattr(result, "supply_chain", None) or {},
+    })
 
 
 def verdict_for(result: ScanResult) -> tuple[str, str]:
-    """``(phrase, value)`` for a scored result: the consumer-facing verdict phrase
-    and its machine value (``safe`` / ``review`` / ``do_not_connect``).
-
-    The ONE place the local CLI derives a verdict. It leans on the shared helpers
-    (``src.scanner.verdict.is_safe`` for the binary call, ``trust_tiers.verdict_phrase``
-    for the words), so when the headline-phrase rule moves into those modules this
-    function is the single line to swap.
-    """
-    safe = is_safe({"trust_score": result.trust_score, "certified": result.certified})
-    phrase = verdict_phrase(result.trust_score, safe=safe)
-    return phrase, _VERDICT_VALUE.get(phrase, "review")
+    """``(phrase, value)`` for a scored result: the headline phrase ("Safe to connect"
+    / "Review before you connect" / "Do not connect") and its machine value
+    (``safe`` / ``review`` / ``do_not_connect``). The ONE place the local CLI derives
+    a verdict: ``decide()`` via :func:`decision_for_result`."""
+    d = decision_for_result(result)
+    return verdict_phrase(d), d.decision
 
 
 def result_to_dict(result: ScanResult) -> dict:
@@ -302,11 +313,13 @@ def result_to_dict(result: ScanResult) -> dict:
     sev_counts: dict[str, int] = {}
     for f in result.findings:
         sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
-    phrase, verdict = verdict_for(result)
+    dec = decision_for_result(result)
     return {
         "tool": result.repo,
-        "verdict": verdict,
-        "verdict_phrase": phrase,
+        "verdict": dec.decision,
+        "verdict_phrase": verdict_phrase(dec),
+        "decision": dec.decision,
+        "decision_reason": dec.reason,
         "trust_score": result.trust_score,
         "tier": _tier(result.trust_score),
         "certified": bool((result.certified or {}).get("eligible")),
@@ -455,8 +468,10 @@ def _print_human(result: ScanResult, stream=sys.stderr) -> None:
     d = result_to_dict(result)
     c = d["counts"]
     print(f"\nAgentAvow — {d['tool']}", file=stream)
-    print(f"  Verdict     : {d['verdict_phrase']}", file=stream)
-    print(f"  Trust score : {d['trust_score']}/100  ({d['tier']})"
+    print(f"  Verdict     : {d['verdict_phrase']}"
+          + (" · Certified" if d["certified"] else "")
+          + f" — {d['decision_reason']}", file=stream)
+    print(f"  Trust score : {d['trust_score']}/100  (tier: {d['tier']})"
           + ("  ✓ Certified-eligible" if d["certified"] else ""), file=stream)
     print(f"  Files       : {d['files_scanned']} scanned"
           + (f" of {d['total_scannable_files']} (sampled)" if d["sampled"] else ""),
@@ -497,8 +512,12 @@ def main(argv: list[str] | None = None) -> int:
                          "(artifacts:reports:codequality, shows in the MR widget)")
     sc.add_argument("--min-score", type=int, default=None,
                     help="exit non-zero if the trust score is below this (CI gate)")
-    sc.add_argument("--fail-on", choices=["critical", "high", "medium"], default=None,
-                    help="exit non-zero if any finding at/above this severity is present")
+    sc.add_argument("--fail-on",
+                    choices=["do_not_connect", "review", "critical", "high", "medium"],
+                    default=None,
+                    help="exit non-zero on this decision or worse (do_not_connect | "
+                         "review), or if any finding at/above this severity is present "
+                         "(critical | high | medium)")
     sc.add_argument("--quiet", action="store_true", help="suppress the human summary")
     # allow bare `agentavow <path>` as shorthand for `agentavow scan <path>`
     args, _ = p.parse_known_args(argv)
@@ -534,7 +553,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"agentavow: FAIL — score {result.trust_score} < min {args.min_score}",
               file=sys.stderr)
         return 1
-    if args.fail_on:
+    if args.fail_on in ("do_not_connect", "review"):
+        dec = decision_for_result(result)
+        failing = ("do_not_connect",) if args.fail_on == "do_not_connect" \
+            else ("do_not_connect", "review")
+        if dec.decision in failing:
+            print(f"agentavow: FAIL — {verdict_phrase(dec)}: {dec.reason}",
+                  file=sys.stderr)
+            return 1
+    elif args.fail_on:
         order = {"critical": 3, "high": 2, "medium": 1}
         thresh = order[args.fail_on]
         if any(order.get(f.severity, 0) >= thresh for f in result.findings):

@@ -52,6 +52,11 @@ class PreflightResponse(BaseModel):
     surface: str         # mcp | repo
     directory_ready: bool
     headline: str
+    # The three-phrase decision (src.scanner.verdict.decide): what to do with the tool.
+    # ``headline`` above is the directory-readiness summary of the gates.
+    decision: str = "review"
+    decision_final: bool = True
+    decision_reason: str = ""
     trust_score: int
     trust_tier: str
     grade: str
@@ -97,11 +102,16 @@ def _build_preflight(
     report = evaluate_gates(data, surface=surface, auth=auth)
     subject_full = f"mcp:{target}" if surface == "mcp" else target
     jws = _sign(subject_full, data)
+    from src.scanner.verdict import decide
+    dec = decide(data)
     return PreflightResponse(
         target=target,
         surface=surface,
         directory_ready=report["directory_ready"],
         headline=report["headline"],
+        decision=dec.decision,
+        decision_final=dec.final,
+        decision_reason=dec.reason,
         trust_score=int(data.get("trust_score") or 0),
         trust_tier=str(data.get("trust_tier") or ""),
         grade=str(data.get("grade") or ""),

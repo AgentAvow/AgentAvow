@@ -126,27 +126,33 @@ def test_scan_path_prefix_from_ci_project_dir(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 def test_verdict_for_tracks_shared_helpers():
-    from src.scanner.verdict import is_safe
+    from src.scanner.local_scan import decision_for_result
     from src.trust_tiers import verdict_phrase
 
     clean = _result([])
     clean.trust_score = 95
+    clean.files_scanned = 40
     clean.certified = {"eligible": False, "checks": {"no_critical_or_high": True}}
     phrase, value = verdict_for(clean)
-    assert phrase == verdict_phrase(95, safe=is_safe(
-        {"trust_score": 95, "certified": clean.certified}))
+    assert phrase == verdict_phrase(decision_for_result(clean))
     assert (phrase, value) == ("Safe to connect", "safe")
 
-    # a blocking finding demotes a high score to review
+    # a blocking high finding reads review, whatever the score
     held = _result([_finding()])
     held.trust_score = 95
+    held.files_scanned = 40
     held.certified = {"eligible": False, "checks": {"no_critical_or_high": False}}
     assert verdict_for(held) == ("Review before you connect", "review")
 
+    # a low score with nothing blocking is review, never "do not connect"
     floor = _result([])
     floor.trust_score = 5
     floor.certified = {"eligible": False, "checks": {"no_critical_or_high": True}}
-    assert verdict_for(floor) == ("Do not connect", "do_not_connect")
+    assert verdict_for(floor) == ("Review before you connect", "review")
+
+    crit = _result([_finding(sev="critical")])
+    crit.trust_score = 40
+    assert verdict_for(crit) == ("Do not connect", "do_not_connect")
 
     d = result_to_dict(held)
     assert d["verdict"] == "review" and d["verdict_phrase"] == "Review before you connect"

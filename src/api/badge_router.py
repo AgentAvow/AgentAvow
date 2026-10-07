@@ -100,7 +100,13 @@ _TC = {
 # ---------------------------------------------------------------------------
 
 def _scan_badge_info(scan_status: str | None) -> tuple[str, str]:
-    """Return (label, color) for the scan status segment."""
+    """Return (label, color) for the scan segment. A three-phrase decision value
+    (safe | review | do_not_connect) renders its short label (Safe / Review / Blocked)
+    in the phrase colour; the legacy scan_result words keep their glyphs."""
+    from src.trust_tiers import DECISION_BY_VALUE
+    if scan_status in DECISION_BY_VALUE:
+        d = DECISION_BY_VALUE[scan_status]
+        return d.label, d.color
     if scan_status == "clean":
         return "scan \u2713", "#22C55E"  # green check
     if scan_status == "warnings":
@@ -635,7 +641,14 @@ async def get_trust_badge_svg(
     )
     scan_status = None
     if scan:
-        scan_status = scan.scan_result  # clean, warnings, critical, error
+        # The scan segment shows the three-phrase decision (Safe / Review / Blocked),
+        # decided from the stored findings + the scan's own score band.
+        from src.scanner.verdict import decide
+        vulns = [v for v in (scan.vulnerabilities or []) if isinstance(v, dict)]
+        scan_status = decide({
+            "trust_score": round(score * 100),
+            "findings": {"items": vulns},
+        }).decision if scan.scan_result != "error" else "error"
 
     svg = _render_badge_svg(
         score=score,

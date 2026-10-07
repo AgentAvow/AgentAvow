@@ -38,15 +38,19 @@ def _render_embed_badge_svg(
     score: float,
     is_verified: bool,
     scan_status: str | None = None,
+    decision: str | None = None,
 ) -> str:
     """Render a shields.io-style three-segment badge as SVG.
 
-    Format: [AgentAvow | entity_name | score ✓/✗]
+    Format: [AgentAvow | entity_name | Safe · score ✓/✗] — the three-phrase short
+    label leads the value segment, coloured by the phrase.
     Includes scan status in title if available.
     """
+    from src.trust_tiers import decision_for
     score_pct = str(round(score * 100))
     status_char = "✓" if is_verified else "✗"  # ✓ / ✗ (was double-escaped → rendered literal text)
-    value_text = f"{score_pct} {status_char}"
+    _d = decision_for(decision or round(score * 100))
+    value_text = f"{_d.label} · {score_pct} {status_char}"
 
     label = "AgentAvow"
     label_width = verdana_width(label) + BADGE_PADDING
@@ -54,7 +58,7 @@ def _render_embed_badge_svg(
     value_width = verdana_width(value_text) + BADGE_PADDING
     total_width = label_width + name_width + value_width
 
-    color = trust_color(round(score * 100))
+    color = _d.color
 
     label_center = label_width / 2
     name_center = label_width + name_width / 2
@@ -158,6 +162,12 @@ async def get_embeddable_badge(
         .limit(1)
     )
     scan_status = scan.scan_result if scan else None
+    from src.scanner.verdict import decide
+    dec = decide({
+        "trust_score": round(score * 100),
+        "findings": {"items": [v for v in ((scan.vulnerabilities if scan else None) or [])
+                               if isinstance(v, dict)]},
+    })
 
     # Truncate long names to keep the badge readable
     max_name_len = 20
@@ -174,6 +184,7 @@ async def get_embeddable_badge(
             "is_verified": is_verified,
             "badge_color": color,
             "scan_status": scan_status,
+            **dec.as_dict(),
             "schema_version": 1,
         }
         return JSONResponse(
@@ -184,6 +195,7 @@ async def get_embeddable_badge(
     # SVG format (default)
     svg = _render_embed_badge_svg(
         entity_name, score, is_verified, scan_status=scan_status,
+        decision=dec.decision,
     )
     return Response(
         content=svg,

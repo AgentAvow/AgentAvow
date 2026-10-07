@@ -1,7 +1,9 @@
 """Dynamic social-preview (Open Graph) card renderer.
 
-Renders a 1200×630 PNG for a score page — the graded tool's name, its signed grade,
-score, and a one-line description — so a shared AgentAvow link unfurls into a rich
+Renders a 1200×630 PNG for a score page — the three-phrase headline ("Safe to
+connect" / "Review before you connect" / "Do not connect", plus " · Certified" when the
+tool carries the mark), the graded tool's name, its 0-100 score + tier word as
+evidence, and a one-line description — so a shared AgentAvow link unfurls into a rich
 card on every platform (Twitter/Facebook need raster, which SVG can't provide).
 
 Pillow's ``load_default(size=)`` gives a scalable default face, so no font file is
@@ -26,6 +28,11 @@ def _score_tier(score: int | None) -> tuple[tuple[int, int, int], str]:
     hexv = trust_color(int(score)).lstrip("#")
     rgb = (int(hexv[0:2], 16), int(hexv[2:4], 16), int(hexv[4:6], 16))
     return rgb, trust_word(int(score))
+
+
+def _hex_rgb(hexv: str) -> tuple[int, int, int]:
+    h = hexv.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
 def _font(size: int):
@@ -75,12 +82,24 @@ def _wrap(draw, text: str, font, max_w: int, max_lines: int) -> list[str]:
 
 def render_og_png(
     *, title: str, grade: str, score: int | None, subtitle: str = "",
+    decision: str | None = None, certified: bool = False,
 ) -> bytes:
-    """Compose the OG card PNG bytes. Raises on a hard Pillow failure (caller falls back)."""
+    """Compose the OG card PNG bytes. Raises on a hard Pillow failure (caller falls back).
+
+    ``decision`` (safe | review | do_not_connect) sets the headline + accent; when it is
+    absent a scored card decides from the score alone (``src.trust_tiers.decision_for``).
+    """
     from PIL import Image, ImageDraw
+
+    from src.trust_tiers import DECISION_BY_VALUE, decision_for
 
     _ = grade  # legacy param — the card now shows the 0-100 number, not a letter
     accent, tier_word = _score_tier(score)
+    eyebrow = "SAFETY SCORE"
+    if score is not None:
+        dp = DECISION_BY_VALUE.get(decision or "") or decision_for(int(score))
+        accent = _hex_rgb(dp.color)
+        eyebrow = dp.phrase.upper() + (" · CERTIFIED" if certified else "")
     img = Image.new("RGB", (_W, _H), _BG)
     d = ImageDraw.Draw(img)
 
@@ -103,7 +122,7 @@ def render_og_png(
     # Right column — eyebrow, title, subtitle. Shrink the title face for long names/URLs
     # so more fits before we have to clip.
     x = 430
-    d.text((x, 150), "SAFETY SCORE", font=_font(28), fill=_TEAL)
+    d.text((x, 150), eyebrow, font=_font(28), fill=accent if score is not None else _TEAL)
     _tl = len(title or "")
     tf = _font(66 if _tl <= 22 else 52 if _tl <= 34 else 42)
     ty = 200

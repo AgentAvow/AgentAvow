@@ -1089,6 +1089,29 @@ def _behavioral_alert_payload(
     }
 
 
+def w_decision_phrase(d: dict) -> str:
+    """"Review before you connect (one high finding: …)" for notification text."""
+    from src.trust_tiers import headline
+    return (f"{headline(d.get('decision'), certified=bool(d.get('certified')))}"
+            f" ({d.get('decision_reason') or ''})")
+
+
+def _watch_decision(data: dict | None, block: dict | None) -> dict:
+    """The three-phrase decision fields for a watch alert, derived like the public scan:
+    the sandbox block folded into the score first, then ``decide`` over the result.
+    Unsigned, additive keys: {decision, decision_final, decision_reason, certified}."""
+    from src.scanner.verdict import decide
+    data = data if isinstance(data, dict) else {}
+    try:
+        from src.api.public_scan_router import _apply_behavioral_score
+        applied = _apply_behavioral_score(data, block)
+    except Exception:
+        applied = dict(data)
+    out = decide({**applied, "behavioral": block}).as_dict()
+    out["certified"] = bool((data.get("certified") or {}).get("eligible"))
+    return out
+
+
 async def _watcher_hook(db, watcher_id):
     """The watcher's active alert webhook, or None."""
     from sqlalchemy import select as _select
@@ -1141,6 +1164,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             # Behavioral drift — read-only against the public scan's cache; a watch
             # whose coordinate has no sandbox block keeps its baseline untouched.
             b_block = await _watch_behavioral_block(ws.data)
+            w_decision = _watch_decision(ws.data, b_block)
             b_change, b_baseline = _behavioral_change(
                 getattr(w, "last_behavioral_digest", None), _behavioral_fingerprint(b_block),
             )
@@ -1158,7 +1182,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 body = (
                     f"A tool you're watching changed: {reason}"
                     + (f" ({w.last_score} -> {new_score})" if dropped else "")
-                    + ". Review it before your agents keep using it."
+                    + f". Now: {w_decision_phrase(w_decision)}."
                 )
                 try:
                     await create_notification(
@@ -1175,6 +1199,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                         subj, html = render_watch_notification(
                             "drop" if dropped else "drift",
                             w.owner, w.repo, w.last_score, new_score,
+                            decision=w_decision,
                         )
                         await send_email(watcher.email, subj, html)
                 except Exception:
@@ -1192,6 +1217,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                             "old_score": w.last_score,
                             "new_score": new_score,
                             "reason": reason,
+                            **w_decision,
                         })
                         hook.last_delivery_at = datetime.now(timezone.utc)
                 except Exception:
@@ -1202,7 +1228,8 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 title = f"{w.owner}/{w.repo} — score improved 🎉"
                 body = (
                     f"Good news: a tool you're watching improved "
-                    f"({w.last_score} → {new_score}/100). See what changed."
+                    f"({w.last_score} → {new_score}/100). "
+                    f"Now: {w_decision_phrase(w_decision)}."
                 )
                 try:
                     await create_notification(
@@ -1214,6 +1241,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                         from src.email import render_watch_notification, send_email
                         subj, html = render_watch_notification(
                             "improve", w.owner, w.repo, w.last_score, new_score,
+                            decision=w_decision,
                         )
                         await send_email(watcher.email, subj, html)
                 except Exception:
@@ -1228,7 +1256,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 title = f"{w.owner}/{w.repo} — sandbox behavior changed"
                 body = (
                     f"A tool you're watching behaves differently in the sandbox: {what}. "
-                    "Review the behavioral findings before your agents keep using it."
+                    f"Now: {w_decision_phrase(w_decision)}."
                 )
                 try:
                     await create_notification(
@@ -1244,9 +1272,9 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                         from src.api.account_webhook_router import deliver_to_hook
 
                         hook.last_status = await deliver_to_hook(
-                            hook, _behavioral_alert_payload(
+                            hook, {**_behavioral_alert_payload(
                                 w, b_block, new_score,
-                                (ws.data or {}).get("package_coordinate")))
+                                (ws.data or {}).get("package_coordinate")), **w_decision})
                         hook.last_delivery_at = datetime.now(timezone.utc)
                 except Exception:
                     logger.debug(
