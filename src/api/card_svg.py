@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from src.trust_tiers import trust_color, trust_word
+from src.trust_tiers import decision_for, trust_color, trust_word
 
 # ── palette ─────────────────────────────────────────────────────────────────
 # One self-contained (dark) card — it carries its own background, so it reads on
@@ -42,15 +42,27 @@ def _arc(cx: float, cy: float, r: float, a0: float, a1: float) -> str:
 def render_card_svg(
     *, coordinate: str, score: int | None, adoption_display: str | None,
     adoption_pct: int, adoption_tier: str | None,
+    decision: str | None = None, certified: bool = False,
 ) -> str:
-    """Compose the condensed dual-mark card SVG (≈360×156). `score` None → 'not scanned'."""
+    """Compose the condensed dual-mark card SVG (≈360×178). `score` None → 'not scanned'.
+
+    The headline row leads with the three-phrase ``decision`` ("Safe to connect",
+    "Review before you connect", "Do not connect"), with " · Certified" when the tool
+    carries the mark; the trust number + tier word and the adoption needle sit
+    underneath as evidence. ``decision`` None → decided from the score alone."""
     c = _DARK
-    card_w, card_h = 360, 156
+    card_w, card_h = 360, 178
+    head_dy = 22  # the phrase row pushes the dual mark down
 
     has_score = score is not None
     s = int(score) if has_score else 0
     tcol = trust_color(s) if has_score else c["faint"]
     tword = trust_word(s) if has_score else "—"
+    if has_score:
+        _d = decision_for(decision if decision else s)
+        phrase, pcol = _d.phrase + (" · Certified" if certified else ""), _d.color
+    else:
+        phrase, pcol = "Not scanned yet", c["faint"]
 
     # ── trust segmented bar (left) ───────────────────────────────────────────
     total, seg_w, seg_h, gap = 10, 12, 5, 2.5  # spec: 12×5px, gap 2.5
@@ -100,6 +112,10 @@ def render_card_svg(
     <circle cx="106" cy="9" r="3" fill="#2dd4bf"/>
   </g>
   <text x="{card_w - 20}" y="28" text-anchor="end" fill="{c['muted']}" font-size="12" font-family="ui-monospace,SF Mono,Menlo,monospace">{coordinate}</text>
+  <!-- headline: the three-phrase decision (+ Certified) -->
+  <circle cx="26" cy="50" r="4" fill="{pcol}"/>
+  <text x="36" y="54" fill="{pcol}" font-size="13" font-weight="800">{phrase}</text>
+  <g transform="translate(0,{head_dy})">
   <!-- trust -->
   <text x="{bar_x}" y="44" text-anchor="middle" fill="{c['faint']}" font-size="8.5" font-weight="700" letter-spacing="1.4" font-family="ui-monospace,monospace">TRUST</text>
   {cells}
@@ -112,4 +128,5 @@ def render_card_svg(
   {fill_arc}{rest_arc}{ticks}{needle}
   <text x="{ncx}" y="138" text-anchor="middle" fill="{c['text'] if has_ad else c['faint']}" font-size="21" font-weight="800">{ad_num}</text>
   <text x="{ncx}" y="150" text-anchor="middle" fill="{c['g2'] if has_ad else c['faint']}" font-size="9.5" font-weight="700">{ad_word}</text>
+  </g>
 </svg>'''

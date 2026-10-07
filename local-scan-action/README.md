@@ -26,8 +26,7 @@ jobs:
       - uses: AgentAvow/AgentAvow/local-scan-action@main
         with:
           path: .
-          min-score: "60"     # fail the job below 60 (omit to not gate on score)
-          fail-on: "high"     # or: fail on any high/critical finding (optional)
+          fail-on: "do_not_connect"  # fail on "Do not connect" (or: review, high, critical)
 ```
 
 ## Inputs
@@ -36,7 +35,7 @@ jobs:
 |-------|---------|-------------|
 | `path` | `.` | Directory to scan. |
 | `min-score` | `""` | Fail if the trust score is below this (0–100). Empty = no score gate. |
-| `fail-on` | `""` | Fail if any finding at/above `critical`/`high`/`medium` is present. |
+| `fail-on` | `""` | Fail on the answer `do_not_connect` (Do not connect) or `review` (Review before you connect, or worse); or on any finding at/above `critical`/`high`/`medium`. |
 | `upload-sarif` | `true` | Upload `results.sarif` to GitHub code scanning. |
 | `ref` | `main` | AgentAvow scanner version (git ref) to install. |
 
@@ -44,12 +43,14 @@ jobs:
 
 | Output | Description |
 |--------|-------------|
-| `trust-score` | The computed 0–100 score. |
-| `tier` | Verified / Trusted / Standard / Minimal / Restricted / Blocked (floors 96 / 81 / 51 / 31 / 11 / 0). |
+| `decision` | The headline answer: `safe` (Safe to connect), `review` (Review before you connect) or `do_not_connect` (Do not connect). |
+| `decision-reason` | The one condition behind it, e.g. `one high finding: os.system / os.popen (Python)`. |
+| `trust-score` | The computed 0–100 score (evidence under the answer). |
+| `tier` | Detail under the answer: Verified / Trusted / Standard / Minimal / Restricted / Blocked (floors 96 / 81 / 51 / 31 / 11 / 0). |
 
 ## Same thing locally (inner loop)
 
 ```bash
 pip install "git+https://github.com/AgentAvow/AgentAvow.git"
-agentavow scan . --min-score 60 --sarif out.sarif --json out.json
+agentavow scan . --fail-on do_not_connect --sarif out.sarif --json out.json
 ```

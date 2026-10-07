@@ -4,6 +4,7 @@ import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSandbox, type CatalogSummary } from '../catalog'
 import { TrustMini, AdoptionMini } from '../components/TrustMark'
+import { DECISIONS, decide, decisionPhrase } from '../../components/trust/gradeSystem'
 
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import SEOHead from '../../components/SEOHead'
@@ -44,6 +45,12 @@ const SEVERITIES = [
   { key: 'skipped', label: 'Skipped / errored' },
 ]
 
+// The three-phrase answer — what each tool reads as (src/scanner/verdict.decide).
+const DECISION_OPTS = [
+  { key: '', label: 'Any answer' },
+  ...DECISIONS.map((d) => ({ key: d.value, label: d.phrase })),
+]
+
 // Tier floors are the API's (gradeSystem.ts TRUST_TIERS); the catalog filters on them.
 const GRADES = [
   { key: '', label: 'Any score' },
@@ -81,7 +88,7 @@ function sandboxMark(sb: CatalogSandbox | null | undefined): string | null {
 }
 
 /** At-a-glance status chip on the card face — mirrors the old Scans status column. */
-function statusChip(row: CatalogRow): { label: string; cls: string } {
+function statusChip(row: CatalogRow): { label: string; cls: string; title?: string } {
   if (row.skipped) return { label: 'skipped', cls: 'text-text-muted bg-surface-hover' }
   if (row.scan_error) return { label: 'fetch error', cls: 'text-warning bg-warning/15' }
   if (row.surface === 'x402') {
@@ -89,9 +96,12 @@ function statusChip(row: CatalogRow): { label: string; cls: string } {
       ? { label: `x402 ✓${row.http_status ? ` · ${row.http_status}` : ''}`, cls: 'text-success bg-success/15' }
       : { label: `${row.http_status ?? '—'}`, cls: 'text-text-muted bg-surface-hover' }
   }
-  if (row.critical) return { label: 'critical', cls: 'text-danger bg-danger/15' }
-  if (row.high) return { label: 'high', cls: 'text-warning bg-warning/15' }
-  if (row.trust_score != null) return { label: 'clean', cls: 'text-success bg-success/15' }
+  if (row.trust_score != null) {
+    // Lead with the three-phrase short label (Safe / Review / Blocked); Certified rides beside.
+    const d = decisionPhrase(row.decision ?? decide({ trust_score: row.trust_score, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision)
+    const cls = d.value === 'safe' ? 'text-success bg-success/15' : d.value === 'review' ? 'text-warning bg-warning/15' : 'text-danger bg-danger/15'
+    return { label: d.label + (row.grade === 'A+' ? ' · ✦ Certified' : ''), cls, title: row.decision_reason ? `${d.phrase} — ${row.decision_reason}` : d.phrase }
+  }
   return { label: 'unscored', cls: 'text-text-muted bg-surface-hover' }
 }
 
@@ -167,7 +177,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
       )}
       {/* status + findings + language — the at-a-glance row Scans had */}
       <div className="mt-2 flex items-center gap-2 flex-wrap">
-        <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded ${chip.cls}`}>{chip.label}</span>
+        <span className={`font-mono text-[10.5px] uppercase tracking-wide px-1.5 py-0.5 rounded ${chip.cls}`} title={chip.title}>{chip.label}</span>
         {fnd && <span className="font-mono text-[11px] text-text-muted tabular-nums">{fnd}</span>}
         {row.primary_language && <span className="font-mono text-[11px] text-text-muted">· {row.primary_language}</span>}
         {sbx && (
@@ -238,6 +248,7 @@ export default function RebrandBrowse() {
   const sort = sp.get('sort') || DEFAULT_SORT
   const severity = sp.get('sev') || ''
   const grade = sp.get('grade') || ''
+  const decision = sp.get('dec') || ''
   const category = sp.get('cat') || ''
   const q = sp.get('q') || ''
   const page = Math.max(0, parseInt(sp.get('page') || '0', 10) || 0)
@@ -264,19 +275,20 @@ export default function RebrandBrowse() {
   const setSort = (v: string) => patch({ sort: v === DEFAULT_SORT ? '' : v })
   const setSeverity = (v: string) => patch({ sev: v })
   const setGrade = (v: string) => patch({ grade: v })
+  const setDecision = (v: string) => patch({ dec: v })
   const setCategory = (v: string) => patch({ cat: v })
   const setPage = (updater: (p: number) => number) => patch({ page: String(updater(page)) })
   const applySearch = () => patch({ q: qInput.trim() })
   const clearSearch = () => { setQInput(''); patch({ q: '' }) }
   const clearAll = () => setSp(new URLSearchParams(surface !== DEFAULT_SURFACE ? { surface } : {}), { replace: true })
 
-  const activeFilters = (grade ? 1 : 0) + (severity ? 1 : 0) + (category ? 1 : 0) + (sort !== DEFAULT_SORT ? 1 : 0)
+  const activeFilters = (decision ? 1 : 0) + (grade ? 1 : 0) + (severity ? 1 : 0) + (category ? 1 : 0) + (sort !== DEFAULT_SORT ? 1 : 0)
 
   // A search should find things anywhere — when q is set we drop the surface
   // filter so search spans the whole catalog, not just the active tab.
   const { data, isLoading, isError, isFetching } = useQuery({
-    queryKey: ['rebrand-catalog', surface, sort, severity, grade, category, q, page],
-    queryFn: () => fetchCatalog({ surface: q ? '' : surface, sort, severity, grade, category, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    queryKey: ['rebrand-catalog', surface, sort, severity, grade, decision, category, q, page],
+    queryFn: () => fetchCatalog({ surface: q ? '' : surface, sort, severity, grade, decision, category, q, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     placeholderData: keepPreviousData,
   })
   // Category options come from the catalog's own breakdown (stable across filters).
@@ -334,7 +346,7 @@ export default function RebrandBrowse() {
             </form>
             {/* desktop: inline filter dropdowns */}
             <div className="hidden sm:flex items-center gap-2 ml-auto">
-              {[{ v: category, set: setCategory, opts: CATEGORIES }, { v: grade, set: setGrade, opts: GRADES }, { v: severity, set: setSeverity, opts: SEVERITIES }, { v: sort, set: setSort, opts: SORTS }].map((f, i) => (
+              {[{ v: category, set: setCategory, opts: CATEGORIES }, { v: decision, set: setDecision, opts: DECISION_OPTS }, { v: grade, set: setGrade, opts: GRADES }, { v: severity, set: setSeverity, opts: SEVERITIES }, { v: sort, set: setSort, opts: SORTS }].map((f, i) => (
                 <select key={i} value={f.v} onChange={(e) => f.set(e.target.value)}
                   className="text-[13px] rounded-full border border-border bg-surface text-text-muted px-3 py-1.5 outline-none hover:border-primary-light max-w-[190px]">
                   {f.opts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
@@ -370,7 +382,7 @@ export default function RebrandBrowse() {
               <h2 className="text-[16px] font-bold">Filters</h2>
               <button onClick={() => setSheetOpen(false)} aria-label="Close" className="text-text-muted text-[22px] leading-none">×</button>
             </div>
-            {[{ label: 'Category', v: category, set: setCategory, opts: CATEGORIES }, { label: 'Trust', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
+            {[{ label: 'Category', v: category, set: setCategory, opts: CATEGORIES }, { label: 'Answer', v: decision, set: setDecision, opts: DECISION_OPTS }, { label: 'Trust', v: grade, set: setGrade, opts: GRADES }, { label: 'Findings', v: severity, set: setSeverity, opts: SEVERITIES }, { label: 'Sort', v: sort, set: setSort, opts: SORTS }].map((f) => (
               <div key={f.label} className="mb-5">
                 <div className="font-mono text-[11px] uppercase tracking-wide text-text-muted mb-2">{f.label}</div>
                 <div className="flex flex-wrap gap-2">
@@ -398,6 +410,7 @@ export default function RebrandBrowse() {
           const chips: { key: string; label: string; onClear: () => void }[] = []
           if (q) chips.push({ key: 'q', label: `“${q}”`, onClear: clearSearch })
           if (category) chips.push({ key: 'cat', label: category, onClear: () => setCategory('') })
+          if (decision) chips.push({ key: 'dec', label: DECISION_OPTS.find((x) => x.key === decision)?.label ?? decision, onClear: () => setDecision('') })
           if (grade) chips.push({ key: 'grade', label: GRADES.find((x) => x.key === grade)?.label ?? grade, onClear: () => setGrade('') })
           if (severity) chips.push({ key: 'sev', label: SEVERITIES.find((x) => x.key === severity)?.label ?? severity, onClear: () => setSeverity('') })
           if (sort !== DEFAULT_SORT) chips.push({ key: 'sort', label: SORTS.find((x) => x.key === sort)?.label ?? sort, onClear: () => setSort(DEFAULT_SORT) })

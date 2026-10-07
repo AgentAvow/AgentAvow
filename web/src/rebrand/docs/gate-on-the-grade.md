@@ -1,46 +1,68 @@
 # Gate on the score
 
-A score you don't act on is trivia. AgentAvow is built so a **machine** can read the verdict and decide — block a risky tool, throttle an unproven one, or wave a Certified one through — in CI and at your agent's runtime. Every path below reads the same signed verdict you can recompute offline.
+A score you don't act on is trivia. AgentAvow is built so a **machine** can read the answer and decide — block a risky tool, throttle an unproven one, or wave a Certified one through — in CI and at your agent's runtime. Every path below reads the same signed result you can recompute offline.
+
+## The answer to gate on
+
+Every result leads with one of three answers, in `decision`, with the reason in `decision_reason`:
+
+| `decision` | Phrase | What a gate does |
+|---|---|---|
+| `safe` | Safe to connect | allow |
+| `review` | Review before you connect | require approval, or allow with limits |
+| `do_not_connect` | Do not connect | deny |
+
+**Do not connect** means a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a high finding (code or sandbox), a published advisory on this version, a deprecated package, a score under 51, or nothing found in very little code. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer (`certified.eligible`), never instead of it.
 
 ## What the score tells a machine to do
 
-Each verdict carries a **trust tier** (`trust_tier`) and a **recommended execution posture** (`recommended_limits`) — not just a number:
+Under the answer, each result carries the **trust tier** (`trust_tier`) and a **recommended execution posture** (`recommended_limits`) — the detail a gateway uses to throttle what it admits:
 
 - **96–100 · Verified** (`verified`) — connect normally; no limits.
 - **81–95 · Trusted** (`trusted`) — auto-approve within budget: 60 requests/min, 8192 tokens/call, no confirmation.
 - **51–80 · Standard** (`standard`) — standard rate + token limits: 30 requests/min, 4096 tokens/call, no confirmation.
 - **31–50 · Minimal** (`minimal`) — rate-limit and cap the token budget (15 requests/min, 2048 tokens/call); prompt before high-impact tool calls.
 - **11–30 · Restricted** (`restricted`) — human-in-the-loop; no autonomous execution (5 requests/min, 1024 tokens/call, confirm every call).
-- **0–10 · Blocked** (`blocked`) — do not connect.
-- **known-malicious (MAL) dependency** — do not connect; disqualifying, regardless of the score.
+- **0–10 · Blocked** (`blocked`) — execution denied.
 
-**Blocked** and **MAL** are a hard stop. Everything above is a **dial**, not a gate — degrade capability instead of failing closed, so an unproven-but-fine tool still runs, just carefully.
+**Do not connect** is the hard stop (a known-malicious dependency lands there whatever the score). The tiers are a **dial**, not a gate — degrade capability instead of failing closed, so an unproven-but-fine tool still runs, just carefully.
 
 ## Gate your CI (GitHub Action)
 
-Fail a pull request when a repo's trust score drops below a threshold, and post the score as a sticky PR comment:
+Fail a pull request on the answer, and post it as a sticky PR comment that leads with the phrase and its reason:
 
 ```yaml
 - uses: AgentAvow/AgentAvow/github-action@main
   with:
-    min_score: 80              # 0–100 threshold to pass
-    fail_on_findings: true     # fail the job when the score is under min_score
-    comment_on_pr: true        # sticky PR comment with score + findings
+    fail_on: do_not_connect    # default; or "review" (Review or worse), or "none"
+    comment_on_pr: true        # sticky PR comment: answer, reason, score, findings
     fail_on_behavioral: false  # optional: also fail on a high/critical sandbox finding
 ```
 
-The action scans on AgentAvow's free API and fails the job when the score is below your `min_score` — so a supply-chain regression blocks the merge instead of shipping. Set `min_score` to the tier floor you want to hold (e.g. **81** for Trusted, **51** for Standard).
+The action scans on AgentAvow's free API and fails the job on **Do not connect** by default, so a supply-chain regression blocks the merge instead of shipping. `fail_on: review` holds the stricter line.
+
+The legacy score floor still works when you set it: `min_score` with `fail_on_findings: true` fails below that number. `min_score` no longer defaults to 60; `fail_on_findings: true` on its own checks against **51**, the score under which the answer reads Review.
+
+```yaml
+- uses: AgentAvow/AgentAvow/github-action@main
+  with:
+    min_score: 81              # legacy: hold the Trusted floor
+    fail_on_findings: true
+```
+
+For private code, the [local scan](./run-locally.md) gates the same way inside your runner, and nothing leaves it: `agentavow scan . --fail-on do_not_connect` (or `--fail-on review`) exits non-zero on that answer or worse; `--fail-on critical|high|medium` still gates on finding severity.
 
 ## Gate your agent at runtime (SDK + bridges)
 
-Check a tool's score **before** your agent connects it. The client SDKs — `agentavow-trust` (npm) and the Python client — read a repo's score over the same free API, so you can enforce a floor in code. The client takes the API origin; `checkRepo` returns the same JSON as the public scan endpoint:
+Check a tool's answer **before** your agent connects it. The client SDKs — `agentavow-trust` (npm) and the Python client — read a repo's result over the same free API, so you can enforce it in code. The client takes the API origin; `checkRepo` returns the same JSON as the public scan endpoint:
 
 ```js
 import { TrustClient } from 'agentavow-trust'
 const client = new TrustClient('https://agentavow.com')
-const { trust_score, trust_tier } = await client.checkRepo('owner', 'repo')
-if (trust_score < 31) throw new Error(`blocked: ${trust_score}/100 (${trust_tier})`)  // below the Minimal floor
-// else apply the recommended posture (rate limit / token cap / confirmation)
+const r = await client.checkRepo('owner', 'repo')
+if (r.decision === 'do_not_connect') throw new Error(`Do not connect: ${r.decision_reason}`)
+if (r.decision === 'review') await confirmWithUser(`Review before you connect: ${r.decision_reason}`)
+// then apply the recommended posture for r.trust_tier (rate limit / token cap / confirmation)
 ```
 
 For a package or a live MCP server, call the scan endpoints under **Gate anything** below; the response shape is the same.
@@ -49,7 +71,7 @@ Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic A
 
 ### LangChain
 
-A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before a tool runs it fetches the server's signed grade, allows the call when the score clears the floor (81, Trusted) with no critical/high finding, and checks the definition the agent was served against the per-tool digest in the attestation — so a tool that was redefined after it was graded is stopped, not run. A block comes back to the model as a tool message that says why; nothing raises.
+A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before a tool runs it fetches the server's signed grade, allows the call when the score clears the floor (81, Trusted) with no critical/high finding, and checks the definition the agent was served against the per-tool digest in the attestation — so a tool that was redefined after it was graded is stopped, not run. A block comes back to the model as a tool message that says why, leading with the tool's answer and its reason ("Do not connect (one critical finding: …) · 40/100, tier minimal"); nothing raises. The result also carries `decision`.
 
 ```python
 from langchain.agents import create_agent
@@ -152,7 +174,7 @@ GET /api/v1/public/scan/skill/{owner}/{repo}                 # OpenClaw skill
 GET /api/v1/public/scan/{owner}/{repo}/adoption              # the second score
 ```
 
-Read `trust_score` / `trust_tier` to decide, and `jws` (the signed attestation) to prove the decision later. The scan response also carries `tool_description` (what the tool is), `package_coordinate` (the registry name a repo maps to), and `coverage{}` (surface, scan depth, artifact digest, DB snapshots). The **adoption** endpoint returns the independent-reliance headline separately — it never moves the trust score. Results cache for an hour; add `?force=true` to re-scan. Don't trust our word for it — **recompute the verdict** from `coverage{}` and check the signature against our public JWKS (see **Verify an attestation**).
+Read `decision` / `decision_reason` to decide (`trust_score` / `trust_tier` underneath for throttling), and `jws` (the signed attestation) to prove the decision later. The scan response also carries `tool_description` (what the tool is), `package_coordinate` (the registry name a repo maps to), and `coverage{}` (surface, scan depth, artifact digest, DB snapshots). The **adoption** endpoint returns the independent-reliance headline separately — it never moves the trust score. Results cache for an hour; add `?force=true` to re-scan. Don't trust our word for it — **recompute the verdict** from `coverage{}` and check the signature against our public JWKS (see **Verify an attestation**).
 
 ## Catch the rug-pull after you've shipped
 
@@ -179,8 +201,8 @@ X-AgentAvow-Signature: sha256=<hex>
 
 The body is JSON with a `type` that says what happened:
 
-- `agentavow.alert.grade_change` — `{type, owner, repo, old_score, new_score, reason}`, where `reason` is `score dropped` or `signed definition changed`.
-- `agentavow.alert.behavioral_change` — a later [sandbox run](./behavioral-sandbox.md) added findings, leaked a canary or reached a new undeclared host. Carries the run's current state rather than a diff: `findings[]` (`rule`, `severity`, `name`), `unexpected_egress[]`, `canary_exfil[]`, `tools_exercised[]`, `plan`, `score`, and the `package` the sandbox exercised.
+- `agentavow.alert.grade_change` — `{type, owner, repo, old_score, new_score, reason, decision, decision_final, decision_reason, certified}`, where `reason` is `score dropped` or `signed definition changed` and `decision` is the tool's answer now.
+- `agentavow.alert.behavioral_change` — a later [sandbox run](./behavioral-sandbox.md) added findings, leaked a canary or reached a new undeclared host. Carries the run's current state rather than a diff: `findings[]` (`rule`, `severity`, `name`), `unexpected_egress[]`, `canary_exfil[]`, `tools_exercised[]`, `plan`, `score`, the `package` the sandbox exercised, and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
 - `agentavow.alert.test` — what `POST …/test` sends, shaped like a grade change with a `message`.
 
 Verify before you act on an alert:
@@ -199,8 +221,8 @@ Reject a delivery whose timestamp is more than a few minutes old. Rotating the s
 
 ## Put it together
 
-1. **CI:** the GitHub Action blocks a merge that pulls in a below-threshold dependency.
-2. **Runtime:** the MCP server refuses to connect a below-threshold tool, and throttles the ones it admits.
+1. **CI:** the GitHub Action blocks a merge on **Do not connect** (or on Review, if you choose).
+2. **Runtime:** your gate refuses a tool that reads **Do not connect**, asks a person on **Review before you connect**, and throttles the ones it admits by tier.
 3. **Ongoing:** a watch alerts you — and can auto-revoke — when a tool you already trust regresses or redefines itself.
 
-Same signed score, enforced at every layer, recomputable by anyone.
+Same answer, on the same signed score, enforced at every layer, recomputable by anyone.

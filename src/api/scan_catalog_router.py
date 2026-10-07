@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +74,24 @@ class CatalogRow(BaseModel):
     http_status: int | None = None
     # behavioral sandbox summary (npm/pypi/docker rows with a cached run; else None)
     sandbox: CatalogSandbox | None = None
+    # The three-phrase headline (safe | review | do_not_connect) + its reason, decided
+    # from the row's score and blocking critical/high counts (src.scanner.verdict).
+    # None for a row with no trust score (skipped / errored / x402 probe).
+    decision: str | None = None
+    decision_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _fill_decision(self) -> CatalogRow:
+        if self.trust_score is not None and self.decision is None:
+            from src.scanner.verdict import decide
+            findings: dict[str, Any] = {}
+            if isinstance(self.critical, int):
+                findings["critical"] = self.critical
+            if isinstance(self.high, int):
+                findings["high"] = self.high
+            d = decide({"trust_score": self.trust_score, "findings": findings})
+            self.decision, self.decision_reason = d.decision, d.reason
+        return self
 
 
 _SANDBOX_SURFACES = ("npm", "pypi", "docker")
@@ -538,6 +556,7 @@ async def scan_catalog(
         None, pattern="^(certified|verified|trusted|standard|minimal|restricted|A|B|C)$",
     ),
     category: str | None = Query(None, max_length=40),
+    decision: str | None = Query(None, pattern="^(safe|review|do_not_connect)$"),
     sort: str = Query("default", pattern="^(default|score-asc|score-desc|name|adoption)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -629,6 +648,10 @@ async def scan_catalog(
         }.get(grade)
         if _min_ok:
             filtered = [r for r in filtered if (r.grade or "") in _min_ok]
+
+    # Three-phrase filter: Safe to connect / Review before you connect / Do not connect.
+    if isinstance(decision, str) and decision:  # (a direct call passes the Query default)
+        filtered = [r for r in filtered if r.decision == decision]
 
     if sort == "score-desc":
         filtered = sorted(filtered, key=lambda r: r.trust_score or -1, reverse=True)

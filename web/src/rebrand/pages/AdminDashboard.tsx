@@ -13,7 +13,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { useAuth } from '../../hooks/useAuth'
 import api from '../../lib/api'
-import { TRUST_TIERS } from '../../components/trust/gradeSystem'
+import { DECISIONS, TRUST_TIERS } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 
@@ -23,7 +23,7 @@ interface Metrics {
   headline?: Record<string, number>
   series?: Record<string, number[]>
   days?: string[]
-  scans?: { grade_distribution?: Record<string, number>; unique_repos_total?: number; scans_total_alltime?: number }
+  scans?: { grade_distribution?: Record<string, number>; decision_distribution?: Record<string, number>; unique_repos_total?: number; scans_total_alltime?: number }
   watches?: { active?: number; total?: number }
   claims?: { verified_total?: number; public?: number; private?: number }
   attestations?: { issued_total?: number; verification_badges_active?: number }
@@ -551,6 +551,7 @@ function MetricsTab() {
   const f = data?.funnel || {}
   const board = data?.badges?.leaderboard || []
   const grades = data?.scans?.grade_distribution || {}
+  const decisions = data?.scans?.decision_distribution || {}
   const surfaces = data?.catalog?.by_surface || {}
   const funnelSteps: [string, number][] = [['Scanned', f.scanned ?? 0], ['Watched', f.watched ?? 0], ['Claimed', f.claimed ?? 0], ['Installed', f.installs ?? 0]]
   const fmax = Math.max(...funnelSteps.map(([, n]) => n), 1)
@@ -786,8 +787,16 @@ function MetricsTab() {
       </Section>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <Section title="Trust-tier distribution" note="Live scanned corpus, all-time, by trust tier.">
+        <Section title="Answer distribution" note="Live scanned corpus, all-time: the three-phrase answer each tool leads with, then the trust tiers underneath as detail.">
           <div className="glass rounded-2xl p-5 flex flex-col gap-2">
+            {/* The headline: Safe to connect / Review before you connect / Do not connect
+                (metrics_dashboard_router._DECISION_CASE, from the stored critical/high counts + score). */}
+            {DECISIONS.map((d) => {
+              const n = decisions[d.value] ?? 0
+              const tot = Object.values(decisions).reduce((a, b) => a + b, 0) || 1
+              return <div key={d.value} className="flex items-center gap-3 text-[13px]"><span className="w-[12rem] shrink-0 flex items-center gap-2"><span className="inline-block w-2 h-2 rounded-full" style={{ background: d.color }} /><span className="font-semibold">{d.phrase}</span></span><div className="flex-1 h-2 rounded-full bg-surface overflow-hidden"><div className="h-full" style={{ width: `${(n / tot) * 100}%`, background: d.color }} /></div><span className="tabular-nums text-text-muted w-16 text-right">{fmt(n)}</span></div>
+            })}
+            <div className="mt-2 font-mono text-[10.5px] uppercase tracking-wide text-text-muted">Trust tiers (detail)</div>
             {/* One bucket per tier, keyed by the API's trust_tier value — the same six floors
                 as getTrustTier / src/trust_tiers.py (metrics_dashboard_router._TIER_CASE). */}
             {TRUST_TIERS.map((t, i) => {

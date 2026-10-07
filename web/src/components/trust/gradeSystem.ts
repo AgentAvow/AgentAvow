@@ -125,18 +125,16 @@ export interface TrustTier {
   requestsPerMinute: number | null   // null = unlimited
   maxTokensPerCall: number | null    // null = unlimited
   requireConfirmation: boolean
-  verdict: string        // the consumer-facing verdict phrase (SEO, share text, cards)
 }
 
-// The verdict phrase agrees with binaryVerdict() / the MCP connector: >= 81 reads
-// "Safe to connect"; everything below is a flavour of "review before you connect".
+// No tier carries a phrase: the headline comes from DECISIONS / decide() below.
 export const TRUST_TIERS: readonly TrustTier[] = [
-  { value: 'verified',   name: 'Verified',   min: 96, color: '#16A34A', colorText: '#166534', posture: 'Connect normally · no limits',  verdict: 'Safe to connect',                            requestsPerMinute: null, maxTokensPerCall: null, requireConfirmation: false },
-  { value: 'trusted',    name: 'Trusted',    min: 81, color: '#22C55E', colorText: '#15803D', posture: 'Auto-approve within budget',    verdict: 'Safe to connect',                            requestsPerMinute: 60,   maxTokensPerCall: 8192, requireConfirmation: false },
-  { value: 'standard',   name: 'Standard',   min: 51, color: '#5BBF3A', colorText: '#3F7D1F', posture: 'Standard rate + token limits',  verdict: 'Review before you connect',                  requestsPerMinute: 30,   maxTokensPerCall: 4096, requireConfirmation: false },
-  { value: 'minimal',    name: 'Minimal',    min: 31, color: '#F59E0B', colorText: '#B45309', posture: 'Confirm on sensitive calls',    verdict: 'Use with caution — confirm sensitive calls', requestsPerMinute: 15,   maxTokensPerCall: 2048, requireConfirmation: true },
-  { value: 'restricted', name: 'Restricted', min: 11, color: '#F97316', colorText: '#C2410C', posture: 'Gated · manual approval',       verdict: 'Not recommended',                            requestsPerMinute: 5,    maxTokensPerCall: 1024, requireConfirmation: true },
-  { value: 'blocked',    name: 'Blocked',    min: 0,  color: '#EF4444', colorText: '#B91C1C', posture: 'Do not connect',                verdict: 'Do not connect',                             requestsPerMinute: 0,    maxTokensPerCall: 0,    requireConfirmation: true },
+  { value: 'verified',   name: 'Verified',   min: 96, color: '#16A34A', colorText: '#166534', posture: 'Connect normally · no limits',  requestsPerMinute: null, maxTokensPerCall: null, requireConfirmation: false },
+  { value: 'trusted',    name: 'Trusted',    min: 81, color: '#22C55E', colorText: '#15803D', posture: 'Auto-approve within budget',    requestsPerMinute: 60,   maxTokensPerCall: 8192, requireConfirmation: false },
+  { value: 'standard',   name: 'Standard',   min: 51, color: '#5BBF3A', colorText: '#3F7D1F', posture: 'Standard rate + token limits',  requestsPerMinute: 30,   maxTokensPerCall: 4096, requireConfirmation: false },
+  { value: 'minimal',    name: 'Minimal',    min: 31, color: '#F59E0B', colorText: '#B45309', posture: 'Confirm on sensitive calls',    requestsPerMinute: 15,   maxTokensPerCall: 2048, requireConfirmation: true },
+  { value: 'restricted', name: 'Restricted', min: 11, color: '#F97316', colorText: '#C2410C', posture: 'Gated · manual approval',       requestsPerMinute: 5,    maxTokensPerCall: 1024, requireConfirmation: true },
+  { value: 'blocked',    name: 'Blocked',    min: 0,  color: '#EF4444', colorText: '#B91C1C', posture: 'Do not connect',                requestsPerMinute: 0,    maxTokensPerCall: 0,    requireConfirmation: true },
 ]
 
 /** Map a 0–100 score to its Trust tier (API value, word, colour, posture, limits). */
@@ -144,19 +142,231 @@ export function getTrustTier(score: number): TrustTier {
   return TRUST_TIERS.find((t) => score >= t.min) ?? TRUST_TIERS[TRUST_TIERS.length - 1]
 }
 
-/** The phrase a >= 81 score drops to when a blocking finding holds the binary verdict at
- * needs-review — the Standard tier's phrase, so copy never says "safe" for something the
- * API says to review. Twin of `REVIEW_PHRASE` in `src/trust_tiers.py`. */
-export const REVIEW_PHRASE = 'Review before you connect'
+// ─── The three-phrase decision (LOCKED 2026-10-07) ──────────────────────────
+// Every surface leads with one of three phrases plus the one reason that triggered
+// it; the 0–100 score, the adoption score and the tier sit underneath as evidence.
+// Certified is a separate axis that rides beside the phrase ("Safe to connect ·
+// Certified"). Twin of DECISIONS / decide() in src/trust_tiers.py and
+// src/scanner/verdict.py — tests/test_decision.py runs both on one table and requires
+// byte-identical output. Prefer the API's own `decision` fields when present.
 
-/** The one consumer-facing verdict phrase for a score's tier (twin of
- * `verdict_phrase` in `src/trust_tiers.py`). `noBlockingCritHigh` is the server's
- * `certified.checks.no_critical_or_high` gate when the caller has the scan: it can
- * only demote a trusted/verified score to REVIEW_PHRASE, never promote. */
-export function verdictPhrase(score: number, noBlockingCritHigh?: boolean): string {
-  const t = getTrustTier(score)
-  if (noBlockingCritHigh === false && t.verdict === TRUST_TIERS[0].verdict) return REVIEW_PHRASE
-  return t.verdict
+export type DecisionValue = 'safe' | 'review' | 'do_not_connect'
+
+export interface DecisionPhrase {
+  value: DecisionValue
+  phrase: string     // the headline
+  label: string      // the short label (badges, chips)
+  color: string      // vivid — on dark grounds
+  colorText: string  // darkened — on light grounds
+}
+
+export const DECISIONS: readonly DecisionPhrase[] = [
+  { value: 'safe', phrase: 'Safe to connect', label: 'Safe', color: '#22C55E', colorText: '#15803D' },
+  { value: 'review', phrase: 'Review before you connect', label: 'Review', color: '#F59E0B', colorText: '#B45309' },
+  { value: 'do_not_connect', phrase: 'Do not connect', label: 'Blocked', color: '#EF4444', colorText: '#B91C1C' },
+]
+
+export const REVIEW_PHRASE = 'Review before you connect'
+export const CERTIFIED_SUFFIX = ' · Certified'
+
+export interface Decision {
+  decision: DecisionValue
+  final: boolean
+  reason: string
+}
+
+export const REVIEW_SCORE_FLOOR = 51
+export const THIN_COVERAGE_FILES = 8
+export const PENDING_SUFFIX = '; sandbox still running'
+
+const BEHAVIORAL_LABELS: Record<string, string> = {
+  behavioral_undeclared_egress: 'undeclared network call',
+  ssrf_internal_fetch: 'fetched an internal network address',
+  annotation_readonly_violated: 'a read-only tool wrote files',
+  credential_canary_exfiltrated: 'a planted credential left the sandbox',
+}
+
+type Obj = Record<string, unknown>
+const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v)
+const asObj = (v: unknown): Obj => (isObj(v) ? v : {})
+const asList = (v: unknown): Obj[] => (Array.isArray(v) ? v.filter(isObj) : [])
+const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v)
+
+function toInt(v: unknown): number {
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : 0
+  if (typeof v === 'string') {
+    const n = Number(v.trim())
+    return v.trim() !== '' && Number.isFinite(n) ? Math.trunc(n) : 0
+  }
+  return 0
+}
+
+const isUpper = (c: string) => c !== c.toLowerCase()
+
+function findingLabel(name: unknown): string {
+  let s = String(name ?? '').split(/\s+/).filter(Boolean).join(' ')
+  if (!s) return 'unnamed finding'
+  if (s.length > 70) s = s.slice(0, 69).trimEnd() + '…'
+  if (s.length > 1 && isUpper(s[0]) && !isUpper(s[1])) s = s[0].toLowerCase() + s.slice(1)
+  return s
+}
+
+function stripMalPrefix(name: unknown): string {
+  let s = String(name ?? '')
+  if (s.toLowerCase().startsWith('known-malicious package:')) s = s.slice(s.indexOf(':') + 1)
+  return s
+}
+
+const isMaliciousItem = (i: Obj) => i.kind !== 'capability' && String(i.name ?? '').toLowerCase().includes('malicious')
+
+function isBlockingItem(i: Obj): boolean {
+  if (isMaliciousItem(i)) return true
+  if (i.kind === 'capability' || i.installed === false) return false
+  if (i.category === 'install_hook') return true
+  if (i.category === 'dependency') return false
+  return i.shipped !== false
+}
+
+function countPhrase(n: number, severity: string, label: string | null): string {
+  if (n === 1) return `one ${severity} finding` + (label ? `: ${label}` : '')
+  return `${n} ${severity} findings` + (label ? `, including ${label}` : '')
+}
+
+/** The three-phrase decision for a scan result (API response JSON). Byte-identical twin
+ * of `decide()` in src/scanner/verdict.py. Never throws. */
+export function decide(input: unknown): Decision {
+  const data = asObj(input)
+  const score = toInt(data.trust_score)
+  const findings = asObj(data.findings)
+  const items = asList(findings.items)
+  const meta = asObj(data.metadata)
+  const files = isInt(meta.files_scanned) ? meta.files_scanned : 0
+
+  const b = isObj(data.behavioral) ? data.behavioral : null
+  const pending = !!(b && b.pending)
+  const bLive = !!(b && b.ran && !b.pending && !(b.plan === 'live-probe' || b.advisory === true))
+  const bFindings = bLive && b ? asList(b.findings) : []
+
+  const done = (decision: DecisionValue, reason: string): Decision =>
+    ({ decision, final: !pending, reason: reason + (pending ? PENDING_SUFFIX : '') })
+  const sev = (i: Obj) => String(i.severity ?? '').toLowerCase()
+
+  // do_not_connect
+  const canaryList = b ? b.canary_exfil : undefined
+  const canary = bLive && ((Array.isArray(canaryList) ? canaryList.length > 0 : !!canaryList)
+    || bFindings.some((f) => f.rule === 'credential_canary_exfiltrated'))
+  if (canary) return done('do_not_connect', 'a planted credential left the sandbox')
+  const inc = asObj(data.incident_history)
+  if (inc.current_version_affected === true) {
+    return done('do_not_connect', 'this version is listed as malicious (OpenSSF MAL advisory)')
+  }
+  const mal = items.find(isMaliciousItem)
+  const scMal = asObj(data.supply_chain).malicious
+  if (mal || (Array.isArray(scMal) && scMal.length > 0)) {
+    const what = mal ? findingLabel(stripMalPrefix(mal.name)) : String((scMal as unknown[])[0])
+    return done('do_not_connect', `a known-malicious dependency: ${what}`)
+  }
+
+  const isAdvisory = (i: Obj) => i.category === 'known_vulnerability' && i.kind !== 'capability'
+  const defect = (severity: string): [number, Obj | undefined] => {
+    let hits = items.filter((i) => sev(i) === severity && isBlockingItem(i) && !isAdvisory(i))
+    const headline = findings[severity]
+    let n: number
+    if (isInt(headline)) {
+      const adv = items.filter((i) => sev(i) === severity && isAdvisory(i)).length
+      n = Math.max(headline - adv, 0)
+    } else {
+      n = hits.length
+    }
+    if (n && !hits.length) {
+      hits = items.filter((i) => sev(i) === severity && i.kind !== 'capability'
+        && i.installed !== false && !isAdvisory(i))
+    }
+    return [n, hits[0]]
+  }
+
+  const [nCrit, crit] = defect('critical')
+  if (nCrit) return done('do_not_connect', countPhrase(nCrit, 'critical', crit ? findingLabel(crit.name) : null))
+  const bCrit = bFindings.filter((f) => sev(f) === 'critical')
+  if (bCrit.length) {
+    const f = bCrit[0]
+    const label = BEHAVIORAL_LABELS[String(f.rule ?? '')] || findingLabel(f.name)
+    return done('do_not_connect', `the sandbox caught a critical behavior: ${label}`)
+  }
+
+  // review
+  const [nHigh, high] = defect('high')
+  if (nHigh) return done('review', countPhrase(nHigh, 'high', high ? findingLabel(high.name) : null))
+  const bHigh = bFindings.filter((f) => sev(f) === 'high')
+  if (bHigh.length) {
+    const f = bHigh[0]
+    const label = BEHAVIORAL_LABELS[String(f.rule ?? '')] || findingLabel(f.name)
+    return done('review', countPhrase(bHigh.length, 'high', label))
+  }
+
+  const rawAdv = Array.isArray(data.advisories) && data.advisories.length ? data.advisories : inc.advisories
+  const advisories = asList(rawAdv).filter((a) => a.affects_scanned_version === true)
+  if (Array.isArray(data.advisories_affecting_version)) advisories.push(...asList(data.advisories_affecting_version))
+  const advItem = items.find(isAdvisory)
+  if (advisories.length || advItem) {
+    const aid = String((advisories.length ? advisories[0].id : '') || '')
+    return done('review', 'a published advisory affects this version' + (aid ? ` (${aid})` : ''))
+  }
+  const dep = data.deprecation
+  if (typeof dep === 'string' && dep.trim()) return done('review', 'the maintainer has deprecated this package')
+  if (score < REVIEW_SCORE_FLOOR) return done('review', `trust score ${score}/100 is under ${REVIEW_SCORE_FLOOR}`)
+
+  const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
+    && i.kind !== 'capability' && i.installed !== false)
+  if (files > 0 && files < THIN_COVERAGE_FILES && !found) {
+    return done('review', 'nothing found, but little code to inspect')
+  }
+
+  // safe
+  let reason: string
+  if (files > 0) {
+    const n = files.toLocaleString('en-US')
+    const unit = files === 1 ? 'file' : 'files'
+    reason = found ? `no critical or high findings in ${n} ${unit}` : `nothing found in ${n} ${unit}`
+  } else {
+    reason = found ? 'no critical or high findings' : 'nothing found'
+  }
+  return done('safe', reason)
+}
+
+const DECISION_BY_VALUE = (v: unknown): DecisionPhrase | undefined => DECISIONS.find((d) => d.value === v)
+
+/** The API's decision when the result carries one, else decided here (same rule). */
+export function decisionOf(scan: unknown): Decision {
+  const o = asObj(scan)
+  if (DECISION_BY_VALUE(o.decision) && typeof o.decision_reason === 'string') {
+    return { decision: o.decision as DecisionValue, final: o.decision_final !== false, reason: o.decision_reason }
+  }
+  return decide(o)
+}
+
+/** The phrase row (headline, short label, colours) for a decision value. */
+export function decisionPhrase(value: DecisionValue | string | null | undefined): DecisionPhrase {
+  return DECISION_BY_VALUE(value) ?? DECISIONS[1]
+}
+
+/** The one headline phrase for a scan (twin of `verdict_phrase` in src/trust_tiers.py).
+ * Pass the scan result, or a decision value. A bare score decides from the score alone. */
+export function verdictPhrase(scanOrDecision: unknown): string {
+  if (typeof scanOrDecision === 'string' && DECISION_BY_VALUE(scanOrDecision)) return decisionPhrase(scanOrDecision).phrase
+  if (typeof scanOrDecision === 'number') return decisionPhrase(decide({ trust_score: scanOrDecision }).decision).phrase
+  return decisionPhrase(decisionOf(scanOrDecision).decision).phrase
+}
+
+/** Whether a scan carries the Certified mark (the full conjunctive gate). */
+export function isCertified(scan: unknown): boolean {
+  return asObj(asObj(scan).certified).eligible === true
+}
+
+/** "Safe to connect · Certified" — the phrase with the Certified mark when earned. */
+export function headline(scan: unknown): string {
+  return verdictPhrase(scan) + (isCertified(scan) ? CERTIFIED_SUFFIX : '')
 }
 
 /** Look a tier up by the API's `trust_tier` value; an unknown value falls back to the score. */

@@ -159,6 +159,41 @@ Certified gate is a new model version; scores carry the model version they were 
 under so a recompute uses the matching rules. Non-normative examples and notes may change
 without a version bump.
 
+## 11. The phrase layer (decision)
+
+Every surface leads with one of three answers, derived from the scored result. The score,
+tier and Certified verdict above are unchanged by it; it adds no input to sections 3–8.
+
+| `decision` | Phrase | Short label |
+|---|---|---|
+| `safe` | Safe to connect | Safe |
+| `review` | Review before you connect | Review |
+| `do_not_connect` | Do not connect | Blocked |
+
+Rule, first match wins:
+
+1. `do_not_connect` — a canary credential left the behavioral sandbox; the scanned version
+   is in an OpenSSF MAL advisory; a known-malicious dependency; a blocking critical defect
+   (shipped, installed, `kind = defect`; a capability never counts); any other critical
+   behavioral finding.
+2. `review` — a blocking high defect; a high behavioral finding; a published advisory
+   affecting the scanned version; a deprecated package; a trust score below 51; or fewer
+   than 8 files scanned with no critical, high or medium finding.
+3. `safe` — otherwise.
+
+The decision is computed from the result after the signed behavioral observation is
+applied (section 9), so phrase and score agree. Adoption is never an input. Advisory
+behavioral results (a live probe, a run that did not happen, needed credentials, or timed
+out) contribute no finding. While the sandbox run is pending, the decision comes from the
+static evidence and is marked provisional (`decision_final = false`); it may move to
+`review` when the run lands.
+
+Each decision carries `decision_reason`, one sentence naming the triggering condition.
+The decision is **unsigned**: it travels beside the signed verdict, derived from the same
+scan result; it is not part of the JWS payload. Certified (section 8) is a separate
+axis and is shown beside the phrase ("Safe to connect · Certified"). Reference
+implementation: `src/scanner/verdict.py` (`decide`).
+
 ---
 
 *Conformance: an implementation conforms when, given the same findings and signals, it

@@ -7,12 +7,16 @@ branding:
   color: "blue"
 
 inputs:
-  min_score:
-    description: "Minimum trust score (0-100) to pass the check"
+  fail_on:
+    description: "Fail the workflow on this decision or worse: do_not_connect (default), review, or none"
     required: false
-    default: "60"
+    default: "do_not_connect"
+  min_score:
+    description: "Legacy: minimum trust score (0-100) checked when fail_on_findings is true (51 when unset)"
+    required: false
+    default: ""
   fail_on_findings:
-    description: "Fail the workflow if the score is below min_score"
+    description: "Legacy: fail the workflow if the score is below min_score"
     required: false
     default: "false"
   comment_on_pr:
@@ -38,6 +42,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        FAIL_ON: ${{ inputs.fail_on }}
         MIN_SCORE: ${{ inputs.min_score }}
         FAIL_ON_FINDINGS: ${{ inputs.fail_on_findings }}
         COMMENT_ON_PR: ${{ inputs.comment_on_pr }}

@@ -44,7 +44,7 @@ All read-only and anonymous — no account or API key required.
 
 | Tool | Description |
 |------|-------------|
-| `scan_repo` | Scan a public GitHub repo (`owner/name`) → signed 0–100 trust score + safe / needs-review verdict + adoption score. |
+| `scan_repo` | Scan a public GitHub repo (`owner/name`) → Safe to connect / Review before you connect / Do not connect, the reason, a signed 0–100 trust score and the adoption score. |
 | `scan_package` | Scan an npm / PyPI / crates / Docker / Hugging Face package. |
 | `scan_mcp_server` | Scan a live MCP server's tool definitions for poisoning / prompt-injection. |
 | `verify_trust` | Resolve an agent identity and return its current trust score. |
@@ -53,9 +53,16 @@ All read-only and anonymous — no account or API key required.
 | `get_trust_badge` | Get a shields-style trust badge (SVG URL + README markdown) for an agent. |
 | `about_agentavow` | What AgentAvow checks and how to read a verdict. |
 
-Every scan result carries a `verdict` (`safe` / `needs_review`), a `verdict_reason`
-(`clean` / `blocking_findings` / `thin_coverage` / `low_signals`), the 0–100 `trust_score`,
-`certified` eligibility, the `adoption` score (count + unit), and the findings behind it.
+Every scan result leads with one of three answers — `decision` = `safe` (**Safe to
+connect**), `review` (**Review before you connect**) or `do_not_connect` (**Do not
+connect**) — and `decision_reason`, the one condition that triggered it ("one high
+finding: undeclared network call", "nothing found, but little code to inspect"). The
+`summary` line starts with the phrase (plus " · Certified" when the tool carries the
+mark). Underneath: the 0–100 `trust_score`, the `tier` as detail, `certified`
+eligibility, the `adoption` score (count + unit), the findings behind it, and the
+binary `verdict` (`safe` / `needs_review`) with its `verdict_reason` (`clean` /
+`blocking_findings` / `thin_coverage` / `low_signals`), unchanged for existing
+consumers.
 
 ## Signed attestations
 

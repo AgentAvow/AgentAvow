@@ -304,6 +304,18 @@ _TIER_CASE = case(
 
 _TIER_ORDER = [t.value for t in TIERS]
 
+# The three-phrase headline over the same corpus, from what a catalog row stores (the
+# blocking critical / high counts + the score): the `decide()` rule without the inputs
+# a row does not keep (advisories, deprecation, coverage, sandbox), so it is the
+# catalog's view, matching CatalogRow.decision.
+_DECISION_CASE = case(
+    (func.coalesce(CommunityScan.critical, 0) > 0, "do_not_connect"),
+    (func.coalesce(CommunityScan.high, 0) > 0, "review"),
+    (CommunityScan.trust_score < 51, "review"),
+    else_="safe",
+)
+_DECISION_ORDER = ["safe", "review", "do_not_connect"]
+
 
 def metrics_baseline() -> dict:
     """The counting rules, one sentence each, and the date they took effect.
@@ -370,6 +382,15 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
     ).all()
     grade_map = {g: c for g, c in grade_rows}
     grade_distribution = {g: int(grade_map.get(g, 0)) for g in _TIER_ORDER}
+    decision_rows = (
+        await db.execute(
+            select(_DECISION_CASE.label("decision"), func.count().label("cnt"))
+            .where(CommunityScan.trust_score.isnot(None))
+            .group_by(_DECISION_CASE)
+        )
+    ).all()
+    _dmap = {d: c for d, c in decision_rows}
+    decision_distribution = {d: int(_dmap.get(d, 0)) for d in _DECISION_ORDER}
 
     # --- Watches ---
     watches_created_window = await db.scalar(
@@ -662,6 +683,7 @@ async def _aggregate(db: AsyncSession, window: str) -> dict:
             "unique_repos_total": int(unique_repos_total),
             "scans_total_alltime": int(scans_total_alltime),
             "grade_distribution": grade_distribution,
+            "decision_distribution": decision_distribution,
         },
         "watches": {
             "created_window": int(watches_created_window),

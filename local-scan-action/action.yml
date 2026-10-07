@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ""
   fail-on:
-    description: "Fail the job if any finding at/above this severity is present: critical | high | medium. Empty = don't gate on findings."
+    description: "Fail the job on this answer or worse — do_not_connect | review — or if any finding at/above this severity is present — critical | high | medium. Empty = don't gate."
     required: false
     default: ""
   upload-sarif:
@@ -32,11 +32,17 @@ inputs:
     default: "main"
 
 outputs:
+  decision:
+    description: "The three-phrase answer: safe (Safe to connect) | review (Review before you connect) | do_not_connect (Do not connect)."
+    value: ${{ steps.scan.outputs.decision }}
+  decision-reason:
+    description: "The one condition behind the answer, e.g. 'one high finding: os.system / os.popen (Python)'."
+    value: ${{ steps.scan.outputs.decision-reason }}
   trust-score:
     description: "The computed 0–100 trust score."
     value: ${{ steps.scan.outputs.trust-score }}
   tier:
-    description: "Trust tier (Verified / Trusted / Standard / Minimal / Restricted / Blocked)."
+    description: "Trust tier, shown as detail under the answer (Verified / Trusted / Standard / Minimal / Restricted / Blocked)."
     value: ${{ steps.scan.outputs.tier }}
 
 runs:
@@ -67,12 +73,20 @@ runs:
         # Surface score/tier as step outputs regardless of the gate result.
         SCORE=$(python -c "import json;print(json.load(open('results.json'))['trust_score'])")
         TIER=$(python -c "import json;print(json.load(open('results.json'))['tier'])")
+        DECISION=$(python -c "import json;print(json.load(open('results.json'))['decision'])")
+        REASON=$(python -c "import json;print(json.load(open('results.json'))['decision_reason'])")
+        HEADLINE=$(python -c "import json;d=json.load(open('results.json'));print(d['verdict_phrase']+(' · Certified' if d.get('certified') else ''))")
         echo "trust-score=$SCORE" >> "$GITHUB_OUTPUT"
         echo "tier=$TIER" >> "$GITHUB_OUTPUT"
+        echo "decision=$DECISION" >> "$GITHUB_OUTPUT"
+        echo "decision-reason=$REASON" >> "$GITHUB_OUTPUT"
         {
           echo "## AgentAvow — local scan"
           echo ""
-          echo "**Trust score: $SCORE / 100 ($TIER)**"
+          echo "### $HEADLINE"
+          echo "$REASON"
+          echo ""
+          echo "**Trust score: $SCORE / 100** (tier: $TIER)"
           python -c "import json;d=json.load(open('results.json'));c=d['counts'];print(f\"\\n{c['critical']} critical · {c['high']} high · {c['medium']} medium · {c['low']} low\")"
         } >> "$GITHUB_STEP_SUMMARY"
         exit $GATE

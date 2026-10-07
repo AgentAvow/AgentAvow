@@ -108,7 +108,8 @@ def test_safe_server_gives_a_visible_verdict_and_never_grants_permission(hook, m
     mod, pc = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add deepwiki https://mcp.deepwiki.com/mcp"),
                lambda t, force=False: _ok(88, "safe"))
-    assert "88/100 — safe" in out["systemMessage"]
+    assert "✅ MCP 'deepwiki' (https://mcp.deepwiki.com/mcp): Safe to connect — nothing found · AgentAvow 88/100" \
+        in out["systemMessage"]
     hso = out["hookSpecificOutput"]
     assert hso["hookEventName"] == "PreToolUse"
     assert "permissionDecision" not in hso  # the normal permission flow still runs
@@ -119,23 +120,42 @@ def test_safe_server_gives_a_visible_verdict_and_never_grants_permission(hook, m
     assert cached["score"] == 88 and cached["id"] == "https://mcp.deepwiki.com/mcp"
 
 
-def test_blocking_findings_ask_the_person_with_the_verdict_as_the_reason(hook, monkeypatch, capsys):
+def test_do_not_connect_asks_the_person_with_the_answer_as_the_reason(hook, monkeypatch, capsys):
     mod, _ = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add tm -- npx -y task-master-ai"),
-               lambda t, force=False: _ok(36, "needs review", 5, deprecated=False))
+               lambda t, force=False: _ok(36, "needs review", 5, decision="do_not_connect",
+                                          decision_reason="one critical finding: eval"))
     hso = out["hookSpecificOutput"]
     assert hso["permissionDecision"] == "ask"
-    assert "36/100 — needs review, 5 blocking finding(s)" in hso["permissionDecisionReason"]
-    assert "Continue anyway?" in hso["permissionDecisionReason"]
+    assert ("⛔ MCP 'tm' (npm:task-master-ai): Do not connect — one critical finding: eval · "
+            "AgentAvow 36/100") in hso["permissionDecisionReason"]
+    assert "AgentAvow says: Do not connect. Continue anyway?" in hso["permissionDecisionReason"]
     assert "https://agentavow.com/check/pkg/npm/task-master-ai" in out["systemMessage"]
 
 
-@pytest.mark.parametrize("tier,score", [("blocked", 4), ("restricted", 22), ("", 12)])
-def test_blocked_or_restricted_tier_asks_even_without_findings(hook, monkeypatch, capsys, tier, score):
+@pytest.mark.parametrize("extra", [
+    {"decision": "review", "decision_reason": "one high finding: x"},
+    {"tier": "blocked", "decision": "review", "decision_reason": "trust score 4/100 is under 51"},
+    {"decision": "review", "decision_reason": "nothing found, but little code to inspect"},
+])
+def test_review_is_a_note_never_a_prompt(hook, monkeypatch, capsys, extra):
+    """Review before you connect — a high finding, a low score, thin coverage — is
+    reported and the add goes on. Only Do not connect asks."""
     mod, _ = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add bad https://bad.example/mcp"),
-               lambda t, force=False: _ok(score, "needs review", 0, tier=tier))
-    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+               lambda t, force=False: _ok(40, "needs review", 1, **extra))
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+    assert "⚠️ MCP 'bad' (https://bad.example/mcp): Review before you connect — " \
+        + extra["decision_reason"] in out["systemMessage"]
+
+
+def test_certified_rides_beside_the_answer(hook, monkeypatch, capsys):
+    mod, _ = hook
+    out = _run(mod, monkeypatch, capsys, _bash("claude mcp add ok https://ok.example/mcp"),
+               lambda t, force=False: _ok(98, "safe", decision="safe", certified=True,
+                                          decision_reason="nothing found in 40 files"))
+    assert "Safe to connect · Certified — nothing found in 40 files · AgentAvow 98/100" \
+        in out["systemMessage"]
 
 
 def test_soft_needs_review_without_findings_notes_and_proceeds(hook, monkeypatch, capsys):
@@ -143,9 +163,11 @@ def test_soft_needs_review_without_findings_notes_and_proceeds(hook, monkeypatch
     not get the prompt a poisoned one gets — the verdict is shown, the add goes on."""
     mod, _ = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add deepwiki https://mcp.deepwiki.com/mcp"),
-               lambda t, force=False: _ok(74, "needs review", 0, tier="standard"))
+               lambda t, force=False: _ok(74, "needs review", 0, tier="standard",
+                                          reason="thin_coverage"))
     assert "permissionDecision" not in out["hookSpecificOutput"]
-    assert "74/100 — needs review, no blocking findings" in out["systemMessage"]
+    assert ("Review before you connect — nothing found, but little code to inspect · "
+            "AgentAvow 74/100") in out["systemMessage"]
 
 
 def test_unscannable_server_notes_it_was_not_scanned_and_proceeds(hook, monkeypatch, capsys):
@@ -164,9 +186,9 @@ def test_needs_decision_rule_directly(hook):
     mod, _ = hook
     assert mod._needs_decision(None) is False
     assert mod._needs_decision(_ok(74, "needs review", 0, tier="standard")) is False
-    assert mod._needs_decision(_ok(60, "needs review", 1, tier="standard")) is True
-    assert mod._needs_decision(_ok(8, "needs review", 0, tier="blocked")) is True
-    assert mod._needs_decision(_ok(40, "needs review", 0, tier="")) is False
+    assert mod._needs_decision(_ok(60, "needs review", 1, decision="review")) is False
+    assert mod._needs_decision(_ok(8, "needs review", 0, tier="blocked")) is False
+    assert mod._needs_decision(_ok(40, "needs review", 3, decision="do_not_connect")) is True
 
 
 def test_transient_failure_and_non_install_commands_are_silent(hook, monkeypatch, capsys):

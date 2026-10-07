@@ -300,6 +300,9 @@ async def _run_sandbox_query(
         return {
             "repo": resp.repo,
             "security_score": resp.security_score,
+            "decision": resp.decision,
+            "decision_final": resp.decision_final,
+            "decision_reason": resp.decision_reason,
             "grade": _grade_from_score(resp.security_score),
             "trust_tier": resp.trust_tier,
             "scan_result": resp.scan_result,

@@ -1,6 +1,6 @@
 # AgentAvow Trust Scan - GitHub Action
 
-Check the security posture of any public repository using the [AgentAvow](https://agentavow.com) trust infrastructure. Every pull request gets an automated trust scan comment with a 0–100 trust score, category breakdown, and actionable findings.
+Check the security posture of any public repository using the [AgentAvow](https://agentavow.com) trust infrastructure. Every pull request gets an automated trust scan comment that leads with one of three answers — **Safe to connect**, **Review before you connect**, or **Do not connect** — and the one reason behind it, with the 0–100 trust score, category breakdown and actionable findings underneath.
 
 No API key required. Works on any public repository.
 
@@ -25,18 +25,44 @@ jobs:
       - uses: AgentAvow/AgentAvow/github-action@main
 ```
 
-That's it. Every PR will now receive a trust scan comment.
+That's it. Every PR will now receive a trust scan comment, and the check fails when the
+answer is **Do not connect**.
+
+## The three answers
+
+| Answer | When | `decision` |
+|--------|------|------------|
+| **Safe to connect** | nothing blocking found | `safe` |
+| **Review before you connect** | a high finding (code or sandbox), a published advisory on this version, a deprecated package, a score under 51, or nothing found in very little code | `review` |
+| **Do not connect** | a critical finding, a planted credential leaving the sandbox, or a known-malicious dependency | `do_not_connect` |
+
+The answer always comes with its reason ("one high finding: undeclared network call").
+The six trust tiers (Verified … Blocked) are shown underneath as detail. A Certified
+tool reads "Safe to connect · Certified".
 
 ## Configuration
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `min_score` | `60` | Minimum trust score (0-100) to pass the check |
-| `fail_on_findings` | `false` | Fail the workflow if the score is below `min_score` |
+| `fail_on` | `do_not_connect` | Fail the workflow on this answer or worse: `do_not_connect`, `review`, or `none` |
 | `comment_on_pr` | `true` | Post a comment on the PR with scan results |
 | `fail_on_behavioral` | `false` | Fail the workflow if the behavioral sandbox run has a high/critical finding |
+| `min_score` | *(unset)* | Legacy: minimum trust score checked when `fail_on_findings` is true (51 when unset) |
+| `fail_on_findings` | `false` | Legacy: fail the workflow if the score is below `min_score` |
 
-### Enforce a minimum trust score
+### Fail on anything that needs a review
+
+```yaml
+- uses: AgentAvow/AgentAvow/github-action@main
+  with:
+    fail_on: review
+```
+
+### Legacy: enforce a minimum trust score
+
+`min_score` keeps working when you set it. Before this release it defaulted to 60;
+it now has no default, and `fail_on_findings: true` on its own checks against 51,
+the score under which the answer reads "Review before you connect".
 
 ```yaml
 - uses: AgentAvow/AgentAvow/github-action@main
@@ -100,7 +126,10 @@ Every scanned PR receives a comment like this:
 
 ## AgentAvow Trust Scan
 
-**AgentAvow Trust: 67/100 (Standard)** — Scan result: warnings
+### Review before you connect
+2 high findings, including shell command built from user input
+
+**Trust score 67/100** (tier: Standard) — Scan result: warnings
 
 | Category | Score |
 |----------|-------|
@@ -146,7 +175,7 @@ Click "View full report" in the PR comment (or visit `https://agentavow.com/chec
 1. The action calls the AgentAvow public scan API (`GET /api/v1/public/scan/{owner}/{repo}`)
 2. AgentAvow analyzes the repository for security and trust signals across multiple categories
 3. Results are posted as a PR comment and written to the GitHub Actions job summary
-4. Optionally, the workflow fails if the score is below your configured threshold
+4. The workflow fails on **Do not connect** by default (`fail_on`), or on the legacy score floor if you set one
 
 No source code is uploaded. The scan uses publicly available repository metadata and content already visible on GitHub.
 

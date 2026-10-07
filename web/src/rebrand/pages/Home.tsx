@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini } from '../components/TrustMark'
+import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini, DecisionLine } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
 import { trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
@@ -271,7 +271,10 @@ export default function RebrandHome() {
           {example ? (
             <div className="glass rounded-2xl overflow-hidden max-w-[620px] mx-auto mt-8">
               <div className="flex items-center gap-3 p-5 border-b border-border/60">
-                <div className="font-mono text-[13.5px] break-all min-w-0 flex-1">{example.display}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-[13.5px] break-all">{example.display}</div>
+                  <DecisionLine row={example.row} className="mt-1" />
+                </div>
                 <span className="font-mono text-[11px] text-text-muted shrink-0">a real scan</span>
               </div>
               {/* the dual mark — real artwork, tier-tinted, a preview of the score page */}
@@ -479,7 +482,8 @@ export default function RebrandHome() {
                           {(row as { adoption_count?: number }).adoption_count ? <AdoptionMini count={(row as { adoption_count?: number }).adoption_count} /> : null}
                         </div>
                       </div>
-                      <div className="mt-3 text-[12.5px] text-primary-light">Why this score →</div>
+                      <DecisionLine row={row} className="mt-2" />
+                      <div className="mt-2 text-[12.5px] text-primary-light">Why this answer →</div>
                     </Link>
                   )
                 })

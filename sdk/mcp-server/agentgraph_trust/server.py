@@ -4,7 +4,9 @@ A local/stdio MCP server that mirrors the flagship remote connector at
 https://agentavow.com/mcp: the same read-only, anonymous TRUST tools, calling
 AgentAvow's own public API and returning the SAME contract (0-100 trust score, a plain
 safe / needs-review verdict + machine reason, findings, certified eligibility, signed
-attestation links).
+attestation links), plus the three-phrase headline every AgentAvow surface leads with:
+``decision`` = safe ("Safe to connect") | review ("Review before you connect") |
+do_not_connect ("Do not connect"), with ``decision_reason``.
 
 Consistency by construction: the verdict/verdict_reason/score are read straight from the
 public API response (which derives them from src/scanner/verdict.py) — this server never
@@ -116,6 +118,32 @@ def _incident(ih: dict) -> dict | None:
     }
 
 
+# The three headline phrases (src/trust_tiers.py DECISIONS in the main repo).
+_DECISION_PHRASES = {
+    "safe": "Safe to connect",
+    "review": "Review before you connect",
+    "do_not_connect": "Do not connect",
+}
+
+
+def _decision(data: dict) -> tuple[str, str, bool]:
+    """(decision, reason, final) — the API's own fields; an older API response without
+    them falls back to the same rule over the counts it carries (critical → do not
+    connect; high or a score under 51 → review; else safe)."""
+    dec = data.get("decision")
+    if dec in _DECISION_PHRASES:
+        return dec, str(data.get("decision_reason") or ""), data.get("decision_final") is not False
+    crit, high, _ = _findings_counts(data)
+    score = int(data.get("trust_score") or 0)
+    if crit:
+        return "do_not_connect", f"{crit} critical finding(s)", True
+    if high:
+        return "review", f"{high} high finding(s)", True
+    if score < 51:
+        return "review", f"trust score {score}/100 is under 51", True
+    return "safe", "no critical or high findings", True
+
+
 _REASON_BLURB = {
     "clean": "no critical/high findings and above the safe bar",
     "blocking_findings": "held back by a critical/high finding — review before connecting",
@@ -136,14 +164,10 @@ def _scan_result(data: dict, target: str, target_type: str,
     reason = data.get("verdict_reason") or "low_signals"
     certified = bool((data.get("certified") or {}).get("eligible"))
     safe = verdict == "safe"
-    if safe:
-        headline = f"Safe to connect — {score}/100."
-    elif reason == "blocking_findings":
-        headline = f"Review before connecting — {score}/100, {crit} critical / {high} high."
-    elif reason == "thin_coverage":
-        headline = f"Clean, limited coverage — {score}/100 (little code to inspect)."
-    else:
-        headline = f"Review — {score}/100."
+    decision, decision_reason, decision_final = _decision(data)
+    phrase = _DECISION_PHRASES[decision] + (" · Certified" if certified else "")
+    headline = f"{phrase} — {decision_reason}. Trust {score}/100" + (
+        f" (tier {data.get('trust_tier')})." if data.get("trust_tier") else ".")
     return {
         "target": target,
         "target_type": target_type,
@@ -151,7 +175,13 @@ def _scan_result(data: dict, target: str, target_type: str,
         "tier": data.get("trust_tier"),
         "verdict": verdict,            # safe | needs_review
         "verdict_reason": reason,      # clean | blocking_findings | thin_coverage | low_signals
-        "summary": f"{headline} ({_REASON_BLURB.get(reason, reason)})",
+        # The three-phrase headline (lead with it): safe | review | do_not_connect.
+        "decision": decision,
+        "decision_phrase": _DECISION_PHRASES[decision],
+        "decision_reason": decision_reason,
+        "decision_final": decision_final,
+        "summary": headline,
+        "verdict_note": _REASON_BLURB.get(reason, reason),
         "critical": crit,
         "high": high,
         "findings_total": total,
@@ -388,8 +418,9 @@ def _clean_err(e: Exception) -> str:
 _ABOUT = (
     "AgentAvow — the \"is this safe to connect?\" layer for AI agents. Point it at a "
     "GitHub repo, an npm/PyPI/crates/Docker/Hugging Face package, a live MCP server, or "
-    "an agent identity and get a signed 0-100 trust score, a plain safe / needs-review "
-    "verdict, the findings behind it, and certified eligibility. Every result is "
+    "an agent identity and get one of three answers — Safe to connect, Review before you "
+    "connect, or Do not connect — with the reason, a signed 0-100 trust score and the "
+    "findings behind it, and certified eligibility. Every result is "
     "Ed25519/JWS-signed and recomputable offline. Read-only, no account. This is the "
     "local/stdio build of the same service as the remote connector at "
     "https://agentavow.com/mcp."
@@ -404,8 +435,9 @@ _RO = {"readOnlyHint": True}
 _TOOLS = [
     {
         "name": "scan_repo",
-        "description": "Scan a public GitHub repo ('owner/name') for a signed 0-100 trust "
-                       "score and a plain safe / needs-review verdict before connecting.",
+        "description": "Scan a public GitHub repo ('owner/name') before connecting: Safe "
+                       "to connect / Review before you connect / Do not connect, with "
+                       "the reason and a signed 0-100 trust score.",
         "annotations": _RO,
         "inputSchema": {
             "type": "object",
@@ -419,8 +451,9 @@ _TOOLS = [
     },
     {
         "name": "scan_package",
-        "description": "Scan a published npm / PyPI / crates / Docker / Hugging Face package "
-                       "for a signed 0-100 trust score and a safe / needs-review verdict.",
+        "description": "Scan a published npm / PyPI / crates / Docker / Hugging Face package: "
+                       "Safe to connect / Review before you connect / Do not connect, "
+                       "with the reason and a signed 0-100 trust score.",
         "annotations": _RO,
         "inputSchema": {
             "type": "object",

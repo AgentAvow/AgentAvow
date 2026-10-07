@@ -1,12 +1,17 @@
 # AgentAvow Trust Scan — GitHub Action (legacy)
 
 > **Use the maintained action instead.** The current, supported GitHub Action is
-> **[`AgentAvow/AgentAvow/github-action@main`](../../github-action/)**. It posts
-> the signed trust score and findings on the PR, includes the behavioral
-> **sandbox line**, can gate the merge on `min_score`, and can fail the build on
-> a high/critical sandbox finding (`fail_on_behavioral`). This composite action
+> **[`AgentAvow/AgentAvow/github-action@main`](../../github-action/)**. Its PR
+> comment leads with one of three answers — **Safe to connect**, **Review before
+> you connect** or **Do not connect** — and the reason behind it, with the signed
+> trust score, findings and the behavioral **sandbox line** underneath. It fails
+> the build on **Do not connect** by default (`fail_on: do_not_connect | review |
+> none`), keeps the legacy `min_score` gate, and can fail on a high/critical
+> sandbox finding (`fail_on_behavioral`). This composite action
 > (`sdk/trust-scan-action`) predates it, is kept for existing workflows, and
-> receives no new features.
+> receives no new features: it reports the score only. To read the answer from
+> its API call yourself, the public scan response carries `decision`
+> (`safe` / `review` / `do_not_connect`) and `decision_reason`.
 
 [![AgentAvow](https://img.shields.io/badge/AgentAvow-trust%20scan-7c3aed)](https://agentavow.com)
 

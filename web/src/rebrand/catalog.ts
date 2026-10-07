@@ -47,6 +47,9 @@ export interface CatalogRow {
   http_status?: number | null
   /** Behavioral sandbox summary — only on npm/pypi/docker rows with a cached run. */
   sandbox?: CatalogSandbox | null
+  /** The three-phrase headline (safe | review | do_not_connect) + reason; null when unscored. */
+  decision?: 'safe' | 'review' | 'do_not_connect' | null
+  decision_reason?: string | null
 }
 
 export interface CatalogSandbox {

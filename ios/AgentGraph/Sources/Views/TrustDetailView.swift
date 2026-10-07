@@ -106,6 +106,11 @@ struct TrustDetailView: View {
                     }
                 }
 
+                Text(HeadlinePhrase.from(score: trust.score))
+                    .font(AGTypography.lg)
+                    .fontWeight(.bold)
+                    .foregroundStyle(HeadlinePhrase.color(score: trust.score))
+
                 HStack(spacing: AGSpacing.sm) {
                     let tier = TrustTierLevel.from(score: trust.score)
                     Image(systemName: tier.attestationIcon)

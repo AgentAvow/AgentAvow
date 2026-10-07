@@ -13,6 +13,13 @@ restricted >= 11, blocked >= 0. The Claude Code plugin gate
 (``plugins/agentavow-trust/scripts/agentavow_pretool_gate.py`` ``TIER_FLOORS``) and
 ``github-action/scan.sh`` carry the same numbers; ``tests/test_trust_tiers.py``
 asserts they agree.
+
+The tier is DETAIL, not the headline (Kenne, 2026-10-07). Every surface leads with one
+of three phrases — "Safe to connect" / "Review before you connect" / "Do not connect"
+(short labels Safe / Review / Blocked) — chosen by ``src.scanner.verdict.decide`` from
+what was found, not from the score's tier. The phrase table is ``DECISIONS`` below; its
+TS twin is ``DECISIONS`` in ``gradeSystem.ts``. Certified is a separate axis and rides
+beside the phrase ("Safe to connect · Certified").
 """
 from __future__ import annotations
 
@@ -33,40 +40,50 @@ class TrustTier:
     requests_per_minute: int | None   # None = unlimited
     max_tokens_per_call: int | None   # None = unlimited
     require_user_confirmation: bool
-    verdict: str        # the consumer-facing verdict phrase (OG cards, SEO, share text)
 
 
 # Highest tier first — the first floor the score clears wins. Hues run green -> red:
 # the deeper green is Verified; Trusted / Standard / Minimal / Restricted / Blocked
 # keep the green / light-green / amber / orange / red of the previous five-band scale.
-# The verdict phrase agrees with the binary verdict in ``src/scanner/verdict.py`` and
-# the MCP connector: >= 81 (trusted / verified) reads "Safe to connect"; everything
-# below is a flavour of "review before you connect".
+# No tier carries a phrase: the headline phrase comes from ``DECISIONS`` (below).
 TIERS: tuple[TrustTier, ...] = (
     TrustTier("verified",   "Verified",   96, "#16A34A", "#166534",
-              "Connect normally · no limits", None, None, False,
-              "Safe to connect"),
+              "Connect normally · no limits", None, None, False),
     TrustTier("trusted",    "Trusted",    81, "#22C55E", "#15803D",
-              "Auto-approve within budget", 60, 8192, False,
-              "Safe to connect"),
+              "Auto-approve within budget", 60, 8192, False),
     TrustTier("standard",   "Standard",   51, "#5BBF3A", "#3F7D1F",
-              "Standard rate + token limits", 30, 4096, False,
-              "Review before you connect"),
+              "Standard rate + token limits", 30, 4096, False),
     TrustTier("minimal",    "Minimal",    31, "#F59E0B", "#B45309",
-              "Confirm on sensitive calls", 15, 2048, True,
-              "Use with caution — confirm sensitive calls"),
+              "Confirm on sensitive calls", 15, 2048, True),
     TrustTier("restricted", "Restricted", 11, "#F97316", "#C2410C",
-              "Gated · manual approval", 5, 1024, True,
-              "Not recommended"),
+              "Gated · manual approval", 5, 1024, True),
     TrustTier("blocked",    "Blocked",    0,  "#EF4444", "#B91C1C",
-              "Do not connect", 0, 0, True,
-              "Do not connect"),
+              "Do not connect", 0, 0, True),
 )
 
-# The phrase a >= 81 score drops to when a blocking critical/high finding (or a sandbox
-# alarm) holds the binary verdict at needs-review — the Standard tier's phrase, so the
-# card never says "safe" for something the API says to review.
-REVIEW_PHRASE = "Review before you connect"
+@dataclass(frozen=True)
+class DecisionPhrase:
+    """One of the three headline phrases."""
+
+    value: str          # the machine ``decision`` value
+    phrase: str         # the headline
+    label: str          # the short label (badges, chips)
+    color: str          # vivid hex — on dark grounds
+    color_light: str    # darkened hex — on light grounds
+
+
+# THE phrase table — one source for every Python surface. Order: safe, review, block.
+DECISIONS: tuple[DecisionPhrase, ...] = (
+    DecisionPhrase("safe", "Safe to connect", "Safe", "#22C55E", "#15803D"),
+    DecisionPhrase("review", "Review before you connect", "Review", "#F59E0B", "#B45309"),
+    DecisionPhrase("do_not_connect", "Do not connect", "Blocked", "#EF4444", "#B91C1C"),
+)
+DECISION_BY_VALUE: dict[str, DecisionPhrase] = {d.value: d for d in DECISIONS}
+
+SAFE_PHRASE = DECISIONS[0].phrase
+REVIEW_PHRASE = DECISIONS[1].phrase
+DO_NOT_CONNECT_PHRASE = DECISIONS[2].phrase
+CERTIFIED_SUFFIX = " · Certified"
 
 # The legacy tuple shape ``(min_score, tier_name, requests_per_min, max_tokens,
 # require_confirmation)`` with -1 for unlimited — what public_scan_router's
@@ -120,18 +137,55 @@ def trust_posture(score: int | float | None) -> str:
     return tier_for_score(score).posture
 
 
-def verdict_phrase(score: int | float | None, safe: bool | None = None) -> str:
-    """The one consumer-facing verdict phrase for a score's tier.
+def _decision_value(decision: object) -> str:
+    """A decision value from a value string, a ``Decision``, a scan dict (decided here)
+    or a bare score (decided from the score alone: under 51 reads review)."""
+    from src.scanner.verdict import decide
+    if isinstance(decision, str) and decision in DECISION_BY_VALUE:
+        return decision
+    v = getattr(decision, "decision", None)
+    if isinstance(v, str) and v in DECISION_BY_VALUE:
+        return v
+    if isinstance(decision, dict):
+        d = decision.get("decision")
+        if isinstance(d, str) and d in DECISION_BY_VALUE:
+            return d
+        return decide(decision).decision
+    return decide({"trust_score": decision}).decision
 
-    ``safe`` is the canonical binary verdict (``src.scanner.verdict.is_safe``) when the
-    caller has the scan to compute it. It can only demote: a trusted/verified score
-    with a blocking finding reads ``REVIEW_PHRASE`` instead of "Safe to connect".
-    A tier below trusted is never "safe", so ``safe=True`` changes nothing there.
-    """
-    t = tier_for_score(score)
-    if safe is False and t.verdict == TIERS[0].verdict:
-        return REVIEW_PHRASE
-    return t.verdict
+
+def decision_for(decision: object) -> DecisionPhrase:
+    """The phrase row for a decision value / ``Decision`` / scan dict / score."""
+    return DECISION_BY_VALUE[_decision_value(decision)]
+
+
+def verdict_phrase(decision: object) -> str:
+    """The headline phrase: "Safe to connect" / "Review before you connect" /
+    "Do not connect". Pass the ``decision`` value, a ``Decision``, or the scan dict
+    (an API response that already carries ``decision`` is read, not re-decided)."""
+    return decision_for(decision).phrase
+
+
+def decision_label(decision: object) -> str:
+    """The short label: Safe / Review / Blocked."""
+    return decision_for(decision).label
+
+
+def decision_color(decision: object, light: bool = False) -> str:
+    """The phrase colour (green / amber / red)."""
+    d = decision_for(decision)
+    return d.color_light if light else d.color
+
+
+def is_certified(data: dict | None) -> bool:
+    """Whether a scan carries the Certified mark (the full conjunctive gate)."""
+    c = (data or {}).get("certified") if isinstance(data, dict) else None
+    return bool(isinstance(c, dict) and c.get("eligible") is True)
+
+
+def headline(decision: object, certified: bool = False) -> str:
+    """The phrase, with " · Certified" when the tool carries the mark."""
+    return verdict_phrase(decision) + (CERTIFIED_SUFFIX if certified else "")
 
 
 def recommended_limits(score: int | float | None) -> dict:

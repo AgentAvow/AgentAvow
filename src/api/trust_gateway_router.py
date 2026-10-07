@@ -90,7 +90,12 @@ class GatewayDecision(BaseModel):
     trust_score: int  # security scan score (0-100)
     trust_tier: str
     grade: str  # A+/A/B/C/D/F
-    decision_reason: str
+    decision_reason: str  # why the gateway allowed / blocked (tier vs min_tier policy)
+    # The tool's three-phrase headline from its scan, UNSIGNED and outside the gateway's
+    # signed payload: {decision: safe|review|do_not_connect, decision_final,
+    # decision_reason}. Display it ("Review before you connect: one high finding: …");
+    # ``allowed`` stays the gateway's own policy answer.
+    scan_decision: dict = {}
     recommended_limits: dict
     category_scores: dict = {}
     # External provider signals (aggregated)
@@ -262,6 +267,9 @@ async def gateway_check(
         trust_tier=tier,
         grade=grade,
         decision_reason=reason,
+        scan_decision={"decision": scan_result.decision,
+                       "decision_final": scan_result.decision_final,
+                       "decision_reason": scan_result.decision_reason},
         recommended_limits=limits,
         category_scores=category_scores,
         external_signals=external_signals,

@@ -6,7 +6,13 @@ set -euo pipefail
 API_BASE="https://agentavow.com/api/v1/public/scan"
 OWNER="${REPO_OWNER}"
 REPO="${REPO_NAME}"
-MIN_SCORE="${MIN_SCORE:-60}"
+# fail_on: do_not_connect (default) | review | none — gate on the three-phrase decision.
+FAIL_ON="${FAIL_ON:-do_not_connect}"
+# Legacy: min_score + fail_on_findings still gate on the number when set explicitly.
+# With fail_on_findings=true and no min_score, the floor is 51 (where the decision
+# itself starts reading "Review before you connect"); the old default of 60 matched
+# nothing else in the product.
+MIN_SCORE="${MIN_SCORE:-}"
 FAIL_ON_FINDINGS="${FAIL_ON_FINDINGS:-false}"
 FAIL_ON_BEHAVIORAL="${FAIL_ON_BEHAVIORAL:-false}"
 COMMENT_ON_PR="${COMMENT_ON_PR:-true}"
@@ -49,6 +55,30 @@ elif [ "${SCORE}" -ge 51 ]; then TIER="Standard"
 elif [ "${SCORE}" -ge 31 ]; then TIER="Minimal"
 elif [ "${SCORE}" -ge 11 ]; then TIER="Restricted"
 else TIER="Blocked"; fi
+# The three headline phrases (src/trust_tiers.py DECISIONS; pinned by
+# tests/test_trust_tiers.py). Every line this script prints leads with one of them.
+PHRASE_SAFE="Safe to connect"
+PHRASE_REVIEW="Review before you connect"
+PHRASE_DO_NOT_CONNECT="Do not connect"
+# The API's decision (src/scanner/verdict.decide); an older response without it falls
+# back to the same rule over the counts it does carry.
+DECISION=$(jq -r '
+  .decision //
+  (if (.findings.critical // 0) > 0 then "do_not_connect"
+   elif (.findings.high // 0) > 0 then "review"
+   elif (.trust_score // 0) < 51 then "review"
+   else "safe" end)
+' /tmp/ag_scan.json)
+DECISION_REASON=$(jq -r '.decision_reason // ""' /tmp/ag_scan.json)
+DECISION_FINAL=$(jq -r 'if .decision_final == false then "false" else "true" end' /tmp/ag_scan.json)
+CERTIFIED=$(jq -r 'if (.certified.eligible // false) == true then "true" else "false" end' /tmp/ag_scan.json)
+case "${DECISION}" in
+  safe) PHRASE="${PHRASE_SAFE}" ;;
+  do_not_connect) PHRASE="${PHRASE_DO_NOT_CONNECT}" ;;
+  *) DECISION="review"; PHRASE="${PHRASE_REVIEW}" ;;
+esac
+HEADLINE="${PHRASE}"
+if [ "${CERTIFIED}" = "true" ]; then HEADLINE="${HEADLINE} · Certified"; fi
 # One-line summary: the API's own if present, else derived from the scan result.
 SUMMARY=$(jq -r '
   .summary //
@@ -118,7 +148,8 @@ elif [ "${B_PENDING}" = "true" ]; then
   SANDBOX_LINE="Sandbox: running now — the observed behavior (and its effect on the score) appears on the next scan"
 fi
 
-echo "Score: ${SCORE}/100 (${TIER})"
+echo "${HEADLINE}${DECISION_REASON:+ — ${DECISION_REASON}}"
+echo "Trust score: ${SCORE}/100 (tier: ${TIER})"
 echo "Findings: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low"
 if [ -n "${SANDBOX_LINE}" ]; then
   echo "${SANDBOX_LINE}"
@@ -130,7 +161,10 @@ echo "::endgroup::"
 # ---------------------------------------------------------------------------
 COMMENT_BODY="## AgentAvow Trust Scan
 
-**AgentAvow Trust: ${SCORE}/100 (${TIER})** — ${SUMMARY}
+### ${HEADLINE}
+${DECISION_REASON:+${DECISION_REASON}
+}
+**Trust score ${SCORE}/100** (tier: ${TIER}) — ${SUMMARY}
 
 | Category | Score |
 |----------|-------|
@@ -188,10 +222,28 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Fail if score is below threshold and fail_on_findings is true
+# 6. Gate on the decision (fail_on), then the legacy score floor (min_score)
 # ---------------------------------------------------------------------------
-if [ "${FAIL_ON_FINDINGS}" = "true" ] && [ "${SCORE}" -lt "${MIN_SCORE}" ]; then
-  echo "::error::Trust score ${SCORE} is below minimum threshold ${MIN_SCORE}"
+case "${FAIL_ON}" in
+  do_not_connect)
+    if [ "${DECISION}" = "do_not_connect" ]; then
+      echo "::error::AgentAvow: ${HEADLINE}${DECISION_REASON:+ — ${DECISION_REASON}}"
+      exit 1
+    fi ;;
+  review)
+    if [ "${DECISION}" = "do_not_connect" ] || [ "${DECISION}" = "review" ]; then
+      echo "::error::AgentAvow: ${HEADLINE}${DECISION_REASON:+ — ${DECISION_REASON}}"
+      exit 1
+    fi ;;
+  none|"") ;;
+  *) echo "::warning::Unknown fail_on '${FAIL_ON}' (use do_not_connect, review or none); not gating" ;;
+esac
+if [ "${DECISION_FINAL}" = "false" ]; then
+  echo "::notice::The sandbox is still running; this decision may move to ${PHRASE_REVIEW} when it lands."
+fi
+
+if [ "${FAIL_ON_FINDINGS}" = "true" ] && [ "${SCORE}" -lt "${MIN_SCORE:-51}" ]; then
+  echo "::error::Trust score ${SCORE} is below minimum threshold ${MIN_SCORE:-51} (legacy min_score gate)"
   exit 1
 fi
 
@@ -202,4 +254,4 @@ if [ "${FAIL_ON_BEHAVIORAL}" = "true" ] && [ "${B_SEVERE}" -gt 0 ]; then
   exit 1
 fi
 
-echo "AgentAvow Trust Scan complete. Score: ${SCORE}/100"
+echo "AgentAvow Trust Scan complete. ${HEADLINE} · ${SCORE}/100"

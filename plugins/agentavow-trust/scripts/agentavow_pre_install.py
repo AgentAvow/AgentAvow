@@ -7,17 +7,19 @@ skill fires on intent and can be skipped. This PreToolUse hook does not depend o
 intent: it watches the two ways an MCP server actually gets added in Claude Code —
 a ``claude mcp add`` / ``claude mcp add-json`` command (Bash) and a write to a
 ``.mcp.json`` file (Write / Edit / MultiEdit) — grades the server through the public
-scan API, and puts the verdict where the person sees it:
+scan API, and puts the answer where the person sees it. Each line leads with one of
+three answers and its reason — "Safe to connect", "Review before you connect" or "Do
+not connect" — then the 0-100 score (" · Certified" when the tool carries the mark):
 
-  • blocking findings (critical/high), or a blocked / restricted tier
-                    -> permissionDecision "ask": Claude Code shows the verdict as the
+  • Do not connect  -> permissionDecision "ask": Claude Code shows the answer as the
                        reason and the person decides. The install is never denied.
-  • everything else (safe; needs review with no blocking finding, e.g. thin
+  • everything else (Safe to connect; Review before you connect, including thin
     coverage on a small server; not scannable)
                     -> a one-line systemMessage and the command proceeds as normal (the
                        hook never grants permission, so Claude Code's own prompt, if
-                       any, still runs). A legitimate server with little to inspect
-                       must not get the same prompt a poisoned one gets.
+                       any, still runs). Review is a note, never a prompt: a legitimate
+                       server with little to inspect must not get the prompt a poisoned
+                       one gets.
   • anything else   -> silent, exit 0 (fail-open). A hook bug can never block a command.
 
 The graded server is written to the same cache the session-start hook reads, so it is
@@ -34,7 +36,7 @@ import shlex
 import sys
 import time
 
-__version__ = "0.1.19"
+__version__ = "0.1.20"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -163,22 +165,18 @@ def _report_url(t: dict, pc) -> str:
                           "deprecated": False}, 0)["report_url"]
 
 
-_ASK_TIERS = frozenset({"blocked", "restricted"})
-_RESTRICTED_FLOOR = 31  # src/trust_tiers: restricted is 11-30, blocked 0-10
+# The three headline phrases (src/trust_tiers.py DECISIONS; pinned by tests).
+DECISION_PHRASES = {
+    "safe": "Safe to connect",
+    "review": "Review before you connect",
+    "do_not_connect": "Do not connect",
+}
 
 
 def _needs_decision(r: dict | None) -> bool:
-    """Ask the person only when the grade carries real risk: a critical/high finding,
-    or a blocked/restricted tier. A soft needs-review (no findings) and an
-    unscannable target are reported, not prompted."""
-    if r is None:
-        return False
-    if int(r.get("blocking") or 0) > 0:
-        return True
-    tier = str(r.get("tier") or "")
-    if tier:
-        return tier in _ASK_TIERS
-    return int(r.get("score") or 0) < _RESTRICTED_FLOOR
+    """Ask the person only on "Do not connect". Review before you connect (a high
+    finding, thin coverage, …) and an unscannable target are reported, not prompted."""
+    return r is not None and r.get("decision") == "do_not_connect"
 
 
 def _line(t: dict, r: dict | None, pc) -> str:
@@ -186,13 +184,9 @@ def _line(t: dict, r: dict | None, pc) -> str:
     if r is None:
         return (f"➖ MCP '{t['name']}' ({coord}): not scanned — AgentAvow couldn't read it "
                 "(it may need sign-in). That is neither safe nor unsafe.")
-    flag = "✅" if r["verdict"] == "safe" else "⚠️"
-    extra = f", {r['blocking']} blocking finding(s)" if r["blocking"] else (
-        "" if r["verdict"] == "safe" else ", no blocking findings")
-    dep = "; DEPRECATED by its maintainer" if r.get("deprecated") else ""
     sandbox = f"; {r['sandbox']}" if r.get("sandbox") else ""
-    return (f"{flag} MCP '{t['name']}' ({coord}): AgentAvow {r['score']}/100 — "
-            f"{r['verdict']}{extra}{dep}{sandbox}. Report: {_report_url(t, pc)}")
+    return (f"{pc._flag(r)} MCP '{t['name']}' ({coord}): {pc._answer(r)}{sandbox}. "
+            f"Report: {_report_url(t, pc)}")
 
 
 def main() -> None:
@@ -243,7 +237,7 @@ def main() -> None:
     if needs_decision:
         out["hookSpecificOutput"]["permissionDecision"] = "ask"
         out["hookSpecificOutput"]["permissionDecisionReason"] = (
-            body + "\nThis grade carries real risk. Continue anyway?")
+            body + f"\nAgentAvow says: {DECISION_PHRASES['do_not_connect']}. Continue anyway?")
     print(json.dumps(out))
 
 
