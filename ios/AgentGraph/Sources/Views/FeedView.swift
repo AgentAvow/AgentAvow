@@ -269,6 +269,28 @@ enum TrustTierLevel: Int, CaseIterable {
     }
 }
 
+// MARK: - Headline phrase (three-phrase decision)
+
+/// The three headline phrases every AgentAvow surface leads with (src/trust_tiers.py
+/// DECISIONS). The app shows a score without the findings behind it, so it can only
+/// apply the score part of the rule: under 51 reads "Review before you connect".
+/// The tier word stays as detail underneath; Certified stays where it is.
+enum HeadlinePhrase {
+    static let safe = "Safe to connect"
+    static let review = "Review before you connect"
+    static let doNotConnect = "Do not connect"
+
+    static func from(score: Double) -> String {
+        return score * 100 < 51 ? review : safe
+    }
+
+    static func color(score: Double) -> Color {
+        return score * 100 < 51
+            ? Color(red: 245/255, green: 158/255, blue: 11/255)
+            : Color(red: 34/255, green: 197/255, blue: 94/255)
+    }
+}
+
 // MARK: - Trust Badge (Tier-Aware)
 
 struct TrustBadge: View {
