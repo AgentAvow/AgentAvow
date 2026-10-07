@@ -94,6 +94,16 @@ def test_pyproject_fallback_parser_without_tomllib(hook, tmp_path, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_tomllib)
     text = '[build-system]\nrequires=["x"]\n[project]\ndependencies = ["httpx>=0.27", \'rich\']\n[tool.y]\n'
     assert [(d["pkg"], d["spec"]) for d in hook._pyproject_deps(text)] == [("httpx", ">=0.27"), ("rich", "")]
+    # The real failure on Kenne's Mac (python 3.9, no tomllib): a multi-line list whose
+    # entries carry extras in brackets. The old regex stopped at the first ']' and found
+    # one dependency out of 25.
+    real = ('[project]\nname = "agentgraph"\ndependencies = [\n    "fastapi>=0.104.0,<1.0",\n'
+            '    "uvicorn[standard]>=0.24.0,<1.0",  # ASGI server\n    "sqlalchemy>=2.0",\n'
+            '    "pydantic-settings>=2.0",\n]\n\n[project.optional-dependencies]\ndev = ["pytest"]\n')
+    got = [(d["pkg"], d["spec"]) for d in hook._pyproject_deps(real)]
+    assert got == [("fastapi", ">=0.104.0,<1.0"), ("uvicorn", ">=0.24.0,<1.0"),
+                   ("sqlalchemy", ">=2.0"), ("pydantic-settings", ">=2.0")]
+    assert hook._pyproject_deps("[project]\nname = \"x\"\n") == []
 
 
 def test_same_package_in_two_manifests_once_and_no_manifest_means_none(hook, tmp_path):
