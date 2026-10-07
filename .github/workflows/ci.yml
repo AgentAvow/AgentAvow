@@ -162,3 +162,24 @@ jobs:
           file: web/Dockerfile
           push: false
           tags: agentgraph/frontend:${{ github.sha }}
+
+      # The slim CI scanner image (gitlab/ component, ghcr.io/agentavow/scanner).
+      # Built and smoke-run on this checkout so a src/ change that breaks its
+      # import closure is caught here; not pushed.
+      - name: Build scanner image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/scanner.Dockerfile
+          push: false
+          load: true
+          tags: agentavow/scanner:${{ github.sha }}
+
+      - name: Smoke-test scanner image on this checkout
+        run: |
+          docker run --rm -v "$PWD:/src" agentavow/scanner:${{ github.sha }} \
+            agentavow scan . --json /src/agentavow-scan.json \
+            --gitlab-code-quality /src/gl-code-quality-report.json
+          python3 -c "import json; d=json.load(open('agentavow-scan.json')); print(d['verdict_phrase'], d['trust_score'])"
+          test -s gl-code-quality-report.json
+          docker image inspect agentavow/scanner:${{ github.sha }} --format 'scanner image: {{.Size}} bytes'

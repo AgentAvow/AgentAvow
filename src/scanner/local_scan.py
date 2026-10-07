@@ -1,10 +1,11 @@
 """Local, offline scan — the same 12-category static engine and scoring the hosted
 service runs, but over a checked-out working tree instead of the GitHub API.
 
-This is the engine behind ``agentavow scan <path>`` and the in-runner CI action:
-a developer (or a private repo's CI) gets the identical trust score + findings
-WITHOUT sending any code to AgentAvow. The grade is recomputable and matches a
-hosted scan of the same tree for the static portion.
+This is the engine behind ``agentavow scan <path>``, the in-runner GitHub Action
+(local-scan-action/), the GitLab CI component (gitlab/), and the slim scanner image
+(docker/scanner.Dockerfile): a developer (or a private repo's CI) gets the identical
+trust score + findings WITHOUT sending any code to AgentAvow. The score is
+recomputable and matches a hosted scan of the same tree for the static portion.
 
 What's identical to a hosted scan: file selection, the 12 detection categories,
 suppression/allowlist, MCP/media context discounting, dependency findings, and
@@ -20,6 +21,7 @@ AgentAvow's private key. A local scan proves the findings; the hosted service
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -43,7 +45,8 @@ from src.scanner.scan import (
     _select_scan_files,
     _should_skip_path,
 )
-from src.trust_tiers import trust_word
+from src.scanner.verdict import is_safe
+from src.trust_tiers import trust_word, verdict_phrase
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
@@ -274,13 +277,36 @@ def _tier(score: int) -> str:
     return trust_word(score)
 
 
+# Machine verdict values, keyed by the phrase src/trust_tiers.py emits today.
+# "Safe to connect" and "Do not connect" map 1:1; every other phrase is a flavour
+# of review.
+_VERDICT_VALUE = {"Safe to connect": "safe", "Do not connect": "do_not_connect"}
+
+
+def verdict_for(result: ScanResult) -> tuple[str, str]:
+    """``(phrase, value)`` for a scored result: the consumer-facing verdict phrase
+    and its machine value (``safe`` / ``review`` / ``do_not_connect``).
+
+    The ONE place the local CLI derives a verdict. It leans on the shared helpers
+    (``src.scanner.verdict.is_safe`` for the binary call, ``trust_tiers.verdict_phrase``
+    for the words), so when the headline-phrase rule moves into those modules this
+    function is the single line to swap.
+    """
+    safe = is_safe({"trust_score": result.trust_score, "certified": result.certified})
+    phrase = verdict_phrase(result.trust_score, safe=safe)
+    return phrase, _VERDICT_VALUE.get(phrase, "review")
+
+
 def result_to_dict(result: ScanResult) -> dict:
     """Compact JSON view for CI / inner-loop consumption."""
     sev_counts: dict[str, int] = {}
     for f in result.findings:
         sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
+    phrase, verdict = verdict_for(result)
     return {
         "tool": result.repo,
+        "verdict": verdict,
+        "verdict_phrase": phrase,
         "trust_score": result.trust_score,
         "tier": _tier(result.trust_score),
         "certified": bool((result.certified or {}).get("eligible")),
@@ -360,10 +386,72 @@ def result_to_sarif(result: ScanResult) -> dict:
     }
 
 
+# GitLab Code Quality (CodeClimate subset) severities: info < minor < major < critical
+# < blocker. A shipped critical is the thing that floors the score, so it is the
+# one that blocks.
+_CODE_QUALITY_SEVERITY = {"critical": "blocker", "high": "critical", "medium": "major",
+                          "low": "minor", "info": "info"}
+
+
+def _code_quality_fingerprint(path: str, category: str, name: str, ordinal: int) -> str:
+    """Stable id for one finding. GitLab diffs fingerprints between the target and
+    source branch to decide what is new vs. fixed, so the line number stays out:
+    an unrelated edit above the finding must not re-report it. The ordinal (n-th
+    identical finding in the file, by line order) keeps two hits of the same rule
+    in one file distinct."""
+    key = f"{path}\0{category}\0{name}\0{ordinal}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def result_to_code_quality(result: ScanResult, path_prefix: str = "") -> list[dict]:
+    """GitLab Code Quality report (``gl-code-quality-report.json``) so findings show
+    in the merge-request widget on every GitLab tier. Format:
+    https://docs.gitlab.com/ci/testing/code_quality/#code-quality-report-format
+
+    ``path_prefix`` is the scanned directory relative to the repository root, for
+    scans of a subdirectory; GitLab resolves ``location.path`` from the repo root.
+    """
+    prefix = path_prefix.strip("/")
+    seen: dict[tuple[str, str, str], int] = {}
+    report: list[dict] = []
+    ordered = sorted(result.findings, key=lambda f: (f.file_path, f.line_number))
+    for f in ordered:
+        path = f"{prefix}/{f.file_path}" if prefix else f.file_path
+        key = (path, f.category, f.name)
+        ordinal = seen.get(key, 0)
+        seen[key] = ordinal + 1
+        description = f.name + (f". {f.remediation}" if f.remediation else "")
+        report.append({
+            "type": "issue",
+            "check_name": f"agentavow/{f.category}",
+            "description": description,
+            "categories": ["Security"],
+            "severity": _CODE_QUALITY_SEVERITY.get(f.severity, "major"),
+            "fingerprint": _code_quality_fingerprint(path, f.category, f.name, ordinal),
+            "location": {"path": path, "lines": {"begin": max(1, f.line_number)}},
+        })
+    return report
+
+
+def _scan_path_prefix(root: Path) -> str:
+    """The scanned directory relative to the CI project root, when it is inside
+    one (``CI_PROJECT_DIR`` is what GitLab exports). Empty when they coincide or the
+    scan is outside the checkout, so report paths stay repo-relative either way."""
+    project_dir = os.environ.get("CI_PROJECT_DIR")
+    if not project_dir:
+        return ""
+    try:
+        rel = Path(root).resolve().relative_to(Path(project_dir).resolve())
+    except ValueError:
+        return ""
+    return "" if rel == Path(".") else rel.as_posix()
+
+
 def _print_human(result: ScanResult, stream=sys.stderr) -> None:
     d = result_to_dict(result)
     c = d["counts"]
     print(f"\nAgentAvow — {d['tool']}", file=stream)
+    print(f"  Verdict     : {d['verdict_phrase']}", file=stream)
     print(f"  Trust score : {d['trust_score']}/100  ({d['tier']})"
           + ("  ✓ Certified-eligible" if d["certified"] else ""), file=stream)
     print(f"  Files       : {d['files_scanned']} scanned"
@@ -400,6 +488,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="write findings JSON (to FILE, or stdout if no FILE)")
     sc.add_argument("--sarif", metavar="FILE",
                     help="write SARIF 2.1.0 to FILE (for GitHub code scanning)")
+    sc.add_argument("--gitlab-code-quality", metavar="FILE",
+                    help="write a GitLab Code Quality report to FILE "
+                         "(artifacts:reports:codequality, shows in the MR widget)")
     sc.add_argument("--min-score", type=int, default=None,
                     help="exit non-zero if the trust score is below this (CI gate)")
     sc.add_argument("--fail-on", choices=["critical", "high", "medium"], default=None,
@@ -429,6 +520,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.sarif:
         Path(args.sarif).write_text(json.dumps(result_to_sarif(result), indent=2),
                                     encoding="utf-8")
+    if args.gitlab_code_quality:
+        report = result_to_code_quality(result, _scan_path_prefix(Path(args.path)))
+        Path(args.gitlab_code_quality).write_text(json.dumps(report, indent=2),
+                                                  encoding="utf-8")
 
     # --- CI gating ---
     if args.min_score is not None and result.trust_score < args.min_score:

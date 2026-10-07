@@ -103,6 +103,43 @@ const { text } = await generateText({ model, tools, prompt })
 
 Tools from `createMCPClient().tools()` don't carry their server's URL, so name it once per set (`server`), per tool (`toolToServer`), or with `resolveServer`. Your own function tools map to no server and run ungated. The drift check compares the definition the server serves now (or the `tools/list` you pass as `servedTools`) against the digest in the attestation; `failClosed: false` lets a call through, with a warning, when AgentAvow itself can't answer.
 
+### Flue
+
+For an agent built on [Flue](https://flueframework.com) (`@flue/runtime` 2.x, remote MCP servers), `agentavow-trust/flue` puts the same check at the two points Flue gives you. One policy object decides `safe`, `review` or `do_not_connect` from the server's signed result; the Certified mark travels next to the decision as its own field.
+
+```ts
+// src/app.ts (module scope, once)
+import { instrument } from '@flue/runtime'
+import { createFlueGate } from 'agentavow-trust/flue'
+
+export const gate = createFlueGate({
+  allowFloor: 51,        // trust score that is safe without review (81 is strict)
+  onReview: 'block',     // or 'warn' | 'confirm'
+  onDrift: 'block',      // a tool whose definition changed since it was graded
+  onApiError: 'block',   // fail closed when AgentAvow cannot answer
+})
+instrument(gate.instrumentation())
+```
+
+```ts
+// src/agents/assistant.ts
+'use agent'
+import { useMcpConnection, useModel } from '@flue/runtime'
+import { gate } from '../app.ts'
+
+export function Assistant() {
+  useModel('anthropic/claude-sonnet-4-6')
+  useMcpConnection(gate.connection({ name: 'deepwiki', url: 'https://mcp.deepwiki.com/mcp', optional: true }))
+  return 'Answer questions about public repositories.'
+}
+```
+
+`gate.connection(def)` returns the same connection definition with its `fetch` wrapped. Flue hands that `fetch` to the MCP transport, so the gate sees the `initialize` and `tools/list` exchange: it fetches the server's signed result before the first message, refuses the connection on `do_not_connect` (with `optional: true` Flue mounts no tools from that server and tells the model why; without it the run fails with the reason), and when the listing arrives it checks each served definition against the per-tool digest in the attestation. A definition that changed since the server was graded refuses the connection too.
+
+`gate.instrumentation()` plugs into Flue's `instrument()` so every `mcp__<server>__<tool>` call runs the in-memory check first. A call that is not allowed is denied before it runs; the model gets the reason as the tool's error and the conversation continues. Pin the definitions you reviewed (`gate.pin(server, tools)` or a `pins` entry in the policy) and a server that redefines a tool after it connected is caught on the next call.
+
+The gate verifies the EdDSA attestation against AgentAvow's public JWKS and decides on the signed fields; it needs only `fetch` and WebCrypto, so it runs on Flue's Node and Cloudflare Workers targets. `onReview: 'confirm'` takes a `confirm` hook of yours, since Flue has no built-in approval pause. The same core, `agentavow-trust/gate`, works without Flue: `createGate(policy).check(target)` and `checkToolCall({ server, toolName, servedDefinition })`.
+
 ## Gate anything (the API)
 
 Every surface is one auth-free GET, returning the score, tier, findings, the signed `coverage{}` block, and the JWS attestation:
