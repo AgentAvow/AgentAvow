@@ -84,6 +84,15 @@ class ScanFinding(BaseModel):
     # False for test/doc/example paths (scored at a fraction). The list is sorted
     # shipped-first so consumers lead with the surface an agent actually runs.
     shipped: bool = True
+    # "defect" (can move the score) or "capability" (what the tool does — reported,
+    # never scored, never blocking; severity info|low only).
+    kind: str = "defect"
+    # Taxonomy tag for a capability (process:spawn, code:eval, filesystem:write, …).
+    capability: str = ""
+    # False when the file is not part of what a consumer installs (an sdist's
+    # Makefile / scripts/ / bench/, anything absent from the wheel): severity is
+    # capped at info and it never blocks.
+    installed: bool = True
 
 
 class FindingsSummary(BaseModel):
@@ -152,6 +161,9 @@ class PublicScanResponse(BaseModel):
     verdict: str = "needs_review"  # safe | needs_review (score >= 81 and no critical/high)
     verdict_reason: str = "low_signals"  # clean | blocking_findings | thin_coverage | low_signals
     findings: FindingsSummary
+    # What the tool DOES, grouped by taxonomy tag: [{capability, label, count, files}].
+    # Informational — never a score or verdict input.
+    capabilities: list[dict] = []
     positive_signals: list[str] = []
     grade: str = ""  # letter grade with the A+ certified gate applied (roadmap §7)
     certified: dict = {}  # A+ certified-tier eligibility {eligible, checks} (roadmap §7)
@@ -1137,6 +1149,9 @@ def _scan_result_to_dict(result: object) -> dict:
             "line_number": f.line_number,
             "remediation": f.remediation or "",
             "shipped": _is_shipped(f.file_path),
+            "kind": getattr(f, "kind", "defect") or "defect",
+            "capability": getattr(f, "capability", "") or "",
+            "installed": bool(getattr(f, "installed", True)),
         }
         for f in sorted(
             result.findings,
@@ -1180,6 +1195,9 @@ def _scan_result_to_dict(result: object) -> dict:
             "items": finding_items,
         },
         "certified": _certified,
+        # Capability chips: what the tool does (fixed-argv spawn, file writes, eval of
+        # its own expressions …), grouped by tag. Never a score input.
+        "capabilities": list(getattr(result, "capabilities", []) or []),
         "declared_scope": getattr(result, "declared_scope", {}) or {},
         "env_reads": list(getattr(result, "env_reads", []) or []),
         "provenance": getattr(result, "provenance", {}) or {},
