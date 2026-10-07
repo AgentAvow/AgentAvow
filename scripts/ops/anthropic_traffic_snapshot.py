@@ -221,7 +221,9 @@ def snapshot(day: str, since_hours: int) -> dict:
         "hook_machines_excl_owner": len(hook_ips - owner),
         "log_complete": int(bool(hours_seen) and min(hours_seen) == 0 and max(hours_seen) == 23),
     }
-    row.update({k: v for k, v in _redis_counts(day).items() if k in COLUMNS})
+    # Redis names the surface "claude-code"; the CSV column is calls_claude_code.
+    row.update({k.replace("-", "_"): v for k, v in _redis_counts(day).items()
+                if k.replace("-", "_") in COLUMNS})
     for c in COLUMNS:
         row.setdefault(c, "")
     return row
