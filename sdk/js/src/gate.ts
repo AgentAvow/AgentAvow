@@ -48,8 +48,10 @@ import {
 const canonicalize = canonicalizeImport as unknown as (input: unknown) => string | undefined;
 
 export const DEFAULT_BASE_URL = 'https://agentavow.com/api/v1';
-export const DEFAULT_MIN_SCORE = 81; // the legacy `evaluate` floor (Trusted)
+/** @deprecated The 0.2.x `evaluate` / `minScore` floor (Trusted). Use `allowFloor`. */
+export const DEFAULT_MIN_SCORE = 81;
 export const DEFAULT_ALLOW_FLOOR = 51; // the gate's default floor (Standard); 81 is strict
+/** @deprecated The 0.2.x `evaluate` severities. Use `DEFAULT_BLOCK_TRIGGERS`. */
 export const DEFAULT_BLOCK_ON: readonly string[] = ['critical', 'high'];
 export const DEFAULT_BLOCK_TRIGGERS: readonly BlockTrigger[] =
   ['critical', 'sandbox_canary', 'malicious_dependency', 'blocked_tier'];
@@ -668,11 +670,17 @@ export function applyDrift(
   return d;
 }
 
-// ── legacy evaluator (the Vercel AI adapter's `allow` policy) ────────────────
+// ── legacy evaluator (0.2.x; deprecated) ─────────────────────────────────────
+//
+// The 0.2.x Vercel AI adapter's allow/fail policy. Nothing in this package uses
+// it any more (`wrapTools` runs `createGate` since 0.3.0); it stays exported for
+// callers that import it and will be removed in a future major version.
 
+/** @deprecated 0.2.x. Use `DecisionOutcome`. */
 export type Outcome =
   | 'allow' | 'low_score' | 'finding' | 'drift' | 'unknown_tool' | 'api_error' | 'unmapped';
 
+/** @deprecated 0.2.x. Use `Decision` (`allowed`, `decision`). */
 export interface GateDecision {
   allow: boolean;
   outcome: Outcome;
@@ -685,6 +693,7 @@ export interface GateDecision {
   warnings: string[];
 }
 
+/** @deprecated 0.2.x. `wrapTools` throws `GateError` (`onBlock: 'throw'`). */
 export class ToolGateError extends Error {
   decision: GateDecision;
   constructor(decision: GateDecision) {
@@ -703,6 +712,7 @@ function blockingFindings(grade: Grade, blockOn: readonly string[]): string[] {
   return blockOn.filter((s) => (counts[s.toLowerCase()] ?? 0) > 0);
 }
 
+/** @deprecated 0.2.x. */
 export interface EvaluateOptions {
   minScore?: number;
   blockOn?: readonly string[];
@@ -711,7 +721,8 @@ export interface EvaluateOptions {
 }
 
 /** Pure policy (the Python `src/bridges/tool_gate.py` twin): grade + optional
- *  served definition -> allow/fail decision. No I/O. */
+ *  served definition -> allow/fail decision. No I/O.
+ *  @deprecated 0.2.x. Use `deriveDecision` + `applyDrift`, or `createGate().checkToolCall`. */
 export function evaluate(
   toolName: string, server: string, grade: Grade, opts: EvaluateOptions = {},
 ): GateDecision {

@@ -104,7 +104,7 @@ Ed25519 signature over the digest, then (7) checks
 
 ## The gate: `agentavow-trust/gate`
 
-> New in 0.3.0 (not yet on npm; ships with the next publish).
+> New in 0.3.0.
 
 ```ts
 import { createGate } from 'agentavow-trust/gate'
@@ -285,46 +285,116 @@ Notes:
 
 ## Vercel AI SDK tool gate — `agentavow-trust/vercel-ai`
 
-> Shipped in 0.2.2. From 0.3.0 it is a thin adapter over `agentavow-trust/gate`.
+> Shipped in 0.2.2. From **0.3.1** it is a thin adapter over `agentavow-trust/gate`,
+> the same core as the Flue adapter: one policy object, the three-phrase
+> decision, signature verification on by default, and drift blocked by default.
 
-`wrapTools(tools, options)` returns the same AI SDK `ToolSet` with each tool's
-`execute` wrapped. Before a tool runs, the gate fetches the serving MCP server's
-signed score from AgentAvow's free API and allows the call only when the score
-clears `minScore` (default 81, the `trusted` tier), no critical / high finding
-is on the result, and the tool definition the agent was served recomputes to
-the per-tool digest signed into the attestation (`tool_digests["tool:<name>"]`,
-profile `agentavow.mcp-tool-definition.v1`) — so a server that quietly changes
-a tool's definition after it was scanned is blocked.
+`wrapTools(tools, policy)` returns the same AI SDK `ToolSet` with each tool's
+`execute` wrapped. Before a tool runs, the gate reads the serving MCP server's
+signed result from AgentAvow's free API (cached), verifies the EdDSA
+attestation against AgentAvow's JWKS, and runs `checkToolCall`: the decision
+(`safe` / `review` / `do_not_connect`, see "How it decides" above) plus the
+drift check of the definition this agent was handed against the per-tool digest
+signed into the attestation. A server that quietly changes a tool's definition
+after it was scanned is blocked.
 
 ```ts
-import { experimental_createMCPClient as createMCPClient, generateText } from 'ai';
+import { createMCPClient } from '@ai-sdk/mcp';
+import { generateText } from 'ai';
 import { wrapTools } from 'agentavow-trust/vercel-ai';
 
-const mcp = await createMCPClient({ transport: { type: 'http', url: 'https://mcp.deepwiki.com/mcp' } });
-const tools = wrapTools(await mcp.tools(), {
-  server: 'https://mcp.deepwiki.com/mcp',  // one server for the whole set
-  minScore: 81,                            // default
-  onFail: 'block',                         // block | confirm | warn | throw
+const SERVER = 'https://mcp.deepwiki.com/mcp';
+const mcp = await createMCPClient({ transport: { type: 'http', url: SERVER } });
+const listing = await mcp.listTools();
+const tools = wrapTools(mcp.toolsFromDefinitions(listing), {
+  server: SERVER,          // one server for the whole set
+  servedTools: listing,    // the exact tools/list, for the drift check (optional; see below)
+  allowFloor: 51,          // trust score that is safe without review (81 is strict)
+  onReview: 'confirm',     // block | warn | confirm (the AI SDK's needsApproval)
+  onDrift: 'block',        // a definition that changed since it was graded
 });
 
 await generateText({ model, tools, prompt: '...' });
 ```
 
+What a call does:
+
+- **Safe to connect** (or `allowed` after the policy switches): the tool runs.
+- **Do not connect**: the tool is not run. Its result is `{ error, agentavow }`:
+  `error` is one line for the model that leads with the phrase
+  (`"Do not connect — 'send_email' was not run. AgentAvow: the definition of …"`,
+  with `· Certified` after the phrase when the tool carries the mark), and
+  `agentavow` is the `Decision` (`decision`, `allowed`, `outcome`, `score`,
+  `tier`, `certified`, `reportUrl`, `servedDigest`, `signedDigest`, `attestation`)
+  without the raw grade and attestation payload. Nothing throws unless you set
+  `onBlock: 'throw'` (a `GateError` whose `decision` is the same object).
+- **Review before you connect**: per `onReview`. `block` (default) as above;
+  `warn` runs and calls `onWarn`; `confirm` sets the tool's `needsApproval`, so
+  `generateText`, `streamText` and `ToolLoopAgent` pause for the user and an
+  approved call runs. `do_not_connect` is never put to the user. If you pass a
+  `confirm(decision)` hook, the hook decides instead of `needsApproval`.
+
+The served definition for the drift check comes from, in order: `servedTools`
+(the `tools/list` you built the tools from; exact), then the wrapped tool itself
+(its description and JSON input schema are what the model is shown;
+`@ai-sdk/mcp` normalises a definition when it builds a tool, and the gate tries
+the few definitions that normalise to what the tool carries), then the server's
+own `tools/list` (`fetchServed`, default on), used only when it shows the model
+the same thing the wrapped tool does. A server that serves the gate one
+definition and the agent another is drift. If a tool declares an `outputSchema`
+or other fields the AI SDK drops and the server cannot be fetched, pass
+`servedTools`, or the call is reported as drift (fail closed).
+
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `server` / `toolToServer` / `resolveServer` | — | Map a tool to its server coordinate (`https://…` MCP URL, `owner/repo`, `npm:name`, …). An unmapped tool is not gated (`unmapped: 'block'` to refuse it). |
-| `minScore` | `81` | Lowest trust score (0–100) that is allowed to run. |
-| `blockOn` | `['critical','high']` | Finding severities that block regardless of score. |
-| `onFail` | `'block'` | `block` returns `{ error, agentavow }` as the tool result; `confirm` uses the AI SDK's `needsApproval` pause; `warn` runs and calls `onWarn`; `throw` throws `ToolGateError`. |
-| `failClosed` | `true` | What to do when AgentAvow cannot be reached. |
-| `servedTools` / `fetchServed` | fetch | The `tools/list` each server served (for the drift check); fetched from the https server by default. |
-| `baseUrl` / `cacheTtlMs` / `timeoutMs` | `https://agentavow.com/api/v1`, 1h, 10s | API base and caching. |
+| every `createGate` policy field | see the gate table | `allowFloor` (51), `blockOn`, `onReview`, `onDrift`, `onUnscanned`, `onApiError`, `maxStaleMs`, `pins`, `verifySignature` (true), `cacheTtlMs`, `baseUrl`, `jwksUrl`, … |
+| `servedTools` | — | A `tools/list` (array or `listTools()` result) for every server, a map keyed by coordinate, or `(server) => listing`. |
+| `fetchServed` | `true` | Fetch the server's `tools/list` when the wrapped tool alone cannot decide the drift check. |
+| `serverHeaders` | — | Per-server headers for that fetch. |
+| `onBlock` | `'output'` | `output` returns `{ error, agentavow }`; `throw` throws `GateError`. |
+| hooks | — | `onWarn`, `confirm`, `fetch`, `jwks`. |
 
-Also exported: `TrustGate`, `TrustGateClient`, `evaluate` (the pure policy,
-no I/O), `toolDigest` / `toolKey` (the per-tool digest exactly as the
-attestation signs it), `parseCoordinate`, `ToolGateError`. `wrapTools` keeps its
-allow/fail semantics (floor 81, critical and high findings block, drift blocks);
-for the three-phrase policy use `createGate` from `agentavow-trust/gate`.
+`createVercelGate(policy)` gives the gate itself (`decide(toolName, tool?)`,
+`wrap(tools)`, plus everything on `createGate`'s gate). Also exported:
+`blockedOutput`, `gateMessage`, `headline`, `toolDigest` / `toolKey`,
+`parseCoordinate`, `GateError`.
+
+### Upgrading from 0.2.x
+
+0.2.x options still work as deprecated aliases (a 0.3.1 name wins when both are given).
+0.3.0 shipped `wrapTools` still on the 0.2.x evaluator; upgrade to 0.3.1 for the behaviour below:
+
+| 0.2.x | 0.3.1 |
+|-------|-------|
+| `minScore: n` | `allowFloor: n` |
+| `onFail: 'block'` | `onReview: 'block'` |
+| `onFail: 'warn'` | `onReview: 'warn'` |
+| `onFail: 'confirm'` | `onReview: 'confirm'` (sets `needsApproval`) |
+| `onFail: 'throw'` | `onReview: 'block'` + `onBlock: 'throw'` |
+| `failClosed: true` / `false` | `onApiError: 'block'` / `'allow'` |
+| `blockOn: ['critical', 'high', 'medium']` | same; `'medium'` / `'low'` still block, the rest are gate triggers |
+
+What changes for a 0.2.x caller:
+
+- **The default floor is 51, not 81.** A tool graded 51 to 80 now runs. Pass
+  `allowFloor: 81` (or keep `minScore: 81`) for the old floor.
+- **A high finding is review, not a block,** unless `blockOn` includes `'high'`
+  (the 0.2.x default `blockOn` did; passing it explicitly keeps that).
+- **`onFail` / `onReview` only soften review.** A do-not-connect result (a
+  critical finding, a known-malicious dependency, the blocked tier, drift under
+  `onDrift: 'block'`) is blocked whatever `onReview` says. Use `onDrift` to soften drift.
+- **The signature is verified by default.** A response whose attestation does
+  not verify is an API error (`onApiError`, default block).
+  `verifySignature: false` restores the 0.2.x behaviour.
+- **The blocked output's `agentavow` is the full `Decision`**: the 0.2.x keys
+  (`outcome`, `server`, `score`, `tier`, `reportUrl`, `servedDigest`,
+  `signedDigest`) are still there, plus `decision`, `allowed`, `certified`.
+  Messages lead with the phrase instead of "AgentAvow blocked …".
+- **`onFail: 'throw'` throws `GateError`** (`err.decision` is a `Decision`), not `ToolGateError`.
+- **`TrustGate`** is deprecated (use `createVercelGate`); its `check` / `decide`
+  return a `Decision` (`allowed`) instead of a `GateDecision` (`allow`).
+  `evaluate`, `GateDecision` and `ToolGateError` are still exported, deprecated.
 
 ## API
 
