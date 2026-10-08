@@ -171,12 +171,19 @@ if $FRONTEND; then
 fi
 
 # --- Step 5: Restart services ---
+# Order matters when the backend is recreated: nginx resolves `backend` once at start
+# and keeps the OLD container's IP, so it serves 502s until it is restarted. Restarting
+# it before the new backend answers is not enough either (2026-10-08: a backend-only
+# deploy served 502 until nginx was restarted a second time). So in EVERY mode that
+# recreates the backend: up -d -> wait for the backend container itself to answer
+# /health -> restart nginx -> the through-nginx health check (step 6).
 step "Restarting services"
 if $DRY_RUN; then
   if $BACKEND; then
     echo "    Would run: ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} up -d"
-  fi
-  if $FRONTEND; then
+    echo "    Would poll http://localhost:8000/health INSIDE the backend container (docker-compose exec -T backend) up to 120 seconds"
+    echo "    Would run: ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx   (after the backend answers; re-resolves its new IP)"
+  elif $FRONTEND; then
     echo "    Would run: ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx"
   fi
 else
@@ -185,24 +192,41 @@ else
       echo "    $line"
     done
     ok "Services started"
-  fi
-  if $FRONTEND && ! $BACKEND; then
-    # Frontend-only: just restart nginx to pick up new web/dist
+
+    # The backend container itself, not through nginx (nginx may still point at the
+    # old container). Startup with migrations takes ~60 s.
+    BACKEND_UP=false
+    for i in $(seq 1 60); do
+      if remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} exec -T backend python3 -c 'import httpx, sys; r = httpx.get(\"http://localhost:8000/health\", timeout=3); sys.exit(0 if r.json().get(\"status\") == \"ok\" else 1)'" > /dev/null 2>&1; then
+        BACKEND_UP=true
+        break
+      fi
+      echo "    Backend container attempt $i/60 — waiting 2s..."
+      sleep 2
+    done
+    if $BACKEND_UP; then
+      ok "Backend container answers /health"
+    else
+      fail "Backend container did not answer /health within 120 seconds. Check logs: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs backend --tail 50'"
+    fi
+
+    # Now nginx: re-resolve the new backend container (and pick up fresh static files
+    # on a full deploy).
+    remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx" 2>&1 | while IFS= read -r line; do
+      echo "    $line"
+    done
+    ok "Nginx restarted after the backend came up"
+  elif $FRONTEND; then
+    # Frontend-only: the backend was not recreated; restart nginx for the new web/dist
     remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx" 2>&1 | while IFS= read -r line; do
       echo "    $line"
     done
     ok "Nginx restarted"
-  elif $FRONTEND && $BACKEND; then
-    # Full deploy: also restart nginx to ensure it picks up the new static files
-    remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx" 2>&1 | while IFS= read -r line; do
-      echo "    $line"
-    done
-    ok "Nginx restarted (fresh static files)"
   fi
 fi
 
 # --- Step 6: Wait for backend to be healthy ---
-step "Waiting for backend to be healthy"
+step "Waiting for the site to be healthy (through nginx)"
 if $DRY_RUN; then
   echo "    Would poll https://localhost/health (Host: agentavow.com, through nginx) up to 120 seconds"
 else
