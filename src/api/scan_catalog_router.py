@@ -13,14 +13,18 @@ Living-record proof: AgentGraph publishes the trail, not a frozen PDF.
 """
 from __future__ import annotations
 
+import asyncio
+import copy
 import json
 import logging
 import re
+import threading
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +43,45 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DATA_DIR = _PROJECT_ROOT / "data" / "launch-scans"
 
 _CATALOG_CACHE: dict[str, Any] | None = None
+_CATALOG_BUILD_LOCK = threading.Lock()
+
+# Per-process caches for the two hot public reads (the list and /flagged-stat). Each
+# uvicorn worker has its own copy; a write in one worker invalidates only that
+# worker's cache, the others pick the change up when the TTL lapses.
+COMMUNITY_ROWS_TTL_SECONDS = 60
+FLAGGED_STAT_TTL_SECONDS = 120
+CATALOG_CACHE_CONTROL = "public, max-age=60"
+
+# (rows, expires_at) — rows are categorized once at fill time and never mutated after.
+_COMMUNITY_CACHE: tuple[list[CatalogRow], float] | None = None
+# (catalog, community_rows, response, expires_at). The inputs are kept so a hit is only
+# served for the same catalog object and equal community rows.
+_FLAGGED_STAT_CACHE: tuple[dict[str, Any], list[CatalogRow], dict[str, Any], float] | None = None
+_COMMUNITY_LOCKS: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+
+
+def _now() -> float:
+    return time.monotonic()
+
+
+def _community_lock() -> asyncio.Lock:
+    """One lock per running event loop (an asyncio.Lock is bound to the loop it first
+    waits on; tests run each case in a fresh loop)."""
+    loop = asyncio.get_running_loop()
+    entry = _COMMUNITY_LOCKS.get(id(loop))
+    if entry is None or entry[0] is not loop:
+        _COMMUNITY_LOCKS.clear()
+        entry = (loop, asyncio.Lock())
+        _COMMUNITY_LOCKS[id(loop)] = entry
+    return entry[1]
+
+
+def invalidate_community_rows_cache() -> None:
+    """Drop the cached community rows and the /flagged-stat response (this process).
+    Call after writing a CommunityScan row."""
+    global _COMMUNITY_CACHE, _FLAGGED_STAT_CACHE
+    _COMMUNITY_CACHE = None
+    _FLAGGED_STAT_CACHE = None
 
 
 class CatalogSandbox(BaseModel):
@@ -492,14 +535,45 @@ def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
 
 def _get_catalog() -> dict[str, Any]:
     global _CATALOG_CACHE
-    if _CATALOG_CACHE is None:
-        _CATALOG_CACHE = _build_catalog()
-    return _CATALOG_CACHE
+    cached = _CATALOG_CACHE
+    if cached is not None:
+        return cached
+    # The startup warm-up builds this in a thread; a request arriving mid-build waits
+    # for that build instead of starting a second one.
+    with _CATALOG_BUILD_LOCK:
+        if _CATALOG_CACHE is None:
+            _CATALOG_CACHE = _build_catalog()
+        return _CATALOG_CACHE
 
 
 async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
     """On-demand scans users have run, persisted so the catalog grows over time.
-    Best-effort — a DB hiccup must never break the static catalog."""
+    Best-effort — a DB hiccup must never break the static catalog.
+
+    Cached per process for COMMUNITY_ROWS_TTL_SECONDS; concurrent cold callers share one
+    DB read. Returns a new list each call (callers may append to it); the rows are
+    categorized at fill time, so callers never need to mutate them. An error result is
+    not cached."""
+    global _COMMUNITY_CACHE
+    cached = _COMMUNITY_CACHE
+    if cached is not None and cached[1] > _now():
+        return list(cached[0])
+    async with _community_lock():
+        cached = _COMMUNITY_CACHE
+        if cached is not None and cached[1] > _now():
+            return list(cached[0])
+        rows = await _fetch_community_rows(db)
+        if rows is None:
+            return []
+        for r in rows:
+            if r.category is None:
+                r.category = _categorize(r)
+        _COMMUNITY_CACHE = (rows, _now() + COMMUNITY_ROWS_TTL_SECONDS)
+        return list(rows)
+
+
+async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
+    """One DB read of the community rows; None on a DB error."""
     from src.models import CommunityScan
 
     try:
@@ -542,7 +616,7 @@ async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
         return out
     except Exception:
         logger.warning("community_scans fetch failed", exc_info=True)
-        return []
+        return None
 
 
 @router.get("", response_model=CatalogResponse, dependencies=[Depends(rate_limit_reads)])
@@ -561,9 +635,12 @@ async def scan_catalog(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
 ) -> CatalogResponse:
     """Return a paginated, filterable catalog of every scan — the static launch
     corpus plus community (on-demand) scans that grow the dataset over time."""
+    if response is not None:
+        response.headers["Cache-Control"] = CATALOG_CACHE_CONTROL
     catalog = _get_catalog()
     rows: list[CatalogRow] = catalog["rows"]
     summary: CatalogSummary = catalog["summary"]
@@ -701,14 +778,18 @@ async def refresh_catalog(
     """Force-rebuild the in-memory catalog from disk. Admin only: the rebuild reads
     every scan file on disk, so an anonymous caller must not be able to trigger it."""
     require_admin(current_entity)
-    global _CATALOG_CACHE
+    global _CATALOG_CACHE, _FLAGGED_STAT_CACHE
     _CATALOG_CACHE = None
+    _FLAGGED_STAT_CACHE = None
     catalog = _get_catalog()
     return {"status": "rebuilt", "total_scans": catalog["summary"].total_scans}
 
 
 @router.get("/flagged-stat", dependencies=[Depends(rate_limit_reads)])
-async def flagged_stat(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def flagged_stat(
+    db: AsyncSession = Depends(get_db),
+    response: Response = None,  # type: ignore[assignment]  # injected by FastAPI
+) -> dict[str, Any]:
     """Single source of truth for the headline stat: the share of SCANNED tools that carry
     a high or critical finding. The homepage, the Index and the State of Agent Security
     report all read this, computed server-side over the launch corpus + community rows.
@@ -739,8 +820,31 @@ async def flagged_stat(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     list's `severity=clean` additionally requires a score >= 80, so it is a subset of
     `clean` here.
     """
+    global _FLAGGED_STAT_CACHE
+    if response is not None:
+        response.headers["Cache-Control"] = CATALOG_CACHE_CONTROL
     catalog = _get_catalog()
-    rows: list[CatalogRow] = list(catalog["rows"]) + await _community_rows(db)
+    community = await _community_rows(db)
+    # Served from cache only for the same catalog object and equal community rows
+    # (the stat is a pure function of those two), within FLAGGED_STAT_TTL_SECONDS.
+    cached = _FLAGGED_STAT_CACHE
+    if (
+        cached is not None
+        and cached[3] > _now()
+        and cached[0] is catalog
+        and len(cached[1]) == len(community)
+        and all(a is b or a == b for a, b in zip(cached[1], community))
+    ):
+        return copy.deepcopy(cached[2])
+    out = _compute_flagged_stat(catalog, community)
+    _FLAGGED_STAT_CACHE = (catalog, community, out, _now() + FLAGGED_STAT_TTL_SECONDS)
+    return copy.deepcopy(out)
+
+
+def _compute_flagged_stat(
+    catalog: dict[str, Any], community: list[CatalogRow],
+) -> dict[str, Any]:
+    rows: list[CatalogRow] = list(catalog["rows"]) + community
     totals = _flagged_counts(rows)
     grouped: dict[str, list[CatalogRow]] = {}
     for r in rows:
