@@ -170,24 +170,15 @@ async def invalidate_behavioral_cache(surface: str, name: str) -> int:
 
 
 # ── enqueue ─────────────────────────────────────────────────────────────────
-async def _acquire_low_priority_slot() -> bool:
-    """Take a sandbox slot only when at least one slot stays free for real scans:
-    active-after-take must be <= max_concurrent - 1 (with max 2: only when 0 are
-    active). Fails CLOSED — a low-priority run never guesses at capacity."""
-    from src.api.public_scan_router import _BEHAVIORAL_SLOT_TTL, _BEHAVIORAL_SLOTS_KEY
-    from src.config import settings
-    limit = int(getattr(settings, "scanner_behavioral_max_concurrent", 2) or 2)
+async def _acquire_low_priority_slot() -> str | None:
+    """Take a sandbox slot lease only when at least one slot stays free for real scans:
+    live-after-take must be <= max_concurrent - 1 (with max 2: only when 0 are live).
+    Fails CLOSED — a low-priority run never guesses at capacity."""
+    from src.api.public_scan_router import _take_slot_lease
     try:
-        from src.redis_client import get_redis
-        r = get_redis()
-        n = int(await r.incr(_BEHAVIORAL_SLOTS_KEY))
-        await r.expire(_BEHAVIORAL_SLOTS_KEY, _BEHAVIORAL_SLOT_TTL)
-        if n > limit - 1:
-            await r.decr(_BEHAVIORAL_SLOTS_KEY)
-            return False
-        return True
+        return await _take_slot_lease(free_after=1)
     except Exception:
-        return False
+        return None
 
 
 async def _bump(name: str) -> None:
@@ -232,17 +223,17 @@ async def enqueue_behavioral(data: dict, *, reason: str, priority: str = "normal
     if not await psr._acquire_behavioral_lock(surface, name, declared, plan):
         return await _done("locked")
     if priority == "low":
-        got_slot = await _acquire_low_priority_slot()
+        lease = await _acquire_low_priority_slot()
     else:
-        got_slot = await psr._acquire_behavioral_slot()
-    if not got_slot:
+        lease = await psr._acquire_behavioral_slot()
+    if not lease:
         await psr._release_behavioral_lock(surface, name, declared, plan)
         if priority == "normal":
             await psr._bump_behavioral("slot_rejected")
         return await _done("deferred")
     run_kwargs = {"plan": plan, "env_names": psr._behavioral_env_names(data),
                   "readme_text": psr._behavioral_readme(data)}
-    asyncio.create_task(psr._run_in_slot(surface, name, declared, run_kwargs))
+    asyncio.create_task(psr._run_in_slot(surface, name, declared, run_kwargs, lease))
     logger.info("behavioral run enqueued (%s, %s priority): %s:%s plan=%s",
                 reason, priority, surface, name, plan)
     return await _done("started")

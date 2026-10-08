@@ -643,7 +643,8 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     run_kwargs = {"plan": plan, "env_names": _behavioral_env_names(data),
                   "readme_text": _behavioral_readme(data)}
     if force:
-        if not await _acquire_behavioral_slot():
+        lease = await _acquire_behavioral_slot()
+        if not lease:
             await _bump_behavioral("slot_rejected")
             return {"ran": False, "pending": True,
                     "reason": "sandbox busy — every slot is in use; try again in a minute"}
@@ -652,7 +653,7 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
                 surface, str(name), declared, **run_kwargs) or {
                 "ran": False, "reason": "behavioral tier error"}
         finally:
-            await _release_behavioral_slot()
+            await _release_behavioral_slot(lease)
     cached = await _get_cached_behavioral(surface, str(name), declared, plan)
     if cached:
         await _bump_behavioral("cache_hit")
@@ -663,51 +664,85 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     # (slots): the sandbox is one small box. A request that finds no slot stays pending
     # and the next request for the coordinate tries again.
     if await _acquire_behavioral_lock(surface, str(name), declared, plan):
-        if await _acquire_behavioral_slot():
-            asyncio.create_task(_run_in_slot(surface, str(name), declared, run_kwargs))
+        lease = await _acquire_behavioral_slot()
+        if lease:
+            asyncio.create_task(_run_in_slot(surface, str(name), declared, run_kwargs, lease))
         else:
             await _bump_behavioral("slot_rejected")
             await _release_behavioral_lock(surface, str(name), declared, plan)
     return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
 
 
-async def _run_in_slot(surface: str, name: str, declared: set[str], run_kwargs: dict) -> None:
+async def _run_in_slot(surface: str, name: str, declared: set[str], run_kwargs: dict,
+                       lease: str | None = None) -> None:
     try:
         await _run_and_cache_behavioral(surface, name, declared, **run_kwargs)
     finally:
-        await _release_behavioral_slot()
+        await _release_behavioral_slot(lease)
 
 
-_BEHAVIORAL_SLOTS_KEY = "behavioral:slots:active"
-_BEHAVIORAL_SLOT_TTL = 600  # a crashed worker can hold a slot at most this long
+# Global sandbox concurrency cap: a Redis sorted set of LEASES (member = a random lease id,
+# score = the unix time it expires). Each run holds its own lease and removes it when done.
+# A run that never finishes (the container was killed by a deploy mid-run) cannot wedge the
+# cap: its lease simply expires, and expired leases are swept on every acquire. This
+# replaces a shared INCR/DECR counter whose TTL was refreshed by every attempt — including
+# rejected ones — so a count leaked by a restart was kept alive by the very requests it
+# turned away and blocked the sandbox until traffic stopped for 10 minutes (found
+# 2026-10-08 after a deploy: "slots 2", zero runs, every scan stuck on pending).
+_BEHAVIORAL_SLOTS_KEY = "behavioral:slots:leases"
+_BEHAVIORAL_SLOT_TTL = 600  # > the longest run (lock TTL 240 s); a dead run frees its slot by then
 
 
-async def _acquire_behavioral_slot() -> bool:
-    """Global concurrency cap across all workers (Redis counter). Fails OPEN."""
+async def _take_slot_lease(free_after: int = 0) -> str | None:
+    """Take a lease when, counting it, at most ``max_concurrent - free_after`` leases are
+    live; return its id, else None. Add-then-count, so two racing takers can both back
+    off (conservative) but never both exceed the cap. Raises on Redis errors — callers
+    choose fail-open or fail-closed."""
+    import secrets as _secrets
+
     from src.config import settings
+    from src.redis_client import get_redis
     limit = int(getattr(settings, "scanner_behavioral_max_concurrent", 2) or 2)
+    r = get_redis()
+    now = time.time()
+    await r.zremrangebyscore(_BEHAVIORAL_SLOTS_KEY, "-inf", now)
+    lease = _secrets.token_hex(8)
+    await r.zadd(_BEHAVIORAL_SLOTS_KEY, {lease: now + _BEHAVIORAL_SLOT_TTL})
+    await r.expire(_BEHAVIORAL_SLOTS_KEY, _BEHAVIORAL_SLOT_TTL * 2)
+    if int(await r.zcard(_BEHAVIORAL_SLOTS_KEY)) > limit - free_after:
+        await r.zrem(_BEHAVIORAL_SLOTS_KEY, lease)
+        return None
+    return lease
+
+
+async def _acquire_behavioral_slot() -> str | None:
+    """A lease id when a sandbox slot is free (truthy), else None. Fails OPEN: if Redis
+    is unreachable the run proceeds with a placeholder lease."""
     try:
-        from src.redis_client import get_redis
-        r = get_redis()
-        n = int(await r.incr(_BEHAVIORAL_SLOTS_KEY))
-        await r.expire(_BEHAVIORAL_SLOTS_KEY, _BEHAVIORAL_SLOT_TTL)
-        if n > limit:
-            await r.decr(_BEHAVIORAL_SLOTS_KEY)
-            return False
-        return True
+        return await _take_slot_lease()
     except Exception:
-        return True
+        return "unleased"
 
 
-async def _release_behavioral_slot() -> None:
+async def _release_behavioral_slot(lease: str | None = None) -> None:
+    if not lease or lease == "unleased":
+        return
     try:
         from src.redis_client import get_redis
-        r = get_redis()
-        n = int(await r.decr(_BEHAVIORAL_SLOTS_KEY))
-        if n < 0:
-            await r.set(_BEHAVIORAL_SLOTS_KEY, 0, ex=_BEHAVIORAL_SLOT_TTL)
+        await get_redis().zrem(_BEHAVIORAL_SLOTS_KEY, lease)
     except Exception:
         pass
+
+
+async def behavioral_slots_in_use() -> int:
+    """Live (unexpired) leases — for the admin dashboard and ops checks."""
+    try:
+        from src.redis_client import get_redis
+        r = get_redis()
+        await r.zremrangebyscore(_BEHAVIORAL_SLOTS_KEY, "-inf", time.time())
+        return int(await r.zcard(_BEHAVIORAL_SLOTS_KEY))
+    except Exception:
+        return 0
 
 
 async def _release_behavioral_lock(surface: str, name: str, expected_hosts: set[str] | None,

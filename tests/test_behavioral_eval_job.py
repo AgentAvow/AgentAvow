@@ -132,11 +132,12 @@ def slots(monkeypatch):
         log.append("acquire")
         if state["refuse"] > 0:
             state["refuse"] -= 1
-            return False
-        return True
+            return None
+        return "lease-1"
 
-    async def release():
+    async def release(lease=None):
         log.append("release")
+        state["released_lease"] = lease
 
     from src.config import settings
 

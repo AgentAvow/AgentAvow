@@ -221,14 +221,14 @@ async def hold_slot(*, wait_s: float | None = None, poll_s: float = 10.0):
     budget = float(wait_s if wait_s is not None
                    else getattr(settings, "behavioral_eval_slot_wait_sec", 600))
     deadline = time.monotonic() + budget
-    while not await _acquire_behavioral_slot():
+    while not (lease := await _acquire_behavioral_slot()):
         if time.monotonic() >= deadline:
             raise NoSandboxSlotError(f"no sandbox slot within {budget:.0f}s")
         await asyncio.sleep(poll_s)
     try:
         yield
     finally:
-        await _release_behavioral_slot()
+        await _release_behavioral_slot(lease)
 
 
 # ---------------------------------------------------------------------------

@@ -218,6 +218,22 @@ def test_global_slot_cap_limits_concurrent_sandbox_runs(fake_redis, captured_run
 
         async def delete(self, key):
             self.store.pop(key, None)
+
+        # sandbox slot leases (sorted set)
+        async def zadd(self, key, mapping):
+            self.store.setdefault(key, {}).update(mapping)
+
+        async def zrem(self, key, *members):
+            for m in members:
+                self.store.get(key, {}).pop(m, None)
+
+        async def zcard(self, key):
+            return len(self.store.get(key, {}))
+
+        async def zremrangebyscore(self, key, lo, hi):
+            z = self.store.get(key, {})
+            for m in [m for m, s in z.items() if s <= float(hi)]:
+                z.pop(m)
     r = _Redis()
     monkeypatch.setattr("src.redis_client.get_redis", lambda: r)
     started = []
@@ -235,7 +251,7 @@ def test_global_slot_cap_limits_concurrent_sandbox_runs(fake_redis, captured_run
     a, b = asyncio.run(go())
     assert a["pending"] and b["pending"]
     assert len(started) == 1, "the second coordinate waits for a slot"
-    assert r.store["behavioral:slots:active"] == 1
+    assert len(r.store[router._BEHAVIORAL_SLOTS_KEY]) == 1  # one live lease
     assert not any(k.endswith("two:lock") or "two" in k and k.endswith(":lock") for k in r.store), \
         "a coordinate that got no slot releases its lock so the next request can retry"
     # a forced run with no slot is reported as busy, not run
