@@ -17,7 +17,18 @@ SAFE_BAR = 81  # A/A+ floor for the binary "safe" call (matches the site verdict
 
 
 def is_safe(data: dict) -> bool:
-    """True iff trust_score >= SAFE_BAR AND there is no critical/high finding.
+    """True iff the three-way decision is Safe to connect (``decide(data)``).
+
+    Since 2026-10-08 the binary ``verdict`` follows ``decide()`` on every surface (Kenne:
+    "make everything the same across the board"), so a result never reads ``safe`` in
+    one field and Review in another (e.g. a deprecated package scoring 84, or a clean
+    thin-coverage 74). The old score-bar rule survives as ``is_safe_legacy``.
+    """
+    return decide(data).decision == DECISION_SAFE
+
+
+def is_safe_legacy(data: dict) -> bool:
+    """The pre-2026-10-08 binary rule: trust_score >= SAFE_BAR AND no critical/high finding.
 
     Prefers the authoritative ``certified.checks.no_critical_or_high`` flag; falls back
     to scanning the (severity-sorted) findings items when that flag is absent.
