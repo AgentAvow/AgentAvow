@@ -73,7 +73,7 @@ const signer = await (async () => {
 })();
 
 /** A scan response whose `jws` signs the given scan fields (defaults: the unsigned ones). */
-async function signedScan(unsigned, { signed = {}, subject, expiresAt, kid } = {}) {
+async function signedScan(unsigned, { signed = {}, subject, expiresAt, kid, issuer } = {}) {
   const now = Date.now();
   const scan = {
     trustScore: unsigned.trust_score, trustTier: unsigned.trust_tier, result: 'clean',
@@ -84,7 +84,7 @@ async function signedScan(unsigned, { signed = {}, subject, expiresAt, kid } = {
   const payload = {
     '@context': 'https://schema.agentgraph.co/attestation/security/v1',
     type: 'SecurityPostureAttestation',
-    issuer: { id: 'did:web:agentgraph.co', name: 'AgentAvow', url: 'https://agentgraph.co' },
+    issuer: { id: issuer ?? 'did:web:agentgraph.co', name: 'AgentAvow', url: 'https://agentgraph.co' },
     subject: { id: subject ?? 'mcp:' + SERVER, repo: subject ?? 'mcp:' + SERVER },
     scannedAt: unsigned.scanned_at, issuedAt: new Date(now).toISOString(),
     expiresAt: expiresAt ?? new Date(now + 86_400_000).toISOString(),
@@ -334,6 +334,7 @@ test('an attestation that does not verify is an API error (fail closed by defaul
     ['wrong subject', await signedScan(scanJson({ score: 92 }), { subject: 'mcp:https://evil.example/mcp' }), /subject/],
     ['expired', await signedScan(scanJson({ score: 92 }), { expiresAt: '2020-01-01T00:00:00Z' }), /expired/],
     ['kid mismatch', { ...good, key_id: 'trust-v2-2026' }, /does not match/],
+    ['other issuer', await signedScan(scanJson({ score: 92 }), { issuer: 'did:web:demo.invalid' }), /issuer did:web:demo.invalid is not did:web:agentgraph.co/],
   ]) {
     const net = fakeNet({ grade });
     const closed = mod.createGate({ baseUrl: API, fetch: net.fetch, jwksUrl: JWKS_URL, ...quiet });
@@ -490,4 +491,19 @@ test('unmapped tools follow the unmapped switch', { skip }, () => {
   const d = mod.createGate({ unmapped: 'block', ...quiet }).unmapped('my_fn');
   assert.equal(d.allowed, false);
   assert.equal(d.outcome, 'unmapped');
+});
+
+test('the issuer option accepts a grader you run yourself, and only that one', { skip }, async () => {
+  const demo = await signedScan(scanJson({ score: 92 }), { issuer: 'did:web:demo.invalid' });
+  const net = fakeNet({ grade: demo });
+  const own = mod.createGate({ baseUrl: API, fetch: net.fetch, jwksUrl: JWKS_URL, issuer: 'did:web:demo.invalid', ...quiet });
+  const d = await own.check(SERVER);
+  assert.equal(d.decision, 'safe');
+  assert.equal(d.attestation.verified, true);
+  // The same option now refuses AgentAvow's own issuer.
+  const real = await signedScan(scanJson({ score: 92 }));
+  const strict = mod.createGate({ baseUrl: API, fetch: fakeNet({ grade: real }).fetch, jwksUrl: JWKS_URL, issuer: 'did:web:demo.invalid', ...quiet });
+  const r = await strict.check(SERVER);
+  assert.equal(r.outcome, 'unverified');
+  assert.match(r.reason, /issuer did:web:agentgraph.co is not did:web:demo.invalid/);
 });

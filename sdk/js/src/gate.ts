@@ -319,10 +319,13 @@ export function gradeFromResponse(server: string, data: Dict): Grade {
  * the signed ones (`scan.trustScore`, `scan.trustTier`, `scan.findings`,
  * `scan.toolDigests`, `scan.toolManifestDigest`, `scan.supplyChain`, `scannedAt`).
  * The subject must be the coordinate that was asked for and the attestation must
- * not have expired. On any failure the grade is marked `invalid` with the reason;
+ * not have expired, and an issuer it names must be `expectIssuer` (AgentAvow's DID
+ * unless the policy's `issuer` says otherwise). On any failure the grade is marked `invalid` with the reason;
  * what that means for the decision is `deriveDecision`'s call.
  */
-export async function verifyGrade(grade: Grade, jwks: Jwks, now: number = Date.now()): Promise<Grade> {
+export async function verifyGrade(
+  grade: Grade, jwks: Jwks, now: number = Date.now(), expectIssuer: string = ISSUER_DID,
+): Promise<Grade> {
   if (!grade.jws) return { ...grade, signature: 'missing', signatureReason: 'response carries no jws' };
   const r = await verifyJws(grade.jws, jwks, { expectKid: grade.kid });
   if (!r.valid || !r.payload) return { ...grade, signature: 'invalid', signatureReason: r.reason, kid: r.kid };
@@ -343,8 +346,8 @@ export async function verifyGrade(grade: Grade, jwks: Jwks, now: number = Date.n
     return { ...grade, signature: 'invalid', kid: r.kid, signatureReason: `attestation expired at ${p.expiresAt}` };
   }
   const issuer = String(p.issuer?.id ?? '');
-  if (issuer && issuer !== ISSUER_DID) {
-    return { ...grade, signature: 'invalid', kid: r.kid, signatureReason: `attestation issuer ${issuer} is not ${ISSUER_DID}` };
+  if (issuer && issuer !== expectIssuer) {
+    return { ...grade, signature: 'invalid', kid: r.kid, signatureReason: `attestation issuer ${issuer} is not ${expectIssuer}` };
   }
   const scan: Dict = p.scan && typeof p.scan === 'object' ? p.scan : {};
   const { items, critical, high } = findingsOf(scan.findings);
@@ -400,6 +403,10 @@ export interface GatePolicy {
   unmapped?: 'allow' | 'block';
   baseUrl?: string;
   jwksUrl?: string;
+  /** The issuer DID the attestation must name. Default AgentAvow's (`did:web:agentgraph.co`).
+   *  Change it only together with `jwksUrl`/`jwks`, for a grader you run yourself
+   *  (the offline demo in `demos/rugpull` uses `did:web:demo.invalid`). */
+  issuer?: string;
   timeoutMs?: number;
   headers?: Record<string, string>;
 }
@@ -441,6 +448,7 @@ export function resolvePolicy(p: GatePolicy = {}): ResolvedPolicy {
     unmapped: pick(p.unmapped, ['allow', 'block'] as const, 'unmapped', 'allow'),
     baseUrl: (p.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, ''),
     jwksUrl: p.jwksUrl ?? DEFAULT_JWKS_URL,
+    issuer: p.issuer ?? ISSUER_DID,
     timeoutMs: p.timeoutMs ?? 10_000,
     headers: p.headers ?? {},
   };
@@ -960,6 +968,8 @@ export interface ClientOptions {
   verifySignature?: boolean;
   jwksUrl?: string;
   jwks?: Jwks;
+  /** The issuer DID a verified attestation must name (default AgentAvow's). */
+  issuer?: string;
 }
 
 /** Fetches grades (and, for drift, a server's own tools/list) with a TTL cache:
@@ -970,6 +980,7 @@ export class GradeClient {
   timeoutMs: number;
   cacheTtlMs: number;
   verifySignature: boolean;
+  issuer: string;
   jwks: JwksCache;
   private _fetch: FetchLike;
   private _headers: Record<string, string>;
@@ -982,6 +993,7 @@ export class GradeClient {
     this.timeoutMs = opts.timeoutMs ?? 10_000;
     this.cacheTtlMs = opts.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
     this.verifySignature = opts.verifySignature ?? false;
+    this.issuer = opts.issuer ?? ISSUER_DID;
     this._fetch = opts.fetch ?? ((input, init) => fetch(input, init));
     this._headers = {
       'User-Agent': `agentavow-tool-gate/${VERSION} (js)`, Accept: 'application/json',
@@ -1054,7 +1066,7 @@ export class GradeClient {
           try {
             const { header } = decodeJws(grade.jws);
             const kid = typeof header?.kid === 'string' ? header.kid : null;
-            grade = await verifyGrade(grade, await this.jwks.get(kid));
+            grade = await verifyGrade(grade, await this.jwks.get(kid), Date.now(), this.issuer);
           } catch (e) {
             grade = { ...grade, signature: 'invalid', signatureReason: `JWKS: ${(e as Error).message}` };
           }
@@ -1170,7 +1182,7 @@ export function createGate(options: GatePolicy & GateHooks = {}): Gate {
   const client = new GradeClient({
     baseUrl: policy.baseUrl, timeoutMs: policy.timeoutMs, cacheTtlMs: policy.cacheTtlMs,
     fetch: options.fetch, headers: policy.headers, verifySignature: policy.verifySignature,
-    jwksUrl: policy.jwksUrl, jwks: options.jwks,
+    jwksUrl: policy.jwksUrl, jwks: options.jwks, issuer: policy.issuer,
   });
   const onWarn = options.onWarn ?? ((m: string) => console.warn(m));
   const runtimePins = new Map<string, Record<string, string>>();
