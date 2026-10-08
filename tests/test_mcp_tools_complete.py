@@ -33,6 +33,9 @@ def _reset_request_context():
 
 
 def _text_of(out) -> str:
+    # A scan tool that could not scan returns a CallToolResult (isError) — see _call_tool.
+    if hasattr(out, "content"):
+        return out.content[0].text
     items = out[0] if isinstance(out, tuple) else out
     return items[0].text
 

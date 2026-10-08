@@ -1,0 +1,101 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "app-6aac4159c8a88191b820a458ef455b03",
+  "version": "1.1.0",
+  "description": "Scan an MCP server, package, or GitHub repo for a signed 0-100 trust score before your agent connects to it.",
+  "author": {
+    "name": "AgentAvow",
+    "url": "https://agentavow.com"
+  },
+  "homepage": "https://agentavow.com",
+  "repository": "https://github.com/AgentAvow/AgentAvow",
+  "keywords": [
+    "security",
+    "trust",
+    "mcp",
+    "supply-chain",
+    "code-scanning",
+    "attestation"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "AgentAvow",
+        "shortDescription": "Is this tool safe to connect?",
+        "longDescription": "AgentAvow tells you whether a tool is safe before your agent connects to it. Give it an MCP server, a package (npm, PyPI, crates, Docker, or Hugging Face), or a GitHub repo, and it answers in plain words: Safe to connect, Review before you connect, or Do not connect, with the reason. Underneath are two scores: a 0–100 trust score, backed by a signed attestation anyone can recompute offline, and an adoption score built from real usage (downloads, stars, installs). It checks for known-malicious versions, published advisories, supply-chain and dependency risk, and code-safety issues, can run the tool in a sandbox to see what it actually does, and shows an interactive trust card. Eight read-only tools cover scanning a repo, package, or live MCP server; verifying a score; checking interaction safety before you connect; looking up an identity; and getting an embeddable badge. No account, no sign-in, and nothing is modified — every call is anonymous and read-only.",
+        "developerName": "Kenne Ives",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Interactive",
+          "Read"
+        ],
+        "websiteURL": "https://agentavow.com",
+        "supportURL": "https://github.com/AgentAvow/AgentAvow/issues",
+        "privacyPolicyURL": "https://agentavow.com/legal/privacy",
+        "termsOfServiceURL": "https://agentavow.com/legal/terms",
+        "defaultPrompt": [
+          "Is the npm package chalk safe to install?",
+          "Should I connect the MCP server at https://agentavow.com/mcp?",
+          "Check the GitHub repo modelcontextprotocol/servers before I use it"
+        ],
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      },
+      "publication": {
+        "release_notes": "Results now lead with one of three plain answers and the reason: Safe to connect, Review before you connect, or Do not connect, with the 0–100 trust score and the adoption score underneath. Adds a bundled skill, scan-before-connect, that picks the right scan tool and reports the answer without overstating it; an output schema on the three scan tools so the structured result is described field by field; widget metadata on the trust card resource; and short status lines while a scan runs. A scan that cannot run now returns its guidance as a tool error. No tools were added or removed; all eight stay read-only."
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Package that is safe to install",
+              "prompt": "Is the npm package chalk safe to install?",
+              "tools_triggered": "scan_package",
+              "expected_behavior": "Leads with 'Safe to connect' and the reason, then the trust score (about 82/100) and the adoption score (hundreds of millions of downloads per week); notes the 2025 compromise as history that does not affect the current version; links the signed report. The trust card renders where supported."
+            },
+            {
+              "description": "Repo with high findings needs review",
+              "prompt": "Is the GitHub repo executeautomation/mcp-playwright safe to connect?",
+              "tools_triggered": "scan_repo",
+              "expected_behavior": "Leads with 'Review before you connect' and the reason (high findings such as execSync / spawn), then the trust score, the adoption score in GitHub stars, and the top findings with where they are and how to fix them; links the signed report."
+            },
+            {
+              "description": "Live MCP server by URL",
+              "prompt": "Should I connect the MCP server at https://agentavow.com/mcp?",
+              "tools_triggered": "scan_mcp_server",
+              "expected_behavior": "Scans the server's tool definitions and leads with one of the three answers and its reason, then the trust score; says no public adoption data exists for a hosted endpoint; links the signed report."
+            },
+            {
+              "description": "Package with a published advisory on the scanned version",
+              "prompt": "Check the npm package event-stream before I install it",
+              "tools_triggered": "scan_package",
+              "expected_behavior": "Leads with 'Review before you connect' because a published advisory affects the scanned version, names the advisory, gives the trust score and adoption score, and does not offer an install command."
+            },
+            {
+              "description": "Overview of what the plugin does",
+              "prompt": "What can AgentAvow check for me?",
+              "tools_triggered": "about_agentavow",
+              "expected_behavior": "Explains what can be scanned (repos, packages, live MCP servers, agent identities), that each result leads with Safe to connect, Review before you connect, or Do not connect plus a trust score and an adoption score, and gives example requests."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Destructive request the read-only plugin cannot do",
+              "prompt": "Delete the GitHub repo octocat/hello-world"
+            },
+            {
+              "description": "Financial advice is out of scope",
+              "prompt": "Should I buy this crypto token?"
+            },
+            {
+              "description": "Unrelated request; no scan",
+              "prompt": "Write me a short poem about the ocean"
+            }
+          ]
+        },
+        "demo_recording_url": "https://agentavow.com/agentavow-chatgpt-demo.mp4",
+        "commerce": false
+      }
+    }
+  }
+}
