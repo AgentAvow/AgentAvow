@@ -17,11 +17,13 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import logging
 import os
 import re
 from urllib.parse import quote
 
 import httpx
+import jsonschema
 import mcp.types as types
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
@@ -36,6 +38,8 @@ from src.scanner.verdict import is_safe as _shared_is_safe
 from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 from src.trust_tiers import headline as _decision_headline
 from src.trust_tiers import is_certified as _is_certified
+
+logger = logging.getLogger(__name__)
 
 # The three-phrase headline rule for scan RESULTS (text headline + card lead). The
 # structuredContent always carries decision / decision_final / decision_reason.
@@ -64,6 +68,9 @@ _CARD_MIME = "text/html;profile=mcp-app"
 # alias for the same resource. `domain`/`csp` are declared for ChatGPT app review;
 # the card is fully self-contained (inline HTML/CSS/SVG, no external fetches), so
 # both allow-lists are empty.
+# The card's "Open report" button opens agentavow.com; ChatGPT needs it allow-listed.
+_WIDGET_ORIGIN = "https://agentavow.com"
+_WIDGET_CSP = {"connect_domains": [], "resource_domains": [], "redirect_domains": [_WIDGET_ORIGIN]}
 _CARD_META = {
     # Shared MCP-Apps standard — Claude reads this; keep `ui` MINIMAL (just the
     # resourceUri) so a strict SEP-1865 host never chokes on extra fields. (Putting
@@ -73,7 +80,7 @@ _CARD_META = {
     # ChatGPT/OpenAI-namespaced fields live OUTSIDE `ui` so only ChatGPT reads them.
     "openai/outputTemplate": _CARD_URI,
     "openai/widgetDomain": "https://agentavow.com",
-    "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
+    "openai/widgetCSP": _WIDGET_CSP,
 }
 
 # Where to reach our own public API from inside the container, and the public web
@@ -1482,6 +1489,99 @@ def _scan_struct(
     }
 
 
+def _nullable(json_type: str, description: str) -> dict:
+    return {"type": [json_type, "null"], "description": description}
+
+
+# The outputSchema the three scan tools advertise: the shape of _scan_struct above. Keep
+# the two in step (tests/test_mcp_output_schema.py checks every key is described). Loose
+# where values come straight from the scan API, and extra keys are allowed, so the
+# contract can grow without breaking a client.
+_SCAN_OUTPUT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "target": {"type": "string", "description": "What was scanned, as given."},
+        "scanned_at": _nullable("string", "When the scan ran (ISO 8601, UTC)."),
+        "target_type": {"type": "string",
+                        "description": "github, npm, pypi, crates, docker, hf, or mcp."},
+        "decision": {
+            "type": "string", "enum": list(_DECISION_VALUES),
+            "description": "The answer to lead with: safe = Safe to connect, review = Review "
+                           "before you connect, do_not_connect = Do not connect.",
+        },
+        "decision_final": {"type": "boolean",
+                           "description": "False while the behavioral sandbox is still "
+                                          "running; the decision can still change."},
+        "decision_reason": {"type": "string",
+                            "description": "One sentence naming what decided it."},
+        "trust_score": {"type": "integer", "minimum": 0, "maximum": 100,
+                        "description": "Trust score, 0-100. Evidence under the decision."},
+        "tier": _nullable("string", "Trust tier for the score (detail, not the headline)."),
+        "verdict": {"type": "string", "enum": ["safe", "needs_review"],
+                    "description": "Binary form of the decision, kept for older clients."},
+        "verdict_reason": {"type": "string",
+                           "description": "Machine reason for the binary verdict, e.g. clean, "
+                                          "blocking_findings, thin_coverage."},
+        "critical": {"type": "integer", "minimum": 0,
+                     "description": "Critical findings, static and sandbox."},
+        "high": {"type": "integer", "minimum": 0,
+                 "description": "High findings, static and sandbox."},
+        "findings_total": {"type": "integer", "minimum": 0,
+                           "description": "All findings, every severity."},
+        "static_findings_total": {"type": "integer", "minimum": 0,
+                                  "description": "Findings from static analysis only."},
+        "package_version": _nullable("string", "Package version scanned."),
+        "published_at": _nullable("string", "When that version was published."),
+        "deprecated": _nullable("string", "The maintainer's deprecation notice, or null."),
+        "advisories_affecting_version": {
+            "type": "array", "description": "Published advisories that affect this version.",
+            "items": {"type": "object"},
+        },
+        "sandbox": {"type": ["object", "null"],
+                    "description": "What the behavioral sandbox observed; null if it does "
+                                   "not apply."},
+        "certified": {"type": "boolean",
+                      "description": "Matches the signed attestation's certified.eligible."},
+        "certified_mark": {"type": "boolean",
+                           "description": "Certified and safe: show the Certified mark."},
+        "top_findings": {
+            "type": "array", "description": "Up to five most important findings.",
+            "items": {"type": "object", "properties": {
+                "severity": _nullable("string", "critical, high, medium, or low."),
+                "what": _nullable("string", "What was found."),
+                "where": _nullable("string", "File and line, if file-based."),
+                "remediation": _nullable("string", "How to fix it."),
+                "count": {"type": "integer", "description": "How many times it occurs."},
+            }},
+        },
+        "incident": {"type": ["object", "null"],
+                     "description": "Known past compromise (context only, never scored)."},
+        "subscores": {"type": "object",
+                      "description": "Per-category 0-100 scores behind the trust score.",
+                      "additionalProperties": {"type": ["number", "null"]}},
+        "install": _nullable("string", "Install command, only when nothing blocks it."),
+        "adoption": {
+            "type": ["object", "null"],
+            "description": "The adoption score: real usage (downloads per week, stars or "
+                           "installs). Never changes the decision.",
+            "properties": {"count": {"type": "integer"}, "unit": {"type": "string"},
+                           "score_0_100": {"type": "integer"}},
+        },
+        "signed": {"type": "boolean",
+                   "description": "True when a signed (Ed25519/JWS) attestation backs this."},
+        "cached": {"type": "boolean", "description": "Served from the ~1h cache."},
+        "rescan_pending": {"type": "boolean",
+                           "description": "A fresh scan was started; this is the previous "
+                                          "result."},
+        "report_url": {"type": "string", "description": "Full report page."},
+        "report_json_url": {"type": "string", "description": "The full verdict as JSON."},
+        "verify_url": {"type": "string", "description": "How to verify offline."},
+    },
+    "required": ["target", "target_type", "decision", "decision_final", "decision_reason",
+                 "trust_score", "verdict", "report_url"],
+}
+
+
 # --------------------------------------------------------------------------- #
 # tool definitions (all read-only, unauthenticated)
 # --------------------------------------------------------------------------- #
@@ -1540,8 +1640,11 @@ _TOOLS: list[types.Tool] = [
             "AgentAvow. Returns one of three answers with its reason (Safe to connect, Review "
             "before you connect, or Do not connect), a 0-100 trust score, an adoption score from "
             "real usage (downloads per week), findings with remediation, and a signed "
-            "attestation. Also reports repo-vs-artifact drift "
-            "(files shipped that aren't in the source). Read-only; calls agentavow.com."
+            "attestation. Also reports published advisories that affect the scanned version, "
+            "the maintainer's deprecation notice, repo-vs-artifact drift (files shipped that "
+            "aren't in the source), and what a sandbox run observed when one applies. Scans the "
+            "latest version unless `version` (or a pin in the name) names one. Read-only; "
+            "calls agentavow.com."
         ),
         inputSchema={
             "type": "object",
@@ -1555,6 +1658,13 @@ _TOOLS: list[types.Tool] = [
                 "name": {
                     "type": "string",
                     "description": "Package name, e.g. 'chalk' (or 'org/model' for hf).",
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Exact version to scan, e.g. '5.3.0'. Optional: the latest "
+                                   "version by default. A pin in the name ('chalk@5.3.0', "
+                                   "'requests==2.32.5') works too.",
+                    "maxLength": 64,
                 },
                 "force": {
                     "type": "boolean",
@@ -1700,9 +1810,15 @@ _TOOLS: list[types.Tool] = [
 
 # Attach the MCP Apps trust-card view to the scan tools. Set on the field (the
 # constructor silently drops an unknown `meta=` kwarg; the field alias is _meta).
+_SCAN_TOOLS = ("scan_repo", "scan_package", "scan_mcp_server")
 for _t in _TOOLS:
-    if _t.name in ("scan_repo", "scan_package", "scan_mcp_server"):
-        _t.meta = _CARD_META
+    if _t.name in _SCAN_TOOLS:
+        # ChatGPT shows these short status lines while the tool runs and when it is done
+        # (openai/* keys; other hosts ignore them).
+        _t.meta = {**_CARD_META, "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
+                   "openai/toolInvocation/invoked": "AgentAvow scan complete"}
+        # The scan tools return structuredContent; describe it (see _SCAN_OUTPUT_SCHEMA).
+        _t.outputSchema = _SCAN_OUTPUT_SCHEMA
 
 # Defensive length bounds on string inputs (hygiene — these are interpolated into API
 # paths; also what our own scanner flags on unconstrained params). Generous so no real
@@ -1736,16 +1852,32 @@ async def _list_resources() -> list[types.Resource]:
     # the resource content, and an unexpected ui.* on the resource can break its render).
     _r.meta = {
         "openai/widgetDomain": "https://agentavow.com",
-        "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
+        "openai/widgetCSP": _WIDGET_CSP,
     }
     return [_r]
+
+
+# OpenAI reads the widget's domain, CSP and description off the resource CONTENTS.
+# openai/* keys only: an unexpected ui.* on the resource has broken Claude's render.
+_CARD_CONTENTS_META = {
+    "openai/widgetDomain": "https://agentavow.com",
+    "openai/widgetCSP": _WIDGET_CSP,
+    "openai/widgetPrefersBorder": True,
+    # Inline only: the card is a compact summary with a link to the full report.
+    "openai/ui": {"availableDisplayModes": ["inline"]},
+    "openai/widgetDescription": (
+        "An AgentAvow trust card: the answer (Safe to connect, Review before you connect, "
+        "or Do not connect) with its reason, the 0-100 trust score, the adoption score, "
+        "the top findings, and a link to the signed report."
+    ),
+}
 
 
 @server.read_resource()
 async def _read_resource(uri: object) -> list[ReadResourceContents]:
     if str(uri).rstrip("/") == _CARD_URI.rstrip("/"):
         return [ReadResourceContents(content=trust_card_html(HEADLINE_FOLLOWS_DECISION),
-                                     mime_type=_CARD_MIME)]
+                                     mime_type=_CARD_MIME, meta=_CARD_CONTENTS_META)]
     return []
 
 
@@ -1827,6 +1959,30 @@ async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResul
 @server.call_tool()
 async def _call_tool(
     name: str, arguments: dict
+) -> list[types.TextContent] | tuple[list[types.TextContent], dict] | types.CallToolResult:
+    out = await _run_tool(name, arguments)
+    if name not in _SCAN_TOOLS:
+        return out
+    if not isinstance(out, tuple):
+        # A scan tool declares an outputSchema, so a reply without structuredContent
+        # (bad input, not found, timeout) cannot go back as a success: the SDK and
+        # spec-following clients reject it. Same guidance, sent as a tool error, which
+        # also keeps a model from reading "not scanned" as an answer.
+        return types.CallToolResult(content=out, isError=True)
+    content, struct = out
+    try:
+        jsonschema.validate(instance=struct, schema=_SCAN_OUTPUT_SCHEMA)
+    except jsonschema.ValidationError as e:
+        # The schema drifted from _scan_struct. Never fail a good scan over it: send it
+        # as-is (a CallToolResult skips the SDK's own check) and log loudly.
+        logger.error("scan structuredContent does not match its outputSchema (%s): %s",
+                     name, e.message)
+        return types.CallToolResult(content=content, structuredContent=struct)
+    return out
+
+
+async def _run_tool(
+    name: str, arguments: dict
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
     await _bump_s("calls:total")
     await _bump(f"tool:{name}")
@@ -1874,6 +2030,8 @@ async def _call_tool(
             # A pinned version rides in the name the way the ecosystems write it
             # (chalk@5.3.0, requests==2.32.5, serde@1.0.200) — no tool-schema change.
             pkg, version = _split_pinned_version(surface, pkg)
+            # The explicit `version` argument; a pin in the name wins if both are given.
+            version = version or (str(arguments.get("version") or "").strip() or None)
             params = dict(fp or {})
             if version:
                 params["version"] = version

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scan before connect"
+  short_description: "Check a tool's safety before you connect or install it"
+  default_prompt: "Is the npm package chalk safe to install?"

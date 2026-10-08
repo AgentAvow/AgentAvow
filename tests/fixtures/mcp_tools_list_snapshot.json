@@ -22,9 +22,13 @@
   {
    "_meta": {
     "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+    "openai/toolInvocation/invoked": "AgentAvow scan complete",
+    "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
      "connect_domains": [],
-     "redirect_domains": [],
+     "redirect_domains": [
+      "https://agentavow.com"
+     ],
      "resource_domains": []
     },
     "openai/widgetDomain": "https://agentavow.com",
@@ -64,14 +68,260 @@
     "type": "object"
    },
    "name": "scan_repo",
+   "outputSchema": {
+    "properties": {
+     "adoption": {
+      "description": "The adoption score: real usage (downloads per week, stars or installs). Never changes the decision.",
+      "properties": {
+       "count": {
+        "type": "integer"
+       },
+       "score_0_100": {
+        "type": "integer"
+       },
+       "unit": {
+        "type": "string"
+       }
+      },
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "advisories_affecting_version": {
+      "description": "Published advisories that affect this version.",
+      "items": {
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "cached": {
+      "description": "Served from the ~1h cache.",
+      "type": "boolean"
+     },
+     "certified": {
+      "description": "Matches the signed attestation's certified.eligible.",
+      "type": "boolean"
+     },
+     "certified_mark": {
+      "description": "Certified and safe: show the Certified mark.",
+      "type": "boolean"
+     },
+     "critical": {
+      "description": "Critical findings, static and sandbox.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "decision": {
+      "description": "The answer to lead with: safe = Safe to connect, review = Review before you connect, do_not_connect = Do not connect.",
+      "enum": [
+       "safe",
+       "review",
+       "do_not_connect"
+      ],
+      "type": "string"
+     },
+     "decision_final": {
+      "description": "False while the behavioral sandbox is still running; the decision can still change.",
+      "type": "boolean"
+     },
+     "decision_reason": {
+      "description": "One sentence naming what decided it.",
+      "type": "string"
+     },
+     "deprecated": {
+      "description": "The maintainer's deprecation notice, or null.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "findings_total": {
+      "description": "All findings, every severity.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "high": {
+      "description": "High findings, static and sandbox.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "incident": {
+      "description": "Known past compromise (context only, never scored).",
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "install": {
+      "description": "Install command, only when nothing blocks it.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "package_version": {
+      "description": "Package version scanned.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "published_at": {
+      "description": "When that version was published.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "report_json_url": {
+      "description": "The full verdict as JSON.",
+      "type": "string"
+     },
+     "report_url": {
+      "description": "Full report page.",
+      "type": "string"
+     },
+     "rescan_pending": {
+      "description": "A fresh scan was started; this is the previous result.",
+      "type": "boolean"
+     },
+     "sandbox": {
+      "description": "What the behavioral sandbox observed; null if it does not apply.",
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "scanned_at": {
+      "description": "When the scan ran (ISO 8601, UTC).",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "signed": {
+      "description": "True when a signed (Ed25519/JWS) attestation backs this.",
+      "type": "boolean"
+     },
+     "static_findings_total": {
+      "description": "Findings from static analysis only.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "subscores": {
+      "additionalProperties": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "description": "Per-category 0-100 scores behind the trust score.",
+      "type": "object"
+     },
+     "target": {
+      "description": "What was scanned, as given.",
+      "type": "string"
+     },
+     "target_type": {
+      "description": "github, npm, pypi, crates, docker, hf, or mcp.",
+      "type": "string"
+     },
+     "tier": {
+      "description": "Trust tier for the score (detail, not the headline).",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "top_findings": {
+      "description": "Up to five most important findings.",
+      "items": {
+       "properties": {
+        "count": {
+         "description": "How many times it occurs.",
+         "type": "integer"
+        },
+        "remediation": {
+         "description": "How to fix it.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "severity": {
+         "description": "critical, high, medium, or low.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "what": {
+         "description": "What was found.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "where": {
+         "description": "File and line, if file-based.",
+         "type": [
+          "string",
+          "null"
+         ]
+        }
+       },
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "trust_score": {
+      "description": "Trust score, 0-100. Evidence under the decision.",
+      "maximum": 100,
+      "minimum": 0,
+      "type": "integer"
+     },
+     "verdict": {
+      "description": "Binary form of the decision, kept for older clients.",
+      "enum": [
+       "safe",
+       "needs_review"
+      ],
+      "type": "string"
+     },
+     "verdict_reason": {
+      "description": "Machine reason for the binary verdict, e.g. clean, blocking_findings, thin_coverage.",
+      "type": "string"
+     },
+     "verify_url": {
+      "description": "How to verify offline.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "target",
+     "target_type",
+     "decision",
+     "decision_final",
+     "decision_reason",
+     "trust_score",
+     "verdict",
+     "report_url"
+    ],
+    "type": "object"
+   },
    "title": "Scan a GitHub repo"
   },
   {
    "_meta": {
     "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+    "openai/toolInvocation/invoked": "AgentAvow scan complete",
+    "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
      "connect_domains": [],
-     "redirect_domains": [],
+     "redirect_domains": [
+      "https://agentavow.com"
+     ],
      "resource_domains": []
     },
     "openai/widgetDomain": "https://agentavow.com",
@@ -87,7 +337,7 @@
     "readOnlyHint": true,
     "title": "Scan a package"
    },
-   "description": "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with AgentAvow. Returns one of three answers with its reason (Safe to connect, Review before you connect, or Do not connect), a 0-100 trust score, an adoption score from real usage (downloads per week), findings with remediation, and a signed attestation. Also reports repo-vs-artifact drift (files shipped that aren't in the source). Read-only; calls agentavow.com.",
+   "description": "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with AgentAvow. Returns one of three answers with its reason (Safe to connect, Review before you connect, or Do not connect), a 0-100 trust score, an adoption score from real usage (downloads per week), findings with remediation, and a signed attestation. Also reports published advisories that affect the scanned version, the maintainer's deprecation notice, repo-vs-artifact drift (files shipped that aren't in the source), and what a sandbox run observed when one applies. Scans the latest version unless `version` (or a pin in the name) names one. Read-only; calls agentavow.com.",
    "inputSchema": {
     "properties": {
      "ecosystem": {
@@ -110,6 +360,11 @@
      "surface": {
       "description": "Alias for registry.",
       "type": "string"
+     },
+     "version": {
+      "description": "Exact version to scan, e.g. '5.3.0'. Optional: the latest version by default. A pin in the name ('chalk@5.3.0', 'requests==2.32.5') works too.",
+      "maxLength": 64,
+      "type": "string"
      }
     },
     "required": [
@@ -118,14 +373,260 @@
     "type": "object"
    },
    "name": "scan_package",
+   "outputSchema": {
+    "properties": {
+     "adoption": {
+      "description": "The adoption score: real usage (downloads per week, stars or installs). Never changes the decision.",
+      "properties": {
+       "count": {
+        "type": "integer"
+       },
+       "score_0_100": {
+        "type": "integer"
+       },
+       "unit": {
+        "type": "string"
+       }
+      },
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "advisories_affecting_version": {
+      "description": "Published advisories that affect this version.",
+      "items": {
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "cached": {
+      "description": "Served from the ~1h cache.",
+      "type": "boolean"
+     },
+     "certified": {
+      "description": "Matches the signed attestation's certified.eligible.",
+      "type": "boolean"
+     },
+     "certified_mark": {
+      "description": "Certified and safe: show the Certified mark.",
+      "type": "boolean"
+     },
+     "critical": {
+      "description": "Critical findings, static and sandbox.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "decision": {
+      "description": "The answer to lead with: safe = Safe to connect, review = Review before you connect, do_not_connect = Do not connect.",
+      "enum": [
+       "safe",
+       "review",
+       "do_not_connect"
+      ],
+      "type": "string"
+     },
+     "decision_final": {
+      "description": "False while the behavioral sandbox is still running; the decision can still change.",
+      "type": "boolean"
+     },
+     "decision_reason": {
+      "description": "One sentence naming what decided it.",
+      "type": "string"
+     },
+     "deprecated": {
+      "description": "The maintainer's deprecation notice, or null.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "findings_total": {
+      "description": "All findings, every severity.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "high": {
+      "description": "High findings, static and sandbox.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "incident": {
+      "description": "Known past compromise (context only, never scored).",
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "install": {
+      "description": "Install command, only when nothing blocks it.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "package_version": {
+      "description": "Package version scanned.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "published_at": {
+      "description": "When that version was published.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "report_json_url": {
+      "description": "The full verdict as JSON.",
+      "type": "string"
+     },
+     "report_url": {
+      "description": "Full report page.",
+      "type": "string"
+     },
+     "rescan_pending": {
+      "description": "A fresh scan was started; this is the previous result.",
+      "type": "boolean"
+     },
+     "sandbox": {
+      "description": "What the behavioral sandbox observed; null if it does not apply.",
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "scanned_at": {
+      "description": "When the scan ran (ISO 8601, UTC).",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "signed": {
+      "description": "True when a signed (Ed25519/JWS) attestation backs this.",
+      "type": "boolean"
+     },
+     "static_findings_total": {
+      "description": "Findings from static analysis only.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "subscores": {
+      "additionalProperties": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "description": "Per-category 0-100 scores behind the trust score.",
+      "type": "object"
+     },
+     "target": {
+      "description": "What was scanned, as given.",
+      "type": "string"
+     },
+     "target_type": {
+      "description": "github, npm, pypi, crates, docker, hf, or mcp.",
+      "type": "string"
+     },
+     "tier": {
+      "description": "Trust tier for the score (detail, not the headline).",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "top_findings": {
+      "description": "Up to five most important findings.",
+      "items": {
+       "properties": {
+        "count": {
+         "description": "How many times it occurs.",
+         "type": "integer"
+        },
+        "remediation": {
+         "description": "How to fix it.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "severity": {
+         "description": "critical, high, medium, or low.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "what": {
+         "description": "What was found.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "where": {
+         "description": "File and line, if file-based.",
+         "type": [
+          "string",
+          "null"
+         ]
+        }
+       },
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "trust_score": {
+      "description": "Trust score, 0-100. Evidence under the decision.",
+      "maximum": 100,
+      "minimum": 0,
+      "type": "integer"
+     },
+     "verdict": {
+      "description": "Binary form of the decision, kept for older clients.",
+      "enum": [
+       "safe",
+       "needs_review"
+      ],
+      "type": "string"
+     },
+     "verdict_reason": {
+      "description": "Machine reason for the binary verdict, e.g. clean, blocking_findings, thin_coverage.",
+      "type": "string"
+     },
+     "verify_url": {
+      "description": "How to verify offline.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "target",
+     "target_type",
+     "decision",
+     "decision_final",
+     "decision_reason",
+     "trust_score",
+     "verdict",
+     "report_url"
+    ],
+    "type": "object"
+   },
    "title": "Scan a package"
   },
   {
    "_meta": {
     "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+    "openai/toolInvocation/invoked": "AgentAvow scan complete",
+    "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
      "connect_domains": [],
-     "redirect_domains": [],
+     "redirect_domains": [
+      "https://agentavow.com"
+     ],
      "resource_domains": []
     },
     "openai/widgetDomain": "https://agentavow.com",
@@ -160,6 +661,248 @@
     "type": "object"
    },
    "name": "scan_mcp_server",
+   "outputSchema": {
+    "properties": {
+     "adoption": {
+      "description": "The adoption score: real usage (downloads per week, stars or installs). Never changes the decision.",
+      "properties": {
+       "count": {
+        "type": "integer"
+       },
+       "score_0_100": {
+        "type": "integer"
+       },
+       "unit": {
+        "type": "string"
+       }
+      },
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "advisories_affecting_version": {
+      "description": "Published advisories that affect this version.",
+      "items": {
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "cached": {
+      "description": "Served from the ~1h cache.",
+      "type": "boolean"
+     },
+     "certified": {
+      "description": "Matches the signed attestation's certified.eligible.",
+      "type": "boolean"
+     },
+     "certified_mark": {
+      "description": "Certified and safe: show the Certified mark.",
+      "type": "boolean"
+     },
+     "critical": {
+      "description": "Critical findings, static and sandbox.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "decision": {
+      "description": "The answer to lead with: safe = Safe to connect, review = Review before you connect, do_not_connect = Do not connect.",
+      "enum": [
+       "safe",
+       "review",
+       "do_not_connect"
+      ],
+      "type": "string"
+     },
+     "decision_final": {
+      "description": "False while the behavioral sandbox is still running; the decision can still change.",
+      "type": "boolean"
+     },
+     "decision_reason": {
+      "description": "One sentence naming what decided it.",
+      "type": "string"
+     },
+     "deprecated": {
+      "description": "The maintainer's deprecation notice, or null.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "findings_total": {
+      "description": "All findings, every severity.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "high": {
+      "description": "High findings, static and sandbox.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "incident": {
+      "description": "Known past compromise (context only, never scored).",
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "install": {
+      "description": "Install command, only when nothing blocks it.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "package_version": {
+      "description": "Package version scanned.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "published_at": {
+      "description": "When that version was published.",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "report_json_url": {
+      "description": "The full verdict as JSON.",
+      "type": "string"
+     },
+     "report_url": {
+      "description": "Full report page.",
+      "type": "string"
+     },
+     "rescan_pending": {
+      "description": "A fresh scan was started; this is the previous result.",
+      "type": "boolean"
+     },
+     "sandbox": {
+      "description": "What the behavioral sandbox observed; null if it does not apply.",
+      "type": [
+       "object",
+       "null"
+      ]
+     },
+     "scanned_at": {
+      "description": "When the scan ran (ISO 8601, UTC).",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "signed": {
+      "description": "True when a signed (Ed25519/JWS) attestation backs this.",
+      "type": "boolean"
+     },
+     "static_findings_total": {
+      "description": "Findings from static analysis only.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "subscores": {
+      "additionalProperties": {
+       "type": [
+        "number",
+        "null"
+       ]
+      },
+      "description": "Per-category 0-100 scores behind the trust score.",
+      "type": "object"
+     },
+     "target": {
+      "description": "What was scanned, as given.",
+      "type": "string"
+     },
+     "target_type": {
+      "description": "github, npm, pypi, crates, docker, hf, or mcp.",
+      "type": "string"
+     },
+     "tier": {
+      "description": "Trust tier for the score (detail, not the headline).",
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "top_findings": {
+      "description": "Up to five most important findings.",
+      "items": {
+       "properties": {
+        "count": {
+         "description": "How many times it occurs.",
+         "type": "integer"
+        },
+        "remediation": {
+         "description": "How to fix it.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "severity": {
+         "description": "critical, high, medium, or low.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "what": {
+         "description": "What was found.",
+         "type": [
+          "string",
+          "null"
+         ]
+        },
+        "where": {
+         "description": "File and line, if file-based.",
+         "type": [
+          "string",
+          "null"
+         ]
+        }
+       },
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "trust_score": {
+      "description": "Trust score, 0-100. Evidence under the decision.",
+      "maximum": 100,
+      "minimum": 0,
+      "type": "integer"
+     },
+     "verdict": {
+      "description": "Binary form of the decision, kept for older clients.",
+      "enum": [
+       "safe",
+       "needs_review"
+      ],
+      "type": "string"
+     },
+     "verdict_reason": {
+      "description": "Machine reason for the binary verdict, e.g. clean, blocking_findings, thin_coverage.",
+      "type": "string"
+     },
+     "verify_url": {
+      "description": "How to verify offline.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "target",
+     "target_type",
+     "decision",
+     "decision_final",
+     "decision_reason",
+     "trust_score",
+     "verdict",
+     "report_url"
+    ],
+    "type": "object"
+   },
    "title": "Scan an MCP server"
   },
   {
