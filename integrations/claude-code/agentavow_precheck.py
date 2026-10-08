@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.22"
+__version__ = "0.1.23"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -604,7 +604,7 @@ def _previously_graded(cache: dict, targets: list[dict], deps: list[dict],
 
 _LEGEND = ("Legend: each line leads with one of three answers and its reason. ✅ Safe to "
            "connect. ⚠️ Review before you connect (a high finding, an advisory for this "
-           "version, deprecation, a score under 51, or little code to inspect). ⛔ Do not "
+           "version, deprecation, or a score under 51). ⛔ Do not "
            "connect (a critical finding, a planted credential leaving the sandbox, or a "
            "known-malicious package). '· Certified' marks a tool that passed the full "
            "Certified gate. ➖ not graded, with the reason. Dependencies are already "
@@ -686,8 +686,9 @@ def _decision(data: dict, advisories: int, incident: bool) -> tuple[str, str, bo
     one; else the same rule over what this response has (src/scanner/verdict.decide):
     do_not_connect on a critical finding, a planted credential leaving the sandbox,
     a critical sandbox finding or a malicious package; review on a high finding, an
-    advisory for this version, deprecation, a score under 51, or little code with
-    nothing found; safe otherwise. Adoption is never an input."""
+    advisory for this version, deprecation, or a score under 51; safe otherwise,
+    including little code with nothing found (the reason says so). Adoption is never
+    an input."""
     dec = data.get("decision")
     if dec in DECISION_PHRASES:
         return (dec, str(data.get("decision_reason") or ""),
@@ -732,7 +733,10 @@ def _decision(data: dict, advisories: int, incident: bool) -> tuple[str, str, bo
     found = any(_sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 for i in items)
     if isinstance(files, int) and 0 < files < 8 and not found:
-        return out("review", "nothing found, but little code to inspect")
+        remote_mcp = any(isinstance(data.get(k), dict) and data[k].get("surface") == "mcp"
+                         for k in ("coverage", "surface_detail"))
+        return out("safe", "tool definitions clean; server code not inspected" if remote_mcp
+                   else "nothing found; little code to inspect")
     return out("safe", "no critical or high findings")
 
 
@@ -740,8 +744,8 @@ def _legacy_decision(r: dict) -> tuple[str, str]:
     """(decision, reason) for a cache record written before 0.1.20, which stored the
     old verdict, its machine ``reason``, the counts and the score but no decision.
     The same rule as decide() over what the record kept: a critical finding → do not
-    connect; a high finding, an advisory, deprecation, a score under 51 or thin
-    coverage → review; nothing found → safe."""
+    connect; a high finding, an advisory, deprecation or a score under 51 → review;
+    nothing found → safe, thin coverage included (it says so)."""
     score = int(r.get("score") or 0)
     critical = int(r.get("critical") or 0)
     blocking = int(r.get("blocking") or 0)
@@ -758,7 +762,7 @@ def _legacy_decision(r: dict) -> tuple[str, str]:
     if score < 51:
         return "review", f"trust score {score}/100 is under 51"
     if r.get("reason") == "thin_coverage":
-        return "review", "nothing found, but little code to inspect"
+        return "safe", "nothing found; little code to inspect"
     return "safe", "nothing found" + (" (low signals only)" if r.get("reason") == "low_signals"
                                       else "")
 
@@ -928,7 +932,7 @@ def _sandbox_summary(b: object) -> str:
 # older GRADE_EPOCH (bump the epoch whenever server-side scoring changes materially).
 # A re-check whose decision (Safe / Review / Do not connect) is unchanged is silent;
 # a changed decision is reported, naming the old answer.
-GRADE_EPOCH = "2026-10-08"
+GRADE_EPOCH = "2026-10-08b"
 GRADE_MAX_AGE = 7 * 24 * 3600
 
 

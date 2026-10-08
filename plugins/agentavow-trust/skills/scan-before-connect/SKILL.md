@@ -65,11 +65,13 @@ not a finding. If the result says the sandbox is running now, say so and offer t
 re-check in about a minute. Do not call the score "static analysis only" without saying
 that the sandbox is pending or what it observed.
 
-- **Safe to connect:** say so in one line and go ahead with what the user asked.
+- **Safe to connect:** say so in one line and go ahead with what the user asked. If the
+  reason says there was little code to inspect, or that only the tool definitions were
+  read, pass that on in the same line.
 - **Do not connect:** show the findings and ask whether to continue. Do not install or
   connect until the user answers. This is the only case that stops.
 - **Review before you connect** (a high finding, an advisory for this version,
-  deprecation, a low score, or little code to inspect): give the one-line answer with
+  deprecation, or a low score): give the one-line answer with
   the reason, then go ahead with what the user asked. It is advice, not a stop.
 - **Not scanned** (an error, a timeout, or a target AgentAvow cannot reach): say it was
   not scanned, that this is neither safe nor unsafe, and go ahead.

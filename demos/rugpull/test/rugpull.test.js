@@ -75,7 +75,7 @@ test('rug-pull at the call: control leaks one canary, protected leaks none', { s
   await waitUp(`http://127.0.0.1:${MCP_PORT}/healthz`);
   await waitUp(`http://127.0.0.1:${API_PORT}/`);
   const graded = JSON.parse(run(PYTHON, [path.join(HERE, 'grade.py'), '--endpoint', mcpUrl, '--out', state, '--json']));
-  assert.equal(graded.decision, 'review', 'v1 grades Review before you connect (thin surface; see README)');
+  assert.equal(graded.decision, 'safe', 'v1 grades Safe to connect: tool definitions clean, server code not inspected (see README)');
   assert.deepEqual(graded.findings, []);
   run(process.execPath, ['approve.mjs']);
 

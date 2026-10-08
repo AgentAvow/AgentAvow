@@ -234,7 +234,8 @@ def test_servers_and_deps_share_one_summary_line(hook, monkeypatch, capsys, tmp_
 
     out = _run(hook, monkeypatch, capsys, scan)
     msg = out["systemMessage"]
-    assert msg.startswith("AgentAvow pre-check: graded 1 MCP server — 0 Safe, 1 Review (needs attention: 'dw' Review before you connect — nothing found, but little code to inspect).")
+    # thin coverage reads Safe (2026-10-08, #19), so nothing needs attention
+    assert msg.startswith("AgentAvow pre-check: graded 1 MCP server — 1 Safe, 0 Review.")
     assert "Dependencies: graded all 1 — 1 Safe, 0 Review." in msg
     assert msg.endswith("Ask for the AgentAvow pre-check for details.")
 
@@ -301,8 +302,13 @@ def test_verdict_reads_the_api_decision_and_falls_back_to_the_same_rule(hook):
         "do_not_connect"
     assert hook._verdict({"trust_score": 90, "findings": {"high": 2}})["decision"] == "review"
     assert hook._verdict({"trust_score": 45})["decision"] == "review"
-    assert hook._verdict({"trust_score": 95, "metadata": {"files_scanned": 3}})[
-        "decision_reason"] == "nothing found, but little code to inspect"
+    thin = hook._verdict({"trust_score": 95, "metadata": {"files_scanned": 3}})
+    assert (thin["decision"], thin["decision_reason"]) == (
+        "safe", "nothing found; little code to inspect")
+    remote = hook._verdict({"trust_score": 82, "metadata": {"files_scanned": 4},
+                            "coverage": {"surface": "mcp"}})
+    assert (remote["decision"], remote["decision_reason"]) == (
+        "safe", "tool definitions clean; server code not inspected")
     assert hook._verdict({"trust_score": 90, "behavioral": {
         "ran": True, "canary_exfil": [{"host": "x"}]}})["decision"] == "do_not_connect"
     assert hook._verdict({"trust_score": 90, "behavioral": {
@@ -448,11 +454,11 @@ def test_summary_does_not_claim_a_server_failed_when_only_dependencies_are_new(h
     monkeypatch.setattr(hook, "_targets", lambda: [dw])
     monkeypatch.setattr(hook, "_servers_elsewhere", lambda here: 3)
     # Session 1: server + dependency both new.
-    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(74, "needs review", 0, reason="thin_coverage", decision="review", decision_reason="nothing found, but little code to inspect")
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(74, "needs review", 0, reason="thin_coverage", decision="review", decision_reason="the maintainer has deprecated this package")
                if t["kind"] == "mcp" and "url" in t else _ok(90, "safe"))
-    assert out["systemMessage"].startswith("AgentAvow pre-check: graded 1 MCP server — 0 Safe, 1 Review (needs attention: 'dw' Review before you connect — nothing found, but little code to inspect).")
+    assert out["systemMessage"].startswith("AgentAvow pre-check: graded 1 MCP server — 0 Safe, 1 Review (needs attention: 'dw' Review before you connect — the maintainer has deprecated this package).")
     assert out["systemMessage"].endswith("3 more MCP servers configured for other projects, graded when you open them.")
-    assert "⚠️ MCP 'dw' (https://mcp.deepwiki.com/mcp): Review before you connect — nothing found, but little code to inspect · AgentAvow 74/100." in out["hookSpecificOutput"]["additionalContext"]
+    assert "⚠️ MCP 'dw' (https://mcp.deepwiki.com/mcp): Review before you connect — the maintainer has deprecated this package · AgentAvow 74/100." in out["hookSpecificOutput"]["additionalContext"]
     # Session 2: a NEW dependency appears, the server is unchanged → no "could not be scanned".
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"chalk": "5", "lodash": "4"}}))
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(90, "safe"))
@@ -555,10 +561,10 @@ def test_compact_server_line_carries_the_reason(hook, monkeypatch, capsys, tmp_p
     monkeypatch.setattr(hook, "_targets", lambda: [dw])
     full = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: _ok(
         74, "needs review", 0, reason="thin_coverage"))["hookSpecificOutput"]["additionalContext"]
-    want = "Review before you connect — nothing found, but little code to inspect · AgentAvow 74/100"
-    assert f"⚠️ MCP 'dw' (https://mcp.deepwiki.com/mcp): {want}" in full
+    want = "Safe to connect — nothing found; little code to inspect · AgentAvow 74/100"
+    assert f"✅ MCP 'dw' (https://mcp.deepwiki.com/mcp): {want}" in full
     compact = hook._previously_graded(json.loads(hook.CACHE.read_text()), [dw], [], [])
-    assert compact == [f"  ⚠️ MCP 'dw': {want}"]
+    assert compact == [f"  ✅ MCP 'dw': {want}"]
 
 
 def test_no_findings_dependency_reads_safe_with_a_reason(hook, monkeypatch, capsys, tmp_path):

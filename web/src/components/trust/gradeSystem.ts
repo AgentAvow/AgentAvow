@@ -178,6 +178,9 @@ export interface Decision {
 export const REVIEW_SCORE_FLOOR = 51
 export const THIN_COVERAGE_FILES = 8
 export const PENDING_SUFFIX = '; sandbox still running'
+export const THIN_REASON = 'nothing found; little code to inspect'
+// A live MCP server scan reads the served tool definitions only (files = tools).
+export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
 
 const BEHAVIORAL_LABELS: Record<string, string> = {
   behavioral_undeclared_egress: 'undeclared network call',
@@ -217,6 +220,11 @@ function stripMalPrefix(name: unknown): string {
   if (s.toLowerCase().startsWith('known-malicious package:')) s = s.slice(s.indexOf(':') + 1)
   return s
 }
+
+// A live MCP server scan (coverage.surface or surface_detail.surface === 'mcp'): only the
+// served tool definitions were read. A stdio MCP package from npm/PyPI is not this.
+const isRemoteMcp = (data: Obj): boolean =>
+  asObj(data.coverage).surface === 'mcp' || asObj(data.surface_detail).surface === 'mcp'
 
 const isMaliciousItem = (i: Obj) => i.kind !== 'capability' && String(i.name ?? '').toLowerCase().includes('malicious')
 
@@ -319,11 +327,12 @@ export function decide(input: unknown): Decision {
 
   const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
     && i.kind !== 'capability' && i.installed !== false)
-  if (files > 0 && files < THIN_COVERAGE_FILES && !found) {
-    return done('review', 'nothing found, but little code to inspect')
-  }
 
-  // safe
+  // safe — thin coverage (0 < files < 8, nothing found) reads Safe and says so in the
+  // reason (decided 2026-10-08, #19); the 74 / 82 score cap still shows it.
+  if (files > 0 && files < THIN_COVERAGE_FILES && !found) {
+    return done('safe', isRemoteMcp(data) ? THIN_REASON_REMOTE_MCP : THIN_REASON)
+  }
   let reason: string
   if (files > 0) {
     const n = files.toLocaleString('en-US')

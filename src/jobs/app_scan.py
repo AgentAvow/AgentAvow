@@ -272,6 +272,14 @@ async def _maybe_notify(
         and new_score > prev_score + _CHANGE_THRESHOLD
     )
 
+    if dropped or improved:
+        # A planned catalog re-score holds back score-change alerts (the formula moved,
+        # not the repo). Definition drift below still alerts.
+        from src.jobs.watch_alert_hold import score_alerts_held
+
+        if await score_alerts_held():
+            dropped = improved = False
+
     old_digest = (old_json or {}).get("tool_manifest_digest") if old_json else None
     new_digest = (new_json or {}).get("tool_manifest_digest")
     drift = bool(old_digest and new_digest and old_digest != new_digest)
