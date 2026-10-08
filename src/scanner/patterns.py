@@ -667,6 +667,30 @@ PROMPT_INJECTION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
 ]
 
+# Metadata-only widenings (tool / parameter descriptions, manifests, SKILL.md). Kept out
+# of PROMPT_INJECTION_PATTERNS because they run on every code line there, and agent apps
+# legitimately write `<IMPORTANT>` in their own prompts or "never show stack traces to the
+# user" in comments. In a tool description these are the documented poisoning shapes
+# (Invariant Labs' `<IMPORTANT>` PoC; "do not mention <the thing> to the user").
+METADATA_INJECTION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
+    (
+        "Hide-from-user directive (tool poisoning)",
+        re.compile(
+            r"(?:do\s+not|don't|never)\s+(?:tell|inform|mention|reveal|show|disclose)\b"
+            r"(?:\s+[\w'-]+){0,6}?\s+(?:to\s+)?(?:the\s+)?users?\b"
+            r"|(?:keep|hide)\s+(?:this|it|that)\s+(?:hidden\s+)?from\s+(?:the\s+)?users?\b",
+            re.IGNORECASE,
+        ),
+        "high",
+    ),
+    (
+        "Injected system/role directive",
+        # Upper-case tags as well as lower-case; PascalCase (`<System>`) stays out.
+        re.compile(r"<\s*/?\s*(?-i:IMPORTANT|SYSTEM|INSTRUCTIONS?|important|system|instructions?)\s*>"),
+        "high",
+    ),
+]
+
 # Files that ARE the tool's instruction surface (manifest / skill metadata). Prompt-injection
 # and invisible-unicode here are the ATTACK SURFACE, not documentation — scan them + never
 # downgrade. (mcp.json/server.json are already scanned via .json; SKILL.md is added here.)
