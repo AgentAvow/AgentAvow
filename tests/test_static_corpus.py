@@ -143,11 +143,11 @@ def test_no_known_good_package_is_do_not_connect_in_the_snapshot():
             assert (_CORPUS_MANIFEST[pid].get("known_fp") or {}).get("label") == \
                 "do_not_connect", pid
         exp = _CORPUS_MANIFEST.get(pid, {}).get("expect")
-        # Thin coverage ("nothing found, but little code to inspect") is not a finding:
-        # a package expected safe may read it (open decision, follow-up #19).
-        thin = r["label"] == "review" and r.get("reason") == THIN_COVERAGE_REASON
-        if exp and not (exp == "safe" and thin):
+        if exp:
             assert r["label"] == exp, (pid, r["label"], exp)
+        # Thin coverage reads safe with its reason (decided 2026-10-08, #19), never review.
+        if r.get("reason") == THIN_COVERAGE_REASON:
+            assert r["label"] == "safe", pid
 
 
 @pytest.mark.parametrize("pid", _SUBSET)

@@ -32,8 +32,8 @@ answer is **Do not connect**.
 
 | Answer | When | `decision` |
 |--------|------|------------|
-| **Safe to connect** | nothing blocking found | `safe` |
-| **Review before you connect** | a high finding (code or sandbox), a published advisory on this version, a deprecated package, a score under 51, or nothing found in very little code | `review` |
+| **Safe to connect** | nothing blocking found, including a clean scan of very little code (the reason says so) | `safe` |
+| **Review before you connect** | a high finding (code or sandbox), a published advisory on this version, a deprecated package, or a score under 51 | `review` |
 | **Do not connect** | a critical finding, a planted credential leaving the sandbox, or a known-malicious dependency | `do_not_connect` |
 
 The answer always comes with its reason ("one high finding: undeclared network call").

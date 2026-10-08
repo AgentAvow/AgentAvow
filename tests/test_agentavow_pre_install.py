@@ -136,10 +136,10 @@ def test_do_not_connect_asks_the_person_with_the_answer_as_the_reason(hook, monk
 @pytest.mark.parametrize("extra", [
     {"decision": "review", "decision_reason": "one high finding: x"},
     {"tier": "blocked", "decision": "review", "decision_reason": "trust score 4/100 is under 51"},
-    {"decision": "review", "decision_reason": "nothing found, but little code to inspect"},
+    {"decision": "review", "decision_reason": "the maintainer has deprecated this package"},
 ])
 def test_review_is_a_note_never_a_prompt(hook, monkeypatch, capsys, extra):
-    """Review before you connect — a high finding, a low score, thin coverage — is
+    """Review before you connect — a high finding, a low score, deprecation — is
     reported and the add goes on. Only Do not connect asks."""
     mod, _ = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add bad https://bad.example/mcp"),
@@ -158,16 +158,17 @@ def test_certified_rides_beside_the_answer(hook, monkeypatch, capsys):
         in out["systemMessage"]
 
 
-def test_soft_needs_review_without_findings_notes_and_proceeds(hook, monkeypatch, capsys):
-    """DeepWiki-style: 74/100, zero findings, 'thin coverage'. A legitimate server must
-    not get the prompt a poisoned one gets — the verdict is shown, the add goes on."""
+def test_thin_coverage_without_findings_reads_safe_and_proceeds(hook, monkeypatch, capsys):
+    """DeepWiki-style: 74/100, zero findings, 'thin coverage', from a pre-0.1.20 shape with
+    no decision field. Thin coverage reads Safe with its reason (2026-10-08, #19); the add
+    goes on."""
     mod, _ = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add deepwiki https://mcp.deepwiki.com/mcp"),
                lambda t, force=False: _ok(74, "needs review", 0, tier="standard",
                                           reason="thin_coverage"))
     assert "permissionDecision" not in out["hookSpecificOutput"]
-    assert ("Review before you connect — nothing found, but little code to inspect · "
-            "AgentAvow 74/100") in out["systemMessage"]
+    assert ("✅ MCP 'deepwiki' (https://mcp.deepwiki.com/mcp): Safe to connect — nothing "
+            "found; little code to inspect · AgentAvow 74/100") in out["systemMessage"]
 
 
 def test_unscannable_server_notes_it_was_not_scanned_and_proceeds(hook, monkeypatch, capsys):

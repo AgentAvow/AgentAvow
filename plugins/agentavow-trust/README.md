@@ -10,7 +10,7 @@ connect** — and the one reason behind it, then the 0–100 score; a Certified 
 "Safe to connect · Certified". Ask for the pre-check and you get one such line per server
 and per dependency, with its report link. From then on, a server you add with `claude mcp
 add` is graded before it is added: "Do not connect" asks you first; "Review before you
-connect" (including a clean-but-thin result) just tells you. You decide. Dependencies are read from the session's folder (the `cwd` Claude Code hands the hook). In Claude Desktop's Code tab, which starts in a scratch workspace, move into the project and type `/clear`: the hook runs again for that folder.
+connect" just tells you. You decide. Dependencies are read from the session's folder (the `cwd` Claude Code hands the hook). In Claude Desktop's Code tab, which starts in a scratch workspace, move into the project and type `/clear`: the hook runs again for that folder.
 
 Check whether a tool is safe before your agent connects to it. AgentAvow scans an MCP
 server, a package, or a GitHub repo and returns one of three answers with its reason,
@@ -27,7 +27,7 @@ Scanning is free and needs no account.
 | MCP connector | The AgentAvow tools: `scan_mcp_server`, `scan_package`, `scan_repo`, and identity lookups. All read-only, no sign-in. | Chat, Cowork, Claude Code |
 | `/scan` command | `/scan npm chalk`, `/scan owner/repo`, `/scan https://mcp.example.com/mcp` | Chat, Cowork, Claude Code |
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the answer before it goes ahead. | Chat, Cowork, Claude Code |
-| Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. "Do not connect": Claude Code asks you, with the answer as the reason. Anything else (Safe to connect; Review before you connect, including thin coverage; not scannable): a one-line answer and the add proceeds. Never denies. | Claude Code, Cowork |
+| Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. "Do not connect": Claude Code asks you, with the answer as the reason. Anything else (Safe to connect; Review before you connect; not scannable): a one-line answer and the add proceeds. Never denies. | Claude Code, Cowork |
 | SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project) that it has not seen before, and the project's direct dependencies (package.json `dependencies`, requirements.txt, pyproject `[project].dependencies`; up to 15 per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns it off). Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many Safe / Review / Blocked, the one needing attention), and keeps one line per server and dependency for when you ask. Dependencies are already installed: their answer is advice, never a stop. | Claude Code, Cowork |
 | PreToolUse gate | Before each MCP tool call, checks the answer on file for that server. Denies a call to a server whose answer is "Do not connect" (and, as before, one in the blocked tier); asks before a tool whose definition changed since it was graded. "Review before you connect" never prompts. | Claude Code, Cowork |
 

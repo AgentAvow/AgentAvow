@@ -175,7 +175,7 @@ DECISION_PHRASES = {
 
 def _needs_decision(r: dict | None) -> bool:
     """Ask the person only on "Do not connect". Review before you connect (a high
-    finding, thin coverage, …) and an unscannable target are reported, not prompted."""
+    finding, an advisory, …) and an unscannable target are reported, not prompted."""
     return r is not None and r.get("decision") == "do_not_connect"
 
 

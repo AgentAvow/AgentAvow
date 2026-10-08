@@ -56,7 +56,7 @@ All read-only and anonymous — no account or API key required.
 Every scan result leads with one of three answers — `decision` = `safe` (**Safe to
 connect**), `review` (**Review before you connect**) or `do_not_connect` (**Do not
 connect**) — and `decision_reason`, the one condition that triggered it ("one high
-finding: undeclared network call", "nothing found, but little code to inspect"). The
+finding: undeclared network call", "nothing found; little code to inspect"). The
 `summary` line starts with the phrase (plus " · Certified" when the tool carries the
 mark). Underneath: the 0–100 `trust_score`, the `tier` as detail, `certified`
 eligibility, the `adoption` score (count + unit), the findings behind it, and the

@@ -8,17 +8,17 @@ AgentAvow answers one question: **is this tool safe for your agent to connect to
 
 | Answer | Short label | `decision` | When |
 |---|---|---|---|
-| **Safe to connect** | Safe | `safe` | nothing below applies |
-| **Review before you connect** | Review | `review` | a high finding, a published advisory on this version, a deprecated package, a score under 51, or nothing found in very little code |
+| **Safe to connect** | Safe | `safe` | nothing below applies, including a clean scan of very little code (the reason says so) |
+| **Review before you connect** | Review | `review` | a high finding, a published advisory on this version, a deprecated package, or a score under 51 |
 | **Do not connect** | Blocked | `do_not_connect` | a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package |
 
-The reason always rides next to the phrase: "one high finding: undeclared network call", "nothing found in 1,200 files", "nothing found, but little code to inspect", "a planted credential left the sandbox". The API returns it as `decision_reason`.
+The reason always rides next to the phrase: "one high finding: undeclared network call", "nothing found in 1,200 files", "nothing found; little code to inspect", "a planted credential left the sandbox". The API returns it as `decision_reason`.
 
 The rule, in the order it is checked (the first match wins):
 
 1. **Do not connect** — a canary credential left the [sandbox](./behavioral-sandbox.md); this version is listed as malicious (OpenSSF MAL advisory); a known-malicious dependency; a blocking critical finding in the code (shipped, installed, a defect — never a capability); any other critical sandbox finding.
-2. **Review before you connect** — a blocking high finding in the code; a high sandbox finding (undeclared network call, an internal address fetched, a read-only tool that wrote files); a published advisory that affects the scanned version; a deprecated package; a trust score under 51; or fewer than 8 files scanned with no critical, high or medium finding.
-3. **Safe to connect** — everything else.
+2. **Review before you connect** — a blocking high finding in the code; a high sandbox finding (undeclared network call, an internal address fetched, a read-only tool that wrote files); a published advisory that affects the scanned version; a deprecated package; or a trust score under 51.
+3. **Safe to connect** — everything else. When fewer than 8 files were scanned and nothing critical, high or medium was found, the answer is still Safe and the reason says so: "nothing found; little code to inspect". For a remote MCP server, where we read the tool definitions it serves and not its code, the reason is "tool definitions clean; server code not inspected". The trust score stays capped at 74 (3 files or fewer) or 82 (4 to 7 files), so the thin evidence still shows in the number.
 
 Adoption is never an input. Advisory results never count either: a live probe of a remote server, a sandbox that did not run, needed credentials or timed out adds no finding. While the sandbox is still running, the answer comes from the static scan, says "sandbox still running", and carries `decision_final: false`; it can move to Review when the run lands, shown as an update.
 

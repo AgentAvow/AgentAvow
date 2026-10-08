@@ -104,9 +104,10 @@ def verdict_label(safe: bool) -> str:
 #   review          "Review before you connect" a blocking high defect (static or
 #                                               sandbox), a published advisory affecting
 #                                               the scanned version, deprecation, a score
-#                                               under 51, or thin static coverage with
-#                                               nothing found
-#   safe            "Safe to connect"           otherwise
+#                                               under 51
+#   safe            "Safe to connect"           otherwise, including thin static
+#                                               coverage with nothing found (the reason
+#                                               says so; decided 2026-10-08, #19)
 #
 # Derived from the APPLIED data (after ``_apply_behavioral_score``; ``behavioral`` is the
 # block as returned to users) so the phrase and the score agree. Adoption is never an
@@ -128,6 +129,9 @@ DECISION_VALUES = (DECISION_SAFE, DECISION_REVIEW, DECISION_DO_NOT_CONNECT)
 REVIEW_SCORE_FLOOR = 51  # below this, accumulated findings alone mean "review"
 THIN_COVERAGE_FILES = 8  # fewer static files than this, with nothing found = thin
 PENDING_SUFFIX = "; sandbox still running"
+THIN_REASON = "nothing found; little code to inspect"
+# A live MCP server scan reads the served tool definitions only (files = tools).
+THIN_REASON_REMOTE_MCP = "tool definitions clean; server code not inspected"
 
 # Human names for the sandbox rules a reason can cite.
 _BEHAVIORAL_LABELS = {
@@ -217,6 +221,17 @@ def _is_blocking_item(i: dict) -> bool:
     if cat == "dependency":
         return False
     return i.get("shipped") is not False
+
+
+def _is_remote_mcp(data: dict) -> bool:
+    """A live MCP server scan (``scan_mcp``): only the served tool definitions were
+    read, no server code. Marked ``coverage.surface == "mcp"`` (or the same in
+    ``surface_detail``); a stdio MCP package scanned from npm/PyPI is not this."""
+    for key in ("coverage", "surface_detail"):
+        block = data.get(key)
+        if isinstance(block, dict) and block.get("surface") == "mcp":
+            return True
+    return False
 
 
 def _count_phrase(n: int, severity: str, label: str | None) -> str:
@@ -335,10 +350,13 @@ def decide(data: dict) -> Decision:
 
     found = any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 and i.get("installed") is not False for i in items)
-    if 0 < files < THIN_COVERAGE_FILES and not found:
-        return done(DECISION_REVIEW, "nothing found, but little code to inspect")
 
     # ── safe ──────────────────────────────────────────────────────────────────────
+    # Thin coverage (0 < files < 8, nothing found) reads Safe and says so in the reason
+    # (Kenne, 2026-10-08, #19). The 74 / 82 evidence cap on the score still shows it.
+    if 0 < files < THIN_COVERAGE_FILES and not found:
+        return done(DECISION_SAFE, THIN_REASON_REMOTE_MCP if _is_remote_mcp(data)
+                    else THIN_REASON)
     if files > 0:
         n = f"{files:,}"
         unit = "file" if files == 1 else "files"

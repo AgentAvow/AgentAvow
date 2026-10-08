@@ -42,9 +42,11 @@ Every result leads with one answer and the one condition that triggered it (`dec
 `decision_reason` in the response):
 
 - **Safe to connect** (`safe`, short label *Safe*) — nothing blocking found, e.g. "nothing found in 340 files".
+  A clean scan of very little code also reads Safe, with the reason "nothing found; little code to
+  inspect" (or, for a remote MCP server, "tool definitions clean; server code not inspected"), and its
+  score stays capped at 74 or 82.
 - **Review before you connect** (`review`, *Review*) — a high finding in the code or the sandbox, a published
-  advisory affecting the version scanned, a deprecated package, a score under 51, or nothing found in very
-  little code ("nothing found, but little code to inspect").
+  advisory affecting the version scanned, a deprecated package, or a score under 51.
 - **Do not connect** (`do_not_connect`, *Blocked*) — a critical finding, a planted credential leaving the
   sandbox, a critical sandbox finding, or a known-malicious package or dependency.
 
