@@ -202,21 +202,25 @@ fi
 # --- Step 6: Wait for backend to be healthy ---
 step "Waiting for backend to be healthy"
 if $DRY_RUN; then
-  echo "    Would poll http://localhost/health up to 30 seconds"
+  echo "    Would poll https://localhost/health (Host: agentavow.com, through nginx) up to 120 seconds"
 else
   HEALTHY=false
-  for i in $(seq 1 15); do
-    if remote "curl -sf --max-time 3 http://localhost/health" > /dev/null 2>&1; then
+  # Through nginx over https with the real Host, and require the body: plain
+  # http://localhost answers 301 (the https redirect), which `curl -f` counts as
+  # success, so the old check passed while the backend was still booting and
+  # nginx was serving 502s (2026-10-08). Startup with migrations takes ~60 s.
+  for i in $(seq 1 60); do
+    if remote "curl -sk --max-time 3 -H 'Host: agentavow.com' https://localhost/health | grep -q '\"status\":\"ok\"'" > /dev/null 2>&1; then
       HEALTHY=true
       break
     fi
-    echo "    Attempt $i/15 — waiting 2s..."
+    echo "    Attempt $i/60 — waiting 2s..."
     sleep 2
   done
   if $HEALTHY; then
     ok "Backend is healthy"
   else
-    fail "Backend did not become healthy within 30 seconds. Check logs: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs backend --tail 50'"
+    fail "Backend did not become healthy within 120 seconds. Check logs: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs backend --tail 50'"
   fi
 
   # Reclaim disk from the image we just replaced (each deploy builds a fresh backend
