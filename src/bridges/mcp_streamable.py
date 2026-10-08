@@ -1502,10 +1502,11 @@ _TOOLS: list[types.Tool] = [
         title="Scan a GitHub repo",
         description=(
             "Scan a public GitHub repository with AgentAvow and return whether it is safe "
-            "for an agent to connect to: a 0-100 trust score, a plain safe / needs-review "
-            "verdict, the findings behind it (with where and how to fix), and a signed, "
-            "offline-verifiable attestation. Read-only, no account. Calls the AgentAvow "
-            "public API at agentavow.com."
+            "for an agent to connect to: one of three answers with its reason (Safe to "
+            "connect, Review before you connect, or Do not connect), a 0-100 trust score, an "
+            "adoption score from real usage (stars), the findings behind it (with where and how "
+            "to fix), and a signed, offline-verifiable attestation. Read-only, no account. "
+            "Calls the AgentAvow public API at agentavow.com."
         ),
         inputSchema={
             "type": "object",
@@ -1534,8 +1535,10 @@ _TOOLS: list[types.Tool] = [
         title="Scan a package",
         description=(
             "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with "
-            "AgentAvow. Returns a 0-100 trust score, a safe / needs-review verdict, findings "
-            "with remediation, and a signed attestation. Also reports repo-vs-artifact drift "
+            "AgentAvow. Returns one of three answers with its reason (Safe to connect, Review "
+            "before you connect, or Do not connect), a 0-100 trust score, an adoption score from "
+            "real usage (downloads per week), findings with remediation, and a signed "
+            "attestation. Also reports repo-vs-artifact drift "
             "(files shipped that aren't in the source). Read-only; calls agentavow.com."
         ),
         inputSchema={
@@ -1571,7 +1574,8 @@ _TOOLS: list[types.Tool] = [
         description=(
             "Scan a live MCP server's tool definitions for tool-poisoning, prompt-injection, "
             "invisible-unicode, and manifest-execution risks before your agent connects to it. "
-            "Returns a 0-100 trust score, a safe / needs-review verdict, findings, and a signed "
+            "Returns one of three answers with its reason (Safe to connect, Review before you "
+            "connect, or Do not connect), a 0-100 trust score, findings, and a signed "
             "attestation. Read-only; calls the agentavow.com public API."
         ),
         inputSchema={
