@@ -60,11 +60,11 @@ RUGPULL_MODEL=mock ./run.sh --model                # the AI SDK's mock model: re
 
 The model sees each tool exactly as served, poisoned description included. The leak does not need the model to obey that description: the v2 server adds the copy itself.
 
-## What the grade says about v1, and why the demo records an approval
+## What the grade says about v1, and the approval step
 
-Under the current rule, v1 grades **74/100, Review before you connect**, reason "nothing found, but little code to inspect". It has no findings. The rule treats a scan that saw fewer than eight files with nothing found as thin coverage, and for a live MCP scan the count is the number of tools, so any one-tool server lands on Review. For a remote server whose code nobody can see, that caution is defensible.
+v1 grades **74/100, Safe to connect**, reason "tool definitions clean; server code not inspected". It has no findings. A live MCP scan sees only the served tool definitions, never the server's code, so the score keeps the thin-coverage cap of 74 and the reason says exactly what was and was not inspected. (Until 2026-10-08 the same result read Review; the rule changed so that a clean result is not penalised for having little to inspect.)
 
-So the demo does what a security team does with a Review: it reviews and records an approval (`approve.mjs`). The gate runs with `onReview: 'confirm'`, and its confirm hook accepts only an approval of the exact signed manifest digest. Drift is decided before review: a changed definition is Do not connect and never reaches the confirm hook.
+The demo still records an approval (`approve.mjs`), because that is what a security team does before agents may use a tool, and the gate runs with `onReview: 'confirm'` so a Review would need that approval. Drift is decided before any of this: a changed definition is Do not connect and never reaches the confirm hook.
 
 The adoption score is not part of any of this; it is never an input to the decision.
 

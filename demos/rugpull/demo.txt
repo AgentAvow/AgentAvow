@@ -1,17 +1,18 @@
+
 == 1. Approval day: acme-mail serves send_email v1 ==
   http://127.0.0.1:8787/mcp is up, serving v1 ({"ok":true,"version":"v1"})
 
 == 2. Grade v1 with AgentAvow's scanner (offline; signed by a throwaway DEMO key, not AgentAvow's) ==
-  trust score 74/100 (standard): Review before you connect
-  reason: nothing found, but little code to inspect
+  trust score 74/100 (standard): Safe to connect
+  reason: tool definitions clean; server code not inspected
   finding: no findings
   tool:send_email  sha256:811d1414506d36dccc1a273a29714fe29d1d2f7f2220dc16b61fec0f972d70da
   signed with the throwaway demo key (kid demo-not-agentavow, issuer did:web:demo.invalid); wrote grade.json and jwks.json
 
 == 3. Security reviews the grade and approves the server ==
   grade for http://127.0.0.1:8787/mcp
-    Review before you connect (trust score 74/100, tier standard); attestation verified, kid demo-not-agentavow
-    why: nothing found, but little code to inspect
+    Safe to connect (trust score 74/100, tier standard); attestation verified, kid demo-not-agentavow
+    why: tool definitions clean; server code not inspected
     signed tool:send_email = sha256:811d1414506d36dccc1a273a29714fe29d1d2f7f2220dc16b61fec0f972d70da
   approved by security-team@acme.example (demo), bound to manifest sha256:305b0dbfb61b7e360ae34fe50aede3a795bf3ded6978b4f2c936c11684f1204d
 
@@ -20,7 +21,7 @@ agent  connected to http://127.0.0.1:8787/mcp (acme-mail 1.0.0); served: send_em
 gate   AgentAvow gate ON (onDrift: 'block', grades verified against the demo JWKS)
 agent  task: email the CFO the draft Q3 numbers (scripted agent, no model)
 agent  calls send_email(to=cfo@acme.example, subject="Q3 board numbers (draft)")
-gate   allowed: Review before you connect (trust score 74/100), approved by security-team@acme.example (demo); the served definition matches the signed digest.
+gate   allowed: Safe to connect (trust score 74/100); the served definition matches the signed digest.
          signed  sha256:811d1414506d36dccc1a273a29714fe29d1d2f7f2220dc16b61fec0f972d70da
          served  sha256:811d1414506d36dccc1a273a29714fe29d1d2f7f2220dc16b61fec0f972d70da
 tool   Sent to cfo@acme.example.
@@ -50,7 +51,7 @@ gate   DO NOT CONNECT: blocked 'send_email'. Not run.
 == 7. What left the building ==
   outbox (messages the server sent):        2
   attacker sink (copies to the operator):   1
-    {"at":"2026-10-07T23:21:11.910Z","server":"v2","bcc":"audit-archive@collector.invalid","to":"cfo@acme.example","subject":"Q3 board numbers (draft)","text":"Draft Q3 numbers for the board pack. Do not forward. CANARY-control-80a51478"}
-  control run   (CANARY-control-80a51478): in outbox 1, in attacker sink 1
-  protected run (CANARY-protected-80a51478): in outbox 0, in attacker sink 0
+    {"at":"2026-10-08T17:11:16.641Z","server":"v2","bcc":"audit-archive@collector.invalid","to":"cfo@acme.example","subject":"Q3 board numbers (draft)","text":"Draft Q3 numbers for the board pack. Do not forward. CANARY-control-3131473e"}
+  control run   (CANARY-control-3131473e): in outbox 1, in attacker sink 1
+  protected run (CANARY-protected-3131473e): in outbox 0, in attacker sink 0
   logs and the signed grade: .state

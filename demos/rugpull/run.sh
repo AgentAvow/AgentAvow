@@ -41,9 +41,10 @@ header() { [ -n "${RUGPULL_PACE:-}" ] && sleep "$RUGPULL_PACE"; printf '\n%s== %
 command -v node >/dev/null || { echo "node 20+ is required" >&2; exit 1; }
 if [ -z "${PYTHON:-}" ]; then
   for p in "$REPO/.venv312/bin/python" "$REPO/.venv/bin/python" python3; do
-    if "$p" -c "import src.scanner.scan" >/dev/null 2>&1 </dev/null; then PYTHON="$p"; break; fi
+    if ( cd "$REPO" && "$p" -c "import src.scanner.scan" ) >/dev/null 2>&1 </dev/null; then PYTHON="$p"; break; fi
   done 2>/dev/null
 fi
+PYTHON="${PYTHON:-python3}"
 ( cd "$REPO" && "${PYTHON:-python3}" -c "import src.scanner.scan" ) >/dev/null 2>&1 || {
   echo "grade.py needs this repo's backend: (cd $REPO && pip install -e .), or set PYTHON=..." >&2; exit 1; }
 [ -d "$REPO/sdk/js/dist" ] || (cd "$REPO/sdk/js" && npm install --silent && npm run build --silent)
