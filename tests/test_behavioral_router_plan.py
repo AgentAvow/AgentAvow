@@ -255,8 +255,9 @@ def test_canary_leak_leads_and_the_headline_is_not_safe():
     text = _block(b, behavioral_score_effect={"applied": True, "delta": -20,
                                               "reason": "a credential canary left the sandbox"})
     first = text.split("\n", 1)[0]
-    assert first.startswith("⚠️ Review before you connect — caught in the sandbox: "
-                            "a planted credential left the sandbox (dns:c2.evil.net)")
+    assert first.startswith("⛔ Do not connect — a planted credential left the sandbox. ")
+    assert ("Caught in the sandbox: a planted credential left the sandbox "
+            "(dns:c2.evil.net)") in first
     assert "Safe" not in first and "clean" not in first.lower()
     sec = _sandbox_line(_scan_data(b, behavioral_score_effect={
         "applied": True, "delta": -20, "reason": "a credential canary left the sandbox"}))
@@ -273,7 +274,9 @@ def test_canary_leak_leads_and_the_headline_is_not_safe():
 
 def test_canary_hit_without_a_finding_still_alarms():
     b = _exercised(canary_exfil=[{"via": "http", "host": "x.net"}])
-    assert _block(b).startswith("⚠️ Review before you connect — caught in the sandbox: ")
+    first = _block(b).split("\n", 1)[0]
+    assert first.startswith("⛔ Do not connect — a planted credential left the sandbox")
+    assert "Caught in the sandbox: " in first
 
 
 def test_critical_finding_overrides_a_deprecated_or_safe_headline():
@@ -281,11 +284,15 @@ def test_critical_finding_overrides_a_deprecated_or_safe_headline():
                               "evidence": "egress to a.net, b.net, c.net"}])
     for extra in ({}, {"deprecation": "retired"}):
         first = _block(b, **extra).split("\n", 1)[0]
-        assert first.startswith("⚠️ Review before you connect — caught in the sandbox: "
-                                "contacted undeclared hosts: a.net, b.net, c.net")
+        assert first.startswith("⛔ Do not connect — the sandbox caught a critical behavior: "
+                                "undeclared network call")
+        assert "Caught in the sandbox: contacted undeclared hosts: a.net, b.net, c.net" in first
     # a high finding also takes over the headline (it pulls the score below the bar too)
     b["findings"][0]["severity"] = "high"
-    assert _block(b).startswith("⚠️ Review before you connect — caught in the sandbox")
+    first = _block(b).split("\n", 1)[0]
+    assert first.startswith("⚠️ Review before you connect — one high finding: undeclared "
+                            "network call")
+    assert "Caught in the sandbox" in first
     # a medium/low one does not
     b["findings"][0]["severity"] = "low"
     assert _block(b).startswith("✅ Safe to connect")
@@ -368,7 +375,8 @@ def test_server_postgres_needs_a_database_url():
             "were not exercised; this is not a finding.") in text
     assert "Version 0.6.2 · published 2024-12-03" in text
     assert "**Deprecated by its maintainer** (latest release 0.6.2, 2024-12-03):" in text
-    assert text.startswith("⚠️ Deprecated")
+    assert text.startswith("⚠️ Review before you connect — the maintainer has deprecated this "
+                           "package.")
 
 
 def test_crashed_quotes_the_error_excerpt():

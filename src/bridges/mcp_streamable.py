@@ -27,10 +27,28 @@ from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-from src.bridges.mcp_app_view import TRUST_CARD_HTML
+from src.bridges.mcp_app_view import trust_card_html
+from src.scanner.verdict import DECISION_VALUES as _DECISION_VALUES
 from src.scanner.verdict import SAFE_BAR as _SHARED_SAFE_BAR
+from src.scanner.verdict import Decision as _Decision
+from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_safe as _shared_is_safe
 from src.scanner.verdict import verdict_reason as _shared_verdict_reason
+from src.trust_tiers import headline as _decision_headline
+from src.trust_tiers import is_certified as _is_certified
+
+# The three-phrase headline rule for scan RESULTS (text headline + card lead). The
+# structuredContent always carries decision / decision_final / decision_reason.
+#   True (current, Kenne 2026-10-08 "make everything the same across the board"):
+#     always lead with the decision phrase; the `initialize` instructions describe the
+#     same three answers.
+#   False: lead with the phrase only where it agrees with the binary verdict (safe <->
+#     safe; review / do_not_connect <-> needs_review); where they disagree (a
+#     thin-coverage 74 decides "safe" but its verdict is needs_review) keep the older
+#     wording. A fallback only, for a surface that must keep the binary ">=81" rule.
+HEADLINE_FOLLOWS_DECISION = True
+
+_DECISION_ICONS = {"safe": "✅", "review": "⚠️", "do_not_connect": "⛔"}
 
 # MCP Apps (SEP-1865): an interactive trust card the host renders natively (vs. the
 # model paraphrasing our text). ui:// resource + _meta.ui.resourceUri on scan tools;
@@ -84,9 +102,11 @@ _INSTRUCTIONS = (
     "themselves for poisoning/injection).\n"
     "• verify_trust / check_interaction_safety / lookup_identity / get_trust_badge — agent-to-"
     "agent identity and trust.\n\n"
-    "Reading a verdict: score >=81 with no critical/high findings is 'safe to connect'; anything "
-    "else is 'review before you connect'. Every result links to a full report and a signed "
-    "(Ed25519/JWS) attestation. All tools are read-only and need no account.\n\n"
+    "Reading a verdict: each result leads with one of three answers and its reason: 'Safe to "
+    "connect', 'Review before you connect', or 'Do not connect', with ' · Certified' where the "
+    "tool earned it. A 0-100 trust score and an adoption score sit underneath. Every result "
+    "links to a full report and a signed (Ed25519/JWS) attestation. All tools are read-only "
+    "and need no account.\n\n"
     "A good habit is to scan a tool before connecting or installing it. To do that "
     f"automatically for every new tool, a user can add a one-line CLAUDE.md rule or a "
     f"SessionStart hook (setup: {_SETUP_URL}) — this is the user's own opt-in config."
@@ -107,9 +127,14 @@ _ABOUT = (
     "• scan_mcp_server — a live MCP server by https URL\n"
     "• verify_trust / check_interaction_safety / lookup_identity / get_trust_badge — "
     "agent identity & trust\n\n"
-    "READING A VERDICT: 81+ with no critical/high findings = safe to connect; otherwise "
-    "review. A sub-81 score with zero findings means non-finding signals (maintainer, "
-    "provenance, adoption) held it down, not detected risk.\n\n"
+    "READING A VERDICT: each scan leads with one of three answers and the reason behind "
+    "it — Safe to connect, Review before you connect (a high finding, a published "
+    "advisory on this version, deprecation, or a score under 51), or Do not connect (a "
+    "critical finding, a known-malicious dependency, or a planted credential leaving the "
+    "sandbox). \"· Certified\" marks a tool that also passed every provenance check. Two "
+    "scores sit under it: trust (0-100) and adoption. A sub-81 score with zero findings "
+    "means non-finding signals (maintainer, provenance, adoption) held it down, not "
+    "detected risk.\n\n"
     "TRY:\n"
     "• \"scan the npm package chalk\"\n"
     "• \"scan the repo modelcontextprotocol/servers\"\n"
@@ -596,6 +621,23 @@ def _scan_block(
         why = f"No risks found; {reason}."
         glyph = "◍ LIMITED"
 
+    # The three-phrase lead (src.scanner.verdict.decide): "<phrase>[ · Certified] —
+    # <reason>". The mode-specific detail that the phrase does not carry (the fix
+    # release, what the sandbox caught, the coverage cap) stays after the score.
+    _decision = _decision_of(data)
+    _lead = _decision_leads(_decision, safe)
+    if _lead:
+        head, glyph = _decision_head(data, _decision)
+        if mode in ("safe", "risk"):
+            why = ""
+        elif mode == "vulnerable":
+            _fix = _highest_fix(_advs)
+            why = (f"Upgrade to {_fix} or later. " if _fix else "") + why
+        elif mode == "sandbox":
+            why = f"Caught in the sandbox: {_alarm}. {why}"
+        elif mode == "limited":
+            why = f"Score {reason}."
+
     # Trust and adoption always travel together (as on the site's dual mark). When
     # there's no established adoption signal (bare endpoint / brand-new package), say
     # "new" rather than dropping the pairing.
@@ -610,7 +652,11 @@ def _scan_block(
         adopt_clause = " Adoption: new (no established public data yet)."
     # Line 1 carries the whole verdict in words, so it survives even if a client only
     # relays the model's one-line summary of the tool result.
-    lines = [f"{head} — {target}, {score}/100. {why}{adopt_clause}", ""]
+    if _lead:
+        _why = f" {why.strip()}" if why.strip() else ""
+        lines = [f"{head}. {target}: trust {score}/100.{_why}{adopt_clause}", ""]
+    else:
+        lines = [f"{head} — {target}, {score}/100. {why}{adopt_clause}", ""]
 
     # Compact 8-bit card. Left-aligned with a top/bottom rule (no right border, which is
     # what breaks alignment across renderers). Renders in any monospace view.
@@ -681,7 +727,8 @@ def _scan_block(
     # Install CTA (own line so the model relays it). Shown for anything without blocking
     # findings — safe gets the confident label, limited gets a "verify first" cue. Never
     # on a review result (real findings to weigh first).
-    if install_hint and mode not in ("risk", "deprecated", "sandbox", "vulnerable"):
+    if (install_hint and mode not in ("risk", "deprecated", "sandbox", "vulnerable")
+            and _decision.decision != "do_not_connect"):
         if mode == "safe":
             lines.append(f"**Ready to install:** `{install_hint}`")
         else:  # limited — no risks found, but not fully verified
@@ -1118,6 +1165,34 @@ def _safe_verdict(data: dict) -> bool:
     return _shared_is_safe(data)
 
 
+def _decision_of(data: dict) -> _Decision:
+    """The three-phrase decision for a /public/scan response: the API's own unsigned
+    ``decision`` / ``decision_final`` / ``decision_reason`` when present (so the MCP and
+    the Check page say the same thing), else ``src.scanner.verdict.decide`` over the same
+    data (an older cached response without the fields)."""
+    dec = data.get("decision")
+    if dec in _DECISION_VALUES:
+        reason = data.get("decision_reason")
+        if isinstance(reason, str) and reason.strip():
+            return _Decision(dec, data.get("decision_final") is not False, reason.strip())
+    return _decide(data)
+
+
+def _decision_leads(decision: _Decision, safe: bool) -> bool:
+    """Whether the headline leads with the decision phrase (see HEADLINE_FOLLOWS_DECISION)."""
+    if HEADLINE_FOLLOWS_DECISION:
+        return True
+    return (decision.decision == "safe") == bool(safe)
+
+
+def _decision_head(data: dict, decision: _Decision) -> tuple[str, str]:
+    """(headline, card glyph): '✅ Safe to connect · Certified — <reason>' and the
+    phrase with its icon for the monospace card."""
+    phrase = _decision_headline(decision.decision, _is_certified(data))
+    icon = _DECISION_ICONS.get(decision.decision, "⚠️")
+    return f"{icon} {phrase} — {decision.reason}", f"{icon} {phrase}"
+
+
 # Registry words people commonly send to scan_repo by mistake ("npm chalk", "npm/chalk",
 # "pypi requests"). Mapped to the scan_package registry so we can nudge to the right tool
 # instead of a format error or a wasted GitHub 404. Only registries scan_package supports.
@@ -1293,6 +1368,10 @@ def _scan_struct(
         "tier": data.get("trust_tier"),
         "verdict": "safe" if safe else "needs_review",
         "verdict_reason": verdict_reason,
+        # The three-phrase decision (unsigned; rides beside the binary verdict above,
+        # which keeps its meaning): safe | review | do_not_connect, whether it is final
+        # (False while the sandbox is still running) and the one-line reason.
+        **_decision_of(data).as_dict(),
         "critical": crit + sum(1 for i in beh_items if i["severity"] == "critical"),
         "high": high + sum(1 for i in beh_items if i["severity"] == "high"),
         # a live probe's findings are advisory: they sit in sandbox.findings only
@@ -1607,7 +1686,8 @@ async def _list_resources() -> list[types.Resource]:
 @server.read_resource()
 async def _read_resource(uri: object) -> list[ReadResourceContents]:
     if str(uri).rstrip("/") == _CARD_URI.rstrip("/"):
-        return [ReadResourceContents(content=TRUST_CARD_HTML, mime_type=_CARD_MIME)]
+        return [ReadResourceContents(content=trust_card_html(HEADLINE_FOLLOWS_DECISION),
+                                     mime_type=_CARD_MIME)]
     return []
 
 

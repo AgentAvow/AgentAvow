@@ -136,7 +136,9 @@ def test_a_version_with_published_advisories_is_headlined_vulnerable():
                 if p.default is inspect.Parameter.empty]
     out = fn(data, *[""] * (len(required) - 1), install_hint="pip install x")
     first = out.strip().splitlines()[0]
-    assert "known vulnerability in this version" in first and "upgrade to 2026.1.14" in first
+    assert first.startswith("⚠️ Review before you connect — a published advisory affects "
+                            "this version (GHSA-1)")
+    assert "Upgrade to 2026.1.14 or later" in first
     assert "Clean" not in first and "pip install x" not in out
     assert verdict_reason(data) == "known_vulnerability"
 

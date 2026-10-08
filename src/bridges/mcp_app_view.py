@@ -23,7 +23,9 @@ one substitution is the six-tier table (``__TRUST_TIERS_JS__``), generated from
 """
 from __future__ import annotations
 
-from src.trust_tiers import tiers_js_table
+import json
+
+from src.trust_tiers import DECISIONS, tiers_js_table
 
 _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -46,6 +48,8 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
   .brand { font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
   .pill { font-size:11px; font-weight:800; padding:3px 11px; border-radius:999px; white-space:nowrap; letter-spacing:.02em; }
   .pill.cert { color:#04201c; background:linear-gradient(120deg,#2dd4bf,#e879f9); }
+  .lead { font-weight:800; font-size:15px; line-height:1.35; margin:10px 0 0; }
+  .lead .lreason { font-weight:500; color:var(--fg); }
   .target { font-weight:700; font-size:15.5px; margin:8px 0 2px; word-break:break-all; }
   .posture { font-size:11.5px; color:var(--muted); margin-bottom:8px; min-height:0; }
   .inst { display:flex; align-items:stretch; justify-content:center; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 6px; margin-top:4px; }
@@ -96,6 +100,7 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
       </span>
       <span class="pill" id="pill" style="display:none"></span>
     </div>
+    <div class="lead" id="lead" style="display:none"></div>
     <div class="target" id="target">Loading trust card…</div>
     <div class="posture" id="posture"></div>
     <div class="inst">
@@ -181,6 +186,17 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
     el.innerHTML=html; el.style.display="grid";
   }
 
+  // The three-phrase lead (structuredContent.decision / decision_reason). Shown when the
+  // result carries a decision AND either DECISION_LEADS is on or the decision agrees with
+  // the binary verdict; otherwise (an older result, or a disagreeing thin-coverage one)
+  // the card keeps the verdict wording below.
+  var DECISION_LEADS=__HEADLINE_FOLLOWS_DECISION__, DECISIONS=__DECISIONS_JS__;
+  function leadFor(sc){
+    var d=DECISIONS[sc.decision]; if(!d) return null;
+    var agrees=(sc.decision==="safe")===(sc.verdict==="safe");
+    return (DECISION_LEADS||agrees)?d:null;
+  }
+
   var reportUrl=null;
   function render(sc){
     if(!sc) return;
@@ -191,10 +207,20 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
     // true on a needs-review result; certified_mark is the display value.
     var certified=(sc.certified_mark!=null)?!!sc.certified_mark:(!!sc.certified&&mode==="safe");
     var conf={ safe:{label:"✓ SAFE",color:"#22C55E"}, risk:{label:"⚠ REVIEW",color:"#F59E0B"}, limited:{label:"◍ LIMITED",color:"#94A3B8"} }[mode];
+    var lead=leadFor(sc), leadEl=document.getElementById("lead");
+    if(lead){
+      conf={label:lead.label,color:lead.color};
+      var cert=!!(sc.certified);
+      leadEl.innerHTML='<span style="color:'+lead.color+'">'+lead.icon+" "+esc(lead.phrase)+'</span>'
+        +(cert?' <span class="grad">· Certified</span>':'')
+        +(sc.decision_reason?'<span class="lreason"> — '+esc(sc.decision_reason)+'</span>':'');
+      leadEl.style.display="block";
+    } else { leadEl.style.display="none"; leadEl.innerHTML=""; }
     document.getElementById("accent").style.background = certified?"linear-gradient(90deg,#2dd4bf,#e879f9)":conf.color;
     document.getElementById("target").textContent = sc.target + (sc.target_type?" · "+sc.target_type:"");
     var pill=document.getElementById("pill"); pill.style.display="inline-block";
     if(certified){ pill.className="pill cert"; pill.textContent="✓ CERTIFIED"; pill.style.color=""; pill.style.background=""; }
+    else if(lead){ pill.style.display="none"; }
     else { pill.className="pill"; pill.textContent=conf.label; pill.style.color=conf.color; pill.style.background=conf.color+"22"; }
     document.getElementById("posture").textContent = (certified||mode==="safe") ? ("Posture: "+t.posture) : "";
     renderTrust(score, certified); renderAdopt(sc.adoption); renderFinds(sc.top_findings, mode); renderSubs(sc.subscores);
@@ -202,6 +228,7 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
                blocking_findings:(sc.critical||0)+" critical · "+(sc.high||0)+" high — review these before you connect.",
                thin_coverage:"No risks found; score capped by limited coverage, not detected risk.",
                low_signals:"No risks found; below the bar on non-finding signals, not detected risk." };
+    if(lead){ whys.clean="Signed and recomputable offline."; whys.blocking_findings=(sc.critical||0)+" critical · "+(sc.high||0)+" high."; }
     var why=whys[reason]||"";
     if(certified) why="Certified — artifact scanned, provenance verified, no drift, signed & recomputable. "+why;
     document.getElementById("why").textContent = why;
@@ -280,4 +307,23 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
 </html>
 """
 
-TRUST_CARD_HTML = _TRUST_CARD_TEMPLATE.replace("__TRUST_TIERS_JS__", tiers_js_table())
+def _decisions_js() -> str:
+    """The phrase table as a JS object ``{value: {phrase, label, color, icon}}``."""
+    icons = {"safe": "✓", "review": "⚠", "do_not_connect": "⛔"}
+    return json.dumps({d.value: {"phrase": d.phrase, "label": d.label, "color": d.color,
+                                 "icon": icons[d.value]} for d in DECISIONS},
+                      separators=(",", ":"), ensure_ascii=False)
+
+
+def trust_card_html(headline_follows_decision: bool = True) -> str:
+    """The card HTML. ``headline_follows_decision`` mirrors
+    ``mcp_streamable.HEADLINE_FOLLOWS_DECISION``: True leads with the decision phrase
+    always; False only where it agrees with the binary verdict."""
+    return (_TRUST_CARD_TEMPLATE
+            .replace("__TRUST_TIERS_JS__", tiers_js_table())
+            .replace("__DECISIONS_JS__", _decisions_js())
+            .replace("__HEADLINE_FOLLOWS_DECISION__",
+                     "true" if headline_follows_decision else "false"))
+
+
+TRUST_CARD_HTML = trust_card_html(True)
