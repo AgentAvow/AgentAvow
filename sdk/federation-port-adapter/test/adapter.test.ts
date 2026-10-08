@@ -234,3 +234,28 @@ test('attestation times unparseable: failed (attestation_times_invalid) on every
   assert.ok(out.claims.every(c => c.status === 'failed' && c.reason === 'attestation_times_invalid'))
   assert.equal(out.valid_until, undefined)
 })
+
+test('credentials in the endpoint URL never leave the process: user:pass@, ?token= and #fragment are stripped before the scan request, and the subject is compared without them', async () => {
+  const { av, adapter } = make()
+  const u = new URL(ENDPOINT)
+  const credentialed = `${u.protocol}//alice:s3cret@${u.host}${u.pathname}?token=sk_live_abc123&tenant=acme#frag`
+  const out = await adapter.check!(input(evidenceFor(servedTool(), credentialed)))
+  const c = byId(out.claims)
+  assert.equal(c[CLAIM_BINDS].status, 'established')
+  assert.equal(c[CLAIM_FRESH].status, 'established')
+  assert.equal(av.calls.length, 1)
+  const sent = av.calls[0].searchParams.get('endpoint')!
+  assert.equal(sent, ENDPOINT)
+  for (const secret of ['alice', 's3cret', 'sk_live_abc123', 'acme', 'frag']) assert.ok(!av.calls[0].href.includes(secret), secret)
+})
+
+test('a path segment that looks like a key is withheld: failed, and no request leaves the process', async () => {
+  const { av, adapter } = make()
+  const u = new URL(ENDPOINT)
+  for (const path of ['/mcp/0f8fad5b-d9cb-469f-a165-70867728950e', '/v1/sk9Xq2LmT7vB4nR8wZ3yK6pD1hF5jC0aE', '/u/abc123def456ghi7/mcp']) {
+    const out = await adapter.check!(input(evidenceFor(servedTool(), `${u.protocol}//${u.host}${path}`)))
+    assert.deepEqual([...new Set(out.claims.map(x => x.status))], ['failed'])
+    assert.equal(out.claims[0].reason, 'endpoint_path_looks_like_a_credential')
+  }
+  assert.equal(av.calls.length, 0)
+})

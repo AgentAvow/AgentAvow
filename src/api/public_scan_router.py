@@ -1655,10 +1655,15 @@ async def scan_mcp_endpoint(
     `&probe=true` additionally runs the opt-in live probe (see `probe`)."""
     import hashlib
 
-    from src.ssrf import validate_url_https
+    from src.ssrf import CredentialedURLError, mcp_endpoint_identity, validate_url_https
 
     try:
-        url = validate_url_https(endpoint, field_name="endpoint")
+        url = mcp_endpoint_identity(validate_url_https(endpoint, field_name="endpoint"))
+    except CredentialedURLError:
+        raise HTTPException(
+            400, "endpoint path looks like a credential; AgentAvow does not scan or publish "
+            "credentialed URLs. Remove the key from the URL and retry.",
+        )
     except Exception:
         raise HTTPException(400, "endpoint must be a valid https:// URL")
     full = f"mcp:{url}"
@@ -1820,6 +1825,15 @@ async def submit_tool(
             result = await asyncio.wait_for(scan_skill(owner, repo), timeout=90)
             cap_owner, cap_repo = owner, repo
         elif surface == "mcp":
+            from src.ssrf import CredentialedURLError, mcp_endpoint_identity, validate_url_https
+            try:
+                ident = mcp_endpoint_identity(validate_url_https(ident, field_name="identifier"))
+            except CredentialedURLError:
+                raise HTTPException(
+                    400, "endpoint path looks like a credential; remove it and retry",
+                )
+            except Exception:
+                raise HTTPException(400, "identifier must be a valid https:// URL")
             result = await asyncio.wait_for(scan_mcp(ident), timeout=90)
             cap_owner, cap_repo = "mcp", ident
         else:  # npm / pypi / crates / huggingface / docker

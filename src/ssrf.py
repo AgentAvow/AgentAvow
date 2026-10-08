@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 from urllib.parse import urlparse
 
@@ -262,3 +263,37 @@ def validate_url_https_optional(
     if url is None:
         return None
     return validate_url_https(url, field_name=field_name)
+
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+
+
+class CredentialedURLError(ValueError):
+    """The URL carries what looks like a credential in a place we cannot strip."""
+
+
+def mcp_endpoint_identity(url: str) -> str:
+    """The identity of an MCP server endpoint: scheme, host[:port] and path.
+
+    A URL's ``user:pass@``, query and fragment are not part of which server it is, and a
+    token or tenant there must never be fetched, cached, signed into a subject or listed
+    in the public catalog, so they are dropped. A path segment that looks like a key (a
+    UUID, a 32+ character alphanumeric run, or a 16+ character run mixing letters with
+    three or more digits) cannot be dropped without changing the server, so the URL is
+    refused instead. Same rule as the Claude Code plugin and the federation-port adapter.
+    """
+    from urllib.parse import unquote, urlsplit, urlunsplit
+
+    p = urlsplit(url)
+    host = (p.hostname or "").lower()
+    if p.port:
+        host = f"{host}:{p.port}"
+    path = p.path or ""
+    for segment in unquote(path).split("/"):
+        if _UUID_RE.search(segment):
+            raise CredentialedURLError("endpoint path looks like a credential")
+        for run in re.split(r"[-_.~]", segment):
+            if len(run) >= 32 and run.isalnum():
+                raise CredentialedURLError("endpoint path looks like a credential")
+            if len(run) >= 16 and re.search(r"[A-Za-z]", run) and len(re.findall(r"\d", run)) >= 3:
+                raise CredentialedURLError("endpoint path looks like a credential")
+    return urlunsplit((p.scheme.lower(), host, path, "", ""))

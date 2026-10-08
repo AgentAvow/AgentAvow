@@ -123,6 +123,17 @@ async def add_watch(
         raise HTTPException(status_code=400, detail="unsupported surface")
     owner = body.owner.strip().strip("/")
     repo = body.repo.strip().strip("/") if surface != "mcp" else body.repo.strip()
+    if surface == "mcp":
+        # A watch stores and re-scans the endpoint: never keep a token, tenant or
+        # user:pass@ from the URL (see src/ssrf.mcp_endpoint_identity).
+        from src.ssrf import CredentialedURLError, mcp_endpoint_identity
+        try:
+            repo = mcp_endpoint_identity(repo)
+        except CredentialedURLError:
+            raise HTTPException(
+                status_code=400,
+                detail="endpoint path looks like a credential; remove it and retry",
+            )
     if not owner or not repo:
         raise HTTPException(status_code=400, detail="owner and repo are required")
 

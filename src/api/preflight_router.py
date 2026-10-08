@@ -141,10 +141,12 @@ async def preflight_mcp(
 ) -> PreflightResponse:
     """Check a LIVE MCP server against the Anthropic + OpenAI submission gates."""
     from src.api.public_scan_router import _scan_result_to_dict
-    from src.ssrf import validate_url_https
+    from src.ssrf import CredentialedURLError, mcp_endpoint_identity, validate_url_https
 
     try:
-        url = validate_url_https(endpoint, field_name="endpoint")
+        url = mcp_endpoint_identity(validate_url_https(endpoint, field_name="endpoint"))
+    except CredentialedURLError:
+        raise HTTPException(400, "endpoint path looks like a credential; remove it and retry")
     except Exception:
         raise HTTPException(400, "endpoint must be a valid https:// URL")
 

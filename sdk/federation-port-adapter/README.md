@@ -19,7 +19,15 @@ test/fixtures/             the pinned DeepWiki attestation (docs/standards/tool-
 
 ## Run
 
-Node 22.18+ (type stripping). The harness tests need a federation-port checkout with `npm ci` done.
+Node 22.18+ (type stripping). The ten harness tests need a federation-port checkout with `npm ci` done and
+`FEDERATION_PORT_DIR` pointing at it; without the variable they are skipped, not failed.
+
+**Endpoint URLs.** A server is identified by scheme, host and path. The adapter strips `user:pass@`, the query
+and the fragment before it requests a scan and compares the signed subject against the URL without them, so a
+token or tenant in a configured endpoint never leaves the process. A path segment that looks like a key (a
+UUID, a 32+ character run, a 16+ character run with three or more digits) is withheld: the check returns
+`failed` with `endpoint_path_looks_like_a_credential` and makes no request. The AgentAvow scan API applies
+the same rule server-side.
 
 ```
 npm install

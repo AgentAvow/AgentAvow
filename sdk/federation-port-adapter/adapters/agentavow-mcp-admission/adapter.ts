@@ -127,6 +127,23 @@ const bytes = (o: unknown): Uint8Array => new TextEncoder().encode(JSON.stringif
 const claim = (id: string, status: ClaimStatus, reason?: string): ClaimResult => (reason ? { claim: id, status, reason } : { claim: id, status })
 const every = (status: ClaimStatus, reason: string): ClaimResult[] => CLAIM_IDS.map(id => claim(id, status, reason))
 
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+/** True when a path segment looks like a credential rather than a route (same rule as the plugin's
+ *  `_has_secret_path`): a UUID, a 32+ character alphanumeric run, or a 16+ character run mixing
+ *  letters with three or more digits. Words, versions and dates split on - _ . ~ pass. */
+export function hasSecretPath(pathname: string): boolean {
+  let path: string
+  try { path = decodeURIComponent(pathname) } catch { return true }
+  for (const segment of path.split('/')) {
+    if (UUID_RE.test(segment)) return true
+    for (const run of segment.split(/[-_.~]/)) {
+      if (run.length >= 32 && /^[A-Za-z0-9]+$/.test(run)) return true
+      if (run.length >= 16 && /[A-Za-z]/.test(run) && (run.match(/\d/g) ?? []).length >= 3) return true
+    }
+  }
+  return false
+}
+
 export function createAdapter(ctx: AdapterContext): Adapter {
   const cfg = ctx.config as Config
   if (cfg.jwk !== undefined && !isJwk(cfg.jwk)) throw new Error('config_jwk_invalid')
@@ -156,7 +173,17 @@ export function createAdapter(ctx: AdapterContext): Adapter {
       }
       const endpoint = cfg.endpoint ?? ev.endpoint
       if (typeof endpoint !== 'string') return { evidence: new Uint8Array(), claims: every('failed', 'endpoint_missing') }
-      try { if (new URL(endpoint).protocol !== 'https:') throw new Error() } catch {
+      let scanUrl: string
+      try {
+        const u = new URL(endpoint)
+        if (u.protocol !== 'https:') throw new Error()
+        // A server is identified by scheme, host and path. Credentials in the URL (user:pass@, a
+        // ?token=, a #fragment) are not part of that identity and never leave the process: the
+        // scan is requested, and the signed subject compared, for the URL without them. A path
+        // segment that looks like a key is withheld rather than sent. Same rule as the plugin.
+        scanUrl = `${u.protocol}//${u.host}${u.pathname}`
+        if (hasSecretPath(u.pathname)) return { evidence: new Uint8Array(), claims: every('failed', 'endpoint_path_looks_like_a_credential') }
+      } catch {
         return { evidence: new Uint8Array(), claims: every('failed', 'endpoint_invalid') }
       }
 
@@ -166,7 +193,7 @@ export function createAdapter(ctx: AdapterContext): Adapter {
 
       // 3. The signed attestation for that server. A transport error propagates: the runtime records
       //    the component as unavailable, which is never success.
-      const res = await ctx.fetch(`${apiBase}${SCAN_PATH}?endpoint=${encodeURIComponent(endpoint)}`, { headers: { accept: 'application/json' } })
+      const res = await ctx.fetch(`${apiBase}${SCAN_PATH}?endpoint=${encodeURIComponent(scanUrl)}`, { headers: { accept: 'application/json' } })
       const body = new Uint8Array(await res.arrayBuffer())
       if (res.status !== 200) return { evidence: body, claims: every('failed', `scan_http_${res.status}`) }
       let jws: unknown
@@ -184,7 +211,7 @@ export function createAdapter(ctx: AdapterContext): Adapter {
       //    recomputable, or about another server.
       if (!signatureValid(a, key, jwk.kid)) return { evidence: bytes(out), claims: every('not_established', 'signature_invalid') }
       if (jcs(a.payload) !== a.payloadBytes.toString('utf8')) return { evidence: bytes(out), claims: every('not_established', 'payload_not_canonical') }
-      if (get(a.payload, 'subject', 'id') !== `mcp:${endpoint}`) return { evidence: bytes(out), claims: every('not_established', 'subject_mismatch') }
+      if (get(a.payload, 'subject', 'id') !== `mcp:${scanUrl}`) return { evidence: bytes(out), claims: every('not_established', 'subject_mismatch') }
       const issuedMs = Date.parse(String(a.payload.issuedAt))
       const expiresMs = Date.parse(String(a.payload.expiresAt))
       if (!Number.isFinite(issuedMs) || !Number.isFinite(expiresMs)) return { evidence: bytes(out), claims: every('failed', 'attestation_times_invalid') }

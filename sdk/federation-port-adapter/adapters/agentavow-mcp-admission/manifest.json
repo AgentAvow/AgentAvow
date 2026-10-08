@@ -10,12 +10,12 @@
     "contact": "https://github.com/AgentAvow/AgentAvow"
   },
   "artifact": {
-    "version": "0.1.0",
+    "version": "0.1.1",
     "entry": "adapter.ts",
     "files": [
       "adapter.ts"
     ],
-    "digest": "sha256:81c18f161334aa5f5ca08ede7b5b9d5344034d2745329baebd167aa02d08cd60"
+    "digest": "sha256:c7d2a4159bd53c2df28360d9a8bdc9a821bd0954125a35b88ef2ca042408d1d1"
   },
   "role": "tool_admission",
   "schemas": {
