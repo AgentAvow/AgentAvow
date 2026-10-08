@@ -562,3 +562,17 @@ def test_verdict_line_flags_a_deprecated_package(hook, monkeypatch, capsys):
     out = _run(hook, monkeypatch, capsys, [_mcp("a", "https://mcp.example.com/mcp")], scan)
     assert ("⚠️ MCP 'a' (https://mcp.example.com/mcp): Review before you connect — the "
             "maintainer has deprecated this package · AgentAvow 70/100") in out
+
+
+
+def test_plugin_manifest_carries_every_directory_listing_field():
+    """Anthropic's directory reads these from plugin.json at submission; a missing one
+    shows as "Nothing is recorded" on the listing."""
+    import urllib.parse
+    plugin = json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text())
+    for field in ("icon", "documentationUrl", "supportUrl", "privacyPolicyUrl", "termsOfServiceUrl",
+                  "homepage", "repository", "description", "keywords"):
+        assert plugin.get(field), field
+    for field in ("documentationUrl", "supportUrl", "privacyPolicyUrl", "termsOfServiceUrl"):
+        assert urllib.parse.urlsplit(plugin[field]).scheme == "https", field
+    assert (PLUGIN_DIR / plugin["icon"]).is_file()

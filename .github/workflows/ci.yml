@@ -183,3 +183,39 @@ jobs:
           python3 -c "import json; d=json.load(open('agentavow-scan.json')); print(d['verdict_phrase'], d['trust_score'])"
           test -s gl-code-quality-report.json
           docker image inspect agentavow/scanner:${{ github.sha }} --format 'scanner image: {{.Size}} bytes'
+
+  # Publish the slim scanner image so the GitLab component (gitlab/templates/scan.yml,
+  # default image ghcr.io/agentavow/scanner:0.1) is pullable without building it.
+  # Only on pushes to main, only after the smoke test above passed.
+  scanner-image:
+    name: Publish scanner image (ghcr.io/agentavow/scanner)
+    runs-on: ubuntu-latest
+    needs: [docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/scanner.Dockerfile
+          push: true
+          tags: |
+            ghcr.io/agentavow/scanner:0.1
+            ghcr.io/agentavow/scanner:latest
+            ghcr.io/agentavow/scanner:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/AgentAvow/AgentAvow
+            org.opencontainers.image.description=AgentAvow slim scanner (agentavow scan) for CI
+            org.opencontainers.image.licenses=MIT
