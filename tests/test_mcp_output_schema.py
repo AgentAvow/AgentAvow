@@ -186,3 +186,26 @@ async def test_text_only_tools_are_unaffected(_quiet):
     assert res.isError is False
     assert res.structuredContent is None
     assert "AgentAvow" in res.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_version_argument_pins_the_scanned_version(monkeypatch, _quiet):
+    seen = {}
+
+    async def _scan(path, params=None):
+        seen["params"] = dict(params or {})
+        return _CLEAN
+
+    monkeypatch.setattr(mod, "_get", _scan)
+    await _call("scan_package", {"registry": "npm", "name": "chalk", "version": "5.3.0"})
+    assert "5.3.0" in seen["params"].values()
+
+
+def test_card_resource_contents_carry_the_widget_metadata():
+    import asyncio
+    contents = asyncio.run(mod._read_resource(mod._CARD_URI))
+    meta = contents[0].meta
+    assert meta["openai/widgetDomain"] == "https://agentavow.com"
+    assert meta["openai/widgetCSP"]["redirect_domains"] == ["https://agentavow.com"]
+    assert meta["openai/widgetDescription"]
+    assert not any(k == "ui" or k.startswith("ui.") for k in meta)  # Claude-safe: openai/* only

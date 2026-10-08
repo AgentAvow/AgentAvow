@@ -26,7 +26,9 @@
     "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
      "connect_domains": [],
-     "redirect_domains": [],
+     "redirect_domains": [
+      "https://agentavow.com"
+     ],
      "resource_domains": []
     },
     "openai/widgetDomain": "https://agentavow.com",
@@ -317,7 +319,9 @@
     "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
      "connect_domains": [],
-     "redirect_domains": [],
+     "redirect_domains": [
+      "https://agentavow.com"
+     ],
      "resource_domains": []
     },
     "openai/widgetDomain": "https://agentavow.com",
@@ -333,7 +337,7 @@
     "readOnlyHint": true,
     "title": "Scan a package"
    },
-   "description": "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with AgentAvow. Returns one of three answers with its reason (Safe to connect, Review before you connect, or Do not connect), a 0-100 trust score, an adoption score from real usage (downloads per week), findings with remediation, and a signed attestation. Also reports repo-vs-artifact drift (files shipped that aren't in the source). Read-only; calls agentavow.com.",
+   "description": "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with AgentAvow. Returns one of three answers with its reason (Safe to connect, Review before you connect, or Do not connect), a 0-100 trust score, an adoption score from real usage (downloads per week), findings with remediation, and a signed attestation. Also reports published advisories that affect the scanned version, the maintainer's deprecation notice, repo-vs-artifact drift (files shipped that aren't in the source), and what a sandbox run observed when one applies. Scans the latest version unless `version` (or a pin in the name) names one. Read-only; calls agentavow.com.",
    "inputSchema": {
     "properties": {
      "ecosystem": {
@@ -355,6 +359,11 @@
      },
      "surface": {
       "description": "Alias for registry.",
+      "type": "string"
+     },
+     "version": {
+      "description": "Exact version to scan, e.g. '5.3.0'. Optional: the latest version by default. A pin in the name ('chalk@5.3.0', 'requests==2.32.5') works too.",
+      "maxLength": 64,
       "type": "string"
      }
     },
@@ -615,7 +624,9 @@
     "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
      "connect_domains": [],
-     "redirect_domains": [],
+     "redirect_domains": [
+      "https://agentavow.com"
+     ],
      "resource_domains": []
     },
     "openai/widgetDomain": "https://agentavow.com",

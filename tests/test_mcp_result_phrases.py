@@ -143,8 +143,11 @@ def test_about_names_the_three_phrases_and_both_scores():
 
 def test_card_uri_and_meta_unchanged():
     assert ms._CARD_URI == "ui://agentavow/trust-card-v13.html"
+    # v1.1: the card's "Open report" link (agentavow.com) is allow-listed for ChatGPT;
+    # it fetches nothing, so connect/resource stay empty.
     assert ms._CARD_META["openai/widgetCSP"] == {
-        "connect_domains": [], "resource_domains": [], "redirect_domains": []}
+        "connect_domains": [], "resource_domains": [],
+        "redirect_domains": ["https://agentavow.com"]}
 
 
 def test_card_template_is_fully_substituted():

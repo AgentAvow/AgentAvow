@@ -68,6 +68,9 @@ _CARD_MIME = "text/html;profile=mcp-app"
 # alias for the same resource. `domain`/`csp` are declared for ChatGPT app review;
 # the card is fully self-contained (inline HTML/CSS/SVG, no external fetches), so
 # both allow-lists are empty.
+# The card's "Open report" button opens agentavow.com; ChatGPT needs it allow-listed.
+_WIDGET_ORIGIN = "https://agentavow.com"
+_WIDGET_CSP = {"connect_domains": [], "resource_domains": [], "redirect_domains": [_WIDGET_ORIGIN]}
 _CARD_META = {
     # Shared MCP-Apps standard — Claude reads this; keep `ui` MINIMAL (just the
     # resourceUri) so a strict SEP-1865 host never chokes on extra fields. (Putting
@@ -77,7 +80,7 @@ _CARD_META = {
     # ChatGPT/OpenAI-namespaced fields live OUTSIDE `ui` so only ChatGPT reads them.
     "openai/outputTemplate": _CARD_URI,
     "openai/widgetDomain": "https://agentavow.com",
-    "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
+    "openai/widgetCSP": _WIDGET_CSP,
 }
 
 # Where to reach our own public API from inside the container, and the public web
@@ -1637,8 +1640,11 @@ _TOOLS: list[types.Tool] = [
             "AgentAvow. Returns one of three answers with its reason (Safe to connect, Review "
             "before you connect, or Do not connect), a 0-100 trust score, an adoption score from "
             "real usage (downloads per week), findings with remediation, and a signed "
-            "attestation. Also reports repo-vs-artifact drift "
-            "(files shipped that aren't in the source). Read-only; calls agentavow.com."
+            "attestation. Also reports published advisories that affect the scanned version, "
+            "the maintainer's deprecation notice, repo-vs-artifact drift (files shipped that "
+            "aren't in the source), and what a sandbox run observed when one applies. Scans the "
+            "latest version unless `version` (or a pin in the name) names one. Read-only; "
+            "calls agentavow.com."
         ),
         inputSchema={
             "type": "object",
@@ -1652,6 +1658,13 @@ _TOOLS: list[types.Tool] = [
                 "name": {
                     "type": "string",
                     "description": "Package name, e.g. 'chalk' (or 'org/model' for hf).",
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Exact version to scan, e.g. '5.3.0'. Optional: the latest "
+                                   "version by default. A pin in the name ('chalk@5.3.0', "
+                                   "'requests==2.32.5') works too.",
+                    "maxLength": 64,
                 },
                 "force": {
                     "type": "boolean",
@@ -1839,7 +1852,7 @@ async def _list_resources() -> list[types.Resource]:
     # the resource content, and an unexpected ui.* on the resource can break its render).
     _r.meta = {
         "openai/widgetDomain": "https://agentavow.com",
-        "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
+        "openai/widgetCSP": _WIDGET_CSP,
     }
     return [_r]
 
@@ -1848,8 +1861,10 @@ async def _list_resources() -> list[types.Resource]:
 # openai/* keys only: an unexpected ui.* on the resource has broken Claude's render.
 _CARD_CONTENTS_META = {
     "openai/widgetDomain": "https://agentavow.com",
-    "openai/widgetCSP": {"connect_domains": [], "resource_domains": [], "redirect_domains": []},
+    "openai/widgetCSP": _WIDGET_CSP,
     "openai/widgetPrefersBorder": True,
+    # Inline only: the card is a compact summary with a link to the full report.
+    "openai/ui": {"availableDisplayModes": ["inline"]},
     "openai/widgetDescription": (
         "An AgentAvow trust card: the answer (Safe to connect, Review before you connect, "
         "or Do not connect) with its reason, the 0-100 trust score, the adoption score, "
@@ -2015,6 +2030,8 @@ async def _run_tool(
             # A pinned version rides in the name the way the ecosystems write it
             # (chalk@5.3.0, requests==2.32.5, serde@1.0.200) — no tool-schema change.
             pkg, version = _split_pinned_version(surface, pkg)
+            # The explicit `version` argument; a pin in the name wins if both are given.
+            version = version or (str(arguments.get("version") or "").strip() or None)
             params = dict(fp or {})
             if version:
                 params["version"] = version

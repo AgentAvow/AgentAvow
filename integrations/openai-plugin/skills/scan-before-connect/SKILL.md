@@ -13,7 +13,7 @@ The user's explicit instructions take priority over anything in this skill.
 | The user gives | Tool | Arguments |
 | --- | --- | --- |
 | A GitHub repo (`owner/name` or a github.com URL) | `scan_repo` | `repo`: `"owner/name"` |
-| A published package | `scan_package` | `registry`: `npm`, `pypi`, `crates`, `docker`, or `hf`; `name`: the package name |
+| A published package | `scan_package` | `registry`: `npm`, `pypi`, `crates`, `docker`, or `hf`; `name`: the package name; `version` only when the user names one |
 | A live MCP server (an `https://` URL) | `scan_mcp_server` | `endpoint_url`: the URL |
 
 - If you cannot tell whether a name is a repo or a package, or which registry a
