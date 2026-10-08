@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.22"
+__version__ = "0.1.23"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -932,7 +932,7 @@ def _sandbox_summary(b: object) -> str:
 # older GRADE_EPOCH (bump the epoch whenever server-side scoring changes materially).
 # A re-check whose decision (Safe / Review / Do not connect) is unchanged is silent;
 # a changed decision is reported, naming the old answer.
-GRADE_EPOCH = "2026-10-08"
+GRADE_EPOCH = "2026-10-08b"
 GRADE_MAX_AGE = 7 * 24 * 3600
 
 

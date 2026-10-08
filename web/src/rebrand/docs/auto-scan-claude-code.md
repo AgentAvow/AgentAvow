@@ -31,7 +31,7 @@ score: **Safe to connect**, **Review before you connect**, or **Do not connect**
   reads Do not connect (and, as before, a server in the `blocked` tier). The install
   hook pauses for your confirmation only on Do not connect.
 - **Review is a note, never a prompt.** A server or package that reads Review before
-  you connect is reported with its reason and proceeds. From 0.1.22, a clean scan of
+  you connect is reported with its reason and proceeds. From 0.1.23, a clean scan of
   very little code reads Safe to connect, with a reason that says there was little
   code to inspect.
 - **Dependencies are advice.** The session-start lines for your project's dependencies
