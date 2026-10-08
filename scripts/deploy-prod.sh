@@ -139,6 +139,8 @@ fi
 # --- Step 3: Build backend ---
 if $BACKEND; then
   step "Building backend Docker image"
+  # bluesky-subscriber has no build of its own: it runs the image tagged here
+  # (agentavow-backend:latest), and the `up -d` in step 5 recreates it on the new image.
   if $DRY_RUN; then
     echo "    Would run: cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} build backend"
   else

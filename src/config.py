@@ -423,6 +423,11 @@ class Settings(BaseSettings):
 
     # Bluesky feed generator
     bluesky_feed_enabled: bool = False
+    # Run the Jetstream subscriber inside the web workers' lifespan. Prod sets this
+    # false and runs it in its own container (python -m
+    # src.feeds.bluesky.run_subscriber_process): keyword-matching the whole firehose
+    # on a worker's event loop stalled every request that worker served.
+    bluesky_subscriber_in_web: bool = True
 
     # Bluesky starter pack — auto-refresh every 30 days
     starter_pack_refresh_enabled: bool = True

@@ -13,6 +13,12 @@ import time
 
 import websockets  # type: ignore[import-untyped]
 
+# Explicit: newer websockets resolves submodules lazily, so `websockets.exceptions`
+# is only an attribute once something imports it. In the web app uvicorn did; in the
+# standalone subscriber process the first `except ...ConnectionClosed` raised
+# AttributeError and killed the process.
+import websockets.exceptions  # type: ignore[import-untyped]  # noqa: F401
+
 from src.feeds.bluesky.keywords import matches_keywords
 
 logger = logging.getLogger(__name__)
@@ -22,6 +28,10 @@ JETSTREAM_URL = (
     "wss://jetstream2.us-east.bsky.network/subscribe"
     "?wantedCollections=app.bsky.feed.post"
 )
+
+# Single-instance lock: whichever process holds it (a web worker or the dedicated
+# subscriber container) consumes the firehose; everyone else waits.
+BLUESKY_JETSTREAM_LOCK = "ag:lock:bluesky-jetstream"
 
 # Redis key for the feed sorted set (score = timestamp_us)
 FEED_KEY = "bluesky:feed:ai-agent-news"
