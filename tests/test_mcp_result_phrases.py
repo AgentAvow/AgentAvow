@@ -1,7 +1,7 @@
 """The hosted MCP connector's scan RESULTS lead with the three phrases (Safe to connect /
 Review before you connect / Do not connect) and the reason, plus " · Certified" when
 certified. structuredContent gains decision / decision_final / decision_reason beside
-the unchanged binary verdict. HEADLINE_FOLLOWS_DECISION decides what leads where the
+the binary verdict (which follows decide() since 2026-10-08). HEADLINE_FOLLOWS_DECISION decides what leads where the
 phrase and the binary verdict disagree (a thin-coverage 74). tools/list and the
 initialize instructions are pinned separately (test_mcp_tools_list_snapshot.py)."""
 from __future__ import annotations
@@ -80,16 +80,14 @@ def test_do_not_connect_leads_with_the_phrase_and_reason(follows):
     assert "npm install x" not in text
 
 
-def test_thin_coverage_keeps_the_old_wording_unless_the_flag_is_on(follows):
+def test_thin_coverage_reads_safe_with_its_reason(follows):
+    # Since the binary verdict follows decide() (2026-10-08), decision and verdict agree
+    # for thin coverage too, so both flag settings lead with the phrase.
     first = _first(THIN)
-    if follows:
-        assert first.startswith("✅ Safe to connect — nothing found; little code to inspect. "
-                                "x · npm: trust 74/100. Score capped because")
-    else:
-        # decision=safe but verdict=needs_review: the headline must not say "safe" while
-        # the frozen instructions say >=81 is safe.
-        assert first.startswith("◍ Clean, limited coverage — x · npm, 74/100.")
-        assert "Safe to connect" not in first
+    assert first.startswith("✅ Safe to connect — nothing found; little code to inspect. "
+                            "x · npm: trust 74/100.")
+    # The capped-score explanation rides on the Next line (not repeated here).
+    assert "capped because" in _next(THIN)
 
 
 def test_api_decision_fields_are_preferred_over_recomputing(follows):
@@ -117,15 +115,14 @@ def test_flag_defaults_to_always_leading_with_the_phrase():
 # ── structuredContent ─────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("data,decision,verdict", [
-    (CERTIFIED, "safe", "safe"), (THIN, "safe", "needs_review"),
+    (CERTIFIED, "safe", "safe"), (THIN, "safe", "safe"),
     (REVIEW, "review", "needs_review"), (BLOCK, "do_not_connect", "needs_review"),
 ])
-def test_struct_carries_the_decision_beside_the_unchanged_verdict(follows, data, decision,
-                                                                  verdict):
+def test_struct_verdict_agrees_with_the_decision(follows, data, decision, verdict):
     s = _struct(data)
     assert s["decision"] == decision and s["decision_final"] is True
     assert isinstance(s["decision_reason"], str) and s["decision_reason"]
-    assert s["verdict"] == verdict  # binary verdict keeps its meaning
+    assert s["verdict"] == verdict  # follows decide(): safe iff decision == safe
     for k in ("verdict_reason", "certified", "certified_mark", "trust_score", "tier",
               "critical", "high", "top_findings", "subscores", "install", "adoption",
               "report_url", "report_json_url", "verify_url", "sandbox", "incident"):
@@ -216,17 +213,16 @@ def test_card_review_and_do_not_connect():
     assert "review these before you connect" not in b["why"]["text"]
 
 
-def test_card_thin_coverage_follows_the_flag():
+def test_card_thin_coverage_leads_with_the_phrase():
     sc = _struct(THIN)
-    off = _render(sc, False)
-    assert off["lead"]["display"] == "none" and off["pill"]["text"] == "◍ LIMITED"
-    on = _render(sc, True)
-    assert "Safe to connect" in on["lead"]["html"]
-    assert "little code to inspect" in on["lead"]["html"]
+    for flag in (False, True):  # decision and verdict agree, so the flag no longer matters
+        out = _render(sc, flag)
+        assert "Safe to connect" in out["lead"]["html"]
+        assert "little code to inspect" in out["lead"]["html"]
 
 
 def test_card_without_decision_falls_back_to_the_old_wording():
-    for data, pill in ((CERTIFIED, "✓ CERTIFIED"), (REVIEW, "⚠ REVIEW"), (THIN, "◍ LIMITED")):
+    for data, pill in ((CERTIFIED, "✓ CERTIFIED"), (REVIEW, "⚠ REVIEW"), (THIN, "✓ SAFE")):
         sc = _struct(data)
         for k in ("decision", "decision_final", "decision_reason"):
             sc.pop(k)

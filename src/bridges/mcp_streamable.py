@@ -1207,8 +1207,10 @@ def _next_step(decision: _Decision, mode: str, verb: str, cap: str, advisories: 
     the reason and what to check first; Do not connect → don't, see the report."""
     act = "install" if installable else "connect"
     if decision.decision == "safe":
-        tail = (f" The score is {cap}, a confidence limit, not a finding."
-                if mode == "limited" else "")
+        # Thin coverage reads Safe now that the verdict follows decide(), so key the
+        # capped-score note off the decision's own reason, not the old "limited" mode.
+        thin = mode == "limited" or "little code to inspect" in decision.reason
+        tail = f" The score is {cap}, a confidence limit, not a finding." if thin else ""
         return f"Safe to connect: {act} it as usual.{tail}"
     if decision.decision == "do_not_connect":
         return (f"Do not connect or install it ({decision.reason}). The full report has the "
