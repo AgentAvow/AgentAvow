@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -186,6 +187,38 @@ _TAG_METADATA = [
 ]
 
 
+def _start_bluesky_subscriber_in_web() -> asyncio.Task[None] | None:
+    """Schedule the Jetstream subscriber on this worker's event loop, if configured.
+
+    Needs both ``bluesky_feed_enabled`` and ``bluesky_subscriber_in_web``. Prod turns
+    the second off and runs ``src.feeds.bluesky.run_subscriber_process`` in a separate
+    container, because matching the firehose here holds the event loop and slows
+    every request the worker serves.
+    """
+    if not getattr(settings, "bluesky_feed_enabled", False):
+        return None
+    if not getattr(settings, "bluesky_subscriber_in_web", True):
+        logging.getLogger(__name__).info(
+            "Bluesky Jetstream subscriber not started in web worker "
+            "(BLUESKY_SUBSCRIBER_IN_WEB=false; runs in its own process)"
+        )
+        return None
+
+    from src.feeds.bluesky.subscriber import BLUESKY_JETSTREAM_LOCK, run_subscriber
+    from src.worker_lock import run_exclusively
+
+    # The firehose is consumed by ONE worker; the others wait on the lock and
+    # take over if it dies. Without this every uvicorn worker ran its own copy.
+    task = asyncio.create_task(
+        run_exclusively(BLUESKY_JETSTREAM_LOCK, 60, run_subscriber, retry=30),
+        name="bluesky-jetstream",
+    )
+    logging.getLogger(__name__).info(
+        "Bluesky Jetstream subscriber scheduled (single-worker lock)"
+    )
+    return task
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan — startup/shutdown hooks."""
@@ -255,22 +288,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "Startup trust recompute skipped", exc_info=True,
         )
 
-    # Start Bluesky Jetstream subscriber for AI Agent News feed
-    if getattr(settings, "bluesky_feed_enabled", False):
-        import asyncio
-
-        from src.feeds.bluesky.subscriber import run_subscriber
-        from src.worker_lock import run_exclusively
-
-        # The firehose is consumed by ONE worker; the others wait on the lock and
-        # take over if it dies. Without this every uvicorn worker ran its own copy.
-        asyncio.create_task(
-            run_exclusively("ag:lock:bluesky-jetstream", 60, run_subscriber, retry=30),
-            name="bluesky-jetstream",
-        )
-        logging.getLogger(__name__).info(
-            "Bluesky Jetstream subscriber scheduled (single-worker lock)"
-        )
+    # Start Bluesky Jetstream subscriber for AI Agent News feed (unless it runs in
+    # its own container — BLUESKY_SUBSCRIBER_IN_WEB=false)
+    _bluesky_task = _start_bluesky_subscriber_in_web()  # noqa: F841 — keep a reference
 
     # Warn if JWT secret is still the default placeholder (non-debug mode
     # already crashes, but staging / misconfigured prod should be visible).

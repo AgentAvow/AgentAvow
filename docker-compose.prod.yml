@@ -33,12 +33,20 @@ services:
           memory: 256M
 
   backend:
+    # Named image so bluesky-subscriber runs the exact image `build backend` produces
+    # (a second `build:` would make its own image that `up -d` never rebuilds).
+    image: agentavow-backend:latest
     build:
       context: .
       dockerfile: Dockerfile
     env_file:
       - .env.production
       - .env.secrets
+    environment:
+      # The Jetstream subscriber runs in the bluesky-subscriber service, not on a
+      # web worker's event loop (it held one worker's loop and slowed half the
+      # requests, 2026-10-08).
+      BLUESKY_SUBSCRIBER_IN_WEB: "false"
     expose:
       - "8000"
     command: >
@@ -73,6 +81,33 @@ services:
       resources:
         limits:
           memory: 1792M
+
+  bluesky-subscriber:
+    # Bluesky Jetstream -> AI Agent News feed (Redis). Same image and env as backend.
+    image: agentavow-backend:latest
+    env_file:
+      - .env.production
+      - .env.secrets
+    environment:
+      BLUESKY_SUBSCRIBER_IN_WEB: "true"
+    # Bypass /docker-entrypoint.sh: it runs `alembic upgrade head`, which belongs to
+    # the backend only. Overriding entrypoint also drops the image's uvicorn CMD.
+    entrypoint: ["python", "-m", "src.feeds.bluesky.run_subscriber_process"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 15s
+    cpu_shares: 1024
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 384M
 
   postgres:
     image: postgres:16-alpine
