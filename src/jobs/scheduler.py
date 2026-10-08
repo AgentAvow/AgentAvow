@@ -1140,7 +1140,15 @@ async def _run_watch_rescan(limit: int = 200) -> None:
             await db.execute(select(ToolWatch).where(ToolWatch.active.is_(True)).limit(limit))
         ).scalars().all()
 
+    from src.jobs.watch_alert_hold import score_alerts_held
     from src.scanner.behavioral.trigger import cached_scan_data, on_watch_rescan
+
+    # A planned catalog re-score holds back score-change alerts for this pass; the new
+    # score still becomes the baseline. Definition drift and sandbox changes still alert.
+    held = await score_alerts_held()
+    if held:
+        logger.warning("watch re-scan: score-change alerts held (planned re-score)")
+    held_count = 0
 
     for w in watches:
         async with async_session() as db:
@@ -1176,6 +1184,9 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 w.last_score is not None and new_score is not None
                 and new_score > w.last_score + 5
             )
+            if held and (dropped or improved):
+                held_count += 1
+                dropped = improved = False
             if dropped or drift:
                 reason = "score dropped" if dropped else "signed definition changed"
                 title = f"{w.owner}/{w.repo} — {reason}"
@@ -1299,6 +1310,8 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 fresh.last_behavioral_digest = b_baseline
                 fresh.last_checked_at = datetime.now(timezone.utc)
                 await db.commit()
+    if held:
+        logger.warning("watch re-scan: %d score-change alert(s) held back", held_count)
 
 
 async def _watch_rescan_loop(interval: int = WATCH_RESCAN_INTERVAL) -> None:
