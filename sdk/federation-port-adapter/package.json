@@ -1,6 +1,6 @@
 {
   "name": "@agentavow/federation-port-adapter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "AgentAvow tool_admission component for the federation-port/v0 adapter contract: signed MCP server grade, per-tool definition binding, validity window.",
