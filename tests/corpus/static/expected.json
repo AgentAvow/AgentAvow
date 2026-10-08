@@ -4,8 +4,8 @@
   "npm/@babel/compat-data": {
    "version": "8.0.5",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -38,8 +38,8 @@
   "npm/@babel/generator": {
    "version": "8.0.6",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -55,8 +55,8 @@
   "npm/@babel/helper-compilation-targets": {
    "version": "8.0.7",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -72,8 +72,8 @@
   "npm/@babel/helper-module-imports": {
    "version": "8.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -89,8 +89,8 @@
   "npm/@babel/helper-module-transforms": {
    "version": "8.0.6",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -106,8 +106,8 @@
   "npm/@babel/helper-plugin-utils": {
    "version": "8.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -123,8 +123,8 @@
   "npm/@babel/helper-string-parser": {
    "version": "8.0.6",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -140,8 +140,8 @@
   "npm/@babel/helper-validator-identifier": {
    "version": "8.0.6",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -157,8 +157,8 @@
   "npm/@babel/helpers": {
    "version": "8.0.7",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -174,8 +174,8 @@
   "npm/@babel/parser": {
    "version": "8.0.7",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -208,8 +208,8 @@
   "npm/@babel/template": {
    "version": "8.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -225,8 +225,8 @@
   "npm/@babel/types": {
    "version": "8.0.6",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -264,8 +264,8 @@
   "npm/@jest/types": {
    "version": "30.5.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -281,8 +281,8 @@
   "npm/@jridgewell/resolve-uri": {
    "version": "3.1.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -349,8 +349,8 @@
   "npm/@modelcontextprotocol/server-filesystem": {
    "version": "2026.8.31",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -366,8 +366,8 @@
   "npm/@modelcontextprotocol/server-memory": {
    "version": "2026.8.31",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -382,7 +382,7 @@
   },
   "npm/@modelcontextprotocol/server-puppeteer": {
    "version": "2025.5.12",
-   "score": 67,
+   "score": 74,
    "label": "review",
    "reason": "the maintainer has deprecated this package",
    "files_scanned": 2,
@@ -402,8 +402,8 @@
   "npm/@modelcontextprotocol/server-sequential-thinking": {
    "version": "2026.8.31",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -438,8 +438,8 @@
   "npm/@playwright/mcp": {
    "version": "0.0.83",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -455,8 +455,8 @@
   "npm/@radix-ui/react-primitive": {
    "version": "2.1.11",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -489,8 +489,8 @@
   "npm/@types/estree": {
    "version": "1.0.9",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -522,7 +522,7 @@
   },
   "npm/@upstash/context7-mcp": {
    "version": "4.2.0",
-   "score": 70,
+   "score": 80,
    "label": "safe",
    "reason": "no critical or high findings in 25 files",
    "files_scanned": 25,
@@ -563,8 +563,8 @@
   "npm/acorn": {
    "version": "8.19.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -580,8 +580,8 @@
   "npm/agent-base": {
    "version": "9.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -616,8 +616,8 @@
   "npm/ansi-regex": {
    "version": "6.4.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -633,8 +633,8 @@
   "npm/ansi-styles": {
    "version": "7.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -650,8 +650,8 @@
   "npm/argparse": {
    "version": "3.0.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -684,8 +684,8 @@
   "npm/balanced-match": {
    "version": "4.0.4",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -701,8 +701,8 @@
   "npm/brace-expansion": {
    "version": "5.0.12",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -734,9 +734,9 @@
   },
   "npm/browserslist": {
    "version": "4.29.3",
-   "score": 50,
-   "label": "review",
-   "reason": "trust score 50/100 is under 51",
+   "score": 72,
+   "label": "safe",
+   "reason": "no critical or high findings in 9 files",
    "files_scanned": 9,
    "severity": {
     "critical": 0,
@@ -754,8 +754,8 @@
   "npm/buffer": {
    "version": "6.0.3",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -788,8 +788,8 @@
   "npm/callsites": {
    "version": "4.2.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -805,8 +805,8 @@
   "npm/camelcase": {
    "version": "9.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -839,8 +839,8 @@
   "npm/chalk": {
    "version": "6.0.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -856,8 +856,8 @@
   "npm/chokidar": {
    "version": "5.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -873,8 +873,8 @@
   "npm/cliui": {
    "version": "9.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -890,8 +890,8 @@
   "npm/color-convert": {
    "version": "3.1.3",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -907,8 +907,8 @@
   "npm/color-name": {
    "version": "2.1.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -941,8 +941,8 @@
   "npm/concat-map": {
    "version": "0.0.2",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -958,8 +958,8 @@
   "npm/convert-source-map": {
    "version": "2.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -975,8 +975,8 @@
   "npm/cookie": {
    "version": "2.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -992,8 +992,8 @@
   "npm/cross-spawn": {
    "version": "7.0.6",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -1009,8 +1009,8 @@
   "npm/csstype": {
    "version": "3.2.3",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 1,
    "severity": {
     "critical": 0,
@@ -1026,8 +1026,8 @@
   "npm/debug": {
    "version": "4.4.3",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -1062,8 +1062,8 @@
   "npm/dotenv": {
    "version": "18.0.6",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -1079,8 +1079,8 @@
   "npm/dunder-proto": {
    "version": "1.0.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -1113,8 +1113,8 @@
   "npm/emoji-regex": {
    "version": "11.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1147,8 +1147,8 @@
   "npm/es-define-property": {
    "version": "1.0.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -1202,8 +1202,8 @@
   "npm/escalade": {
    "version": "3.2.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -1219,8 +1219,8 @@
   "npm/escape-string-regexp": {
    "version": "5.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1270,8 +1270,8 @@
   "npm/eslint-visitor-keys": {
    "version": "5.0.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -1304,8 +1304,8 @@
   "npm/estraverse": {
    "version": "5.3.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1338,8 +1338,8 @@
   "npm/eventemitter3": {
    "version": "5.0.4",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -1355,8 +1355,8 @@
   "npm/exa-mcp-server": {
    "version": "3.4.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -1457,8 +1457,8 @@
   "npm/fast-levenshtein": {
    "version": "3.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -1474,8 +1474,8 @@
   "npm/fastq": {
    "version": "1.20.3",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -1491,8 +1491,8 @@
   "npm/fdir": {
    "version": "6.5.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1508,8 +1508,8 @@
   "npm/file-entry-cache": {
    "version": "11.1.5",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1525,8 +1525,8 @@
   "npm/fill-range": {
    "version": "7.1.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -1542,8 +1542,8 @@
   "npm/find-up": {
    "version": "8.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1559,8 +1559,8 @@
   "npm/firecrawl-mcp": {
    "version": "3.28.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -1576,8 +1576,8 @@
   "npm/flat-cache": {
    "version": "6.1.23",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1610,8 +1610,8 @@
   "npm/form-data": {
    "version": "4.0.6",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -1646,8 +1646,8 @@
   "npm/function-bind": {
    "version": "1.1.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -1663,8 +1663,8 @@
   "npm/get-intrinsic": {
    "version": "1.3.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1731,8 +1731,8 @@
   "npm/glob-parent": {
    "version": "6.0.2",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -1748,8 +1748,8 @@
   "npm/globals": {
    "version": "17.13.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -1765,8 +1765,8 @@
   "npm/gopd": {
    "version": "1.2.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -1782,8 +1782,8 @@
   "npm/graceful-fs": {
    "version": "4.2.11",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -1799,8 +1799,8 @@
   "npm/has-flag": {
    "version": "5.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1816,8 +1816,8 @@
   "npm/has-symbols": {
    "version": "1.1.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -1833,8 +1833,8 @@
   "npm/hasown": {
    "version": "2.0.4",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -1850,8 +1850,8 @@
   "npm/http-errors": {
    "version": "2.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -1867,8 +1867,8 @@
   "npm/http-proxy-agent": {
    "version": "9.1.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1884,8 +1884,8 @@
   "npm/https-proxy-agent": {
    "version": "9.1.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -1900,7 +1900,7 @@
   },
   "npm/iconv-lite": {
    "version": "0.7.3",
-   "score": 70,
+   "score": 80,
    "label": "safe",
    "reason": "no critical or high findings in 25 files",
    "files_scanned": 25,
@@ -1920,8 +1920,8 @@
   "npm/ignore": {
    "version": "7.0.12",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -1937,8 +1937,8 @@
   "npm/import-fresh": {
    "version": "4.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1954,8 +1954,8 @@
   "npm/imurmurhash": {
    "version": "0.1.4",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -1971,8 +1971,8 @@
   "npm/inherits": {
    "version": "2.0.4",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1988,8 +1988,8 @@
   "npm/is-core-module": {
    "version": "2.17.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -2005,8 +2005,8 @@
   "npm/is-extglob": {
    "version": "2.1.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2022,8 +2022,8 @@
   "npm/is-fullwidth-code-point": {
    "version": "5.1.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2039,8 +2039,8 @@
   "npm/is-glob": {
    "version": "4.0.3",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2056,8 +2056,8 @@
   "npm/is-number": {
    "version": "7.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2073,8 +2073,8 @@
   "npm/is-stream": {
    "version": "4.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2090,8 +2090,8 @@
   "npm/isarray": {
    "version": "2.0.5",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2123,7 +2123,7 @@
   },
   "npm/jiti": {
    "version": "2.7.0",
-   "score": 71,
+   "score": 84,
    "label": "safe",
    "reason": "no critical or high findings in 10 files",
    "files_scanned": 10,
@@ -2143,8 +2143,8 @@
   "npm/js-tokens": {
    "version": "10.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2160,8 +2160,8 @@
   "npm/js-yaml": {
    "version": "5.4.3",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -2177,8 +2177,8 @@
   "npm/jsesc": {
    "version": "3.1.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2194,8 +2194,8 @@
   "npm/json-schema-traverse": {
    "version": "1.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -2228,8 +2228,8 @@
   "npm/keyv": {
    "version": "6.1.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2245,8 +2245,8 @@
   "npm/kind-of": {
    "version": "6.0.3",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2262,8 +2262,8 @@
   "npm/levn": {
    "version": "0.4.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -2279,8 +2279,8 @@
   "npm/lines-and-columns": {
    "version": "2.0.4",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -2296,8 +2296,8 @@
   "npm/locate-path": {
    "version": "8.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2347,8 +2347,8 @@
   "npm/magic-string": {
    "version": "1.4.3",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2381,8 +2381,8 @@
   "npm/mcp-remote": {
    "version": "0.14.3",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -2398,8 +2398,8 @@
   "npm/micromatch": {
    "version": "4.0.8",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2432,8 +2432,8 @@
   "npm/mime-db": {
    "version": "1.54.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2449,8 +2449,8 @@
   "npm/mime-types": {
    "version": "3.0.2",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2483,8 +2483,8 @@
   "npm/minimist": {
    "version": "1.2.8",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2500,8 +2500,8 @@
   "npm/minipass": {
    "version": "7.1.3",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -2534,8 +2534,8 @@
   "npm/ms": {
    "version": "2.1.3",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2568,8 +2568,8 @@
   "npm/negotiator": {
    "version": "1.1.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -2602,8 +2602,8 @@
   "npm/node-releases": {
    "version": "2.0.57",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2619,8 +2619,8 @@
   "npm/normalize-path": {
    "version": "3.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2636,8 +2636,8 @@
   "npm/npm-run-path": {
    "version": "6.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2653,8 +2653,8 @@
   "npm/object-assign": {
    "version": "4.1.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2670,8 +2670,8 @@
   "npm/object-inspect": {
    "version": "1.13.4",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -2687,8 +2687,8 @@
   "npm/onetime": {
    "version": "8.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2704,8 +2704,8 @@
   "npm/optionator": {
    "version": "0.9.4",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -2721,8 +2721,8 @@
   "npm/p-limit": {
    "version": "7.3.3",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2738,8 +2738,8 @@
   "npm/p-locate": {
    "version": "7.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2755,8 +2755,8 @@
   "npm/path-exists": {
    "version": "5.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2772,8 +2772,8 @@
   "npm/path-key": {
    "version": "4.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2789,8 +2789,8 @@
   "npm/path-parse": {
    "version": "1.0.7",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -2806,8 +2806,8 @@
   "npm/path-scurry": {
    "version": "2.0.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -2823,8 +2823,8 @@
   "npm/path-to-regexp": {
    "version": "8.4.2",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2840,8 +2840,8 @@
   "npm/picocolors": {
    "version": "1.1.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -2874,8 +2874,8 @@
   "npm/pify": {
    "version": "6.1.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2907,7 +2907,7 @@
   },
   "npm/postcss-selector-parser": {
    "version": "7.1.6",
-   "score": 71,
+   "score": 84,
    "label": "safe",
    "reason": "no critical or high findings in 33 files",
    "files_scanned": 33,
@@ -2927,8 +2927,8 @@
   "npm/pretty-format": {
    "version": "30.5.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -2944,8 +2944,8 @@
   "npm/punycode": {
    "version": "2.3.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -2997,8 +2997,8 @@
   "npm/react-is": {
    "version": "19.3.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -3031,8 +3031,8 @@
   "npm/readdirp": {
    "version": "5.1.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3067,8 +3067,8 @@
   "npm/resolve-from": {
    "version": "5.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3118,8 +3118,8 @@
   "npm/safe-buffer": {
    "version": "5.2.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3135,8 +3135,8 @@
   "npm/safer-buffer": {
    "version": "2.1.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -3169,8 +3169,8 @@
   "npm/shebang-command": {
    "version": "2.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -3186,8 +3186,8 @@
   "npm/shebang-regex": {
    "version": "4.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3254,8 +3254,8 @@
   "npm/statuses": {
    "version": "2.0.2",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3271,8 +3271,8 @@
   "npm/string-width": {
    "version": "8.3.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3288,8 +3288,8 @@
   "npm/string_decoder": {
    "version": "1.3.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -3305,8 +3305,8 @@
   "npm/strip-ansi": {
    "version": "7.2.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3322,8 +3322,8 @@
   "npm/strip-json-comments": {
    "version": "5.0.3",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3339,8 +3339,8 @@
   "npm/supports-color": {
    "version": "11.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -3355,7 +3355,7 @@
   },
   "npm/task-master-ai": {
    "version": "0.43.1",
-   "score": 71,
+   "score": 84,
    "label": "safe",
    "reason": "no critical or high findings in 24 files",
    "files_scanned": 24,
@@ -3376,8 +3376,8 @@
   "npm/tavily-mcp": {
    "version": "0.2.22",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -3393,8 +3393,8 @@
   "npm/tinyglobby": {
    "version": "0.2.17",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3410,8 +3410,8 @@
   "npm/to-regex-range": {
    "version": "5.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -3427,8 +3427,8 @@
   "npm/tr46": {
    "version": "7.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -3512,8 +3512,8 @@
   "npm/universalify": {
    "version": "2.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -3567,8 +3567,8 @@
   "npm/util-deprecate": {
    "version": "1.0.2",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3618,8 +3618,8 @@
   "npm/webidl-conversions": {
    "version": "8.0.1",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -3652,8 +3652,8 @@
   "npm/which": {
    "version": "7.0.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3669,8 +3669,8 @@
   "npm/wrap-ansi": {
    "version": "10.0.2",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3703,8 +3703,8 @@
   "npm/y18n": {
    "version": "5.0.8",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -3720,8 +3720,8 @@
   "npm/yallist": {
    "version": "5.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -3771,8 +3771,8 @@
   "npm/yargs-parser": {
    "version": "22.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -3788,8 +3788,8 @@
   "npm/yocto-queue": {
    "version": "1.2.2",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -3822,8 +3822,8 @@
   "pypi/aiohappyeyeballs": {
    "version": "2.7.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -3856,8 +3856,8 @@
   "pypi/aiosignal": {
    "version": "1.4.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -3907,8 +3907,8 @@
   "pypi/annotated-types": {
    "version": "0.8.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -3994,8 +3994,8 @@
   "pypi/bcrypt": {
    "version": "5.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -4067,8 +4067,8 @@
   "pypi/certifi": {
    "version": "2026.7.22",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -4103,8 +4103,8 @@
   "pypi/cfgv": {
    "version": "3.5.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -4171,8 +4171,8 @@
   "pypi/cloudpickle": {
    "version": "3.1.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -4241,8 +4241,8 @@
   "pypi/decorator": {
    "version": "5.3.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -4313,8 +4313,8 @@
   "pypi/distro": {
    "version": "1.9.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -4364,8 +4364,8 @@
   "pypi/editables": {
    "version": "0.6",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -4398,8 +4398,8 @@
   "pypi/et-xmlfile": {
    "version": "2.0.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -4415,8 +4415,8 @@
   "pypi/exceptiongroup": {
    "version": "1.3.1",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -4913,8 +4913,8 @@
   "pypi/hyperframe": {
    "version": "6.1.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -4930,8 +4930,8 @@
   "pypi/identify": {
    "version": "2.6.20",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -5266,8 +5266,8 @@
   "pypi/markitdown-mcp": {
    "version": "0.0.1a7",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -5306,7 +5306,7 @@
   },
   "pypi/mcp": {
    "version": "2.3.0",
-   "score": 70,
+   "score": 80,
    "label": "safe",
    "reason": "no critical or high findings in 180 files",
    "files_scanned": 180,
@@ -5326,8 +5326,8 @@
   "pypi/mcp-server-fetch": {
    "version": "2026.8.18",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -5343,8 +5343,8 @@
   "pypi/mcp-server-git": {
    "version": "2026.8.18",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -5360,8 +5360,8 @@
   "pypi/mcp-server-sqlite": {
    "version": "2025.4.25",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -5377,8 +5377,8 @@
   "pypi/mcp-server-time": {
    "version": "2026.8.18",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -5394,8 +5394,8 @@
   "pypi/mdurl": {
    "version": "0.1.2",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -5445,8 +5445,8 @@
   "pypi/msgpack": {
    "version": "1.2.3",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -5498,8 +5498,8 @@
   "pypi/mypy-extensions": {
    "version": "1.1.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -6119,7 +6119,7 @@
   },
   "pypi/pygments": {
    "version": "2.21.0",
-   "score": 71,
+   "score": 84,
    "label": "safe",
    "reason": "no critical or high findings in 362 files",
    "files_scanned": 362,
@@ -6330,8 +6330,8 @@
   "pypi/pytz": {
    "version": "2026.5",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -6400,8 +6400,8 @@
   "pypi/regex": {
    "version": "2026.9.29",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -6657,8 +6657,8 @@
   "pypi/smmap": {
    "version": "5.0.3",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -6691,8 +6691,8 @@
   "pypi/sortedcontainers": {
    "version": "2.4.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -6730,8 +6730,8 @@
   "pypi/sse-starlette": {
    "version": "3.5.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -6798,8 +6798,8 @@
   "pypi/threadpoolctl": {
    "version": "3.7.0",
    "score": 74,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 2,
    "severity": {
     "critical": 0,
@@ -6851,8 +6851,8 @@
   "pypi/tomli": {
    "version": "2.5.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -6904,8 +6904,8 @@
   "pypi/trove-classifiers": {
    "version": "2026.9.21.13",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -6921,8 +6921,8 @@
   "pypi/truststore": {
    "version": "0.10.4",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 7,
    "severity": {
     "critical": 0,
@@ -6955,8 +6955,8 @@
   "pypi/typing-extensions": {
    "version": "4.16.0",
    "score": 82,
-   "label": "review",
-   "reason": "nothing found, but little code to inspect",
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 4,
    "severity": {
     "critical": 0,

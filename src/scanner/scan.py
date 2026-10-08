@@ -3073,6 +3073,17 @@ _CRITICAL_CEILING = 45
 # it stays Trusted, just not pristine — so "high: 1" never coexists with 100/verified.
 _HIGH_CEILING = 90
 
+# Graduated curve for results with NO critical or high code finding (Kenne, 2026-10-08,
+# #4): base 84 (no drop to the 68 findings base); each code medium costs a fixed 4 points
+# (2 in an expected / declared category, the same 50% discount as above) times its
+# shipped weight, total capped at 16; lows cost nothing. This replaces the 42 cap and the
+# file-ratio scaling for these results only. Anything with a critical or high keeps the
+# formula above unchanged.
+_CURVE_BASE = 84
+_CURVE_MEDIUM_COST = 4
+_CURVE_MEDIUM_COST_EXPECTED = 2
+_CURVE_MEDIUM_CAP = 16
+
 # Evidence-confidence cap. A clean scan with very little to go on (a handful of files, no
 # real code to analyze) is "we found nothing" — NOT "this is excellent". Left uncapped, a
 # 4-file MCP wrapper with a README + license floats into the 90s next to thoroughly-vetted,
@@ -3120,6 +3131,7 @@ def _calculate_trust_score(result: ScanResult) -> int:
     - Positive security signals (bonuses)
     - Good practices: README, LICENSE, tests (bonuses)
     - File ratio: if findings are concentrated in few files, reduce penalty
+    - No critical or high: the graduated curve (fixed medium cost, capped; lows free)
     """
     # Dependency vulns are scored separately (bounded); the general severity
     # model applies only to first-party CODE findings. Capabilities (what the tool
@@ -3136,7 +3148,9 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # deliberately small so documentation can't float an unsafe tool to the top. A repo
     # with any real code findings starts lower and has to earn its way back.
     total_findings = code_critical + code_high + code_medium
-    score = 84 if total_findings < 0.5 else 68
+    # No critical or high code finding (weighted): the graduated curve applies below.
+    graduated = code_critical == 0 and code_high == 0
+    score = _CURVE_BASE if graduated or total_findings < 0.5 else 68
 
     # High/medium findings in a tool's EXPECTED capability categories are discounted —
     # that's the tool's job. Two sources of "expected":
@@ -3152,7 +3166,17 @@ def _calculate_trust_score(result: ScanResult) -> int:
         expected_categories |= {"fs_access"}
     expected_categories |= _declared_categories(result)
 
-    if expected_categories:
+    if graduated:
+        # Fixed cost per medium, no 42 cap, no file-ratio scaling (see _CURVE_* above).
+        medium_cost = sum(
+            _finding_grade_weight(f) * (_CURVE_MEDIUM_COST_EXPECTED
+                                        if f.category in expected_categories
+                                        else _CURVE_MEDIUM_COST)
+            for f in code_findings if f.severity == "medium"
+        )
+        crit_ded = 0
+        hm_ded = min(medium_cost, _CURVE_MEDIUM_CAP)
+    elif expected_categories:
         exp_high = sum(
             _finding_grade_weight(f) for f in code_findings
             if f.severity == "high" and f.category in expected_categories
@@ -3180,13 +3204,14 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # 30th instance is not 30× the risk of the first, and pure VOLUME of high findings
     # must not floor a whole library to 0. The cap only bites past ~5 highs, so small
     # repos are unaffected.
-    capped_hm = min(int(hm_ded), _CODE_HM_DEDUCTION_CAP)
+    capped_hm = hm_ded if graduated else min(int(hm_ded), _CODE_HM_DEDUCTION_CAP)
 
     # File-ratio scaling: if only a small percentage of files have issues, soften the
     # HIGH/MEDIUM deduction (a repo with 200 files and 5 findings in 3 files shouldn't be
     # hit as hard as one with issues in half its files). Criticals are NOT scaled — a
-    # single critical must always bite, however large the repo.
-    if result.files_scanned > 0 and total_findings > 0:
+    # single critical must always bite, however large the repo. Not applied on the
+    # graduated curve, where each medium has a fixed cost.
+    if not graduated and result.files_scanned > 0 and total_findings > 0:
         affected_files = len({f.file_path for f in code_findings})
         ratio = affected_files / result.files_scanned
         # Scale factor: 0.4 at 1% affected, 1.0 at 25%+ affected
