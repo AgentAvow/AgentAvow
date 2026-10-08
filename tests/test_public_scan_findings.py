@@ -46,3 +46,33 @@ def test_items_signed_into_attestation():
     payload = _build_scan_payload("o/r", d)
     signed_items = payload["scan"]["findings"]["items"]
     assert signed_items and signed_items[0]["name"] == "trifecta"
+
+
+def test_items_list_decision_inputs_before_dependency_advisories():
+    """vercel/next.js: three critical dependency advisories led the list while the
+    reason named a high finding in the tool's own code. Decision inputs come first."""
+    r = _result_with(
+        [Finding("dependency", f"Vulnerable dependency: lib@1 (GHSA-{n})", "critical",
+                 "lockfile", 1, "") for n in range(3)]
+        + [Finding("dependency", "Vulnerable dependency: x@1 (GHSA-h)", "high",
+                   "lockfile", 1, "")]
+        + [Finding("unsafe_exec", "execSync / spawn (Node.js)", "high", "lib/run.js", 9, ""),
+           Finding("fs_access", "m", "medium", "lib/a.js", 2, "")]
+    )
+    items = _scan_result_to_dict(r)["findings"]["items"]
+    assert len(items) == 6
+    assert [(i["category"], i["severity"]) for i in items] == [
+        ("unsafe_exec", "high"),
+        ("dependency", "critical"), ("dependency", "critical"), ("dependency", "critical"),
+        ("dependency", "high"), ("fs_access", "medium"),
+    ]
+
+
+def test_items_cap_keeps_decision_inputs():
+    r = _result_with(
+        [Finding("dependency", f"Vulnerable dependency: d@{n}", "critical", "lockfile", 1, "")
+         for n in range(150)]
+        + [Finding("unsafe_exec", "eval of input", "high", "src/x.js", 1, "")]
+    )
+    items = _scan_result_to_dict(r)["findings"]["items"]
+    assert len(items) == 100 and items[0]["name"] == "eval of input"

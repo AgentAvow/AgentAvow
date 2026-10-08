@@ -519,10 +519,14 @@ def _findings(items: list[dict], limit: int = 5) -> list[dict]:
 def _grouped_findings(items: list[dict], limit: int = 3) -> list[dict]:
     """Collapse repeats of the same finding into one row with a count, so a single
     pattern hit in 25 files reads as 'X (×25)' rather than 25 separate findings."""
+    from src.scanner.verdict import finding_decides
+
     groups: dict[tuple, dict] = {}
+    decides: dict[tuple, bool] = {}
     order: list[tuple] = []
     for it in items:
         key = (it.get("severity"), it.get("name"))
+        decides[key] = decides.get(key, False) or finding_decides(it)
         g = groups.get(key)
         if g is None:
             groups[key] = {
@@ -536,15 +540,18 @@ def _grouped_findings(items: list[dict], limit: int = 3) -> list[dict]:
             order.append(key)
         else:
             g["count"] += 1
-    # Surface the most important first: severity (critical > high > medium > low), then
-    # the highest-count pattern within a severity — so a big cluster (e.g. vulnerable
-    # deps) isn't dropped behind a single lower-priority finding. Stable within ties.
+    # Surface the findings that decided the answer first (blocking critical/high in the
+    # tool's own code), so the list leads with what the decision reason names, not a
+    # pile of dependency advisories. Then severity (critical > high > medium > low),
+    # then the highest-count pattern within a severity — so a big cluster (e.g.
+    # vulnerable deps) isn't dropped behind a single lower-priority finding. Stable.
     sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     ranked = sorted(
-        groups.values(),
-        key=lambda g: (sev_rank.get(g["severity"], 4), -g["count"]),
+        order,
+        key=lambda k: (not decides[k], sev_rank.get(groups[k]["severity"], 4),
+                       -groups[k]["count"]),
     )
-    return ranked[:limit]
+    return [groups[k] for k in ranked[:limit]]
 
 
 def _scan_block(
