@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.corpus.run_static_corpus import THIN_COVERAGE_REASON
 from src.scanner.artifact_fetch import ArtifactFetchResult, _make_file
 from src.scanner.artifact_scan import scan_artifact_files
 from src.scanner.scan import (
@@ -142,7 +143,10 @@ def test_no_known_good_package_is_do_not_connect_in_the_snapshot():
             assert (_CORPUS_MANIFEST[pid].get("known_fp") or {}).get("label") == \
                 "do_not_connect", pid
         exp = _CORPUS_MANIFEST.get(pid, {}).get("expect")
-        if exp:
+        # Thin coverage ("nothing found, but little code to inspect") is not a finding:
+        # a package expected safe may read it (open decision, follow-up #19).
+        thin = r["label"] == "review" and r.get("reason") == THIN_COVERAGE_REASON
+        if exp and not (exp == "safe" and thin):
             assert r["label"] == exp, (pid, r["label"], exp)
 
 

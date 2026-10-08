@@ -4,11 +4,16 @@ Scans every pinned package in ``tests/corpus/static/manifest.json`` through the 
 code production runs for a package scan (``npm_result_from_tarball`` /
 ``pypi_result_from_archive`` with the wheel member list → ``installed``,
 ``apply_artifact_scan`` → ``scan_artifact_files``, then ``_calculate_trust_score``),
-labels each with a three-way decision, and fails when:
+labels each with the real three-phrase ``src.scanner.verdict.decide()`` over the public
+API dict, and fails when:
 
 * a known-good package is labelled ``do_not_connect``;
 * a ``review`` rests only on capability findings or files the consumer never installs;
 * a package with a human-recorded ``expect`` lands on a different label;
+
+A ``review`` whose reason is thin coverage ("nothing found, but little code to
+inspect") passes both checks: it is not a finding, only a statement that fewer than 8
+files were there to read (open decision, tracked follow-up #19).
 
 A package whose manifest entry carries a reviewed ``known_fp`` (an open false-positive
 class left for a later decision, with its label) is reported under "Known false
@@ -55,48 +60,56 @@ SEVERITIES = ("critical", "high", "medium", "low", "info")
 
 
 # ---------------------------------------------------------------------------
-# Decision. PROVISIONAL: the real three-way `decide()` is being built in
-# src/scanner/verdict.py by another session. When it lands, swap the ONE line
-# `DECIDE = provisional_decide` below for the real function (adapting its input if it
-# takes the public dict) — nothing else in this file depends on the rule set.
+# Decision: the REAL three-phrase rule, ``src.scanner.verdict.decide()``, fed the same
+# dict the public API builds (``_scan_result_to_dict`` over a fully scored result), so a
+# corpus label is exactly what a user would read for this archive (minus the networked
+# OSV / provenance deltas noted above).
 # ---------------------------------------------------------------------------
+
+# decide()'s thin-coverage reason: nothing found, but fewer than 8 files to inspect. It
+# is not a finding, so a known-good package may read it without failing the gate.
+THIN_COVERAGE_REASON = "nothing found, but little code to inspect"
+
 
 @dataclass
 class Decision:
     label: str                                   # safe | review | do_not_connect
     reasons: list[str] = field(default_factory=list)
     reason_findings: list = field(default_factory=list)   # Finding objects behind it
+    reason: str = ""                             # decide()'s one-line decision_reason
 
 
-def provisional_decide(result) -> Decision:
-    """PROVISIONAL three-way label (stand-in for verdict.decide()):
+def api_dict(result) -> dict:
+    """The dict the public API hands ``decide()`` for this result."""
+    from src.api.public_scan_router import _scan_result_to_dict
 
-    * do_not_connect — any BLOCKING critical defect on the installed surface;
-    * review         — any BLOCKING high defect, or score < 51;
-    * safe           — otherwise.
+    return _scan_result_to_dict(result)
 
-    ``_finding_is_blocking`` already excludes capabilities, non-installed files, test /
-    doc paths and dependency CVEs, so "blocking" == installed first-party defect.
-    """
+
+def real_decide(result) -> Decision:
+    """Label via ``verdict.decide()``; the listed reasons/findings explain it for the
+    report and for the gate's "review must rest on an installed defect" check."""
     from src.scanner.scan import _finding_is_blocking, _is_defect
+    from src.scanner.verdict import decide
 
+    d = decide(api_dict(result))
     blocking = [f for f in result.findings if _finding_is_blocking(f)]
-    crit = [f for f in blocking if f.severity == "critical"]
-    if crit:
-        return Decision("do_not_connect", [_reason(f) for f in crit], crit)
-    high = [f for f in blocking if f.severity == "high"]
-    if high:
-        return Decision("review", [_reason(f) for f in high], high)
-    if result.trust_score < 51:
-        scored = [f for f in result.findings if _is_defect(f)
-                  and getattr(f, "installed", True)
-                  and f.severity in ("critical", "high", "medium")]
-        return Decision("review", [f"score {result.trust_score} < 51"]
-                        + [_reason(f) for f in scored[:5]], scored)
-    return Decision("safe", [], [])
+    if d.decision == "do_not_connect":
+        why = [f for f in blocking if f.severity == "critical"]
+    elif d.decision == "review":
+        why = [f for f in blocking if f.severity == "high"]
+        if not why and result.deprecation:
+            why = [f for f in result.findings if f.category == "maintenance"]
+        if not why and d.reason.startswith("trust score"):
+            why = [f for f in result.findings if _is_defect(f)
+                   and getattr(f, "installed", True)
+                   and f.severity in ("critical", "high", "medium")][:5]
+    else:
+        why = []
+    return Decision(d.decision, [d.reason] + [_reason(f) for f in why], why, d.reason)
 
 
-DECIDE = provisional_decide  # ← swap for src.scanner.verdict.decide when it exists
+DECIDE = real_decide
 
 
 def _reason(f) -> str:
@@ -115,7 +128,13 @@ def scan_entry(entry: dict, cache_dir: str, offline: bool) -> dict:
         pypi_result_from_archive,
         wheel_installed_paths_from_bytes,
     )
-    from src.scanner.scan import ScanResult, _calculate_trust_score, apply_artifact_scan
+    from src.scanner.scan import (
+        ScanResult,
+        _calculate_category_scores,
+        _calculate_trust_score,
+        _certified_status,
+        apply_artifact_scan,
+    )
 
     cache = Path(cache_dir)
     eco, name, version = entry["ecosystem"], entry["name"], entry["version"]
@@ -157,7 +176,10 @@ def scan_entry(entry: dict, cache_dir: str, offline: bool) -> dict:
 
     result = ScanResult(repo=f"{eco}:{name}", stars=0, description="", framework="")
     apply_artifact_scan(result, eco, fetched)
+    # Same scoring tail as production scan_package (minus networked OSV / provenance).
     result.trust_score = _calculate_trust_score(result)
+    result.category_scores = _calculate_category_scores(result)
+    result.certified = _certified_status(result)
     decision = DECIDE(result)
     return summarize(entry, result, decision)
 
@@ -194,13 +216,15 @@ def summarize(entry: dict, result, decision: Decision) -> dict:
         "version": entry["version"],
         "score": result.trust_score,
         "label": decision.label,
+        "reason": decision.reason,
         "files_scanned": result.files_scanned,
         "severity": {s: sev.get(s, 0) for s in SEVERITIES},
         "capabilities": caps,
         "not_installed": not_installed,
         "rules": dict(sorted(rules.items())),
         "_reasons": decision.reasons,
-        "_reason_ok": bool(decision.reason_findings) and reason_ok
+        "_reason_ok": (decision.reason == THIN_COVERAGE_REASON
+                       or (bool(decision.reason_findings) and reason_ok))
                       if decision.label == "review" else True,
         "_findings": findings,
     }
@@ -225,10 +249,16 @@ def gate(manifest: dict, results: dict[str, dict]) -> list[str]:
             failures.append(f"{e['id']}: review rests only on capability / not-installed "
                             f"findings ({'; '.join(r['_reasons'][:3])})")
         exp = e.get("expect")
-        if exp and exp != r["label"]:
+        thin_ok = exp == "safe" and r["label"] == "review" and _is_thin(r)
+        if exp and exp != r["label"] and not thin_ok:
             failures.append(f"{e['id']}: expected {exp}, got {r['label']} "
                             f"({'; '.join(r['_reasons'][:2])})")
     return failures
+
+
+def _is_thin(r: dict) -> bool:
+    """Review only because there was little code to inspect (not a finding)."""
+    return r.get("label") == "review" and r.get("reason") == THIN_COVERAGE_REASON
 
 
 def public(r: dict) -> dict:
@@ -248,7 +278,7 @@ def diff(expected: dict, results: dict[str, dict]) -> list[str]:
             lines.append(f"- {pid}: (not run)")
         else:
             changes = []
-            for k in ("version", "label", "score", "files_scanned", "capabilities",
+            for k in ("version", "label", "reason", "score", "files_scanned", "capabilities",
                       "not_installed"):
                 if a.get(k) != b.get(k):
                     changes.append(f"{k} {a.get(k)} → {b.get(k)}")
@@ -294,6 +324,11 @@ def report(manifest: dict, results: dict[str, dict], failures: list[str],
     out.append("")
     out.append("## Gate failures" if failures else "## Gate: pass")
     out += [f"- {f}" for f in failures]
+    thin = sorted((r for r in rs if _is_thin(r)), key=lambda r: r["id"])
+    if thin:
+        out += ["", f"## Review on thin coverage only ({len(thin)}; not a finding, passes "
+                "the gate)", "", "| Package | Files scanned | Score |", "|---|---|---|"]
+        out += [f"| {r['id']} | {r['files_scanned']} | {r['score']} |" for r in thin]
     known = [(e, results[e["id"]]) for e in manifest["packages"]
              if e.get("known_fp") and e["id"] in results]
     if known:
@@ -417,8 +452,8 @@ def main() -> int:
         merged.update({pid: public(r) for pid, r in results.items()
                        if r["label"] not in ("error", "missing")})
         args.expected.write_text(json.dumps({
-            "_doc": "Committed snapshot of the static corpus gate (score, provisional "
-                    "label, defect counts per severity on the installed surface, rule "
+            "_doc": "Committed snapshot of the static corpus gate (score, label and "
+                    "reason from verdict.decide(), defect counts per severity on the installed surface, rule "
                     "counts). Regenerate with run_static_corpus.py --write-expected and "
                     "review the diff in the same PR.",
             "packages": dict(sorted(merged.items())),
