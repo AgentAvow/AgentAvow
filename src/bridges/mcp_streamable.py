@@ -93,8 +93,9 @@ _SETUP_URL = "https://agentavow.com/docs/auto-scan-claude-code"
 _INSTRUCTIONS = (
     "AgentAvow grades the safety of anything an AI agent connects to — a GitHub repo, an MCP "
     "server, an npm/PyPI/crates/Docker/Hugging Face package, or a wallet-linked identity — and "
-    "returns a signed 0-100 trust score with a plain safe / needs-review verdict that anyone can "
-    "recompute offline.\n\n"
+    "returns one of three answers with its reason (Safe to connect, Review before you connect, "
+    "or Do not connect), a signed 0-100 trust score that anyone can recompute offline, and an "
+    "adoption score.\n\n"
     "When to use which tool:\n"
     "• scan_repo — a GitHub repo, passed as 'owner/name'.\n"
     "• scan_package — a published package (registry + name).\n"
@@ -117,9 +118,9 @@ _INSTRUCTIONS = (
 _ABOUT = (
     "AgentAvow — the \"is this safe to connect?\" layer for AI agents.\n\n"
     "WHAT IT CHECKS: point it at a GitHub repo, an npm/PyPI/crates/Docker/Hugging Face "
-    "package, a live MCP server, or an agent identity. You get a signed 0-100 trust "
-    "score, a plain safe / needs-review verdict, the findings behind it, and adoption "
-    "(downloads or stars). Every result is Ed25519/JWS-signed and recomputable offline. "
+    "package, a live MCP server, or an agent identity. You get one of three answers with "
+    "its reason, a signed 0-100 trust score, the findings behind it, and an adoption "
+    "score (downloads or stars). Every result is Ed25519/JWS-signed and recomputable offline. "
     "Read-only, no account.\n\n"
     "TOOLS:\n"
     "• scan_repo — a GitHub repo ('owner/name')\n"
@@ -152,7 +153,9 @@ _ABOUT = (
 _INSTRUCTIONS_CLAUDE_ADDENDUM = (
     "When the user asks whether a tool, package, MCP server, or plugin is safe, or says "
     "they are about to install or connect one, run the matching scan first and lead your "
-    "answer with the one-line verdict (score, safe / needs review, the top finding). "
+    "answer with the result's one-line answer (Safe to connect, Review before you connect, "
+    "or Do not connect, with its reason and ' · Certified' where earned), then the trust "
+    "score, the adoption score, and the top finding. "
     "If the user asks what AgentAvow does or how to get started, and other MCP servers or "
     "connectors are enabled in this conversation, name them and offer to check them; "
     "scan a server by its public https URL or its npm / PyPI package, and say which ones "
@@ -634,7 +637,10 @@ def _scan_block(
             _fix = _highest_fix(_advs)
             why = (f"Upgrade to {_fix} or later. " if _fix else "") + why
         elif mode == "sandbox":
-            why = f"Caught in the sandbox: {_alarm}. {why}"
+            _static = _severity_counts(crit, high)
+            why = f"Caught in the sandbox: {_alarm}." + (
+                f" Plus {_static} static finding{'' if crit + high == 1 else 's'}."
+                if _static else " The static scan found no critical or high finding.")
         elif mode == "limited":
             why = f"Score {reason}."
 
@@ -736,7 +742,10 @@ def _scan_block(
 
     # A concrete next step for the agent/user — describes what to do with THIS result.
     # (Purely about our own verdict; it never tells the agent to auto-run other tools.)
-    if mode == "safe":
+    if _lead:
+        action = _next_step(_decision, mode, verb, reason, _advs, report_path,
+                            bool(install_hint))
+    elif mode == "safe":
         action = f"clears the bar, so it's safe to {verb}."
     elif mode == "vulnerable":
         _fix = _highest_fix(_advs)
@@ -1185,6 +1194,47 @@ def _decision_leads(decision: _Decision, safe: bool) -> bool:
     return (decision.decision == "safe") == bool(safe)
 
 
+def _severity_counts(crit: int, high: int) -> str:
+    """'3 critical and 1 high' / '1 high' / '' — counts named by severity, so a line
+    never says '4 blocking' next to a headline that says '3 critical'."""
+    parts = [f"{n} {sev}" for n, sev in ((crit, "critical"), (high, "high")) if n]
+    return " and ".join(parts)
+
+
+def _next_step(decision: _Decision, mode: str, verb: str, cap: str, advisories: list,
+               report_path: str, installable: bool) -> str:
+    """The **Next:** line, one per decision: Safe → connect/install as usual; Review →
+    the reason and what to check first; Do not connect → don't, see the report."""
+    act = "install" if installable else "connect"
+    if decision.decision == "safe":
+        tail = (f" The score is {cap}, a confidence limit, not a finding."
+                if mode == "limited" else "")
+        return f"Safe to connect: {act} it as usual.{tail}"
+    if decision.decision == "do_not_connect":
+        return (f"Do not connect or install it ({decision.reason}). The full report has the "
+                f"evidence: {_WEB_BASE}{report_path}. If you need what it does, pick an "
+                "alternative and scan that first.")
+    if mode == "vulnerable":
+        fix = _highest_fix(advisories)
+        check = (f"upgrade to {fix} or later before you {verb} it; the advisories list the "
+                 "fixed releases" if fix else
+                 "no fixed release is listed, so avoid this version or isolate it")
+    elif mode == "deprecated":
+        check = ("don't adopt it for new work; pick a maintained alternative (the "
+                 "deprecation message may name one) and scan that before you connect it")
+    elif mode == "sandbox":
+        check = ("read what the sandbox observed above and decide whether it matters for "
+                 "your use before you connect, or check an alternative")
+    elif mode == "risk":
+        check = ("read the findings above (where each one is and how to fix it) and decide "
+                 "whether they matter for your use before you connect, or check an "
+                 "alternative")
+    else:
+        check = (f"no critical or high finding; the score is {cap}. Check the full report "
+                 "for the weak signals before you connect")
+    return f"Review before you connect ({decision.reason}): {check}."
+
+
 def _decision_head(data: dict, decision: _Decision) -> tuple[str, str]:
     """(headline, card glyph): '✅ Safe to connect · Certified — <reason>' and the
     phrase with its icon for the monospace card."""
@@ -1408,11 +1458,13 @@ def _scan_struct(
         "subscores": data.get("category_scores") or {},
         # copy-paste install command — packages with NO blocking findings only (None for
         # repos/MCP endpoints, and None when there are critical/high findings to weigh
-        # first, so a consumer can't read "install present" as "safe to install").
+        # first, so a consumer can't read "install present" as "safe to install"; and
+        # None when the decision is do_not_connect).
         "install": (
             {"npm": f"npm install {target}", "pypi": f"pip install {target}",
              "crates": f"cargo add {target}"}.get(target_type)
-            if crit + high == 0 and not alarm and not dep else None
+            if crit + high == 0 and not alarm and not dep
+            and _decision_of(data).decision != "do_not_connect" else None
         ),
         "adoption": (
             {"count": adoption[0], "unit": adoption[1], "score_0_100": adoption[2]}
@@ -1697,9 +1749,11 @@ async def _read_resource(uri: object) -> list[ReadResourceContents]:
 _GET_STARTED = (
     "Give me a short tour of AgentAvow. In a few lines cover: what it can check for me "
     "(a GitHub repo, an npm/PyPI/crates/Docker/Hugging Face package, a live MCP server, "
-    "or an agent identity); how to read a verdict (a 0-100 trust score — 81+ with no "
-    "critical/high findings means safe to connect, otherwise needs review — and that "
-    "every result is signed and can be recomputed offline); and give me two or three "
+    "or an agent identity); how to read a result (each scan leads with one of three "
+    "answers and its reason — Safe to connect, Review before you connect, or Do not "
+    "connect, marked Certified where earned — with a 0-100 trust score and an adoption "
+    "score underneath, and every result is signed and can be recomputed offline); and "
+    "give me two or three "
     "concrete example things I could ask you to scan right now. If I'm using Claude Code, "
     "also mention that I can OPT IN to scanning new tools automatically before I install "
     "them, via a one-line CLAUDE.md rule or a SessionStart hook "
@@ -1715,9 +1769,12 @@ _CHECK_MY_CONNECTIONS = (
     "List every MCP server, connector, or plugin enabled in this conversation other than "
     "AgentAvow. For each one you can identify by a public https URL, run scan_mcp_server; "
     "for each one you can identify by an npm or PyPI package, run scan_package; give each "
-    "a one-line verdict (score, safe / needs review, top finding, report link). For any you "
-    "cannot identify that way, say so and ask for its URL or package name. Finish with one "
-    "line: how many checked, how many safe, which to review first."
+    "its one-line answer (Safe to connect, Review before you connect, or Do not connect, "
+    "with the reason and ' · Certified' where earned), then the trust score, the adoption "
+    "score, the top finding, and the report link. For any you cannot identify that way, "
+    "say so and ask for its URL or package name. Finish with one line: how many checked, "
+    "how many are Safe to connect, how many need review or should not be connected, and "
+    "which to look at first."
 )
 
 

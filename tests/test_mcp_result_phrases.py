@@ -239,3 +239,66 @@ def test_card_without_decision_falls_back_to_the_old_wording():
     for k in ("decision", "decision_final", "decision_reason"):
         sc.pop(k)
     assert "No blocking issues found" in _render(sc)["why"]["text"]
+
+
+# ── Next line, counts, install, metadata wording (Kenne: same across the board) ───
+
+def _next(data: dict, hint: str = "") -> str:
+    text = ms._scan_block(data, "use", RP, "x · npm", install_hint=hint)
+    return next(ln for ln in text.splitlines() if ln.startswith("**Next:**"))
+
+
+def test_next_line_per_decision():
+    assert _next(CERTIFIED, "npm install x") == "**Next:** Safe to connect: install it as usual."
+    assert _next(CERTIFIED) == "**Next:** Safe to connect: connect it as usual."
+    thin = _next(THIN)
+    assert thin.startswith("**Next:** Safe to connect: connect it as usual. The score is "
+                           "capped because there's little code to inspect (3 files)")
+    review = _next(REVIEW)
+    assert review.startswith("**Next:** Review before you connect (one high finding: unsafe "
+                             "eval call): read the findings above")
+    block = _next(BLOCK, "npm install x")
+    assert block.startswith("**Next:** Do not connect or install it (one critical finding: "
+                            "hardcoded AWS key). The full report has the evidence: ")
+    assert "/check/pkg/npm/x" in block and "alternative" in block
+
+
+def test_no_line_counts_blocking_findings_against_a_severity_headline():
+    data = dict(BLOCK, findings={"total": 4, "critical": 3, "high": 1, "items": [
+        {"severity": "critical", "name": "curl piped to shell", "file_path": "a"}] * 3 + [
+        {"severity": "high", "name": "shell subprocess", "file_path": "b"}]})
+    text = ms._scan_block(data, "use", RP, "x · npm")
+    assert text.startswith("⛔ Do not connect — 3 critical findings")
+    assert "blocking" not in text
+    sandbox = dict(data, behavioral={"ran": True, "plan": "pypi", "canary_exfil": [
+        {"via": "dns", "host": "c2.evil.net"}], "findings": []})
+    first = ms._scan_block(sandbox, "use", RP, "x · npm").split("\n", 1)[0]
+    assert "Plus 3 critical and 1 high static findings." in first
+
+
+def test_struct_install_is_null_on_do_not_connect():
+    mal = dict(CERTIFIED, incident_history={"has_incident": True,
+                                            "current_version_affected": True})
+    s = _struct(mal)
+    assert s["decision"] == "do_not_connect" and s["install"] is None
+    assert _struct(dict(CERTIFIED))["install"] == "npm install x"
+
+
+def test_metadata_text_describes_the_three_answers():
+    import asyncio
+    texts = {
+        "instructions": ms._INSTRUCTIONS,
+        "claude": ms._instructions_for("claude"),
+        "get_started": asyncio.run(ms._get_prompt("agentavow_get_started", None))
+        .messages[0].content.text,
+        "check": asyncio.run(ms._get_prompt("agentavow_check_my_connections", None))
+        .messages[0].content.text,
+        "about": ms._ABOUT,
+    }
+    for name, t in texts.items():
+        for p in ("Safe to connect", "Review before you connect", "Do not connect"):
+            assert p in t, (name, p)
+        assert "adoption" in t.lower() and "0-100" in t or name == "check", name
+        assert "needs review" not in t and "needs-review" not in t, name
+        assert "letter grade" not in t.lower() and ">=81" not in t and "81+" not in t, name
+    assert "Certified" in texts["claude"] and "Certified" in texts["get_started"]

@@ -269,7 +269,7 @@ def test_canary_leak_leads_and_the_headline_is_not_safe():
     assert lines[-1] == ("- Included in the trust score: −20, a credential canary left the "
                          "sandbox.")
     assert "credentials: canary values" not in sec  # never "stayed put" next to a leak
-    assert "Ready to install" not in text and "hold off" in text
+    assert "Ready to install" not in text and "**Next:** Do not connect or install it" in text
 
 
 def test_canary_hit_without_a_finding_still_alarms():
