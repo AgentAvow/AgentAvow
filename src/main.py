@@ -285,6 +285,36 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Pre-generate OpenAPI schema (avoids 3s+ generation on first request)
     app.openapi()
 
+    # Warm the scan catalog off the event loop (~6s build) so the first Browse /
+    # flagged-stat visitor after a deploy doesn't pay it. Per process on purpose: each
+    # worker holds its own in-memory catalog, so no worker lock.
+    async def _warm_scan_catalog() -> None:
+        import asyncio
+        import time
+
+        from src.api.scan_catalog_router import _get_catalog
+
+        _log = logging.getLogger(__name__)
+        t0 = time.monotonic()
+        try:
+            catalog = await asyncio.to_thread(_get_catalog)
+            _log.info(
+                "Scan catalog warmed: %d rows in %.2fs",
+                len(catalog.get("rows") or []), time.monotonic() - t0,
+            )
+        except Exception:
+            _log.warning("Scan catalog warm-up failed", exc_info=True)
+
+    try:
+        import asyncio as _aio_warm
+
+        # held in a local so the task is not garbage-collected while lifespan yields
+        _catalog_warm_task = _aio_warm.create_task(  # noqa: F841
+            _warm_scan_catalog(), name="scan-catalog-warm",
+        )
+    except Exception:
+        logging.getLogger(__name__).warning("Scan catalog warm-up skipped", exc_info=True)
+
     # Remote MCP (Streamable HTTP) session manager — powers the /mcp connector.
     # Must run in the parent lifespan (Starlette doesn't run a mounted sub-app's own).
     async with mcp_session_manager.run():
