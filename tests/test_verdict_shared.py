@@ -28,10 +28,15 @@ def _data(score, items=None, no_blocking=None, files=None):
         # blocking findings floor the verdict even when the score is high
         (_data(90, [{"severity": "critical"}], no_blocking=False, files=50), False, "blocking_findings"),
         (_data(45, [{"severity": "high"}], no_blocking=False, files=50), False, "blocking_findings"),
-        # clean but under the bar: distinguish coverage cap from weak signals
-        (_data(74, no_blocking=True, files=3), False, "thin_coverage"),
-        (_data(78, no_blocking=True, files=40), False, "low_signals"),
-        (_data(70, no_blocking=True), False, "low_signals"),  # no files_scanned
+        # Since 2026-10-08 the verdict follows decide(): a clean result is safe even under
+        # the old 81 bar (thin coverage reads Safe with its reason; Kenne's decision).
+        (_data(74, no_blocking=True, files=3), True, "clean"),
+        (_data(78, no_blocking=True, files=40), True, "clean"),
+        (_data(70, no_blocking=True), True, "clean"),  # no files_scanned
+        # Review without a finding: score under 51 (weak signals) or deprecated
+        (_data(40, no_blocking=True, files=40), False, "low_signals"),
+        (dict(_data(84, no_blocking=True, files=40), deprecation="no longer maintained"),
+         False, "deprecated"),
         # fallback when the certified.checks flag is absent: count the items
         (_data(85, [{"severity": "medium"}], files=20), True, "clean"),
         (_data(85, [{"severity": "high"}], files=20), False, "blocking_findings"),
@@ -47,8 +52,29 @@ def test_verdict_matrix(data, exp_safe, exp_reason):
     assert verdict_label(safe) == ("safe" if exp_safe else "needs_review")
 
 
-def test_just_below_bar_is_not_safe():
-    assert is_safe(_data(SAFE_BAR - 1, no_blocking=True, files=20)) is False
+def test_old_bar_no_longer_decides():
+    """The verdict follows decide(), not the old SAFE_BAR: just under 81 with nothing
+    found is safe; the legacy rule is kept as is_safe_legacy for reference."""
+    from src.scanner.verdict import is_safe_legacy
+
+    data = _data(SAFE_BAR - 1, no_blocking=True, files=20)
+    assert is_safe(data) is True
+    assert is_safe_legacy(data) is False
+
+
+def test_verdict_agrees_with_decide():
+    from src.scanner.verdict import decide
+
+    cases = [
+        _data(92, no_blocking=True, files=50),
+        _data(74, no_blocking=True, files=3),
+        _data(69, [{"severity": "high"}], no_blocking=False, files=50),
+        _data(6, [{"severity": "critical"}], no_blocking=False, files=50),
+        dict(_data(84, no_blocking=True, files=40), deprecation="retired"),
+        _data(40, no_blocking=True, files=40),
+    ]
+    for d in cases:
+        assert verdict_label(is_safe(d)) == ("safe" if decide(d).decision == "safe" else "needs_review")
 
 
 def test_adoption_is_never_an_input():

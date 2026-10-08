@@ -32,8 +32,9 @@ def test_verdict_reason_names_the_sandbox_and_deprecation():
     assert verdict_reason({"trust_score": 67, "findings": {"items": []},
                            "deprecation": "no longer supported",
                            "metadata": {"files_scanned": 1}}) == "deprecated"
+    # A clean thin-coverage result is safe since 2026-10-08 (verdict follows decide()).
     assert verdict_reason({"trust_score": 70, "findings": {"items": []},
-                           "metadata": {"files_scanned": 1}}) == "thin_coverage"
+                           "metadata": {"files_scanned": 1}}) == "clean"
 
 
 def test_a_high_sandbox_finding_blocks_safe_even_at_a_high_score():
