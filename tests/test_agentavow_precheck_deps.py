@@ -639,3 +639,32 @@ def test_grades_older_than_the_max_age_are_rechecked_quietly(hook, monkeypatch, 
     hook.CACHE.write_text(json.dumps(cache))
     assert _run(hook, monkeypatch, capsys, scan) == {}  # same answer: nothing reported
     assert calls == ["uvicorn", "uvicorn"]
+
+
+
+def test_a_stale_copy_is_shown_but_rechecked_next_start(hook, monkeypatch, capsys, tmp_path):
+    """The API serves its 7-day copy (stale=true) while it refreshes. That answer must not
+    be stamped current, or an outdated grade sticks for a week (alembic, 2026-10-08)."""
+    (tmp_path / "requirements.txt").write_text("alembic\n")
+    answers = [_ok(48, "needs review", 5, stale=True), _ok(88, "safe")]
+    calls = []
+
+    def scan(t, force=False, stored=False):
+        calls.append(t["pkg"])
+        return answers[min(len(calls) - 1, 1)]
+
+    _run(hook, monkeypatch, capsys, scan)
+    rec = json.loads(hook.CACHE.read_text())["dep:pypi:alembic"]
+    assert rec["epoch"] == "stale-copy" and rec["score"] == 48
+    out = _run(hook, monkeypatch, capsys, scan)  # next start: re-checked, fresh answer
+    assert calls == ["alembic", "alembic"]
+    assert "dependency 'alembic'" in out["hookSpecificOutput"]["additionalContext"]
+    rec = json.loads(hook.CACHE.read_text())["dep:pypi:alembic"]
+    assert rec["epoch"] == hook.GRADE_EPOCH and rec["score"] == 88
+    assert _run(hook, monkeypatch, capsys, scan) == {}
+    assert calls == ["alembic", "alembic"]
+
+
+def test_verdict_carries_the_api_stale_flag(hook):
+    assert hook._verdict({"trust_score": 48, "stale": True})["stale"] is True
+    assert hook._verdict({"trust_score": 88})["stale"] is False
