@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.23"
+__version__ = "0.1.24"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -822,6 +822,7 @@ def _verdict(data: dict) -> dict:
     digests = data.get("tool_digests")
     decision, decision_reason, decision_final = _decision(data, advisories, incident)
     return {
+        "stale": bool(data.get("stale")),
         "score": score,
         # The three-phrase answer every line leads with; the gate denies on do_not_connect.
         "decision": decision,
@@ -956,7 +957,10 @@ def _record(target: dict, result: dict, now: float) -> dict:
     """The cache entry for a graded server: the target's identity (name is the key,
     id is the sanitized URL or package coordinate), the verdict, the signed per-tool
     digests, the report link, and when it was approved. The gate reads this."""
-    rec = {"id": target["id"], "kind": target["kind"], "approved_at": now, "epoch": GRADE_EPOCH}
+    # A ``stale`` answer (the API's 7-day copy, served while it refreshes) is shown but
+    # not stamped with the current epoch, so the next session start checks again.
+    rec = {"id": target["id"], "kind": target["kind"], "approved_at": now,
+           "epoch": "stale-copy" if result.get("stale") else GRADE_EPOCH}
     if target["kind"] == "mcp":
         rec["url"] = target["url"]
         rec["report_url"] = (
