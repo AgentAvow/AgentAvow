@@ -1,6 +1,6 @@
 ---
 name: scan-before-connect
-description: Check whether an MCP server, a package (npm, PyPI, crates, Docker, or Hugging Face), or a GitHub repo is safe to connect to or install. AgentAvow answers Safe to connect, Review before you connect, or Do not connect, with the reason, a signed 0-100 trust score and an adoption score. Use when the user asks whether a specific tool, package, repo, or MCP server is safe or trustworthy, or asks to vet one before installing or connecting it.
+description: Check whether an MCP server, a published package, or a GitHub repo is safe to connect to or install. AgentAvow answers Safe to connect, Review before you connect, or Do not connect, with the reason, a signed 0-100 trust score and an adoption score. Use when the user asks whether a specific tool, package, repo, or MCP server is safe or trustworthy, or asks to vet one before installing or connecting it.
 ---
 
 Use this skill when the user wants to know whether one specific tool is safe before
