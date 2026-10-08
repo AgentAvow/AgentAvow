@@ -1642,7 +1642,8 @@ _TOOLS: list[types.Tool] = [
             "real usage (downloads per week), findings with remediation, and a signed "
             "attestation. Also reports published advisories that affect the scanned version, "
             "the maintainer's deprecation notice, repo-vs-artifact drift (files shipped that "
-            "aren't in the source), and what a sandbox run observed when one applies. Scans the "
+            "aren't in the source), and AgentAvow's behavioral sandbox results when available. "
+            "Scans the "
             "latest version unless `version` (or a pin in the name) names one. Read-only; "
             "calls agentavow.com."
         ),
