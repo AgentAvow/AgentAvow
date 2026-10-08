@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.21"
+__version__ = "0.1.22"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -477,6 +477,7 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
         if new >= DEPS_CAP or time.monotonic() - started > BUDGET:
             break
         new += 1
+        refresh = _refresh_only(entry, t["id"], now)
         unscannable_reason = ""
         try:
             r: dict | None = _scan(t, stored=True)
@@ -506,10 +507,13 @@ def _dep_lines_and_graded(cache: dict, deps: list[dict], now: float, started: fl
         rec = _record(t, r, now)
         rec["spec"] = t.get("spec", "")
         cache[t["name"]] = rec
+        if refresh and _dval(r) == _dval(entry):
+            continue  # routine re-check, same answer: nothing to say
+        was = f"updated grade (was: {_answer(entry)}): " if refresh else ""
         sandbox = f"; {r['sandbox']}" if r.get("sandbox") else ""
         # Already installed: the answer is advice, never a stop.
         lines.append(f"{_flag(r)} dependency '{t['pkg']}' ({_dep_coord(t)}): "
-                     f"{_answer(r)}{sandbox}.")
+                     f"{was}{_answer(r)}{sandbox}.")
     graded: list[tuple[str, dict]] = []
     unscannable = 0
     for t in deps:
@@ -648,12 +652,13 @@ def _servers_elsewhere(here: list[dict]) -> int:
 
 
 def _advisory_applies(a: object) -> bool:
-    """Does a raw advisory entry apply to the installed version? An explicit flag wins;
-    otherwise only an advisory with no fix counts. A fixed one with no version match
-    is history, not evidence against this version."""
+    """Does a raw advisory entry apply to the installed version? An explicit flag wins
+    (the API's raw shape sends ``affects_scanned_version``); otherwise only an advisory
+    with no fix counts. A fixed one with no version match is history, not evidence
+    against this version."""
     if not isinstance(a, dict):
         return False
-    for key in ("affects_current_version", "current_version_affected"):
+    for key in ("affects_scanned_version", "affects_current_version", "current_version_affected"):
         if key in a:
             return bool(a[key])
     return not (a.get("fixed_in") or a.get("fixed") or a.get("fixed_version"))
@@ -917,11 +922,37 @@ def _sandbox_summary(b: object) -> str:
     return f"sandbox: installed, {net}"
 
 
+# Cached grades go stale: the API's scoring improves (the 2026-10-08 precision pass moved
+# fastapi from 40 to 88) and packages publish new versions under an unchanged pin. A
+# cached grade is re-checked when it is older than GRADE_MAX_AGE or was written under an
+# older GRADE_EPOCH (bump the epoch whenever server-side scoring changes materially).
+# A re-check whose decision (Safe / Review / Do not connect) is unchanged is silent;
+# a changed decision is reported, naming the old answer.
+GRADE_EPOCH = "2026-10-08"
+GRADE_MAX_AGE = 7 * 24 * 3600
+
+
+def _stale(entry: dict, now: float) -> bool:
+    if entry.get("epoch") != GRADE_EPOCH:
+        return True
+    try:
+        return now - float(entry.get("approved_at") or 0) > GRADE_MAX_AGE
+    except (TypeError, ValueError):
+        return True
+
+
+def _refresh_only(entry: object, target_id: str, now: float) -> bool:
+    """A graded record for this exact target that is due only because it is old (not
+    because its definitions drifted): re-check it quietly."""
+    return (isinstance(entry, dict) and entry.get("id") == target_id
+            and "approved_at" in entry and not _drifted(entry) and _stale(entry, now))
+
+
 def _record(target: dict, result: dict, now: float) -> dict:
     """The cache entry for a graded server: the target's identity (name is the key,
     id is the sanitized URL or package coordinate), the verdict, the signed per-tool
     digests, the report link, and when it was approved. The gate reads this."""
-    rec = {"id": target["id"], "kind": target["kind"], "approved_at": now}
+    rec = {"id": target["id"], "kind": target["kind"], "approved_at": now, "epoch": GRADE_EPOCH}
     if target["kind"] == "mcp":
         rec["url"] = target["url"]
         rec["report_url"] = (
@@ -1087,7 +1118,7 @@ def _is_cached(entry: object, target_id: str, now: float) -> bool:
     if not isinstance(entry, dict) or entry.get("id") != target_id:
         return False
     if "approved_at" in entry:
-        return not _drifted(entry)
+        return not _drifted(entry) and not _stale(entry, now)
     try:
         return now < float(entry.get("retry_after") or 0)
     except (TypeError, ValueError):
@@ -1128,6 +1159,7 @@ def main() -> None:
         if _is_cached(entry, t["id"], now):
             continue
         regraded = isinstance(entry, dict) and _drifted(entry)
+        refresh = _refresh_only(entry, t["id"], now)
         if t["kind"] == "withheld":
             cache[t["name"]] = t["id"]
             lines.append(f"➖ MCP '{t['name']}' ({t['host']}): not scanned — its URL looks "
@@ -1150,9 +1182,12 @@ def main() -> None:
                          "couldn't read it (it may need sign-in).")
             continue
         cache[t["name"]] = _record(t, result, now)
+        if refresh and _dval(result) == _dval(entry):
+            continue  # routine re-check, same answer: nothing to say
         graded.append((t["name"], result))
         changed = ("its tool definitions changed since the last grade; re-graded: "
-                   if regraded else "")
+                   if regraded else
+                   f"updated grade (was: {_answer(entry)}): " if refresh else "")
         sandbox = f"; {result['sandbox']}" if result.get("sandbox") else ""
         lines.append(f"{_flag(result)} MCP '{t['name']}' ({coord}): {changed}"
                      f"{_answer(result)}{sandbox}.")

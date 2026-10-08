@@ -583,3 +583,53 @@ def test_no_findings_dependency_reads_safe_with_a_reason(hook, monkeypatch, caps
             "· AgentAvow 74/100") in compact
     assert "  ⚠️ dependency 'highs': Review before you connect — 4 high finding(s) · AgentAvow 66/100" in compact
     assert not any("pattern hits only" in ln for ln in compact)
+
+
+# --- grade freshness (0.1.22) --------------------------------------------------------
+
+def test_api_advisory_flag_affects_scanned_version_is_honoured(hook):
+    """PyJWT: three advisories, all fixed in earlier releases, each flagged
+    affects_scanned_version=False by the API. None may count against the install."""
+    v = hook._verdict({"trust_score": 92, "advisories": [
+        {"id": "GHSA-2gx3", "fixed_in": "2.14.0", "affects_scanned_version": False},
+        {"id": "GHSA-42vr", "fixed_in": "2.15.0", "affects_scanned_version": False},
+        {"id": "GHSA-x", "affects_scanned_version": True}]})
+    assert v["advisories"] == 1
+
+
+def test_pre_epoch_cache_is_rechecked_and_a_changed_answer_is_reported(hook, monkeypatch, capsys, tmp_path):
+    """A cache written before the scoring epoch (fastapi 40, 30 highs) must be re-checked
+    and the corrected answer reported once, naming the old one."""
+    (tmp_path / "requirements.txt").write_text("fastapi\nuvicorn\n")
+    old = {"id": "dep:pypi:fastapi@", "kind": "package", "approved_at": hook.time.time() - 60,
+           "registry": "pypi", "pkg": "fastapi", "spec": "", **_ok(40, "needs review", 30)}
+    same = {"id": "dep:pypi:uvicorn@", "kind": "package", "approved_at": hook.time.time() - 60,
+            "registry": "pypi", "pkg": "uvicorn", "spec": "", **_ok(92, "safe")}
+    hook.CACHE.parent.mkdir(parents=True, exist_ok=True)
+    hook.CACHE.write_text(json.dumps({"dep:pypi:fastapi": old, "dep:pypi:uvicorn": same}))
+    live = {"fastapi": _ok(88, "safe"), "uvicorn": _ok(92, "safe")}
+    out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: live[t["pkg"]])
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "dependency 'fastapi'" in ctx and "updated grade (was:" in ctx
+    assert "dependency 'uvicorn' (" not in ctx  # re-checked, same answer: silent
+    cache = json.loads(hook.CACHE.read_text())
+    assert cache["dep:pypi:fastapi"]["score"] == 88 and cache["dep:pypi:fastapi"]["epoch"] == hook.GRADE_EPOCH
+    assert cache["dep:pypi:uvicorn"]["epoch"] == hook.GRADE_EPOCH
+    assert _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: live[t["pkg"]]) == {}
+
+
+def test_grades_older_than_the_max_age_are_rechecked_quietly(hook, monkeypatch, capsys, tmp_path):
+    (tmp_path / "requirements.txt").write_text("uvicorn\n")
+    calls = []
+
+    def scan(t, force=False, stored=False):
+        calls.append(t["pkg"])
+        return _ok(92, "safe")
+
+    _run(hook, monkeypatch, capsys, scan)
+    assert _run(hook, monkeypatch, capsys, scan) == {} and calls == ["uvicorn"]
+    cache = json.loads(hook.CACHE.read_text())
+    cache["dep:pypi:uvicorn"]["approved_at"] -= hook.GRADE_MAX_AGE + 60
+    hook.CACHE.write_text(json.dumps(cache))
+    assert _run(hook, monkeypatch, capsys, scan) == {}  # same answer: nothing reported
+    assert calls == ["uvicorn", "uvicorn"]

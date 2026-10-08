@@ -36,7 +36,7 @@ import shlex
 import sys
 import time
 
-__version__ = "0.1.21"
+__version__ = "0.1.22"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
