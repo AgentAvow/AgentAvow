@@ -315,6 +315,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logging.getLogger(__name__).warning("Scan catalog warm-up skipped", exc_info=True)
 
+    # Recompute /flagged-stat off the request path every ~100s (first run right after
+    # the warm-up above), so steady-state requests are always cache hits. Per process.
+    try:
+        from src.api.scan_catalog_router import start_flagged_stat_refresher
+
+        start_flagged_stat_refresher()
+    except Exception:
+        logging.getLogger(__name__).warning("flagged-stat refresher not started", exc_info=True)
+
     # Remote MCP (Streamable HTTP) session manager — powers the /mcp connector.
     # Must run in the parent lifespan (Starlette doesn't run a mounted sub-app's own).
     async with mcp_session_manager.run():
@@ -325,6 +334,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         from src.jobs.scheduler import stop_scheduler
 
         stop_scheduler()
+
+    # Shutdown: stop the flagged-stat refresh timer
+    from src.api.scan_catalog_router import stop_flagged_stat_refresher
+
+    await stop_flagged_stat_refresher()
 
     # Shutdown: clean up Redis connections
     from src.redis_client import close_redis
@@ -522,9 +536,16 @@ async def auth_identity_middleware(request: Request, call_next) -> Response:
 
 @app.middleware("http")
 async def cache_headers_middleware(request: Request, call_next) -> Response:
-    """Set Cache-Control headers on GET responses based on URL path."""
+    """Set a default Cache-Control on GET responses based on URL path.
+
+    A route that sets its own Cache-Control (the public scan catalog, badge SVGs, the
+    trust aggregate) keeps it; the defaults below only fill responses that carry none."""
     response: Response = await call_next(request)
-    if request.method == "GET" and response.status_code == 200:
+    if (
+        request.method == "GET"
+        and response.status_code == 200
+        and "cache-control" not in response.headers
+    ):
         path = request.url.path
         has_auth = "authorization" in request.headers or "x-api-key" in request.headers
         # Authenticated API requests get private, no-cache (viewer-specific data)

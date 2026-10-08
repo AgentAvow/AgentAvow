@@ -14,6 +14,7 @@ Living-record proof: AgentGraph publishes the trail, not a frozen PDF.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import logging
@@ -59,6 +60,24 @@ _COMMUNITY_CACHE: tuple[list[CatalogRow], float] | None = None
 _FLAGGED_STAT_CACHE: tuple[dict[str, Any], list[CatalogRow], dict[str, Any], float] | None = None
 _COMMUNITY_LOCKS: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
 
+# Fully computed list responses for the default views, keyed by (surface, sort, limit).
+# Value: (catalog, community fill, response, expires_at). A hit needs the same catalog
+# object and the same community-rows fill (a refill or an invalidation makes a new one).
+_VIEW_CACHE: dict[tuple[Any, ...], tuple[dict[str, Any], tuple[Any, ...], Any, float]] = {}
+# (surface, sort) pairs whose first page is cached: the home page's MCP teaser
+# (score-desc, limit 6), Browse's unfiltered first page (mcp, adoption, limit 30) and a
+# bare request (sort=default). Every other query takes the uncached path.
+_DEFAULT_VIEWS = frozenset({("mcp", "score-desc"), ("mcp", "adoption"), (None, "default")})
+
+# /flagged-stat is refreshed off the request path: a request that finds it stale serves
+# the cached value and starts one background refresh; a lifespan timer also refreshes it
+# every FLAGGED_STAT_REFRESH_SECONDS so steady-state requests never compute.
+FLAGGED_STAT_REFRESH_SECONDS = 100
+# Bumped by every invalidation, so a refresh that started before a write never stores.
+_FLAGGED_STAT_GEN = 0
+_FLAGGED_STAT_TASK: tuple[asyncio.AbstractEventLoop, asyncio.Task[None]] | None = None
+_FLAGGED_STAT_TIMER: asyncio.Task[None] | None = None
+
 
 def _now() -> float:
     return time.monotonic()
@@ -77,11 +96,18 @@ def _community_lock() -> asyncio.Lock:
 
 
 def invalidate_community_rows_cache() -> None:
-    """Drop the cached community rows and the /flagged-stat response (this process).
-    Call after writing a CommunityScan row."""
-    global _COMMUNITY_CACHE, _FLAGGED_STAT_CACHE
+    """Drop the cached community rows, the /flagged-stat response and the default-view
+    list responses (this process). Call after writing a CommunityScan row."""
+    global _COMMUNITY_CACHE
     _COMMUNITY_CACHE = None
+    _drop_derived_caches()
+
+
+def _drop_derived_caches() -> None:
+    global _FLAGGED_STAT_CACHE, _FLAGGED_STAT_GEN
     _FLAGGED_STAT_CACHE = None
+    _FLAGGED_STAT_GEN += 1
+    _VIEW_CACHE.clear()
 
 
 class CatalogSandbox(BaseModel):
@@ -641,6 +667,64 @@ async def scan_catalog(
     corpus plus community (on-demand) scans that grow the dataset over time."""
     if response is not None:
         response.headers["Cache-Control"] = CATALOG_CACHE_CONTROL
+    key = _default_view_key(surface, q, severity, grade, category, decision, sort, limit, offset)
+    if key is not None:
+        return await _cached_default_view(key, db)
+    return await _catalog_view(surface, q, severity, grade, category, decision, sort, limit,
+                               offset, db)
+
+
+def _default_view_key(
+    surface: Any, q: Any, severity: Any, grade: Any, category: Any, decision: Any,
+    sort: Any, limit: Any, offset: Any,
+) -> tuple[Any, ...] | None:
+    """(surface, sort, limit) for a default view's first page, else None. A direct call
+    passes Query() objects for omitted params; anything that is not a plain value
+    takes the uncached path."""
+    def _val(v: Any) -> str | None:
+        return v if isinstance(v, str) and v else None
+
+    if any(_val(v) for v in (q, severity, grade, category, decision)):
+        return None
+    if not isinstance(limit, int) or not isinstance(offset, int) or offset != 0:
+        return None
+    if (_val(surface), sort) not in _DEFAULT_VIEWS:
+        return None
+    return (_val(surface), sort, limit)
+
+
+async def _cached_default_view(key: tuple[Any, ...], db: AsyncSession) -> CatalogResponse:
+    """Serve a default view from the per-process cache (no filtering, sorting or summary
+    work on a hit). The entry is valid for the catalog object and community-rows fill it
+    was computed from, and at most COMMUNITY_ROWS_TTL_SECONDS. Callers get a deep copy."""
+    surface, sort, limit = key
+    catalog = _get_catalog()
+    await _community_rows(db)  # refills the shared rows when their TTL has lapsed
+    fill = _COMMUNITY_CACHE
+    hit = _VIEW_CACHE.get(key)
+    if (
+        hit is not None and fill is not None
+        and hit[0] is catalog and hit[1] is fill and hit[3] > _now()
+    ):
+        return hit[2].model_copy(deep=True)
+    out = await _catalog_view(surface, None, None, None, None, None, sort, limit, 0, db)
+    # Only store what was computed from inputs that are still current (a write or a
+    # refill during the await makes this result one fill old).
+    if fill is not None and _COMMUNITY_CACHE is fill and _CATALOG_CACHE is catalog:
+        now = _now()
+        for k in [k for k, v in _VIEW_CACHE.items() if v[3] <= now or v[1] is not fill]:
+            del _VIEW_CACHE[k]
+        _VIEW_CACHE[key] = (catalog, fill, out.model_copy(deep=True),
+                            now + COMMUNITY_ROWS_TTL_SECONDS)
+    return out
+
+
+async def _catalog_view(
+    surface: str | None, q: str | None, severity: str | None, grade: str | None,
+    category: str | None, decision: Any, sort: str, limit: int, offset: int,
+    db: AsyncSession,
+) -> CatalogResponse:
+    """Filter, sort and page the catalog for one query (the uncached path)."""
     catalog = _get_catalog()
     rows: list[CatalogRow] = catalog["rows"]
     summary: CatalogSummary = catalog["summary"]
@@ -778,9 +862,9 @@ async def refresh_catalog(
     """Force-rebuild the in-memory catalog from disk. Admin only: the rebuild reads
     every scan file on disk, so an anonymous caller must not be able to trigger it."""
     require_admin(current_entity)
-    global _CATALOG_CACHE, _FLAGGED_STAT_CACHE
+    global _CATALOG_CACHE
     _CATALOG_CACHE = None
-    _FLAGGED_STAT_CACHE = None
+    _drop_derived_caches()
     catalog = _get_catalog()
     return {"status": "rebuilt", "total_scans": catalog["summary"].total_scans}
 
@@ -825,20 +909,100 @@ async def flagged_stat(
         response.headers["Cache-Control"] = CATALOG_CACHE_CONTROL
     catalog = _get_catalog()
     community = await _community_rows(db)
-    # Served from cache only for the same catalog object and equal community rows
-    # (the stat is a pure function of those two), within FLAGGED_STAT_TTL_SECONDS.
+    # The stat is a pure function of the catalog object and the community rows. For the
+    # same catalog it is served from cache; when it is past FLAGGED_STAT_TTL_SECONDS or
+    # the community rows changed (a write in another worker), the cached value is served
+    # and one background refresh recomputes it (stale-while-revalidate). A write in this
+    # worker or an admin refresh clears the cache, so the next request computes once.
     cached = _FLAGGED_STAT_CACHE
-    if (
-        cached is not None
-        and cached[3] > _now()
-        and cached[0] is catalog
-        and len(cached[1]) == len(community)
-        and all(a is b or a == b for a, b in zip(cached[1], community))
-    ):
+    if cached is not None and cached[0] is catalog:
+        if not (cached[3] > _now() and _same_rows(cached[1], community)):
+            _schedule_flagged_stat_refresh()
         return copy.deepcopy(cached[2])
     out = _compute_flagged_stat(catalog, community)
     _FLAGGED_STAT_CACHE = (catalog, community, out, _now() + FLAGGED_STAT_TTL_SECONDS)
     return copy.deepcopy(out)
+
+
+def _same_rows(a: list[CatalogRow], b: list[CatalogRow]) -> bool:
+    return len(a) == len(b) and all(x is y or x == y for x, y in zip(a, b))
+
+
+async def _refresh_flagged_stat() -> None:
+    """Recompute the /flagged-stat cache off the request path. Never raises: a failure
+    is logged and the cached value (if any) keeps being served."""
+    global _FLAGGED_STAT_CACHE
+    gen = _FLAGGED_STAT_GEN
+    try:
+        catalog = await asyncio.to_thread(_get_catalog)
+        from src.database import async_session
+
+        async with async_session() as db:
+            community = await _community_rows(db)
+        fill = _COMMUNITY_CACHE
+        if fill is None or fill[1] <= _now():
+            # The DB read failed (or a write just cleared it). Computing over an empty
+            # community set would publish a wrong figure, so keep the current one.
+            return
+        out = await asyncio.to_thread(_compute_flagged_stat, catalog, community)
+        if gen != _FLAGGED_STAT_GEN or catalog is not _CATALOG_CACHE:
+            return  # invalidated meanwhile; the next request computes from fresh inputs
+        _FLAGGED_STAT_CACHE = (catalog, community, out, _now() + FLAGGED_STAT_TTL_SECONDS)
+    except Exception:
+        logger.warning("flagged-stat background refresh failed", exc_info=True)
+
+
+def _schedule_flagged_stat_refresh() -> asyncio.Task[None]:
+    """Start a background refresh unless one is already running on this event loop
+    (at most one per worker). Returns the running task."""
+    global _FLAGGED_STAT_TASK
+    loop = asyncio.get_running_loop()
+    cur = _FLAGGED_STAT_TASK
+    if cur is not None and cur[0] is loop and not cur[1].done():
+        return cur[1]
+    task = loop.create_task(_refresh_flagged_stat(), name="flagged-stat-refresh")
+    _FLAGGED_STAT_TASK = (loop, task)
+    return task
+
+
+async def _flagged_stat_timer(interval: float) -> None:
+    while True:
+        # shield: cancelling the timer must not cancel a refresh a request started
+        await asyncio.shield(_schedule_flagged_stat_refresh())
+        await asyncio.sleep(interval)
+
+
+def start_flagged_stat_refresher(
+    interval: float = FLAGGED_STAT_REFRESH_SECONDS,
+) -> asyncio.Task[None]:
+    """Start the proactive /flagged-stat refresh timer (first refresh immediately).
+    Idempotent per event loop; stop it with `stop_flagged_stat_refresher`."""
+    global _FLAGGED_STAT_TIMER
+    loop = asyncio.get_running_loop()
+    cur = _FLAGGED_STAT_TIMER
+    if cur is not None and cur.get_loop() is loop and not cur.done():
+        return cur
+    _FLAGGED_STAT_TIMER = loop.create_task(
+        _flagged_stat_timer(interval), name="flagged-stat-timer",
+    )
+    return _FLAGGED_STAT_TIMER
+
+
+async def stop_flagged_stat_refresher() -> None:
+    """Cancel the refresh timer and any in-flight refresh started on this loop."""
+    global _FLAGGED_STAT_TIMER, _FLAGGED_STAT_TASK
+    loop = asyncio.get_running_loop()
+    tasks = [_FLAGGED_STAT_TIMER, _FLAGGED_STAT_TASK[1] if _FLAGGED_STAT_TASK else None]
+    _FLAGGED_STAT_TIMER = None
+    _FLAGGED_STAT_TASK = None
+    for task in tasks:
+        if task is None or task.done():
+            continue
+        with contextlib.suppress(RuntimeError):  # a task left on a closed loop
+            task.cancel()
+        if task.get_loop() is loop:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 def _compute_flagged_stat(
