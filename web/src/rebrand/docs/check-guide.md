@@ -4,9 +4,6 @@ AgentAvow scans the tools, MCP servers, packages, and skills your AI agents conn
 of three phrases — **Safe to connect**, **Review before you connect**, or **Do not connect** — plus the reason,
 backed by a **signed 0–100 trust score** you can verify yourself. This guide explains how to read a result.
 
-> Staged rebrand doc. Product/serving URLs use `agentavow.com` (the post-cutover host). Verification
-> identifiers (JWKS, `@context`) stay on `agentgraph.co` — those are permanent and never move.
-
 ## Run a check
 
 No account, no install. Paste any of these into the check box, or hit the API directly:

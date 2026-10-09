@@ -64,10 +64,34 @@ const SURFACE_LABEL: Record<string, string> = {
   crates: 'crate', openclaw: 'skill', huggingface: 'model', docker: 'image',
 }
 
+// Our own packages (the bridge SDKs, the scanner) would otherwise top the "Safest"
+// boards, and one repo can publish several packages; neither reads as an
+// independent ranking, so boards skip ours and show one row per repo.
+const OWN_RE = /^(agentgraph|agentavow)[-_]|github\.com\/(agentgraph-co|agentavow)\//i
+
+function independent(rows: CatalogRow[], limit: number): CatalogRow[] {
+  const seen = new Set<string>()
+  const out: CatalogRow[] = []
+  for (const r of rows) {
+    const repo = (r.repository_url || r.full_name || '').toLowerCase().replace(/\.git$/, '').replace(/\/$/, '')
+    if (OWN_RE.test(r.name || '') || OWN_RE.test(repo) || /^(agentgraph-co|agentavow)\//i.test(r.full_name || '')) continue
+    if (repo && seen.has(repo)) continue
+    if (repo) seen.add(repo)
+    out.push(r)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
 function useBoard(params: Parameters<typeof fetchCatalog>[0], key: string) {
+  const limit = Number(params?.limit ?? 10)
   return useQuery({
     queryKey: ['trust-index', key],
-    queryFn: () => fetchCatalog(params),
+    // Over-fetch so the filter below still leaves a full board.
+    queryFn: async () => {
+      const data = await fetchCatalog({ ...params, limit: limit * 3 })
+      return { ...data, rows: independent(data.rows || [], limit) }
+    },
     staleTime: 300_000,
   })
 }

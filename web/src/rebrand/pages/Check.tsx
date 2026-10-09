@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
+import { NoticeText } from '../components/NoticeText'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
@@ -766,7 +767,7 @@ function Hero() {
           className="flex-1 min-w-0 bg-transparent outline-none font-mono text-[15px] text-text placeholder:text-text-muted" />
         <button type="submit" className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">Check</button>
       </form>
-      {notice && <p role="alert" className="mt-3 mx-auto max-w-[560px] text-[13px] text-amber-300">{notice}</p>}
+      {notice && <p role="alert" className="mt-3 mx-auto max-w-[560px] text-[13px] text-amber-300"><NoticeText text={notice} /></p>}
       <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
         <span className="text-[11.5px] text-text-muted/70">Try:</span>
         {EXAMPLES.map(([label, coord]) => (

@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Helmet } from 'react-helmet-async'
 import { rp } from './basePath'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -254,17 +255,16 @@ export default function RebrandLayout() {
     trackEvent('guest_page_view', pathname)
   }, [pathname])
 
-  // Rebrand-only favicon + title swap — restored on unmount so the live site
-  // (which shares index.html) keeps its own identity until the real cutover.
+  // Rebrand-only favicon swap — restored on unmount so the live site (which shares
+  // index.html) keeps its own identity until the real cutover. The page title is
+  // left to each page's <Helmet>/<SEOHead>; the defaultTitle below covers pages
+  // that set none (setting document.title here overwrote every page's own title).
   useEffect(() => {
     const iconEl = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
     const prevIcon = iconEl?.getAttribute('href') ?? null
-    const prevTitle = document.title
     if (iconEl) iconEl.setAttribute('href', '/favicon-avow.svg')
-    document.title = 'AgentAvow — Trust for the tools your agents connect to'
     return () => {
       if (iconEl && prevIcon) iconEl.setAttribute('href', prevIcon)
-      document.title = prevTitle
     }
   }, [])
   const link = (to: string, label: string) => (
@@ -280,6 +280,7 @@ export default function RebrandLayout() {
 
   return (
     <div className="min-h-screen bg-background text-text">
+      <Helmet defaultTitle="AgentAvow — Trust for the tools your agents connect to" />
       <Orbs />
       <header className="sticky top-0 z-20 bg-surface border-b border-border/60">
         <div className="max-w-[1080px] mx-auto px-6 h-[62px] flex items-center gap-7">
@@ -328,6 +329,8 @@ export default function RebrandLayout() {
               <Link to={rp("/rebrand/badge")} className="hover:text-text">Badges</Link>
               <Link to={rp("/rebrand/certified")} className="hover:text-text">Certified</Link>
               <Link to={rp("/rebrand/preflight")} className="hover:text-text">Preflight</Link>
+              <Link to={rp("/rebrand/sandbox")} className="hover:text-text">Sandbox</Link>
+              <Link to={rp("/rebrand/for-developers")} className="hover:text-text">Developers</Link>
               <Link to={rp("/rebrand/faq")} className="hover:text-text">FAQ</Link>
               <Link to={rp("/rebrand/research")} className="hover:text-text">Research</Link>
               <a href="/api/v1/redoc" target="_blank" rel="noopener noreferrer" className="hover:text-text">API</a>

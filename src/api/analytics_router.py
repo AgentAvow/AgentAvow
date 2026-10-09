@@ -8,7 +8,7 @@ from sqlalchemy import func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_entity, require_admin
-from src.api.rate_limit import rate_limit_reads, rate_limit_writes
+from src.api.rate_limit import rate_limit_analytics, rate_limit_reads, rate_limit_writes
 from src.database import get_db
 from src.models import AnalyticsEvent, Entity, InteractionEvent
 
@@ -96,7 +96,7 @@ class AttributionSummary(BaseModel):
 @router.post(
     "/event",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(rate_limit_writes)],
+    dependencies=[Depends(rate_limit_analytics)],
 )
 async def track_event(
     body: TrackEventRequest,

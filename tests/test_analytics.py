@@ -300,3 +300,14 @@ async def test_register_records_analytics_event(client: AsyncClient, db):
     assert event is not None
     assert event.entity_id is not None
     assert event.page == "/register"
+
+
+def test_track_event_uses_its_own_rate_limit_bucket():
+    """Page-view events must not share (and exhaust) the 20/min write bucket."""
+    from src.api import analytics_router
+    from src.api.rate_limit import ANALYTICS_EVENTS_PER_MINUTE, rate_limit_analytics
+
+    route = next(r for r in analytics_router.router.routes if r.path.endswith("/event"))
+    deps = [d.dependency for d in route.dependencies]
+    assert rate_limit_analytics in deps
+    assert ANALYTICS_EVENTS_PER_MINUTE >= 60

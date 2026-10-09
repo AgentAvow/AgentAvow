@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
+import { NoticeText } from '../components/NoticeText'
 import { publicApi } from '../../lib/scanApi'
 import SEOHead from '../../components/SEOHead'
 
@@ -107,7 +108,7 @@ export default function Submit() {
               {busy ? 'Listing…' : 'List it'}
             </button>
           </form>
-          {error && <p className="mt-3 text-center text-[13px] text-danger max-w-[52ch] mx-auto">{error}</p>}
+          {error && <p className="mt-3 text-center text-[13px] text-danger max-w-[52ch] mx-auto"><NoticeText text={error} /></p>}
           <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
             <span className="text-[11.5px] text-text-muted/70">Try:</span>
             {EXAMPLES.map(([label, coord]) => (
