@@ -69,11 +69,12 @@ jobs:
       - name: Install the reader's pinned dependencies
         run: python -m pip install -r ".probity/${{ steps.pin.outputs.requirements }}"
 
-      - name: Check exact time boundaries with the unchanged signed grade
+      - name: Check exact time boundaries with native fixtures
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/tool-grade-time-controls"
           mkdir "$out"
+          export AGENTAVOW_TIME_TEST_RECEIPT="$out/local-signed-nanosecond-window.json"
           if node --experimental-test-coverage --test "$V1_DIR/test-time.mjs" > "$out/controls.stdout" 2> "$out/controls.stderr"; then
             printf '0\n' > "$out/controls.exit"
           else

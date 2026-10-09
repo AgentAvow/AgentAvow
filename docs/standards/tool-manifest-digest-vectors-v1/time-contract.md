@@ -13,13 +13,17 @@ precision refuse. It never silently truncates them.
 
 The original signed grade expires at `2026-10-02T21:28:34.085197+00:00`.
 Mayur021's `2026-10-02T21:28:34.085Z` case is 197 microseconds before expiry.
-`Date.parse` maps both to one millisecond, so the previous verifier refused it.
+`Date.parse` maps both to one millisecond, so the earlier verifier refused it.
 It also accepted one nanosecond before issuance after the same truncation.
+The later microsecond reader handles that original case, but still truncates
+digits seven through nine. A separately signed local 200-nanosecond window
+tests the resulting early-issuance acceptance and premature-expiry refusal.
 
 The controls use the unchanged signed grade, with exact issuance, exact expiry,
 one-nanosecond neighbors, equivalent representations, offsets, day/epoch crossings
-and unsupported forms. They make the time comparison visible without changing a
-signature, served definition or digest rule.
+and unsupported forms. The original signature, served definitions and digest
+rules stay unchanged. The additional signed window uses an ephemeral local
+fixture key; it creates no issuer credential or current admission.
 
 From this directory:
 
