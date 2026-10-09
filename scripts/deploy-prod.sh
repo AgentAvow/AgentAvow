@@ -23,6 +23,10 @@ COMPOSE_FILE="docker-compose.prod.yml"
 # code. Override with AG_DEPLOY_BRANCH to ship a hotfix branch.
 DEPLOY_BRANCH="${AG_DEPLOY_BRANCH:-main}"
 SSH_OPTS="-i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=10"
+# How long to wait for the new backend container, and then the site through nginx, to
+# answer /health. Startup with migrations is normally ~35 s, but a busy box has taken
+# longer; 240 s leaves headroom. Deadline-based, so slow SSH round trips can't stretch it.
+HEALTH_WAIT_SECONDS="${AG_HEALTH_WAIT_SECONDS:-240}"
 
 # Load prod secrets (POSTGRES_PASSWORD, REDIS_PASSWORD, JWT_SECRET, …) into the
 # remote shell BEFORE invoking docker-compose so the YAML's `${VAR:?must be set}`
@@ -94,6 +98,41 @@ remote() {
   ssh $SSH_OPTS "${EC2_USER}@${EC2_HOST}" "$1"
 }
 
+# The new backend container answers /health with status ok (inside the container, so
+# it doesn't depend on nginx's view of the backend's IP).
+backend_container_ok() {
+  remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} exec -T backend python3 -c 'import httpx, sys; r = httpx.get(\"http://localhost:8000/health\", timeout=3); sys.exit(0 if r.json().get(\"status\") == \"ok\" else 1)'" > /dev/null 2>&1
+}
+
+# The site answers /health with status ok through nginx over https with the real Host.
+site_ok() {
+  remote "curl -sk --max-time 3 -H 'Host: agentavow.com' https://localhost/health | grep -q '\"status\":\"ok\"'" > /dev/null 2>&1
+}
+
+restart_nginx() {
+  remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx" 2>&1 | while IFS= read -r line; do
+    echo "    $line"
+  done
+}
+
+# wait_until <label> <check function> <seconds>: poll every 2 s until the check passes
+# or the deadline passes, printing elapsed time. Returns 0 on success, 1 on timeout.
+wait_until() {
+  local label="$1" check="$2" limit="$3" start=$SECONDS attempt=0
+  while true; do
+    attempt=$((attempt + 1))
+    if "$check"; then
+      echo "    ${label}: ok after $((SECONDS - start))s"
+      return 0
+    fi
+    if (( SECONDS - start >= limit )); then
+      return 1
+    fi
+    echo "    ${label}: attempt ${attempt}, $((SECONDS - start))s/${limit}s, waiting 2s..."
+    sleep 2
+  done
+}
+
 # --- Pre-flight checks ---
 echo -e "${BOLD}=== AgentGraph Production Deploy ===${NC}"
 echo ""
@@ -134,6 +173,20 @@ else
     || { echo "    $OUTPUT"; fail "Could not check out ${DEPLOY_BRANCH} on the host."; }
   echo "    $OUTPUT"
   ok "On ${DEPLOY_BRANCH}: $(remote "cd ~/${PROJECT_DIR} && git log --oneline -1")"
+
+  # Refuse to run a stale copy of this script. 2026-10-09: a deploy run from an old
+  # checkout skipped the nginx restart after the backend came up, so nginx kept the
+  # old container's IP and the site served 502s until nginx was restarted by hand.
+  # The host now has the branch tip; this script must match its copy there.
+  if ! remote "cat ~/${PROJECT_DIR}/scripts/deploy-prod.sh" 2>/dev/null | cmp -s - "$0"; then
+    if [ "${AG_ALLOW_SCRIPT_DRIFT:-0}" = "1" ]; then
+      warn "This deploy-prod.sh differs from ${DEPLOY_BRANCH}'s copy on the host (AG_ALLOW_SCRIPT_DRIFT=1, continuing)."
+    else
+      fail "This deploy-prod.sh differs from ${DEPLOY_BRANCH}'s copy on the host. Run it from an up-to-date checkout of ${DEPLOY_BRANCH} (git pull), or set AG_ALLOW_SCRIPT_DRIFT=1 if that's deliberate."
+    fi
+  else
+    ok "deploy-prod.sh matches ${DEPLOY_BRANCH}"
+  fi
 fi
 
 # --- Step 3: Build backend ---
@@ -181,7 +234,7 @@ step "Restarting services"
 if $DRY_RUN; then
   if $BACKEND; then
     echo "    Would run: ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} up -d"
-    echo "    Would poll http://localhost:8000/health INSIDE the backend container (docker-compose exec -T backend) up to 120 seconds"
+    echo "    Would poll http://localhost:8000/health INSIDE the backend container (docker-compose exec -T backend) up to ${HEALTH_WAIT_SECONDS} seconds"
     echo "    Would run: ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx   (after the backend answers; re-resolves its new IP)"
   elif $FRONTEND; then
     echo "    Would run: ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx"
@@ -194,27 +247,16 @@ else
     ok "Services started"
 
     # The backend container itself, not through nginx (nginx may still point at the
-    # old container). Startup with migrations takes ~60 s.
-    BACKEND_UP=false
-    for i in $(seq 1 60); do
-      if remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} exec -T backend python3 -c 'import httpx, sys; r = httpx.get(\"http://localhost:8000/health\", timeout=3); sys.exit(0 if r.json().get(\"status\") == \"ok\" else 1)'" > /dev/null 2>&1; then
-        BACKEND_UP=true
-        break
-      fi
-      echo "    Backend container attempt $i/60 — waiting 2s..."
-      sleep 2
-    done
-    if $BACKEND_UP; then
+    # old container).
+    if wait_until "Backend container /health" backend_container_ok "$HEALTH_WAIT_SECONDS"; then
       ok "Backend container answers /health"
     else
-      fail "Backend container did not answer /health within 120 seconds. Check logs: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs backend --tail 50'"
+      fail "Backend container did not answer /health within ${HEALTH_WAIT_SECONDS} seconds. Check logs: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs backend --tail 50'"
     fi
 
     # Now nginx: re-resolve the new backend container (and pick up fresh static files
     # on a full deploy).
-    remote "cd ~/${PROJECT_DIR} && ${LOAD_ENV} && docker-compose -f ${COMPOSE_FILE} restart nginx" 2>&1 | while IFS= read -r line; do
-      echo "    $line"
-    done
+    restart_nginx
     ok "Nginx restarted after the backend came up"
   elif $FRONTEND; then
     # Frontend-only: the backend was not recreated; restart nginx for the new web/dist
@@ -228,25 +270,26 @@ fi
 # --- Step 6: Wait for backend to be healthy ---
 step "Waiting for the site to be healthy (through nginx)"
 if $DRY_RUN; then
-  echo "    Would poll https://localhost/health (Host: agentavow.com, through nginx) up to 120 seconds"
+  echo "    Would poll https://localhost/health (Host: agentavow.com, through nginx) up to ${HEALTH_WAIT_SECONDS} seconds"
 else
-  HEALTHY=false
   # Through nginx over https with the real Host, and require the body: plain
   # http://localhost answers 301 (the https redirect), which `curl -f` counts as
   # success, so the old check passed while the backend was still booting and
-  # nginx was serving 502s (2026-10-08). Startup with migrations takes ~60 s.
-  for i in $(seq 1 60); do
-    if remote "curl -sk --max-time 3 -H 'Host: agentavow.com' https://localhost/health | grep -q '\"status\":\"ok\"'" > /dev/null 2>&1; then
-      HEALTHY=true
-      break
-    fi
-    echo "    Attempt $i/60 — waiting 2s..."
-    sleep 2
-  done
-  if $HEALTHY; then
+  # nginx was serving 502s (2026-10-08).
+  if wait_until "Site /health (through nginx)" site_ok "$HEALTH_WAIT_SECONDS"; then
     ok "Backend is healthy"
+  elif $BACKEND && backend_container_ok; then
+    # The backend is fine but nginx can't reach it: almost always nginx still holding
+    # the old container's IP. Restart it once more and give it a short window.
+    warn "Backend container is healthy but nginx isn't reaching it; restarting nginx once more"
+    restart_nginx
+    if wait_until "Site /health after nginx restart" site_ok 60; then
+      ok "Backend is healthy (late: nginx needed a second restart)"
+    else
+      fail "Backend container is healthy but the site still fails /health through nginx. Check: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'docker logs agentgraph-nginx-1 --tail 50'"
+    fi
   else
-    fail "Backend did not become healthy within 120 seconds. Check logs: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs backend --tail 50'"
+    fail "Backend did not become healthy within ${HEALTH_WAIT_SECONDS} seconds. Check logs: ssh $SSH_OPTS ${EC2_USER}@${EC2_HOST} 'cd ~/${PROJECT_DIR} && docker-compose -f ${COMPOSE_FILE} logs backend --tail 50'"
   fi
 
   # Reclaim disk from the image we just replaced (each deploy builds a fresh backend
