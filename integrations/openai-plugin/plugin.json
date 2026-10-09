@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "app-6aac4159c8a88191b820a458ef455b03",
+  "name": "agentavow",
   "version": "1.1.2",
   "description": "Scan an MCP server, package, or GitHub repo for a signed 0-100 trust score before your agent connects to it.",
   "author": {
