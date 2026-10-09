@@ -1,6 +1,6 @@
 # AgentAvow Safety Model — v1.0
 
-**Status:** Stable · **Model version:** `safety-model-v1` · **Last updated:** 2026-10-09 (added §4.2 graduated curve and §11.1 thin coverage, both live since 2026-10-08; 2026-10-02: §5 tier table aligned with the API's six `trust_tier` values)
+**Status:** Stable · **Model versions:** `safety-model-v1`, `safety-model-v1.1` (§4.2; selection rule in §10) · **Last updated:** 2026-10-09 (added §4.2 `safety-model-v1.1` graduated curve, the §10 selection rule, and §11.1 thin coverage; 2026-10-02: §5 tier table aligned with the API's six `trust_tier` values)
 
 This document specifies the **model** AgentAvow uses to turn a scan into a 0–100 safety
 score, a tier, and a Certified verdict. It is the declarative, versioned counterpart to
@@ -92,8 +92,13 @@ targets, **high/medium** findings *in those expected categories* deduct at **50%
 earlier rule that zeroed expected-category findings entirely, which let MCP servers with
 critical findings score 100.)
 
-### 4.2 Graduated curve — no critical or high (since 2026-10-08)
-When the shipped-weighted counts give `C = 0` and `H = 0`, steps 1 and 3 above are replaced:
+### 4.2 `safety-model-v1.1` — graduated curve when there is no critical or high
+Effective for scores whose signed `scannedAt` is on or after **2026-10-08T17:36:57Z** (see
+§10). Scores scanned before then follow §4 as written (`safety-model-v1`), and §4 stays
+normative for them.
+
+Under `safety-model-v1.1`, when the shipped-weighted counts give `C = 0` and `H = 0`, steps
+1 and 3 of §4 are replaced:
 
 1. **Base** is `84` whether or not mediums are present (no drop to `68`).
 2. Each code **medium** costs a fixed `4` points (`2` when it falls in an expected or
@@ -169,10 +174,21 @@ score is the product; the signature is the proof under it.
 
 ## 10. Versioning
 
-This is `safety-model-v1`. A change to any weight, threshold, tier boundary, or the
-Certified gate is a new model version; scores carry the model version they were computed
-under so a recompute uses the matching rules. Non-normative examples and notes may change
-without a version bump.
+A change to any weight, threshold, tier boundary, or the Certified gate is a new model
+version. The signed payload carries no model-version field, so a recompute selects the
+model by the attestation's signed `scannedAt` (the time the score was computed):
+
+| Signed `scannedAt` | Model | Differs in |
+|---|---|---|
+| before 2026-10-08T17:36:57Z | `safety-model-v1` | — |
+| on or after 2026-10-08T17:36:57Z | `safety-model-v1.1` | §4.2 graduated curve |
+
+`scannedAt`, not `issuedAt`, selects the model: a cached result can be re-signed later
+(a new `issuedAt`) without being re-scored, so `issuedAt` can postdate the model that
+computed the score. The boundary is the time production pulled the v1.1 change; the
+first scan recorded after it is at 17:45:07Z, so no score sits between the pull and the
+restart onto the new code. Every other section applies to both versions unchanged.
+Non-normative examples and notes may change without a version bump.
 
 ## 11. The phrase layer (decision)
 
@@ -210,6 +226,8 @@ axis and is shown beside the phrase ("Safe to connect · Certified"). Reference
 implementation: `src/scanner/verdict.py` (`decide`).
 
 ### 11.1 Thin coverage reads safe (since 2026-10-08)
+The phrase layer is unsigned (it rides beside the signed verdict and adds no input to the
+score), so this change carries no model version.
 The last clause of rule 2 ("fewer than 8 files scanned with no critical, high or medium
 finding") no longer applies. A result with fewer than 8 files scanned and nothing found
 reads `safe`, and its reason says how little there was to inspect:
