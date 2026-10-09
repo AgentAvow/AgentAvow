@@ -84,6 +84,15 @@ jobs:
             exit "$status"
           fi
           cat "$out/controls.stdout"
+          if node "$V1_DIR/verify.mjs" "$V1_DIR/nanosecond-window-vectors.json" > "$out/published-window.stdout" 2> "$out/published-window.stderr"; then
+            printf '0\n' > "$out/published-window.exit"
+          else
+            status=$?
+            printf '%s\n' "$status" > "$out/published-window.exit"
+            cat "$out/published-window.stdout" "$out/published-window.stderr" >&2
+            exit "$status"
+          fi
+          cat "$out/published-window.stdout"
 
       - name: Native verifier, then Probity reader
         run: |
