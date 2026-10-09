@@ -4284,8 +4284,9 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     apply_artifact_scan(result, eco, fetched)
 
     # Provenance verification on the exact coordinate — this is what makes A+
-    # reachable for a package that publishes Sigstore/PEP-740 provenance.
-    if getattr(settings, "scanner_verify_provenance", False):
+    # reachable for a package that publishes Sigstore/PEP-740 provenance. (Images:
+    # cosign signatures, checked in ``apply_docker_image_extras`` below.)
+    if getattr(settings, "scanner_verify_provenance", False) and eco != "docker":
         try:
             from src.scanner.provenance import analyze_provenance
 
@@ -4319,6 +4320,12 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     except Exception:
         pass
 
+    if eco == "docker":
+        # The image's installed packages → OSV (fixable CVEs, dependency-class), its
+        # cosign signature/attestation → provenance, and what the layer walk read.
+        from src.scanner.docker_image import apply_docker_image_extras
+        await apply_docker_image_extras(result, fetched)
+
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
     result.certified = _certified_status(result)
@@ -4343,7 +4350,7 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     if eco == "huggingface":
         findings = findings + huggingface_weight_findings(fetched)
     elif eco == "docker":
-        # No layer scan: the OCI config carries the graded signal (root/env/base).
+        # The OCI config's own signal (root/env/base) on top of the layer walk's files.
         findings = findings + docker_config_findings(fetched)
     if getattr(fetched, "deprecation", None):
         result.deprecation = fetched.deprecation
