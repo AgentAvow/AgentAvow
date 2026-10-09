@@ -20,8 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_db
-from src.scanner.verdict import decide
-from src.trust_tiers import headline, is_certified
+from src.scanner.verdict import certified_mark, decide
+from src.trust_tiers import headline
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,8 @@ async def og_check(
     # would pair one result's eligibility with a different score, so it never shows.
     _composite = bool(entity_trust and entity_trust.get("imported")
                       and entity_trust.get("composite_score") is not None)
-    verdict = headline(dec, certified=not _composite and is_certified(scan_data))
+    verdict = headline(dec, certified=not _composite and bool(scan_data)
+                       and certified_mark(scan_data, dec))
     title = f"{full_name}: {verdict} · trust score {score}/100"
     description = f"{verdict}: {dec.reason}."
 
@@ -251,7 +252,7 @@ async def og_profile(
 # /check/mcp, /check/skill/* here; real users still get the SPA.
 
 def _og_image_url(title: str, grade: str, score, subtitle: str,
-                  data: dict | None = None) -> str:
+                  data: dict | None = None, adoption: tuple | None = None) -> str:
     from urllib.parse import urlencode
     params = {
         # Clip the title like the subtitle — a long HF/docker coordinate would otherwise
@@ -261,8 +262,18 @@ def _og_image_url(title: str, grade: str, score, subtitle: str,
     }
     if data:
         params["decision"] = decide(data).decision
-        if is_certified(data):
+        # The Certified MARK (eligible AND a final Safe answer at 81+), never raw
+        # eligibility — the card never reads "Review · Certified".
+        if certified_mark(data):
             params["certified"] = "1"
+    if adoption is not None:
+        # (score_0_100, count, unit) from surface_adoption_summary; "0" = no signal.
+        a_pct, a_count, a_unit = adoption
+        params["adoption"] = int(a_count or 0)
+        if a_pct is not None:
+            params["adoption_pct"] = int(a_pct)
+        if a_unit:
+            params["adoption_unit"] = str(a_unit)[:24]
     q = urlencode(params)
     return f"{BASE_URL}/api/v1/public/scan/og.png?{q}"
 
@@ -275,7 +286,7 @@ def _og_verdict(score: int | None, data: dict | None = None) -> str:
         return "A signed safety score — verify it offline."
     if data:
         dec = decide(data)
-        return (f"{headline(dec, certified=is_certified(data))}: {dec.reason}"
+        return (f"{headline(dec, certified=certified_mark(data, dec))}: {dec.reason}"
                 " · signed, verifiable offline.")
     return f"{headline(decide({'trust_score': score}))} · signed, verifiable offline."
 
@@ -293,7 +304,7 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
     cached = await _get_cached(surface, name)
     if cached:
         score = cached.get("trust_score")
-        grade = cached.get("grade") or _display_grade(score or 0, is_certified(cached))
+        grade = cached.get("grade") or _display_grade(score or 0, certified_mark(cached))
         subtitle = (cached.get("tool_description") or "").strip()
     verdict = _og_verdict(score, cached)
     if not subtitle:
@@ -301,8 +312,19 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
     title = f"{name} ({surface})"
     _shown = "—" if score is None else f"{int(score)}/100"
     description = f"{name} scored {_shown} on AgentAvow — {verdict}"
-    image_url = _og_image_url(full, grade, score, subtitle, cached)
+    image_url = _og_image_url(full, grade, score, subtitle, cached,
+                              adoption=await _adoption_for(surface, surface, name)
+                              if cached else None)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
+
+
+async def _adoption_for(surface: str, owner: str, repo: str) -> tuple | None:
+    """(score_0_100, count, unit) for the OG card's adoption dial; None when unknown."""
+    try:
+        from src.api.public_scan_router import surface_adoption_summary
+        return await surface_adoption_summary(surface, owner, repo)
+    except Exception:  # noqa: BLE001 — the card renders without adoption
+        return None
 
 
 @router.get("/skill/{owner}/{repo}", response_class=HTMLResponse)

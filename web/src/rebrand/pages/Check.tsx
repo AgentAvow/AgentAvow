@@ -323,15 +323,15 @@ function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified
     <div className="relative px-4 sm:px-7 py-6">
       <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
         <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
-        <div className="relative grid grid-cols-2">
+        <div className="relative grid grid-cols-1 sm:grid-cols-2">
           <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-            <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{showCert ? <CertifiedMark score={trustScore} scale={big} /> : <TrustBar score={trustScore} scale={big} />}</div>
+            <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">{showCert ? <CertifiedMark score={trustScore} scale={big} /> : <TrustBar score={trustScore} scale={big} />}</div>
             <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: showCert ? undefined : t.color }}>{trustLabel}</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
             <Percentile score={trustScore} />
           </div>
-          <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
-            <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">
+          <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
+            <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">
               <AdoptionNeedle count={has ? h!.count : 0} unit={has ? h!.unit : undefined} scorePct={data?.adoption_score_100} scale={big} />
             </div>
             <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
@@ -2028,15 +2028,15 @@ function Result({ owner, repo, privateResult }: {
         <div className="relative px-4 sm:px-7 py-6">
           <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
             <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
-            <div className="relative grid grid-cols-2">
+            <div className="relative grid grid-cols-1 sm:grid-cols-2">
               <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-                <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{isCertified(scan) ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
+                <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">{isCertified(scan) ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
                 <Percentile score={scan.trust_score} />
               </div>
-              <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-l border-border/50">
-                <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} scale={heroBig} /></div>
+              <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
+                <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} scale={heroBig} /></div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption ? adoption.sub : 'no adoption signal yet'}</div>
               </div>

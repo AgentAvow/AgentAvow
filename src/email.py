@@ -47,23 +47,26 @@ def render_watch_notification(
     grade, badge_color = _grade_and_color(new_score)
     delta = (new_score - old_score) if (new_score is not None and old_score is not None) else 0
 
-    # Email-native trust mark: a horizontal 10-segment power bar (SVG is stripped by
-    # Gmail, so the mark is drawn with table cells — renders everywhere). Filled count
-    # = round(score/10), filled cells in the tier colour, the rest neutral slate.
+    # Email-native trust mark in the badge design (option C): the vertical 10-segment
+    # bar with the score + tier word to its right. SVG is stripped by Gmail, so the bar
+    # is drawn with table cells (renders everywhere); filled = round(score/10) from the
+    # bottom, in the tier colour, the rest neutral slate.
+    from src.trust_tiers import tier_for_score
     lv = round((new_score or 0) / 10)
-    _seg = []
-    for i in range(10):
+    _rows = []
+    for i in range(9, -1, -1):
         fill = badge_color if i < lv else "#243458"
-        _seg.append(
-            f'<td style="width:14px;height:9px;background-color:{fill};'
-            f'border-radius:1px;font-size:0;line-height:0;">&nbsp;</td>'
+        _rows.append(
+            f'<tr><td style="width:16px;height:7px;background-color:{fill};'
+            f'border-radius:1px;font-size:0;line-height:0;">&nbsp;</td></tr>'
         )
-        if i < 9:
-            _seg.append('<td style="width:3px;font-size:0;line-height:0;">&nbsp;</td>')
+        if i > 0:
+            _rows.append('<tr><td style="height:3px;font-size:0;line-height:0;">&nbsp;</td></tr>')
     trust_bar = (
-        '<table cellpadding="0" cellspacing="0" role="presentation"><tr>'
-        + "".join(_seg) + "</tr></table>"
+        '<table cellpadding="0" cellspacing="0" role="presentation">'
+        + "".join(_rows) + "</table>"
     )
+    tier_word = tier_for_score(new_score).display if new_score is not None else ""
 
     _d = decision or {}
     _dval = _d.get("decision") or (new_score if new_score is not None else 0)
@@ -110,7 +113,7 @@ def render_watch_notification(
         "watch_notification.html",
         _raw={
             "accent": accent, "badge_color": badge_color, "grade": grade,
-            "trust_bar": trust_bar,
+            "trust_bar": trust_bar, "tier_word": _esc(tier_word),
             "tag": tag, "headline": title, "repo": full,
             "phrase": _esc(phrase), "phrase_reason": _esc(phrase_reason),
             "phrase_color": phrase_color,

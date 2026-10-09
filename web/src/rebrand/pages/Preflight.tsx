@@ -5,7 +5,7 @@ import { getTrustTier } from '../../components/trust/gradeSystem'
 import api from '../../lib/api'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
-import { DecisionLine } from '../components/TrustMark'
+import { CertifiedMark, DecisionLine, TrustBar } from '../components/TrustMark'
 import SEOHead from '../../components/SEOHead'
 
 /**
@@ -161,9 +161,10 @@ export default function RebrandPreflight() {
                   {data.summary.warnings > 0 && ` · ${data.summary.warnings} warning${data.summary.warnings === 1 ? '' : 's'}`}
                 </p>
               </div>
-              <div className="text-right">
-                <div className="font-mono text-[34px] font-bold tabular-nums leading-none" style={{ color: tier.color }}>{data.trust_score}</div>
-                <div className="text-[11px] text-text-muted mt-1">tier {tier.name}{data.certified && ' · Certified'}</div>
+              {/* the trust mark in the badge design: the bar with the score to its right
+                  (the Certified mark only when the result carries certified_mark) */}
+              <div className="shrink-0">
+                {data.certified ? <CertifiedMark score={data.trust_score} scale={0.85} /> : <TrustBar score={data.trust_score} scale={0.85} />}
               </div>
             </div>
           </div>
