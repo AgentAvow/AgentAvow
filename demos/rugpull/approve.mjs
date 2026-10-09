@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// The security team's approval step. Reads the grade through the gate (so the
+// The security team's approval step. Reads the signed result through the gate (so the
 // signature is verified first), shows it, and records an approval bound to the
 // signed tool manifest digest: the approval covers exactly the definitions that
-// were graded, and nothing the server serves later.
+// were scanned, and nothing the server serves later.
 
 import fs from 'node:fs';
 import { createGate } from 'agentavow-trust/gate';
@@ -13,8 +13,8 @@ const PHRASE = { safe: 'Safe to connect', review: 'Review before you connect', d
 const gate = createGate({ baseUrl: API_BASE, jwksUrl: JWKS_URL, issuer: DEMO_ISSUER, onReview: 'block', onWarn: () => {} });
 const d = await gate.check(MCP_URL);
 const g = d.grade;
-console.log(`  grade for ${MCP_URL}`);
-console.log(`    ${PHRASE[d.decision]} (trust score ${d.score}/100, tier ${d.tier}); attestation ${d.attestation?.verified ? 'verified' : 'NOT verified'}, kid ${g?.kid}`);
+console.log(`  signed result for ${MCP_URL}`);
+console.log(`    ${PHRASE[d.decision]} · trust ${d.score}/100 (${d.tier}) · signature ${d.attestation?.verified ? 'verified' : 'NOT verified'} (kid ${g?.kid})`);
 try {
   const raw = await (await fetch(`${API_BASE}/public/scan/mcp?endpoint=${encodeURIComponent(MCP_URL)}`)).json();
   if (raw.decision_reason) console.log(`    why: ${raw.decision_reason}`);
@@ -36,4 +36,5 @@ const approval = {
     : 'Safe to connect; approved.',
 };
 fs.writeFileSync(statePath('approvals.json'), JSON.stringify([approval], null, 2) + '\n');
-console.log(`  approved by ${approval.approvedBy}, bound to manifest ${approval.toolManifestDigest}`);
+console.log(`  approved by ${approval.approvedBy}, bound to the signed tool manifest:`);
+console.log(`    ${approval.toolManifestDigest}`);

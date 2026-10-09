@@ -161,7 +161,7 @@ test('seam (a): a drifted or unknown tool refuses the connect; the allowlist nar
   await f(SERVER, post(INIT));
   await assert.rejects(f(SERVER, post(LIST)), (e) => {
     assert.match(e.message, /refused MCP server "deepwiki"/);
-    assert.match(e.message, /changed since it was graded/);
+    assert.match(e.message, /changed since it was scanned/);
     assert.equal(e.decision.outcome, 'drift');
     return true;
   });
@@ -292,7 +292,7 @@ test('real @flue/runtime: createMcpConnection mounts gated tools and refuses a d
 
   const drifted = fakeNet({ served: [DRIFTED, OTHER] });
   const driftGate = flue.createFlueGate({ ...quiet, fetch: drifted.fetch });
-  await assert.rejects(rt.createMcpConnection(driftGate.connection({ name: 'deepwiki', url: SERVER, fetch: drifted.fetch })), /changed since it was graded/);
+  await assert.rejects(rt.createMcpConnection(driftGate.connection({ name: 'deepwiki', url: SERVER, fetch: drifted.fetch })), /changed since it was scanned/);
 });
 
 test('real @flue/runtime: instrument(gate.instrumentation()) denies a drifted call through interceptExecution', { skip: runtimeSkip }, async () => {

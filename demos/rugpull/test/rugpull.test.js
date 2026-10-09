@@ -1,6 +1,6 @@
 // End-to-end, model-free, localhost only: the control run leaks exactly one
 // canary message; the protected run leaks none and reports do_not_connect with
-// both digests. Needs node 20+ and this repo's Python backend (for grade.py).
+// both digests. Needs node 20+ and this repo's Python backend (for scan.py).
 //
 //   cd demos/rugpull && npm test
 
@@ -69,13 +69,13 @@ test('rug-pull at the call: control leaks one canary, protected leaks none', { s
     try { return fs.readFileSync(path.join(state, name), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; }
   };
 
-  // Approval day: v1 is served, graded by the real scanner, signed by the demo key, approved.
+  // Approval day: v1 is served, scanned by the real scanner, signed by the demo key, approved.
   let server = start(['server.mjs', '--version', 'v1']);
   start(['api.mjs']);
   await waitUp(`http://127.0.0.1:${MCP_PORT}/healthz`);
   await waitUp(`http://127.0.0.1:${API_PORT}/`);
-  const graded = JSON.parse(run(PYTHON, [path.join(HERE, 'grade.py'), '--endpoint', mcpUrl, '--out', state, '--json']));
-  assert.equal(graded.decision, 'safe', 'v1 grades Safe to connect: tool definitions clean, server code not inspected (see README)');
+  const graded = JSON.parse(run(PYTHON, [path.join(HERE, 'scan.py'), '--endpoint', mcpUrl, '--out', state, '--json']));
+  assert.equal(graded.decision, 'safe', 'v1 reads Safe to connect: tool definitions clean, server code not inspected (see README)');
   assert.deepEqual(graded.findings, []);
   run(process.execPath, ['approve.mjs']);
 
