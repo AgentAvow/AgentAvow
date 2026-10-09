@@ -31,6 +31,12 @@ def _f(severity, name="Finding", **kw):
             "kind": kw.pop("kind", "defect"), "installed": kw.pop("installed", True), **kw}
 
 
+def _dep(severity, pkg="lib@1.0.0 (GHSA-xxxx)"):
+    """A vulnerable-dependency finding as the API lists it."""
+    return _f(severity, f"Vulnerable dependency: {pkg}", category="dependency",
+              file_path="lockfile")
+
+
 def _scan(score=92, files=120, items=(), crit=None, high=None, **extra):
     findings = {"items": list(items)}
     if crit is not None:
@@ -171,6 +177,74 @@ CASES = [
         "ran": True, "pending": True,
         "findings": [{"rule": "behavioral_undeclared_egress", "severity": "high"}]}),
      "safe", False, "nothing found in 300 files; sandbox still running"),
+    # ── dependency advisories: never an input, always named beside a count ────────
+    # (vercel/next.js read "5 high findings, …" next to totals of 48 high / 6 critical)
+    ("deps_review_nextjs_shape", _scan(
+        58, 200,
+        [_dep("critical", "handlebars@4.7.9 (GHSA-8r5x)")] * 6
+        + [_dep("high", "tar@6.1.0 (GHSA-x)")] * 43
+        + [_f("high", "execSync / spawn (Node.js)", category="unsafe_exec")] * 5,
+        crit=0, high=5,
+        supply_chain={"scored": True, "counts": {"critical": 6, "high": 43, "low": 31}}),
+     "review", True,
+     "5 high findings in its code, including execSync / spawn (Node.js); "
+     "plus 6 critical and 43 high in dependencies"),
+    ("deps_review_one_high_items_only", _scan(
+        80, 200, [_f("high", "Eval of input"), _dep("high", "a@1 (GHSA-1)")], high=1),
+     "review", True, "one high finding in its code: eval of input; plus 1 high in dependencies"),
+    ("deps_supply_chain_counts_exceed_capped_items", _scan(
+        70, 200, [_f("high", "X"), _dep("critical", "a@1 (GHSA-1)")], high=1,
+        supply_chain={"scored": True, "counts": {"critical": 4, "high": "9"}}),
+     "review", True, "one high finding in its code: X; plus 4 critical and 9 high in dependencies"),
+    ("deps_unscored_supply_chain_counts_ignored", _scan(
+        70, 200, [_f("high", "X")], high=1,
+        supply_chain={"scored": False, "counts": {"critical": 4, "high": 9}}),
+     "review", True, "one high finding: X"),
+    ("deps_sandbox_high", _scan(70, 200, [_dep("critical", "a@1 (GHSA-1)")], behavioral=_bev(
+        [{"rule": "behavioral_undeclared_egress", "severity": "high"}])),
+     "review", True,
+     "one high finding in the sandbox: undeclared network call; plus 1 critical in dependencies"),
+    ("deps_medium_only_no_clause", _scan(70, 40, [_dep("medium", "a@1 (GHSA-1)")]),
+     "safe", True, "no critical or high findings in 40 files"),
+    ("deps_advisory_branch_unchanged", _scan(88, 200, [_dep("high", "a@1 (GHSA-1)")],
+                                             advisories=[{"id": "GHSA-abcd",
+                                                          "affects_scanned_version": True}]),
+     "review", True, "a published advisory affects this version (GHSA-abcd)"),
+    ("deps_score_branch_unchanged", _scan(45, 200, [_dep("critical", "a@1 (GHSA-1)")] * 3),
+     "review", True, "trust score 45/100 is under 51"),
+    ("deps_safe", _scan(82, 300, [_dep("high", "a@1 (GHSA-1)"), _dep("high", "b@2 (GHSA-2)")]),
+     "safe", True, "no critical or high findings in its code (dependencies: 2 high advisories)"),
+    ("deps_safe_one", _scan(82, 300, [_dep("critical", "a@1 (GHSA-1)")]),
+     "safe", True, "no critical or high findings in its code (dependencies: 1 critical advisory)"),
+    ("deps_safe_thin", _scan(82, 3, [_dep("high", "a@1 (GHSA-1)")]),
+     "safe", True, "no critical or high findings in its code (dependencies: 1 high advisory)"),
+    ("deps_safe_pending", _scan(82, 300, [_dep("high", "a@1 (GHSA-1)")],
+                                behavioral={"ran": False, "pending": True}),
+     "safe", False,
+     "no critical or high findings in its code (dependencies: 1 high advisory); "
+     "sandbox still running"),
+    ("deps_do_not_connect", _scan(40, 200, [_f("critical", "Hardcoded private key"),
+                                            _dep("critical", "a@1 (GHSA-1)"),
+                                            _dep("high", "b@1 (GHSA-2)")], crit=1),
+     "do_not_connect", True,
+     "one critical finding in its code: hardcoded private key; "
+     "plus 1 critical and 1 high in dependencies"),
+    ("deps_do_not_connect_many", _scan(30, 200, [_f("critical", "Alpha")] * 2
+                                       + [_dep("high", "a@1 (GHSA-1)")] * 3, crit=2),
+     "do_not_connect", True,
+     "2 critical findings in its code, including alpha; plus 3 high in dependencies"),
+    ("deps_sandbox_critical", _scan(45, 200, [_dep("high", "a@1 (GHSA-1)")], behavioral=_bev(
+        [{"rule": "some_new_rule", "severity": "critical", "name": "Wiped the disk"}])),
+     "do_not_connect", True,
+     "the sandbox caught a critical behavior: wiped the disk; plus 1 high in dependencies"),
+    ("deps_malicious_branch_unchanged", _scan(30, 200, [
+        _f("critical", "Known-malicious package: evil@1.0.0 (MAL-2025-1)",
+           category="dependency", file_path="package-lock.json"),
+        _dep("high", "a@1 (GHSA-1)")], crit=1),
+     "do_not_connect", True, "a known-malicious dependency: evil@1.0.0 (MAL-2025-1)"),
+    ("deps_canary_branch_unchanged", _scan(45, 200, [_dep("high", "a@1 (GHSA-1)")],
+                                           behavioral=_bev(canary_exfil=[{"host": "x"}])),
+     "do_not_connect", True, "a planted credential left the sandbox"),
     # ── odd shapes never raise ────────────────────────────────────────────────────
     ("empty", {}, "review", True, "trust score 0/100 is under 51"),
     ("garbage", {"trust_score": "x", "findings": "nope", "metadata": None,

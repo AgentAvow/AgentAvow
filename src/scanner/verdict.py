@@ -245,10 +245,55 @@ def _is_remote_mcp(data: dict) -> bool:
     return False
 
 
-def _count_phrase(n: int, severity: str, label: str | None) -> str:
+def _count_phrase(n: int, severity: str, label: str | None, where: str = "") -> str:
     if n == 1:
-        return f"one {severity} finding" + (f": {label}" if label else "")
-    return f"{n} {severity} findings" + (f", including {label}" if label else "")
+        return f"one {severity} finding{where}" + (f": {label}" if label else "")
+    return f"{n} {severity} findings{where}" + (f", including {label}" if label else "")
+
+
+def finding_decides(i: dict) -> bool:
+    """Whether a listed finding is an input to the decision: a blocking critical/high
+    (static code, install hook, known-malicious dependency, own advisory) or a sandbox
+    critical/high (``sandbox: True``). Dependency advisories, mediums, lows and
+    capabilities are not. Used to list the findings that decided the answer first."""
+    if not isinstance(i, dict):
+        return False
+    if str(i.get("severity") or "").lower() not in ("critical", "high"):
+        return False
+    return bool(i.get("sandbox")) or _is_blocking_item(i)
+
+
+def _is_dependency_advisory(i: dict) -> bool:
+    """A vulnerable-dependency finding (``category == "dependency"``): reported and
+    counted in the totals, never a decision input (a known-malicious one is)."""
+    return (i.get("category") == "dependency" and i.get("kind") != "capability"
+            and not _is_malicious_item(i))
+
+
+def _dependency_counts(data: dict, items: list) -> tuple[int, int]:
+    """(critical, high) dependency advisories, as the totals beside the reason count
+    them: the larger of the listed items and the scored supply-chain counts (the item
+    list is capped)."""
+    crit = sum(1 for i in items if _is_dependency_advisory(i)
+               and str(i.get("severity") or "").lower() == "critical")
+    high = sum(1 for i in items if _is_dependency_advisory(i)
+               and str(i.get("severity") or "").lower() == "high")
+    sc = data.get("supply_chain") if isinstance(data.get("supply_chain"), dict) else {}
+    counts = sc.get("counts")
+    if sc.get("scored") is True and isinstance(counts, dict):
+        crit = max(crit, _int(counts.get("critical")))
+        high = max(high, _int(counts.get("high")))
+    return crit, high
+
+
+def _dependency_phrase(crit: int, high: int) -> str:
+    """``6 critical and 43 high`` (empty when neither)."""
+    parts = []
+    if crit > 0:
+        parts.append(f"{crit} critical")
+    if high > 0:
+        parts.append(f"{high} high")
+    return " and ".join(parts)
 
 
 def _first(items: list, pred) -> dict | None:
@@ -278,6 +323,16 @@ def decide(data: dict) -> Decision:
 
     def done(decision: str, reason: str) -> Decision:
         return Decision(decision, not pending, reason + (PENDING_SUFFIX if pending else ""))
+
+    # Dependency advisories are never decision inputs, but the totals beside the reason
+    # count them; a reason that counts findings names them too, so the two never seem
+    # to disagree ("5 high findings in its code; plus 6 critical and 43 high in
+    # dependencies"). Wording only: nothing here changes the decision.
+    dep_c, dep_h = _dependency_counts(data, items)
+    deps = _dependency_phrase(dep_c, dep_h)
+    in_code = " in its code" if deps else ""
+    in_sandbox = " in the sandbox" if deps else ""
+    plus_deps = f"; plus {deps} in dependencies" if deps else ""
 
     def sev(i: dict) -> str:
         return str(i.get("severity") or "").lower()
@@ -322,23 +377,27 @@ def decide(data: dict) -> Decision:
     n_crit, crit = defect("critical")
     if n_crit:
         return done(DECISION_DO_NOT_CONNECT, _count_phrase(
-            n_crit, "critical", _label(crit.get("name")) if crit else None))
+            n_crit, "critical", _label(crit.get("name")) if crit else None, in_code)
+            + plus_deps)
     b_crit = [f for f in b_findings if sev(f) == "critical"]
     if b_crit:
         f = b_crit[0]
         label = _BEHAVIORAL_LABELS.get(str(f.get("rule") or "")) or _label(f.get("name"))
-        return done(DECISION_DO_NOT_CONNECT, f"the sandbox caught a critical behavior: {label}")
+        return done(DECISION_DO_NOT_CONNECT,
+                    f"the sandbox caught a critical behavior: {label}" + plus_deps)
 
     # ── review ────────────────────────────────────────────────────────────────────
     n_high, high = defect("high")
     if n_high:
         return done(DECISION_REVIEW, _count_phrase(
-            n_high, "high", _label(high.get("name")) if high else None))
+            n_high, "high", _label(high.get("name")) if high else None, in_code)
+            + plus_deps)
     b_high = [f for f in b_findings if sev(f) == "high"]
     if b_high:
         f = b_high[0]
         label = _BEHAVIORAL_LABELS.get(str(f.get("rule") or "")) or _label(f.get("name"))
-        return done(DECISION_REVIEW, _count_phrase(len(b_high), "high", label))
+        return done(DECISION_REVIEW,
+                    _count_phrase(len(b_high), "high", label, in_sandbox) + plus_deps)
 
     raw_adv = data.get("advisories")
     if not (isinstance(raw_adv, list) and raw_adv):
@@ -363,6 +422,10 @@ def decide(data: dict) -> Decision:
                 and i.get("installed") is not False for i in items)
 
     # ── safe ──────────────────────────────────────────────────────────────────────
+    if deps:
+        noun = "advisory" if dep_c + dep_h == 1 else "advisories"
+        return done(DECISION_SAFE,
+                    f"no critical or high findings in its code (dependencies: {deps} {noun})")
     # Thin coverage (0 < files < 8, nothing found) reads Safe and says so in the reason
     # (Kenne, 2026-10-08, #19). The 74 / 82 evidence cap on the score still shows it.
     if 0 < files < THIN_COVERAGE_FILES and not found:

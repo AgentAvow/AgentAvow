@@ -301,3 +301,54 @@ def test_metadata_text_describes_the_three_answers():
         assert "needs review" not in t and "needs-review" not in t, name
         assert "letter grade" not in t.lower() and ">=81" not in t and "81+" not in t, name
     assert "Certified" in texts["claude"] and "Certified" in texts["get_started"]
+
+
+# vercel/next.js on claude.ai: the reason named a high finding in the tool's own code
+# while top_findings led with three critical dependency advisories.
+NEXTJS_SHAPE = {
+    "trust_score": 58, "trust_tier": "standard", "metadata": {"files_scanned": 200},
+    "findings": {"total": 10, "critical": 0, "high": 1, "items": [
+        *[{"severity": "critical", "category": "dependency",
+           "name": f"Vulnerable dependency: handlebars@4.7.9 (GHSA-{n})",
+           "file_path": "lockfile", "line_number": 1, "shipped": True, "kind": "defect",
+           "installed": True} for n in range(3)],
+        *[{"severity": "high", "category": "dependency", "name": "Vulnerable dependency: tar",
+           "file_path": "lockfile", "line_number": 1, "shipped": True, "kind": "defect",
+           "installed": True}] * 5,
+        {"severity": "high", "category": "unsafe_exec", "name": "execSync / spawn (Node.js)",
+         "file_path": "packages/next/x.js", "line_number": 4, "shipped": True,
+         "kind": "defect", "installed": True},
+        {"severity": "medium", "category": "fs_access", "name": "fs write",
+         "file_path": "packages/next/y.js", "line_number": 2, "shipped": True,
+         "kind": "defect", "installed": True},
+    ]},
+    "certified": {"eligible": False},
+}
+
+
+def test_top_findings_lead_with_what_decided():
+    items = NEXTJS_SHAPE["findings"]["items"]
+    rows = ms._grouped_findings(items, 3)
+    assert [r["what"] for r in rows] == [
+        "execSync / spawn (Node.js)",
+        "Vulnerable dependency: handlebars@4.7.9 (GHSA-0)",
+        "Vulnerable dependency: handlebars@4.7.9 (GHSA-1)",
+    ]
+    assert set(rows[0]) == {"severity", "category", "what", "where", "remediation", "count"}
+    sc = ms._scan_struct(NEXTJS_SHAPE, "vercel/next.js", "github", RP, API, None)
+    assert len(sc["top_findings"]) == 3
+    assert sc["top_findings"][0]["what"] == "execSync / spawn (Node.js)"
+    assert sc["decision_reason"] == ("one high finding in its code: execSync / spawn (Node.js);"
+                                     " plus 3 critical and 5 high in dependencies")
+    text = ms._scan_block(NEXTJS_SHAPE, "use", RP, "vercel/next.js")
+    top = text.split("**Top findings:**", 1)[1].strip().splitlines()
+    assert "execSync / spawn (Node.js)" in top[0]
+    assert "Vulnerable dependency: tar (×5)" in "\n".join(top[:5])
+
+
+def test_top_findings_without_decision_inputs_stay_severity_first():
+    rows = ms._grouped_findings([
+        {"severity": "medium", "category": "fs_access", "name": "m"},
+        {"severity": "critical", "category": "dependency", "name": "Vulnerable dependency: a"},
+    ], 3)
+    assert [r["severity"] for r in rows] == ["critical", "medium"]

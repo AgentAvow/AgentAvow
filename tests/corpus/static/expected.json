@@ -1628,7 +1628,7 @@
    "version": "11.4.1",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 30 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 30,
    "severity": {
     "critical": 0,
@@ -4206,7 +4206,7 @@
    "version": "7.16.2",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 42 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 42,
    "severity": {
     "critical": 0,
@@ -4278,7 +4278,7 @@
    "version": "0.4.1",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 21 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 21,
    "severity": {
     "critical": 0,
@@ -5118,7 +5118,7 @@
    "version": "4.26.0",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 146 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 146,
    "severity": {
     "critical": 0,
@@ -5137,7 +5137,7 @@
    "version": "2025.9.1",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 16 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 16,
    "severity": {
     "critical": 0,
@@ -5644,7 +5644,7 @@
    "version": "1.45.1",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 8 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 8,
    "severity": {
     "critical": 0,
@@ -5982,7 +5982,7 @@
    "version": "2.9.13",
    "score": 82,
    "label": "review",
-   "reason": "one high finding: setup.py executes code at install time (run...)",
+   "reason": "one high finding in its code: setup.py executes code at install time (run...); plus 1 high in dependencies",
    "files_scanned": 17,
    "severity": {
     "critical": 0,
@@ -6382,7 +6382,7 @@
    "version": "0.37.0",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 22 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 22,
    "severity": {
     "critical": 0,
@@ -6435,7 +6435,7 @@
    "version": "2.0.0",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 16 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 16,
    "severity": {
     "critical": 0,
@@ -6869,7 +6869,7 @@
    "version": "0.15.1",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 13 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
    "files_scanned": 13,
    "severity": {
     "critical": 0,
@@ -7024,7 +7024,7 @@
    "version": "2.8.0",
    "score": 82,
    "label": "safe",
-   "reason": "no critical or high findings in 42 files",
+   "reason": "no critical or high findings in its code (dependencies: 1 critical advisory)",
    "files_scanned": 42,
    "severity": {
     "critical": 1,
