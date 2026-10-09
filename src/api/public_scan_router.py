@@ -1827,7 +1827,9 @@ async def _skill_scan(
     from src.scanner.scan import scan_skill
 
     try:
-        result = await asyncio.wait_for(scan_skill(owner, repo, skill_path), timeout=60)
+        result = await asyncio.wait_for(
+            scan_skill(owner, repo, skill_path) if skill_path else scan_skill(owner, repo),
+            timeout=60)
     except asyncio.TimeoutError:
         raise HTTPException(
             503, "Scan is taking longer than expected — please retry shortly.",
