@@ -23,6 +23,10 @@ GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}/badge
 - Returns an **SVG** (shields.io-compatible), served with `Access-Control-Allow-Origin: *` so it embeds
   anywhere.
 - Shows the composite trust score if the repo is imported, else the security-scan score.
+- Shows the gradient **Certified** treatment only when the tool carries the Certified mark: every Certified
+  check passes **and** the answer is Safe to connect at a score of 81 or above (the API's `certified_mark`).
+  A tool that passes the checks but reads Review gets the plain Review badge. A badge showing an imported
+  repo's composite score never carries the mark, since the mark belongs to the scan's own score.
 - Cached, not static: served with `Cache-Control: public, max-age=300, s-maxage=3600` (five minutes in the
   browser, an hour at the edge) over the hourly scan cache, so it tracks the current score and will not decay
   to "not scanned" in a stranger's README.

@@ -22,7 +22,7 @@ The rule, in the order it is checked (the first match wins):
 
 Adoption is never an input. Advisory results never count either: a live probe of a remote server, a sandbox that did not run, needed credentials or timed out adds no finding. While the sandbox is still running, the answer comes from the static scan, says "sandbox still running", and carries `decision_final: false`; it can move to Review when the run lands, shown as an update.
 
-The answer is unsigned and sits beside the signed verdict; the score, tier and findings it reads are the signed ones. Certified is a separate axis: a Certified tool reads **Safe to connect · Certified**.
+The answer is unsigned and sits beside the signed verdict; the score, tier and findings it reads are the signed ones. Certified is a separate axis: a Certified tool reads **Safe to connect · Certified**, and the mark never sits beside any other answer.
 
 ## Two separate scores
 
@@ -60,6 +60,8 @@ Every static finding carries a `kind`. A **defect** is something a reviewer woul
 4. **Zero critical/high** findings, and no known-malicious dependency.
 5. The signed verdict **recomputes offline** against its pinned snapshots.
 6. **Complete scan** — the whole tree was read, not sampled or truncated.
+
+The **Certified mark** shows only when all six pass **and** the answer is **Safe to connect** at a trust score of **81 or above**, the sandbox result is in, and there was enough code to inspect (8 or more files). A tool that passes the six checks but reads Review (a deprecation, an advisory against this version, a high finding, a sandbox catch) shows "Certified checks pass" on its page with the reason, not the mark. The API carries both: `certified.eligible` (the six checks, signed) and `certified_mark` (what every surface displays). Gate on `certified_mark`.
 
 Certification is **re-checked every scan and is revocable**: if provenance expires, drift appears, or a new critical lands, certification is revoked automatically. "Certified" means *currently, verifiably true* — not "was true once." It is not buyable, not self-attested, and not reachable by a repo-only scan no matter how clean.
 

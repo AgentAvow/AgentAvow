@@ -409,9 +409,51 @@ export function verdictPhrase(scanOrDecision: unknown): string {
   return decisionPhrase(decisionOf(scanOrDecision).decision).phrase
 }
 
-/** Whether a scan carries the Certified mark (the full conjunctive gate). */
+// ── The Certified mark (display rule) ─────────────────────────────────────────────
+// `certified.eligible` is the signed six-check provenance gate and never changes here.
+// The MARK sits only beside Safe to connect, once the sandbox result is final, at a
+// score of 81 or above, and never on thin coverage. Byte-identical twin of
+// `certified_mark_status()` in src/scanner/verdict.py (tests/test_decision.py).
+export const CERTIFIED_MARK_MIN_SCORE = 81
+export type CertifiedMarkWhyNot = '' | 'not_safe' | 'sandbox_pending' | 'score_below_81' | 'thin_coverage'
+
+/** [mark, whyNot]. `whyNot` is '' when the mark shows or the tool is not eligible at
+ * all; otherwise the one condition that suppressed an earned eligibility. */
+export function certifiedMarkStatus(input: unknown, decision?: Decision): [boolean, CertifiedMarkWhyNot] {
+  const data = asObj(input)
+  if (asObj(data.certified).eligible !== true) return [false, '']
+  const d = decision ?? decide(data)
+  if (d.decision !== 'safe') return [false, 'not_safe']
+  if (!d.final) return [false, 'sandbox_pending']
+  if (toInt(data.trust_score) < CERTIFIED_MARK_MIN_SCORE) return [false, 'score_below_81']
+  const files = asObj(data.metadata).files_scanned
+  if ((isInt(files) ? files : 0) < THIN_COVERAGE_FILES) return [false, 'thin_coverage']
+  return [true, '']
+}
+
+/** Whether a result shows the Certified MARK: the API's `certified_mark` when the result
+ * carries it, else the display rule over the API's decision. Never the raw
+ * `certified.eligible` provenance gate, which can sit beside Review. */
 export function isCertified(scan: unknown): boolean {
-  return asObj(asObj(scan).certified).eligible === true
+  const o = asObj(scan)
+  if (typeof o.certified_mark === 'boolean') return o.certified_mark
+  return certifiedMarkStatus(o, decisionOf(o))[0]
+}
+
+/** Why an earned Certified eligibility shows no mark, in plain words ('' when the mark
+ * shows or the tool is not eligible). */
+export function certifiedMarkNote(scan: unknown): string {
+  const o = asObj(scan)
+  const why = (typeof o.certified_mark_reason === 'string' && typeof o.certified_mark === 'boolean')
+    ? (o.certified_mark ? '' : o.certified_mark_reason)
+    : certifiedMarkStatus(o, decisionOf(o))[1]
+  const tail: Record<string, string> = {
+    not_safe: 'the mark shows when the answer is Safe to connect.',
+    sandbox_pending: 'the mark shows after the sandbox finishes.',
+    score_below_81: 'the mark shows at a trust score of 81 or above.',
+    thin_coverage: 'the mark needs more code to inspect (8 or more files).',
+  }
+  return tail[why] ? `Certified checks pass; ${tail[why]}` : ''
 }
 
 /** "Safe to connect · Certified" — the phrase with the Certified mark when earned. */

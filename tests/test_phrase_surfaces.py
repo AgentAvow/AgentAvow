@@ -179,8 +179,17 @@ def test_local_cli_human_line_leads_with_phrase_and_certified(tmp_path):
     buf = io.StringIO()
     _print_human(result, stream=buf)
     line = [ln for ln in buf.getvalue().splitlines() if "Verdict" in ln][0]
-    assert "· Certified — " in line
-    assert any(p in line for p in ("Safe to connect", "Review before you connect"))
+    # one file is thin coverage: eligible, but no Certified mark on the headline
+    assert "Safe to connect — " in line and "Certified —" not in line
+    for i in range(9):
+        (tmp_path / f"m{i}.py").write_text(f"def f{i}():\n    return {i}\n")
+    result = scan_local(str(tmp_path))
+    result.certified = {"eligible": True}
+    assert result.trust_score >= 81 and result.files_scanned >= 8
+    buf = io.StringIO()
+    _print_human(result, stream=buf)
+    line = [ln for ln in buf.getvalue().splitlines() if "Verdict" in ln][0]
+    assert "Safe to connect · Certified — " in line
 
 
 def test_local_cli_fail_on_decision(tmp_path):
@@ -228,8 +237,8 @@ def test_stdio_mcp_server_result_leads_with_the_phrase():
         sys.path.pop(0)
     out = server._scan_result(
         {"trust_score": 98, "verdict": "safe", "verdict_reason": "clean",
-         "certified": CERT, "decision": "safe", "decision_reason": "nothing found in 3 files",
-         "trust_tier": "verified"},
+         "certified": CERT, "certified_mark": True, "decision": "safe",
+         "decision_reason": "nothing found in 3 files", "trust_tier": "verified"},
         "o/r", "repo", "https://x", "/api")
     assert out["decision"] == "safe" and out["verdict"] == "safe"
     assert out["summary"].startswith("Safe to connect · Certified — nothing found")

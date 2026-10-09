@@ -73,7 +73,9 @@ connect.
 connect · Certified") and is a separate set of checks the response reports under
 `certified.checks` — the published artifact was scanned, build provenance is verified, no drift, no
 critical or high finding, the verdict recomputes offline, and the whole tree was read — and every check must
-pass (see [How scoring works](./how-grading-works.md)).
+pass. The mark itself shows only beside Safe to connect, at a score of 81 or above, once the sandbox result is
+in and with 8 or more files inspected; the response carries that display value as `certified_mark` (see
+[How scoring works](./how-grading-works.md)).
 
 ### Subscores
 

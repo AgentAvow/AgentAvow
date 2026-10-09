@@ -71,7 +71,9 @@ DECISION=$(jq -r '
 ' /tmp/ag_scan.json)
 DECISION_REASON=$(jq -r '.decision_reason // ""' /tmp/ag_scan.json)
 DECISION_FINAL=$(jq -r 'if .decision_final == false then "false" else "true" end' /tmp/ag_scan.json)
-CERTIFIED=$(jq -r 'if (.certified.eligible // false) == true then "true" else "false" end' /tmp/ag_scan.json)
+# The Certified MARK (eligible AND Safe AND final AND score >= 81 AND not thin), never the
+# raw provenance gate; an older response without the field shows no mark (fail closed).
+CERTIFIED=$(jq -r 'if .certified_mark == true then "true" else "false" end' /tmp/ag_scan.json)
 case "${DECISION}" in
   safe) PHRASE="${PHRASE_SAFE}" ;;
   do_not_connect) PHRASE="${PHRASE_DO_NOT_CONNECT}" ;;

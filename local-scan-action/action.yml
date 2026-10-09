@@ -75,7 +75,7 @@ runs:
         TIER=$(python -c "import json;print(json.load(open('results.json'))['tier'])")
         DECISION=$(python -c "import json;print(json.load(open('results.json'))['decision'])")
         REASON=$(python -c "import json;print(json.load(open('results.json'))['decision_reason'])")
-        HEADLINE=$(python -c "import json;d=json.load(open('results.json'));print(d['verdict_phrase']+(' · Certified' if d.get('certified') else ''))")
+        HEADLINE=$(python -c "import json;d=json.load(open('results.json'));print(d['verdict_phrase']+(' · Certified' if d.get('certified_mark') else ''))")
         echo "trust-score=$SCORE" >> "$GITHUB_OUTPUT"
         echo "tier=$TIER" >> "$GITHUB_OUTPUT"
         echo "decision=$DECISION" >> "$GITHUB_OUTPUT"

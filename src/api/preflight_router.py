@@ -102,7 +102,7 @@ def _build_preflight(
     report = evaluate_gates(data, surface=surface, auth=auth)
     subject_full = f"mcp:{target}" if surface == "mcp" else target
     jws = _sign(subject_full, data)
-    from src.scanner.verdict import decide
+    from src.scanner.verdict import certified_mark, decide
     dec = decide(data)
     return PreflightResponse(
         target=target,
@@ -115,7 +115,8 @@ def _build_preflight(
         trust_score=int(data.get("trust_score") or 0),
         trust_tier=str(data.get("trust_tier") or ""),
         grade=str(data.get("grade") or ""),
-        certified=bool((data.get("certified") or {}).get("eligible")),
+        # The Certified MARK (display rule), not the raw provenance gate.
+        certified=certified_mark(data, dec),
         gates=[Gate(**g) for g in report["gates"]],
         summary=report["summary"],
         signed={

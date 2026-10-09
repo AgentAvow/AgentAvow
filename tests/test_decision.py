@@ -337,3 +337,70 @@ def test_ts_phrase_table_agrees():
     rows = re.findall(r"\{ value: '([a-z_]+)', phrase: '([^']+)', label: '([^']+)', "
                       r"color: '(#[0-9A-F]{6})', colorText: '(#[0-9A-F]{6})' \}", ts)
     assert rows == [(d.value, d.phrase, d.label, d.color, d.color_light) for d in DECISIONS]
+
+
+# ── The Certified mark (display rule) ──────────────────────────────────────────────
+# (id, data, mark, why_not)
+MARK_CASES = [
+    ("mark", _scan(92, 340, certified=CERTIFIED), True, ""),
+    ("not_eligible", _scan(98, 340), False, ""),
+    ("eligible_not_true", _scan(98, 340, certified={"eligible": "yes"}), False, ""),
+    ("review_deprecated", _scan(90, 340, certified=CERTIFIED, deprecation="use x instead"),
+     False, "not_safe"),
+    ("review_advisory", _scan(88, 340, certified=CERTIFIED,
+                              advisories=[{"id": "GHSA-1", "affects_scanned_version": True}]),
+     False, "not_safe"),
+    ("do_not_connect_canary", _scan(92, 340, certified=CERTIFIED, behavioral=_bev(
+        [{"rule": "credential_canary_exfiltrated", "severity": "critical"}])),
+     False, "not_safe"),
+    ("sandbox_pending", _scan(92, 340, certified=CERTIFIED,
+                              behavioral={"ran": False, "pending": True, "state": "running"}),
+     False, "sandbox_pending"),
+    ("score_80", _scan(80, 340, certified=CERTIFIED), False, "score_below_81"),
+    ("score_81", _scan(81, 340, certified=CERTIFIED), True, ""),
+    ("thin_7_files", _scan(82, 7, certified=CERTIFIED), False, "thin_coverage"),
+    ("files_8", _scan(82, 8, certified=CERTIFIED), True, ""),
+    ("no_metadata", {"trust_score": 92, "certified": CERTIFIED}, False, "thin_coverage"),
+    ("score_only", {"trust_score": 99}, False, ""),
+    ("garbage", {"trust_score": "x", "certified": 3, "metadata": None}, False, ""),
+    ("dependency_advisory_only", _scan(84, 340, [_dep("critical")], certified=CERTIFIED),
+     True, ""),
+]
+
+
+@pytest.mark.parametrize("case_id,data,mark,why", MARK_CASES, ids=[c[0] for c in MARK_CASES])
+def test_certified_mark_table(case_id, data, mark, why):
+    from src.scanner.verdict import certified_mark, certified_mark_status
+    assert certified_mark_status(data) == (mark, why)
+    assert certified_mark(data) is mark
+    # trust_tiers.is_certified reads the mark (computed here when the field is absent)
+    assert is_certified(data) is mark
+    # an API response's own field wins
+    assert is_certified({**data, "certified_mark": not mark}) is (not mark)
+
+
+def test_mark_uses_the_passed_decision():
+    from src.scanner.verdict import certified_mark
+    data = _scan(92, 340, certified=CERTIFIED)
+    assert certified_mark(data, Decision("review", True, "x")) is False
+    assert certified_mark(data, Decision("safe", False, "x")) is False
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_ts_certified_mark_twin_is_byte_identical():
+    payload = json.dumps([c[1] for c in MARK_CASES])
+    script = (
+        "const m = await import(process.argv[1]);"
+        "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{"
+        "const out=JSON.parse(s).map(x=>m.certifiedMarkStatus(x));"
+        "process.stdout.write(JSON.stringify(out));});"
+    )
+    ts = ROOT / "web" / "src" / "components" / "trust" / "gradeSystem.ts"
+    proc = subprocess.run(
+        ["node", "--no-warnings", "--experimental-strip-types", "--input-type=module",
+         "-e", script, str(ts)],
+        input=payload, capture_output=True, text=True, timeout=60)
+    if proc.returncode != 0 and "strip-types" in proc.stderr:
+        pytest.skip("node lacks type stripping")
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == [[c[2], c[3]] for c in MARK_CASES]

@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.24"
+__version__ = "0.1.25"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -778,8 +778,10 @@ def _dval(r: dict) -> str:
 
 def _headline(r: dict) -> str:
     """'Safe to connect · Certified' — the answer, with the mark when earned."""
-    phrase = DECISION_PHRASES[_dval(r)]
-    return phrase + (" · Certified" if r.get("certified") else "")
+    dval = _dval(r)
+    # The mark only ever sits beside Safe to connect.
+    return DECISION_PHRASES[dval] + (" · Certified" if r.get("certified") and dval == "safe"
+                                     else "")
 
 
 def _why(r: dict) -> str:
@@ -828,7 +830,9 @@ def _verdict(data: dict) -> dict:
         "decision": decision,
         "decision_reason": decision_reason,
         "decision_final": decision_final,
-        "certified": bool((data.get("certified") or {}).get("eligible") is True),
+        # The Certified MARK (the API's display rule: Safe to connect, final, score >= 81,
+        # not thin), never the raw provenance gate; a response without it shows no mark.
+        "certified": data.get("certified_mark") is True,
         "verdict": "safe" if (score >= 81 and blocking == 0) else "needs review",
         "reason": str(data.get("verdict_reason") or ""),
         "blocking": blocking,
@@ -939,7 +943,7 @@ def _sandbox_summary(b: object) -> str:
 # older GRADE_EPOCH (bump the epoch whenever server-side scoring changes materially).
 # A re-check whose decision (Safe / Review / Do not connect) is unchanged is silent;
 # a changed decision is reported, naming the old answer.
-GRADE_EPOCH = "2026-10-08b"
+GRADE_EPOCH = "2026-10-09"
 GRADE_MAX_AGE = 7 * 24 * 3600
 
 

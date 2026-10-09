@@ -152,12 +152,14 @@ export function TrustMini({ score }: { score: number }) {
 export function DecisionLine({ row, className = '' }: {
   row: { trust_score?: number | null; decision?: string | null; decision_reason?: string | null
     critical?: number | null; high?: number | null; grade?: string | null
-    certified?: { eligible?: boolean } | null }
+    certified?: { eligible?: boolean } | null; certified_mark?: boolean | null }
   className?: string
 }) {
   const d = decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } })
   const p = decisionPhrase(d.decision)
-  const cert = isCertified(row) || row.grade === 'A+'
+  // The mark only ever sits beside Safe to connect; a catalog row carries it as the
+  // stored A+ (which follows the Certified mark), an API result as certified_mark.
+  const cert = d.decision === 'safe' && (isCertified(row) || row.grade === 'A+')
   return (
     <div className={`text-[12.5px] font-semibold ${className}`} style={{ color: p.color }} data-decision={p.value}>
       {p.phrase}{cert && <span className="ml-1" style={GRAD_TEXT}>· Certified</span>}

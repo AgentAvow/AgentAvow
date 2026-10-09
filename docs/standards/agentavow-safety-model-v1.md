@@ -243,6 +243,13 @@ The evidence-confidence cap still bounds the score of such a result (82 for a th
 74 for a very thin one), so the score says how much was inspected and the answer says
 whether anything was found.
 
+### 11.2 The Certified mark (display note, non-normative)
+The Certified mark is displayed only beside Safe to
+connect, at a score of 81 or above, when the sandbox result is final and coverage is not
+thin; `certified.eligible` is unchanged. Responses carry the display value as
+`certified_mark` (with `certified_mark_reason` naming why an eligible result shows no
+mark). Reference implementation: `src/scanner/verdict.py` (`certified_mark`).
+
 ---
 
 *Conformance: an implementation conforms when, given the same findings and signals, it

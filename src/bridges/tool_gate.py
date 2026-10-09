@@ -268,7 +268,7 @@ class Grade:
         dec, dec_reason, dec_final = _decision_of(data)
         return cls(
             decision=dec, decision_reason=dec_reason, decision_final=dec_final,
-            certified=bool((data.get("certified") or {}).get("eligible") is True),
+            certified=_certified_mark_of(data),
             server=server,
             score=int(score) if isinstance(score, (int, float)) else None,
             tier=str(data.get("trust_tier") or ""),
@@ -346,6 +346,20 @@ DECISION_PHRASES = {
     "review": "Review before you connect",
     "do_not_connect": "Do not connect",
 }
+
+
+def _certified_mark_of(data: dict) -> bool:
+    """The Certified MARK from a public scan response: the API's ``certified_mark``,
+    else the shared display rule when importable, else no mark (fail closed). Never
+    the raw ``certified.eligible`` provenance gate, which can sit beside Review."""
+    mark = data.get("certified_mark")
+    if isinstance(mark, bool):
+        return mark
+    try:
+        from src.scanner.verdict import certified_mark
+    except Exception:  # noqa: BLE001 — standalone install: no local rule
+        return False
+    return certified_mark(data)
 
 
 def _decision_of(data: dict) -> tuple[str, str, bool]:

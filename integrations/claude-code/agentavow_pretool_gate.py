@@ -57,7 +57,7 @@ import time
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.24"
+__version__ = "0.1.25"
 
 CACHE = pathlib.Path.home() / ".cache" / "agentavow" / "scanned.json"
 META_KEY = "_agentavow"  # cache entry holding hook state; never a server name
@@ -573,8 +573,8 @@ def decide(payload: dict, cache: dict) -> tuple[str, str] | None:
         report = record.get("report_url") or "https://agentavow.com/check"
         tier = record.get("tier") or "blocked"
         why = f" — {record['decision_reason']}" if record.get("decision_reason") else ""
-        cert = " · Certified" if record.get("certified") else ""
-        return "deny", (f"AgentAvow: {DECISION_PHRASES['do_not_connect']}{cert}{why}. "
+        # Never " · Certified" here: the mark only ever sits beside Safe to connect.
+        return "deny", (f"AgentAvow: {DECISION_PHRASES['do_not_connect']}{why}. "
                         f"MCP '{name}' is graded {record.get('score')}/100 (tier {tier}); "
                         f"'{tool}' was not run. Report: {report}")
     if record.get("kind") == "mcp":
