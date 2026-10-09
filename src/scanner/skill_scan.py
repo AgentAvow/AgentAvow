@@ -61,9 +61,20 @@ _OVERRIDE_RE = re.compile(
     r"|always (run|execute|use)|never (ask|refuse|decline))\b"
 )
 # Env-exfil / sandbox-probe patterns in bundled scripts (near-unambiguous malware).
+# The secret-named-env part is case-SENSITIVE (env vars are UPPER_SNAKE:
+# AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN) and must be READ. Under a blanket (?i) it matched
+# ordinary code such as `def sort_key(` and `key=_sort_key`, flagging every Python
+# helper that sorts as credential exfiltration. `.env` must be a file name, not the
+# attribute in `process.env` / `os.environ`-style code.
 _EXFIL_RE = re.compile(
-    r"(?i)(~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|\.env\b"
-    r"|169\.254\.169\.254|metadata\.google|[A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD)\b)"
+    r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|(?<![\w\\])\.env\b"
+    r"|169\.254\.169\.254|metadata\.google)"
+    # ...read through an env accessor ($VAR, ${VAR}, os.environ[...]/.get(...),
+    # os.getenv(...), process.env.VAR / ["VAR"], ENV["VAR"], os.Getenv("VAR")), not a
+    # name merely mentioned in a docstring or comment.
+    r"|(?:\$\{?|\benviron(?:\.get)?\s*[\[(]\s*[\"']|\bgetenv\s*\(\s*[\"']"
+    r"|\bprocess\.env(?:\.|\[\s*[\"'])|\bENV\[\s*[\"']|\bGetenv\(\s*\")"
+    r"[A-Z][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD)\b"
 )
 _SCRIPT_EXT = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
 

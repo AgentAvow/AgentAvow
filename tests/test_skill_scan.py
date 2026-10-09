@@ -185,3 +185,28 @@ def test_no_exec_drift_when_bash_declared():
     res = analyze_skill({"skills/b/SKILL.md": md, "skills/b/build.py": script},
                         skill_md_path="skills/b/SKILL.md")
     assert not _has_drift(res, "execute")
+
+
+def test_exfil_rule_ignores_ordinary_code():
+    """`sort_key`, `key=_sort_key`, `process.env` and a regex mentioning `process\\.env`
+    are ordinary code, not credential reads (anthropics/skills docx/pdf/claude-api)."""
+    from src.scanner.skill_scan import _EXFIL_RE
+
+    for text in ("def sort_key(f):\n    return f", "items.sort(key=_sort_key)",
+                 "const home = process.env.HOME", 'PAT = r"(os\\.environ|process\\.env)"',
+                 "api_key = load_config()", "self.secret_token = None",
+                 '"""Uses the session auth, no separate ANTHROPIC_API_KEY needed."""',
+                 "# set GITHUB_TOKEN in your shell first"):
+        assert not _EXFIL_RE.search(text), text
+
+
+def test_exfil_rule_still_catches_secret_reads():
+    from src.scanner.skill_scan import _EXFIL_RE
+
+    for text in ("cat ~/.aws/credentials", 'open(os.path.expanduser("~/.ssh/id_rsa"))',
+                 'load_dotenv(".env")', "curl http://169.254.169.254/latest/meta-data/",
+                 'os.environ["AWS_SECRET_ACCESS_KEY"]', "echo $GITHUB_TOKEN",
+                 'curl -H "x: ${NPM_TOKEN}"', "os.environ.get('OPENAI_API_KEY')",
+                 'os.getenv("DB_PASSWORD")', "fetch(u, {body: process.env.AWS_SECRET_KEY})",
+                 "process.env['SLACK_TOKEN']", 'ENV["STRIPE_SECRET"]', 'os.Getenv("GH_TOKEN")'):
+        assert _EXFIL_RE.search(text), text
