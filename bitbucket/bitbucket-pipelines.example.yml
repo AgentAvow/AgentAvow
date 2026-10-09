@@ -1,0 +1,32 @@
+# AgentAvow scan in Bitbucket Pipelines: two ways to run it. Copy one into your
+# bitbucket-pipelines.yml. Both run the same offline scan; neither needs a token.
+
+pipelines:
+  pull-requests:
+    '**':
+      # Option 1: the pipe. Variables are optional; these are the defaults.
+      - step:
+          name: AgentAvow scan
+          script:
+            - pipe: docker://ghcr.io/agentavow/scanner:pipe-0.1
+              variables:
+                FAIL_ON: "do_not_connect"     # do_not_connect | review | none
+                FAIL_ON_FINDINGS: "none"      # none | critical | high | medium
+                SCAN_PATHS: "."               # space-separated directories
+          artifacts:
+            - agentavow-*.json
+            - agentavow-*.md
+
+  branches:
+    main:
+      # Option 2: the scanner image as the step image (pin it in your own registry
+      # if your runners cannot reach ghcr.io). Same variables, set as step env.
+      - step:
+          name: AgentAvow scan
+          image: ghcr.io/agentavow/scanner:0.1
+          script:
+            - export FAIL_ON=do_not_connect
+            - agentavow-bitbucket
+          artifacts:
+            - agentavow-*.json
+            - agentavow-*.md

@@ -175,7 +175,7 @@ The gate verifies the EdDSA attestation against AgentAvow's public JWKS and deci
 | ChatGPT app | In OpenAI review |
 | npm `agentavow-trust`: core gate, Vercel AI SDK, Flue | Shipped |
 | LangChain and Google ADK gates | In this repository (`src/bridges/`); not on PyPI yet |
-| GitHub Action, local CLI, GitLab CI component | Shipped |
+| GitHub Action, local CLI, GitLab CI component, Bitbucket Pipe, Azure Pipelines template | Shipped |
 | Claude Agent SDK, OpenAI Agents SDK | No dedicated adapter yet. Use the core gate (`createGate` / `ToolGate`) in a tool-call hook, or add the MCP connector |
 
 ## Gate anything (the API)
