@@ -13,7 +13,7 @@ import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
   geminiCmd, codexCmd, claudeDesktopConfig, packageInstallCommands, skillInstallCommands,
   packageStdioTarget, cursorStdio, vscodeStdio, gooseStdio, claudeCodeStdio,
-  geminiStdio, codexStdio, stdioServersConfig,
+  geminiStdio, codexStdio, stdioServersConfig, collectionSkillInstallCommands,
 } from '../lib/installLinks'
 import { useAuth } from '../../hooks/useAuth'
 import SEOHead from '../../components/SEOHead'
@@ -21,6 +21,7 @@ import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder , useIsDesktop } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
+import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageBadge, VerifyPanel } from '../components/ScanEvidence'
 
 /**
  * Rebrand-native check / trust-score page — built for ANY user, not just devs.
@@ -1110,6 +1111,8 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
             )
           ) : b?.state === 'unavailable' && !b.ran ? (
             <><span className="inline-block w-2 h-2 rounded-full bg-warning" /><span className="text-text-muted">Sandbox unavailable — no slot freed up for two hours, so the answer stands on static analysis alone. Press Run now to try again.</span></>
+          ) : b?.ran && (b.grade_summary?.start_reason === 'install_failed' || (isMcpRun && !ex && typeof b.exit_code === 'number' && b.exit_code !== 0)) ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-warning" /><span className="text-text-muted">Ran, but the install failed, so nothing was exercised{observedAt ? ` · ${observedAt.toLocaleString()}` : ''}{b.plan ? ` · plan ${b.plan}` : ''}. Not a finding.</span></>
           ) : b?.ran ? (
             <><span className="inline-block w-2 h-2 rounded-full bg-success" /><span className="text-text-muted">Completed{observedAt ? ` · observed ${observedAt.toLocaleString()}` : ''}{b.plan ? ` · plan ${b.plan}` : ''}</span></>
           ) : b ? (
@@ -1171,7 +1174,7 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
                       const lied = readOnly && wrote
                       return (
                         <li key={i} className="text-[12.5px] flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                          <span className={`font-mono ${lied ? 'text-danger' : 'text-text'}`}>{c.tool}</span>
+                          <span className={`font-mono break-all ${lied ? 'text-danger' : 'text-text'}`}>{c.tool}</span>
                           {kind && <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">{kind === 'mcp' ? 'MCP server' : kind}</span>}
                           {readOnly && <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${lied ? 'bg-danger/15 text-danger' : 'bg-surface border border-border text-text-muted'}`}>declares read-only</span>}
                           <span className="text-text-muted">{c.ok && !c.is_error ? 'ok' : c.is_error ? 'returned an error' : (c.error || 'failed')}{typeof c.duration_ms === 'number' ? ` · ${c.duration_ms} ms` : ''}</span>
@@ -1343,7 +1346,7 @@ function LiveProbePanel({ b, pending, error, observedAt, onRun }: { b: Behaviora
 function AddToAgent(props:
   | { kind: 'mcp'; url: string }
   | { kind: 'package'; surface: string; name: string; isMcp?: boolean }
-  | { kind: 'skill'; owner: string; repo: string }
+  | { kind: 'skill'; owner: string; repo: string; skillName?: string }
   | { kind: 'repo'; owner: string; repo: string; isMcpServer?: boolean; pkg?: { surface: string; name: string; isMcp?: boolean } }) {
   const [more, setMore] = useState(false)
   const deeplinkBtn = DEEPLINK_BTN
@@ -1376,14 +1379,21 @@ function AddToAgent(props:
           )
         })()}
         {props.kind === 'package' && <PkgInstall surface={props.surface} name={props.name} isMcp={props.isMcp} />}
-        {props.kind === 'skill' && (
+        {props.kind === 'skill' && (props.skillName && props.skillName.toLowerCase() !== props.repo.toLowerCase() ? (
+          <>
+            <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">This repo holds a skills collection; we graded the <span className="font-mono text-text">{props.skillName}</span> skill. Cloning the whole repo into your skills directory won&apos;t load it. Copy that skill&apos;s folder instead:</p>
+            <div className="mt-3 flex flex-col gap-2">
+              {collectionSkillInstallCommands(props.owner, props.repo, props.skillName).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} multiline />)}
+            </div>
+          </>
+        ) : (
           <>
             <p className="text-text-muted text-[13px] mt-1">Install the skill by cloning it into your skills directory:</p>
             <div className="mt-3 flex flex-col gap-2">
               {skillInstallCommands(props.owner, props.repo).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} />)}
             </div>
           </>
-        )}
+        ))}
         {props.kind === 'repo' && (props.pkg ? (
           <>
             <p className="text-text-muted text-[13px] mt-1">This repo publishes the <span className="font-mono text-text">{props.pkg.surface}</span> package <span className="font-mono text-text">{props.pkg.name}</span>{props.pkg.isMcp ? ' — an MCP server' : ''}.</p>
@@ -1417,6 +1427,12 @@ function AddToAgent(props:
 /** OpenClaw / Agent Skill score view — grades the capability surface a repo scan
  * misses (auto-exec allowed-tools grant, always-loaded-description injection,
  * lifecycle hooks, script exfil). */
+/** The scanner labels every SKILL.md repo "An OpenClaw agent skill"; most are Claude
+ * Code / Agent Skills, so the page says what the format is rather than one runtime. */
+function skillDescription(d?: string): string | undefined {
+  return d === 'An OpenClaw agent skill' ? 'An Agent Skill (SKILL.md) for Claude Code, OpenClaw and other skill-aware agents' : d
+}
+
 function SkillResult({ owner, repo }: { owner: string; repo: string }) {
   const { data: scan, isLoading, isError } = useQuery({
     queryKey: ['rebrand-skill-scan', owner, repo],
@@ -1454,7 +1470,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
               <ClaimedBadge surface="openclaw" owner={owner} repo={repo} />
             </div>
             <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}</h1>
-            {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{(scan as { tool_description?: string }).tool_description}</div>}
+            {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{skillDescription((scan as { tool_description?: string }).tool_description)}</div>}
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           </div>
           <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="install" /></div>
@@ -1465,9 +1481,10 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
 
       {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
       <div className="mt-4"><WatchCTA surface="openclaw" owner={owner} repo={repo} /></div>
-      {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="skill" owner={owner} repo={repo} />}
+      {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="skill" owner={owner} repo={repo} skillName={(scan as { surface_detail?: { skill_name?: string } }).surface_detail?.skill_name} />}
 
       <BlastRadius scan={scan} />
+      <CapabilitiesPanel scan={scan} />
 
       <BehavioralPanel owner={owner} repo={repo} surface="skill" skill auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
 
@@ -1509,6 +1526,8 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
       ) : (
         <Reveal><div className="mt-6 glass rounded-2xl p-6 text-[13.5px] text-success">✓ No capability-surface risks found — clean skill.</div></Reveal>
       )}
+
+      <VerifyPanel scan={scan} />
 
       <div className="mt-8 flex justify-center">
         <ShareRow owner={owner} repo={repo} score={scan.trust_score} />
@@ -1701,7 +1720,14 @@ function McpResult({ endpoint }: { endpoint: string }) {
         )
       })()}
 
-      <CategoryFindings categoryScores={scan.category_scores as Record<string, number> | undefined} findings={f} maxFindings={15} emptyMessage="✓ No capability-surface risks found — clean tool set." />
+      <McpToolList scan={scan} />
+
+      {/* A live endpoint is graded on the tool definitions it serves; its server code is
+          never fetched, so the code-category scores would read as passes we didn't earn. */}
+      <CategoryFindings categoryScores={null} findings={f} maxFindings={15} emptyMessage="✓ No capability-surface risks found — clean tool set." />
+      <Reveal><p className="mt-3 text-[12px] text-text-muted/80">Code categories (secret hygiene, code safety, data handling, filesystem, dependencies) are not scored for a live endpoint: we grade the tools it serves, not its server code, which we can&apos;t see. Scan its repo or package for those.</p></Reveal>
+
+      <VerifyPanel scan={scan} />
 
       <div className="mt-8 flex justify-center">
         <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} />
@@ -1783,12 +1809,19 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
           <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">The chain we verified</h3>
           <div className="mt-3 flex flex-col gap-2 text-[13px]">
             <div className="flex justify-between gap-3"><span className="text-text-muted">Coordinate</span><span className="font-mono break-all">{scan.repo}</span></div>
-            <div className="flex justify-between gap-3"><span className="text-text-muted">Scan depth</span><span className="font-mono text-success">artifact (real published bytes)</span></div>
+            <div className="flex justify-between gap-3"><span className="text-text-muted">Scan depth</span>{surface === 'docker'
+              ? <span className="font-mono text-warning text-right">image config &amp; metadata only (layers not scanned)</span>
+              : <span className="font-mono text-success text-right">artifact (real published bytes)</span>}</div>
             <div className="flex justify-between gap-3"><span className="text-text-muted">Artifact digest</span><span className="font-mono break-all">{digest ? `sha256:${digest}…` : '—'}</span></div>
             <div className="flex justify-between gap-3"><span className="text-text-muted">Provenance</span><span className="font-mono">{prov.verified ? 'verified ✓' : prov.present ? 'present · unverified' : 'none published (N/A)'}</span></div>
           </div>
         </div>
       </Reveal>
+
+      <PackageFacts scan={scan} surface={surface} />
+      <McpToolList scan={scan} />
+      <CapabilitiesPanel scan={scan} />
+      <AdvisoriesPanel scan={scan} />
 
       {/* Behavioral deep scan — auto-runs for npm/PyPI packages */}
       <BehavioralPanel owner={surface} repo={name} surface={surface} pkg={{ surface, name, version }} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
@@ -1811,6 +1844,9 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
           </div>
         </>
       )}
+
+      <VerifyPanel scan={scan} />
+      {!version && <PackageBadge surface={surface} name={name} />}
 
       <div className="mt-8 flex justify-center">
         <ShareRow owner={surface} repo={name} score={scan.trust_score} />
@@ -2074,6 +2110,9 @@ function Result({ owner, repo, privateResult }: {
       {/* Declared scope — the tool's own .agentavow.yml, if present */}
       <DeclaredScopePanel scope={(scan as { declared_scope?: { present?: boolean; egress?: string[]; capabilities?: string[]; note?: string } }).declared_scope} />
 
+      <CapabilitiesPanel scan={scan} />
+      <AdvisoriesPanel scan={scan} />
+
       {/* Behavioral deep scan — auto-runs for npm/PyPI; re-run on demand */}
       {!isPrivate && <BehavioralPanel owner={owner} repo={repo} surface={(scan as { package_coordinate?: { surface?: string } }).package_coordinate?.surface} auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />}
 
@@ -2098,21 +2137,8 @@ function Result({ owner, repo, privateResult }: {
         </div>
       </Reveal>
 
-      {/* SIGNED & VERIFIABLE — the powerful part, explained */}
-      <Reveal>
-        <div className="mt-6 glass rounded-2xl p-6 border-l-4 border-primary/60">
-          <div className="flex items-center gap-2 text-success font-mono text-[12.5px]">
-            <svg viewBox="0 0 24 24" fill="none" className="w-[18px] h-[18px]"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.6" /><path d="M7.5 12.4l3 3 6-6.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            Signed · Ed25519 / JWS
-          </div>
-          <h3 className="mt-2 text-lg font-bold">This score is signed — you don't have to trust us.</h3>
-          <p className="mt-1 text-text-muted text-[14px] max-w-[62ch]">Every result carries a cryptographic signature you can verify offline against our public keys. If anyone tampers with the score, verification fails. That's the difference between a badge and a signature.</p>
-          <div className="mt-3 flex gap-4 flex-wrap">
-            <a href="https://agentgraph.co/.well-known/jwks.json" target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-primary-light hover:text-primary">Public keys (JWKS) →</a>
-            <Link to={rp("/rebrand/how-it-works")} className="text-[13px] font-semibold text-primary-light hover:text-primary">How verification works →</Link>
-          </div>
-        </div>
-      </Reveal>
+      {/* SIGNED & VERIFIABLE — copy the JWS and check it offline */}
+      <VerifyPanel scan={scan} />
 
       {/* the distribution showcase — README badge (trust / trust+adoption) + share card */}
       <Reveal>
