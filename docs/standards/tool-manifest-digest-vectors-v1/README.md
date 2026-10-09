@@ -220,6 +220,17 @@ reader's `pyproject.toml` says Python 3.13 or newer; it also runs on 3.14. Its r
 dependencies are `cryptography` and `rfc8785`, at the versions pinned in that
 requirements file.
 
+## Contributors
+
+- **Mayur Agnihotri** ([@Mayur021](https://github.com/Mayur021)): a separate reader that reproduced all six cases on
+  2026-10-08, the finding that string or millisecond comparison misjudges freshness inside the window, and the
+  `boundary-fresh` vector (#131).
+- **Sankalp Gilda, Probity** ([@astrogilda](https://github.com/astrogilda)): the signed-map reader run in CI
+  (`probity-v1-compat`), and nanosecond-exact time comparison with calendar checks, a locally signed
+  200 ns window fixture and 49 controls (#132).
+
+Contributions to this folder are accepted under its Apache-2.0 licence; see `CONTRIBUTING.md` at the repository root.
+
 ## Licence
 
 This directory (the vector file, `source.json`, `generate.mjs`, `verify.mjs` and this README) is licensed under
