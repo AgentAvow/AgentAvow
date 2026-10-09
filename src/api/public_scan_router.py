@@ -2527,9 +2527,18 @@ async def scan_badge(
     owner: str,
     repo: str,
     metric: str = Query("trust", pattern="^(trust|adoption|combined)$"),
+    style: str = Query("compact", pattern="^(compact|card|card-stacked|classic)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Return an SVG badge for README embedding.
+
+    ``style`` picks the look from the shared badge design system
+    (``src.api.badge_avow``): ``compact`` (default) is the 20px README badge with the
+    trust and adoption meters; ``card`` is the website-embed card as an image;
+    ``classic`` is the previous shields-style pill. ``theme`` (auto / light / dark)
+    pins the colours; ``auto`` follows the viewer's colour scheme.
+    ``metric=adoption`` keeps the adoption-only classic badge.
 
     ``metric=trust`` (default) shows the signed grade — the composite trust score
     when the repo is imported ("Trust: A 92"), else the security scan ("Scan: B 74").
@@ -2599,9 +2608,16 @@ async def scan_badge(
                 score = None
                 score_type = None
 
+    # The DISPLAY gate (certified_mark via _badge_view): the mark shows only on a final
+    # Safe to connect with the full conjunctive gate, never on an entity composite.
     decision, certified = await _badge_view(scan_data, score)
-    if composite:
+    if composite or score is None:
         certified = False
+
+    if style != "classic":
+        return await _avow_badge_response(
+            owner, repo, style=style, theme=theme, score=score, certified=certified,
+            decision=decision if score is not None else None)
 
     # Combined = trust + adoption in one badge (adoption never travels alone)
     if metric == "combined":
@@ -2636,10 +2652,17 @@ async def scan_badge(
 async def scan_card(
     owner: str,
     repo: str,
+    style: str = Query("card", pattern="^(card|card-stacked|classic)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """The LIVE dual-mark card as a hosted SVG — trust bar + adoption needle, branded,
-    always-current. Link/embed it like the badge (`<img>`), never a stale download."""
+    """The LIVE card as a hosted SVG — the website embed (``widget.js`` renders it),
+    always-current. Link/embed it like the badge (`<img>`), never a stale download.
+
+    ``style=card`` (default) is the shared badge design system's card (trust and
+    adoption meters, ``src.api.badge_avow``); ``style=classic`` is the previous
+    trust-bar + adoption-needle card; ``style=card-stacked`` keeps the round-3 stacked
+    layout. ``theme`` = auto / light / dark."""
     full_name = f"{owner}/{repo}"
     # Trust score — composite entity, else cached scan, else regenerate on demand.
     score: int | None = None
@@ -2679,6 +2702,28 @@ async def scan_card(
     coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
 
     decision, mark = await _badge_view(scan_data, score)
+    cert = bool(mark and not composite and score is not None)
+
+    if style in ("card", "card-stacked"):
+        from src.api.badge_avow import render_avow_badge
+        svg = render_avow_badge(
+            style=style,
+            decision=decision if score is not None else None,
+            score=int(score) if score is not None else None,
+            certified=cert,
+            brand=settings.badge_brand, theme=theme,
+            coordinate=full_name if a_surface == "github" else f"{owner}:{repo}",
+            adoption=a_count, adoption_unit=_unit, adoption_pct=a_score100,
+        )
+        return Response(
+            content=svg,
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=300, s-maxage=3600",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
     from src.api.card_svg import render_card_svg
     svg = render_card_svg(
         coordinate=coordinate,
@@ -2687,7 +2732,7 @@ async def scan_card(
         adoption_pct=int(a_score100 or 0),
         adoption_tier=None,
         decision=decision if score is not None else None,
-        certified=mark and not composite and score is not None,
+        certified=cert,
     )
     return Response(
         content=svg,
@@ -2888,6 +2933,37 @@ def _certified_badge_response(score: int, decision: str | None = None) -> Respon
   <text x="{80 + label_width // 2}" y="14" fill="#06231f" font-family="{BADGE_FONT}"
         font-size="11" font-weight="bold" text-anchor="middle">{label}</text>
 </svg>'''
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=3600, s-maxage=86400",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+async def _avow_badge_response(
+    owner: str, repo: str, *, style: str, theme: str, score: int | None,
+    certified: bool, decision: str | None,
+) -> Response:
+    """The opt-in Avow badge family (``src.api.badge_avow``) — same inputs and the same
+    open-CORS, regenerate-per-view headers as the classic badge."""
+    from src.api.badge_avow import render_avow_badge
+    a_surface = owner.lower() if owner.lower() in (
+        "npm", "pypi", "crates", "huggingface", "docker",
+    ) else "github"
+    try:
+        a_pct, adoption, a_unit = await surface_adoption_summary(a_surface, owner, repo)
+    except Exception:
+        a_pct, adoption, a_unit = None, None, None
+    coordinate = f"{owner}/{repo}" if a_surface == "github" else f"{owner}:{repo}"
+    svg = render_avow_badge(
+        style=style, decision=decision, score=int(score) if score is not None else None,
+        certified=certified, brand=settings.badge_brand, theme=theme,
+        coordinate=coordinate, adoption=adoption, adoption_unit=a_unit,
+        adoption_pct=a_pct,
+    )
     return Response(
         content=svg,
         media_type="image/svg+xml",

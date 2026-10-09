@@ -3,7 +3,8 @@
  *
  *   <script src="https://agentavow.com/widget.js" data-tool="npm/chalk"></script>
  *
- * Renders the always-current scores card (the hosted card.svg) as a link to the
+ * Renders the always-current trust card (the hosted card.svg — the same design as
+ * the README badge: trust and adoption meters) as a link to the
  * full report, and adds a "Verify offline" control that recomputes the Ed25519
  * (JWS/EdDSA) signature IN THE VISITOR'S BROWSER against the public JWKS — so the
  * trust check runs on the reader's machine, not on a claim we make. No framework,
@@ -12,6 +13,7 @@
  * Attributes on the <script> (or a target <div data-agentavow-tool="...">):
  *   data-tool   required — coordinate: "npm/chalk", "pypi/requests", "owner/repo"
  *   data-verify "true" (default) | "false"  — hide the verify control
+ *   data-theme  "auto" (default, follows the reader's colour scheme) | "light" | "dark"
  */
 (function () {
   'use strict';
@@ -69,10 +71,12 @@
     return n;
   }
 
-  function mount(host, tool, wantVerify) {
+  function mount(host, tool, wantVerify, theme) {
     var path = coordToPath(tool);
     if (!path) return;
-    var cardUrl = ORIGIN + '/api/v1/public/scan/' + path + '/card.svg';
+    theme = (theme === 'light' || theme === 'dark') ? theme : 'auto';
+    var cardUrl = ORIGIN + '/api/v1/public/scan/' + path + '/card.svg' +
+      (theme === 'auto' ? '' : '?theme=' + theme);
     var reportUrl = ORIGIN + '/check/' + path;
     var verdictUrl = ORIGIN + '/api/v1/public/scan/' + path + '/verdict.json';
 
@@ -134,7 +138,7 @@
       var placeholder = el('div');
       t.appendChild(placeholder);
       mount(placeholder, t.getAttribute('data-agentavow-tool'),
-        t.getAttribute('data-verify') !== 'false');
+        t.getAttribute('data-verify') !== 'false', t.getAttribute('data-theme'));
     }
   }
 
@@ -147,7 +151,7 @@
       var anchor = el('span');
       s.parentNode.insertBefore(anchor, s.nextSibling);
       mount(anchor, s.getAttribute('data-tool'),
-        s.getAttribute('data-verify') !== 'false');
+        s.getAttribute('data-verify') !== 'false', s.getAttribute('data-theme'));
     }
   }
 

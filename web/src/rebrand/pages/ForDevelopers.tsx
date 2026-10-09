@@ -193,7 +193,7 @@ export default function RebrandForDevelopers() {
 
         <div className="mt-5 grid sm:grid-cols-2 gap-4">
           {[
-            ['Embeddable widget', 'The full dual-mark card + an in-browser "Verify offline" button, for docs sites and landing pages — one script tag.', rp('/rebrand/badge')],
+            ['Embeddable widget', 'The trust card (answer, trust bar, adoption dial) plus an in-browser "Verify offline" button, for docs sites and landing pages. One script tag.', rp('/rebrand/badge')],
             ['Share / social card', 'A downloadable card of your score for a launch post, changelog, or slide.', rp('/rebrand/badge')],
             ['Signed report link', 'The full report + JWS attestation at agentavow.com/check/you/your-repo — verifiable offline against our JWKS.', rp('/rebrand/check')],
             ['The "Certified" mark', 'Earn the top tier through the public conjunctive gate and display the Certified treatment — the earned top tier.', rp('/rebrand/certified')],
