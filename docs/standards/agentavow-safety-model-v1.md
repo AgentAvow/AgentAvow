@@ -183,6 +183,10 @@ model by the attestation's signed `scannedAt` (the time the score was computed):
 | before 2026-10-08T17:36:57Z | `safety-model-v1` | — |
 | on or after 2026-10-08T17:36:57Z | `safety-model-v1.1` | §4.2 graduated curve |
 
+Compare `scannedAt` with the boundary as an instant, never as a string: attestations signed
+before 2026-10-09 write it with microseconds and `+00:00`, later ones with milliseconds and `Z`
+(`2026-10-08T17:36:57Z` and `2026-10-08T17:36:57.000Z` are the same instant).
+
 `scannedAt` is stamped by the scoring run itself: every path that computes a score
 (including catalog re-scores) runs a fresh scan and stamps a fresh `scannedAt`, and no path
 recomputes a stored score under its old timestamp. `scannedAt`, not `issuedAt`, selects

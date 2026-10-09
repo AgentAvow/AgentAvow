@@ -334,3 +334,13 @@ def create_jws(payload_bytes: bytes) -> str:
     signing_input = (h_b64 + "." + p_b64).encode()
     sig = get_signing_key().sign(signing_input)
     return h_b64 + "." + p_b64 + "." + _b64url(sig)
+
+
+def rfc3339_ms(dt) -> str:
+    """A UTC instant as RFC 3339 at millisecond precision with ``Z``, e.g.
+    ``2026-10-09T01:02:03.456Z``. Signed timestamps use this form so that a consumer whose
+    clock type holds milliseconds (JavaScript ``Date``, ``jose``) reads the same instant the
+    issuer wrote; microseconds were truncated by such consumers and misjudged freshness at the
+    window boundary."""
+    from datetime import timezone as _tz
+    return dt.astimezone(_tz.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")

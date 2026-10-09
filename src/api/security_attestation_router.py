@@ -18,7 +18,7 @@ from src.attestation.composed_slot import (
 )
 from src.database import get_db
 from src.models import Entity, FrameworkSecurityScan, TrustScore
-from src.signing import KID, canonicalize, create_jws
+from src.signing import KID, canonicalize, create_jws, rfc3339_ms
 
 logger = logging.getLogger(__name__)
 
@@ -134,9 +134,9 @@ def _build_payload(
             "entity_id": str(entity.id),
             "display_name": entity.display_name,
         },
-        "scannedAt": scan.scanned_at.isoformat() if scan.scanned_at else now.isoformat(),
-        "issuedAt": now.isoformat(),
-        "expiresAt": (now + timedelta(hours=24)).isoformat(),
+        "scannedAt": rfc3339_ms(scan.scanned_at or now),
+        "issuedAt": rfc3339_ms(now),
+        "expiresAt": rfc3339_ms(now + timedelta(hours=24)),
         "scan": {
             "result": scan.scan_result,
             "framework": scan.framework,

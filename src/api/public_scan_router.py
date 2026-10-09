@@ -45,6 +45,7 @@ from src.signing import (
     create_jws,
     get_trust_v2_kid,
     get_trust_v2_signing_key,
+    rfc3339_ms,
 )
 
 # Scan attestations sign over RFC 8785 (JCS) canonical bytes so a consumer can
@@ -1224,9 +1225,9 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
             "id": _subject_id(repo),
             "repo": repo,
         },
-        "scannedAt": result_data.get("scanned_at", now.isoformat()),
-        "issuedAt": now.isoformat(),
-        "expiresAt": (now + timedelta(hours=24)).isoformat(),
+        "scannedAt": result_data.get("scanned_at", rfc3339_ms(now)),
+        "issuedAt": rfc3339_ms(now),
+        "expiresAt": rfc3339_ms(now + timedelta(hours=24)),
         "scan": scan_block,
         "recommendedLimits": result_data["recommended_limits"],
     }
@@ -1375,7 +1376,7 @@ def _scan_result_to_dict(result: object) -> dict:
         "deprecation": getattr(result, "deprecation", None),
         "package_version": (getattr(result, "artifact_scan", None) or {}).get("version"),
         "published_at": (getattr(result, "artifact_scan", None) or {}).get("published_at"),
-        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "scanned_at": rfc3339_ms(datetime.now(timezone.utc)),
     }
     # A+ follows the Certified MARK (static: no sandbox block yet), not raw eligibility.
     out["grade"] = _display_grade(result.trust_score, _certified_mark(out), ship_crit)
@@ -2463,8 +2464,8 @@ async def public_scan_history(
             "@context": "https://schema.agentgraph.co/attestation/scan-history/v1",
             "type": "ScanHistoryAttestation",
             "subject": {"id": f"github:{full_name}", "repo": full_name},
-            "issuedAt": datetime.now(timezone.utc).isoformat(),
-            "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "issuedAt": rfc3339_ms(datetime.now(timezone.utc)),
+            "expiresAt": rfc3339_ms(datetime.now(timezone.utc) + timedelta(hours=1)),
             "history": {
                 "entityId": payload.get("entity_id"),
                 "scoreTimeline": payload.get("score_timeline", []),
@@ -2488,8 +2489,8 @@ async def public_scan_history(
             "@context": "https://schema.agentgraph.co/attestation/scan-history/v1",
             "type": "ScanHistoryAttestation",
             "subject": {"id": f"github:{full_name}", "repo": full_name},
-            "issuedAt": datetime.now(timezone.utc).isoformat(),
-            "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "issuedAt": rfc3339_ms(datetime.now(timezone.utc)),
+            "expiresAt": rfc3339_ms(datetime.now(timezone.utc) + timedelta(hours=1)),
             "history": {
                 "entityId": None,
                 "scoreTimeline": [],
@@ -2547,8 +2548,8 @@ async def public_scan_history(
         "@context": "https://schema.agentgraph.co/attestation/scan-history/v1",
         "type": "ScanHistoryAttestation",
         "subject": {"id": f"github:{full_name}", "repo": full_name},
-        "issuedAt": datetime.now(timezone.utc).isoformat(),
-        "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "issuedAt": rfc3339_ms(datetime.now(timezone.utc)),
+        "expiresAt": rfc3339_ms(datetime.now(timezone.utc) + timedelta(hours=1)),
         "history": {
             "entityId": payload["entity_id"],
             "scoreTimeline": score_timeline,
