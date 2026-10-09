@@ -166,6 +166,62 @@ export function Assistant() {
 
 The gate verifies the EdDSA attestation against AgentAvow's public JWKS and decides on the signed fields; it needs only `fetch` and WebCrypto, so it runs on Flue's Node and Cloudflare Workers targets. `onReview: 'confirm'` takes a `confirm` hook of yours, since Flue has no built-in approval pause. The same core, `agentavow-trust/gate`, works without Flue: `createGate(policy).check(target)` and `checkToolCall({ server, toolName, servedDefinition })`.
 
+### Claude Agent SDK
+
+For an agent built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), `agentavow-trust/claude-agent-sdk` (TypeScript) and `src/bridges/claude_agent_sdk` (Python) put the check at two points: before the session starts, and before every MCP tool call.
+
+```ts
+import { query } from '@anthropic-ai/claude-agent-sdk'
+import { createClaudeAgentGate } from 'agentavow-trust/claude-agent-sdk'
+
+const gate = createClaudeAgentGate({ onReview: 'confirm' })   // or 'block' | 'warn'
+const { servers, disallowedTools, refused } = await gate.mcpServers({
+  deepwiki: { type: 'http', url: 'https://mcp.deepwiki.com/mcp' },
+})
+for await (const m of query({ prompt, options: { mcpServers: servers, disallowedTools, hooks: gate.hooks() } })) {
+  // …
+}
+```
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions, query
+from src.bridges.claude_agent_sdk import AgentAvowClaudeGate     # from the AgentAvow repo; not on PyPI yet
+
+gate = AgentAvowClaudeGate(fail_on="review", on_fail="block")    # or on_fail="confirm" | "warn" | "raise"
+servers = await gate.check_mcp_servers({"deepwiki": {"type": "http", "url": "https://mcp.deepwiki.com/mcp"}})
+options = ClaudeAgentOptions(mcp_servers=servers, hooks=gate.hooks())
+```
+
+`mcpServers` (`check_mcp_servers` in Python) reads each server's signed result and leaves out the ones whose answer fails your policy, so the session never connects to them. For an https server the TypeScript gate also reads the server's own `tools/list` and lists any tool whose definition changed since it was graded in `disallowedTools`. `hooks()` adds a `PreToolUse` hook for every `mcp__<server>__<tool>` call: it re-checks the call (the cached result plus the definition check) and, when the call is not allowed, returns `permissionDecision: "deny"` with the reason, which the model gets as the tool result. A `PreToolUse` deny holds in every permission mode, including `bypassPermissions`, which is why the gate uses a hook rather than `canUseTool` (auto-approved tools never reach `canUseTool`; `gate.canUseTool` is there if your code already routes approvals through it). Review before you connect with `onReview: 'confirm'` returns `permissionDecision: "ask"`, the SDK's own approval flow. A stdio server has no URL: give it a coordinate (`coordinates: { fs: 'npm:@scope/server' }`, `servers={...}` in Python) and it's graded as a package. Tools that aren't `mcp__…` (Bash, Edit, your own SDK tools) are not gated.
+
+### OpenAI Agents SDK
+
+For an agent built on the [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/), `agentavow-trust/openai-agents` (TypeScript) and `src/bridges/openai_agents` (Python) wrap an MCP server object, so the same server you pass to `Agent({ mcpServers })` carries the check.
+
+```ts
+import { Agent, run, MCPServerStreamableHttp } from '@openai/agents'
+import { createOpenAIAgentsGate } from 'agentavow-trust/openai-agents'
+
+const gate = createOpenAIAgentsGate({ onReview: 'block' })
+const { servers, refused } = await gate.connectAll([
+  new MCPServerStreamableHttp({ name: 'deepwiki', url: 'https://mcp.deepwiki.com/mcp' }),
+])
+const agent = new Agent({ name: 'Assistant', instructions: '…', mcpServers: servers })
+```
+
+```python
+from agents import Agent, Runner
+from agents.mcp import MCPServerStreamableHttp
+from src.bridges.openai_agents import AgentAvowMCPGate          # from the AgentAvow repo; not on PyPI yet
+
+gate = AgentAvowMCPGate(fail_on="review")
+async with gate.wrap(MCPServerStreamableHttp(name="deepwiki",
+                                             params={"url": "https://mcp.deepwiki.com/mcp"})) as server:
+    result = await Runner.run(Agent(name="Assistant", mcp_servers=[server]), prompt)
+```
+
+`gate.wrap(server)` wraps three methods on that server. `connect()` reads the server's signed result first and refuses the connection (a `GateError`, `ToolGateBlockedError` in Python) when the answer fails your policy; `connectAll` / `connect_all` connects the servers that pass and returns the rest as `refused`, so the agent starts without them. `listTools()` checks each served definition against the per-tool digest in the attestation and drops a tool that changed since it was graded, so the model never sees it. `callTool()` re-checks each call; a call that is not allowed never reaches the server, and the model gets the reason (TypeScript throws, which the SDK's `errorFunction` turns into model-visible text; Python returns an MCP error result). A stdio server needs a coordinate (`gate.wrap(server, 'npm:@scope/server')`, `servers={...}` in Python). `onReview: 'confirm'` needs a `confirm` hook of yours, since MCP server tools have no SDK approval pause.
+
 ### Where each integration stands
 
 | Integration | Status |
@@ -173,10 +229,10 @@ The gate verifies the EdDSA attestation against AgentAvow's public JWKS and deci
 | Claude Code plugin (session-start check, install check, per-call gate) | Shipped; listed in the Claude plugin directory |
 | MCP connector (`https://agentavow.com/mcp`) | Shipped; works in any MCP client |
 | ChatGPT app | In OpenAI review |
-| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue | Shipped |
-| LangChain and Google ADK gates | In this repository (`src/bridges/`); not on PyPI yet |
+| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue | Shipped (0.3.2) |
+| npm `agentavow-trust`: Claude Agent SDK and OpenAI Agents SDK adapters | In the repository (0.4.0); next npm release |
+| LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates (Python) | In this repository (`src/bridges/`); not on PyPI yet |
 | GitHub Action, local CLI, GitLab CI component, Bitbucket Pipe, Azure Pipelines template | Shipped |
-| Claude Agent SDK, OpenAI Agents SDK | No dedicated adapter yet. Use the core gate (`createGate` / `ToolGate`) in a tool-call hook, or add the MCP connector |
 
 ## Gate anything (the API)
 

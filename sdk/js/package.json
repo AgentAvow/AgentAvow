@@ -1,7 +1,7 @@
 {
   "name": "agentavow-trust",
-  "version": "0.3.2",
-  "description": "AgentAvow for JavaScript: a framework-agnostic gate that decides safe / review / do_not_connect for any tool, MCP server or package from AgentAvow's signed scan results (Ed25519 JWS verified offline), with adapters for Flue and the Vercel AI SDK, plus Trust Score v2 envelope verification. Formerly agentgraph-trust.",
+  "version": "0.4.0",
+  "description": "AgentAvow for JavaScript: a framework-agnostic gate that decides safe / review / do_not_connect for any tool, MCP server or package from AgentAvow's signed scan results (Ed25519 JWS verified offline), with adapters for Flue, the Vercel AI SDK, the Claude Agent SDK and the OpenAI Agents SDK, plus Trust Score v2 envelope verification. Formerly agentgraph-trust.",
   "type": "module",
   "license": "MIT",
   "author": "AgentAvow",
@@ -26,6 +26,14 @@
     "./vercel-ai": {
       "types": "./dist/vercel-ai.d.ts",
       "default": "./dist/vercel-ai.js"
+    },
+    "./claude-agent-sdk": {
+      "types": "./dist/claude-agent-sdk.d.ts",
+      "default": "./dist/claude-agent-sdk.js"
+    },
+    "./openai-agents": {
+      "types": "./dist/openai-agents.d.ts",
+      "default": "./dist/openai-agents.js"
     }
   },
   "files": [
@@ -63,7 +71,9 @@
     "flue",
     "gate",
     "cloudflare-workers",
-    "webcrypto"
+    "webcrypto",
+    "claude-agent-sdk",
+    "openai-agents"
   ],
   "bin": {
     "agentavow-trust": "bin/cli.js"
@@ -71,5 +81,17 @@
   "devDependencies": {
     "typescript": "^5.9.0",
     "@types/node": "^22.0.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": ">=0.1.0",
+    "@openai/agents": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    },
+    "@openai/agents": {
+      "optional": true
+    }
   }
 }

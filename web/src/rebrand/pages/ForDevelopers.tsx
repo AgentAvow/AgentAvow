@@ -159,9 +159,11 @@ export default function RebrandForDevelopers() {
               ['GitLab CI', 'run the scanner in your own runner, MR widget included', '/rebrand/docs/run-locally#gitlab-ci-self-managed-behind-a-firewall'],
               ['Bitbucket Pipelines', 'a pipe that posts a Code Insights report on the pull request', '/rebrand/docs/run-locally#bitbucket-pipelines'],
               ['Azure DevOps', 'a pipeline template with a run summary and SARIF', '/rebrand/docs/run-locally#azure-devops'],
-              ['Agent runtime', 'LangChain and Google ADK callbacks check each tool before the call', '/rebrand/docs/gate-on-the-grade#gate-your-agent-at-runtime-sdk--bridges'],
+              ['Agent runtime', 'LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates check each tool before the call', '/rebrand/docs/gate-on-the-grade#gate-your-agent-at-runtime-sdk--bridges'],
               ['Vercel AI SDK', 'wrap your tools so a Do not connect answer never runs', '/rebrand/docs/gate-on-the-grade#vercel-ai-sdk'],
               ['Flue', 'gate the tools a Flue agent connects to', '/rebrand/docs/gate-on-the-grade#flue'],
+              ['Claude Agent SDK', 'leave out a server that fails, and deny each mcp__ call that does', '/rebrand/docs/gate-on-the-grade#claude-agent-sdk'],
+              ['OpenAI Agents SDK', 'wrap an MCP server so connect, listTools and callTool are checked', '/rebrand/docs/gate-on-the-grade#openai-agents-sdk'],
               ['Behavioral sandbox', 'see what a package actually does when it runs', '/rebrand/sandbox'],
               ['Claim your repo', 'prove you own it and manage its listing', '/rebrand/claim'],
             ] as const).map(([h, p, to]) => (

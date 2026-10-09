@@ -17,6 +17,11 @@ What is in the box:
   (`@flue/runtime` 2.x): refuse a server at connect time, deny a drifted tool
   call at run time.
 - **`agentavow-trust/vercel-ai`**: the same gate for the Vercel AI SDK (`wrapTools`).
+- **`agentavow-trust/claude-agent-sdk`**: the gate for the Claude Agent SDK: check
+  `mcpServers` before the session, and a `PreToolUse` hook that denies each
+  `mcp__…` call that fails (0.4.0).
+- **`agentavow-trust/openai-agents`**: the gate for the OpenAI Agents SDK: wrap an
+  MCP server so `connect`, `listTools` and `callTool` are checked (0.4.0).
 - **`agentavow-trust`** (root) and **`/verify`**: Trust Score v2 signed envelope
   verification, the JS peer of the Python `agentavow-sdk` verify module;
   both reproduce the server's JCS-canonical, Ed25519-over-SHA-256 check
@@ -283,6 +288,42 @@ Notes:
 - `gate.lookup('mcp__deepwiki__ask_wiki_question')` gives the server and
   original tool name behind an adapted name.
 
+## Claude Agent SDK: `agentavow-trust/claude-agent-sdk`
+
+```ts
+import { query } from '@anthropic-ai/claude-agent-sdk'
+import { createClaudeAgentGate } from 'agentavow-trust/claude-agent-sdk'
+
+const gate = createClaudeAgentGate({ onReview: 'confirm' })
+const { servers, disallowedTools, refused } = await gate.mcpServers({
+  deepwiki: { type: 'http', url: 'https://mcp.deepwiki.com/mcp' },
+})
+for await (const m of query({ prompt, options: { mcpServers: servers, disallowedTools, hooks: gate.hooks() } })) { /* … */ }
+```
+
+- `mcpServers(config)` grades each server (its https URL, or `coordinates: { name: 'npm:…' }`) and returns only the ones that pass. For an https server it also reads the server's `tools/list` and puts any tool whose definition drifted from the signed digest into `disallowedTools` (`mcp__<server>__<tool>`).
+- `hooks()` is a `PreToolUse` hook on `mcp__.*`. A call that fails returns `permissionDecision: 'deny'` with the reason (the model gets it as the tool result); it holds in every permission mode, including `bypassPermissions`. Review under `onReview: 'confirm'` with no `confirm` hook returns `'ask'`, the SDK's own approval flow.
+- `canUseTool` gives the same decision in the `canUseTool` shape, for code that already routes approvals through it (auto-approved tools never reach it, so prefer the hook).
+- Non-`mcp__` tools (Bash, Edit, your own tools) are not gated; an `mcp__` tool from a server the gate wasn't given follows `unmapped`.
+
+## OpenAI Agents SDK: `agentavow-trust/openai-agents`
+
+```ts
+import { Agent, MCPServerStreamableHttp } from '@openai/agents'
+import { createOpenAIAgentsGate } from 'agentavow-trust/openai-agents'
+
+const gate = createOpenAIAgentsGate({ onReview: 'block' })
+const { servers, refused } = await gate.connectAll([
+  new MCPServerStreamableHttp({ name: 'deepwiki', url: 'https://mcp.deepwiki.com/mcp' }),
+])
+const agent = new Agent({ name: 'Assistant', mcpServers: servers })
+```
+
+- `wrap(server, coordinate?)` returns the same server with `connect`, `listTools` and `callTool` wrapped. `connect()` throws a `GateError` when the answer fails; `listTools()` drops a tool whose definition drifted; `callTool()` throws a `GateError` for a call that fails, which the SDK's `errorFunction` turns into model-visible text.
+- `connectAll(servers)` connects the servers that pass and returns the rest as `refused`.
+- A stdio server needs a coordinate: `gate.wrap(server, 'npm:@scope/server')` or `coordinates: { name: '…' }`.
+- `onReview: 'confirm'` needs your `confirm` hook (MCP server tools have no SDK approval pause).
+
 ## Vercel AI SDK tool gate — `agentavow-trust/vercel-ai`
 
 > Shipped in 0.2.2. From **0.3.1** it is a thin adapter over `agentavow-trust/gate`,
@@ -425,7 +466,7 @@ JCS-canonical, proof-stripped envelope), `isFresh(envelope, { now? })`,
 
 ```bash
 npm install
-npm run build     # tsc -> dist/ (the gate, flue, jws and vercel-ai entry points)
+npm run build     # tsc -> dist/ (the gate, flue, jws, vercel-ai, claude-agent-sdk and openai-agents entry points)
 npm test          # builds first (pretest), then node --test against dist/
 ```
 
