@@ -203,3 +203,20 @@ def test_cli_report_matches_scan_local(tmp_path):
     main(["scan", str(repo), "--quiet", "--gitlab-code-quality", str(out)])
     direct = result_to_code_quality(scan_local(repo))
     assert json.loads(out.read_text()) == direct
+
+
+def test_gitlab_component_gates_on_the_answer_by_default():
+    """The component and the plain include fail on Do not connect, not on a score."""
+    from pathlib import Path
+
+    import yaml
+    root = Path(__file__).resolve().parents[1] / "gitlab"
+    spec, job = list(yaml.safe_load_all((root / "templates" / "scan.yml").read_text()))
+    inputs = spec["spec"]["inputs"]
+    assert inputs["fail_on"]["default"] == "do_not_connect"
+    assert inputs["min_score"]["default"] == 0
+    script = job["$[[ inputs.job_name ]]"]["script"][0]
+    assert '--fail-on "$AGENTAVOW_FAIL_ON_ANSWER"' in script
+    plain = yaml.safe_load((root / "agentavow-scan.gitlab-ci.yml").read_text())
+    assert plain["variables"]["AGENTAVOW_FAIL_ON_ANSWER"] == "do_not_connect"
+    assert plain["variables"]["AGENTAVOW_MIN_SCORE"] == "0"

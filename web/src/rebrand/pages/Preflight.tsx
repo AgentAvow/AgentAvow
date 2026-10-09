@@ -171,6 +171,7 @@ export default function RebrandPreflight() {
           {/* blockers */}
           <div className="mt-6 glass rounded-2xl px-6 py-4">
             <h3 className="text-[12px] font-mono uppercase tracking-wide text-text-muted mb-1">Blockers — must pass to be listed</h3>
+            <p className="text-[12.5px] text-text-muted mb-1">A failed blocker is a predicted rejection at review. Fix every one before you submit.</p>
             {blockers.map((g) => <GateRow key={g.id} g={g} />)}
           </div>
 
@@ -178,6 +179,7 @@ export default function RebrandPreflight() {
           {warnings.length > 0 && (
             <div className="mt-4 glass rounded-2xl px-6 py-4">
               <h3 className="text-[12px] font-mono uppercase tracking-wide text-text-muted mb-1">Recommended — clean these up</h3>
+              <p className="text-[12.5px] text-text-muted mb-1">Warnings are worth fixing but don&apos;t block a listing on their own. A tool annotation that reads wrong only from its description wording is a warning; one backed by evidence (a command parameter on a read-only tool, or the sandbox seeing it write) is a blocker.</p>
               {warnings.map((g) => <GateRow key={g.id} g={g} />)}
             </div>
           )}

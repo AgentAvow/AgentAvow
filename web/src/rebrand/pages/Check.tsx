@@ -1107,6 +1107,8 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
             ) : (
               <><span className="inline-block w-2 h-2 rounded-full bg-warning" /><span className="text-text-muted">Still running or queued behind other runs — reload later, or press Run now.</span></>
             )
+          ) : b?.state === 'unavailable' && !b.ran ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-warning" /><span className="text-text-muted">Sandbox unavailable — no slot freed up for two hours, so the answer stands on static analysis alone. Press Run now to try again.</span></>
           ) : b?.ran ? (
             <><span className="inline-block w-2 h-2 rounded-full bg-success" /><span className="text-text-muted">Completed{observedAt ? ` · observed ${observedAt.toLocaleString()}` : ''}{b.plan ? ` · plan ${b.plan}` : ''}</span></>
           ) : b ? (
@@ -1325,7 +1327,7 @@ function LiveProbePanel({ b, pending, error, observedAt, onRun }: { b: Behaviora
             ) : ex.launch_ok && calls.length > 0 ? (
               <div className="flex items-center gap-2 text-[13.5px] font-semibold text-success"><span>✓</span> No injection text or credential-looking value in any result.</div>
             ) : null}
-            <p className="text-[11.5px] text-text-muted/70">Advisory only: a live probe is not reproducible, carries no attestation, and never changes the trust score or the safe / needs-review verdict.</p>
+            <p className="text-[11.5px] text-text-muted/70">Advisory only: a live probe is not reproducible, carries no attestation, and never changes the trust score or the answer (Safe to connect, Review before you connect, or Do not connect).</p>
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 # AgentAvow Safety Model — v1.0
 
-**Status:** Stable · **Model version:** `safety-model-v1` · **Last updated:** 2026-10-02 (§5 tier table aligned with the API's six `trust_tier` values)
+**Status:** Stable · **Model version:** `safety-model-v1` · **Last updated:** 2026-10-09 (added §4.2 graduated curve and §11.1 thin coverage, both live since 2026-10-08; 2026-10-02: §5 tier table aligned with the API's six `trust_tier` values)
 
 This document specifies the **model** AgentAvow uses to turn a scan into a 0–100 safety
 score, a tier, and a Certified verdict. It is the declarative, versioned counterpart to
@@ -91,6 +91,21 @@ targets, **high/medium** findings *in those expected categories* deduct at **50%
 **critical is never discounted** — MCP or not, a critical deducts in full. (This replaced an
 earlier rule that zeroed expected-category findings entirely, which let MCP servers with
 critical findings score 100.)
+
+### 4.2 Graduated curve — no critical or high (since 2026-10-08)
+When the shipped-weighted counts give `C = 0` and `H = 0`, steps 1 and 3 above are replaced:
+
+1. **Base** is `84` whether or not mediums are present (no drop to `68`).
+2. Each code **medium** costs a fixed `4` points (`2` when it falls in an expected or
+   declared category, §4.1), times its shipped weight. The total medium cost is **capped at
+   16**. There is no 42 cap and no file-ratio scaling on this branch.
+3. **Low** findings cost nothing.
+
+Every other step (dependencies, provenance, maintainer, positive signals, good practices,
+suppressions, clamp) applies unchanged. Results with any critical or high keep the formula
+in §4 exactly as written, including the ceilings: a shipped critical caps the score at
+**45**, and a blocking high caps it at **90**. Reference implementation:
+`src/scanner/scan.py` (`_CURVE_*`).
 
 ## 5. Tiers & posture
 
@@ -193,6 +208,19 @@ The decision is **unsigned**: it travels beside the signed verdict, derived from
 scan result; it is not part of the JWS payload. Certified (section 8) is a separate
 axis and is shown beside the phrase ("Safe to connect · Certified"). Reference
 implementation: `src/scanner/verdict.py` (`decide`).
+
+### 11.1 Thin coverage reads safe (since 2026-10-08)
+The last clause of rule 2 ("fewer than 8 files scanned with no critical, high or medium
+finding") no longer applies. A result with fewer than 8 files scanned and nothing found
+reads `safe`, and its reason says how little there was to inspect:
+
+- `nothing found; little code to inspect` — a package or repository;
+- `tool definitions clean; server code not inspected` — a remote MCP server scanned by URL,
+  where only the served tool definitions are visible.
+
+The evidence-confidence cap still bounds the score of such a result (82 for a thin scan,
+74 for a very thin one), so the score says how much was inspected and the answer says
+whether anything was found.
 
 ---
 

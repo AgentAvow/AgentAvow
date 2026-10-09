@@ -1,15 +1,16 @@
 # AgentAvow scan: GitLab CI/CD component.
 #
 # Runs the offline AgentAvow static scan inside your runner, on the checked-out code.
-# Nothing leaves your network. The job fails below the trust-score threshold and
+# Nothing leaves your network. The job prints the answer and the trust score and
 # publishes a GitLab Code Quality report so findings show in the merge-request widget.
+# By default the job fails when the answer is "Do not connect".
 #
-# Usage (once the component project is published; pin a version):
+# Usage (from your component project; pin a version tag you created there):
 #
 #   include:
-#     - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@1.0.0
+#     - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@<your-tag>
 #       inputs:
-#         min_score: 81
+#         fail_on: do_not_connect
 #         image: registry.example.internal/mirrors/agentavow/scanner:0.1
 #
 # Self-managed instances that cannot reach gitlab.com components: mirror this
@@ -18,12 +19,20 @@
 
 spec:
   inputs:
+    fail_on:
+      type: string
+      default: "do_not_connect"
+      options: ["do_not_connect", "review", "none"]
+      description: >-
+        Fail the job on this answer or worse. "do_not_connect" fails only on
+        Do not connect; "review" also fails on Review before you connect; "none"
+        reports without gating on the answer.
     min_score:
       type: number
-      default: 81
+      default: 0
       description: >-
-        Fail the job when the trust score (0-100) is below this. The default, 81,
-        is the floor of "Safe to connect"; lower it to start with a softer gate.
+        Legacy. Also fail when the trust score (0-100) is below this. 0 turns it
+        off; gate on fail_on instead.
     fail_on_findings:
       type: string
       default: "none"
@@ -66,6 +75,7 @@ spec:
   interruptible: true
   allow_failure: $[[ inputs.allow_failure ]]
   variables:
+    AGENTAVOW_FAIL_ON_ANSWER: "$[[ inputs.fail_on ]]"
     AGENTAVOW_MIN_SCORE: "$[[ inputs.min_score ]]"
     AGENTAVOW_FAIL_ON: "$[[ inputs.fail_on_findings ]]"
     AGENTAVOW_PATH: "$[[ inputs.path ]]"
@@ -76,8 +86,9 @@ spec:
     - |
       set -- "$AGENTAVOW_PATH" \
         --json agentavow-scan.json \
-        --gitlab-code-quality gl-code-quality-report.json \
-        --min-score "$AGENTAVOW_MIN_SCORE"
+        --gitlab-code-quality gl-code-quality-report.json
+      if [ "$AGENTAVOW_FAIL_ON_ANSWER" != "none" ]; then set -- "$@" --fail-on "$AGENTAVOW_FAIL_ON_ANSWER"; fi
+      if [ "${AGENTAVOW_MIN_SCORE:-0}" != "0" ]; then set -- "$@" --min-score "$AGENTAVOW_MIN_SCORE"; fi
       if [ "$AGENTAVOW_FAIL_ON" != "none" ]; then set -- "$@" --fail-on "$AGENTAVOW_FAIL_ON"; fi
       agentavow scan "$@"
   artifacts:

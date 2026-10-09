@@ -153,8 +153,10 @@ shows one line saying so and how to scan a tool on demand. That line is shown on
 machine, is recorded in the same file, and makes no request.
 
 If the network is down or anything unexpected happens, either hook prints nothing and
-exits cleanly. The session-start hook cannot stop a session from starting, and the
-gate cannot stop a call for any reason other than a blocked-tier grade on file.
+exits cleanly. The session-start hook cannot stop a session from starting. The gate
+refuses a call only when the server's answer on file is Do not connect (or its score is
+below `AGENTAVOW_GATE_DENY_BELOW`, the Blocked tier by default), and asks before a tool
+whose definition changed since it was checked.
 
 The MCP connector sends AgentAvow only the target you ask it to scan. Scan results for
 public tools are public.

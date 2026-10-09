@@ -1,5 +1,7 @@
+import { useQuery } from '@tanstack/react-query'
 import { Reveal, RevealStagger } from '../components/motion'
 import SEOHead from '../../components/SEOHead'
+import { fetchFlaggedStat } from '../catalog'
 
 /**
  * Research hub (rebrand) — self-published reports + specs. On a trust product,
@@ -9,7 +11,7 @@ import SEOHead from '../../components/SEOHead'
 
 const REPORTS: { title: string; sub: string; date: string; status: 'live' | 'upcoming'; href?: string }[] = [
   { title: 'State of Agent Security 2026', sub: 'Agent distribution surfaces + the signed-evidence substrate. 35k+ tools scanned, reproducible.', date: 'Q2 2026', status: 'live', href: '/state-of-agent-security-2026' },
-  { title: 'State of Agent Security — Q3 2026', sub: 'We scanned 25k+ agent tools — nearly a third carry a high/critical finding. The tool-safety blind spot, sized (live figure).', date: 'Aug 2026', status: 'live', href: '/state-of-agent-security-q3-2026' },
+  { title: 'State of Agent Security — Q3 2026', sub: 'Of {scanned} agent tools scanned, {pct} carry a high or critical finding. The tool-safety blind spot, sized (live figure).', date: 'Aug 2026', status: 'live', href: '/state-of-agent-security-q3-2026' },
 ]
 
 const PUBLICATIONS: { title: string; sub: string; href: string }[] = [
@@ -22,7 +24,15 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
 }
 
+// Fallbacks mirror the live flagged-stat endpoint (2026-10-09); the page swaps in the live figure.
+const FALLBACK_SCANNED = '16k+'
+const FALLBACK_PCT = '38%'
+
 export default function RebrandResearch() {
+  const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
+  const scanned = stat?.scanned_total ? `${Math.floor(stat.scanned_total / 1000)}k+` : FALLBACK_SCANNED
+  const pct = stat?.pct != null ? `${stat.pct}%` : FALLBACK_PCT
+  const fill = (text: string) => text.replace('{scanned}', scanned).replace('{pct}', pct)
   return (
     <div className="max-w-[880px] mx-auto px-6 py-16">
       <SEOHead
@@ -48,7 +58,7 @@ export default function RebrandResearch() {
                 <span className="font-mono text-[12px] text-text-muted">{r.date}</span>
               </div>
               <h3 className="mt-2 text-lg font-bold">{r.title}</h3>
-              <p className="mt-1 text-text-muted text-[14px]">{r.sub}</p>
+              <p className="mt-1 text-text-muted text-[14px]">{fill(r.sub)}</p>
               {r.href && <span className="inline-block mt-3 text-[13.5px] font-semibold text-primary-light">Read the report →</span>}
             </div>
           )

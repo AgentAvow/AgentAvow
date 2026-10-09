@@ -71,7 +71,7 @@ Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic A
 
 ### LangChain
 
-A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before a tool runs it fetches the server's signed grade, allows the call when the score clears the floor (81, Trusted) with no critical/high finding, and checks the definition the agent was served against the per-tool digest in the attestation — so a tool that was redefined after it was graded is stopped, not run. A block comes back to the model as a tool message that says why, leading with the tool's answer and its reason ("Do not connect (one critical finding: …) · 40/100, tier minimal"); nothing raises. The result also carries `decision`.
+A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before a tool runs it fetches the server's signed result, allows the call when the answer is Safe to connect (and the score clears the floor, 51 by default, with no critical/high finding), and checks the definition the agent was served against the per-tool digest in the attestation — so a tool that was redefined after it was graded is stopped, not run. A block comes back to the model as a tool message that says why, leading with the tool's answer and its reason ("Do not connect (one critical finding: …) · 40/100, tier minimal"); nothing raises. The result also carries `decision`.
 
 ```python
 from langchain.agents import create_agent
@@ -79,13 +79,14 @@ from src.bridges.langchain.middleware import AgentAvowGate   # from the AgentAvo
 
 gate = AgentAvowGate(
     servers={"deepwiki": "https://mcp.deepwiki.com/mcp"},    # or tool_to_server={tool: server}
-    min_score=81,                                             # Trusted floor
+    fail_on="review",                                         # default: stop Review and Do not connect;
+                                                              # "do_not_connect" lets Review through
     on_fail="block",                                          # or "confirm" | "warn" | "raise"
 )
 agent = create_agent(model, tools=mcp_tools, middleware=[gate])
 ```
 
-The mapping is yours to give — a LangChain tool doesn't carry its server's URL — by tool name (`tool_to_server`), by server name (`servers`, matched to `MCPAdapter`'s server name or a `<server>_` tool-name prefix), or a `resolve_server` callable. Tools that map to no server (your own functions) are not gated. `on_fail="confirm"` pauses the graph with a LangGraph interrupt until you resume with `"approve"`; `fail_closed=False` lets a call through, with a warning, when AgentAvow itself can't answer.
+The mapping is yours to give — a LangChain tool doesn't carry its server's URL — by tool name (`tool_to_server`), by server name (`servers`, matched to `MCPAdapter`'s server name or a `<server>_` tool-name prefix), or a `resolve_server` callable. Tools that map to no server (your own functions) are not gated. `min_score=81` holds the stricter Trusted floor. `on_fail="confirm"` pauses the graph with a LangGraph interrupt until you resume with `"approve"`; `fail_closed=False` lets a call through, with a warning, when AgentAvow itself can't answer.
 
 ### Google ADK
 
@@ -99,7 +100,7 @@ from src.bridges.google_adk import AgentAvowToolGate            # from the Agent
 agent = LlmAgent(
     name="assistant", model="gemini-2.5-flash",
     tools=[McpToolset(connection_params=StreamableHTTPConnectionParams(url=SERVER_URL))],
-    before_tool_callback=AgentAvowToolGate(min_score=81, on_fail="block"),
+    before_tool_callback=AgentAvowToolGate(fail_on="review", on_fail="block"),
 )
 ```
 
@@ -165,6 +166,18 @@ export function Assistant() {
 
 The gate verifies the EdDSA attestation against AgentAvow's public JWKS and decides on the signed fields; it needs only `fetch` and WebCrypto, so it runs on Flue's Node and Cloudflare Workers targets. `onReview: 'confirm'` takes a `confirm` hook of yours, since Flue has no built-in approval pause. The same core, `agentavow-trust/gate`, works without Flue: `createGate(policy).check(target)` and `checkToolCall({ server, toolName, servedDefinition })`.
 
+### Where each integration stands
+
+| Integration | Status |
+|---|---|
+| Claude Code plugin (session-start check, install check, per-call gate) | Shipped; listed in the Claude plugin directory |
+| MCP connector (`https://agentavow.com/mcp`) | Shipped; works in any MCP client |
+| ChatGPT app | In OpenAI review |
+| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue | Shipped |
+| LangChain and Google ADK gates | In this repository (`src/bridges/`); not on PyPI yet |
+| GitHub Action, local CLI, GitLab CI component | Shipped |
+| Claude Agent SDK, OpenAI Agents SDK | No dedicated adapter yet. Use the core gate (`createGate` / `ToolGate`) in a tool-call hook, or add the MCP connector |
+
 ## Gate anything (the API)
 
 Every surface is one auth-free GET, returning the score, tier, findings, the signed `coverage{}` block, and the JWS attestation:
@@ -226,6 +239,6 @@ Reject a delivery whose timestamp is more than a few minutes old. Rotating the s
 
 1. **CI:** the GitHub Action blocks a merge on **Do not connect** (or on Review, if you choose).
 2. **Runtime:** your gate refuses a tool that reads **Do not connect**, asks a person on **Review before you connect**, and throttles the ones it admits by tier.
-3. **Ongoing:** a watch alerts you — and can auto-revoke — when a tool you already trust regresses or redefines itself.
+3. **Ongoing:** a watch alerts you (wire the signed webhook to pull the tool) when a tool you already trust regresses or redefines itself.
 
 Same answer, on the same signed score, enforced at every layer, recomputable by anyone.

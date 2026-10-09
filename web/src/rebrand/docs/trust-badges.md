@@ -1,8 +1,8 @@
 # Add a trust badge to your README
 
-Show that your tool is safe — with proof. An AgentAvow trust badge renders your repo's current signed safety
-score — a **0–100 number** and tier word (Trusted → Blocked), coloured green→red — and clicking it opens the
-full, verifiable report. It's free, needs no account, and **refreshes on its own, so it never goes stale.**
+Show that your tool is safe — with proof. An AgentAvow trust badge renders your repo's current answer
+(**Safe**, **Review** or **Do not connect**) and its signed **0–100 trust score**, coloured green→red, and
+clicking it opens the full, verifiable report. It's free, needs no account, and **refreshes on its own, so it never goes stale.**
 
 > Staged rebrand doc. Serving URLs use `agentavow.com` (post-cutover host); verification identifiers stay on
 > `agentgraph.co`.
@@ -60,14 +60,13 @@ HTML rather than Markdown, the same SVG URL works in an `<img>` tag:
 ## Gate your CI on it
 
 The badge is the display; the **GitHub Action** is the enforcement. Run the scan on every pull request and
-fail the build if the score drops below a threshold:
+fail the build when the answer is Do not connect:
 
 ```yaml
 # .github/workflows/agentavow.yml
 - uses: AgentAvow/AgentAvow/github-action@main
   with:
-    min_score: 60              # block merges under 60/100
-    fail_on_findings: true     # fail the job when the score is under min_score
+    fail_on: do_not_connect    # the default; "review" also fails on Review before you connect
     fail_on_behavioral: false  # optional: also fail on a high/critical sandbox finding
 ```
 

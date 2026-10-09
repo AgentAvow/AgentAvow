@@ -58,14 +58,19 @@ rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases).
 
 Under the answer sits the evidence: a **0–100 trust score** and the separate adoption score. The subscores
 tell you *why* the trust score is what it is. It maps to one of **six tiers**, shown as detail — the
-`trust_tier` field in the response (higher is safer):
+`trust_tier` field in the response (higher is safer). A tier sets a recommended execution posture (rate
+limit, token budget, whether to confirm each call); **the answer, not the tier, says whether to connect.**
 
-- **96–100 · Verified** (`verified`) — nothing to fix; clean findings and dependencies.
-- **81–95 · Trusted** (`trusted`) — no high or critical findings, clean dependencies.
-- **51–80 · Standard** (`standard`) — minor issues; safe for most uses.
-- **31–50 · Minimal** (`minimal`) — real findings worth reviewing before you connect.
-- **11–30 · Restricted** (`restricted`) — high-severity issues present; human-in-the-loop.
-- **0–10 · Blocked** (`blocked`) — critical issues; do not connect.
+- **96–100 · Verified** (`verified`) — connect normally, no limits.
+- **81–95 · Trusted** (`trusted`) — auto-approve within budget (60 requests/min, 8,192 tokens).
+- **51–80 · Standard** (`standard`) — standard rate and token limits (30/min, 4,096).
+- **31–50 · Minimal** (`minimal`) — confirm on sensitive calls (15/min, 2,048).
+- **11–30 · Restricted** (`restricted`) — gated, manual approval (5/min, 1,024).
+- **0–10 · Blocked** (`blocked`) — no calls.
+
+A tier and the answer can differ: a tool with one high finding can still score in the Trusted band and read
+Review before you connect, and a shipped critical caps the score at 45 (Minimal) while the answer is Do not
+connect.
 
 **Certified** is not a score band and not one of the three answers. It rides beside the answer ("Safe to
 connect · Certified") and is a separate set of checks the response reports under
