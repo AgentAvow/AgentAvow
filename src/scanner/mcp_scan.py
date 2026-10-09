@@ -25,28 +25,131 @@ from typing import Any
 
 import rfc8785
 
-# Capability keyword taxonomy — classify a tool from its name + description.
+# Capability taxonomy — classify a tool from its name + description.
+#
+# exec / fs_write / db_write drive the annotation-lie finding and the "mutate" leg of
+# the lethal trifecta, so they need a capability PHRASE (a verb plus the thing it acts
+# on), not a bare word: "run a search", "dry run", "list commands", "create a summary",
+# "update the view" and "drop-in" are not code execution or writes. A match preceded
+# in the same clause by a negation ("never executes code", "does not write files",
+# "read-only: no writes") does not count (see ``_affirmed``).
+_GAP = r"(?:\s+[\w'./-]+){0,%d}?\s+"  # up to N intervening words between verb and object
+
+_EXEC_OBJ = (
+    r"(?:commands?|shell|scripts?|programs?|process(?:es)?|binar(?:y|ies)|executables?"
+    r"|python|javascript|js|bash|powershell|snippets?"
+    r"|code(?!\s+(?:analysis|review|search|scan|quality|coverage|style|navigation|"
+    r"intelligence|completion|graph|map|owners?|examples?|documentation|docs)))"
+)
+_FS_OBJ = r"(?:files?|director(?:y|ies)|folders?|paths?|disk|filesystem|file\s+system)"
+_DB_OBJ = (
+    r"(?:rows?|records?|tables?|databases?|db|collections?|entries|entry|documents? in"
+    r"|keys? in)"
+)
+
 _CAP_PATTERNS: dict[str, re.Pattern] = {
     "exec": re.compile(
-        r"\b(exec|execute|run|shell|command|spawn|subprocess|eval|bash|sh)\b", re.I),
+        r"(?<!-)\b(?:exec(?:ute|utes|uted|uting)?|run|runs|running|eval(?:uate|uates|uating)?"
+        r"|invoke|invokes|launch(?:es)?|spawn(?:s|ed|ing)?)" + (_GAP % 3) + _EXEC_OBJ + r"\b(?!-)"
+        r"|\b(?:shell|terminal|system|os|cli)\s+commands?\b"
+        r"|\b(?:shell|command|code|process)\s+execution\b"
+        r"|\b(?:arbitrary|remote)\s+(?:code|commands?|scripts?)\b"
+        r"|\b(?:subprocess(?:es)?|child[\s_]process(?:es)?|bash|powershell|zsh)\b"
+        r"|\bsh\s+-c\b"
+        r"|\b(?:in|via|through|from|into|on)\s+(?:a|the)?\s*shell\b(?!-)",
+        re.I),
     "fs_write": re.compile(
-        r"\b(write|create|delete|remove|unlink|rename|move|mkdir|chmod|save|edit|patch)\b", re.I),
+        r"\b(?:write|writes|writing|overwrite|overwrites|append|appends|create|creates"
+        r"|creating|delete|deletes|deleting|remove|removes|removing|move|moves|moving"
+        r"|rename|renames|renaming|save|saves|saving|edit|edits|editing|modify|modifies"
+        r"|copy|copies)" + (_GAP % 4) + _FS_OBJ + r"\b"
+        r"|\b(?:mkdir|rmdir|chmod|chown|unlink|rm\s+-rf?)\b"
+        r"|\bfiles?\s+(?:writes?|deletion|removal)\b",
+        re.I),
     "fs_read": re.compile(
-        r"\b(read|open|cat|list|glob|stat|load|fetch file|get file)\b", re.I),
+        r"\b(?:read|reads|reading|open|opens|list|lists|listing|load|loads|get|gets|view"
+        r"|cat|search|searches|find|finds|stat|glob|browse)" + (_GAP % 5) + _FS_OBJ + r"\b"
+        r"|\bglob\b|\bfile\s+(?:contents?|tree|listing|search)\b",
+        re.I),
     "net": re.compile(
-        r"\b(http|https|url|fetch|request|curl|download"
-        r"|upload|webhook|post|api call|send)\b", re.I),
+        r"\b(?:https?|urls?|fetch|fetches|curl|wget|downloads?(?!\s+per\b)|upload|uploads"
+        r"|webhooks?|api\s+calls?|web\s+(?:pages?|requests?|search)"
+        r"|(?:http|web|api|network|post|get)\s+requests?|requests?\s+to"
+        r"|post\s+(?:to|data)|send\s+(?:an?\s+)?(?:emails?|messages?|requests?|data))\b",
+        re.I),
     "secrets": re.compile(
-        r"\b(secret|token|password|credential|api[_ ]?key|env"
-        r"|environment|\.env|ssh|aws|private key)\b", re.I),
+        r"\b(?:secrets?|passwords?|credentials?|api[_ ]?keys?|private\s+keys?|ssh\s+keys?"
+        r"|(?:access|auth|api|bearer|oauth|session|refresh|github|gh|npm|personal)"
+        r"[\s_-]tokens?|env(?:ironment)?\s+var(?:iable)?s?|\.env|env\s+files?"
+        r"|process\.env|os\.environ|aws\s+(?:credentials|keys?|secrets?))\b",
+        re.I),
     "db_write": re.compile(
-        r"\b(insert|update|delete from|drop|truncate|mutation|write to|db write|sql)\b", re.I),
+        r"\b(?:insert|inserts|inserting|update|updates|updating|upsert|upserts|delete"
+        r"|deletes|deleting|truncate|truncates|modify|modifies|write"
+        r"|writes|writing|alter|alters)" + (_GAP % 3) + _DB_OBJ + r"\b"
+        r"|\b(?:drop|truncate|alter)\s+(?:table|database|index|collection)\b"
+        r"|\bdelete\s+from\b|\binsert\s+into\b"
+        r"|\bgraphql\s+mutations?\b"
+        r"|\b(?:run|runs|execute|executes|perform|performs|send|sends)\s+(?:an?\s+|the\s+)?"
+        r"mutations?\b"
+        r"|\b(?:execute|executes|run|runs)\s+(?:arbitrary|raw|any)\s+sql\b",
+        re.I),
 }
+
+# A capability match preceded in the same clause (within ~4 words) by one of these
+# is a denial, not a claim: "never executes code", "does not write files".
+_NEGATION = re.compile(
+    r"^(?:not|never|no|none|nor|without|cannot|can't|cant|doesn't|doesnt|don't|dont"
+    r"|won't|wont|isn't|isnt|read-only|readonly|non-destructive)$", re.I)
+_CLAUSE_BREAK = re.compile(r"[.;:!?\n(),]|\bbut\b|\bwhile\b|\bthen\b", re.I)
+
+
+def _affirmed(pat: re.Pattern, text: str) -> bool:
+    """True when ``pat`` matches somewhere in ``text`` that is not negated."""
+    for m in pat.finditer(text):
+        head = _CLAUSE_BREAK.split(text[: m.start()])[-1]
+        words = re.findall(r"[\w'-]+", head)[-4:]
+        if not any(_NEGATION.match(w) for w in words):
+            return True
+    return False
+
+
+def _normalize_tool_name(name: str) -> str:
+    """``execute_command`` / ``runShellCommand`` → words, so a name reads as prose."""
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
+    return re.sub(r"[_\-.:/]+", " ", s)
+
 # Param names that are dangerous when freeform (no enum / constrained format).
 _DANGEROUS_PARAM = re.compile(
     r"^(cmd|command|exec|script|code|eval|shell|path|file|filepath|filename|dir|"
     r"directory|url|uri|endpoint|query|sql|expression|template|payload|body)$", re.I
 )
+# The subset of those that, as a freeform string, is declared evidence of execution.
+_EXEC_PARAM = re.compile(r"^(cmd|command|commands|script|shell|shell_command)$", re.I)
+# Ambiguous names (``code`` is as often an OTP, invite or country code): evidence only
+# when the param's own description says it is source to run.
+_EXEC_PARAM_AMBIGUOUS = re.compile(r"^(code|exec|eval|source|expression)$", re.I)
+_EXEC_PARAM_DESC = re.compile(
+    r"\b(?:python|javascript|typescript|bash|shell|sql|source\s+code|code\s+to\s+(?:run|exec"
+    r"|evaluate)|script|snippet|to\s+(?:run|execute|evaluate)|executed|evaluated)\b", re.I)
+# A tool whose name, or the first word of its description, is a destructive verb
+# ("delete_record", "Removes the entry ...") mutates state whatever object it names.
+_DESTRUCTIVE_NAME_VERBS = frozenset({
+    "delete", "remove", "drop", "purge", "destroy", "erase", "truncate", "overwrite",
+    "write", "insert", "upsert", "wipe",
+})
+_DESTRUCTIVE_LEAD = re.compile(
+    r"^\W*(?:delete|remove|drop|purge|destroy|erase|truncate|overwrite|wipe)s?\b", re.I)
+# A description that explicitly says the "command" is not executed on a real host
+# (e.g. a docs server's shell-like query over a virtual, in-memory filesystem). The
+# schema and the prose then disagree, so the read-only contradiction is medium.
+_EXEC_DENIAL = re.compile(
+    r"\b(?:not|never|isn't|is\s+not)\s+(?:a\s+)?(?:real\s+)?shell\b"
+    r"|\bnothing\s+(?:is\s+)?(?:runs?|executed|executes)\b"
+    r"|\bno\s+process\s+(?:control|execution|spawning)\b"
+    r"|\b(?:virtual(?:ized)?|in-memory|simulated|sandboxed)\s+(?:in-memory\s+)?"
+    r"(?:filesystem|file\s+system|shell)\b",
+    re.I)
 
 
 @dataclass
@@ -108,8 +211,41 @@ def compute_blast_radius(capabilities: dict, lethal_trifecta: bool) -> dict:
 
 
 def _classify_tool(name: str, desc: str) -> set[str]:
-    blob = f"{name} {desc}"
-    return {cap for cap, pat in _CAP_PATTERNS.items() if pat.search(blob)}
+    """Capabilities a tool's name + description affirm (prose evidence only)."""
+    blob = f"{_normalize_tool_name(name)}. {desc}"
+    return {cap for cap, pat in _CAP_PATTERNS.items() if _affirmed(pat, blob)}
+
+
+def _schema_exec_params(schema: Any) -> list[str]:
+    """Freeform string params named like a command / script / code: declared evidence
+    that the tool executes what it is given, independent of how the prose reads."""
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict):
+        return []
+    out = []
+    for pname, pspec in props.items():
+        if (
+            isinstance(pspec, dict) and pspec.get("type") == "string"
+            and not pspec.get("enum") and "const" not in pspec
+            and not pspec.get("format") and not pspec.get("pattern")
+            and (
+                _EXEC_PARAM.match(str(pname))
+                or (
+                    _EXEC_PARAM_AMBIGUOUS.match(str(pname))
+                    and _EXEC_PARAM_DESC.search(str(pspec.get("description") or ""))
+                )
+            )
+        ):
+            out.append(str(pname))
+    return out
+
+
+def _declares_destruction(name: str, desc: str) -> bool:
+    """The tool's name or its description's first word is a destructive verb."""
+    words = _normalize_tool_name(name).lower().split()
+    return bool(
+        (words and words[0] in _DESTRUCTIVE_NAME_VERBS) or _DESTRUCTIVE_LEAD.search(desc)
+    )
 
 
 def _finding(category: str, name: str, severity: str, where: str, remediation: str = ""):
@@ -157,6 +293,7 @@ def analyze_mcp(
     )
     caps_union: set[str] = set()
     cap_counts: dict[str, int] = {}
+    mutates_any = False  # a destructive-verb tool name / lead, outside the cap taxonomy
 
     for t in tools:
         if not isinstance(t, dict):
@@ -199,24 +336,49 @@ def analyze_mcp(
                             " freeform is an injection/RCE vector.",
                         ))
 
-        # 3. capability taxonomy
-        caps = _classify_tool(tname, tdesc)
+        # 3. capability taxonomy — prose phrases, plus declared schema evidence
+        prose_caps = _classify_tool(tname, tdesc)
+        exec_params = _schema_exec_params(schema)
+        # A "command" the description says never runs on a real host (a docs server's
+        # shell-like query over a virtual filesystem) is not counted as execution.
+        exec_denied = bool(exec_params) and bool(_EXEC_DENIAL.search(tdesc))
+        caps = prose_caps | ({"exec"} if exec_params and not exec_denied else set())
         caps_union |= caps
+        destructive = _declares_destruction(tname, tdesc)
+        mutates_any = mutates_any or destructive
         for c in caps:
             cap_counts[c] = cap_counts.get(c, 0) + 1
 
-        # 4. annotation truthfulness — readOnlyHint that lies
+        # 4. annotation truthfulness — readOnlyHint that lies. Declared schema evidence
+        # (a freeform command/script/code param) is high; a contradiction read only
+        # from description prose is medium, since prose is a weaker signal than a
+        # schema. The behavioral sandbox's observed write (annotation_readonly_violated)
+        # stays high on its own path.
         ann = t.get("annotations") or {}
         if isinstance(ann, dict) and ann.get("readOnlyHint") is True:
             writes = caps & {"fs_write", "exec", "db_write"}
-            if writes:
+            if exec_params:
+                denied = exec_denied
                 result.findings.append(_finding(
                     "annotation_lie",
-                    f"Tool '{tname}' claims readOnlyHint but looks like it "
-                    f"{', '.join(sorted(writes))}",
-                    "high", where,
-                    "A read-only annotation contradicting the tool's caps"
-                    " is a strong bad-actor signal.",
+                    f"Tool '{tname}' claims readOnlyHint but takes a freeform "
+                    f"'{exec_params[0]}' to execute"
+                    + (" (its description says nothing runs on a real host)" if denied else ""),
+                    "medium" if denied else "high", f"{where}:param:{exec_params[0]}",
+                    "A read-only annotation on a tool that accepts a command/script/code"
+                    " string contradicts its declared schema; fix the annotation or the"
+                    " input.",
+                ))
+            elif writes or destructive:
+                said = [_CAP_LABEL[c] for c in sorted(writes)] or ["delete or overwrite data"]
+                result.findings.append(_finding(
+                    "annotation_lie",
+                    f"Tool '{tname}' claims readOnlyHint but its name or description says"
+                    f" it can {', '.join(said)}",
+                    "medium", where,
+                    "Either the read-only annotation or the description is wrong; a"
+                    " read-only claim that contradicts what the tool says it does misleads"
+                    " clients that auto-approve read-only tools.",
                 ))
 
     # resource + prompt text also gets the injection scan (always-loaded content)
@@ -233,7 +395,7 @@ def analyze_mcp(
     # comms + (implicit) untrusted input → the classic exfiltration chain.
     private = bool(caps_union & {"secrets", "fs_read"})
     external = bool(caps_union & {"net"})
-    mutate = bool(caps_union & {"fs_write", "exec", "db_write"})
+    mutate = bool(caps_union & {"fs_write", "exec", "db_write"}) or mutates_any
     if private and external and (mutate or "exec" in caps_union):
         result.lethal_trifecta = True
         result.findings.append(_finding(
