@@ -55,11 +55,11 @@ CRATES_DL = "https://static.crates.io/crates/{name}/{name}-{version}.crate"
 HF_META = "https://huggingface.co/api/models/{name}"
 HF_TREE = "https://huggingface.co/api/models/{name}/tree/main?recursive=true"
 HF_RESOLVE = "https://huggingface.co/{name}/resolve/main/{path}"
-# --- Container images. Graded at CONFIG level (not a full layer scan): the OCI
-# image config carries the highest-density security signal without pulling layers —
-# runs-as-root, secrets baked into ENV/labels, stale base, exposed ports. The token
-# dance is anonymous pull scope; the config blob is content-addressed so we verify
-# its digest even when the registry redirects it to a CDN.
+# --- Container images. The OCI image config carries runs-as-root, secrets baked into
+# ENV/labels, stale base and exposed ports; ``src.scanner.docker_layers`` then pulls the
+# layers (bounded) for the app's own files and the installed-package inventory. The token
+# dance is anonymous pull scope; every blob is content-addressed, so its digest is
+# verified even when the registry redirects it to a CDN.
 DOCKER_REGISTRY = "https://registry-1.docker.io"
 DOCKER_AUTH = "https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repo}:pull"
 GHCR_REGISTRY = "https://ghcr.io"
@@ -70,14 +70,6 @@ _OCI_MANIFEST_ACCEPT = ", ".join([
     "application/vnd.docker.distribution.manifest.list.v2+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 ])
-# Bounded full-layer scan: pull the image's (gzip) layers up to a total cap, extract
-# the filesystem, and run the 12-category engine over it — baked file secrets,
-# world-readable keys, install/entry scripts. NOT a config-only grade. Skips zstd
-# layers (can't gunzip) and any single layer over the per-layer cap; newest layers
-# (the app's own, most interesting) are pulled first.
-_DOCKER_MAX_LAYER_TOTAL = 45 * 1024 * 1024   # total compressed bytes pulled across layers
-_DOCKER_MAX_ONE_LAYER = 30 * 1024 * 1024     # skip any single layer bigger than this
-_DOCKER_MAX_LAYER_FILES = 800                # cap extracted files scanned
 
 # --- Host allowlist. A resolved download URL MUST match one of these hosts, in
 # addition to passing the generic SSRF guard. This is the anti-SSRF backbone:
@@ -169,6 +161,10 @@ class ArtifactFetchResult:
     # unknown (sdist-only package, wheel fetch failed) → everything counts as installed.
     # An npm tarball IS the installed tree, so it stays None there.
     installed_paths: set[str] | None = None
+    # Container images only: the layer walk's package inventory, distro, layer summary
+    # and the tag's top-level manifest digest (what signatures are made over). Read by
+    # ``src.scanner.docker_image`` for the CVE check and cosign provenance.
+    image: dict | None = None
     error: str | None = None
 
 
@@ -985,14 +981,19 @@ def _pick_platform_manifest(index: dict) -> str | None:
 async def fetch_docker_artifact(
     name: str, version: str | None = None, *, client: httpx.AsyncClient | None = None,
 ) -> ArtifactFetchResult:
-    """Resolve a container image and fetch its **OCI config** (not its layers).
+    """Resolve a container image, fetch its **OCI config**, and walk its **layers**.
 
-    The config JSON is where the highest-density security signal lives without a
-    layer pull: ``User`` (runs-as-root), ``Env``/``Labels`` (baked secrets),
-    ``ExposedPorts``, ``Entrypoint``, and ``created`` (staleness). The config blob
-    is content-addressed, so its digest is a perfect offline-recompute anchor.
+    The config JSON carries ``User`` (runs-as-root), ``Env``/``Labels`` (baked secrets),
+    ``ExposedPorts``, ``Entrypoint`` and ``created`` (staleness). The layer walk
+    (:func:`src.scanner.docker_layers.scan_image_layers`, bounded) adds the app's own
+    files for the static engine and the installed-package inventory for the CVE check.
+    When the layers are over budget the result keeps the config grade and says so
+    (``image.layers.depth`` = ``partial`` / ``config``). The config blob is
+    content-addressed, so its digest is the offline-recompute anchor.
 
     Fail-open: raises ``ArtifactFetchError`` on a hard failure."""
+    from src.scanner.docker_layers import scan_image_layers
+
     owns = client is None
     if owns:
         client = httpx.AsyncClient(headers={
@@ -1007,12 +1008,21 @@ async def fetch_docker_artifact(
         man_raw = await _docker_get(man_url, client, token=token, accept=_OCI_MANIFEST_ACCEPT)
         if man_raw is None:
             raise ArtifactFetchError(f"image not found or unauthorized: {display}:{tag}")
+        # The tag's top-level manifest (often a multi-arch index): signatures and
+        # `image@sha256:` pins refer to this digest.
+        index_digest = "sha256:" + hashlib.sha256(man_raw).hexdigest()
         try:
             manifest = json.loads(man_raw)
         except ValueError as exc:
             raise ArtifactFetchError(f"invalid manifest for {display}:{tag}") from exc
+        has_build_attestation = any(
+            ((m.get("annotations") or {}).get("vnd.docker.reference.type")
+             == "attestation-manifest")
+            for m in (manifest.get("manifests") or []) if isinstance(m, dict)
+        )
 
         # Multi-arch index → resolve the linux/amd64 child manifest.
+        platform_digest = index_digest
         if manifest.get("manifests"):
             child = _pick_platform_manifest(manifest)
             if not child:
@@ -1024,6 +1034,7 @@ async def fetch_docker_artifact(
             if man_raw is None:
                 raise ArtifactFetchError(f"platform manifest fetch failed: {display}:{tag}")
             manifest = json.loads(man_raw)
+            platform_digest = child
 
         cfg_digest = ((manifest.get("config") or {}).get("digest"))
         if not cfg_digest:
@@ -1036,43 +1047,29 @@ async def fetch_docker_artifact(
             raise ArtifactFetchError(f"config blob fetch failed: {display}:{tag}")
         config = json.loads(cfg_raw)
 
-        layers = manifest.get("layers") or []
+        layers = [ly for ly in (manifest.get("layers") or []) if isinstance(ly, dict)]
         layer_count = len(layers)
-
-        # Bounded full-layer scan: pull + extract the actual filesystem so the engine
-        # sees baked secrets/keys and install/entry scripts a config grade can't. Newest
-        # layers first (the app's own). Fail-soft: a bad layer is skipped, never fatal.
-        files: dict[str, ArtifactFile] = {}
-        pulled = 0
-        layers_scanned = 0
-        for layer in reversed(layers):
-            if pulled >= _DOCKER_MAX_LAYER_TOTAL or len(files) >= _DOCKER_MAX_LAYER_FILES:
-                break
-            if not isinstance(layer, dict):
-                continue
-            mt = str(layer.get("mediaType") or "")
-            dig = layer.get("digest")
-            sz = int(layer.get("size") or 0)
-            if "gzip" not in mt or not dig or sz > _DOCKER_MAX_ONE_LAYER:
-                continue  # skip zstd / oversized / malformed
-            raw = await _docker_get(
-                f"{registry}/v2/{repo}/blobs/{dig}", client,
-                token=token, verify_digest=dig, max_bytes=_DOCKER_MAX_ONE_LAYER,
-            )
-            if raw is None:
-                continue
-            pulled += len(raw)
-            try:
-                for path, af in _build_file_map(_unpack_tar_gz(raw)).items():
-                    # A layer's whiteout markers (deleted files) aren't a real surface.
-                    if path.rsplit("/", 1)[-1].startswith(".wh."):
-                        continue
-                    files.setdefault(path, af)
-                    if len(files) >= _DOCKER_MAX_LAYER_FILES:
-                        break
-                layers_scanned += 1
-            except ArtifactFetchError:
-                continue
+        walked = await scan_image_layers(
+            registry, repo, layers, token=token, client=client,
+            allowed_hosts=_ALLOWED_HOSTS,
+        )
+        files = walked.files
+        layers_scanned = walked.layers_scanned
+        labels = (config.get("config") or {}).get("Labels") or {}
+        image_info = {
+            "registry": "ghcr" if registry == GHCR_REGISTRY else "dockerhub",
+            "repo": repo,
+            "tag": tag,
+            "index_digest": index_digest,
+            "platform_digest": platform_digest,
+            "has_build_attestation": has_build_attestation,
+            "source_label": _first_label(
+                labels, "org.opencontainers.image.source", "org.label-schema.vcs-url",
+            ),
+            "os_release": walked.os_release,
+            "packages": walked.packages,
+            "layers": walked.summary(),
+        }
 
         return ArtifactFetchResult(
             ecosystem="docker",
@@ -1100,8 +1097,10 @@ async def fetch_docker_artifact(
                 "architecture": config.get("architecture"),
                 "layer_count": layer_count,
                 "layers_scanned": layers_scanned,
+                "scan_depth": walked.depth,
                 "history_len": len(config.get("history") or []),
             }},
+            image=image_info,
             description=_first_label(
                 (config.get("config") or {}).get("Labels") or {},
                 "org.opencontainers.image.description",

@@ -361,6 +361,10 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     # code that runs (the repo-scanner skip for those dirs is for build OUTPUT in a git
     # tree). Scan them here instead of grading 1 of 700 files.
     is_npm_tarball = (fetched.ecosystem or "").lower() == "npm"
+    # A container image's package manifests describe what was installed when the image
+    # was BUILT; nothing installs (no lifecycle script runs) when you run it. Its
+    # packages are checked against OSV instead (``src.scanner.docker_image``).
+    is_image = (fetched.ecosystem or "").lower() == "docker"
 
     def _skip(path: str) -> bool:
         if not is_npm_tarball:
@@ -382,8 +386,8 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # Dependency manifests (package.json / setup.py / requirements.txt ...) →
         # dependency + install-hook detectors (npm lifecycle hooks live here).
         name_lower = Path(path).name.lower()
-        if name_lower in {"package.json", "setup.py", "setup.cfg", "pyproject.toml",
-                          "requirements.txt", "pipfile"}:
+        if not is_image and name_lower in {"package.json", "setup.py", "setup.cfg",
+                                           "pyproject.toml", "requirements.txt", "pipfile"}:
             if af.text:
                 dep_findings = _scan_dependencies(af.text, path)
                 findings.extend(dep_findings)
@@ -397,7 +401,7 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # dedicated detector understands install-time vs maintainer-only reachability.
         # Only the ROOT setup.py runs at `pip install`; a nested one (a test fixture
         # package, a vendored C-runtime build script) is ordinary source below.
-        if name_lower == "setup.py" and path == "setup.py":
+        if name_lower == "setup.py" and path == "setup.py" and not is_image:
             if af.text:
                 ast_findings = detect_pypi_install_exec(af.text, path)
                 if ast_findings:

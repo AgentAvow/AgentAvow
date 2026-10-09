@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'reac
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
 import { NoticeText } from '../components/NoticeText'
+import ImageScanDepth from '../components/ImageScanDepth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
@@ -1889,9 +1890,9 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
           <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">The chain we verified</h3>
           <div className="mt-3 flex flex-col gap-2 text-[13px]">
             <div className="flex justify-between gap-3"><span className="text-text-muted">Coordinate</span><span className="font-mono break-all">{scan.repo}</span></div>
-            <div className="flex justify-between gap-3"><span className="text-text-muted">Scan depth</span>{surface === 'docker'
-              ? <span className="font-mono text-warning text-right">image config &amp; metadata only (layers not scanned)</span>
-              : <span className="font-mono text-success text-right">artifact (real published bytes)</span>}</div>
+            {surface === 'docker'
+              ? <ImageScanDepth scan={scan} />
+              : <div className="flex justify-between gap-3"><span className="text-text-muted">Scan depth</span><span className="font-mono text-success text-right">artifact (real published bytes)</span></div>}
             <div className="flex justify-between gap-3"><span className="text-text-muted">Artifact digest</span><span className="font-mono break-all">{digest ? `sha256:${digest}…` : '—'}</span></div>
             <div className="flex justify-between gap-3"><span className="text-text-muted">Provenance</span><span className="font-mono">{prov.verified ? 'verified ✓' : prov.present ? 'present · unverified' : 'none published (N/A)'}</span></div>
           </div>
