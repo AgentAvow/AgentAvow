@@ -69,6 +69,21 @@ jobs:
       - name: Install the reader's pinned dependencies
         run: python -m pip install -r ".probity/${{ steps.pin.outputs.requirements }}"
 
+      - name: Check exact time boundaries with the unchanged signed grade
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/tool-grade-time-controls"
+          mkdir "$out"
+          if node --experimental-test-coverage --test "$V1_DIR/test-time.mjs" > "$out/controls.stdout" 2> "$out/controls.stderr"; then
+            printf '0\n' > "$out/controls.exit"
+          else
+            status=$?
+            printf '%s\n' "$status" > "$out/controls.exit"
+            cat "$out/controls.stdout" "$out/controls.stderr" >&2
+            exit "$status"
+          fi
+          cat "$out/controls.stdout"
+
       - name: Native verifier, then Probity reader
         run: |
           "$V1_DIR/compat/run-probity.sh" \
@@ -81,7 +96,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: probity-v1-compat-reports
-          path: ${{ runner.temp }}/probity-v1-compat/*
+          path: |
+            ${{ runner.temp }}/probity-v1-compat/*
+            ${{ runner.temp }}/tool-grade-time-controls/*
           if-no-files-found: error
           retention-days: 90
 
