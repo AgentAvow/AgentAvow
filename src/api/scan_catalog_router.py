@@ -331,7 +331,8 @@ def _row_grade(
 # Prod first served the certified_mark rule (#119, 308d7e64) at about 05:44Z; before
 # that a stored A+ followed raw ``certified.eligible`` (it could sit on a pending
 # sandbox or a thin-coverage scan). A stored A+ written earlier is not trusted as the
-# mark: it reads A until the row is re-scanned (fail closed).
+# mark: it reads A until the row is re-scanned (fail closed), unless the cached scan it
+# came from still passes ``certified_mark()`` at the same score (_mark_from_cached_scan).
 CERTIFIED_MARK_SINCE = datetime(2026, 10, 9, 6, 0, tzinfo=timezone.utc)
 
 
@@ -343,6 +344,33 @@ def _stored_grade_for_mark(grade: str | None, scanned_at: datetime | None) -> st
     if scanned_at.tzinfo is None:
         scanned_at = scanned_at.replace(tzinfo=timezone.utc)
     return grade if scanned_at >= CERTIFIED_MARK_SINCE else "A"
+
+
+def _is_pre_rule_a_plus(grade: str | None, scanned_at: datetime | None) -> bool:
+    """A stored A+ that ``_stored_grade_for_mark`` would demote (written before the rule)."""
+    return grade == "A+" and _stored_grade_for_mark(grade, scanned_at) == "A"
+
+
+async def _mark_from_cached_scan(owner: str, repo: str, trust_score: int | None) -> bool:
+    """Re-check a pre-rule stored A+ against the scan it was written from.
+
+    The 7-day stale copy of the public scan cache holds the scan data; the mark is
+    ``certified_mark()`` on its static part, which is exactly what the scan path stores
+    the A+ from. Fail closed: no cached scan, a different score (the row and the cache
+    disagree), or any error means no mark. Read-only; nothing is written back."""
+    try:
+        from src import cache
+        from src.api.public_scan_router import _STALE_CACHE_PREFIX
+        from src.scanner.verdict import certified_mark
+
+        data = await cache.get(f"{_STALE_CACHE_PREFIX}{owner}/{repo}")
+        if not isinstance(data, dict) or data.get("trust_score") != trust_score:
+            return False
+        static = {k: v for k, v in data.items() if k != "behavioral"}
+        return certified_mark(static)
+    except Exception:
+        logger.debug("cached mark check failed for %s/%s", owner, repo, exc_info=True)
+        return False
 
 
 def _guard_stale_score(score: int | None, critical: int | None) -> int | None:
@@ -631,6 +659,11 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
         )
         out: list[CatalogRow] = []
         for c in result.scalars().all():
+            stored_grade = _stored_grade_for_mark(c.grade, getattr(c, "last_scanned_at", None))
+            if _is_pre_rule_a_plus(c.grade, getattr(c, "last_scanned_at", None)) and (
+                await _mark_from_cached_scan(c.owner, c.repo, c.trust_score)
+            ):
+                stored_grade = "A+"
             # Route each community row by its real surface (default github for
             # pre-t18 rows): npm/pypi → package name, mcp → endpoint URL, else repo.
             surf = (getattr(c, "surface", None) or "github").lower()
@@ -652,8 +685,7 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                     repository_url=repository_url,
                     endpoint_url=endpoint_url,
                     trust_score=c.trust_score,
-                    grade=_row_grade(c.trust_score, _stored_grade_for_mark(
-                        c.grade, getattr(c, "last_scanned_at", None))),
+                    grade=_row_grade(c.trust_score, stored_grade),
                     critical=c.critical,
                     high=c.high,
                     findings_count=c.findings_count,

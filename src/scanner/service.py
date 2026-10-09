@@ -292,53 +292,51 @@ async def rescan_all_agents(
 async def refresh_public_scan_cache(limit: int | None = None) -> int:
     """Pre-refresh Redis cache for popular public scan repos.
 
-    Queries cached scan results that are about to expire (> 50 min old
-    from the 1-hour TTL) and re-scans them so the cache stays warm.
-    Called by the scheduler alongside the agent rescan loop.
+    Finds cached public scan results about to expire (< 10 min left of the 1-hour
+    TTL) and re-scans them so the cache stays warm. Called by the scheduler alongside
+    the agent rescan loop.
+
+    Each key is routed to its own surface (``coords_from_cache_key``): a package key
+    like ``npm/react-dom`` is re-scanned as the npm package, not looked up as a GitHub
+    repo (which 404'd and wasted a GitHub call per package key). The re-scan goes
+    through the catalog row path, which writes the fresh result back to the cache;
+    the old ``scan_repo`` call discarded its result, so nothing was ever refreshed.
 
     ``limit`` defaults from ``config.settings.public_cache_refresh_limit``.
     """
-    if limit is None:
-        from src.config import settings
+    from src.config import settings
 
+    if limit is None:
         limit = settings.public_cache_refresh_limit
     try:
+        from src.database import async_session
+        from src.jobs.scheduler import _rescan_catalog_row
         from src.redis_client import get_redis
-        from src.scanner.scan import scan_repo
+        from src.scanner.behavioral.trigger import coords_from_cache_key
 
         r = await get_redis()
         refreshed = 0
+        spacing = getattr(settings, "catalog_rescan_spacing_seconds", 1.5)
 
-        # Find cached public scan keys
         keys: list[bytes] = []
         async for key in r.scan_iter(match="ag:cache:public_scan:*"):
             keys.append(key)
 
-        if not keys:
-            return 0
-
-        # Check TTL — refresh any with < 10 min remaining
         for key in keys[:limit]:
             ttl = await r.ttl(key)
-            if 0 < ttl < 600:  # less than 10 min remaining
-                # Extract repo name from key: ag:cache:public_scan:owner/repo
-                key_str = key.decode() if isinstance(key, bytes) else key
-                repo = key_str.replace("ag:cache:public_scan:", "")
-                if "/" in repo:
-                    from src.github_auth import get_github_token
-                    token = await get_github_token()
-                    try:
-                        await scan_repo(
-                            full_name=repo,
-                            stars=0,
-                            description="",
-                            framework="",
-                            token=token,
-                        )
-                        refreshed += 1
-                        logger.debug("Pre-refreshed public scan cache: %s", repo)
-                    except Exception:
-                        logger.debug("Failed to refresh cache for %s", repo)
+            if not 0 < ttl < 600:  # refresh only what has < 10 min left
+                continue
+            key_str = key.decode() if isinstance(key, bytes) else key
+            coords = coords_from_cache_key(key_str.replace("ag:cache:public_scan:", "", 1))
+            if coords is None:
+                continue
+            surface, owner, repo = coords
+            async with async_session() as db:
+                if await _rescan_catalog_row(surface, owner, repo, db):
+                    refreshed += 1
+                    logger.debug("Pre-refreshed public scan cache: %s %s/%s",
+                                 surface, owner, repo)
+            await asyncio.sleep(spacing)
 
         return refreshed
     except Exception:
