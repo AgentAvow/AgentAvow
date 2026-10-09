@@ -39,6 +39,17 @@ function toolKey(name) {
     : enc;
   return 'tool:' + body;
 }
+// RFC 3339 timestamp -> integer microseconds since the epoch (BigInt). Fractional digits
+// beyond six are truncated; a missing fraction is zero. Throws on anything else.
+function instantMicros(ts) {
+  const m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/.exec(ts);
+  if (!m) throw new Error(`not an RFC 3339 timestamp: ${ts}`);
+  const whole = Date.parse(m[1] + m[3]);
+  if (Number.isNaN(whole)) throw new Error(`not an RFC 3339 timestamp: ${ts}`);
+  const frac = BigInt(((m[2] ?? '') + '000000').slice(0, 6));
+  return BigInt(whole) * 1000n + frac;
+}
+
 const pub = createPublicKey({ key: set.issuer.jwk, format: 'jwk' });
 
 function axes(vec) {
@@ -56,8 +67,11 @@ function axes(vec) {
   const signed = payload.scan?.toolDigests?.[toolKey(vec.gate.tool_name)];
   const tool_binds = typeof signed === 'string';
   const tool_digest_binds = tool_binds ? signed === vec.gate.observed_tool_digest : 'not_evaluated';
-  const t = Date.parse(vec.gate.evaluation_time);
-  const fresh = t >= Date.parse(payload.issuedAt) && t < Date.parse(payload.expiresAt);
+  // Compare instants, not strings, and at the precision the timestamps carry: the signed
+  // times have microseconds and an explicit offset, the gate times milliseconds and Z, and
+  // Date.parse alone truncates to milliseconds.
+  const t = instantMicros(vec.gate.evaluation_time);
+  const fresh = t >= instantMicros(payload.issuedAt) && t < instantMicros(payload.expiresAt);
   const rely = signature_valid && canonical_bytes && subject_binds && tool_binds
     && tool_digest_binds === true && fresh;
   return { signature_valid, canonical_bytes, subject_binds, tool_binds, tool_digest_binds, fresh, rely };
