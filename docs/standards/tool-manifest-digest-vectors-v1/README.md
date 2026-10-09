@@ -79,7 +79,7 @@ A consumer reports these separately. None is derived from another.
 `rely` is true only when all six axes are `true`; `not_evaluated` is not `true`, so it never relies. Whether a gate proceeds on `rely=true` is a separately versioned
 admission policy.
 
-## The six cases
+## The seven cases
 
 1. **tool-match**: the positive case.
 2. **unknown-tool**: the gate authorizes `delete_wiki_page`, which the scan never saw.
@@ -90,8 +90,16 @@ admission policy.
 5. **past-expiry**: evaluated after `expiresAt`.
 6. **tampered-payload**: score raised after signing, payload re-canonicalized, original
    signature kept. Canonical bytes still check; the signature does not.
+7. **boundary-fresh**: a gate time inside the window by less than a millisecond. It is
+   `expiresAt` truncated to millisecond precision and written with `Z`, the shape a
+   millisecond clock produces. Every axis passes. A consumer that compares the timestamps
+   as strings, or parses them with something that truncates to milliseconds, reads it as
+   expired.
 
-Each negative fails exactly one axis, and the verifier asserts that.
+Each negative fails exactly one axis, and the verifier asserts that. `boundary-fresh` is a
+second positive rather than a negative: it is the only case where comparing instants,
+truncating to milliseconds and comparing strings do not all agree, so it is the one that
+tells a correct consumer from one that happens to pass the other six.
 
 ## What the verifier also checks
 
@@ -104,7 +112,7 @@ correctly.
 
 ## Key encoding
 
-The pinned server's tool names are plain ASCII, so the six cases never exercise the
+The pinned server's tool names are plain ASCII, so the seven cases never exercise the
 key rules. `key_encoding` in the vector file carries thirteen name-to-key pairs that
 do: seven for percent-encoding (`=`, `%`, space, a tab, `é`, an emoji) and six for the
 length rule (an encoded body of exactly 128 stays literal; 129 ASCII characters, 200

@@ -125,6 +125,8 @@ check('a grade for one server cannot be re-attached to another', byName['wrong-s
 check('a signed verdict does not verify forever', byName['past-expiry'].fresh, 'false');
 check('canonical form is not authenticity: tampered payload is canonical yet unsigned',
   byName['tampered-payload'].canonical_bytes && !byName['tampered-payload'].signature_valid, 'true');
+check('a gate time inside the window by a sub-millisecond remainder is fresh and relies',
+  byName['boundary-fresh'].fresh && byName['boundary-fresh'].rely, 'true');
 check('every negative fails exactly one axis',
   ['unknown-tool', 'tool-drift', 'wrong-subject', 'past-expiry', 'tampered-payload']
     .every(n => Object.entries(byName[n]).filter(([k, v]) => k !== 'rely' && v === false).length === 1), 'true');
