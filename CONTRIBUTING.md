@@ -1,71 +1,59 @@
-# Contributing to AgentGraph
+# Contributing to AgentAvow
 
-## Quick Start
+Thank you for looking. This repository is source-available, not open source as a whole, so
+what you can contribute depends on the folder. The short version: the open standards
+material and the Claude Code plugin take outside contributions; the product does not.
 
-AgentGraph is a trust infrastructure for AI agents and humans. The codebase has a Python/FastAPI backend (`src/`) and a React/Vite frontend (`web/`). Tests live in `tests/`.
+## What takes contributions
 
-## Python Compatibility
+| Folder | Licence | Contributions |
+|---|---|---|
+| `docs/standards/tool-manifest-digest-vectors-v0/` | Apache-2.0 | Welcome: new vectors, verifier fixes, reproductions |
+| `docs/standards/tool-manifest-digest-vectors-v1/` | Apache-2.0 | Welcome: new vectors, verifier fixes, reproductions |
+| `docs/standards/attribution-record-v0/` | Apache-2.0 | Welcome: record format, fixtures, verifier fixes |
+| `plugins/agentavow-trust/` | MIT | Welcome: bug fixes and hook improvements |
+| Everything else (`src/`, `web/`, `sdk/`, `scripts/`, …) | All rights reserved (see `LICENSE`) | Not accepted. Please open an issue instead |
 
-Target runtime is **Python 3.9**. All Python files must include:
+Files under `docs/standards/attribution-record-v0/pins/` are byte copies of other projects'
+artifacts under their own licences. Fix those upstream, not here.
 
-```python
-from __future__ import annotations
-```
+## Terms
 
-This goes after the module docstring, before all other imports. It enables PEP 604 union types (`X | Y`) on 3.9.
+A contribution to a folder that carries its own `LICENSE` file is accepted under that
+licence (inbound equals outbound). There is no separate contributor agreement.
 
-## Verification
-
-Run these before submitting a PR:
-
-```bash
-# AST-verify any changed Python files
-python3 -c "import ast; ast.parse(open('path/to/file.py').read())"
-
-# Lint
-python3 -m ruff check .
-
-# TypeScript build check
-npx tsc -b
-
-# Tests
-python3 -m pytest tests/ -v
-```
-
-All four must pass cleanly.
-
-## Testing
-
-- Tests run against a **separate database** (`agentgraph_test`). Never point tests at the dev or staging databases.
-- Write unit tests for all new or changed code.
-- Use the existing conftest fixtures for database sessions, auth tokens, and rate limiter cleanup.
-
-## Project Structure
+Sign off each commit to certify the [Developer Certificate of Origin](https://developercertificate.org/):
 
 ```
-src/           Python backend (FastAPI, SQLAlchemy, async)
-  api/         Route handlers
-  marketing/   Marketing automation system
-  bots/        Bot definitions and onboarding
-web/           React frontend (Vite, TanStack Query, Tailwind CSS v4)
-tests/         pytest test suite
-scripts/       Dev/staging utility scripts
-migrations/    Alembic DB migrations
-ios/           iOS app (SwiftUI)
+git commit -s
 ```
 
-## Security-First Mindset
+which adds `Signed-off-by: Your Name <you@example.com>`. A pull request to a proprietary
+folder will be closed with thanks; the idea is still welcome as an issue.
 
-AgentGraph's entire value proposition is trust and verifiable identity. Every contribution must reflect that:
+## Credit
 
-- Validate inputs at every boundary.
-- Never ship code with known vulnerabilities.
-- All agent interactions must be auditable.
-- Auth and identity features are security-critical -- treat them accordingly.
+Contributors to a folder are named in that folder's README. If you would rather not be
+named, say so in the pull request.
 
-## Code Style
+## How a standards contribution is checked
 
-- Backend: enforced by `ruff` (config in `pyproject.toml`)
-- Frontend: TypeScript strict mode, checked via `npx tsc -b`
-- Avoid `asyncio.gather` with multiple queries on the same `AsyncSession`
-- SQLAlchemy reserved name: use `extra_metadata` instead of `metadata`
+Every vector folder has a zero-dependency verifier. Before opening a pull request:
+
+```
+cd docs/standards/tool-manifest-digest-vectors-v1
+node generate.mjs   # regenerates the vector file from source.json; must be byte-identical
+node verify.mjs     # must print "all checks passed"
+```
+
+A new negative vector should fail exactly one named axis, and the README should say what the
+case establishes and what it does not. Reproductions by people who did not write the vectors
+are the most useful contribution of all: report the commit you ran, your runtime, the verifier
+output verbatim, and whether you used `verify.mjs` or your own implementation.
+
+Pull requests from forks need a maintainer to approve their CI run before checks start; that
+is a GitHub default, not a judgement on the change.
+
+## Security
+
+Please report vulnerabilities privately, not in a public issue: email admin@agentavow.com.
