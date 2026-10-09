@@ -67,7 +67,7 @@ async def test_listing_found_and_cached():
     with patch("httpx.AsyncClient", return_value=_client(_PAGE)), \
             patch("src.redis_client.get_redis", return_value=redis):
         out = await m.endpoint_registry_listing(
-            "https://server.smithery.ai/@smithery-ai/github/mcp")
+            "https://server.smithery.ai/@smithery-ai/github/mcp", wait=True)
     assert out["listed"] is True and out["repository"].endswith("mcp-servers")
     assert redis.set.await_args.kwargs["ex"] == m._CACHE_TTL
 
@@ -77,16 +77,43 @@ async def test_registry_error_is_no_signal_with_short_cache():
     redis = _no_redis()
     with patch("httpx.AsyncClient", return_value=_client({}, status=503)), \
             patch("src.redis_client.get_redis", return_value=redis):
-        out = await m.endpoint_registry_listing("https://mcp.deepwiki.com/mcp")
+        out = await m.endpoint_registry_listing("https://mcp.deepwiki.com/mcp", wait=True)
     assert out == {"listed": False}
 
     boom = _client({})
     boom.get = AsyncMock(side_effect=RuntimeError("timeout"))
     with patch("httpx.AsyncClient", return_value=boom), \
             patch("src.redis_client.get_redis", return_value=redis):
-        out = await m.endpoint_registry_listing("https://mcp.deepwiki.com/mcp")
+        out = await m.endpoint_registry_listing("https://mcp.deepwiki.com/mcp", wait=True)
     assert out == {"listed": False}
     assert redis.set.await_args.kwargs["ex"] == m._FAIL_TTL
+
+
+@pytest.mark.asyncio
+async def test_miss_refreshes_in_background_and_answers_pending():
+    import asyncio
+    redis = _no_redis()
+    with patch("httpx.AsyncClient", return_value=_client(_PAGE)), \
+            patch("src.redis_client.get_redis", return_value=redis):
+        out = await m.endpoint_registry_listing(
+            "https://server.smithery.ai/@smithery-ai/github/mcp")
+        assert out == {"listed": False, "pending": True}
+        await asyncio.gather(*list(m._BG_TASKS))
+    cached = [c for c in redis.set.await_args_list
+              if c.args[0] == "mcp_endpoint_adoption:server.smithery.ai/@smithery-ai/github/mcp"]
+    assert cached and '"listed": true' in cached[-1].args[1]
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_never_calls_the_registry():
+    redis = _no_redis()
+    redis.get = AsyncMock(return_value='{"listed": true, "repository": "https://github.com/o/r"}')
+    client = _client(_PAGE)
+    with patch("httpx.AsyncClient", return_value=client), \
+            patch("src.redis_client.get_redis", return_value=redis):
+        out = await m.endpoint_registry_listing("https://x.example/mcp")
+    assert out["listed"] is True
+    client.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
