@@ -4270,6 +4270,9 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         Path(p).name.lower().startswith(("license", "licence", "copying"))
         for p in fetched.files
     )
+    _hf = (fetched.packaged_manifest or {}).get("hf") if eco == "huggingface" else None
+    if isinstance(_hf, dict) and _hf.get("license"):
+        result.has_license = True  # HF declares it in the model card, not a LICENSE file
     result.artifact_scan = {
         "ok": True, "ecosystem": fetched.ecosystem, "name": fetched.name,
         "version": fetched.version, "kind": fetched.kind, "digest": fetched.digest,
@@ -4280,6 +4283,15 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         "is_mcp_server": _looks_like_mcp_server(eco, fetched.name, fetched.packaged_manifest),
         "published_at": getattr(fetched, "published_at", None),
     }
+    if isinstance(_hf, dict):
+        from src.scanner.hf_facts import model_card_facts
+        result.artifact_scan["model_card"] = model_card_facts(_hf)
+    _repo_url = (fetched.packaged_manifest or {}).get("repository") \
+        if eco == "crates" else None
+    if isinstance(_repo_url, str) and _repo_url:
+        result.artifact_scan["repository"] = _repo_url[:300]
+    if eco == "crates" and (fetched.packaged_manifest or {}).get("license"):
+        result.has_license = True  # crates.io records the SPDX license per version
     result.coverage = build_coverage(
         surface=eco,
         artifact_digest=fetched.digest,
@@ -4400,15 +4412,25 @@ def _extract_skill_refs(text: str, skill_dir: str, blobs: list[str]) -> list[str
     return refs
 
 
-async def scan_skill(owner: str, repo: str) -> ScanResult:
+async def scan_skill(owner: str, repo: str, skill: str | None = None) -> ScanResult:
     """Grade an OpenClaw / Agent SKILL living in a GitHub repo (roadmap §2.D). Finds
     the SKILL.md, fetches the manifest + bundled scripts + lifecycle-hook files, and
     STATICALLY grades the capability surface — the auto-exec `allowed-tools` grant,
     always-loaded-description injection, lifecycle-hook escalation, and env-exfil in
-    scripts. ``coverage.surface = openclaw``, scan_depth = artifact. Fail-open."""
+    scripts. ``coverage.surface = openclaw``, scan_depth = artifact. Fail-open.
+
+    A repo can hold MANY skills (e.g. anthropics/skills). ``skill`` names one of them
+    by its directory (``skills/pdf``) or folder name (``pdf``) and grades only that
+    skill. Without it, a single-skill repo is graded as before; a multi-skill repo
+    grades EVERY skill (capped, see ``src.scanner.skill_collection``) and the repo's
+    result is the WORST skill's, with every skill's answer listed alongside."""
     from src.github_auth import get_github_token
-    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
-    from src.scanner.skill_scan import analyze_skill
+    from src.scanner.skill_collection import (
+        build_collection_result,
+        grade_skills,
+        real_skill_mds,
+        resolve_skill_md,
+    )
 
     result = ScanResult(repo=f"skill:{owner}/{repo}", stars=0, description="", framework="")
     try:
@@ -4423,15 +4445,46 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
             result.error = "No SKILL.md found — this repo isn't a recognizable Agent Skill."
             return result
 
-        # A repo can hold MANY skills (a monorepo). Grade the PRIMARY one — the
-        # shallowest SKILL.md — and scope the scripts/hooks to its own directory,
-        # so a big skills-collection doesn't blur into one grade. Skip template/
-        # example/test skeletons so we grade a REAL skill (keep them only if that's
-        # all there is).
-        import re as _re
-        _skel = _re.compile(r"(?:^|/)(template|example|sample|demo|starter|_?tests?)s?/", _re.I)
-        _real = [p for p in skill_mds if not _skel.search(p)]
-        skill_md_path = min(_real or skill_mds, key=lambda p: (p.count("/"), p.lower()))
+        if skill:
+            md = resolve_skill_md(skill_mds, skill)
+            if md is None:
+                result.error = f"Skill not found in this repo: {skill}"
+                return result
+            one = await _grade_skill_at(owner, repo, token, ref, blobs, md)
+            sub = md.rsplit("/", 1)[0] if "/" in md else ""
+            if not one.error and sub:
+                one.repo = f"skill:{owner}/{repo}/{sub}"
+            return one
+
+        real = real_skill_mds(skill_mds)
+        if len(real) <= 1:
+            # One skill (or only template skeletons): grade the primary, as before.
+            primary = min(real or skill_mds, key=lambda p: (p.count("/"), p.lower()))
+            return await _grade_skill_at(owner, repo, token, ref, blobs, primary)
+
+        graded, total = await grade_skills(
+            real, lambda md: _grade_skill_at(owner, repo, token, ref, blobs, md))
+        if not graded:
+            result.error = "Could not grade any of this repo's skills."
+            return result
+        return build_collection_result(f"skill:{owner}/{repo}", graded, total)
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        result.error = f"skill scan failed: {exc}"
+        logger.warning("scan_skill failed for %s/%s", owner, repo, exc_info=True)
+    return result
+
+
+async def _grade_skill_at(
+    owner: str, repo: str, token: str | None, ref: str | None, blobs: list[str],
+    skill_md_path: str,
+) -> ScanResult:
+    """Grade ONE skill: the SKILL.md at ``skill_md_path`` plus the scripts, hooks and
+    referenced files in its own directory. Fail-open (``.error`` on failure)."""
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
+    from src.scanner.skill_scan import analyze_skill
+
+    result = ScanResult(repo=f"skill:{owner}/{repo}", stars=0, description="", framework="")
+    try:
         skill_dir = skill_md_path.rsplit("/", 1)[0] if "/" in skill_md_path else ""
         script_ext = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
         hook_names = ("hooks.json", "plugin.json", ".mcp.json")
@@ -4477,6 +4530,7 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
         result.tool_manifest_digest = skill.tree_digest
         result.artifact_scan = {
             "surface": "openclaw", "skill_name": skill.skill_name,
+            "skill_path": skill_dir,
             "allowed_tools": skill.allowed_tools, "auto_exec_risk": skill.auto_exec_risk,
             "has_lifecycle_hooks": skill.has_lifecycle_hooks, "script_count": skill.script_count,
             "blast_radius": skill.blast_radius,
@@ -4490,7 +4544,8 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
         result.certified = _certified_status(result)
     except Exception as exc:  # noqa: BLE001 — fail-open
         result.error = f"skill scan failed: {exc}"
-        logger.warning("scan_skill failed for %s/%s", owner, repo, exc_info=True)
+        logger.warning("skill grade failed for %s/%s %s", owner, repo, skill_md_path,
+                       exc_info=True)
     return result
 
 

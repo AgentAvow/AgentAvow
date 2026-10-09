@@ -9,8 +9,11 @@ backed by a **signed 0–100 trust score** you can verify yourself. This guide e
 No account, no install. Paste any of these into the check box, or hit the API directly:
 
 - a GitHub repo — `github.com/owner/repo` or `owner/repo`
-- an MCP server, an npm or PyPI package, an OpenClaw skill
-- a wallet address (resolves to the linked agent's repo scan)
+- an MCP server, an npm, PyPI or crates package, a Hugging Face model, or a Docker image
+- an Agent Skill (`skill:owner/repo`); a repo holding many skills is graded skill by skill, and its result is
+  the worst of them
+- a wallet address (`0x…` or a Solana address); it opens the result for the repo linked to that wallet, or
+  says the wallet isn't linked to a tool yet
 
 ```
 GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}

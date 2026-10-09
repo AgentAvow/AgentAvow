@@ -37,6 +37,14 @@ GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}/badge
 - Shows the composite trust score if the repo is imported, else the security-scan score.
 - Cached, not static: the badge is served with `Cache-Control: public, max-age=3600, s-maxage=86400` (an hour in the browser, a day at the edge) and the card with `max-age=300, s-maxage=3600`. Each regenerates from the current scan when its cache expires, so it tracks the current score and will not decay to "not scanned" in a stranger's README.
 
+For a published package, use the package route. It also takes names with a slash, such as scoped npm packages and Hugging Face models (same `style`, `theme` and `metric` options):
+
+```
+GET https://agentavow.com/api/v1/public/scan/package/{surface}/{name}/badge
+GET https://agentavow.com/api/v1/public/scan/package/npm/@scope/name/badge
+GET https://agentavow.com/api/v1/public/scan/package/huggingface/org/model/badge
+```
+
 ## On your website
 
 For a docs site, landing page or security page, one script tag renders the card, linked to the report, with a **Verify offline** button that checks the Ed25519 signature in the reader's own browser:

@@ -55,7 +55,7 @@ function parseClaimCoord(raw: string): { surface: string; owner: string; repo: s
   const s = raw.trim()
   if (!s) return null
   let m
-  if ((m = s.match(/^(npm|pypi):(.+)$/i))) return { surface: m[1].toLowerCase(), owner: '', repo: m[2].trim() }
+  if ((m = s.match(/^(npm|pypi|crates):(.+)$/i))) return { surface: m[1].toLowerCase(), owner: '', repo: m[2].trim() }
   if ((m = s.match(/^mcp:(.+)$/i))) return { surface: 'mcp', owner: '', repo: m[1].trim() }
   if ((m = s.match(/^skill:([\w.-]+)\/([\w.-]+)$/i))) return { surface: 'openclaw', owner: m[1], repo: m[2] }
   if (/^https?:\/\//i.test(s)) return { surface: 'mcp', owner: '', repo: s } // bare URL → MCP endpoint
@@ -66,7 +66,7 @@ function parseClaimCoord(raw: string): { surface: string; owner: string; repo: s
 /** Route a claim to its correct public report page per surface. */
 function claimReportHref(c: Claim): string {
   const s = (c.surface || 'github').toLowerCase()
-  if (s === 'npm' || s === 'pypi') return rp(`/rebrand/check/pkg/${s}/${c.repo}`)
+  if (s === 'npm' || s === 'pypi' || s === 'crates') return rp(`/rebrand/check/pkg/${s}/${c.repo}`)
   if (s === 'mcp') return rp(`/rebrand/check/mcp?endpoint=${encodeURIComponent(c.repo)}`)
   if (s === 'openclaw') return rp(`/rebrand/check/skill/${c.owner}/${c.repo}`)
   return rp(`/rebrand/check/${c.owner}/${c.repo}`)
@@ -108,7 +108,7 @@ function claimNextStep(c: Claim): { verified: boolean; text: React.ReactNode } {
     return { verified: true, text: <>Verified{how} — you own this. It&apos;s in <span className="text-text font-medium">Your tools</span> below, and we&apos;ll re-scan it and alert you if its score drops.</> }
   }
   const s = (c.surface || 'github').toLowerCase()
-  if (s === 'npm' || s === 'pypi') return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below as <span className="font-mono">{c.full_name}</span>. To verify: either <span className="text-text">claim its source repo</span> (we auto-link it) or <span className="text-text">add the keyword</span> shown on the row — then press <span className="text-text font-medium">Verify</span>.</> }
+  if (s === 'npm' || s === 'pypi' || s === 'crates') return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below as <span className="font-mono">{c.full_name}</span>. To verify: either <span className="text-text">claim its source repo</span> (we auto-link it) or <span className="text-text">add the keyword</span> shown on the row — then press <span className="text-text font-medium">Verify</span>.</> }
   if (s === 'mcp') return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below. To verify: have your endpoint <span className="text-text">return the challenge</span> shown on the row (an <span className="font-mono">X-AgentAvow-Verify</span> header), then press <span className="text-text font-medium">Verify</span>.</> }
   return { verified: false, text: <>Added to <span className="text-text font-medium">Your tools</span> below as <span className="font-mono">{c.full_name}</span>. To verify: open the row, <span className="text-text">add the GitHub topic</span> we show to the repo, then press <span className="text-text font-medium">Verify</span>.</> }
 }
@@ -119,7 +119,9 @@ function claimNextStep(c: Claim): { verified: boolean; text: React.ReactNode } {
  * flags the new row so it opens its proof panel highlighted. */
 function AddToolForm({ onClaimed }: { onClaimed: (c: Claim) => void }) {
   const qc = useQueryClient()
-  const [coord, setCoord] = useState('')
+  const [params] = useSearchParams()
+  // ?coord=npm:chalk (from a package page's "Claim this package") pre-fills the input.
+  const [coord, setCoord] = useState(params.get('coord') || '')
   const [privateHint, setPrivateHint] = useState<string | null>(null)
   const [parseErr, setParseErr] = useState(false)
   const [done, setDone] = useState<Claim | null>(null)
@@ -143,7 +145,7 @@ function AddToolForm({ onClaimed }: { onClaimed: (c: Claim) => void }) {
   return (
     <div>
       <form onSubmit={(e) => { e.preventDefault(); create.mutate() }} className="flex gap-2">
-        <input value={coord} onChange={(e) => { setCoord(e.target.value); if (done) setDone(null) }} placeholder="owner/repo · npm:chalk · pypi:requests · mcp:https://… · skill:owner/repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light font-mono" />
+        <input value={coord} onChange={(e) => { setCoord(e.target.value); if (done) setDone(null) }} placeholder="owner/repo · npm:chalk · pypi:requests · crates:serde · mcp:https://… · skill:owner/repo" className="flex-1 min-w-0 bg-surface border border-border rounded-xl px-3.5 py-2 text-[14px] outline-none focus:border-primary-light font-mono" />
         <button type="submit" disabled={create.isPending || !coord.trim()} className="text-[13px] font-semibold px-4 py-2 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60 shrink-0">{create.isPending ? 'Claiming…' : 'Claim'}</button>
       </form>
       {!done && <p className="mt-2 text-[12.5px] text-text-muted">Claim any tool you own. <span className="text-text">Repos/skills</span> verify by GitHub topic (private repos: connect the App in <span className="text-text">Connections</span>). <span className="text-text">npm/PyPI</span> auto-link to a repo you&apos;ve claimed. <span className="text-text">MCP servers</span> verify by a challenge your endpoint returns.</p>}
@@ -349,8 +351,8 @@ function CodeChip({ value }: { value: string }) {
  * publish a keyword challenge. */
 function ClaimPkgProof({ c, onVerify, pending, msg }: { c: Claim; onVerify: () => void; pending: boolean; msg: string | null }) {
   const kw = c.proof?.keyword || c.topic
-  const reg = c.surface === 'pypi' ? 'PyPI' : 'npm'
-  const field = c.surface === 'pypi' ? 'keywords (or a classifier) in pyproject.toml / setup.cfg' : 'the "keywords" array in package.json'
+  const reg = c.surface === 'pypi' ? 'PyPI' : c.surface === 'crates' ? 'crates.io' : 'npm'
+  const field = c.surface === 'pypi' ? 'keywords (or a classifier) in pyproject.toml / setup.cfg' : c.surface === 'crates' ? 'the keywords list in Cargo.toml (crates.io allows five)' : 'the "keywords" array in package.json'
   const btn = 'text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark disabled:opacity-60'
   return (
     <div>
@@ -486,7 +488,7 @@ function ToolRow({ c, highlight = false }: { c: Claim; highlight?: boolean }) {
       {/* pending claim → per-surface proof expands in-row (the one expander) */}
       {!verified && showVerify && (
         <div className="mt-3 rounded-lg border border-border/70 p-3 text-[12.5px] text-text-muted">
-          {!isRepoLike && (surface === 'npm' || surface === 'pypi') && (
+          {!isRepoLike && (surface === 'npm' || surface === 'pypi' || surface === 'crates') && (
             <ClaimPkgProof c={c} onVerify={() => verify.mutate()} pending={verify.isPending} msg={msg} />
           )}
           {!isRepoLike && surface === 'mcp' && (
