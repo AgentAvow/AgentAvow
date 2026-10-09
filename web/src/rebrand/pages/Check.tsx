@@ -1383,8 +1383,8 @@ function AddToAgent(props:
         )}
         {props.kind === 'repo' && (props.pkg ? (
           <>
-            <p className="text-text-muted text-[13px] mt-1">This repo publishes the <span className="font-mono text-text">{props.pkg.surface}</span> package <span className="font-mono text-text">{props.pkg.name}</span>{props.isMcpServer ? ' — an MCP server' : ''}.</p>
-            <div className="mt-2"><PkgInstall surface={props.pkg.surface} name={props.pkg.name} isMcp={props.pkg.isMcp || props.isMcpServer} /></div>
+            <p className="text-text-muted text-[13px] mt-1">This repo publishes the <span className="font-mono text-text">{props.pkg.surface}</span> package <span className="font-mono text-text">{props.pkg.name}</span>{props.pkg.isMcp ? ' — an MCP server' : ''}.</p>
+            <div className="mt-2"><PkgInstall surface={props.pkg.surface} name={props.pkg.name} isMcp={props.pkg.isMcp} /></div>
           </>
         ) : props.isMcpServer ? (
           <>
@@ -1462,7 +1462,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
 
       {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
       <div className="mt-4"><WatchCTA surface="openclaw" owner={owner} repo={repo} /></div>
-      <AddToAgent kind="skill" owner={owner} repo={repo} />
+      {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="skill" owner={owner} repo={repo} />}
 
       <BlastRadius scan={scan} />
 
@@ -1642,7 +1642,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
 
       {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
       <div className="mt-4"><WatchCTA surface="mcp" owner="mcp" repo={endpoint} /></div>
-      <AddToAgent kind="mcp" url={endpoint} />
+      {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="mcp" url={endpoint} />}
 
       <BlastRadius scan={scan} />
 
@@ -1769,7 +1769,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
 
       {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
       <div className="mt-4"><WatchCTA surface={surface} owner={surface} repo={name} /></div>
-      <AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />
+      {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />}
 
       {/* Certified panel — the A+ story for packages */}
       {(scan.trust_score >= 81 || certified?.eligible) && <CertifiedPanel certified={certified} />}
@@ -2008,19 +2008,21 @@ function Result({ owner, repo, privateResult }: {
       </motion.div>
 
       {/* PRIMARY ACTIONS — install right below watch (watch is in the hero), so the two
-          primary actions lead, consistent with every other score page. */}
-      {!isPrivate && (() => {
+          primary actions lead, consistent with every other score page. No install
+          offer on a Do not connect result. */}
+      {!isPrivate && decisionOf(scan).decision !== 'do_not_connect' && (() => {
         const cov = (scan as { coverage?: { surface?: string } }).coverage || {}
         const sd = (scan as { surface_detail?: { name?: string; is_mcp_server?: boolean } }).surface_detail || {}
         const isMcpServer = !!(scan as { metadata?: { is_mcp_server?: boolean } }).metadata?.is_mcp_server
-        // Prefer the resolved package coordinate (accurate registry name from the
-        // manifest, always set for a package-backed repo) over surface_detail, which
-        // is only populated when the flag-gated artifact fetch actually ran.
-        const pc = (scan as { package_coordinate?: { surface?: string; name?: string } }).package_coordinate || {}
+        // The package coordinate is set only when the package's own registry entry
+        // points back at this repo (a manifest name alone can match a stranger's
+        // package). MCP install only when the PACKAGE is an MCP server — the repo
+        // containing MCP code doesn't make its published package one.
+        const pc = (scan as { package_coordinate?: { surface?: string; name?: string; is_mcp_server?: boolean } }).package_coordinate || {}
         const pkg = (pc.surface === 'npm' || pc.surface === 'pypi') && pc.name
-          ? { surface: pc.surface, name: pc.name, isMcp: isMcpServer }
+          ? { surface: pc.surface, name: pc.name, isMcp: !!pc.is_mcp_server }
           : (cov.surface === 'npm' || cov.surface === 'pypi') && sd.name
-            ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server || isMcpServer }
+            ? { surface: cov.surface, name: sd.name, isMcp: !!sd.is_mcp_server }
             : undefined
         return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} isMcpServer={isMcpServer} />
       })()}
