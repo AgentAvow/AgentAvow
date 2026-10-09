@@ -71,9 +71,12 @@ A consumer reports these separately. None is derived from another.
   computed from the definition it was served. `not_evaluated` when `tool_binds` is false:
   there is no signed digest to compare, and the verifier says so rather than reporting a
   failure it did not measure.
-- **fresh**: `evaluation_time` is inside `[issuedAt, expiresAt)`.
+- **fresh**: `evaluation_time` is inside `[issuedAt, expiresAt)`, compared as instants, not as
+  strings, at the precision the timestamps carry. The signed times have microseconds and an
+  explicit `+00:00`; gate times have milliseconds and `Z`. A string comparison, or a parser that
+  truncates to milliseconds (JavaScript `Date`), misjudges a gate time just inside the window.
 
-`rely` is all six. Whether a gate proceeds on `rely=true` is a separately versioned
+`rely` is true only when all six axes are `true`; `not_evaluated` is not `true`, so it never relies. Whether a gate proceeds on `rely=true` is a separately versioned
 admission policy.
 
 ## The six cases
