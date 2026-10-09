@@ -236,9 +236,35 @@ function isBlockingItem(i: Obj): boolean {
   return i.shipped !== false
 }
 
-function countPhrase(n: number, severity: string, label: string | null): string {
-  if (n === 1) return `one ${severity} finding` + (label ? `: ${label}` : '')
-  return `${n} ${severity} findings` + (label ? `, including ${label}` : '')
+function countPhrase(n: number, severity: string, label: string | null, where = ''): string {
+  if (n === 1) return `one ${severity} finding${where}` + (label ? `: ${label}` : '')
+  return `${n} ${severity} findings${where}` + (label ? `, including ${label}` : '')
+}
+
+// A vulnerable-dependency finding: counted in the totals, never a decision input (a
+// known-malicious one is).
+const isDependencyAdvisory = (i: Obj) =>
+  i.category === 'dependency' && i.kind !== 'capability' && !isMaliciousItem(i)
+
+/** [critical, high] dependency advisories as the totals count them: the larger of the
+ * listed items and the scored supply-chain counts (the item list is capped). */
+function dependencyCounts(data: Obj, items: Obj[]): [number, number] {
+  const sevOf = (i: Obj) => String(i.severity ?? '').toLowerCase()
+  let crit = items.filter((i) => isDependencyAdvisory(i) && sevOf(i) === 'critical').length
+  let high = items.filter((i) => isDependencyAdvisory(i) && sevOf(i) === 'high').length
+  const sc = asObj(data.supply_chain)
+  if (sc.scored === true && isObj(sc.counts)) {
+    crit = Math.max(crit, toInt(sc.counts.critical))
+    high = Math.max(high, toInt(sc.counts.high))
+  }
+  return [crit, high]
+}
+
+function dependencyPhrase(crit: number, high: number): string {
+  const parts: string[] = []
+  if (crit > 0) parts.push(`${crit} critical`)
+  if (high > 0) parts.push(`${high} high`)
+  return parts.join(' and ')
 }
 
 /** The three-phrase decision for a scan result (API response JSON). Byte-identical twin
@@ -259,6 +285,14 @@ export function decide(input: unknown): Decision {
   const done = (decision: DecisionValue, reason: string): Decision =>
     ({ decision, final: !pending, reason: reason + (pending ? PENDING_SUFFIX : '') })
   const sev = (i: Obj) => String(i.severity ?? '').toLowerCase()
+
+  // Dependency advisories never decide, but the totals count them: a reason that counts
+  // findings names them too. Wording only; nothing here changes the decision.
+  const [depC, depH] = dependencyCounts(data, items)
+  const deps = dependencyPhrase(depC, depH)
+  const inCode = deps ? ' in its code' : ''
+  const inSandbox = deps ? ' in the sandbox' : ''
+  const plusDeps = deps ? `; plus ${deps} in dependencies` : ''
 
   // do_not_connect
   const canaryList = b ? b.canary_exfil : undefined
@@ -295,22 +329,22 @@ export function decide(input: unknown): Decision {
   }
 
   const [nCrit, crit] = defect('critical')
-  if (nCrit) return done('do_not_connect', countPhrase(nCrit, 'critical', crit ? findingLabel(crit.name) : null))
+  if (nCrit) return done('do_not_connect', countPhrase(nCrit, 'critical', crit ? findingLabel(crit.name) : null, inCode) + plusDeps)
   const bCrit = bFindings.filter((f) => sev(f) === 'critical')
   if (bCrit.length) {
     const f = bCrit[0]
     const label = BEHAVIORAL_LABELS[String(f.rule ?? '')] || findingLabel(f.name)
-    return done('do_not_connect', `the sandbox caught a critical behavior: ${label}`)
+    return done('do_not_connect', `the sandbox caught a critical behavior: ${label}` + plusDeps)
   }
 
   // review
   const [nHigh, high] = defect('high')
-  if (nHigh) return done('review', countPhrase(nHigh, 'high', high ? findingLabel(high.name) : null))
+  if (nHigh) return done('review', countPhrase(nHigh, 'high', high ? findingLabel(high.name) : null, inCode) + plusDeps)
   const bHigh = bFindings.filter((f) => sev(f) === 'high')
   if (bHigh.length) {
     const f = bHigh[0]
     const label = BEHAVIORAL_LABELS[String(f.rule ?? '')] || findingLabel(f.name)
-    return done('review', countPhrase(bHigh.length, 'high', label))
+    return done('review', countPhrase(bHigh.length, 'high', label, inSandbox) + plusDeps)
   }
 
   const rawAdv = Array.isArray(data.advisories) && data.advisories.length ? data.advisories : inc.advisories
@@ -330,6 +364,10 @@ export function decide(input: unknown): Decision {
 
   // safe — thin coverage (0 < files < 8, nothing found) reads Safe and says so in the
   // reason (decided 2026-10-08, #19); the 74 / 82 score cap still shows it.
+  if (deps) {
+    const noun = depC + depH === 1 ? 'advisory' : 'advisories'
+    return done('safe', `no critical or high findings in its code (dependencies: ${deps} ${noun})`)
+  }
   if (files > 0 && files < THIN_COVERAGE_FILES && !found) {
     return done('safe', isRemoteMcp(data) ? THIN_REASON_REMOTE_MCP : THIN_REASON)
   }

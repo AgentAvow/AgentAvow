@@ -1188,8 +1188,13 @@ def _scan_result_to_dict(result: object) -> dict:
     def _is_shipped(path: str) -> bool:
         return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
 
+    from src.scanner.verdict import finding_decides
+
     _sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    finding_items = [
+    # Order: the findings that decided the answer (blocking critical/high in the tool's
+    # own code) first, then shipped before non-shipped, then severity — so a pile of
+    # vulnerable-dependency advisories never leads above the defect the reason names.
+    finding_items = sorted((
         {
             "category": f.category,
             "name": f.name,
@@ -1202,11 +1207,9 @@ def _scan_result_to_dict(result: object) -> dict:
             "capability": getattr(f, "capability", "") or "",
             "installed": bool(getattr(f, "installed", True)),
         }
-        for f in sorted(
-            result.findings,
-            key=lambda x: (not _is_shipped(x.file_path), _sev_rank.get(x.severity, 5)),
-        )
-    ][:100]
+        for f in result.findings
+    ), key=lambda i: (not finding_decides(i), not i["shipped"],
+                      _sev_rank.get(i["severity"], 5)))[:100]
 
     tier_info = _compute_tier(result.trust_score)
 
