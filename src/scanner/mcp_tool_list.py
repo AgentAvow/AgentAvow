@@ -134,17 +134,21 @@ def _hints(window: str) -> dict:
 
 
 def static_tool_list(files: dict | None) -> list[dict]:
-    """Tool registrations found in a package's published source. Fail-open → []."""
+    """Tool registrations found in a package's published source. ``files`` maps path →
+    ``ArtifactFile`` (or plain text). Fail-open → []."""
     try:
         hits: dict[str, dict] = {}
         n = 0
         for path, content in (files or {}).items():
             if n >= _MAX_FILES:
                 break
-            if not isinstance(content, str) or not _is_source(str(path)):
+            # ``ArtifactFile`` objects carry decoded text in ``.text``; plain str is
+            # accepted too (tests, local scans).
+            text = content if isinstance(content, str) else getattr(content, "text", None)
+            if not isinstance(text, str) or not _is_source(str(path)):
                 continue
             n += 1
-            text = content[:_MAX_BYTES]
+            text = text[:_MAX_BYTES]
             spans: list[tuple[int, str]] = []
             for rx in (_JS_CALL, _JS_ADD, _JS_LIST, _PY_TOOL):
                 spans += [(m.start(), m.group(1)) for m in rx.finditer(text)]

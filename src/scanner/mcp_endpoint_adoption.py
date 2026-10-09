@@ -13,7 +13,11 @@ signal of reliance. So:
 The registry's search is a name substring match, so candidate search terms are built
 from the endpoint's host labels and path segments, and only a listing whose remote URL
 matches the endpoint exactly (scheme-insensitive, trailing slash ignored) counts.
-Results are cached for a day. Fail-open everywhere.
+
+The registry's search can take 20-30s, so the lookup never runs on a page request: a
+cache miss starts one background refresh (deduplicated by a short Redis lock) and
+answers "no signal yet"; the next view reads the cached answer. Results are cached for a
+day (an hour after a registry failure). Fail-open everywhere.
 """
 from __future__ import annotations
 
@@ -28,8 +32,9 @@ REGISTRY_API = "https://registry.modelcontextprotocol.io/v0/servers"
 _CACHE_PREFIX = "mcp_endpoint_adoption:"
 _CACHE_TTL = 24 * 3600
 _FAIL_TTL = 3600  # a slow/failed registry is retried hourly, not on every page view
-_TIMEOUT = 6.0
-_BUDGET = 10.0  # total seconds for one lookup across all terms and pages
+_LOCK_TTL = 180  # one background refresh per endpoint at a time
+_TIMEOUT = 35.0  # the registry's search is slow (20-30s observed on 2026-10-09)
+_BUDGET = 90.0  # total seconds for one background lookup across all terms and pages
 _PAGE_LIMIT = 100
 _MAX_TERMS = 3
 _MAX_PAGES = 2
@@ -117,17 +122,8 @@ async def _find_listing(endpoint: str) -> dict | None:
     return None
 
 
-async def endpoint_registry_listing(endpoint: str) -> dict:
-    """``{"listed": bool, "name"?, "repository"?}`` for an MCP endpoint, cached 24h.
-    ``{"listed": False}`` when not found or on any failure."""
-    key = _CACHE_PREFIX + normalize_endpoint(endpoint)
-    try:
-        from src.redis_client import get_redis
-        raw = await get_redis().get(key)
-        if raw:
-            return json.loads(raw)
-    except Exception:  # noqa: BLE001
-        pass
+async def _refresh(endpoint: str, key: str) -> dict:
+    """Look the endpoint up in the registry and cache the answer. Never raises."""
     import asyncio
     out: dict = {"listed": False}
     ttl = _CACHE_TTL
@@ -144,3 +140,39 @@ async def endpoint_registry_listing(endpoint: str) -> dict:
     except Exception:  # noqa: BLE001
         pass
     return out
+
+
+_BG_TASKS: set = set()
+
+
+async def endpoint_registry_listing(endpoint: str, *, wait: bool = False) -> dict:
+    """``{"listed": bool, "name"?, "repository"?}`` for an MCP endpoint.
+
+    Reads the cached answer. On a miss it starts one background refresh and returns
+    ``{"listed": False, "pending": True}`` (or, with ``wait=True``, runs the lookup
+    inline — for batch jobs and tests)."""
+    import asyncio
+    norm = normalize_endpoint(endpoint)
+    if not norm:
+        return {"listed": False}
+    key = _CACHE_PREFIX + norm
+    redis = None
+    try:
+        from src.redis_client import get_redis
+        redis = get_redis()
+        raw = await redis.get(key)
+        if raw:
+            return json.loads(raw)
+    except Exception:  # noqa: BLE001
+        pass
+    if wait:
+        return await _refresh(endpoint, key)
+    try:
+        if redis is not None and not await redis.set(key + ":lock", "1", ex=_LOCK_TTL, nx=True):
+            return {"listed": False, "pending": True}
+    except Exception:  # noqa: BLE001
+        pass
+    task = asyncio.get_running_loop().create_task(_refresh(endpoint, key))
+    _BG_TASKS.add(task)  # keep a reference so the task isn't garbage-collected
+    task.add_done_callback(_BG_TASKS.discard)
+    return {"listed": False, "pending": True}

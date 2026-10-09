@@ -119,6 +119,17 @@ def test_static_extraction_js_python_and_hints():
     assert all(r["source"] == "source" and "digest" not in r for r in rows)
 
 
+def test_static_extraction_reads_artifact_files():
+    """Production hands ArtifactFile objects (decoded text in .text), not strings."""
+    from src.scanner.artifact_fetch import ArtifactFile
+    files = {"dist/index.js": ArtifactFile(path="dist/index.js", size=len(_FS_JS),
+                                           sha256="0" * 64, text=_FS_JS),
+             "dist/logo.png": ArtifactFile(path="dist/logo.png", size=3, sha256="1" * 64,
+                                           text=None, is_binary=True)}
+    names = [r["name"] for r in static_tool_list(files)]
+    assert names == ["list_allowed_directories", "read_text_file", "write_file"]
+
+
 def test_static_extraction_fails_open():
     assert static_tool_list(None) == []
     assert static_tool_list({"a.js": None, "b.py": b"bytes"}) == []
