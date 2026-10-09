@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -1608,7 +1609,13 @@ async def package_badge(
         if pname in ("owner", "repo", "db"):
             continue
         if pname in request.query_params:
-            extra[pname] = request.query_params[pname]
+            value = request.query_params[pname]
+            # Same validation FastAPI would apply on the direct route.
+            for m in getattr(param.default, "metadata", None) or []:
+                pat = getattr(m, "pattern", None)
+                if pat and not re.fullmatch(pat, value):
+                    raise HTTPException(422, f"Invalid value for {pname}")
+            extra[pname] = value
         elif param.default is not inspect.Parameter.empty:
             d = param.default
             extra[pname] = getattr(d, "default", d)

@@ -73,6 +73,19 @@ async def test_hf_badge_with_slash_and_query_options(client):
 
 
 @pytest.mark.asyncio
+async def test_scoped_package_badge_card_style(client):
+    with patch.object(psr, "_get_cached", new=AsyncMock(return_value=_scan_dict(84))):
+        r = await client.get("/api/v1/public/scan/package/npm/@scope/pkg/badge",
+                             params={"style": "card", "theme": "dark"})
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("image/svg+xml")
+        assert "84" in r.text
+        bad = await client.get("/api/v1/public/scan/package/npm/@scope/pkg/badge",
+                               params={"style": "bogus"})
+        assert bad.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_package_badge_rejects_bad_input(client):
     r = await client.get("/api/v1/public/scan/package/gopher/x/badge")
     assert r.status_code == 404
