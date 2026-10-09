@@ -53,7 +53,9 @@ logger = logging.getLogger(__name__)
 MAX_LAYER_COMPRESSED = 160 * 1024 * 1024      # one layer's download (streamed to disk)
 MAX_TOTAL_COMPRESSED = 400 * 1024 * 1024      # all layers' downloads
 MAX_TOTAL_WALKED = 1536 * 1024 * 1024         # decompressed tar bytes walked (bomb guard)
-LAYER_TIME_BUDGET = 75.0                      # seconds for the whole layer phase
+# The whole image scan must finish inside the router's scan timeout (60 s on the badge
+# path): layers 35 s + CVE check 12 s + signatures 8 s + manifest/config leaves headroom.
+LAYER_TIME_BUDGET = 35.0                      # seconds for the whole layer phase
 MAX_APP_FILES = 800                           # app files handed to the static engine
 MAX_APP_FILE_BYTES = 512 * 1024               # largest single app file read
 MAX_APP_BYTES = 48 * 1024 * 1024              # all app-file candidates held in memory

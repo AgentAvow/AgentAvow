@@ -524,3 +524,33 @@ def test_signature_b64_roundtrip_helper():
     from src.scanner.provenance import _b64d
 
     assert _b64d(base64.b64encode(b"sig").decode()) == b"sig"
+
+
+@pytest.mark.asyncio
+async def test_slow_osv_drops_the_cve_check_not_the_scan(monkeypatch):
+    """The image scan has to finish inside the router's scan timeout, so a slow OSV
+    answer is cut off and the rest of the result still lands."""
+    import asyncio as _asyncio
+
+    from src.scanner import docker_image
+    from src.scanner.artifact_fetch import ArtifactFetchResult
+    from src.scanner.scan import ScanResult
+
+    async def slow(*a, **k):
+        await _asyncio.sleep(5)
+
+    monkeypatch.setattr(docker_image, "_VULN_TIME_BUDGET", 0.05)
+    monkeypatch.setattr(docker_image, "check_image_vulnerabilities", slow)
+    monkeypatch.setattr(docker_image, "analyze_image_provenance", slow)
+    monkeypatch.setattr(docker_image, "_PROV_TIME_BUDGET", 0.05)
+    fetched = ArtifactFetchResult(ecosystem="docker", name="nginx", version="latest",
+                                  kind="image", ok=True, image={
+                                      "packages": [ImagePackage("dpkg", "a", "1")],
+                                      "layers": {"depth": "full"}})
+    result = ScanResult(repo="docker:nginx", stars=0, description="", framework="")
+    result.artifact_scan = {"ok": True}
+    await _asyncio.wait_for(docker_image.apply_docker_image_extras(result, fetched), 3)
+    img = result.artifact_scan["image"]
+    assert img["depth"] == "full"
+    assert img["vulnerabilities"]["ok"] is False
+    assert result.findings == []
