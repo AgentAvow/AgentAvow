@@ -83,9 +83,10 @@ export async function fetchPackageScan(
 }
 
 /** Grade an OpenClaw / Agent Skill in a GitHub repo. */
-export async function fetchSkillScan(owner: string, repo: string, force = false): Promise<PublicScanResponse> {
+export async function fetchSkillScan(owner: string, repo: string, force = false, skill?: string): Promise<PublicScanResponse> {
+  const sub = skill ? `/${skill.split('/').map(encodeURIComponent).join('/')}` : ''
   const { data } = await publicApi.get<PublicScanResponse>(
-    `/public/scan/skill/${owner}/${repo}${force ? '?force=true' : ''}`,
+    `/public/scan/skill/${owner}/${repo}${sub}${force ? '?force=true' : ''}`,
   )
   return data
 }

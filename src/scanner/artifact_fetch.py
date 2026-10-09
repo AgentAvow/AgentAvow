@@ -689,8 +689,16 @@ async def fetch_crates_artifact(
         url = CRATES_DL.format(name=name, version=version)
         raw = await _download(url, client)
         files = _build_file_map(_unpack_tar_gz(raw))  # a .crate is a gzipped tar
+        vrow = next((v for v in (meta.get("versions") or [])
+                     if isinstance(v, dict) and v.get("num") == version), {})
         return ArtifactFetchResult(
             ecosystem="crates",
+            published_at=str(vrow.get("created_at") or "")[:10] or None,
+            packaged_manifest={
+                "repository": crate.get("repository") or None,
+                "homepage": crate.get("homepage") or None,
+                "license": vrow.get("license") or None,
+            },
             name=name,
             version=version,
             kind="crate",
@@ -791,6 +799,15 @@ async def fetch_huggingface_artifact(
             if ext in _HF_TEXT_EXT and size <= _HF_MAX_TEXT_BYTES:
                 text_targets.append((path, size))
 
+        # ``.bin`` is ambiguous (PyTorch pickle vs OpenVINO raw tensors): classify
+        # each by its first bytes so raw weights aren't flagged as executable.
+        from src.scanner.hf_facts import PICKLE, ZIP_PICKLE, classify_weights, license_from_meta
+        all_paths = {str(e.get("path") or "") for e in tree if isinstance(e, dict)}
+        formats = await classify_weights(name, unsafe_weights, all_paths, client)
+        raw_weights = [p for p in unsafe_weights
+                       if formats.get(p) not in (None, PICKLE, ZIP_PICKLE)]
+        unsafe_weights = [p for p in unsafe_weights if p not in raw_weights]
+
         # Deterministic order (drift-stable), configs/code first, capped.
         text_targets.sort(key=lambda t: (t[0].count("/"), t[0]))
         files: dict[str, ArtifactFile] = {}
@@ -812,7 +829,8 @@ async def fetch_huggingface_artifact(
         # every weight-file PATH (their format is the graded signal) so the coverage
         # block gets a stable artifact anchor.
         manifest_lines = [f"{p}:{files[p].sha256}" for p in sorted(files)]
-        manifest_lines += [f"weight:{p}" for p in sorted(safe_weights + unsafe_weights)]
+        manifest_lines += [f"weight:{p}" for p in sorted(safe_weights + unsafe_weights
+                                                           + raw_weights)]
         if sha:
             manifest_lines.append(f"commit:{sha}")
         digest = _digest("\n".join(manifest_lines).encode())
@@ -838,7 +856,9 @@ async def fetch_huggingface_artifact(
                 "last_modified": meta.get("lastModified"),
                 "safe_weights": safe_weights[:50],
                 "unsafe_weights": unsafe_weights[:50],
+                "raw_weights": raw_weights[:50],
                 "custom_code": custom_code[:50],
+                "license": license_from_meta(meta),
             }},
             description=_hf_description(
                 meta.get("pipeline_tag"), meta.get("library_name"),

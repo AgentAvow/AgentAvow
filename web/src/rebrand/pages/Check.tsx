@@ -21,7 +21,7 @@ import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder , useIsDesktop } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
-import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageBadge, VerifyPanel } from '../components/ScanEvidence'
+import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageBadge, PackageClaim, PackageHistory, VerifyPanel } from '../components/ScanEvidence'
 
 /**
  * Rebrand-native check / trust-score page — built for ANY user, not just devs.
@@ -726,6 +726,9 @@ function Hero() {
     // Live MCP server: `mcp:https://…`.
     const mcp = v.match(/^mcp\s*:\s*(https?:\/\/.+)$/i)
     if (mcp) { navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(mcp[1].trim())); return }
+    // Wallet address: EVM `0x…` (40 hex) or Solana base58, optionally `wallet:`-prefixed.
+    const wal = v.match(/^(?:wallet\s*:\s*)?(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/)
+    if (wal) { navigate(rp(`/rebrand/check/wallet/${wal[1]}`)); return }
     // Agent Skill: `skill:owner/repo`.
     const sk = v.match(/^skill\s*:\s*(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)
     if (sk) { navigate(rp(`/rebrand/check/skill/${sk[1]}/${sk[2]}`)); return }
@@ -1444,13 +1447,77 @@ function skillDescription(d?: string): string | undefined {
   return d === 'An OpenClaw agent skill' ? 'An Agent Skill (SKILL.md) for Claude Code, OpenClaw and other skill-aware agents' : d
 }
 
-function SkillResult({ owner, repo }: { owner: string; repo: string }) {
+/** A wallet address resolves to the agent it is bound to, and that agent's linked
+ * repo; we send the visitor to that repo's result. */
+function WalletResult({ addr }: { addr: string }) {
+  const navigate = useNavigate()
+  const chain = /^0x/i.test(addr) ? 'ethereum' : 'solana'
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['wallet', addr, chain],
+    retry: 0,
+    queryFn: async () => (await publicApi.get<{ found: boolean; repo?: string; reason?: string }>(
+      `/public/scan/wallet/${encodeURIComponent(addr)}?chain=${chain}`)).data,
+  })
+  useEffect(() => {
+    if (data?.repo) navigate(rp(`/rebrand/check/${data.repo}`), { replace: true })
+  }, [data, navigate])
+  if (isLoading || data?.repo) return <ScanningLoader owner="wallet" repo={addr} />
+  const why = isError ? 'We couldn\u2019t look that address up right now. Try again shortly.'
+    : !data?.found ? 'No agent on AgentAvow is bound to this address yet.'
+    : 'An agent is bound to this address, but it has no linked GitHub repo to check yet.'
+  return (
+    <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
+      <SEOHead title="Wallet not linked to a tool yet" description="Resolve a wallet address to the tool it is linked to." path={`/check/wallet/${addr}`} />
+      <h1 className="text-2xl font-extrabold tracking-tight">Not linked to a tool yet</h1>
+      <p className="mt-2 font-mono text-[12.5px] text-text-muted break-all">{addr} · {chain}</p>
+      <p className="mt-3 text-text-muted text-[14px]">{why} A wallet resolves to a tool once its owner binds the wallet to their AgentAvow account and links the tool&apos;s repo.</p>
+      <Link to={rp('/rebrand/check')} className="mt-6 inline-block text-primary-light hover:text-primary font-semibold">← Check something else</Link>
+    </div>
+  )
+}
+
+type SkillRow = { path: string; name: string; trust_score: number; decision: string; critical: number; high: number; files_scanned: number }
+
+/** A repo holding many skills: every skill's answer, each linking to its own page.
+ * The repo-level answer above is the WORST of them. */
+function SkillCollection({ owner, repo, scan }: { owner: string; repo: string; scan: unknown }) {
+  const sd = (scan as { surface_detail?: { collection?: boolean; skills?: SkillRow[]; skills_total?: number; skills_graded?: number; worst_skill?: string } }).surface_detail
+  if (!sd?.collection || !sd.skills?.length) return null
+  const left = (sd.skills_total ?? sd.skills.length) - (sd.skills_graded ?? sd.skills.length)
+  const label: Record<string, [string, string]> = {
+    safe: ['Safe to connect', 'text-success'],
+    review: ['Review before you connect', 'text-warning'],
+    do_not_connect: ['Do not connect', 'text-danger'],
+  }
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6">
+        <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Skills in this repo ({sd.skills_total ?? sd.skills.length})</h3>
+        <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">Each skill installs on its own, so each is graded on its own. The answer above is the <span className="text-text">worst of them</span>{sd.worst_skill ? <> (<span className="font-mono">{sd.worst_skill}</span>)</> : null}. Open a skill for its own result.</p>
+        <div className="mt-3 flex flex-col divide-y divide-border">
+          {sd.skills.map((k) => {
+            const [txt, cls] = label[k.decision] ?? [k.decision, 'text-text-muted']
+            return (
+              <Link key={k.path} to={rp(`/rebrand/check/skill/${owner}/${repo}/${k.path}`)} className="flex items-center justify-between gap-3 py-2.5 hover:bg-surface/60 rounded-lg px-2 -mx-2">
+                <span className="min-w-0"><span className="font-mono text-[13px] break-all">{k.name}</span>{k.name !== k.path && <span className="block font-mono text-[11px] text-text-muted break-all">{k.path}</span>}</span>
+                <span className="shrink-0 text-right"><span className={`text-[12.5px] font-semibold ${cls}`}>{txt}</span><span className="block font-mono text-[11px] text-text-muted">{k.trust_score}/100</span></span>
+              </Link>
+            )
+          })}
+        </div>
+        {left > 0 && <p className="mt-2 text-[12px] text-text-muted">{left} more skill{left === 1 ? '' : 's'} not graded in this pass (size or time cap); open them by path to grade each one.</p>}
+      </div>
+    </Reveal>
+  )
+}
+
+function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skill?: string }) {
   const { data: scan, isLoading, isError } = useQuery({
-    queryKey: ['rebrand-skill-scan', owner, repo],
-    queryFn: () => fetchSkillScan(owner, repo),
+    queryKey: ['rebrand-skill-scan', owner, repo, skill ?? ''],
+    queryFn: () => fetchSkillScan(owner, repo, false, skill),
     retry: 0,
   })
-  if (isLoading) return <ScanningLoader owner="skill" repo={`${owner}/${repo}`} />
+  if (isLoading) return <ScanningLoader owner="skill" repo={`${owner}/${repo}${skill ? `/${skill}` : ''}`} />
   if (isError || !scan) {
     return (
       <div className="max-w-[560px] mx-auto px-6 py-24 text-center">
@@ -1468,7 +1535,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
       <SEOHead
         title={`${owner}/${repo} skill — safety score ${scan.trust_score}/100`}
         description={`${verdict}. AgentAvow's signed capability grade for the ${owner}/${repo} Agent Skill: ${scan.trust_score}/100 (${t.name}), verifiable offline.`}
-        path={`/check/skill/${owner}/${repo}`}
+        path={`/check/skill/${owner}/${repo}${skill ? `/${skill}` : ''}`}
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
         jsonLd={scanReviewJsonLd(`${owner}/${repo}`, scan.trust_score)}
       />
@@ -1480,7 +1547,8 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Capability-graded</span>
               <ClaimedBadge surface="openclaw" owner={owner} repo={repo} />
             </div>
-            <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}</h1>
+            <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}{skill && <span className="text-text-muted">/{skill}</span>}</h1>
+            {skill && <Link to={rp(`/rebrand/check/skill/${owner}/${repo}`)} className="mt-1 inline-block text-[12.5px] text-primary-light hover:text-primary">← All skills in {owner}/{repo}</Link>}
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{skillDescription((scan as { tool_description?: string }).tool_description)}</div>}
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           </div>
@@ -1492,8 +1560,9 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
 
       {/* PRIMARY ACTIONS — watch + install, consistent across every score page */}
       <div className="mt-4"><WatchCTA surface="openclaw" owner={owner} repo={repo} /></div>
-      {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="skill" owner={owner} repo={repo} skillName={(scan as { surface_detail?: { skill_name?: string } }).surface_detail?.skill_name} />}
+      {decisionOf(scan).decision !== 'do_not_connect' && !(scan as { surface_detail?: { collection?: boolean } }).surface_detail?.collection && <AddToAgent kind="skill" owner={owner} repo={repo} skillName={(scan as { surface_detail?: { skill_name?: string } }).surface_detail?.skill_name} />}
 
+      <SkillCollection owner={owner} repo={repo} scan={scan} />
       <BlastRadius scan={scan} />
       <CapabilitiesPanel scan={scan} />
 
@@ -1857,7 +1926,9 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
       )}
 
       <VerifyPanel scan={scan} />
+      {!version && <PackageHistory surface={surface} name={name} />}
       {!version && <PackageBadge surface={surface} name={name} />}
+      {!version && <PackageClaim surface={surface} name={name} />}
 
       <div className="mt-8 flex justify-center">
         <ShareRow owner={surface} repo={name} score={scan.trust_score} />
@@ -1876,9 +1947,13 @@ export default function RebrandCheck() {
     if (!ep) return <Hero />
     return <McpResult endpoint={ep} />
   }
+  // Wallet route (/check/wallet/:addr): resolve to the linked tool, then its result.
+  if (location.pathname.includes('/check/wallet/') && params.addr) {
+    return <WalletResult addr={params.addr} />
+  }
   // OpenClaw / Agent Skill route (/check/skill/:owner/:repo).
   if (location.pathname.includes('/check/skill/') && params.owner && params.repo) {
-    return <SkillResult owner={params.owner} repo={params.repo} />
+    return <SkillResult owner={params.owner} repo={params.repo} skill={(params['*'] || '').replace(/\/+$/, '') || undefined} />
   }
   // A pinned package scan (/check/pkg/npm/chalk?version=5.3.0 — what the MCP connector
   // and the plugin link to). Empty/blank = latest.

@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -1549,6 +1550,74 @@ async def _refresh_package(surface: str, name: str, version: str | None,
         pass  # best-effort; the next stored read serves whatever exists
 
 
+_PKG_BADGE_SURFACES = ("npm", "pypi", "crates", "huggingface", "docker")
+
+
+async def _package_badge_data(surface: str, name: str) -> dict | None:
+    """The cached package result for a badge: fresh, else stale (refreshed in the
+    background), else a fresh scan now (a README badge must not decay to grey)."""
+    data = await _get_cached(surface, name)
+    if data:
+        return data
+    stale = await _get_stale_cached(surface, name)
+    if stale:
+        _schedule_package_refresh(surface, name, None, surface, name)
+        return stale
+    try:
+        from src.scanner.scan import scan_package
+        result = await asyncio.wait_for(scan_package(surface, name), timeout=60)
+    except Exception:
+        logger.warning("badge package scan failed for %s:%s", surface, name, exc_info=True)
+        return None
+    if getattr(result, "error", None):
+        return None
+    data = _scan_result_to_dict(result)
+    await _set_cached(surface, name, data)
+    return data
+
+
+@router.get(
+    "/package/{surface}/{name:path}/badge",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+)
+async def package_badge(
+    surface: str, name: str, request: Request, db: AsyncSession = Depends(get_db),
+) -> Response:
+    """README badge for a published package, including names with a slash: scoped
+    npm (`/package/npm/@scope/name/badge`) and Hugging Face
+    (`/package/huggingface/org/model/badge`). Same output and query options as
+    `/{owner}/{repo}/badge`."""
+    import inspect
+
+    surface = (surface or "").strip().lower()
+    surface = {"hf": "huggingface", "python": "pypi", "crate": "crates"}.get(surface, surface)
+    name = (name or "").strip().strip("/")
+    if surface not in _PKG_BADGE_SURFACES:
+        raise HTTPException(404, "Unknown package surface")
+    if not name or len(name) > 214 or ".." in name or any(c.isspace() for c in name):
+        raise HTTPException(400, "Invalid package name")
+    # Forward the query options the badge renderer takes (metric, style, theme, …).
+    # Called directly (not through FastAPI), so unset options take their declared
+    # defaults here rather than arriving as Query() markers.
+    extra = {}
+    for pname, param in inspect.signature(scan_badge).parameters.items():
+        if pname in ("owner", "repo", "db"):
+            continue
+        if pname in request.query_params:
+            value = request.query_params[pname]
+            # Same validation FastAPI would apply on the direct route.
+            for m in getattr(param.default, "metadata", None) or []:
+                pat = getattr(m, "pattern", None)
+                if pat and not re.fullmatch(pat, value):
+                    raise HTTPException(422, f"Invalid value for {pname}")
+            extra[pname] = value
+        elif param.default is not inspect.Parameter.empty:
+            d = param.default
+            extra[pname] = getattr(d, "default", d)
+    return await scan_badge(owner=surface, repo=name, db=db, **extra)
+
+
 @router.get(
     "/package/{surface}/{name:path}",
     response_model=PublicScanResponse,
@@ -1661,6 +1730,13 @@ async def scan_package_endpoint(
 
     data = _scan_result_to_dict(result)
     await _set_cached(cache_owner, cache_repo, data)
+    if not version:
+        # Record the latest-version result: the catalog row and the score-history
+        # point (the signed /drift/pkg feed and the package page's history).
+        try:
+            await _capture_community_scan(surface, name, data, db, surface=surface)
+        except Exception:
+            logger.debug("package capture failed for %s:%s", surface, name, exc_info=True)
     return await _signed_response(data, cached=False)
 
 
@@ -1688,18 +1764,51 @@ async def scan_skill_endpoint(
     scripts. `coverage.surface = openclaw`. E.g. `/public/scan/skill/owner/repo`.
     The behavioral sandbox (plan `skill`) clones the repo and runs its hooks and
     scripts; the signed observation comes back in `behavioral`."""
+    return await _skill_scan(owner, repo, None, request, force, behavioral)
+
+
+@router.get(
+    "/skill/{owner}/{repo}/{skill_path:path}",
+    response_model=PublicScanResponse,
+    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+)
+async def scan_one_skill_endpoint(
+    owner: str,
+    repo: str,
+    skill_path: str,
+    request: Request = None,
+    force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    behavioral: bool = Query(False, description="Force a fresh behavioral sandbox run"),
+    db: AsyncSession = Depends(get_db),
+) -> PublicScanResponse:
+    """Grade ONE skill inside a repo that holds many (e.g.
+    `/public/scan/skill/anthropics/skills/skills/pdf`). The skill is named by its
+    directory, or by its folder name when that is unambiguous."""
+    skill_path = (skill_path or "").strip().strip("/")
+    if (not skill_path or ".." in skill_path or len(skill_path) > 200
+            or not all(c.isalnum() or c in "-_./" for c in skill_path)):
+        raise HTTPException(400, "Invalid skill path")
+    return await _skill_scan(owner, repo, skill_path, request, force, behavioral)
+
+
+async def _skill_scan(
+    owner: str, repo: str, skill_path: str | None, request: Request | None,
+    force: bool, behavioral: bool,
+) -> PublicScanResponse:
     if not all(c.isalnum() or c in "-_." for c in owner):
         raise HTTPException(400, "Invalid owner")
     if not repo.replace("-", "").replace("_", "").replace(".", "").isalnum():
         raise HTTPException(400, "Invalid repo name")
-    full = f"skill:{owner}/{repo}"
     full_name = f"{owner}/{repo}"
+    cache_key = f"{full_name}/{skill_path}" if skill_path else full_name
+    full = f"skill:{cache_key}"
     if behavioral:
         force = True  # a deep scan is paired with a fresh static scan (same as repos)
 
     async def _signed_response(data: dict, *, cached: bool) -> PublicScanResponse:
         """Sandbox block first (cached / background / forced), folded into the score
-        that gets signed — the same shape as the repo and package endpoints."""
+        that gets signed — the same shape as the repo and package endpoints. Every
+        skill in a repo shares the repo's sandbox run (it clones the whole repo)."""
         block = await _behavioral_block(
             {**data, "repo_full_name": full_name, "surface_kind": "skill"},
             force=behavioral)
@@ -1709,7 +1818,7 @@ async def scan_skill_endpoint(
         return resp
 
     if not force:
-        cached = await _get_cached("skill", full_name)
+        cached = await _get_cached("skill", cache_key)
         if cached:
             return await _signed_response(cached, cached=True)
 
@@ -1721,7 +1830,9 @@ async def scan_skill_endpoint(
     from src.scanner.scan import scan_skill
 
     try:
-        result = await asyncio.wait_for(scan_skill(owner, repo), timeout=60)
+        result = await asyncio.wait_for(
+            scan_skill(owner, repo, skill_path) if skill_path else scan_skill(owner, repo),
+            timeout=60)
     except asyncio.TimeoutError:
         raise HTTPException(
             503, "Scan is taking longer than expected — please retry shortly.",
@@ -1733,7 +1844,17 @@ async def scan_skill_endpoint(
         raise HTTPException(code, f"Scan error: {result.error}")
 
     data = _scan_result_to_dict(result)
-    await _set_cached("skill", full_name, data)
+    await _set_cached("skill", cache_key, data)
+    # A multi-skill repo graded every skill: cache each one so its own page opens
+    # at once instead of re-scanning.
+    for sub_path, sub in (getattr(result, "per_skill", None) or {}).items():
+        if sub_path:
+            try:
+                sub.repo = f"skill:{full_name}/{sub_path}"
+                await _set_cached("skill", f"{full_name}/{sub_path}", _scan_result_to_dict(sub))
+            except Exception:
+                logger.debug("per-skill cache failed for %s/%s", full_name, sub_path,
+                             exc_info=True)
     return await _signed_response(data, cached=False)
 
 
@@ -2036,12 +2157,13 @@ async def scan_by_wallet(
     owner, repo = repo_id.split("/", 1)
 
     # Delegate to the main scan endpoint
-    scan_result = await public_scan(owner=owner, repo=repo, db=db)
+    scan_result = await public_scan(owner=owner, repo=repo, force=False, db=db)
     return {
         "found": True,
         "wallet": wallet_address,
         "chain": chain,
         "entity_id": str(binding.entity_id),
+        "repo": f"{owner}/{repo}",
         "scan": scan_result.dict(),
     }
 
@@ -2581,6 +2703,13 @@ async def scan_badge(
         # composite, so pairing them would certify a number the scan never earned.
         scan_data = await _get_cached(owner, repo)
         composite = True
+    elif owner.lower() in _PKG_BADGE_SURFACES:
+        # A published package (/npm/semver/badge, /package/npm/@scope/x/badge): read
+        # the PACKAGE result. The repo fallback below would scan a GitHub repo that
+        # happens to be named <surface>/<name> (github.com/npm/semver).
+        scan_data = await _package_badge_data(owner.lower(), repo)
+        score = scan_data.get("trust_score") if scan_data else None
+        score_type = "Scan"
     else:
         # No entity — fall back to security scan score
         cached = await _get_cached(owner, repo)

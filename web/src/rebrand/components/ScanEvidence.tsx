@@ -1,5 +1,9 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { Reveal } from './motion'
+import { publicApi } from '../../lib/scanApi'
+import { rp } from '../basePath'
 
 /**
  * Evidence panels shared by every score page (repo, package, MCP server, skill), so a
@@ -168,7 +172,7 @@ function fmtBytes(n?: number): string | null {
  * whether it runs an install hook, and which environment variables its code reads. */
 export function PackageFacts({ scan: raw, surface }: { scan: unknown; surface: string }) {
   const scan = raw as ScanLike
-  const sd = (scan.surface_detail ?? {}) as { file_count?: number; unpacked_size?: number; has_install_hook?: boolean; published_at?: string | null; version?: string; kind?: string }
+  const sd = (scan.surface_detail ?? {}) as { file_count?: number; unpacked_size?: number; has_install_hook?: boolean; published_at?: string | null; version?: string; kind?: string; repository?: string | null; model_card?: { license?: string | null; gated?: boolean | string; pipeline_tag?: string | null; library_name?: string | null; safetensors?: boolean; pickle_weights?: number; raw_weights?: number; custom_code?: number } }
   const env = scan.env_reads ?? []
   const [showEnv, setShowEnv] = useState(false)
   const published = (scan.published_at || sd.published_at || '').slice(0, 10)
@@ -180,7 +184,19 @@ export function PackageFacts({ scan: raw, surface }: { scan: unknown; surface: s
   if (typeof sd.has_install_hook === 'boolean' && surface !== 'docker' && surface !== 'huggingface') {
     rows.push(['Install hook', sd.has_install_hook ? 'yes, runs code on install' : 'none', sd.has_install_hook ? 'text-warning' : 'text-success'])
   }
-  if (rows.length === 0 && env.length === 0) return null
+  const mc = sd.model_card
+  if (mc) {
+    if (mc.license) rows.push(['License', mc.license])
+    if (mc.pipeline_tag || mc.library_name) rows.push(['Task', [mc.pipeline_tag, mc.library_name].filter(Boolean).join(' · ')])
+    rows.push(['Access', mc.gated ? `gated (${typeof mc.gated === 'string' ? mc.gated : 'request access'})` : 'open'])
+    rows.push(['Weights', mc.pickle_weights
+      ? `${mc.pickle_weights} pickle file${mc.pickle_weights === 1 ? '' : 's'} (runs code on load)${mc.safetensors ? '; safetensors copy also published' : ''}`
+      : mc.safetensors ? 'safetensors (no code runs on load)' : 'no pickle weights',
+      mc.pickle_weights && !mc.safetensors ? 'text-warning' : mc.pickle_weights ? '' : 'text-success'])
+    if (mc.custom_code) rows.push(['Custom model code', `${mc.custom_code} .py file${mc.custom_code === 1 ? '' : 's'} (run with trust_remote_code)`, 'text-warning'])
+  }
+  const repoUrl = sd.repository && /^https:\/\//.test(sd.repository) ? sd.repository : null
+  if (rows.length === 0 && env.length === 0 && !repoUrl) return null
   const shownEnv = showEnv ? env : env.slice(0, 12)
   return (
     <Reveal>
@@ -191,6 +207,9 @@ export function PackageFacts({ scan: raw, surface }: { scan: unknown; surface: s
             {rows.map(([k, v, cls]) => (
               <div key={k} className="flex justify-between gap-3"><span className="text-text-muted shrink-0">{k}</span><span className={`font-mono text-right break-all ${cls ?? ''}`}>{v}</span></div>
             ))}
+            {repoUrl && (
+              <div className="flex justify-between gap-3"><span className="text-text-muted shrink-0">Source repository</span><a href={repoUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-right break-all text-primary-light hover:text-primary">{repoUrl.replace(/^https:\/\//, '')} ↗</a></div>
+            )}
           </div>
         )}
         {env.length > 0 && (
@@ -210,13 +229,18 @@ export function PackageFacts({ scan: raw, surface }: { scan: unknown; surface: s
   )
 }
 
-/** README badge for a published package. The badge route takes a single path segment
- * for the name, so scoped npm names (@scope/name) have no badge URL yet. */
+/** The badge URL for a published package. ``/package/<surface>/<name>/badge`` takes
+ * names with a slash too (scoped npm ``@scope/name``, Hugging Face ``org/model``). */
+export function packageBadgeUrl(origin: string, surface: string, name: string): string {
+  return `${origin}/api/v1/public/scan/package/${surface}/${name.split('/').map(encodeURIComponent).join('/')}/badge`
+}
+
+/** README badge for a published package. */
 export function PackageBadge({ surface, name }: { surface: string; name: string }) {
-  if (!name || name.includes('/')) return null
+  if (!name) return null
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  const img = `${origin}/api/v1/public/scan/${surface}/${encodeURIComponent(name)}/badge`
-  const link = `${origin}/check/pkg/${surface}/${encodeURIComponent(name)}`
+  const img = packageBadgeUrl(origin, surface, name)
+  const link = `${origin}/check/pkg/${surface}/${name.split('/').map(encodeURIComponent).join('/')}`
   const md = `[![AgentAvow Trust](${img})](${link})`
   return (
     <Reveal>
@@ -266,6 +290,61 @@ export function VerifyPanel({ scan: raw }: { scan: unknown }) {
           <CodeLine text={VERIFY_PY} />
         </div>
         <a href="/docs/verify-attestations" className="mt-3 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">Verify in Python or JavaScript, step by step →</a>
+      </div>
+    </Reveal>
+  )
+}
+
+type DriftPoint = { scanned_at: string | null; trust_score: number | null; score_delta: number | null; manifest_drift: boolean }
+
+/** Score history for a published package, from the signed drift feed. Self-hides
+ * until there is recorded history. */
+export function PackageHistory({ surface, name }: { surface: string; name: string }) {
+  const path = `/public/drift/pkg/${surface}/${name.split('/').map(encodeURIComponent).join('/')}`
+  const { data } = useQuery({
+    queryKey: ['pkg-drift', surface, name],
+    retry: false,
+    queryFn: async () => {
+      try {
+        return (await publicApi.get<{ summary: { points: number }; history: DriftPoint[] }>(path)).data
+      } catch { return null }
+    },
+  })
+  if (!data || !data.history?.length) return null
+  const pts = data.history.slice(0, 8)
+  const drift = data.history.filter((h) => h.manifest_drift).length
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className={H3}>Score history</h3>
+          <a href={`/api/v1${path}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">signed feed ↗</a>
+        </div>
+        <p className="mt-1.5 text-[13px] text-text-muted">{data.summary.points} recorded change{data.summary.points === 1 ? '' : 's'}{drift ? <>; the signed contents changed <span className="text-warning font-semibold">{drift}×</span></> : null}. A point is added when the score moves or the published contents change.</p>
+        <div className="mt-3 flex flex-col gap-1.5 text-[12.5px]">
+          {pts.map((p, i) => (
+            <div key={i} className="flex justify-between gap-3">
+              <span className="font-mono text-text-muted">{(p.scanned_at || '').slice(0, 10)}</span>
+              <span className="font-mono">{p.trust_score ?? '–'}/100{p.score_delta ? <span className={p.score_delta > 0 ? 'text-success' : 'text-danger'}> ({p.score_delta > 0 ? '+' : ''}{p.score_delta})</span> : null}{p.manifest_drift ? <span className="text-warning"> · contents changed</span> : null}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Reveal>
+  )
+}
+
+/** "Maintain this package?" — claim it via the registry proof on My Tools. */
+export function PackageClaim({ surface, name }: { surface: string; name: string }) {
+  if (!name || !['npm', 'pypi', 'crates'].includes(surface)) return null
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h3 className="text-[15px] font-bold">Maintain this package?</h3>
+          <p className="text-text-muted text-[13.5px] mt-0.5">Claim it to get alerts when its result changes. Proof is a link to a GitHub repo you&apos;ve claimed, or a keyword you publish in a new version.</p>
+        </div>
+        <Link to={rp(`/rebrand/tools?coord=${encodeURIComponent(`${surface}:${name}`)}`)} className="text-[13.5px] font-semibold px-4 py-2 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors shrink-0">Claim this package</Link>
       </div>
     </Reveal>
   )
