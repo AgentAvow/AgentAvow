@@ -55,6 +55,31 @@ def scan_cache_coords(surface: str, owner: str, repo: str) -> tuple[str, str]:
     return owner, repo
 
 
+_PACKAGE_CACHE_OWNERS = ("npm", "pypi", "docker", "crates", "huggingface")
+
+
+def coords_from_cache_key(key: str) -> tuple[str, str, str] | None:
+    """Inverse of ``scan_cache_coords``: the (surface, owner, repo) catalog coordinate a
+    public scan cache key (``owner/repo`` part, prefix stripped) belongs to. A package
+    key such as ``npm/react-dom`` is the npm package, never a GitHub repo named
+    ``npm/react-dom``. None for a key that maps to no single coordinate."""
+    head, sep, rest = (key or "").partition("/")
+    if not sep or not head or not rest:
+        return None
+    if head in _PACKAGE_CACHE_OWNERS:
+        return head, head, rest
+    if head == "mcp":
+        return "mcp", "mcp", rest
+    if head == "skill":
+        owner, sep2, repo = rest.partition("/")
+        if not sep2 or not owner or not repo or "/" in repo:
+            return None  # a per-skill sub-path is not a catalog row
+        return "openclaw", owner, repo
+    if "/" in rest:
+        return None
+    return "github", head, rest
+
+
 async def cached_scan_data(
     surface: str, owner: str, repo: str, *, stale: bool = True,
 ) -> dict | None:
