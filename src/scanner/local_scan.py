@@ -455,11 +455,16 @@ def result_to_code_quality(result: ScanResult, path_prefix: str = "") -> list[di
     return report
 
 
+# The checkout root each CI system exports: GitLab, Bitbucket Pipelines, Azure Pipelines.
+_CI_ROOT_VARS = ("CI_PROJECT_DIR", "BITBUCKET_CLONE_DIR", "BUILD_SOURCESDIRECTORY")
+
+
 def _scan_path_prefix(root: Path) -> str:
-    """The scanned directory relative to the CI project root, when it is inside
-    one (``CI_PROJECT_DIR`` is what GitLab exports). Empty when they coincide or the
-    scan is outside the checkout, so report paths stay repo-relative either way."""
-    project_dir = os.environ.get("CI_PROJECT_DIR")
+    """The scanned directory relative to the CI checkout root, when it is inside
+    one (``CI_PROJECT_DIR`` on GitLab, ``BITBUCKET_CLONE_DIR`` on Bitbucket,
+    ``BUILD_SOURCESDIRECTORY`` on Azure). Empty when they coincide or the scan is
+    outside the checkout, so report paths stay repo-relative either way."""
+    project_dir = next((os.environ[v] for v in _CI_ROOT_VARS if os.environ.get(v)), "")
     if not project_dir:
         return ""
     try:
@@ -467,6 +472,110 @@ def _scan_path_prefix(root: Path) -> str:
     except ValueError:
         return ""
     return "" if rel == Path(".") else rel.as_posix()
+
+
+# Where a local or CI result points a reader: what the offline scan covers and what a
+# hosted scan adds (dependency CVEs, the sandbox, adoption, a signature).
+REPORT_LINK = "https://agentavow.com/docs/run-locally"
+
+
+def _headline(d: dict) -> str:
+    return d["verdict_phrase"] + (" · Certified" if d["certified_mark"] else "")
+
+
+def _md_cell(text: str) -> str:
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def result_to_markdown(result: ScanResult, gate_failure: str | None = None,
+                       label: str = "") -> str:
+    """A short Markdown summary for CI pages (Azure ``##vso[task.uploadsummary]``,
+    Bitbucket build logs, a PR comment): the answer and reason first, then both
+    scores, the gate outcome and the top findings."""
+    d = result_to_dict(result)
+    c = d["counts"]
+    files = f"{d['files_scanned']} scanned" + (
+        f" of {d['total_scannable_files']} (sampled)" if d["sampled"] else "")
+    gate = f"failed: {gate_failure}" if gate_failure else "passed"
+    lines = [
+        f"### AgentAvow: {_md_cell(label or d['tool'])}",
+        "",
+        f"**{_headline(d)}**: {_md_cell(d['decision_reason'])}",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| Trust score | {d['trust_score']}/100 ({d['tier']}) |",
+        "| Adoption | not measured offline (it needs registry data; a hosted scan adds it) |",
+        f"| Files | {files} |",
+        f"| Findings | {c['critical']} critical, {c['high']} high, {c['medium']} medium, "
+        f"{c['low']} low |",
+        f"| Gate | {_md_cell(gate)} |",
+    ]
+    top = [f for f in d["findings"] if f["severity"] in ("critical", "high")][:10]
+    if top:
+        lines += ["", "**Top findings**", ""]
+        for f in top:
+            lines.append(f"- `{f['severity']}` {_md_cell(f['name'])} "
+                         f"(`{f['file']}:{f['line']}`)")
+    lines += ["", "An offline scan leaves out dependency CVEs, the sandbox, adoption and a "
+                  f"signature. [What this covers]({REPORT_LINK})", ""]
+    return "\n".join(lines)
+
+
+# Bitbucket Code Insights: report + annotations.
+# https://developer.atlassian.com/cloud/bitbucket/rest/api-group-reports/
+_BB_SEVERITY = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM",
+                "low": "LOW", "info": "LOW"}
+_BB_MAX_ANNOTATIONS = 1000  # per report
+
+
+def result_to_bitbucket_insights(result: ScanResult, path_prefix: str = "",
+                                 gate_failure: str | None = None) -> dict:
+    """A Bitbucket Code Insights report and its annotations, as one JSON document
+    ``{"report": {...}, "annotations": [...]}``. The pipe PUTs the report and POSTs
+    the annotations in batches of 100; the report shows on the commit and the pull
+    request, and each annotation on its line in the PR diff."""
+    d = result_to_dict(result)
+    c = d["counts"]
+    report = {
+        "title": "AgentAvow",
+        "details": f"{_headline(d)}: {d['decision_reason']}"[:2000],
+        "report_type": "SECURITY",
+        "reporter": "AgentAvow",
+        "link": REPORT_LINK,
+        "result": "FAILED" if gate_failure else "PASSED",
+        "data": [
+            {"title": "Answer", "type": "TEXT", "value": d["verdict_phrase"]},
+            {"title": "Trust score", "type": "NUMBER", "value": d["trust_score"]},
+            {"title": "Tier", "type": "TEXT", "value": d["tier"]},
+            {"title": "Critical", "type": "NUMBER", "value": c["critical"]},
+            {"title": "High", "type": "NUMBER", "value": c["high"]},
+            {"title": "Files scanned", "type": "NUMBER", "value": d["files_scanned"]},
+        ],
+    }
+    prefix = path_prefix.strip("/")
+    seen: dict[tuple[str, str, str], int] = {}
+    annotations: list[dict] = []
+    ordered = sorted(result.findings,
+                     key=lambda f: (not _is_shipped(f), _SEV_RANK.get(f.severity, 5),
+                                    f.file_path, f.line_number))
+    for f in ordered[:_BB_MAX_ANNOTATIONS]:
+        path = f"{prefix}/{f.file_path}" if prefix else f.file_path
+        key = (path, f.category, f.name)
+        ordinal = seen.get(key, 0)
+        seen[key] = ordinal + 1
+        ann = {
+            "external_id": _code_quality_fingerprint(path, f.category, f.name, ordinal)[:50],
+            "annotation_type": "VULNERABILITY",
+            "summary": f"{f.name} ({f.category})"[:450],
+            "severity": _BB_SEVERITY.get(f.severity, "MEDIUM"),
+            "path": path,
+            "line": max(1, f.line_number),
+        }
+        if f.remediation:
+            ann["details"] = f.remediation[:2000]
+        annotations.append(ann)
+    return {"report": report, "annotations": annotations}
 
 
 def _print_human(result: ScanResult, stream=sys.stderr) -> None:
@@ -515,6 +624,14 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--gitlab-code-quality", metavar="FILE",
                     help="write a GitLab Code Quality report to FILE "
                          "(artifacts:reports:codequality, shows in the MR widget)")
+    sc.add_argument("--name", metavar="NAME",
+                    help="name to show for the scanned tree (default: the directory "
+                         "name; CI wrappers pass the repository name)")
+    sc.add_argument("--markdown", metavar="FILE",
+                    help="write a short Markdown summary to FILE (answer, both scores, "
+                         "gate outcome, top findings) for CI summary pages")
+    sc.add_argument("--bitbucket-insights", metavar="FILE",
+                    help="write a Bitbucket Code Insights report + annotations to FILE")
     sc.add_argument("--min-score", type=int, default=None,
                     help="exit non-zero if the trust score is below this (CI gate)")
     sc.add_argument("--fail-on",
@@ -532,7 +649,7 @@ def main(argv: list[str] | None = None) -> int:
         p.print_help(sys.stderr)
         return 2
 
-    result = scan_local(args.path)
+    result = scan_local(args.path, name=args.name)
     if result.error:
         print(f"agentavow: {result.error}", file=sys.stderr)
         return 2
@@ -554,29 +671,41 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.gitlab_code_quality).write_text(json.dumps(report, indent=2),
                                                   encoding="utf-8")
 
-    # --- CI gating ---
-    if args.min_score is not None and result.trust_score < args.min_score:
-        print(f"agentavow: FAIL — score {result.trust_score} < min {args.min_score}",
-              file=sys.stderr)
+    # --- CI gating --- (decided before the gate-aware reports are written, so a
+    # Markdown summary or Code Insights report records the outcome; the exit code
+    # comes last, after every report is on disk.)
+    failure = _gate_failure(args, result)
+    if args.markdown:
+        Path(args.markdown).write_text(result_to_markdown(result, failure),
+                                       encoding="utf-8")
+    if args.bitbucket_insights:
+        insights = result_to_bitbucket_insights(
+            result, _scan_path_prefix(Path(args.path)), failure)
+        Path(args.bitbucket_insights).write_text(json.dumps(insights, indent=2),
+                                                 encoding="utf-8")
+    if failure:
+        print(f"agentavow: FAIL — {failure}", file=sys.stderr)
         return 1
+    return 0
+
+
+def _gate_failure(args, result: ScanResult) -> str | None:
+    """Why the CI gate fails (``--min-score`` / each ``--fail-on``), or None."""
+    if args.min_score is not None and result.trust_score < args.min_score:
+        return f"score {result.trust_score} < min {args.min_score}"
     for fail_on in args.fail_on or ():
         if fail_on in ("do_not_connect", "review"):
             dec = decision_for_result(result)
             failing = ("do_not_connect",) if fail_on == "do_not_connect" \
                 else ("do_not_connect", "review")
             if dec.decision in failing:
-                print(f"agentavow: FAIL — {verdict_phrase(dec)}: {dec.reason}",
-                      file=sys.stderr)
-                return 1
+                return f"{verdict_phrase(dec)}: {dec.reason}"
         else:
             order = {"critical": 3, "high": 2, "medium": 1}
             thresh = order[fail_on]
             if any(order.get(f.severity, 0) >= thresh for f in result.findings):
-                print(f"agentavow: FAIL — findings at/above '{fail_on}' present",
-                      file=sys.stderr)
-                return 1
-    return 0
-
+                return f"findings at/above '{fail_on}' present"
+    return None
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,7 +1,8 @@
 /**
  * Repo hosts we recognise but cannot scan yet. A gitlab.com / bitbucket.org / Azure DevOps
  * URL used to fall through the input routers to the `owner/repo` rule and silently scan the
- * same-named GitHub repo — a wrong answer. Say so instead.
+ * same-named GitHub repo — a wrong answer. Say so instead, and point at the CI scan that
+ * covers that host today.
  */
 const HOSTS: Array<[RegExp, string]> = [
   [/^https?:\/\/(?:www\.)?gitlab\.com\//i, 'GitLab'],
@@ -16,11 +17,16 @@ export function unsupportedRepoHost(raw: string): string | null {
   return null
 }
 
-export const DOCS_LABEL = 'Docs → Run locally & in CI'
-export const DOCS_HREF = '/rebrand/docs/run-locally#gitlab-ci-self-managed-behind-a-firewall'
+/** The docs pointer for each host's CI scan: [link label, docs path]. */
+export const HOST_DOCS: Record<string, [string, string]> = {
+  'GitLab': ['Docs → GitLab CI', '/rebrand/docs/run-locally#gitlab-ci-self-managed-behind-a-firewall'],
+  'Bitbucket': ['Docs → Bitbucket Pipelines', '/rebrand/docs/run-locally#bitbucket-pipelines'],
+  'Azure DevOps': ['Docs → Azure DevOps', '/rebrand/docs/run-locally#azure-devops'],
+}
 
 /** The one-line message shown in place of a scan. */
 export function unsupportedRepoHostMessage(host: string): string {
-  return `${host} repos aren't supported yet — AgentAvow reads GitHub repos today. ` +
-    `You can run the same scanner on any checkout in your own CI (see ${DOCS_LABEL}).`
+  const [label] = HOST_DOCS[host] ?? HOST_DOCS['GitLab']
+  return `${host} repos can't be checked here yet: the hosted Check reads GitHub repos. ` +
+    `Run the same scan in your own ${host} pipeline instead (see ${label}).`
 }

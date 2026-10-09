@@ -24,6 +24,8 @@ agentavow scan .              # human summary
 agentavow scan . --json out.json      # structured findings (file · line · severity · remediation)
 agentavow scan . --sarif out.sarif    # SARIF 2.1.0 for code-scanning tools
 agentavow scan . --gitlab-code-quality gl-code-quality-report.json   # GitLab MR widget
+agentavow scan . --bitbucket-insights insights.json   # Bitbucket Code Insights report + annotations
+agentavow scan . --markdown summary.md                # short summary: answer, scores, gate, top findings
 agentavow scan . --fail-on do_not_connect   # exit non-zero when the answer is Do not connect
 agentavow scan . --fail-on review           # also exit non-zero on Review before you connect
 agentavow scan . --fail-on high             # exit non-zero on any high/critical finding
@@ -119,9 +121,68 @@ The static score is computed exactly as the hosted service computes it, so the n
 
 Full reference, including inputs, exit codes and the report format: [gitlab/README.md](https://github.com/AgentAvow/AgentAvow/tree/main/gitlab).
 
+## Bitbucket Pipelines
+
+The same offline scan runs as a Bitbucket Pipe. It prints the answer and the trust score to the build log, writes the JSON report and a Markdown summary next to the checkout, and posts a **Code Insights** report: one report on the commit and pull request, and one annotation per finding on its line in the PR diff. By default the step fails when the answer is Do not connect. No token is needed: inside Bitbucket Cloud Pipelines the build's own proxy authenticates the Code Insights calls.
+
+```yaml
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: AgentAvow scan
+          script:
+            - pipe: docker://ghcr.io/agentavow/scanner:pipe-0.1
+              variables:
+                FAIL_ON: "do_not_connect"   # do_not_connect | review | none
+                FAIL_ON_FINDINGS: "none"    # none | critical | high | medium
+                SCAN_PATHS: "."             # space-separated directories
+          artifacts:
+            - agentavow-*.json
+            - agentavow-*.md
+```
+
+Or use the scanner image as the step image and run the same wrapper:
+
+```yaml
+      - step:
+          name: AgentAvow scan
+          image: ghcr.io/agentavow/scanner:0.1
+          script:
+            - agentavow-bitbucket
+```
+
+Behind a firewall, mirror the image into your registry and point the pipe or the step at the mirror. On a self-hosted runner without the Pipelines proxy, set `BITBUCKET_ACCESS_TOKEN` (a repository access token with pull request and repository scopes) for Code Insights, or `CODE_INSIGHTS: "false"` to skip it. Full reference: [bitbucket/README.md](https://github.com/AgentAvow/AgentAvow/tree/main/bitbucket).
+
+## Azure DevOps
+
+The scan runs as an Azure Pipelines job template. Reference the AgentAvow repository as a pipeline resource (from GitHub through a service connection, or from a mirror in Azure Repos) and add the template. Each run uploads a summary to the run's **Extensions** tab (answer, trust score, gate outcome, top findings), publishes the JSON, SARIF and summary files as the `CodeAnalysisLogs` artifact (the SARIF SAST Scans Tab extension renders it), and fails the job when the answer is Do not connect.
+
+```yaml
+resources:
+  repositories:
+    - repository: agentavow
+      type: github
+      name: AgentAvow/AgentAvow
+      endpoint: <your GitHub service connection>
+      ref: refs/heads/main          # pin a commit or tag for a reproducible gate
+
+jobs:
+  - template: azure-devops/templates/agentavow-scan.yml@agentavow
+    parameters:
+      failOn: do_not_connect        # do_not_connect | review | none
+      failOnFindings: none          # none | critical | high | medium
+      scanPaths: ['.']
+      image: myregistry.azurecr.io/mirrors/agentavow/scanner:0.1   # optional mirror
+```
+
+The template needs a Linux agent with Docker; Microsoft-hosted `ubuntu-latest` has it. Set `continueOnError: true` to report without blocking for a first rollout. Full reference: [azure-devops/README.md](https://github.com/AgentAvow/AgentAvow/tree/main/azure-devops).
+
+Bitbucket and Azure DevOps repositories can't be checked on agentavow.com itself yet: the hosted Check reads GitHub repositories. The CI scan above is how you check them today.
+
 ## Actioning the output
 
-`--json` emits every finding with `category`, `severity`, `file`, `line`, and a `remediation` string — enough to drive a fix in your inner loop or fail a check. `--sarif` feeds GitHub code scanning (or any SARIF viewer) so findings land as annotations on the exact line. `--gitlab-code-quality` writes the GitLab Code Quality report for the merge-request widget.
+`--json` emits every finding with `category`, `severity`, `file`, `line`, and a `remediation` string — enough to drive a fix in your inner loop or fail a check. `--sarif` feeds GitHub code scanning (or any SARIF viewer) so findings land as annotations on the exact line. `--gitlab-code-quality` writes the GitLab Code Quality report for the merge-request widget. `--bitbucket-insights` writes a Bitbucket Code Insights report and its annotations, and `--markdown` a short summary for CI summary pages.
 
 ## Tuning false positives
 

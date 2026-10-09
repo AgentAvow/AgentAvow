@@ -68,7 +68,7 @@ For the local stdio server instead: `pip install agentavow-trust`.
 - **Watch & change-alerts** — Watch a tool; AgentAvow re-scans it and alerts you when its score drops or its **signed tool definition changes** (`tool_manifest_digest` drift) — the rug-pull you'd otherwise miss.
 - **Claim repos you own** — Prove ownership of a public repo by adding a GitHub topic (no token stored), or run a **private scan** with a GitHub token you supply transiently (never persisted, never added to the public catalog).
 - **Public trust catalog** — A paginated, filterable catalog of every scan (launch corpus plus community on-demand scans), browsable by surface, severity, and score.
-- **MCP server & CI gating** — The **AgentAvow Trust** MCP server (`agentavow-trust`) exposes scanning to Claude Code and other clients, and a GitHub Action, GitLab CI component, or local CLI can fail a build when the answer is Do not connect (`fail_on: do_not_connect`). The npm package `agentavow-trust` adds per-call gates for the Vercel AI SDK and Flue; LangChain and Google ADK gates live in `src/bridges/`. A runnable rug-pull demo is in [demos/rugpull/](demos/rugpull/).
+- **MCP server & CI gating** — The **AgentAvow Trust** MCP server (`agentavow-trust`) exposes scanning to Claude Code and other clients, and a GitHub Action, GitLab CI component, Bitbucket Pipe, Azure Pipelines template, or local CLI can fail a build when the answer is Do not connect (`fail_on: do_not_connect`). The npm package `agentavow-trust` adds per-call gates for the Vercel AI SDK and Flue; LangChain and Google ADK gates live in `src/bridges/`. A runnable rug-pull demo is in [demos/rugpull/](demos/rugpull/).
 
 ## Tech Stack
 

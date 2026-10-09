@@ -157,6 +157,8 @@ export default function RebrandForDevelopers() {
           <ul className="mt-2 space-y-1.5 text-[13.5px] text-text-muted max-w-[64ch]">
             {([
               ['GitLab CI', 'run the scanner in your own runner, MR widget included', '/rebrand/docs/run-locally#gitlab-ci-self-managed-behind-a-firewall'],
+              ['Bitbucket Pipelines', 'a pipe that posts a Code Insights report on the pull request', '/rebrand/docs/run-locally#bitbucket-pipelines'],
+              ['Azure DevOps', 'a pipeline template with a run summary and SARIF', '/rebrand/docs/run-locally#azure-devops'],
               ['Agent runtime', 'LangChain and Google ADK callbacks check each tool before the call', '/rebrand/docs/gate-on-the-grade#gate-your-agent-at-runtime-sdk--bridges'],
               ['Vercel AI SDK', 'wrap your tools so a Do not connect answer never runs', '/rebrand/docs/gate-on-the-grade#vercel-ai-sdk'],
               ['Flue', 'gate the tools a Flue agent connects to', '/rebrand/docs/gate-on-the-grade#flue'],

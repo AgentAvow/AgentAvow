@@ -1,0 +1,129 @@
+# AgentAvow scan: Azure Pipelines job template.
+#
+# Runs the offline AgentAvow static scan on the checkout inside the scanner image,
+# once per path in scanPaths. Nothing leaves the agent. Each run uploads a Markdown
+# summary to the pipeline's Extensions tab (answer, trust score, gate, top findings),
+# publishes the JSON, SARIF and summary files as the CodeAnalysisLogs artifact (the
+# SARIF SAST Scans Tab extension renders it), and fails the job on fail_on.
+#
+# Needs a Linux agent with Docker (Microsoft-hosted ubuntu-latest has it).
+#
+# Usage, from a pipeline in your project:
+#
+#   resources:
+#     repositories:
+#       - repository: agentavow
+#         type: github                   # or type: git with name: <project>/agentavow
+#         name: AgentAvow/AgentAvow      #   for a mirror in Azure Repos
+#         endpoint: <your GitHub service connection>
+#         ref: refs/heads/main           # or a tag you pin
+#
+#   jobs:
+#     - template: azure-devops/templates/agentavow-scan.yml@agentavow
+#       parameters:
+#         failOn: do_not_connect
+#         image: myregistry.azurecr.io/mirrors/agentavow/scanner:0.1
+
+parameters:
+  - name: failOn
+    displayName: Fail on this answer or worse
+    type: string
+    default: do_not_connect
+    values: [do_not_connect, review, none]
+  - name: failOnFindings
+    displayName: Also fail on any finding at or above this severity
+    type: string
+    default: none
+    values: [none, critical, high, medium]
+  - name: minScore
+    displayName: Legacy trust-score gate (0 turns it off)
+    type: number
+    default: 0
+  - name: scanPaths
+    displayName: Directories to scan, relative to the repository root
+    type: object
+    default: ['.']
+  - name: image
+    displayName: Scanner image (point it at your internal mirror)
+    type: string
+    default: ghcr.io/agentavow/scanner:0.1
+  - name: jobName
+    type: string
+    default: agentavow_scan
+  - name: dependsOn
+    type: object
+    default: []
+  - name: pool
+    type: object
+    default:
+      vmImage: ubuntu-latest
+  - name: continueOnError
+    displayName: Report without failing the job (for a first rollout)
+    type: boolean
+    default: false
+
+jobs:
+  - job: ${{ parameters.jobName }}
+    displayName: AgentAvow scan
+    dependsOn: ${{ parameters.dependsOn }}
+    pool: ${{ parameters.pool }}
+    steps:
+      - checkout: self
+        fetchDepth: 1
+
+      - bash: |
+          set -u
+          out="$(Agent.TempDirectory)/agentavow"
+          mkdir -p "$out"
+          repo="${AGENTAVOW_REPO##*/}"
+          repo="${repo:-src}"
+          IFS=';' read -r -a paths <<< "$AGENTAVOW_PATHS"
+          status=0
+          for p in "${paths[@]}"; do
+            suffix=""
+            if [ "${#paths[@]}" -gt 1 ]; then
+              slug=$(printf '%s' "$p" | sed -e 's#^\./##' -e 's#[^A-Za-z0-9]\{1,\}#-#g' -e 's#^-##' -e 's#-$##')
+              suffix="-${slug:-root}"
+            fi
+            name="$repo"
+            rel="${p#./}"; rel="${rel%/}"
+            if [ -n "$rel" ] && [ "$rel" != "." ]; then name="$repo/$rel"; fi
+            rm -f "$out/agentavow-summary$suffix.md"
+            set -- "$p" --name "$name" --json "/out/agentavow-scan$suffix.json" \
+              --sarif "/out/agentavow$suffix.sarif" \
+              --markdown "/out/agentavow-summary$suffix.md"
+            if [ "$AGENTAVOW_FAIL_ON_ANSWER" != "none" ]; then set -- "$@" --fail-on "$AGENTAVOW_FAIL_ON_ANSWER"; fi
+            if [ "$AGENTAVOW_FAIL_ON" != "none" ]; then set -- "$@" --fail-on "$AGENTAVOW_FAIL_ON"; fi
+            if [ "${AGENTAVOW_MIN_SCORE:-0}" != "0" ]; then set -- "$@" --min-score "$AGENTAVOW_MIN_SCORE"; fi
+            docker run --rm -v "$(Build.SourcesDirectory):/src" -v "$out:/out" -w /src \
+              "$AGENTAVOW_IMAGE" agentavow scan "$@"
+            rc=$?
+            if [ -s "$out/agentavow-summary$suffix.md" ]; then
+              echo "##vso[task.uploadsummary]$out/agentavow-summary$suffix.md"
+            fi
+            if [ "$rc" -eq 1 ]; then
+              echo "##vso[task.logissue type=error]AgentAvow gate failed for '$p' (see the AgentAvow summary)"
+            elif [ "$rc" -ne 0 ]; then
+              echo "##vso[task.logissue type=error]AgentAvow scan could not run for '$p' (exit $rc)"
+            fi
+            [ "$rc" -gt "$status" ] && status=$rc
+          done
+          echo "##vso[task.setvariable variable=AGENTAVOW_OUT]$out"
+          exit $status
+        displayName: AgentAvow scan
+        continueOnError: ${{ parameters.continueOnError }}
+        env:
+          AGENTAVOW_IMAGE: ${{ parameters.image }}
+          AGENTAVOW_REPO: $(Build.Repository.Name)
+          AGENTAVOW_PATHS: ${{ join(';', parameters.scanPaths) }}
+          AGENTAVOW_FAIL_ON_ANSWER: ${{ parameters.failOn }}
+          AGENTAVOW_FAIL_ON: ${{ parameters.failOnFindings }}
+          AGENTAVOW_MIN_SCORE: ${{ parameters.minScore }}
+
+      - task: PublishPipelineArtifact@1
+        displayName: Publish AgentAvow reports
+        condition: always()
+        inputs:
+          targetPath: $(Agent.TempDirectory)/agentavow
+          artifact: CodeAnalysisLogs
+          publishLocation: pipeline
