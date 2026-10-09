@@ -246,3 +246,17 @@ def test_ai_catalog_points_at_the_published_spec():
     from scripts import ai_catalog_wellknown as m
     assert m.SAFETY_MODEL_SPEC_URL.startswith("https://github.com/AgentAvow/AgentAvow/blob/main/")
     assert m._answer_phrase({"decision": "safe"}) == "Safe to connect, "
+
+
+@pytest.mark.parametrize("count,unit", [
+    (495_100_000, "downloads/wk"), (1_200_000_000, "downloads/wk"),
+    (228_000_000, "downloads/mo"), (866_979_583, "downloads/wk"), (3_100_000, "pulls"),
+])
+def test_card_keeps_the_short_unit_for_long_counts(count, unit):
+    from src.adoption_units import short_unit
+    from src.api.badge_avow import render_avow_badge
+    for cert in (False, True):
+        svg = render_avow_badge(style="card", decision="safe", score=92, certified=cert,
+                                coordinate="npm:x", adoption=count, adoption_unit=unit,
+                                adoption_pct=60)
+        assert f">{short_unit(unit)}<" in svg, (count, unit, cert)

@@ -462,12 +462,14 @@ def _card(f: _Facts, p: _Paint, brand: str) -> str:
     # adoption text — count (+ unit when it fits), level word under it
     if f.has_adoption:
         an = f.adoption_text
-        # A step below the trust numeral: 21px (18px if it must), muted a touch. Always
+        # A step below the trust numeral: 21px (18 or 16px if it must), muted. Always
         # the short unit; it drops only when nothing fits (it stays in the accessible
         # title).
         size, unit = 21, ""
         units = [f.adoption_unit] if f.adoption_unit else [""]
-        for sz in (21, 18):
+        # Step the count down (21 → 18 → 16px) before the short unit is ever dropped,
+        # so a long count like "495.1M dl/wk" still shows its unit.
+        for sz in (21, 18, 16):
             fit = next((u for u in units
                         if _w(an, sz, True) + (3 + _w(u, 9) * 0.95 if u else 0) <= avail),
                        None)
