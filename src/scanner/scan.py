@@ -3600,41 +3600,111 @@ async def _release_tree_shas(
     return None
 
 
-async def _published_pkg_repo_slug(ecosystem: str, name: str) -> str | None:
-    """The ``owner/repo`` (lowercased) that a PUBLISHED npm/PyPI package declares as its
-    source, or None if it declares none. Lets the artifact scan skip a diff when a repo's
-    manifest name collides with an UNRELATED published package of the same name."""
-    urls: list[str] = []
+_GH_SLUG_RE = re.compile(r"github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git|/|#|\?|$)", re.IGNORECASE)
+_SHORTHAND_RE = re.compile(r"^(?:github:)?([\w.-]+/[\w.-]+?)(?:\.git)?$", re.IGNORECASE)
+
+
+def _github_slug(url: str, *, allow_shorthand: bool = False) -> str | None:
+    """The lowercased ``owner/repo`` a declared source URL points at, or None.
+
+    Handles ``git+https://github.com/o/r.git``, ``git@github.com:o/r.git``, monorepo
+    subpaths (``github.com/o/r/tree/main/packages/x``) and, for npm's ``repository``
+    field, the ``o/r`` / ``github:o/r`` shorthands."""
+    if not isinstance(url, str) or not url.strip():
+        return None
+    m = _GH_SLUG_RE.search(url)
+    if m:
+        return m.group(1).lower()
+    if allow_shorthand:
+        m = _SHORTHAND_RE.match(url.strip())
+        if m and ":" not in url.replace("github:", ""):
+            return m.group(1).lower()
+    return None
+
+
+async def _published_pkg_meta(ecosystem: str, name: str) -> tuple[list[str], dict | None]:
+    """The GitHub ``owner/repo`` slugs a PUBLISHED npm/PyPI/crates package declares as
+    its source (repository field first, then homepage/project URLs), plus the npm
+    latest-version manifest (None elsewhere). ``([], None)`` when the package doesn't
+    exist or the registry can't be reached."""
+    urls: list[tuple[str, bool]] = []  # (url, shorthand allowed)
+    manifest: dict | None = None
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
             if ecosystem == "pypi":
                 resp = await client.get(f"https://pypi.org/pypi/{name}/json")
                 if resp.status_code != 200:
-                    return None
+                    return [], None
                 info = (resp.json() or {}).get("info", {}) or {}
-                urls = [v for v in (info.get("project_urls") or {}).values()
+                urls = [(v, False) for v in (info.get("project_urls") or {}).values()
                         if isinstance(v, str)]
                 if isinstance(info.get("home_page"), str):
-                    urls.append(info["home_page"])
+                    urls.append((info["home_page"], False))
             elif ecosystem == "npm":
-                resp = await client.get(f"https://registry.npmjs.org/{name}")
+                # The latest-version manifest: small (the full packument for a big
+                # package is many MB) and it carries repository, deps, keywords, bin.
+                resp = await client.get(f"https://registry.npmjs.org/{name}/latest")
                 if resp.status_code != 200:
-                    return None
+                    return [], None
                 data = resp.json() or {}
-                repo_field = data.get("repository")
-                if isinstance(repo_field, str):
-                    urls.append(repo_field)
-                elif isinstance(repo_field, dict) and isinstance(repo_field.get("url"), str):
-                    urls.append(repo_field["url"])
-                if isinstance(data.get("homepage"), str):
-                    urls.append(data["homepage"])
+                if isinstance(data, dict):
+                    manifest = data
+                    repo_field = data.get("repository")
+                    if isinstance(repo_field, str):
+                        urls.append((repo_field, True))
+                    elif isinstance(repo_field, dict) and isinstance(repo_field.get("url"), str):
+                        urls.append((repo_field["url"], True))
+                    if isinstance(data.get("homepage"), str):
+                        urls.append((data["homepage"], False))
+            elif ecosystem == "crates":
+                resp = await client.get(
+                    f"https://crates.io/api/v1/crates/{name}",
+                    headers={"User-Agent": "agentavow-scanner (https://agentavow.com)"},
+                )
+                if resp.status_code != 200:
+                    return [], None
+                crate = (resp.json() or {}).get("crate", {}) or {}
+                for k in ("repository", "homepage"):
+                    if isinstance(crate.get(k), str):
+                        urls.append((crate[k], False))
     except (httpx.HTTPError, ValueError, TypeError):
-        return None
-    for u in urls:
-        m = re.search(r"github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git|/|#|$)", u, re.IGNORECASE)
-        if m:
-            return m.group(1).lower()
-    return None
+        return [], None
+    slugs: list[str] = []
+    for u, shorthand in urls:
+        slug = _github_slug(u, allow_shorthand=shorthand)
+        if slug and slug not in slugs:
+            slugs.append(slug)
+    return slugs, manifest
+
+
+async def _published_pkg_repo_slug(ecosystem: str, name: str) -> str | None:
+    """The ``owner/repo`` (lowercased) that a PUBLISHED npm/PyPI package declares as its
+    source, or None if it declares none. Lets the artifact scan skip a diff when a repo's
+    manifest name collides with an UNRELATED published package of the same name."""
+    slugs, _ = await _published_pkg_meta(ecosystem, name)
+    return slugs[0] if slugs else None
+
+
+async def _verified_package_coordinate(
+    owner: str, repo: str, surface: str, name: str,
+) -> dict:
+    """``{"surface", "name", "is_mcp_server"}`` only when the published package's own
+    registry entry points back at ``owner/repo``; ``{}`` otherwise.
+
+    This gates the 1-click install on a repo page. A manifest name alone isn't proof:
+    vercel/next.js's private workspace root is named ``nextjs-project``, and an
+    unrelated npm package of that name exists. Fail-closed: no registry answer, no
+    install."""
+    if surface not in ("npm", "pypi", "crates") or not name:
+        return {}
+    slugs, manifest = await _published_pkg_meta(surface, name)
+    if f"{owner}/{repo}".lower() not in slugs:
+        return {}
+    return {
+        "surface": surface,
+        "name": name,
+        "is_mcp_server": _looks_like_mcp_server(surface, name, manifest),
+    }
 
 
 async def _maybe_scan_artifact(
@@ -3807,55 +3877,18 @@ async def _accurate_artifact_coord(
 async def _resolve_repo_package(
     owner: str, repo: str, tree: list[dict], token: str | None, ref: str | None,
 ) -> dict:
-    """Resolve the published (surface, registry-name) a repo maps to by READING its
-    root manifest — the accurate published name. Returns ``{}`` when the repo
-    publishes no recognizable package.
+    """Resolve the published package a repo maps to: the name its root manifest
+    declares, kept only when that package's registry entry points back at this repo.
+    Returns ``{}`` when the repo publishes no package we can tie to it.
 
-    Best-effort + fail-open: any fetch/parse error falls back to the repo name (which
-    npm/PyPI normalization usually accepts) or ``{}``."""
-    root_names = {Path(it["path"]).name.lower(): it["path"]
-                  for it in tree if "/" not in it["path"]}
-
-    async def _read(path: str) -> str | None:
-        try:
-            return await _fetch_file_content(owner, repo, path, token, ref)
-        except Exception:  # noqa: BLE001 — fail-open
-            return None
-
-    if "package.json" in root_names:
-        txt = await _read(root_names["package.json"])
-        if txt:
-            try:
-                name = (json.loads(txt) or {}).get("name")
-                if name and isinstance(name, str):
-                    return {"surface": "npm", "name": name}
-            except (ValueError, TypeError):
-                pass
-        return {"surface": "npm", "name": repo}
-
-    for mf in ("pyproject.toml", "setup.py", "setup.cfg"):
-        if mf in root_names:
-            txt = await _read(root_names[mf])
-            if txt:
-                # [project] name = "x" / [tool.poetry] name = "x" / setup(name="x").
-                m = re.search(r'(?mi)^\s*name\s*=\s*["\']([A-Za-z0-9][A-Za-z0-9._-]*)["\']', txt)
-                if m:
-                    return {"surface": "pypi", "name": m.group(1)}
-            return {"surface": "pypi", "name": repo}
-
-    if "cargo.toml" in root_names:
-        txt = await _read(root_names["cargo.toml"])
-        if txt:
-            # The [package] name — take the first name= after a [package] header.
-            m = re.search(
-                r'(?is)\[package\].*?^\s*name\s*=\s*["\']([A-Za-z0-9][A-Za-z0-9._-]*)["\']',
-                txt, re.MULTILINE,
-            )
-            if m:
-                return {"surface": "crates", "name": m.group(1)}
-        return {"surface": "crates", "name": repo}
-
-    return {}
+    Never guesses: a missing/unparseable manifest, a ``"private": true`` workspace
+    root, or a registry entry that names another repo (or none) all return ``{}``.
+    Fail-open on errors (returns ``{}``)."""
+    coord = await _accurate_artifact_coord(owner, repo, tree, token, ref)
+    if not coord:
+        return {}
+    surface, name, _version = coord
+    return await _verified_package_coordinate(owner, repo, surface, name)
 
 
 async def _maybe_verify_provenance(
@@ -4935,9 +4968,9 @@ async def scan_repo(
         try:
             art = result.artifact_scan if isinstance(result.artifact_scan, dict) else {}
             if art.get("ok") and art.get("name") and art.get("ecosystem") in ("npm", "pypi"):
-                result.package_coordinate = {
-                    "surface": art["ecosystem"], "name": art["name"],
-                }
+                result.package_coordinate = await _verified_package_coordinate(
+                    owner, repo, art["ecosystem"], art["name"],
+                )
             else:
                 result.package_coordinate = await _resolve_repo_package(
                     owner, repo, tree, token, ref,
