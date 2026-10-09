@@ -108,18 +108,38 @@ docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q runsc || {
 
 RUN_ID="beh_$(date +%s)_$$"
 NAME="${RUN_ID}"
-PCAP="$(mktemp /tmp/${RUN_ID}.XXXX.pcap)"
-LOGS="$(mktemp /tmp/${RUN_ID}.XXXX.log)"
-DNS_TXT="$(mktemp /tmp/${RUN_ID}.XXXX.dns)"
-HTTP_TXT="$(mktemp /tmp/${RUN_ID}.XXXX.http)"
+# Scratch files live on the DISK, not in /tmp: /tmp on the sandbox box is a 1.9 GB RAM
+# disk, and a run killed before its trap (SIGKILL by an SSM timeout) left its capture
+# behind. By 2026-10-08 leftovers filled /tmp, every new capture was truncated a few MB
+# in, and late traffic — the exercise itself — was silently missing: a vulnerable server
+# graded clean. Three guards: (1) disk-backed scratch dir, (2) sweep of anything older
+# than an hour from runs that never cleaned up (and legacy /tmp leftovers), (3) refuse to
+# run below a free-space floor, so a full disk is an ERROR, never a false clean.
+WORK_DIR="/var/tmp/agentavow-beh"
+mkdir -p "$WORK_DIR" 2>/dev/null && chmod 700 "$WORK_DIR" 2>/dev/null
+find "$WORK_DIR" -maxdepth 1 -name 'beh_*' -mmin +60 -delete 2>/dev/null || true
+find /tmp -maxdepth 1 -name 'beh_*' -mmin +60 -delete 2>/dev/null || true
+MIN_FREE_MB=1024
+FREE_MB="$(df -Pm "$WORK_DIR" 2>/dev/null | awk 'NR==2 {print $4}')"
+case "$FREE_MB" in ''|*[!0-9]*) FREE_MB=0 ;; esac
+if [ "$FREE_MB" -lt "$MIN_FREE_MB" ]; then
+  echo "{\"error\":\"sandbox_disk_low\",\"free_mb\":$FREE_MB}"; exit 0
+fi
+PCAP="$(mktemp "$WORK_DIR/${RUN_ID}.XXXX.pcap")"
+LOGS="$(mktemp "$WORK_DIR/${RUN_ID}.XXXX.log")"
+DNS_TXT="$(mktemp "$WORK_DIR/${RUN_ID}.XXXX.dns")"
+HTTP_TXT="$(mktemp "$WORK_DIR/${RUN_ID}.XXXX.http")"
+EXIT_FILE="$WORK_DIR/${RUN_ID}.exit"
 IMAGE_PULLED=false
 cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   [ -n "${NET:-}" ] && docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -f "$PCAP" "$LOGS" "$DNS_TXT" "$HTTP_TXT" /tmp/${RUN_ID}.exit >/dev/null 2>&1 || true
+  kill "${TCPDUMP_PID:-}" >/dev/null 2>&1 || true
+  rm -f "$PCAP" "$LOGS" "$DNS_TXT" "$HTTP_TXT" "$EXIT_FILE" >/dev/null 2>&1 || true
   if [ "$IMAGE_PULLED" = true ]; then docker rmi -f "$IMAGE" >/dev/null 2>&1 || true; fi
 }
 trap cleanup EXIT
+trap 'exit 143' INT TERM HUP  # run cleanup on a catchable kill too (SIGKILL → the sweep)
 
 # 0. Materialize shipped files (exec/mcp): the payload is decoded HERE, on the sandbox host,
 #    into a prefix of shell commands that writes each file into /work (a tmpfs) before the
@@ -170,8 +190,14 @@ fi
 NET=""
 BRIDGE="$(docker network inspect bridge -f '{{index .Options "com.docker.network.bridge.name"}}' 2>/dev/null)"
 [ -z "$BRIDGE" ] && BRIDGE=docker0
+# Capture OUTBOUND packets only (source = the bridge subnet). Every observation is
+# outbound — DNS queries, TLS ClientHello SNI, plaintext HTTP requests, the canary, the
+# SSRF sentinel SYN — while the inbound side is mostly package / browser downloads, which
+# made single captures 380–600 MB. Outbound-only keeps a capture to a few MB.
+SUBNET="$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>/dev/null | awk '{print $1}')"
+case "$SUBNET" in */*) SRCF="src net $SUBNET and " ;; *) SRCF="" ;; esac
 timeout "$TIMEOUT" tcpdump -l -nn -i "$BRIDGE" -w "$PCAP" \
-  '(udp port 53) or (tcp port 443) or (tcp port 80)' >/dev/null 2>&1 &
+  "${SRCF}((udp port 53) or (tcp port 443) or (tcp port 80))" >/dev/null 2>&1 &
 TCPDUMP_PID=$!
 sleep 0.3  # let tcpdump attach before the target does any egress
 
@@ -200,8 +226,8 @@ if [ -n "$CIP" ]; then PF="host $CIP and "; else PF=""; fi
 
 # 3. Wait for the target, bounded by the wall-clock timeout.
 TIMED_OUT=false
-if timeout "$TIMEOUT" docker wait "$NAME" >/tmp/${RUN_ID}.exit 2>/dev/null; then
-  EXIT_CODE="$(cat /tmp/${RUN_ID}.exit 2>/dev/null || echo -1)"
+if timeout "$TIMEOUT" docker wait "$NAME" >"$EXIT_FILE" 2>/dev/null; then
+  EXIT_CODE="$(cat "$EXIT_FILE" 2>/dev/null || echo -1)"
 else
   TIMED_OUT=true; EXIT_CODE=124; docker kill "$NAME" >/dev/null 2>&1 || true
 fi
