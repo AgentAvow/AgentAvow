@@ -170,7 +170,8 @@ class PublicScanResponse(BaseModel):
     # ("Do not connect"), plus the one condition that triggered it. Derived from the
     # applied behavioral block; provisional (decision_final=false) while the sandbox is
     # still running. UNSIGNED — rides beside `verdict`, not inside the JWS. Adoption is
-    # never an input; Certified is a separate axis (`certified`).
+    # never an input; Certified is a separate axis (`certified` = the signed gate,
+    # `certified_mark` = the displayed mark, only ever beside Safe to connect).
     decision: str = "review"
     decision_final: bool = True
     decision_reason: str = ""
