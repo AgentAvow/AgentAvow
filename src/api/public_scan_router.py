@@ -32,6 +32,7 @@ from src.api.rate_limit import (
 )
 from src.config import settings
 from src.database import get_db
+from src.scanner.behavioral import slots as _behavioral_slots
 from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_safe as _is_safe
 from src.scanner.verdict import verdict_label as _verdict_label
@@ -528,6 +529,8 @@ async def _run_and_cache_behavioral(
             _behavioral_cache_key(surface, name, expected_hosts, plan), json.dumps(block),
             ex=_BEHAVIORAL_CACHE_TTL,
         )
+        await _behavioral_slots.clear_pending(
+            _behavioral_cache_key(surface, name, expected_hosts, plan))
     except Exception:
         pass
     return block
@@ -642,18 +645,19 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     plan = _behavioral_plan(data, surface)
     run_kwargs = {"plan": plan, "env_names": _behavioral_env_names(data),
                   "readme_text": _behavioral_readme(data)}
+    member = _behavioral_cache_key(surface, str(name), declared, plan)
     if force:
-        lease = await _acquire_behavioral_slot()
-        if not lease:
+        handle = await _acquire_behavioral_slot()
+        if handle is None:
             await _bump_behavioral("slot_rejected")
-            return {"ran": False, "pending": True,
-                    "reason": "sandbox busy — every slot is in use; try again in a minute"}
-        try:
+            pos = await _behavioral_slots.enqueue(
+                member, _queue_payload(surface, str(name), declared, run_kwargs, force=True),
+                "normal")
+            return _queued_block(pos)
+        async with _behavioral_slots.holding(handle, lock_ttl=None):
             return await _run_and_cache_behavioral(
                 surface, str(name), declared, **run_kwargs) or {
                 "ran": False, "reason": "behavioral tier error"}
-        finally:
-            await _release_behavioral_slot(lease)
     cached = await _get_cached_behavioral(surface, str(name), declared, plan)
     if cached:
         await _bump_behavioral("cache_hit")
@@ -661,88 +665,133 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     await _bump_behavioral("cache_miss")
     # Not cached — run it in the background so it's ready next time, return pending now.
     # One detonation per coordinate at a time (lock), and a global cap on concurrent runs
-    # (slots): the sandbox is one small box. A request that finds no slot stays pending
-    # and the next request for the coordinate tries again.
-    if await _acquire_behavioral_lock(surface, str(name), declared, plan):
-        lease = await _acquire_behavioral_slot()
-        if lease:
-            asyncio.create_task(_run_in_slot(surface, str(name), declared, run_kwargs, lease))
-        else:
-            await _bump_behavioral("slot_rejected")
-            await _release_behavioral_lock(surface, str(name), declared, plan)
-    return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
+    # (slots): the sandbox is one small box. A request that finds no slot is QUEUED and
+    # starts when a slot frees. Who is asking sets the priority: a viewer is normal, the
+    # catalog re-score (``slots.low_priority()``) is low.
+    priority = _behavioral_slots.current_priority()
+    payload = _queue_payload(surface, str(name), declared, run_kwargs)
+    outcome = await _start_behavioral_payload(payload, priority, check_cache=False)
+    if outcome in ("started", "locked"):
+        await _behavioral_slots.pending_age(member)
+        return _running_block()
+    if priority == "normal":  # a real request turned away (low work waiting is normal)
+        await _bump_behavioral("slot_rejected")
+    pos = await _behavioral_slots.enqueue(member, payload, priority)
+    if priority == "normal" and await _behavioral_slots.pending_age(member) \
+            > _behavioral_slots.PENDING_MAX_AGE:
+        await _bump_behavioral("pending_expired")
+        return {"ran": False, "pending": False, "state": "unavailable",
+                "reason": BEHAVIORAL_UNAVAILABLE_REASON}
+    return _queued_block(pos)
+
+
+BEHAVIORAL_RUNNING_REASON = "analysis running — reload in ~1 min"
+BEHAVIORAL_UNAVAILABLE_REASON = "sandbox unavailable, static analysis only"
+
+
+def _running_block() -> dict:
+    return {"ran": False, "pending": True, "state": "running",
+            "reason": BEHAVIORAL_RUNNING_REASON}
+
+
+def _queued_block(position: int | None) -> dict:
+    """Pending because every sandbox slot is busy (not because a run is going)."""
+    out = {"ran": False, "pending": True, "state": "queued",
+           "reason": "waiting for a sandbox slot — every slot is in use"}
+    if position is not None:
+        out["queue_position"] = int(position) + 1
+        out["reason"] += f"; queued at position {int(position) + 1}"
+    return out
+
+
+_QUEUE_README_LIMIT = 64_000  # = runner._README_LIMIT; the runner never reads past it
+
+
+def _queue_payload(surface: str, name: str, declared: set[str] | None, run_kwargs: dict,
+                   *, force: bool = False) -> dict:
+    """Everything a queued run needs to start later, JSON-safe."""
+    kw = dict(run_kwargs or {})
+    if isinstance(kw.get("readme_text"), str):
+        kw["readme_text"] = kw["readme_text"][:_QUEUE_README_LIMIT]
+    out = {"surface": surface, "name": str(name), "declared": sorted(declared or []),
+           "run_kwargs": kw}
+    if force:
+        out["force"] = True
+    return out
+
+
+async def _start_behavioral_payload(payload: dict, priority: str = "normal", *,
+                                    check_cache: bool = True) -> str:
+    """Start a background run for a queue payload. Returns ``started``, ``cached``
+    (already have a block; a forced payload skips this check), ``locked`` (a run for
+    the coordinate is in flight) or ``no_slot``. Never raises."""
+    try:
+        surface, name = str(payload["surface"]), str(payload["name"])
+        declared = set(payload.get("declared") or [])
+        run_kwargs = dict(payload.get("run_kwargs") or {})
+    except (KeyError, TypeError, AttributeError):
+        return "invalid"
+    plan = run_kwargs.get("plan")
+    if check_cache and not payload.get("force") and await _get_cached_behavioral(
+            surface, name, declared, plan):
+        return "cached"
+    if not await _acquire_behavioral_lock(surface, name, declared, plan):
+        return "locked"
+    lock_key = _behavioral_cache_key(surface, name, declared, plan) + ":lock"
+    handle = await _acquire_behavioral_slot(priority, lock_key=lock_key)
+    if handle is None:
+        await _release_behavioral_lock(surface, name, declared, plan)
+        return "no_slot"
+    _behavioral_slots.spawn(
+        _run_in_slot(surface, name, declared, run_kwargs, handle, priority=priority))
+    return "started"
+
+
+async def _drain_behavioral_queue() -> int:
+    """Start queued runs while slots are free (called when a slot frees and by the
+    periodic loop). Returns runs started."""
+    from src.config import settings
+    if not getattr(settings, "scanner_behavioral_enabled", False):
+        return 0
+    return await _behavioral_slots.drain(_start_behavioral_payload)
 
 
 async def _run_in_slot(surface: str, name: str, declared: set[str], run_kwargs: dict,
-                       lease: str | None = None) -> None:
+                       handle: object = None, *, priority: str = "normal") -> None:
+    """The background run. Holds ``handle`` (heartbeat, compare-and-delete release).
+    Cancelled at shutdown: the coordinate goes back on the queue and its lock is freed
+    so it runs again after the restart. Otherwise the next queued run starts."""
+    plan = (run_kwargs or {}).get("plan")
     try:
-        await _run_and_cache_behavioral(surface, name, declared, **run_kwargs)
-    finally:
-        await _release_behavioral_slot(lease)
+        async with _behavioral_slots.holding(handle, lock_ttl=_BEHAVIORAL_LOCK_TTL):
+            await _run_and_cache_behavioral(surface, name, declared, **run_kwargs)
+    except asyncio.CancelledError:
+        try:
+            await _release_behavioral_lock(surface, name, declared, plan)
+            await _behavioral_slots.enqueue(
+                _behavioral_cache_key(surface, name, declared, plan),
+                _queue_payload(surface, name, declared, run_kwargs), priority)
+        except BaseException:  # noqa: BLE001 — shutdown is best effort
+            pass
+        raise
+    except Exception:  # noqa: BLE001 — a background task has nobody to raise to
+        logger.exception("behavioral background run failed for %s:%s", surface, name)
+    await _drain_behavioral_queue()
 
 
-# Global sandbox concurrency cap: a Redis sorted set of LEASES (member = a random lease id,
-# score = the unix time it expires). Each run holds its own lease and removes it when done.
-# A run that never finishes (the container was killed by a deploy mid-run) cannot wedge the
-# cap: its lease simply expires, and expired leases are swept on every acquire. This
-# replaces a shared INCR/DECR counter whose TTL was refreshed by every attempt — including
-# rejected ones — so a count leaked by a restart was kept alive by the very requests it
-# turned away and blocked the sandbox until traffic stopped for 10 minutes (found
-# 2026-10-08 after a deploy: "slots 2", zero runs, every scan stuck on pending).
-_BEHAVIORAL_SLOTS_KEY = "behavioral:slots:leases"
-_BEHAVIORAL_SLOT_TTL = 600  # > the longest run (lock TTL 240 s); a dead run frees its slot by then
+async def _acquire_behavioral_slot(priority: str = "normal", *, lock_key: str = ""):
+    """A ``slots.SlotHandle`` or None. Normal fails OPEN on a Redis error (see
+    ``slots.acquire_slot``)."""
+    return await _behavioral_slots.acquire_slot(priority, lock_key=lock_key)
 
 
-async def _take_slot_lease(free_after: int = 0) -> str | None:
-    """Take a lease when, counting it, at most ``max_concurrent - free_after`` leases are
-    live; return its id, else None. Add-then-count, so two racing takers can both back
-    off (conservative) but never both exceed the cap. Raises on Redis errors — callers
-    choose fail-open or fail-closed."""
-    import secrets as _secrets
-
-    from src.config import settings
-    from src.redis_client import get_redis
-    limit = int(getattr(settings, "scanner_behavioral_max_concurrent", 2) or 2)
-    r = get_redis()
-    now = time.time()
-    await r.zremrangebyscore(_BEHAVIORAL_SLOTS_KEY, "-inf", now)
-    lease = _secrets.token_hex(8)
-    await r.zadd(_BEHAVIORAL_SLOTS_KEY, {lease: now + _BEHAVIORAL_SLOT_TTL})
-    await r.expire(_BEHAVIORAL_SLOTS_KEY, _BEHAVIORAL_SLOT_TTL * 2)
-    if int(await r.zcard(_BEHAVIORAL_SLOTS_KEY)) > limit - free_after:
-        await r.zrem(_BEHAVIORAL_SLOTS_KEY, lease)
-        return None
-    return lease
-
-
-async def _acquire_behavioral_slot() -> str | None:
-    """A lease id when a sandbox slot is free (truthy), else None. Fails OPEN: if Redis
-    is unreachable the run proceeds with a placeholder lease."""
-    try:
-        return await _take_slot_lease()
-    except Exception:
-        return "unleased"
-
-
-async def _release_behavioral_slot(lease: str | None = None) -> None:
-    if not lease or lease == "unleased":
-        return
-    try:
-        from src.redis_client import get_redis
-        await get_redis().zrem(_BEHAVIORAL_SLOTS_KEY, lease)
-    except Exception:
-        pass
+async def _release_behavioral_slot(handle: object = None) -> None:
+    await _behavioral_slots.release_slot(handle)
 
 
 async def behavioral_slots_in_use() -> int:
     """Live (unexpired) leases — for the admin dashboard and ops checks."""
-    try:
-        from src.redis_client import get_redis
-        r = get_redis()
-        await r.zremrangebyscore(_BEHAVIORAL_SLOTS_KEY, "-inf", time.time())
-        return int(await r.zcard(_BEHAVIORAL_SLOTS_KEY))
-    except Exception:
-        return 0
+    return await _behavioral_slots.slots_in_use()
 
 
 async def _release_behavioral_lock(surface: str, name: str, expected_hosts: set[str] | None,
@@ -767,6 +816,8 @@ async def _bump_behavioral(name: str, by: int = 1) -> None:
         k = f"{_BM}:{name}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
         await r.incrby(k, by)
         await r.expire(k, _BM_TTL)
+        if name == "slot_rejected":  # lifetime total feeds the slot watchdog
+            await r.incrby(f"{_BM}:total:{name}", by)
     except Exception:
         pass
 
@@ -2010,6 +2061,12 @@ async def public_scan(
     - ``blocked`` (0-10): execution denied
     """
     full_name = f"{owner}/{repo}"
+    # Internal callers (catalog re-score, gateway, claims, sandbox, wallet lookup) call
+    # this function directly; an omitted parameter is then FastAPI's ``Query(False)``
+    # object, which is TRUTHY — it silently forced a fresh scan plus an inline sandbox
+    # run on every such call. Only a real bool counts.
+    force = force if isinstance(force, bool) else False
+    behavioral = behavioral if isinstance(behavioral, bool) else False
 
     # Validate inputs
     if not owner.isalnum() and not all(c.isalnum() or c in "-_." for c in owner):

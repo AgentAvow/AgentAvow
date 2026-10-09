@@ -979,6 +979,9 @@ type ExerciseData = {
 }
 type BehavioralData = {
   ran: boolean; pending?: boolean; timed_out?: boolean; reason?: string
+  /** Why it is pending: a run is going, or every sandbox slot is busy and it is queued.
+   * `unavailable` = no longer pending; the static result is final. */
+  state?: 'running' | 'queued' | 'unavailable'; queue_position?: number
   /** `plan: "live-probe"` blocks are advisory: reported, never scored, no attestation */
   advisory?: boolean; notes?: string[]; observed_at?: string
   egress_hosts?: string[]; unexpected_egress?: string[]; declared_egress?: string[]; vendor_egress?: string[]; fs_writes_sample?: string[]
@@ -1096,6 +1099,8 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
         <div className="mt-3 flex items-center gap-2 text-[12.5px]" aria-live="polite">
           {mut.isPending ? (
             <><span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" /><span className="text-text-muted">Running now in the sandbox…</span></>
+          ) : stillPending && b?.state === 'queued' ? (
+            <><span className="inline-block w-2 h-2 rounded-full bg-warning" /><span className="text-text-muted">Waiting for a sandbox slot{b.queue_position ? ` (position ${b.queue_position} in the queue)` : ''} — every slot is busy. The static result above stands; this panel updates by itself.</span></>
           ) : stillPending ? (
             waited < 300 ? (
               <><span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" /><span className="text-text-muted">Running in the sandbox · {waited}s — this panel updates by itself (usually under a minute)</span></>

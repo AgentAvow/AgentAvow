@@ -126,7 +126,9 @@ def verdict_label(safe: bool) -> str:
 # (``is_advisory_block``), a run that did not happen, needed credentials or timed out
 # contributes no finding. A capability (``kind == "capability"``) is never a defect.
 # While ``behavioral.pending`` is true the decision is provisional (``final=False``) and
-# the reason says the sandbox is still running.
+# the reason says the sandbox is still running (or, ``state == "queued"``, waiting for a
+# slot). The API stops saying pending after a while (``slots.PENDING_MAX_AGE``), so a
+# busy or down sandbox can't keep a decision provisional for hours.
 #
 # UNSIGNED: the decision rides beside the signed verdict; it is not in the JWS.
 # TS twin: ``decide()`` in ``web/src/components/trust/gradeSystem.ts`` — the two must
@@ -140,6 +142,9 @@ DECISION_VALUES = (DECISION_SAFE, DECISION_REVIEW, DECISION_DO_NOT_CONNECT)
 REVIEW_SCORE_FLOOR = 51  # below this, accumulated findings alone mean "review"
 THIN_COVERAGE_FILES = 8  # fewer static files than this, with nothing found = thin
 PENDING_SUFFIX = "; sandbox still running"
+# Pending because every sandbox slot is busy (``behavioral.state == "queued"``), not
+# because a run is going. Past the pending age limit the API stops saying pending.
+QUEUED_SUFFIX = "; waiting for a sandbox slot"
 THIN_REASON = "nothing found; little code to inspect"
 # A live MCP server scan reads the served tool definitions only (files = tools).
 THIN_REASON_REMOTE_MCP = "tool definitions clean; server code not inspected"
@@ -321,8 +326,11 @@ def decide(data: dict) -> Decision:
     b_findings = [f for f in ((b or {}).get("findings") or []) if isinstance(f, dict)] \
         if b_live else []
 
+    suffix = "" if not pending else (
+        QUEUED_SUFFIX if b and b.get("state") == "queued" else PENDING_SUFFIX)
+
     def done(decision: str, reason: str) -> Decision:
-        return Decision(decision, not pending, reason + (PENDING_SUFFIX if pending else ""))
+        return Decision(decision, not pending, reason + suffix)
 
     # Dependency advisories are never decision inputs, but the totals beside the reason
     # count them; a reason that counts findings names them too, so the two never seem

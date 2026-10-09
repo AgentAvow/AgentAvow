@@ -213,22 +213,33 @@ async def apply_corpus_edit(
 
 @contextlib.asynccontextmanager
 async def hold_slot(*, wait_s: float | None = None, poll_s: float = 10.0):
-    """Acquire one of the global sandbox slots (the same counter the public scan path
-    uses), waiting up to ``wait_s`` for one to free up. Released on exit."""
-    from src.api.public_scan_router import _acquire_behavioral_slot, _release_behavioral_slot
+    """Acquire one of the global sandbox slots (the same per-slot keys the public scan
+    path uses), waiting up to ``wait_s`` for one to free up. Heartbeats while held;
+    released on exit (compare-and-delete), then the sandbox queue gets a chance."""
+    from src.api.public_scan_router import (
+        _acquire_behavioral_slot,
+        _drain_behavioral_queue,
+        _release_behavioral_slot,
+    )
     from src.config import settings
+    from src.scanner.behavioral.slots import start_heartbeat
 
     budget = float(wait_s if wait_s is not None
                    else getattr(settings, "behavioral_eval_slot_wait_sec", 600))
     deadline = time.monotonic() + budget
-    while not (lease := await _acquire_behavioral_slot()):
+    while not (handle := await _acquire_behavioral_slot(lock_key=RUNNING_KEY)):
         if time.monotonic() >= deadline:
             raise NoSandboxSlotError(f"no sandbox slot within {budget:.0f}s")
         await asyncio.sleep(poll_s)
+    hb = start_heartbeat(handle)
     try:
         yield
     finally:
-        await _release_behavioral_slot(lease)
+        if hb is not None:
+            hb.cancel()
+        await _release_behavioral_slot(handle)
+        with contextlib.suppress(Exception):
+            await _drain_behavioral_queue()
 
 
 # ---------------------------------------------------------------------------

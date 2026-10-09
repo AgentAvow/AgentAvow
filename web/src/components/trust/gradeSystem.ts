@@ -178,6 +178,8 @@ export interface Decision {
 export const REVIEW_SCORE_FLOOR = 51
 export const THIN_COVERAGE_FILES = 8
 export const PENDING_SUFFIX = '; sandbox still running'
+/** Pending because every sandbox slot is busy (`behavioral.state === 'queued'`). */
+export const QUEUED_SUFFIX = '; waiting for a sandbox slot'
 export const THIN_REASON = 'nothing found; little code to inspect'
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
@@ -282,8 +284,9 @@ export function decide(input: unknown): Decision {
   const bLive = !!(b && b.ran && !b.pending && !(b.plan === 'live-probe' || b.advisory === true))
   const bFindings = bLive && b ? asList(b.findings) : []
 
+  const suffix = !pending ? '' : (b && b.state === 'queued' ? QUEUED_SUFFIX : PENDING_SUFFIX)
   const done = (decision: DecisionValue, reason: string): Decision =>
-    ({ decision, final: !pending, reason: reason + (pending ? PENDING_SUFFIX : '') })
+    ({ decision, final: !pending, reason: reason + suffix })
   const sev = (i: Obj) => String(i.severity ?? '').toLowerCase()
 
   // Dependency advisories never decide, but the totals count them: a reason that counts

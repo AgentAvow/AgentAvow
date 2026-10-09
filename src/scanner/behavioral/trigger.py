@@ -18,16 +18,17 @@ sandbox runs for this scan":
   its own and the next viewer re-triggers.
 
 * ``enqueue_behavioral`` — the one entry point for starting a background run. A
-  ``normal`` run takes a slot exactly like the viewer path; a ``low`` run (the
-  catalog backfill, ``src/jobs/behavioral_backfill.py``) only takes a slot when at
-  least one would remain free for real scans, and is ``deferred`` otherwise.
+  ``normal`` run (watch triggers) takes a slot exactly like the viewer path; a ``low``
+  run (catalog re-score, the backfill in ``src/jobs/behavioral_backfill.py``) only
+  takes slots 1.. while slot 0 is free (``slots.py``). With no slot the coordinate
+  joins the sandbox queue (``queued``); the backfill opts out (``deferred``) because
+  it is itself a queue.
 
 Every function here is fail-open: a Redis blip or a malformed scan dict means "no
 run this time", never an exception into the scheduler loops.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 # ``_behavioral_target`` on the shaped scan data, not by the surface alone.
 SANDBOX_SURFACES = ("npm", "pypi", "docker", "openclaw", "github")
 
-ENQUEUE_OUTCOMES = ("started", "cached", "locked", "deferred", "ineligible")
+ENQUEUE_OUTCOMES = ("started", "cached", "locked", "queued", "deferred", "ineligible")
 
 
 # ── scan-cache coordinates ──────────────────────────────────────────────────
@@ -170,15 +171,12 @@ async def invalidate_behavioral_cache(surface: str, name: str) -> int:
 
 
 # ── enqueue ─────────────────────────────────────────────────────────────────
-async def _acquire_low_priority_slot() -> str | None:
-    """Take a sandbox slot lease only when at least one slot stays free for real scans:
-    live-after-take must be <= max_concurrent - 1 (with max 2: only when 0 are live).
+async def _acquire_low_priority_slot():
+    """A slot for a low-priority run, or None: only slots 1.. and only while slot 0 is
+    free, so one slot always stays open for real scans (``slots.acquire_slot``).
     Fails CLOSED — a low-priority run never guesses at capacity."""
-    from src.api.public_scan_router import _take_slot_lease
-    try:
-        return await _take_slot_lease(free_after=1)
-    except Exception:
-        return None
+    from src.scanner.behavioral.slots import acquire_slot
+    return await acquire_slot("low")
 
 
 async def _bump(name: str) -> None:
@@ -186,20 +184,24 @@ async def _bump(name: str) -> None:
     await _bump_behavioral(name)
 
 
-async def enqueue_behavioral(data: dict, *, reason: str, priority: str = "normal") -> str:
+async def enqueue_behavioral(data: dict, *, reason: str, priority: str = "normal",
+                             queue: bool = True) -> str:
     """Start a background sandbox run for a scan's coordinate, resolved exactly like
     ``_behavioral_block`` (same target, plan, declared egress, cache key, lock, slot).
 
     Returns one of ``started`` (a run is now in flight), ``cached`` (a block already
     exists — nothing to do), ``locked`` (a run for this coordinate is already in
-    flight), ``deferred`` (no slot: for ``normal`` every slot is busy, for ``low`` fewer
-    than one slot would remain free), ``ineligible`` (tier off / nothing to install).
+    flight), ``queued`` (no slot; the coordinate waits in the sandbox queue and starts
+    when one frees), ``deferred`` (no slot and ``queue=False``: the backfill retries on
+    its next pass), ``ineligible`` (tier off / nothing to install). A ``normal`` run
+    takes any free slot; a ``low`` run only slots 1.. while slot 0 is free.
 
     Counts ``ag:metrics:behavioral:trigger:<reason>`` (calls) and
     ``trigger:<reason>:<outcome>`` per UTC day.
     """
     from src.api import public_scan_router as psr
     from src.config import settings
+    from src.scanner.behavioral import slots
 
     if priority not in ("normal", "low"):
         raise ValueError(f"priority must be 'normal' or 'low', got {priority!r}")
@@ -218,25 +220,24 @@ async def enqueue_behavioral(data: dict, *, reason: str, priority: str = "normal
     name = str(name)
     declared = psr._declared_egress(data)
     plan = psr._behavioral_plan(data, surface)
-    if await psr._get_cached_behavioral(surface, name, declared, plan):
-        return await _done("cached")
-    if not await psr._acquire_behavioral_lock(surface, name, declared, plan):
-        return await _done("locked")
-    if priority == "low":
-        lease = await _acquire_low_priority_slot()
-    else:
-        lease = await psr._acquire_behavioral_slot()
-    if not lease:
-        await psr._release_behavioral_lock(surface, name, declared, plan)
-        if priority == "normal":
-            await psr._bump_behavioral("slot_rejected")
-        return await _done("deferred")
     run_kwargs = {"plan": plan, "env_names": psr._behavioral_env_names(data),
                   "readme_text": psr._behavioral_readme(data)}
-    asyncio.create_task(psr._run_in_slot(surface, name, declared, run_kwargs, lease))
-    logger.info("behavioral run enqueued (%s, %s priority): %s:%s plan=%s",
-                reason, priority, surface, name, plan)
-    return await _done("started")
+    payload = psr._queue_payload(surface, name, declared, run_kwargs)
+    outcome = await psr._start_behavioral_payload(payload, priority)
+    if outcome == "started":
+        logger.info("behavioral run enqueued (%s, %s priority): %s:%s plan=%s",
+                    reason, priority, surface, name, plan)
+        return await _done("started")
+    if outcome in ("cached", "locked"):
+        return await _done(outcome)
+    # no slot
+    if priority == "normal":
+        await psr._bump_behavioral("slot_rejected")
+    if not queue or (priority == "low" and slots.max_slots() < 2):
+        return await _done("deferred")  # (a low run can never get a slot when max is 1)
+    pos = await slots.enqueue(psr._behavioral_cache_key(surface, name, declared, plan),
+                              payload, priority)
+    return await _done("queued" if pos is not None else "deferred")
 
 
 # ── on-change hooks (called by the re-scan loops) ───────────────────────────
@@ -264,7 +265,10 @@ async def on_scan_change(
             dropped = await invalidate_behavioral_cache(s, str(n))
             logger.info("%s:%s changed (%s) — dropped %d cached sandbox block(s)",
                         s, n, ", ".join(changed), dropped)
-            return await enqueue_behavioral(shaped, reason="version_change")
+            # A catalog re-score is background work (LOW); a watched tool's change
+            # is what a watcher is waiting for (NORMAL).
+            return await enqueue_behavioral(
+                shaped, reason="version_change", priority="normal" if watched else "low")
         if watched:
             block = await psr._get_cached_behavioral(
                 s, str(n), psr._declared_egress(shaped), psr._behavioral_plan(shaped, s))
