@@ -45,8 +45,8 @@ _HTTP_TIMEOUT = 12.0
 _OSV_BATCH = 1000            # OSV querybatch limit per request
 _MAX_HYDRATE = 600           # vuln records fetched for fix + severity
 _HYDRATE_CONCURRENCY = 16
-_VULN_TIME_BUDGET = 35.0     # seconds for the whole CVE check
-_PROV_TIME_BUDGET = 20.0     # seconds for the signature lookups
+_VULN_TIME_BUDGET = 12.0     # seconds for the whole CVE check (hard cap, see below)
+_PROV_TIME_BUDGET = 8.0      # seconds for the signature lookups
 
 _SIG_ANNOTATION = "dev.cosignproject.cosign/signature"
 _CERT_ANNOTATION = "dev.sigstore.cosign/certificate"
@@ -577,8 +577,13 @@ async def apply_docker_image_extras(result, fetched) -> None:
     try:
         async with httpx.AsyncClient(headers={"User-Agent": "AgentAvow-Scanner"}) as client:
             if image.get("packages"):
-                findings, vulns = await check_image_vulnerabilities(
-                    image["packages"], image.get("os_release") or {}, client=client)
+                try:
+                    # Hard cap: a slow OSV answer drops the CVE check, never the scan.
+                    findings, vulns = await asyncio.wait_for(check_image_vulnerabilities(
+                        image["packages"], image.get("os_release") or {}, client=client),
+                        timeout=_VULN_TIME_BUDGET + 1)
+                except asyncio.TimeoutError:
+                    findings, vulns = [], {"ok": False, "error": "vulnerability lookup timed out"}
                 if vulns.get("ok"):
                     result.findings = result.findings + [Finding(**f) for f in findings]
                     counts = vulns.get("counts") or {}
@@ -599,11 +604,14 @@ async def apply_docker_image_extras(result, fetched) -> None:
                         snaps.update(vulns.get("db_snapshots") or {})
                         result.coverage["db_snapshots"] = snaps
             if getattr(settings, "scanner_verify_provenance", False):
-                res = await asyncio.wait_for(
-                    analyze_image_provenance(image, display=fetched.name, client=client),
-                    timeout=_PROV_TIME_BUDGET,
-                )
-                _apply_provenance_result(result, res, res.claimed_repo)
+                try:
+                    res = await asyncio.wait_for(
+                        analyze_image_provenance(image, display=fetched.name, client=client),
+                        timeout=_PROV_TIME_BUDGET,
+                    )
+                    _apply_provenance_result(result, res, res.claimed_repo)
+                except asyncio.TimeoutError:
+                    logger.warning("image provenance lookup timed out for %s", fetched.name)
     except Exception:  # noqa: BLE001 — fail-open
         logger.warning("docker image extras failed for %s", getattr(fetched, "name", "?"),
                        exc_info=True)
