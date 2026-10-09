@@ -35,6 +35,7 @@ CAP_FS_READ = "filesystem:read"
 CAP_FS_WRITE = "filesystem:write"
 CAP_PEM = "secret:pem_handling"
 CAP_HEX = "binary:hex_literal"
+CAP_INSTALLER = "install:remote_script"
 
 # Human labels for the capability taxonomy (the `capabilities` summary on a result).
 CAPABILITY_LABELS: dict[str, str] = {
@@ -46,6 +47,7 @@ CAPABILITY_LABELS: dict[str, str] = {
     CAP_FS_WRITE: "Writes files at runtime-chosen paths",
     CAP_PEM: "Handles PEM private-key markers (no key body present)",
     CAP_HEX: "Embeds long hex-escaped byte literals",
+    CAP_INSTALLER: "Ships a one-time installer script that downloads and runs a remote script",
 }
 
 _URL_RE = re.compile(r"https?://", re.IGNORECASE)

@@ -1250,11 +1250,7 @@ def _scan_result_to_dict(result: object) -> dict:
     # scored at a fraction, so a package isn't judged on its test-suite noise. Sort:
     # shipped first, then by severity, so the top of the (capped) list is the surface
     # an agent actually runs.
-    from src.scanner.scan import _is_nonshipped_path, _is_test_or_doc_file
-
-    def _is_shipped(path: str) -> bool:
-        return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
-
+    from src.scanner.scan import finding_is_shipped
     from src.scanner.verdict import finding_decides
 
     _sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -1269,7 +1265,7 @@ def _scan_result_to_dict(result: object) -> dict:
             "file_path": f.file_path,
             "line_number": f.line_number,
             "remediation": f.remediation or "",
-            "shipped": _is_shipped(f.file_path),
+            "shipped": finding_is_shipped(f),
             "kind": getattr(f, "kind", "defect") or "defect",
             "capability": getattr(f, "capability", "") or "",
             "installed": bool(getattr(f, "installed", True)),

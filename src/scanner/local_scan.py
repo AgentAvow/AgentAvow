@@ -38,13 +38,12 @@ from src.scanner.scan import (
     _dedupe_findings,
     _detect_language,
     _finding_is_blocking,
-    _is_nonshipped_path,
-    _is_test_or_doc_file,
     _load_allowlist,
     _scan_content,
     _scan_dependencies,
     _select_scan_files,
     _should_skip_path,
+    finding_is_shipped,
 )
 from src.scanner.verdict import Decision, certified_mark, decide
 from src.trust_tiers import trust_word, verdict_phrase
@@ -52,10 +51,10 @@ from src.trust_tiers import trust_word, verdict_phrase
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
-def _is_shipped(path: str) -> bool:
-    """False for test/doc/example paths — those score at a fraction, so the output
-    leads with the shipped surface an agent actually runs."""
-    return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
+def _is_shipped(f) -> bool:
+    """False for test/doc/example/infra findings — those score at a fraction, so the
+    output leads with the shipped surface an agent actually runs."""
+    return finding_is_shipped(f)
 
 # Skip files larger than ~1MB — matches the practical hosted fetch cap and keeps
 # a huge generated/vendored file from dominating the scan.
@@ -353,7 +352,7 @@ def result_to_dict(result: ScanResult) -> dict:
                 "file": f.file_path,
                 "line": f.line_number,
                 "remediation": f.remediation,
-                "shipped": _is_shipped(f.file_path),
+                "shipped": _is_shipped(f),
                 "kind": f.kind,
                 "capability": f.capability,
                 "installed": f.installed,
@@ -361,7 +360,7 @@ def result_to_dict(result: ScanResult) -> dict:
             # shipped findings first, then by severity — lead with what an agent runs
             for f in sorted(
                 result.findings,
-                key=lambda x: (not _is_shipped(x.file_path),
+                key=lambda x: (not _is_shipped(x),
                                _SEV_RANK.get(x.severity, 5)),
             )
         ],
@@ -488,7 +487,7 @@ def _print_human(result: ScanResult, stream=sys.stderr) -> None:
         print("  Context     : MCP server (fs_access/unsafe_exec discounted)", file=stream)
     top = sorted(
         [f for f in result.findings if f.severity in ("critical", "high")],
-        key=lambda x: (not _is_shipped(x.file_path), _SEV_RANK.get(x.severity, 5)),
+        key=lambda x: (not _is_shipped(x), _SEV_RANK.get(x.severity, 5)),
     )[:15]
     if top:
         print("\n  Top findings:", file=stream)

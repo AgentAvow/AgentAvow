@@ -132,6 +132,9 @@ class Finding:
     # Makefile / scripts/ / bench/ / tox.ini, or any file absent from the wheel).
     # Non-installed findings are capped at severity "info" and never block.
     installed: bool = True
+    # True when the finding sits in test-only code INSIDE an otherwise-shipped file (an
+    # inline Rust ``#[cfg(test)] mod``): graded like a finding under tests/.
+    test_code: bool = False
 
 
 @dataclass
@@ -334,10 +337,16 @@ def _finding_grade_weight(f) -> float:
     test conventions (foo_test.go, foo.test.ts, foo.spec.js) that live next to
     source — those are the tool's tests, not the surface an agent connects to.
     """
+    return 1.0 if finding_is_shipped(f) else _NONSHIPPED_FINDING_WEIGHT
+
+
+def finding_is_shipped(f) -> bool:
+    """Whether a finding sits in the shipped surface (the public ``shipped`` tag):
+    not a test/doc/example/benchmark path, not an infra/installer script, and not an
+    inline test module inside a shipped file."""
     path = f.file_path
-    if _is_nonshipped_path(path) or _is_test_or_doc_file(path):
-        return _NONSHIPPED_FINDING_WEIGHT
-    return 1.0
+    return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path)
+                or _is_unshipped_script(path) or getattr(f, "test_code", False))
 
 
 def _is_source_file(path: str) -> bool:
@@ -1593,6 +1602,8 @@ def _finding_is_blocking(f: object) -> bool:
     # short-circuits above / via _DEP_MAL_PENALTY). Only FIRST-PARTY shipped code blocks.
     if getattr(f, "category", "") in _DEP_CATEGORIES:
         return False
+    if getattr(f, "test_code", False):
+        return False
     path = getattr(f, "file_path", None)
     if not path:
         return True
@@ -1602,7 +1613,7 @@ def _finding_is_blocking(f: object) -> bool:
     # floors the score. Only genuinely-non-runtime code (tests/fixtures/docs/
     # examples/benchmarks, co-located test files) is exempt from the floor — that
     # noise is still weight-discounted elsewhere, it just can't hide a real critical.
-    return not _is_blocking_exempt_path(path)
+    return not (_is_blocking_exempt_path(path) or _is_unshipped_script(path))
 
 
 # Dirs that are truly never the runtime surface an agent connects to. STRICTER than
@@ -1700,6 +1711,62 @@ def _is_build_tooling_file(file_path: str) -> bool:
     return any(p in _BUILD_TOOLING_DIRS for p in parts)
 
 
+# Repo infrastructure a consumer never builds or runs: the project's own CI/release
+# machines (`infra/`, `ci/`, `*-runner/` bootstrap scripts, `scripts/release*`) and the
+# CI-config dirs. Limited to script/config files so an author can't park importable
+# source (.py/.js/.rs …) under `infra/` to dodge the floor.
+_CI_CONFIG_DIRS = frozenset({".github", ".gitlab", ".circleci", ".buildkite"})
+_INFRA_DIRS = frozenset({"infra", "ci", ".ci"})
+_SCRIPT_CONFIG_EXTS = frozenset({
+    ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd",
+    ".yml", ".yaml", ".tf", ".tfvars", ".hcl", ".toml", ".json", ".cfg", ".conf", ".ini",
+})
+
+
+def _is_script_or_config(file_path: str) -> bool:
+    return Path(file_path).suffix.lower() in _SCRIPT_CONFIG_EXTS
+
+
+def _is_infra_script(file_path: str) -> bool:
+    """True for a CI/release-infrastructure script or config file (see above)."""
+    if not _is_script_or_config(file_path):
+        return False
+    parts = [p.lower() for p in Path(file_path).parts[:-1]]
+    if any(p in _CI_CONFIG_DIRS or p in _INFRA_DIRS or p.endswith(("-runner", "_runner"))
+           for p in parts):
+        return True
+    # scripts/release.sh, scripts/release-mac.sh, scripts/release/notarize.sh
+    for i, p in enumerate(parts):
+        if p in ("scripts", "script"):
+            below = parts[i + 1:] + [Path(file_path).name.lower()]
+            if any(b.startswith("release") for b in below):
+                return True
+    return False
+
+
+# A standalone installer a user runs ONCE to install the product (`curl …/install.sh |
+# sh`): download_cli.sh, install.sh, get-foo.sh, install-foo.ps1 at the repo root or in
+# scripts/. It is how the tool is delivered, not code the tool runs.
+_INSTALLER_STEM_RE = re.compile(
+    r"^(?:install(?:er)?|download[-_]?cli|get[-_][\w.-]+|install[-_][\w.-]+)$")
+
+
+def _is_installer_script(file_path: str) -> bool:
+    p = Path(file_path)
+    if p.suffix.lower() not in (".sh", ".bash", ".zsh", ".ps1"):
+        return False
+    parts = [x.lower() for x in p.parts[:-1]]
+    if parts not in ([], ["scripts"], ["script"]):
+        return False
+    return bool(_INSTALLER_STEM_RE.match(p.stem.lower()))
+
+
+def _is_unshipped_script(file_path: str) -> bool:
+    """Infra/CI/release scripts and one-time installer scripts: never the runtime surface,
+    so their findings are downgraded, weighted like tests, and never block."""
+    return _is_infra_script(file_path) or _is_installer_script(file_path)
+
+
 def _is_infra_file(file_path: str) -> bool:
     """Check if a file is CI/infra config (graded like tests/docs, not shipped code).
 
@@ -1721,6 +1788,8 @@ def _is_infra_file(file_path: str) -> bool:
     # Build / developer tooling that never runs for a consumer (`pip install` does not
     # run the Makefile, tox, nox, or pre-commit): graded like CI config.
     if _is_build_tooling_file(file_path):
+        return True
+    if _is_unshipped_script(file_path):
         return True
     # Workflow YAMLs (e.g. under a workflows/ directory)
     if any(p == "workflows" for p in parts) and lname.endswith((".yml", ".yaml")):
@@ -1995,12 +2064,14 @@ def _scan_content(
     if allowlist is None:
         allowlist = set()
 
-    is_test_or_doc = _is_test_or_doc_file(file_path)
+    file_test_or_doc = _is_test_or_doc_file(file_path)
     # CI/infra files (#3) are graded like tests/docs so a Dockerfile / workflow recipe
     # can't dominate the grade with a critical.
     is_infra = _is_infra_file(file_path)
     # Findings in tests/docs/infra are downgraded (never suppressed).
-    is_downgraded = is_test_or_doc or is_infra
+    file_downgraded = file_test_or_doc or is_infra
+    is_test_or_doc, is_downgraded = file_test_or_doc, file_downgraded
+    is_installer = _is_installer_script(file_path)
     # Per-file language for language-specific pattern dispatch (#2).
     file_lang = _EXT_TO_LANG.get(Path(file_path).suffix.lower())
     # Manifest / skill files ARE the tool's instruction surface — never downgrade
@@ -2039,8 +2110,19 @@ def _scan_content(
     consumed_until = -1
     suppressed_lines: set[int] = set()
 
+    # Inline Rust unit tests (`#[cfg(test)] mod tests { … }`) compile only for
+    # `cargo test`: lines inside them are graded like a file under tests/.
+    test_lines: set[int] = set()
+    if file_lang == "rust" and not file_test_or_doc:
+        from src.scanner.rust_tests import rust_test_lines
+        test_lines = rust_test_lines(content)
+
     for line_num, line in enumerate(lines, 1):
         idx = line_num - 1
+        if test_lines:
+            in_test = idx in test_lines
+            is_test_or_doc = file_test_or_doc or in_test
+            is_downgraded = file_downgraded or in_test
         # Skip comments (basic heuristic)
         stripped = line.strip()
         if stripped.startswith(("#", "//", "*", "/*")):
@@ -2358,6 +2440,21 @@ def _scan_content(
                 # Downgrade in test/doc/infra files like other groups
                 if is_downgraded and effective_severity in ("critical", "high"):
                     effective_severity = "medium"
+                # A one-time installer piping a remote script to the shell is how the
+                # tool is delivered, reported as what it does, not as a defect.
+                if is_installer and name == "curl/wget piped to shell":
+                    from src.scanner.exec_classify import CAP_INSTALLER
+                    findings.append(Finding(
+                        category="dynamic_remote_load",
+                        name=name,
+                        severity="low",
+                        file_path=file_path,
+                        line_number=line_num,
+                        snippet=stripped[:120],
+                        kind="capability",
+                        capability=CAP_INSTALLER,
+                    ))
+                    break
                 findings.append(Finding(
                     category="dynamic_remote_load",
                     name=name,
@@ -2455,6 +2552,12 @@ def _scan_content(
             if f.line_number not in suppressed_lines
             or (f.kind == "defect" and f.severity in ("critical", "high"))
         ]
+
+    is_test_or_doc, is_downgraded = file_test_or_doc, file_downgraded
+    if test_lines:
+        for f in findings:
+            if f.line_number - 1 in test_lines:
+                f.test_code = True
 
     # Split fetch->exec across lines: a network read + an exec sink co-occurring in
     # one file is the classic rug-pull loader the per-line scan can't see. Fire only
