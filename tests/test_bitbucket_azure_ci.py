@@ -176,9 +176,11 @@ def test_wrapper_runs_each_path_and_posts(tmp_path, monkeypatch):
     posted = []
     monkeypatch.setattr(ci_bitbucket, "post_insights",
                         lambda ins, rid, env: posted.append(rid) or True)
+    before = Path.cwd()
     rc = ci_bitbucket.run({"BITBUCKET_CLONE_DIR": str(repo), "SCAN_PATHS": "a b",
                            "FAIL_ON": "do_not_connect"})
     assert rc == 0
+    assert Path.cwd() == before  # the wrapper restores the working directory
     assert posted == ["agentavow-a", "agentavow-b"]
     assert (repo / "agentavow-scan-a.json").is_file()
     assert (repo / "agentavow-summary-b.md").is_file()

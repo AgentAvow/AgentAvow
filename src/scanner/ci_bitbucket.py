@@ -111,8 +111,16 @@ def post_insights(insights: dict, report_id: str, env: dict[str, str]) -> bool:
 def run(env: dict[str, str] | None = None) -> int:
     env = dict(os.environ if env is None else env)
     root = env.get("BITBUCKET_CLONE_DIR")
+    cwd = os.getcwd()
     if root and Path(root).is_dir():
         os.chdir(root)
+    try:
+        return _run_paths(env)
+    finally:
+        os.chdir(cwd)
+
+
+def _run_paths(env: dict[str, str]) -> int:
     paths = (env.get("SCAN_PATHS") or ".").split()
     insights_on = _truthy(env.get("CODE_INSIGHTS"))
     worst = 0
