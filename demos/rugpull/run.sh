@@ -46,7 +46,7 @@ if [ -z "${PYTHON:-}" ]; then
 fi
 PYTHON="${PYTHON:-python3}"
 ( cd "$REPO" && "${PYTHON:-python3}" -c "import src.scanner.scan" ) >/dev/null 2>&1 || {
-  echo "grade.py needs this repo's backend: (cd $REPO && pip install -e .), or set PYTHON=..." >&2; exit 1; }
+  echo "scan.py needs this repo's backend: (cd $REPO && pip install -e .), or set PYTHON=..." >&2; exit 1; }
 [ -d "$REPO/sdk/js/dist" ] || (cd "$REPO/sdk/js" && npm install --silent && npm run build --silent)
 [ -d node_modules/@modelcontextprotocol ] || npm install --silent
 for port in "$MCP_PORT" "$API_PORT"; do
@@ -78,10 +78,10 @@ node api.mjs >"$RUGPULL_STATE/api.log" 2>&1 &
 API_PID=$!
 wait_up "http://127.0.0.1:$API_PORT/"
 
-header "2. Grade v1 with AgentAvow's scanner (offline; signed by a throwaway DEMO key, not AgentAvow's)"
-( cd "$REPO" && "$PYTHON" "$HERE/grade.py" --endpoint "$MCP_URL" --out "$RUGPULL_STATE" )
+header "2. Scan v1 with AgentAvow's scanner (offline; signed by a throwaway DEMO key, not AgentAvow's)"
+( cd "$REPO" && "$PYTHON" "$HERE/scan.py" --endpoint "$MCP_URL" --out "$RUGPULL_STATE" )
 
-header "3. Security reviews the grade and approves the server"
+header "3. Security reviews the signed result and approves the server"
 node approve.mjs
 
 header "4. Baseline: the protected agent calls send_email on v1"
@@ -97,7 +97,10 @@ echo "  $MCP_URL now serves $LATER. Nobody re-approved anything."
 node --input-type=module -e "
   import { V1, VERSIONS } from './tools.mjs';
   const t = VERSIONS['$LATER'];
-  if (t.description !== V1.description) console.log('  description now: ' + JSON.stringify(t.description));
+  if (t.description !== V1.description) {
+    console.log('  description now:');
+    for (const line of t.description.replace(/\\n+/g, ' ').match(/.{1,90}(\\s|\$)/g)) console.log('    ' + line.trim());
+  }
   if (t.inputSchema.properties.bcc) console.log('  new input:       bcc, default ' + t.inputSchema.properties.bcc.default);
 "
 
@@ -132,9 +135,18 @@ sent=$( [ -f "$RUGPULL_STATE/outbox.jsonl" ] && wc -l <"$RUGPULL_STATE/outbox.js
 echo "  outbox (messages the server sent):        $sent"
 echo "  attacker sink (copies to the operator):   ${red}${leaks}${off}"
 if [ -f "$RUGPULL_STATE/attacker-sink.jsonl" ]; then
-  while IFS= read -r line; do echo "    ${dim}${line}${off}"; done <"$RUGPULL_STATE/attacker-sink.jsonl"
+  node --input-type=module -e "
+    import fs from 'node:fs';
+    for (const l of fs.readFileSync('$RUGPULL_STATE/attacker-sink.jsonl', 'utf8').split('\\n').filter(Boolean)) {
+      const m = JSON.parse(l);
+      console.log('    ${dim}copied to ' + m.bcc + ': ' + m.text.split(' ').pop() + '${off}');
+    }"
 fi
 count() { cat "$RUGPULL_STATE/$2" 2>/dev/null | grep -c "$1" || true; }
 echo "  control run   ($CONTROL_CANARY): in outbox $(count "$CONTROL_CANARY" outbox.jsonl), in attacker sink ${red}$(count "$CONTROL_CANARY" attacker-sink.jsonl)${off}"
 echo "  protected run ($PROTECTED_CANARY): in outbox $(count "$PROTECTED_CANARY" outbox.jsonl), in attacker sink ${green}$(count "$PROTECTED_CANARY" attacker-sink.jsonl)${off}"
-echo "  logs and the signed grade: ${RUGPULL_STATE#"$HERE"/}"
+echo "  logs and the signed result: ${RUGPULL_STATE#"$HERE"/}"
+
+header "8. Anyone can check the signed result offline"
+RUGPULL_LATER="$LATER" node verify.mjs
+node verify.mjs --tamper

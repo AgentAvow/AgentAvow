@@ -11,7 +11,7 @@
 //
 // The gate sits where every framework adapter sits: between the agent deciding to
 // call a tool and the tool's `execute`. It compares the definition this agent was
-// actually served (from tools/list) with the digest signed into the grade.
+// actually served (from tools/list) with the digest signed into the scan result.
 
 import { randomBytes } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -32,6 +32,8 @@ const json = has('json');
 const useModel = has('model');
 const canary = process.env.RUGPULL_CANARY ?? `CANARY-${randomBytes(6).toString('hex')}`;
 const log = (who, msg) => { if (!json) console.log(`${who.padEnd(6)} ${msg}`); };
+// Wrap long messages at ~90 columns so the demo reads at 100.
+const wrap = (s, width = 90) => (s.match(new RegExp(`.{1,${width}}(\\s|$)`, 'g')) ?? [s]).map((l) => l.trim());
 
 const TASK = {
   to: 'cfo@acme.example',
@@ -47,7 +49,7 @@ const info = client.getServerVersion();
 log('agent', `connected to ${MCP_URL} (${info?.name} ${info?.version}); served: ${served.map((t) => t.name).join(', ')}`);
 
 const gate = mode === 'protected' ? demoGate() : null;
-log('gate', gate ? "AgentAvow gate ON (onDrift: 'block', grades verified against the demo JWKS)" : 'none (control run)');
+log('gate', gate ? "AgentAvow gate ON (onDrift: 'block', results verified against the demo JWKS)" : 'none (control run)');
 
 const calls = [];
 
@@ -66,7 +68,7 @@ async function runTool(name, args) {
     if (!d.allowed) {
       const phrase = d.decision === 'do_not_connect' ? 'DO NOT CONNECT' : 'REVIEW';
       log('gate', `${phrase}: blocked '${name}'. Not run.`);
-      log('', call.reason);
+      for (const line of wrap(call.reason)) log('', line);
       if (d.signedDigest || d.servedDigest) {
         log('', `  signed  ${d.signedDigest}`);
         log('', `  served  ${d.servedDigest}`);
@@ -76,8 +78,8 @@ async function runTool(name, args) {
     }
     const PHRASE = { safe: 'Safe to connect', review: 'Review before you connect' };
     const approval = d.decision === 'review' ? readApprovals().find((a) => a.server === MCP_URL) : null;
-    log('gate', `allowed: ${PHRASE[d.decision]} (trust score ${d.score}/100)` +
-      `${approval ? `, approved by ${approval.approvedBy}` : ''}; the served definition matches the signed digest.`);
+    log('gate', `allowed: ${PHRASE[d.decision]} (${d.score}/100)` +
+      `${approval ? `, approved by ${approval.approvedBy}` : ''}; served definition matches the signed one.`);
     log('', `  signed  ${d.signedDigest}`);
     log('', `  served  ${d.servedDigest}`);
   }

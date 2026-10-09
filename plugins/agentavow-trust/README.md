@@ -29,7 +29,7 @@ Scanning is free and needs no account.
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the answer before it goes ahead. | Chat, Cowork, Claude Code |
 | Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. "Do not connect": Claude Code asks you, with the answer as the reason. Anything else (Safe to connect; Review before you connect; not scannable): a one-line answer and the add proceeds. Never denies. | Claude Code, Cowork |
 | SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project) that it has not seen before, and the project's direct dependencies (package.json `dependencies`, requirements.txt, pyproject `[project].dependencies`; up to 15 per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns it off). Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many Safe / Review / Blocked, the one needing attention), and keeps one line per server and dependency for when you ask. Dependencies are already installed: their answer is advice, never a stop. | Claude Code, Cowork |
-| PreToolUse gate | Before each MCP tool call, checks the answer on file for that server. Denies a call to a server whose answer is "Do not connect" (and, as before, one in the blocked tier); asks before a tool whose definition changed since it was graded. "Review before you connect" never prompts. | Claude Code, Cowork |
+| PreToolUse gate | Before each MCP tool call, checks the answer on file for that server. Denies a call to a server whose answer is "Do not connect" (and, as before, one in the blocked tier); asks before a tool whose definition changed since it was scanned. "Review before you connect" never prompts. | Claude Code, Cowork |
 
 The session-start hook and the skill warn; a low score adds context and you decide.
 The gate is the one part that can stop a call, and by default only for a server whose
@@ -134,7 +134,7 @@ containing either:
 
 **It writes** one file, `~/.cache/agentavow/scanned.json`, so each server is scanned
 once: per server, the score, tier and grade, the signed per-tool digests, the report
-link, and when it was graded. A server AgentAvow cannot read (one that needs sign-in,
+link, and when it was scanned. A server AgentAvow cannot read (one that needs sign-in,
 for example) is reported once and retried after a week. Delete the file to scan
 everything again.
 

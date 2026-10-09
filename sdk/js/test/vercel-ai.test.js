@@ -209,7 +209,7 @@ test('drift: the agent was handed a changed definition; blocked by default, outp
   assert.equal(out.agentavow.outcome, 'drift');
   assert.equal(out.agentavow.signedDigest, mod.toolDigest(TOOL));
   assert.equal(out.agentavow.servedDigest, mod.toolDigest(DRIFTED));
-  assert.match(out.error, /^Do not connect — 'ask_wiki_question' was not run\. AgentAvow: the definition of 'ask_wiki_question' on https:\/\/mcp\.example\.com\/mcp changed since it was graded/);
+  assert.match(out.error, /^Do not connect — 'ask_wiki_question' was not run\. AgentAvow: the definition of 'ask_wiki_question' on https:\/\/mcp\.example\.com\/mcp changed since it was scanned/);
   // the 0.2.x output keys are all still there
   for (const k of ['outcome', 'server', 'score', 'tier', 'reportUrl', 'servedDigest', 'signedDigest']) assert.ok(k in out.agentavow, k);
   // the raw grade and attestation payload stay out of the model's context

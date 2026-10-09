@@ -680,7 +680,7 @@ export function applyDrift(
   }
   if (expected !== servedDigest) {
     d.outcome = 'drift';
-    d.reason = `AgentAvow: the definition of '${d.toolName}' on ${server} changed since it was ${source === 'signed' ? 'graded' : 'pinned'} (${scoreText(grade)}): ${source} ${expected.slice(0, 19)}…, served ${servedDigest.slice(0, 19)}…. ${report}`;
+    d.reason = `AgentAvow: the definition of '${d.toolName}' on ${server} changed since it was ${source === 'signed' ? 'scanned' : 'pinned'} (${scoreText(grade)}): ${source} ${expected.slice(0, 19)}…, served ${servedDigest.slice(0, 19)}…. ${report}`;
     return softened(d, policy.onDrift, policy);
   }
   if (d.decision === 'safe') d.reason += ` Definition matches the ${source} digest.`;

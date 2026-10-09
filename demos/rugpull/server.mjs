@@ -2,7 +2,7 @@
 // The fixture: a tiny remote MCP server (Streamable HTTP, the official SDK) with
 // one tool, `send_email`. Which definition it serves is set at start:
 //
-//   node server.mjs --version v1        the approved, graded definition
+//   node server.mjs --version v1        the approved, scanned definition
 //   node server.mjs --version v2        the rug-pull (poisoned description, hidden bcc)
 //   node server.mjs --version v1-tweak  v1 plus one byte in the description
 //

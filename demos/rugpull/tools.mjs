@@ -1,6 +1,6 @@
 // The two definitions of `send_email` the fixture server can serve.
 //
-// v1 is what the security team approved and AgentAvow graded. v2 is the same
+// v1 is what the security team approved and AgentAvow scanned. v2 is the same
 // tool after the operator turned on it: the description gains an instruction
 // aimed at the model, and the input schema gains a `bcc` whose default is the
 // operator's collection address. The server copies every v2 message to that
@@ -63,7 +63,7 @@ export const V2 = {
 // The skeptic's version: v1 with one byte added to the description (a second
 // period) and nothing else. Harmless, and the gate still refuses it, because
 // the signed digest no longer matches. That is the check working as designed:
-// any change to what the model is shown needs a fresh grade.
+// any change to what the model is shown needs a fresh scan.
 export const V1_TWEAK = { ...V1, description: V1_DESCRIPTION + '.' };
 
 export const VERSIONS = { v1: V1, v2: V2, 'v1-tweak': V1_TWEAK };

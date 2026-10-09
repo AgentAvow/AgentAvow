@@ -12,7 +12,7 @@ What is in the box:
   a `safe` / `review` / `do_not_connect` decision out, from AgentAvow's signed
   scan result (the EdDSA JWS is verified against the public JWKS, on WebCrypto,
   so it runs on Node 18+, Bun, Deno and Cloudflare Workers). Catches a tool whose
-  definition changed after it was graded.
+  definition changed after it was scanned.
 - **`agentavow-trust/flue`**: the gate wired into the Flue agent framework
   (`@flue/runtime` 2.x): refuse a server at connect time, deny a drifted tool
   call at run time.
@@ -112,7 +112,7 @@ import { createGate } from 'agentavow-trust/gate'
 const gate = createGate({
   allowFloor: 51,          // trust score that is safe without review (81 = strict)
   onReview: 'block',       // what a review decision does: block | warn | confirm
-  onDrift: 'block',        // a tool definition that changed since it was graded
+  onDrift: 'block',        // a tool definition that changed since it was scanned
   onApiError: 'block',     // AgentAvow unreachable or the attestation did not verify
 })
 
@@ -311,7 +311,7 @@ const tools = wrapTools(mcp.toolsFromDefinitions(listing), {
   servedTools: listing,    // the exact tools/list, for the drift check (optional; see below)
   allowFloor: 51,          // trust score that is safe without review (81 is strict)
   onReview: 'confirm',     // block | warn | confirm (the AI SDK's needsApproval)
-  onDrift: 'block',        // a definition that changed since it was graded
+  onDrift: 'block',        // a definition that changed since it was scanned
 });
 
 await generateText({ model, tools, prompt: '...' });
