@@ -3677,12 +3677,18 @@ async def _published_pkg_meta(ecosystem: str, name: str) -> tuple[list[str], dic
     return slugs, manifest
 
 
-async def _published_pkg_repo_slug(ecosystem: str, name: str) -> str | None:
-    """The ``owner/repo`` (lowercased) that a PUBLISHED npm/PyPI package declares as its
-    source, or None if it declares none. Lets the artifact scan skip a diff when a repo's
-    manifest name collides with an UNRELATED published package of the same name."""
+PACKAGE_UNCONFIRMED_NOTE = "no published package confirmed for this repo"
+
+
+async def _package_points_back(owner: str, repo: str, ecosystem: str, name: str) -> bool:
+    """True only when the published ``ecosystem``/``name`` package's own registry entry
+    names ``owner/repo`` as its source. The single gate for using a published package as
+    a repo's artifact (scan, sandbox, provenance, install). Fail-closed: no registry
+    answer, no repo declared, or a different repo declared all return False."""
+    if ecosystem not in ("npm", "pypi", "crates") or not name:
+        return False
     slugs, _ = await _published_pkg_meta(ecosystem, name)
-    return slugs[0] if slugs else None
+    return f"{owner}/{repo}".lower() in slugs
 
 
 async def _verified_package_coordinate(
@@ -3739,20 +3745,22 @@ async def _maybe_scan_artifact(
         return
     ecosystem, name, version = coord
 
-    # Name-collision guard: if the PUBLISHED package declares a source repo that is a
-    # DIFFERENT GitHub repo than the one we're scanning, this manifest name collides
-    # with an unrelated package (e.g. our `agentgraph` vs the unrelated PyPI `agentgraph`
-    # task-parallelism library). Diffing would attribute a stranger's files as bogus
-    # artifact_drift — skip the artifact scan entirely. Only skips on a POSITIVE mismatch
-    # (declared-and-different); a package declaring the same repo, or none, proceeds.
-    if ecosystem in ("pypi", "npm"):
-        declared = await _published_pkg_repo_slug(ecosystem, name)
-        if declared and declared != f"{owner}/{repo}".lower():
-            logger.info(
-                "artifact scan skipped: %s package %r declares repo %r, not %s/%s",
-                ecosystem, name, declared, owner, repo,
-            )
-            return
+    # Package-identity gate: scan the published package as this repo's artifact ONLY
+    # when its own registry entry points back at this repo. A manifest name alone isn't
+    # proof — vercel/next.js's root manifest is named `nextjs-project`, and a stranger's
+    # npm package of that name (declaring no repo) was being scanned and run in the
+    # sandbox as next.js. No repo declared, a different repo, or no registry answer all
+    # skip, and the result says so; the repo is graded from its source alone.
+    if not await _package_points_back(owner, repo, ecosystem, name):
+        logger.info(
+            "artifact scan skipped: %s package %r doesn't point back at %s/%s",
+            ecosystem, name, owner, repo,
+        )
+        result.artifact_scan = {
+            "ok": False, "skipped": "unconfirmed", "ecosystem": ecosystem,
+            "name": name, "note": PACKAGE_UNCONFIRMED_NOTE,
+        }
+        return
 
     try:
         from src.scanner.artifact_scan import scan_published_artifact
@@ -3935,7 +3943,9 @@ async def _maybe_verify_provenance(
         dl = art.get("download_url")
         if dl:
             filename = Path(str(dl).split("?", 1)[0]).name
-    elif artifact and artifact[2]:
+    elif artifact and artifact[2] and await _package_points_back(
+        owner, repo, artifact[0], artifact[1],
+    ):
         ecosystem, name, version = artifact
 
     surface = {"npm": "npm", "pypi": "pypi"}.get((ecosystem or "").lower())

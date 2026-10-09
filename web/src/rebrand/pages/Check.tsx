@@ -2030,6 +2030,19 @@ function Result({ owner, repo, privateResult }: {
         return <AddToAgent kind="repo" owner={owner} repo={repo} pkg={pkg} isMcpServer={isMcpServer} />
       })()}
 
+      {/* The repo's manifest names a published package, but that package's registry
+          entry doesn't point back at this repo — so it was neither scanned nor run as
+          this repo, and the grade covers the source alone. */}
+      {(() => {
+        const sd = (scan as { surface_detail?: { skipped?: string; ecosystem?: string; name?: string } }).surface_detail || {}
+        if (sd.skipped !== 'unconfirmed' || !sd.name) return null
+        return (
+          <p className="mt-3 px-1 text-[13px] text-text-muted">
+            No published package confirmed for this repo: the {sd.ecosystem} package <code className="font-mono">{sd.name}</code> doesn&apos;t point back here, so this result covers the source code only.
+          </p>
+        )
+      })()}
+
       {/* PLAIN-ENGLISH VERDICT — for any user */}
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">
