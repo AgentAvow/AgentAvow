@@ -493,6 +493,12 @@ def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_pa
     (None, ""),
     ({"ran": False, "reason": "off"}, ""),
     ({"ran": False, "pending": True}, "sandbox: running now, results in about a minute"),
+    ({"ran": False, "pending": True, "state": "queued", "queue_position": 3},
+     "sandbox: waiting for a free slot (position 3 in the queue)"),
+    ({"ran": False, "pending": True, "state": "queued"}, "sandbox: waiting for a free slot"),
+    ({"ran": False, "pending": False, "state": "unavailable",
+      "reason": "sandbox unavailable, static analysis only"},
+     "sandbox: unavailable, static analysis only"),
     ({"ran": True, "findings": [], "plan": "npm-mcp",
       "egress_hosts": ["registry.npmjs.org", "api.x.com"],
       "exercise": {"launch_ok": True, "calls": [{"tool": f"t{i}"} for i in range(9)]

@@ -189,6 +189,16 @@ def test_local_cli_fail_on_decision(tmp_path):
     assert main(["scan", str(tmp_path), "--quiet", "--fail-on", "do_not_connect"]) == 0
 
 
+def test_local_cli_fail_on_repeats(tmp_path):
+    """GitLab passes an answer gate and a severity gate together; either can fail."""
+    from src.scanner.local_scan import main
+    (tmp_path / "app.py").write_text(
+        "import subprocess\n\ndef run(cmd):\n    return subprocess.run(cmd, shell=True)\n")
+    base = ["scan", str(tmp_path), "--quiet", "--fail-on", "do_not_connect"]
+    assert main(base) == 0
+    assert main(base + ["--fail-on", "medium"]) == 1
+
+
 # ── tool gate ───────────────────────────────────────────────────────────────────
 
 def test_tool_gate_messages_lead_with_the_phrase():

@@ -147,15 +147,15 @@ export default function RebrandHowItWorks() {
           </div>
           <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
             The exact scanner runs in your own runner or terminal, so a <strong className="text-text">private repo</strong> never
-            leaves your machine. Gate a PR on a minimum score and get findings as inline annotations — the signed attestation
+            leaves your machine. Fail a PR when the answer is Do not connect and get findings as inline annotations — the signed attestation
             is the one part that stays with us.
           </p>
           <pre className="mt-3 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3 text-text overflow-x-auto">{`# CI (private repos, runs in the runner)
 - uses: AgentAvow/AgentAvow/local-scan-action@main
-  with: { min-score: "60" }
+  with: { fail-on: "do_not_connect" }
 
 # or locally
-agentavow scan . --min-score 60`}</pre>
+agentavow scan . --fail-on do_not_connect`}</pre>
           <Link to={rp('/rebrand/docs/run-locally')} className="inline-block mt-3 text-[13.5px] font-semibold text-primary-light hover:text-primary">Run locally &amp; in CI →</Link>
         </div>
       </Reveal>

@@ -132,19 +132,18 @@ export default function RebrandForDevelopers() {
       </Reveal>
       <Reveal>
         <div className="mt-4 glass rounded-xl p-5">
-          <div className="text-[15px] font-semibold">Gate pull requests on the score and on sandbox behavior</div>
+          <div className="text-[15px] font-semibold">Gate pull requests on the answer and on sandbox behavior</div>
           <p className="mt-1.5 text-text-muted text-[13.5px] leading-relaxed max-w-[64ch]">
-            For a public repo, the hosted GitHub Action comments the trust score on every PR. When the repo publishes a
+            For a public repo, the hosted GitHub Action comments the answer and the trust score on every PR, and fails the build when the answer is Do not connect. When the repo publishes a
             package (or is a JavaScript or Python project), AgentAvow also runs it in the behavioral sandbox and the
             Action prints a <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">Sandbox:</code> line.
             Set <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">fail_on_behavioral: true</code> to
-            fail the build on a high or critical sandbox finding. It is a separate gate from <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">min_score</code>,
+            fail the build on a high or critical sandbox finding. It is a separate gate from <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">fail_on</code>,
             and a pending sandbox run never fails the step.
           </p>
           <pre className="mt-3 font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3 text-text overflow-x-auto">{`- uses: AgentAvow/AgentAvow/github-action@main
   with:
-    min_score: 70
-    fail_on_findings: true
+    fail_on: do_not_connect   # the default; "review" is stricter
     fail_on_behavioral: true`}</pre>
           <div className="mt-2.5 flex gap-4 flex-wrap text-[13px]">
             <a href="https://github.com/AgentAvow/AgentAvow/tree/main/github-action" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary-light hover:text-primary">Action inputs ↗</a>

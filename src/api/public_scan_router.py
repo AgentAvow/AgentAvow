@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -177,7 +177,11 @@ class PublicScanResponse(BaseModel):
     # Informational — never a score or verdict input.
     capabilities: list[dict] = []
     positive_signals: list[str] = []
-    grade: str = ""  # letter grade with the A+ certified gate applied (roadmap §7)
+    # Deprecated: kept for old clients only. Read `decision` (the answer), `trust_score`
+    # and `certified` instead; no AgentAvow surface shows a letter grade.
+    grade: str = Field(
+        "", json_schema_extra={"deprecated": True},
+        description="Deprecated legacy field; read decision, trust_score and certified.")
     certified: dict = {}  # A+ certified-tier eligibility {eligible, checks} (roadmap §7)
     coverage: dict = {}  # scan_depth / provenance_binding / db_snapshots (recompute discipline)
     supply_chain: dict = {}  # OSV/deps.dev summary (signed into the JWS; mirrored here for readers)

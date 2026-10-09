@@ -95,7 +95,7 @@ Only a **signed, completed** run counts. Applied to the score from the static sc
 | What the sandbox observed | Effect on the trust score |
 |---|---|
 | A canary credential left the sandbox, or any critical behavioral finding | Capped at 45, the same as a shipped critical in code |
-| Any high behavioral finding (undeclared egress, a read-only tool that wrote files, following a caller-supplied URL to an internal address) | −10 and capped at 70, so the verdict is always "needs review" |
+| Any high behavioral finding (undeclared egress, a read-only tool that wrote files, following a caller-supplied URL to an internal address) | −10 and capped at 70, so the answer is at least "Review before you connect" |
 | Medium behavioral findings only | −5 |
 | Low findings (a crash) | No change |
 | A clean, full exercise: the server started, tools were called, nothing was found | +3, for evidence nobody else has |
@@ -118,13 +118,25 @@ single run.
 
 ## When runs happen
 
-- **First look.** The first time anyone scans a supported package, repo, or skill, from any client, a sandbox run starts within a minute. The result is kept for a day.
+- **First look.** The first time anyone scans a supported package, repo, or skill, from any client, a sandbox run starts as soon as a slot is free, usually within a minute. The result is kept for a day.
 - **When the tool changes.** The catalog is re-scanned on a schedule. When a package publishes a new version, or a server's tool definitions change, its sandbox result is discarded and a fresh run is queued. A tool cannot start behaving differently without shipping a change, so this is the cadence that matters.
 - **Watched tools** are kept current and you are alerted when their observed behavior changes.
 - **The long tail** is backfilled in the background, most-used first, using only sandbox capacity that real scans aren't using.
 - **On demand.** Add `?behavioral=true` to a package scan URL, or press **Run now** on the score page, for a fresh run.
 
 We don't re-run every tool on a calendar: most tools don't change from week to week, and a run that observes the same version again adds nothing.
+
+## Running, queued, and unavailable
+
+The sandbox runs a limited number of tools at once. A result's sandbox panel shows one of these states while there is no finished run:
+
+| State | What you see | What it means |
+|---|---|---|
+| Running | "analysis running — reload in ~1 min" | A run is in progress. The panel updates itself when it finishes. |
+| Queued | "waiting for a sandbox slot — every slot is in use; queued at position N" | Every slot is busy. The run waits its turn; scans people are looking at go ahead of background re-scans. |
+| Unavailable | "sandbox unavailable, static analysis only" | No slot freed up for two hours. The answer and the score stand on static analysis alone; scan again later for a run. |
+
+While a run is running or queued, the answer from the static scan is shown with a note that the sandbox result is still coming, and it can change once the run lands. One slot is always kept free for scans people request, so background re-scans never crowd them out.
 
 ## How we check ourselves
 
@@ -136,7 +148,7 @@ A fixed corpus runs through the real sandbox every week: fixture servers with kn
 - **Watches**: a watched tool whose later run adds findings, an exfiltrated canary, or a new
   undeclared host raises a behavioral-change alert (an in-app notification and an HMAC-signed webhook).
 - **GitHub Action**: a `Sandbox:` line in the output and PR comment; set `fail_on_behavioral: true`
-  to fail the build on a high or critical sandbox finding. The trust-score gate (`min_score`) is separate.
+  to fail the build on a high or critical sandbox finding. The answer gate (`fail_on`) is separate.
 - **AgentAvow MCP server**: the scan result carries a `Sandbox:` line: a clean run and where it
   sent traffic, the behavioral findings, or why the server did not start (not a finding).
 - **Claude Code plugin**: the session-start verdict line carries a sandbox clause, for example

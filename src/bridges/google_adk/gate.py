@@ -5,10 +5,11 @@
 the tool when it returns a dict, which the model then sees as the tool's result).
 Before a tool runs it maps the tool to the MCP server (or repo / package) it came
 from, fetches that server's signed grade from AgentAvow's free API, and allows the
-call only when the score clears ``min_score`` (default 81), no critical / high finding
-is on the grade, and the definition the agent was served recomputes to the per-tool
-digest signed into the attestation (``scan.toolDigests["tool:<name>"]``). Anything
-else is a fail, handled per ``on_fail``:
+call only when the tool's answer is Safe to connect (``fail_on``, default ``review``),
+the score clears ``min_score`` (default 51), no critical / high finding is on the
+grade, and the definition the agent was served recomputes to the per-tool digest
+signed into the attestation (``scan.toolDigests["tool:<name>"]``). Anything else is a
+fail, handled per ``on_fail``:
 
 * ``block`` (default) — return ``{"error": <why>, "agentavow": {...}}`` in place of
   the tool result. Nothing is raised.
@@ -50,6 +51,7 @@ from src.bridges.tool_gate import (
     DEFAULT_BASE_URL,
     DEFAULT_BLOCK_ON,
     DEFAULT_CACHE_TTL,
+    DEFAULT_FAIL_ON,
     DEFAULT_MIN_SCORE,
     DEFAULT_TIMEOUT,
     GateDecision,
@@ -94,6 +96,7 @@ class AgentAvowToolGate:
         base_url: str = DEFAULT_BASE_URL,
         min_score: int = DEFAULT_MIN_SCORE,
         block_on: tuple[str, ...] | list[str] = DEFAULT_BLOCK_ON,
+        fail_on: str = DEFAULT_FAIL_ON,
         on_fail: str = "block",
         cache_ttl: float = DEFAULT_CACHE_TTL,
         fail_closed: bool = True,
@@ -111,7 +114,8 @@ class AgentAvowToolGate:
         server_headers: dict[str, dict[str, str]] | None = None,
     ) -> None:
         self.gate = ToolGate(
-            base_url=base_url, min_score=min_score, block_on=block_on, on_fail=on_fail,
+            base_url=base_url, min_score=min_score, block_on=block_on, fail_on=fail_on,
+            on_fail=on_fail,
             cache_ttl=cache_ttl, fail_closed=fail_closed, tool_to_server=tool_to_server,
             servers=servers, resolve_server=resolve_server, served_tools=served_tools,
             fetch_served=fetch_served, unmapped=unmapped, confirm=confirm, on_warn=on_warn,

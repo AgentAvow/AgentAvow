@@ -24,9 +24,13 @@ agentavow scan .              # human summary
 agentavow scan . --json out.json      # structured findings (file · line · severity · remediation)
 agentavow scan . --sarif out.sarif    # SARIF 2.1.0 for code-scanning tools
 agentavow scan . --gitlab-code-quality gl-code-quality-report.json   # GitLab MR widget
-agentavow scan . --min-score 60       # exit non-zero below 60 (gate a commit hook)
-agentavow scan . --fail-on high       # exit non-zero on any high/critical finding
+agentavow scan . --fail-on do_not_connect   # exit non-zero when the answer is Do not connect
+agentavow scan . --fail-on review           # also exit non-zero on Review before you connect
+agentavow scan . --fail-on high             # exit non-zero on any high/critical finding
+agentavow scan . --min-score 60             # legacy: exit non-zero below a trust score
 ```
+
+`--fail-on` can be repeated, so one run can gate on the answer and on a finding severity. The human summary leads with the answer (Safe to connect, Review before you connect, or Do not connect) and its reason, then the trust score.
 
 The scan covers **git-tracked files only** — the same surface the hosted grade is computed over — so your build artifacts, data dumps, and gitignored caches never skew the score.
 
@@ -47,33 +51,35 @@ jobs:
       - uses: actions/checkout@v4
       - uses: AgentAvow/AgentAvow/local-scan-action@main
         with:
-          min-score: "60"    # fail the PR below 60
-          fail-on: "high"    # or fail on any high/critical (optional)
+          fail-on: "do_not_connect"   # fail the PR when the answer is Do not connect
+                                      # ("review" also fails on Review; "high" fails on any high/critical finding)
 ```
 
-Findings show up as inline PR annotations (via code scanning) and a job-summary; `trust-score` and `tier` are exposed as step outputs. Full reference: [local-scan-action](https://github.com/AgentAvow/AgentAvow/tree/main/local-scan-action).
+Findings show up as inline PR annotations (via code scanning) and a job-summary; `decision`, `decision-reason`, `trust-score` and `tier` are exposed as step outputs. `min-score` still works as a legacy score gate. Full reference: [local-scan-action](https://github.com/AgentAvow/AgentAvow/tree/main/local-scan-action).
 
 ## GitLab CI (self-managed, behind a firewall)
 
 If your GitLab instance cannot be reached from the internet, the hosted scanner cannot see your repositories. The same scan runs inside your own runner instead, from a slim image you mirror into your registry. Nothing leaves your network.
 
-The image is `docker/scanner.Dockerfile` in the AgentAvow repository (intended name `ghcr.io/agentavow/scanner`): `python:3.12-slim` plus `git`, `httpx`, `pyyaml` and the scanner package. Build it from the repository root and push it to a registry your runners can pull from.
+The image is published as `ghcr.io/agentavow/scanner:0.1` (built from `docker/scanner.Dockerfile`: `python:3.12-slim` plus `git`, `httpx`, `pyyaml` and the scanner package). Pull it and mirror it into a registry your runners can reach, or build it yourself from the repository root:
 
 ```bash
+docker pull ghcr.io/agentavow/scanner:0.1
+# or build it:
 docker build -f docker/scanner.Dockerfile -t registry.example.internal/mirrors/agentavow/scanner:0.1 .
 docker push registry.example.internal/mirrors/agentavow/scanner:0.1
 ```
 
 ### Component
 
-GitLab 17.0 or newer can include the scan as a CI/CD component. Pin the version after `@`; it is a git tag on the component project.
+GitLab 17.0 or newer can include the scan as a CI/CD component. By default it fails the pipeline when the answer is Do not connect. Pin the version after `@`; it is a git tag you create on your component project (AgentAvow does not publish component tags yet).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@1.0.0
+  - component: $CI_SERVER_FQDN/<group>/agentavow-scan/scan@<your-tag>
     inputs:
-      min_score: 81          # fail below the "Safe to connect" floor
-      fail_on_findings: high # also fail on any high or critical finding (optional)
+      fail_on: do_not_connect  # or review; none reports without gating
+      fail_on_findings: high   # also fail on any high or critical finding (optional)
       image: registry.example.internal/mirrors/agentavow/scanner:0.1
 ```
 
@@ -81,22 +87,22 @@ Self-managed instances cannot reach components hosted on gitlab.com. Mirror the 
 
 ### Plain include
 
-For older instances, or when you want to own the YAML, include the job file from a mirror at a pinned tag, or copy it into your repository.
+For older instances, or when you want to own the YAML, include the job file from your mirror (at `main` or a tag you create there), or copy it into your repository.
 
 ```yaml
 include:
   - project: <group>/agentavow
-    ref: v0.1.0
+    ref: main
     file: /gitlab/agentavow-scan.gitlab-ci.yml
 
 variables:
   AGENTAVOW_IMAGE: registry.example.internal/mirrors/agentavow/scanner:0.1
-  AGENTAVOW_MIN_SCORE: "81"
+  AGENTAVOW_FAIL_ON_ANSWER: "do_not_connect"   # do_not_connect | review | none
 ```
 
 ### What you get
 
-The job log leads with the verdict phrase and the trust score. Two artifacts are published on every run, pass or fail: `agentavow-scan.json` (every finding with file, line, severity and remediation) and `gl-code-quality-report.json`, which GitLab reads as a Code Quality report and shows in the merge-request widget on every tier. The job runs on merge-request pipelines and on the default branch; the default-branch run is the baseline GitLab diffs an MR against.
+The job log leads with the answer and the trust score. Two artifacts are published on every run, pass or fail: `agentavow-scan.json` (every finding with file, line, severity and remediation) and `gl-code-quality-report.json`, which GitLab reads as a Code Quality report and shows in the merge-request widget on every tier. The job runs on merge-request pipelines and on the default branch; the default-branch run is the baseline GitLab diffs an MR against.
 
 ### What a local scan does not include
 

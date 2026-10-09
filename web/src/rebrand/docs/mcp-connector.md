@@ -8,9 +8,10 @@ the connector.
 
 - **URL:** `https://agentavow.com/mcp` (remote, Streamable HTTP)
 - **Auth:** none. Every tool is anonymous and read-only.
-- **What it does:** scans a target and returns two scores: a signed 0–100 trust score with a
-  plain safe / needs-review verdict and the findings behind it, and an adoption score
-  from real usage (downloads, stars, installs). Each result is signed (Ed25519) and can be recomputed offline.
+- **What it does:** scans a target and returns one of three answers with its reason
+  (**Safe to connect**, **Review before you connect**, or **Do not connect**), a signed 0–100
+  trust score with the findings behind it, and an adoption score from real usage (downloads,
+  stars, installs). The scored verdict is signed (Ed25519) and can be recomputed offline.
 
 ## Tools (all read-only)
 
@@ -25,6 +26,9 @@ the connector.
 - **verify_trust**, **check_interaction_safety**, **lookup_identity**, **get_trust_badge**
   — resolve and check an agent's identity and trust before delegating to it.
 - **about_agentavow** — an overview of the service.
+
+Two prompts are also available: **agentavow_get_started** (what AgentAvow does and how to
+start) and **agentavow_check_my_connections** (check the other connectors in this conversation).
 
 None of the tools write, delete, install, or transact. They only read public information
 and call AgentAvow's own API.

@@ -3,19 +3,22 @@
 Before an agent runs a tool from an MCP server (or a package / repo it maps to),
 look up the server's signed grade on AgentAvow and decide:
 
-* **allow** — the score is at or above ``min_score`` (default 81, the Trusted
-  floor), no finding carries a ``block_on`` severity (default critical / high),
+* **allow** — the tool's answer is Safe to connect (``fail_on="review"``, the
+  default; ``fail_on="do_not_connect"`` also allows Review before you connect),
+  the score is at or above ``min_score`` (default 51, the floor of Safe to
+  connect), no finding carries a ``block_on`` severity (default critical / high),
   and — for a live MCP server — the definition the agent was served for this
   tool recomputes to the per-tool digest signed into the attestation.
-* **fail** — anything else: a low score, a blocking finding, a definition that
-  drifted since the grade (the rug-pull), a tool the grade never saw, or — when
-  ``fail_closed`` is on (the default) — an AgentAvow API that could not answer.
+* **fail** — anything else: an answer at or past ``fail_on``, a low score, a
+  blocking finding, a definition that drifted since the grade (the rug-pull), a
+  tool the grade never saw, or — when ``fail_closed`` is on (the default) — an
+  AgentAvow API that could not answer.
 
 Every message leads with the tool's three-phrase decision — "Safe to connect",
 "Review before you connect" or "Do not connect" — and its one reason, read from the
 API's ``decision`` / ``decision_reason`` (decided locally by the same rule when an older
 response lacks them); the score and tier follow as evidence, and
-``GateDecision.decision`` carries the value. The allow / fail policy above is unchanged.
+``GateDecision.decision`` carries the value.
 
 What a *fail* does is the framework adapter's job (``on_fail``: block, confirm,
 warn or raise); this module only produces the :class:`GateDecision`. The
@@ -46,7 +49,9 @@ __version__ = "0.1.0"
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://agentavow.com/api/v1"
-DEFAULT_MIN_SCORE = 81  # the Trusted floor
+DEFAULT_MIN_SCORE = 51  # the floor of Safe to connect (81, Trusted, is the strict choice)
+DEFAULT_FAIL_ON = "review"  # fail on Review before you connect or worse
+FAIL_ON_MODES = ("review", "do_not_connect", "none")
 DEFAULT_BLOCK_ON = ("critical", "high")
 DEFAULT_CACHE_TTL = 3600.0  # the API caches a verdict for an hour
 DEFAULT_TIMEOUT = 10.0
@@ -292,7 +297,8 @@ class GateDecision:
     """The gate's verdict for one tool call."""
 
     allow: bool
-    outcome: str  # allow | low_score | finding | drift | unknown_tool | api_error | unmapped
+    # allow | low_score | finding | decision | drift | unknown_tool | api_error | unmapped
+    outcome: str
     reason: str
     tool_name: str
     server: str | None
@@ -379,6 +385,7 @@ def evaluate(
     block_on: Iterable[str] = DEFAULT_BLOCK_ON,
     fail_closed: bool = True,
     served_definition: dict | None = None,
+    fail_on: str = DEFAULT_FAIL_ON,
 ) -> GateDecision:
     """Pure policy: grade + optional served definition -> decision. No I/O."""
     report = grade.report_url or report_url(server)
@@ -403,6 +410,14 @@ def evaluate(
             f"AgentAvow blocked '{tool_name}' on {server}: the grade "
             f"({_score_text(grade)}) carries {' and '.join(hits)} findings. Not run. "
             f"Report: {report}",
+            tool_name, server, grade)
+    failing = {"review": ("review", "do_not_connect"),
+               "do_not_connect": ("do_not_connect",)}.get(fail_on, ())
+    if grade.decision in failing:
+        return GateDecision(
+            False, "decision",
+            f"AgentAvow blocked '{tool_name}' on {server}: {_score_text(grade)}. "
+            f"Not run. Report: {report}",
             tool_name, server, grade)
 
     decision = GateDecision(True, "allow", f"AgentAvow: {server} graded {_score_text(grade)}; "
@@ -756,8 +771,11 @@ class ToolGate:
 
     Args:
         base_url: AgentAvow API root (``/api/v1``).
-        min_score: allow at or above this score (default 81, Trusted).
+        min_score: allow at or above this score (default 51, the floor of Safe
+            to connect; 81, Trusted, is stricter).
         block_on: finding severities that fail the gate (default critical, high).
+        fail_on: the answer that fails the gate — ``review`` (default: Review
+            before you connect or Do not connect), ``do_not_connect``, or ``none``.
         on_fail: what a fail does — ``block`` (return a message in place of the
             tool result), ``confirm`` (ask before running), ``warn`` (run, log a
             warning), ``raise`` (raise :class:`ToolGateBlockedError`).
@@ -788,6 +806,7 @@ class ToolGate:
         base_url: str = DEFAULT_BASE_URL,
         min_score: int = DEFAULT_MIN_SCORE,
         block_on: Iterable[str] = DEFAULT_BLOCK_ON,
+        fail_on: str = DEFAULT_FAIL_ON,
         on_fail: str = "block",
         cache_ttl: float = DEFAULT_CACHE_TTL,
         fail_closed: bool = True,
@@ -808,6 +827,9 @@ class ToolGate:
             raise ValueError(f"on_fail must be one of {ON_FAIL_MODES}, got {on_fail!r}")
         if unmapped not in ("allow", "block"):
             raise ValueError("unmapped must be 'allow' or 'block'")
+        if fail_on not in FAIL_ON_MODES:
+            raise ValueError(f"fail_on must be one of {FAIL_ON_MODES}, got {fail_on!r}")
+        self.fail_on = fail_on
         self.min_score = int(min_score)
         self.block_on = tuple(str(s).lower() for s in block_on)
         self.on_fail = on_fail
@@ -914,7 +936,8 @@ class ToolGate:
             served_definition = self.served_definition(server, mcp_name)
         return self._finish(evaluate(
             tool_name, server, grade, min_score=self.min_score, block_on=self.block_on,
-            fail_closed=self.fail_closed, served_definition=served_definition))
+            fail_closed=self.fail_closed, served_definition=served_definition,
+            fail_on=self.fail_on))
 
     async def acheck(self, tool_name: str, server: str, *, mcp_name: str | None = None,
                      served_definition: dict | None = None) -> GateDecision:
@@ -925,7 +948,8 @@ class ToolGate:
             served_definition = await self.aserved_definition(server, mcp_name)
         return self._finish(evaluate(
             tool_name, server, grade, min_score=self.min_score, block_on=self.block_on,
-            fail_closed=self.fail_closed, served_definition=served_definition))
+            fail_closed=self.fail_closed, served_definition=served_definition,
+            fail_on=self.fail_on))
 
     def action(self, decision: GateDecision) -> str:
         """``allow`` | ``block`` | ``confirm`` for a decision under ``on_fail``.

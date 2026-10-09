@@ -31,7 +31,7 @@ We publish **two** scores and never mix them:
 - **Trust** — *is it safe?* The signed 0–100 score, from static analysis + supply-chain + provenance.
 - **Adoption** — *do real, independent parties rely on it?* A distinct signal (with "rising" vs "established" states) from downloads, reverse-dependents, stars, and first-party data.
 
-A widely-adopted tool can still be a serious trust risk (bigger blast radius, not higher trust). A pristine unknown can be top-tier **Trusted** with near-zero adoption. **Popular is not the same as safe** — so adoption is never an input to the trust score, the three-phrase answer, or the safe / needs-review verdict. A CVE costs the same points in a package with 40k dependents as in one with none. Adoption is the second score, reported beside the first: it tells you how many independent parties rely on the tool, which is what is at stake if the trust score is wrong.
+A widely-adopted tool can still be a serious trust risk (bigger blast radius, not higher trust). A pristine unknown can be top-tier **Trusted** with near-zero adoption. **Popular is not the same as safe** — so adoption is never an input to the trust score or the three-phrase answer. A CVE costs the same points in a package with 40k dependents as in one with none. Adoption is the second score, reported beside the first: it tells you how many independent parties rely on the tool, which is what is at stake if the trust score is wrong.
 
 ## The trust score: 0–100
 

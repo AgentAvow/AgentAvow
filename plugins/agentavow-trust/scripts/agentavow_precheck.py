@@ -891,8 +891,14 @@ def _sandbox_summary(b: object) -> str:
     running. Empty when there is nothing to say. Read-only; no extra request."""
     if not isinstance(b, dict):
         return ""
+    if b.get("pending") and b.get("state") == "queued":
+        pos = b.get("queue_position")
+        return "sandbox: waiting for a free slot" + (
+            f" (position {pos} in the queue)" if isinstance(pos, int) else "")
     if b.get("pending"):
         return "sandbox: running now, results in about a minute"
+    if not b.get("ran") and b.get("state") == "unavailable":
+        return "sandbox: unavailable, static analysis only"
     if not b.get("ran"):
         return ""
     findings = [f for f in (b.get("findings") or []) if isinstance(f, dict)]

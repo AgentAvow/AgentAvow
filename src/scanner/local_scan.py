@@ -514,10 +514,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="exit non-zero if the trust score is below this (CI gate)")
     sc.add_argument("--fail-on",
                     choices=["do_not_connect", "review", "critical", "high", "medium"],
-                    default=None,
-                    help="exit non-zero on this decision or worse (do_not_connect | "
+                    action="append", default=None,
+                    help="exit non-zero on this answer or worse (do_not_connect | "
                          "review), or if any finding at/above this severity is present "
-                         "(critical | high | medium)")
+                         "(critical | high | medium). Repeat to combine an answer gate "
+                         "with a severity gate.")
     sc.add_argument("--quiet", action="store_true", help="suppress the human summary")
     # allow bare `agentavow <path>` as shorthand for `agentavow scan <path>`
     args, _ = p.parse_known_args(argv)
@@ -553,21 +554,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"agentavow: FAIL — score {result.trust_score} < min {args.min_score}",
               file=sys.stderr)
         return 1
-    if args.fail_on in ("do_not_connect", "review"):
-        dec = decision_for_result(result)
-        failing = ("do_not_connect",) if args.fail_on == "do_not_connect" \
-            else ("do_not_connect", "review")
-        if dec.decision in failing:
-            print(f"agentavow: FAIL — {verdict_phrase(dec)}: {dec.reason}",
-                  file=sys.stderr)
-            return 1
-    elif args.fail_on:
-        order = {"critical": 3, "high": 2, "medium": 1}
-        thresh = order[args.fail_on]
-        if any(order.get(f.severity, 0) >= thresh for f in result.findings):
-            print(f"agentavow: FAIL — findings at/above '{args.fail_on}' present",
-                  file=sys.stderr)
-            return 1
+    for fail_on in args.fail_on or ():
+        if fail_on in ("do_not_connect", "review"):
+            dec = decision_for_result(result)
+            failing = ("do_not_connect",) if fail_on == "do_not_connect" \
+                else ("do_not_connect", "review")
+            if dec.decision in failing:
+                print(f"agentavow: FAIL — {verdict_phrase(dec)}: {dec.reason}",
+                      file=sys.stderr)
+                return 1
+        else:
+            order = {"critical": 3, "high": 2, "medium": 1}
+            thresh = order[fail_on]
+            if any(order.get(f.severity, 0) >= thresh for f in result.findings):
+                print(f"agentavow: FAIL — findings at/above '{fail_on}' present",
+                      file=sys.stderr)
+                return 1
     return 0
 
 
