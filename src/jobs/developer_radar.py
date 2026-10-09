@@ -216,7 +216,11 @@ async def run_developer_radar(
                 summary["errors"] += 1
                 continue
             score = result.trust_score
-            certified = bool((getattr(result, "certified", None) or {}).get("eligible"))
+            # The Certified MARK (eligible AND Safe AND >= 81 AND not thin), never the
+            # raw eligibility: a pitch must not call a Review tool "CERTIFIED".
+            from src.api.public_scan_router import _scan_result_to_dict
+            from src.trust_tiers import is_certified
+            certified = is_certified(_scan_result_to_dict(result))
             crit = result.critical_count
             high = result.high_count
             readme = await _fetch_readme(owner, repo, token)

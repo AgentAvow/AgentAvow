@@ -323,7 +323,7 @@ export default function RebrandHome() {
               <div className="min-w-0 flex-1 text-center sm:text-left">
                 <div className="font-mono text-[11px] uppercase tracking-[0.16em] gradient-text font-semibold">The top tier</div>
                 <h3 className="mt-1.5 text-xl font-bold">Certified — the earned pinnacle.</h3>
-                <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[44ch] mx-auto sm:mx-0">Score 96+ <em>and</em> verified provenance, no manifest drift, full category coverage — revocable the moment any of it slips. Not a sticker you buy; a bar you clear.</p>
+                <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[44ch] mx-auto sm:mx-0">Verified provenance, no drift, nothing sampled — <em>and</em> a Safe to connect answer at a trust score of 81 or above. Revocable the moment any of it slips. Not a sticker you buy; a bar you clear.</p>
                 <p className="mt-2 text-[12.5px] text-text-muted/90 max-w-[44ch] mx-auto sm:mx-0"><span className="text-text">sigstore</span>, <span className="text-text">react</span>, <span className="text-text">axios</span> and more clear it today — not theoretical.</p>
                 <Link to={rp('/rebrand/certified')} className="inline-block mt-2.5 text-[13px] font-semibold text-primary-light hover:text-primary">See the gate + who's Certified →</Link>
               </div>

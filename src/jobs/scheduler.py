@@ -1107,8 +1107,13 @@ def _watch_decision(data: dict | None, block: dict | None) -> dict:
         applied = _apply_behavioral_score(data, block)
     except Exception:
         applied = dict(data)
-    out = decide({**applied, "behavioral": block}).as_dict()
-    out["certified"] = bool((data.get("certified") or {}).get("eligible"))
+    from src.scanner.verdict import certified_mark
+    marked = {**applied, "behavioral": block}
+    dec = decide(marked)
+    out = dec.as_dict()
+    # The Certified MARK (display rule), not raw eligibility: an alert never reads
+    # "Review before you connect · Certified".
+    out["certified"] = certified_mark(marked, dec)
     return out
 
 

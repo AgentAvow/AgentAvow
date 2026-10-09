@@ -56,7 +56,7 @@ async function scan(target) {
   const answer = PHRASES[d.decision] || '';
   console.log(`\n  ${target}`);
   if (answer) {
-    console.log(`  ${answer}${d.certified?.eligible ? ' · Certified' : ''}${d.decision_reason ? ' — ' + d.decision_reason : ''}`);
+    console.log(`  ${answer}${d.certified_mark === true && d.decision === 'safe' ? ' · Certified' : ''}${d.decision_reason ? ' — ' + d.decision_reason : ''}`);
   }
   console.log(`  trust score: ${d.trust_score}/100${d.trust_tier ? '  (tier: ' + d.trust_tier + ')' : ''}`);
   console.log(`  findings: ${f.critical || 0} critical · ${f.high || 0} high · ${f.total || 0} total`);

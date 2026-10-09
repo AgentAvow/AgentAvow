@@ -210,7 +210,7 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
     var lead=leadFor(sc), leadEl=document.getElementById("lead");
     if(lead){
       conf={label:lead.label,color:lead.color};
-      var cert=!!(sc.certified);
+      var cert=certified;  // the display mark, never the raw provenance gate
       leadEl.innerHTML='<span style="color:'+lead.color+'">'+lead.icon+" "+esc(lead.phrase)+'</span>'
         +(cert?' <span class="grad">· Certified</span>':'')
         +(sc.decision_reason?'<span class="lreason"> — '+esc(sc.decision_reason)+'</span>':'');

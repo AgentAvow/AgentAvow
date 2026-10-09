@@ -129,7 +129,11 @@ async def og_check(
             )
 
     dec = decide(scan_data) if scan_data else decide({"trust_score": score})
-    verdict = headline(dec, certified=is_certified(scan_data))
+    # The mark belongs to the scan's own score; beside an entity composite number it
+    # would pair one result's eligibility with a different score, so it never shows.
+    _composite = bool(entity_trust and entity_trust.get("imported")
+                      and entity_trust.get("composite_score") is not None)
+    verdict = headline(dec, certified=not _composite and is_certified(scan_data))
     title = f"{full_name}: {verdict} · trust score {score}/100"
     description = f"{verdict}: {dec.reason}."
 
@@ -289,8 +293,7 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
     cached = await _get_cached(surface, name)
     if cached:
         score = cached.get("trust_score")
-        _elig = (cached.get("certified") or {}).get("eligible")
-        grade = cached.get("grade") or _display_grade(score or 0, _elig)
+        grade = cached.get("grade") or _display_grade(score or 0, is_certified(cached))
         subtitle = (cached.get("tool_description") or "").strip()
     verdict = _og_verdict(score, cached)
     if not subtitle:

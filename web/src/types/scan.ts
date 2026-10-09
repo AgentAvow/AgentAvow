@@ -77,6 +77,10 @@ export interface PublicScanResponse {
   grade?: string
   // A+ certified-tier eligibility: { eligible, checks: {check_name: bool} }.
   certified?: { eligible?: boolean; checks?: Record<string, boolean> }
+  // The Certified MARK every surface displays: eligible AND Safe to connect AND final AND
+  // score >= 81 AND not thin. Reason names why an eligible result shows no mark.
+  certified_mark?: boolean
+  certified_mark_reason?: '' | 'not_safe' | 'sandbox_pending' | 'score_below_81' | 'thin_coverage'
   // Package scans: the exact published version that was scanned (latest, or the
   // `?version=` pin the request asked for).
   package_version?: string | null

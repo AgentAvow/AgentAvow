@@ -294,9 +294,17 @@ def test_verdict_reads_the_api_decision_and_falls_back_to_the_same_rule(hook):
     v = hook._verdict({"trust_score": 92, "decision": "review", "decision_final": False,
                        "decision_reason": "one high finding: x; sandbox still running",
                        "certified": {"eligible": True}})
-    assert (v["decision"], v["decision_final"], v["certified"]) == ("review", False, True)
-    assert hook._answer(v) == ("Review before you connect · Certified — one high finding: x; "
+    # raw eligibility is the provenance gate, not the mark: no mark beside Review
+    assert (v["decision"], v["decision_final"], v["certified"]) == ("review", False, False)
+    assert hook._answer(v) == ("Review before you connect — one high finding: x; "
                                "sandbox still running · AgentAvow 92/100")
+    m = hook._verdict({"trust_score": 92, "decision": "safe", "decision_final": True,
+                       "decision_reason": "nothing found in 340 files",
+                       "certified": {"eligible": True}, "certified_mark": True})
+    assert m["certified"] is True
+    assert hook._answer(m).startswith("Safe to connect · Certified — ")
+    # a stray mark beside Review never prints
+    assert not hook._headline({**v, "certified": True}).endswith("Certified")
     # older API response: decided locally
     assert hook._verdict({"trust_score": 40, "findings": {"critical": 1}})["decision"] == \
         "do_not_connect"

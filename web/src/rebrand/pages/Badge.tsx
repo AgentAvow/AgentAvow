@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import api from '../../lib/api'
+import { isCertified as certifiedMark } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import SEOHead from '../../components/SEOHead'
@@ -93,11 +94,12 @@ export default function RebrandBadge() {
     staleTime: 60_000,
     queryFn: async () => {
       try {
-        return (await api.get<{ certified?: { eligible?: boolean } }>(`/public/scan/${owner}/${name}`)).data
+        return (await api.get<Record<string, unknown>>(`/public/scan/${owner}/${name}`)).data
       } catch { return null }
     },
   })
-  const isCertified = !!certData?.certified?.eligible
+  // The Certified MARK (what the badge actually renders), not the raw provenance gate.
+  const isCertified = !!certData && certifiedMark(certData)
 
   const widgetSnippet = `<script src="${origin}/widget.js"\n        data-tool="${slug}"></script>`
   const copyWidget = () => {

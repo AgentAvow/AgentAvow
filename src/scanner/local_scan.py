@@ -46,7 +46,7 @@ from src.scanner.scan import (
     _select_scan_files,
     _should_skip_path,
 )
-from src.scanner.verdict import Decision, decide
+from src.scanner.verdict import Decision, certified_mark, decide
 from src.trust_tiers import trust_word, verdict_phrase
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -322,7 +322,13 @@ def result_to_dict(result: ScanResult) -> dict:
         "decision_reason": dec.reason,
         "trust_score": result.trust_score,
         "tier": _tier(result.trust_score),
+        # `certified` = the signed provenance gate; `certified_mark` = the display rule
+        # (Safe to connect, score >= 81, not thin; verdict.certified_mark) — the one a
+        # headline shows. A local scan has no sandbox, so its decision is final.
         "certified": bool((result.certified or {}).get("eligible")),
+        "certified_mark": certified_mark(
+            {"certified": result.certified or {}, "trust_score": result.trust_score,
+             "metadata": {"files_scanned": result.files_scanned}}, dec),
         "files_scanned": result.files_scanned,
         "total_scannable_files": result.total_scannable_files,
         "sampled": result.sampled,
@@ -469,7 +475,7 @@ def _print_human(result: ScanResult, stream=sys.stderr) -> None:
     c = d["counts"]
     print(f"\nAgentAvow — {d['tool']}", file=stream)
     print(f"  Verdict     : {d['verdict_phrase']}"
-          + (" · Certified" if d["certified"] else "")
+          + (" · Certified" if d["certified_mark"] else "")
           + f" — {d['decision_reason']}", file=stream)
     print(f"  Trust score : {d['trust_score']}/100  (tier: {d['tier']})"
           + ("  ✓ Certified-eligible" if d["certified"] else ""), file=stream)

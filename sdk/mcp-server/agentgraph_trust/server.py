@@ -163,9 +163,11 @@ def _scan_result(data: dict, target: str, target_type: str,
     verdict = data.get("verdict") or "needs_review"
     reason = data.get("verdict_reason") or "low_signals"
     certified = bool((data.get("certified") or {}).get("eligible"))
-    safe = verdict == "safe"
     decision, decision_reason, decision_final = _decision(data)
-    phrase = _DECISION_PHRASES[decision] + (" · Certified" if certified else "")
+    # The Certified MARK is the API's display rule (eligible AND Safe to connect AND
+    # final AND score >= 81 AND not thin); an older response without it shows no mark.
+    mark = data.get("certified_mark") is True
+    phrase = _DECISION_PHRASES[decision] + (" · Certified" if mark else "")
     headline = f"{phrase} — {decision_reason}. Trust {score}/100" + (
         f" (tier {data.get('trust_tier')})." if data.get("trust_tier") else ".")
     return {
@@ -187,9 +189,9 @@ def _scan_result(data: dict, target: str, target_type: str,
         "findings_total": total,
         "top_findings": _top_findings(data),
         # certified.eligible matches the signed attestation; certified_mark carries the
-        # display rule (only badge it when also safe), same as the remote connector.
+        # display rule, same as the remote connector.
         "certified": certified,
-        "certified_mark": certified and safe,
+        "certified_mark": mark,
         "incident": incident,  # context only — same key+shape as the remote connector
         "signed": bool(data.get("jws")),
         "cached": bool(data.get("cached")),

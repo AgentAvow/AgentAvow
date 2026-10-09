@@ -37,7 +37,6 @@ from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_safe as _shared_is_safe
 from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 from src.trust_tiers import headline as _decision_headline
-from src.trust_tiers import is_certified as _is_certified
 
 logger = logging.getLogger(__name__)
 
@@ -1211,6 +1210,17 @@ def _decision_of(data: dict) -> _Decision:
     return _decide(data)
 
 
+def _certified_mark_of(data: dict) -> bool:
+    """The Certified MARK for a /public/scan response: the API's ``certified_mark``
+    when present, else the shared display rule over the same decision the headline
+    uses (eligible AND Safe to connect AND final AND score >= 81 AND not thin)."""
+    mark = data.get("certified_mark")
+    if isinstance(mark, bool):
+        return mark
+    from src.scanner.verdict import certified_mark
+    return certified_mark(data, _decision_of(data))
+
+
 def _decision_leads(decision: _Decision, safe: bool) -> bool:
     """Whether the headline leads with the decision phrase (see HEADLINE_FOLLOWS_DECISION)."""
     if HEADLINE_FOLLOWS_DECISION:
@@ -1264,7 +1274,7 @@ def _next_step(decision: _Decision, mode: str, verb: str, cap: str, advisories: 
 def _decision_head(data: dict, decision: _Decision) -> tuple[str, str]:
     """(headline, card glyph): '✅ Safe to connect · Certified — <reason>' and the
     phrase with its icon for the monospace card."""
-    phrase = _decision_headline(decision.decision, _is_certified(data))
+    phrase = _decision_headline(decision.decision, _certified_mark_of(data))
     icon = _DECISION_ICONS.get(decision.decision, "⚠️")
     return f"{icon} {phrase} — {decision.reason}", f"{icon} {phrase}"
 
@@ -1476,11 +1486,11 @@ def _scan_struct(
         "sandbox": sandbox,
         # MUST match the signed attestation's certified.eligible (the 6 crypto gates) — a
         # trust product cannot have its MCP field disagree with its own signed report.
-        # The "only render the Certified MARK when also safe" rule is a DISPLAY gate applied
-        # in the card/site, NOT here. `certified_mark` carries that display value for
-        # consumers who want the badge rule without re-deriving it.
+        # The Certified MARK is the display rule on top (verdict.certified_mark: Safe to
+        # connect, final, score >= 81, not thin), the same one the site and badge use;
+        # always sent so the card never re-derives it.
         "certified": bool((data.get("certified") or {}).get("eligible")),
-        "certified_mark": bool((data.get("certified") or {}).get("eligible")) and safe,
+        "certified_mark": _certified_mark_of(data),
         # top findings, repeats collapsed to one row + count — for the card + CI triage
         "top_findings": (beh_items + _grouped_findings(items, 3))[:5],
         # context-only incident history (was this package ever compromised?) — never

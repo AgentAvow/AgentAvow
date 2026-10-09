@@ -447,3 +447,49 @@ def decide(data: dict) -> Decision:
     else:
         reason = "no critical or high findings" if found else "nothing found"
     return done(DECISION_SAFE, reason)
+
+
+# ── The Certified mark (display rule) ─────────────────────────────────────────────
+# ``certified.eligible`` is the signed six-check provenance gate (safety model §8) and
+# never changes here. The MARK ("✓ Certified <score>") is a display rule on top of it
+# (§10, Kenne 2026-10-08): it sits only beside Safe to connect, once the sandbox result
+# is final, at a score of 81 or above, and never on thin coverage. Every surface reads
+# this one function (or the API's ``certified_mark`` field); fail closed on anything
+# missing. TS twin: ``certifiedMarkStatus()`` in gradeSystem.ts (byte-identical; the
+# equivalence table is in tests/test_decision.py).
+
+CERTIFIED_MARK_MIN_SCORE = 81
+
+MARK_NOT_SAFE = "not_safe"
+MARK_PENDING = "sandbox_pending"
+MARK_SCORE = "score_below_81"
+MARK_THIN = "thin_coverage"
+
+
+def certified_mark_status(data: dict, decision: Decision | None = None) -> tuple[bool, str]:
+    """(mark, why_not). ``why_not`` is "" when the mark shows or when the tool is not
+    eligible at all (nothing to explain); otherwise the one condition that suppressed
+    an earned eligibility. ``decision`` defaults to ``decide(data)``; pass the applied
+    one (sandbox block + adjusted score) when the caller already has it."""
+    data = data if isinstance(data, dict) else {}
+    cert = data.get("certified")
+    if not (isinstance(cert, dict) and cert.get("eligible") is True):
+        return False, ""
+    d = decision if isinstance(decision, Decision) else decide(data)
+    if d.decision != DECISION_SAFE:
+        return False, MARK_NOT_SAFE
+    if not d.final:
+        return False, MARK_PENDING
+    if _int(data.get("trust_score")) < CERTIFIED_MARK_MIN_SCORE:
+        return False, MARK_SCORE
+    meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    files = meta.get("files_scanned")
+    files = files if isinstance(files, int) and not isinstance(files, bool) else 0
+    if files < THIN_COVERAGE_FILES:
+        return False, MARK_THIN
+    return True, ""
+
+
+def certified_mark(data: dict, decision: Decision | None = None) -> bool:
+    """Whether a result shows the Certified mark (see ``certified_mark_status``)."""
+    return certified_mark_status(data, decision)[0]

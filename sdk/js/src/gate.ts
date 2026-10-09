@@ -210,7 +210,7 @@ export interface Grade {
   verdict: string | null;
   /** Adoption score when the response carries one (never a verdict input). */
   adoption: number | null;
-  /** The Certified mark (`certified.eligible` / `certified_mark` / a boolean `certified`).
+  /** The Certified mark (`certified_mark`, or an already-decided boolean `certified`).
    *  Its own mark, carried next to the decision and never folded into it. */
   certified: boolean;
   /** OSV `MAL-` ids among the dependencies (signed supplyChain when verified). */
@@ -279,15 +279,15 @@ function digestsOf(raw: unknown): Record<string, string> {
 
 const DECISIONS = ['safe', 'review', 'do_not_connect'];
 
-/** The Certified mark as the API carries it: `certified: { eligible }`, a bare
- *  boolean `certified`, or `certified_mark`. */
+/** The Certified MARK: the API's `certified_mark` (eligible AND Safe to connect AND
+ *  final AND score >= 81 AND not thin). A bare boolean `certified` is a gate's own
+ *  already-decided mark. Never the raw `certified.eligible` provenance gate, which can
+ *  sit beside Review; a response without `certified_mark` shows no mark (fail closed). */
 export function certifiedOf(data: Dict): boolean {
-  const c = data.certified;
-  if (typeof c === 'boolean') return c;
-  if (c && typeof c === 'object' && typeof c.eligible === 'boolean') return c.eligible;
   const m = data.certified_mark;
   if (typeof m === 'boolean') return m;
-  if (m && typeof m === 'object' && typeof m.eligible === 'boolean') return m.eligible;
+  const c = data.certified;
+  if (typeof c === 'boolean') return c;
   return false;
 }
 
@@ -482,7 +482,8 @@ export interface Decision {
   tier: string | null;
   adoption?: number;
   /** The Certified mark, next to the decision and never folded into it: a reader
-   *  can show "Safe to connect · Certified". Pass-through from the API (unsigned). */
+   *  can show "Safe to connect · Certified". The API's `certified_mark` (unsigned),
+   *  and only ever true on a safe decision. */
   certified: boolean;
   reportUrl: string;
   attestation: {
@@ -558,6 +559,14 @@ function softened(d: Decision, mode: OnDrift, policy: ResolvedPolicy): Decision 
  * only tighten the derived decision; a signed one is taken as authoritative).
  */
 export function deriveDecision(grade: Grade, policy: ResolvedPolicy, toolName: string | null = null): Decision {
+  const d = deriveDecisionRaw(grade, policy, toolName);
+  // The Certified mark only ever sits beside Safe to connect (the API applies the same
+  // rule; this also covers a policy that ends somewhere stricter than the API).
+  if (d.decision !== 'safe') d.certified = false;
+  return d;
+}
+
+function deriveDecisionRaw(grade: Grade, policy: ResolvedPolicy, toolName: string | null): Decision {
   const server = grade.server;
   const d = base(grade, server, toolName);
   const what = toolName ? `'${toolName}' on ${server}` : server;

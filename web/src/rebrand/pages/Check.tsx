@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
-import { getGradeInfo, getTrustTier, decisionOf, headline as decisionHeadline } from '../../components/trust/gradeSystem'
+import { getGradeInfo, getTrustTier, decisionOf, headline as decisionHeadline, isCertified, certifiedMarkNote } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
@@ -315,9 +315,9 @@ function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified
   const h = data?.headline
   const has = !!(h && h.count && h.count > 0)
   const big = useIsDesktop() ? 1.5 : 1  // scale the marks up on desktop; spec size on mobile
-  // Certified is the earned top-tier mark: show it only when the crypto gates pass AND
-  // the result is actually safe (>=81), so it never sits on a needs-review score.
-  const showCert = certified && trustScore >= 81
+  // `certified` is the Certified MARK (isCertified: eligible AND Safe to connect AND
+  // final AND score >= 81 AND not thin) — never the raw provenance gate.
+  const showCert = certified
   return (
     <div className="relative px-4 sm:px-7 py-6">
       <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
@@ -633,27 +633,44 @@ const _CERT_LABELS: Array<[string, string]> = [
   ['recompute_ready', 'Signed verdict recomputes offline against pinned snapshots'],
   ['full_coverage', 'Complete scan — the whole tree was read, nothing sampled or truncated'],
 ]
-function CertifiedPanel({ certified }: { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }) {
+/** A neutral provenance line: the published artifact matches its source. Shown on every
+ * result whose provenance verified, whatever the answer — it says "this is the real
+ * artifact", not "this is safe", so it carries no Certified seal. */
+function ProvenanceChip() {
+  return (
+    <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light" title="The published artifact's build provenance verified and is bound to its source">
+      ✓ Provenance verified · artifact matches source
+    </span>
+  )
+}
+
+function CertifiedPanel({ scan }: { scan: unknown }) {
+  const certified = (scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified
   const checks = certified?.checks
   if (!checks || Object.keys(checks).length === 0) return null
   const eligible = !!certified?.eligible
-  const accent = eligible ? '#14B8A6' : 'var(--color-border)'
+  const mark = isCertified(scan)
+  // Eligible but no mark: say why rather than silently dropping it.
+  const note = mark ? '' : certifiedMarkNote(scan)
+  const accent = mark ? '#14B8A6' : 'var(--color-border)'
   return (
     <Reveal>
       <div className="mt-4 glass rounded-2xl p-6 border-l-4" style={{ borderLeftColor: accent }}>
         <div className="flex items-center gap-2 flex-wrap">
-          {eligible ? (
+          {mark ? (
             <span className="inline-flex items-center gap-1.5 font-bold text-[15px]" style={{ color: '#14B8A6' }}>
               <span aria-hidden>✦</span> AgentAvow Certified
             </span>
           ) : (
-            <h3 className="text-[15px] font-bold">Not yet Certified</h3>
+            <h3 className="text-[15px] font-bold">{eligible ? 'Certified checks pass' : 'Not yet Certified'}</h3>
           )}
         </div>
         <p className="text-text-muted text-[13.5px] mt-1 max-w-[62ch]">
-          {eligible
-            ? 'This tool meets every requirement for AgentAvow Certified — the top tier. Certification is re-checked on every scan, so it stays true only while it stays true.'
-            : 'Certified is earned, not just a high score — it requires all of the following. Anything unchecked shows exactly what to fix to earn it:'}
+          {mark
+            ? 'This tool passes every Certified check and reads Safe to connect at a score of 81 or above. It is re-checked on every scan, so it stays true only while it stays true.'
+            : eligible
+              ? `${note || 'Certified checks pass; the mark shows when the answer is Safe to connect.'} The six checks:`
+              : 'Certified is earned, not just a high score: it takes all six checks below, plus a Safe to connect answer at a score of 81 or above. Anything unchecked shows exactly what to fix:'}
         </p>
         <ul className="mt-3 flex flex-col gap-1.5">
           {_CERT_LABELS.filter(([k]) => checks[k] !== undefined).map(([k, label]) => (
@@ -1459,7 +1476,7 @@ function SkillResult({ owner, repo }: { owner: string; repo: string }) {
           </div>
           <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="install" /></div>
           <IncidentBanner scan={scan} />
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="openclaw" owner={owner} repo={repo} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
+          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="openclaw" owner={owner} repo={repo} certified={isCertified(scan)} />
         </div>
       </Reveal>
 
@@ -1639,7 +1656,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
           </div>
           <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
           <IncidentBanner scan={scan} />
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="mcp" owner="mcp" repo={endpoint} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
+          <ScoreDuo trustScore={scan.trust_score} trustLabel="Capability Trust" surface="mcp" owner="mcp" repo={endpoint} certified={isCertified(scan)} />
         </div>
       </Reveal>
 
@@ -1754,7 +1771,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">{surface}</span>
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Artifact-scanned</span>
-              {prov.verified && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light">✓ Provenance verified</span>}
+              {prov.verified && <ProvenanceChip />}
               <ClaimedBadge surface={surface} repo={name} />
             </div>
             <h1 className="mt-2 text-2xl font-extrabold tracking-tight break-all">
@@ -1766,7 +1783,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
           </div>
           <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="use" /></div>
           <IncidentBanner scan={scan} />
-          <ScoreDuo trustScore={scan.trust_score} trustLabel="Attestation Trust" surface={surface} repo={name} certified={!!(scan as { certified?: { eligible?: boolean } }).certified?.eligible} />
+          <ScoreDuo trustScore={scan.trust_score} trustLabel="Attestation Trust" surface={surface} repo={name} certified={isCertified(scan)} />
         </div>
       </Reveal>
 
@@ -1775,7 +1792,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
       {decisionOf(scan).decision !== 'do_not_connect' && <AddToAgent kind="package" surface={surface} name={name} isMcp={!!(scan as { surface_detail?: { is_mcp_server?: boolean } }).surface_detail?.is_mcp_server} />}
 
       {/* Certified panel — the A+ story for packages */}
-      {(scan.trust_score >= 81 || certified?.eligible) && <CertifiedPanel certified={certified} />}
+      {(scan.trust_score >= 81 || certified?.eligible) && <CertifiedPanel scan={scan} />}
 
       {/* The verified chain */}
       <Reveal>
@@ -1967,6 +1984,7 @@ function Result({ owner, repo, privateResult }: {
           <div className="flex items-center gap-2 flex-wrap">
             {isPrivate && <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-warning/15 text-warning">{storedPrivate ? '🔒 Private · via GitHub App' : '🔒 Private scan · not public'}</span>}
             {!isPrivate && <ClaimedBadge surface="github" owner={owner} repo={repo} />}
+            {(scan as { provenance?: { verified?: boolean } }).provenance?.verified && <ProvenanceChip />}
           </div>
           <h1 className="mt-3 text-[26px] font-extrabold tracking-tight leading-tight">{sum.headline}</h1>
           <div className="mt-1.5 font-mono text-[13px] text-text-muted break-all">{scan.repo}</div>
@@ -1982,7 +2000,7 @@ function Result({ owner, repo, privateResult }: {
             <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
             <div className="relative grid grid-cols-2">
               <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
-                <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{((scan as { certified?: { eligible?: boolean } }).certified?.eligible && scan.trust_score >= 81) ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
+                <div className="min-h-[132px] md:min-h-[196px] flex items-center justify-center">{isCertified(scan) ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
                 <Percentile score={scan.trust_score} />
@@ -2068,7 +2086,7 @@ function Result({ owner, repo, privateResult }: {
           A-band-or-above (or already-certified) repos; the "how to earn A+" guide
           is noise on a low grade. */}
       {(scan.trust_score >= 81 || (scan as { certified?: { eligible?: boolean } }).certified?.eligible) && (
-        <CertifiedPanel certified={(scan as { certified?: { eligible?: boolean; checks?: Record<string, boolean> } }).certified} />
+        <CertifiedPanel scan={scan} />
       )}
 
       {/* Declared scope — the tool's own .agentavow.yml, if present */}

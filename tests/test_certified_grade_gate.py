@@ -143,10 +143,19 @@ def _scannable(**over):
 
 
 def test_serializer_grade_certified_a_plus(gate_on):
-    data = psr._scan_result_to_dict(_scannable())
+    data = psr._scan_result_to_dict(_scannable(files_scanned=40, total_scannable_files=40))
     assert data["grade"] == "A+"
     assert data["certified"]["eligible"] is True
     assert data["provenance"]["verified"] is True
+
+
+def test_serializer_grade_follows_the_certified_mark_not_eligibility(gate_on):
+    """A+ follows the Certified MARK: eligible but thin (5 files) or not Safe → A."""
+    thin = psr._scan_result_to_dict(_scannable())
+    assert thin["certified"]["eligible"] is True and thin["grade"] == "A"
+    dep = psr._scan_result_to_dict(_scannable(files_scanned=40, total_scannable_files=40,
+                                              deprecation="use y"))
+    assert dep["grade"] == "A"
 
 
 def test_serializer_grade_uncertified_capped(gate_on):

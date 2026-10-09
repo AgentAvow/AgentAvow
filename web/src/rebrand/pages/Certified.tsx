@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import api from '../../lib/api'
+import { isCertified, certifiedMarkNote } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 import { type CatalogRow, rowIdentity } from '../catalog'
 import { CertifiedMark } from '../components/TrustMark'
@@ -44,6 +45,7 @@ const DISQUALIFIERS: [string, string][] = [
   ['A known-malicious dependency', 'A dependency flagged malicious (MAL) forces the score to 20 or below. No exceptions.'],
   ['Unverified build provenance', 'The most common reason a good tool isn’t Certified: it publishes no cryptographic build attestation, so we can’t prove the artifact came from the source you claim.'],
   ['Sampled or partial coverage', 'If we couldn’t scan the whole tree, we won’t certify what we didn’t see.'],
+  ['Any answer but Safe to connect', 'A deprecation, an advisory against this version, a high finding or a sandbox catch makes the answer Review, and the mark comes off until it reads Safe again. So does a score under 81, a sandbox run still in progress, or too little code to inspect.'],
 ]
 
 interface Certified { eligible: boolean; checks: Record<string, boolean> }
@@ -59,7 +61,7 @@ function toPath(raw: string): string | null {
 
 export default function RebrandCertified() {
   const [input, setInput] = useState('')
-  const [result, setResult] = useState<{ target: string; certified: Certified } | null>(null)
+  const [result, setResult] = useState<{ target: string; certified: Certified; mark: boolean; note: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [cohort, setCohort] = useState<CatalogRow[]>([])
@@ -83,7 +85,10 @@ export default function RebrandCertified() {
     setLoading(true); setError(''); setResult(null)
     try {
       const res = await api.get<{ certified?: Certified }>(path)
-      setResult({ target: input.trim(), certified: res.data.certified ?? { eligible: false, checks: {} } })
+      setResult({
+        target: input.trim(), certified: res.data.certified ?? { eligible: false, checks: {} },
+        mark: isCertified(res.data), note: certifiedMarkNote(res.data),
+      })
     } catch {
       setError('Could not scan that target — check it and try again.')
     } finally {
@@ -153,7 +158,7 @@ export default function RebrandCertified() {
             </div>
           ))}
         </div>
-        <p className="mt-3 text-text-muted text-[13px] max-w-[64ch]">Plus the score bar: <strong className="text-text">81+ with zero critical or high findings</strong>. The score and trust tier are never gated — only the Certified label is.</p>
+        <p className="mt-3 text-text-muted text-[13px] max-w-[64ch]">Plus the answer: the mark shows only beside <strong className="text-text">Safe to connect, at a trust score of 81 or above</strong>, once the sandbox result is in and with enough code to inspect (8 or more files). A tool that passes the six checks but reads Review keeps a "Certified checks pass" note on its page, not the mark. The score and trust tier are never gated, only the Certified mark is.</p>
       </Reveal>
 
       {/* disqualifiers */}
@@ -187,13 +192,14 @@ export default function RebrandCertified() {
         </div>
         {error && <p className="mt-3 text-[13px] text-danger">{error}</p>}
         {result && (
-          <div className={`mt-5 glass rounded-2xl px-6 py-4 border-l-4 ${result.certified.eligible ? 'border-success' : 'border-warning'}`}>
+          <div className={`mt-5 glass rounded-2xl px-6 py-4 border-l-4 ${result.mark ? 'border-success' : 'border-warning'}`}>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[15px] font-bold">{result.target}</span>
-              <span className={`text-[12px] font-mono uppercase tracking-wide px-2 py-0.5 rounded ${result.certified.eligible ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
-                {result.certified.eligible ? 'Certified' : 'Not certified'}
+              <span className={`text-[12px] font-mono uppercase tracking-wide px-2 py-0.5 rounded ${result.mark ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
+                {result.mark ? 'Certified' : result.certified.eligible ? 'Checks pass · no mark' : 'Not certified'}
               </span>
             </div>
+            {!result.mark && result.note && <p className="mt-2 text-[13px] text-text-muted">{result.note}</p>}
             <div className="mt-3">
               {CHECKS.map(([key, label]) => {
                 const ok = result.certified.checks[key]
