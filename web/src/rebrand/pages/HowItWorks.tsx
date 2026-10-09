@@ -83,14 +83,14 @@ export default function RebrandHowItWorks() {
               <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-text-muted">Example — a widely-used, safe tool</span>
               <span className="font-mono text-[10px] text-text-muted/70">illustrative</span>
             </div>
-            <div className="grid grid-cols-2 relative">
+            <div className="grid grid-cols-1 sm:grid-cols-2 relative">
               <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(340px 130px at 25% 0%, rgba(34,197,94,0.10), transparent 70%), radial-gradient(340px 130px at 78% 0%, rgba(45,212,191,0.10), transparent 70%)' }} />
-              <div className="relative p-6 text-center flex flex-col items-center border-r border-border/50">
-                <div className="min-h-[132px] flex items-center justify-center"><TrustBar score={94} /></div>
+              <div className="relative p-6 text-center flex flex-col items-center border-b sm:border-b-0 sm:border-r border-border/50">
+                <div className="min-h-[100px] sm:min-h-[132px] flex items-center justify-center"><TrustBar score={94} /></div>
                 <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-success">Attestation Trust</div>
               </div>
               <div className="relative p-6 text-center flex flex-col items-center">
-                <div className="min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={12400} unit="stars" /></div>
+                <div className="min-h-[100px] sm:min-h-[132px] flex items-center justify-center"><AdoptionNeedle count={12400} unit="stars" /></div>
                 <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
               </div>
             </div>

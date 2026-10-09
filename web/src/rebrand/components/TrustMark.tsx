@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import { getTrustTier, decisionOf, decisionPhrase, isCertified } from '../../components/trust/gradeSystem'
 
 /**
@@ -40,31 +40,57 @@ const GRAD_TEXT = { background: 'linear-gradient(100deg,#2dd4bf,#e879f9)', Webki
 
 // ── HERO ────────────────────────────────────────────────────────────────────
 
-/** Trust — vertical segmented power bar + number + tier word.
- * Geometry is locked to the mark spec: 10 segments 12×5px (gap 2.5), number 22px/800,
- * "/100" 10px mono, tier word 10px/700. `scale` uniformly resizes the whole instrument
- * (defaults to spec size 1) so the hero and the card read as the same object. */
+/** Trust — the AgentAvow badge design (option C): the vertical segmented bar with the
+ * score and tier word to its RIGHT. 10 segments, tier-tinted; the numeral is the
+ * heaviest number in the pair. `scale` resizes the whole instrument uniformly (the
+ * hero passes 1.5 on desktop). Same design as card.svg / the README badge / the
+ * Claude & ChatGPT trust card. */
 export function TrustBar({ score, scale = 1 }: { score: number; scale?: number }) {
   const t = getTrustTier(score)
-  const total = 10
   const lv = Math.round(score / 10)
   return (
-    <div className="flex flex-col items-center">
-      <div className="flex flex-col-reverse" style={{ gap: 2.5 * scale }}>
-        {Array.from({ length: total }).map((_, i) => (
-          <div key={i} style={{ width: 12 * scale, height: 5 * scale, borderRadius: 1, background: i < lv ? t.color : 'var(--color-border)' }} />
-        ))}
-      </div>
-      <div className="font-extrabold leading-none tabular-nums" style={{ color: t.color, fontSize: 22 * scale, marginTop: 6 * scale }}>
-        {score}<span className="font-mono align-baseline text-text-muted" style={{ fontSize: 10 * scale, marginLeft: 2 * scale }}>/100</span>
-      </div>
-      <div className="font-bold" style={{ color: t.color, fontSize: 10 * scale, marginTop: 2 * scale }}>{t.name}</div>
+    <div className="flex items-center text-left" style={{ gap: 14 * scale }}>
+      <Segments scale={scale} fill={(i) => (i < lv ? t.color : 'var(--color-border)')} />
+      <PairText scale={scale}
+        num={<span style={{ color: t.color }}>{score}</span>}
+        unit="/100"
+        word={<span style={{ color: t.color }}>{t.name}</span>} />
     </div>
   )
 }
 
-/** Adoption — VU needle that fills-to-level + compact count + tier word. Prefer the
- * backend's 0–100 adoption score (`scorePct`) for the fill + tier so the needle agrees
+/** The 10-segment column shared by TrustBar and CertifiedMark. */
+function Segments({ scale, fill }: { scale: number; fill: (i: number) => string }) {
+  return (
+    <div className="flex flex-col-reverse shrink-0" style={{ gap: 2.4 * scale }} aria-hidden="true">
+      {Array.from({ length: 10 }).map((_, i) => (
+        <div key={i} style={{ width: 14 * scale, height: 5.5 * scale, borderRadius: 1, background: fill(i) }} />
+      ))}
+    </div>
+  )
+}
+
+/** The number + word block that sits to the right of a meter. `lead` = trust (the
+ * larger numeral); the adoption block is a step down and shares the same baselines. */
+function PairText({ scale, num, unit, word, lead = true }: {
+  scale: number; num: ReactNode; unit?: ReactNode; word: ReactNode; lead?: boolean
+}) {
+  const size = (lead ? 30 : 21) * scale
+  return (
+    <div className="flex flex-col min-w-0">
+      <div className="font-extrabold leading-none tabular-nums whitespace-nowrap"
+        style={{ fontSize: size, paddingTop: lead ? 0 : 7 * scale, paddingBottom: lead ? 0 : 2 * scale, opacity: lead ? 1 : 0.85 }}>
+        {num}
+        {unit && <span className="font-mono font-normal align-baseline text-text-muted" style={{ fontSize: (lead ? 10 : 9.5) * scale, marginLeft: 3 * scale }}>{unit}</span>}
+      </div>
+      <div className="font-bold whitespace-nowrap" style={{ fontSize: (lead ? 11 : 10.5) * scale, marginTop: 4 * scale }}>{word}</div>
+    </div>
+  )
+}
+
+/** Adoption — the badge card's VU dial (the heavier arc) that fills to level, with the
+ * compact count + unit and the level word to its RIGHT (option C). Prefer the
+ * backend's 0–100 adoption score (`scorePct`) for the fill + level so the dial agrees
  * with the adoption detail panel; fall back to a count-derived estimate. */
 export function AdoptionNeedle({ count, unit, scorePct, tier, scale = 1 }: { count?: number | null; unit?: string; scorePct?: number | null; tier?: string | null; scale?: number }) {
   const gid = useId()
@@ -72,57 +98,54 @@ export function AdoptionNeedle({ count, unit, scorePct, tier, scale = 1 }: { cou
   const pct = scorePct != null ? scorePct : adoptionPct(c)
   const has = pct > 0 || c > 0
   const tierWord = tier || adoptionTierWord(pct)
-  const cx = 100, cy = 88, r = 74, a0 = 180, a1 = 360
+  const cx = 100, cy = 88, r = 72, a0 = 180, a1 = 360
   const ang = a0 + (pct / 100) * 180
-  const [nx, ny] = P(cx, cy, r - 16, ang)
+  const [nx, ny] = P(cx, cy, r - 22, ang)
   return (
-    <div className="flex flex-col items-center">
-      <svg width={118 * scale} viewBox="0 0 200 94" className="text-text-muted" style={{ overflow: 'visible' }}>
+    <div className="flex items-center text-left" style={{ gap: 12 * scale }}>
+      <svg width={76 * scale} viewBox="0 0 200 94" className="text-text-muted shrink-0" style={{ overflow: 'visible' }} aria-hidden="true">
         <defs>
           <linearGradient id={gid} gradientUnits="userSpaceOnUse" x1="26" y1="0" x2="174" y2="0">
             <stop stopColor="#2dd4bf" /><stop offset="1" stopColor="#e879f9" />
           </linearGradient>
         </defs>
-        {has && ang > a0 + 1.5 && <path d={ARC(cx, cy, r, a0, ang)} fill="none" stroke={`url(#${gid})`} strokeWidth={8} />}
-        <path d={ARC(cx, cy, r, Math.max(ang, a0 + 0.5), a1)} fill="none" stroke="var(--color-border)" strokeWidth={8} />
+        <path d={ARC(cx, cy, r, Math.max(ang, a0 + 0.5), a1)} fill="none" stroke="var(--color-border)" strokeWidth={16} strokeLinecap="round" />
+        {has && ang > a0 + 1.5 && <path d={ARC(cx, cy, r, a0, ang)} fill="none" stroke={`url(#${gid})`} strokeWidth={16} strokeLinecap="round" />}
         {Array.from({ length: 9 }).map((_, i) => {
           const ta = a0 + 180 * ((i + 1) / 10)
-          const [x0, y0] = P(cx, cy, r - 6, ta)
-          const [x1, y1] = P(cx, cy, r - (i + 1 === 5 ? 14 : 10), ta)
-          return <line key={i} x1={x0.toFixed(1)} y1={y0.toFixed(1)} x2={x1.toFixed(1)} y2={y1.toFixed(1)} stroke="currentColor" strokeWidth={i + 1 === 5 ? 1.6 : 1} opacity={0.4} />
+          const mid = i + 1 === 5
+          const [x0, y0] = P(cx, cy, r - 13, ta)
+          const [x1, y1] = P(cx, cy, r - 13 - (mid ? 8 : 4), ta)
+          return <line key={i} x1={x0.toFixed(1)} y1={y0.toFixed(1)} x2={x1.toFixed(1)} y2={y1.toFixed(1)} stroke="currentColor" strokeWidth={mid ? 1.6 : 1} opacity={0.4} />
         })}
         {has ? (
-          <><line x1={cx} y1={cy} x2={nx.toFixed(1)} y2={ny.toFixed(1)} stroke="#2dd4bf" strokeWidth={3.4} strokeLinecap="round" /><circle cx={cx} cy={cy} r={5.5} fill="#2dd4bf" /></>
+          <><line x1={cx} y1={cy} x2={nx.toFixed(1)} y2={ny.toFixed(1)} stroke="#2dd4bf" strokeWidth={6.5} strokeLinecap="round" /><circle cx={cx} cy={cy} r={9.5} fill="#2dd4bf" /></>
         ) : (
-          <circle cx={cx} cy={cy} r={5.5} fill="currentColor" opacity={0.3} />
+          <circle cx={cx} cy={cy} r={9.5} fill="currentColor" opacity={0.3} />
         )}
       </svg>
-      <div className="font-extrabold leading-none tabular-nums text-text" style={{ fontSize: 22 * scale, marginTop: -2 * scale }}>
-        {has ? compactNum(c) : <span className="text-text-muted/70">New</span>}
-        {has && unit && <span className="font-mono align-baseline text-text-muted" style={{ fontSize: 10 * scale, marginLeft: 3 * scale }}>{unit}</span>}
-      </div>
-      <div className="font-bold" style={{ fontSize: 10 * scale, marginTop: 2 * scale }}>
-        {has ? <span style={GRAD_TEXT}>{tierWord}</span> : <span className="text-text-muted">no adoption signal yet</span>}
-      </div>
+      <PairText scale={scale} lead={false}
+        num={has ? <span className="text-text">{compactNum(c)}</span> : <span className="text-text-muted/70">New</span>}
+        unit={has && unit ? unit : undefined}
+        word={has ? <span style={GRAD_TEXT}>{tierWord}</span> : <span className="text-text-muted font-semibold">no signal yet</span>} />
     </div>
   )
 }
 
-/** Certified — the earned, gated top tier: a full green→magenta gradient bar + a
- * solid gradient pill (branded ring-check + number) with CERTIFIED beneath. */
+/** Certified — the earned, gated top tier, in the option C layout: the full
+ * teal→magenta bar with the gradient pill (branded ring-check + number) to its right
+ * and CERTIFIED beneath. Only rendered for a tool that carries the Certified mark. */
 export function CertifiedMark({ score = 98, scale = 1 }: { score?: number; scale?: number }) {
   return (
-    <div className="flex flex-col items-center">
-      <div className="flex flex-col-reverse" style={{ gap: 2.5 * scale }}>
-        {Array.from({ length: 10 }).map((_, i) => (
-          <div key={i} style={{ width: 12 * scale, height: 5 * scale, borderRadius: 1, background: 'linear-gradient(90deg,#2dd4bf,#e879f9)' }} />
-        ))}
+    <div className="flex items-center text-left" style={{ gap: 14 * scale }}>
+      <Segments scale={scale} fill={() => 'linear-gradient(90deg,#2dd4bf,#e879f9)'} />
+      <div className="flex flex-col items-start min-w-0">
+        <div className="inline-flex items-center rounded-full shadow-lg" style={{ gap: 6 * scale, paddingLeft: 13 * scale, paddingRight: 15 * scale, paddingTop: 5 * scale, paddingBottom: 5 * scale, background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', boxShadow: '0 6px 20px -6px rgba(45,212,191,0.5)' }}>
+          <svg width={17 * scale} height={17 * scale} viewBox="0 0 40 40" fill="none" aria-hidden="true"><circle cx="20" cy="20" r="16.5" stroke="#06231f" strokeWidth="3.2" /><path d="M12 21l6 6 12-13" stroke="#06231f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          <span className="font-extrabold leading-none tabular-nums" style={{ fontSize: 24 * scale, color: '#06231f' }}>{score}</span>
+        </div>
+        <div className="font-mono font-extrabold tracking-[0.18em]" style={{ ...GRAD_TEXT, fontSize: 10.5 * scale, marginTop: 7 * scale }}>CERTIFIED</div>
       </div>
-      <div className="inline-flex items-center rounded-full shadow-lg" style={{ marginTop: 12 * scale, gap: 6 * scale, paddingLeft: 16 * scale, paddingRight: 16 * scale, paddingTop: 6 * scale, paddingBottom: 6 * scale, background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', boxShadow: '0 6px 20px -6px rgba(45,212,191,0.5)' }}>
-        <svg width={17 * scale} height={17 * scale} viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="16.5" stroke="#06231f" strokeWidth="3.2" /><path d="M12 21l6 6 12-13" stroke="#06231f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        <span className="font-extrabold leading-none" style={{ fontSize: 22 * scale, color: '#06231f' }}>{score}</span>
-      </div>
-      <div className="font-mono font-extrabold tracking-[0.18em]" style={{ ...GRAD_TEXT, fontSize: 10 * scale, marginTop: 6 * scale }}>CERTIFIED</div>
     </div>
   )
 }

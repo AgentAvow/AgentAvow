@@ -2937,6 +2937,9 @@ async def og_image(
     subtitle: str = Query("", max_length=400),
     decision: str = Query("", max_length=16),
     certified: str = Query("", max_length=1),
+    adoption: str = Query("", max_length=16),
+    adoption_unit: str = Query("", max_length=24),
+    adoption_pct: str = Query("", max_length=4),
 ) -> Response:
     """Dynamic Open Graph card (1200×630 PNG) for a score page — the grade + name +
     one-liner, so a shared link unfurls into a rich card everywhere. Query-driven so
@@ -2951,10 +2954,16 @@ async def og_image(
         score_val = max(0, min(100, int(s)))
     try:
         from src.api.og_image import render_og_png
+        _ad, _ap = (adoption or "").strip(), (adoption_pct or "").strip()
         png = render_og_png(
             title=title.strip() or "Is this tool safe?",
             grade=grade.strip(), score=score_val, subtitle=subtitle.strip(),
             decision=decision.strip() or None, certified=certified.strip() == "1",
+            # adoption is optional and lenient: "0" = known, no signal; absent = unknown
+            adoption=int(_ad) if _ad.isdigit() else None,
+            adoption_unit=(adoption_unit or "").strip() or None,
+            adoption_pct=min(100, int(_ap)) if _ap.isdigit() else None,
+            adoption_known=_ad.isdigit(),
         )
         return Response(
             content=png,
@@ -3756,12 +3765,23 @@ async def scan_og_image(
         subtitle = (_cached.get("tool_description") or "").strip()
     if not subtitle:
         subtitle = verdict
+    a_known, a_pct, a_count, a_unit = False, None, None, None
+    if grade != "?":
+        try:
+            _surf = owner.lower() if owner.lower() in (
+                "npm", "pypi", "crates", "huggingface", "docker") else "github"
+            a_pct, a_count, a_unit = await surface_adoption_summary(_surf, owner, repo)
+            a_known = True
+        except Exception:  # noqa: BLE001 — adoption is optional on the card
+            a_known = False
     try:
         from src.api.og_image import render_og_png
         png = render_og_png(
             title=full_name, grade=grade,
             score=int(score) if score is not None else None, subtitle=subtitle,
             decision=_decision, certified=_cert,
+            adoption=a_count, adoption_unit=a_unit, adoption_pct=a_pct,
+            adoption_known=a_known,
         )
         return Response(
             content=png, media_type="image/png",

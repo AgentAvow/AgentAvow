@@ -281,13 +281,13 @@ export default function RebrandHome() {
               {/* the dual mark — real artwork, tier-tinted, a preview of the score page */}
               <div className="relative border-b border-border/60 overflow-hidden">
                 <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(340px 130px at 25% -10%, ${example.t.color}1c, transparent 70%), radial-gradient(340px 130px at 78% -10%, rgba(45,212,191,0.12), transparent 70%)` }} />
-                <div className="relative grid grid-cols-2">
+                <div className="relative grid grid-cols-1 sm:grid-cols-2">
                   <div className="p-5 text-center flex flex-col items-center">
-                    <div className="min-h-[126px] flex items-center justify-center"><TrustBar score={example.row.trust_score as number} /></div>
+                    <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center"><TrustBar score={example.row.trust_score as number} /></div>
                     <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: example.t.color }}>Attestation Trust</div>
                   </div>
-                  <div className="p-5 text-center flex flex-col items-center border-l border-border/50">
-                    <div className="min-h-[126px] flex items-center justify-center"><AdoptionNeedle count={exCount} unit={exUnit} /></div>
+                  <div className="p-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
+                    <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center"><AdoptionNeedle count={exCount} unit={exUnit} /></div>
                     <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                   </div>
                 </div>
