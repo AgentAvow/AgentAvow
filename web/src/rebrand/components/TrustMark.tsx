@@ -270,6 +270,7 @@ export function VerdictBadge(
     : severe.length ? `Sandbox: caught — ${severe[0].name ?? 'a behavioral finding'}${deltaTxt}`
     : bFindings.length ? `Sandbox: ran, ${bFindings.length} minor finding${bFindings.length === 1 ? '' : 's'}${deltaTxt}`
     : b.exercise?.launch_ok ? `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'}, clean${deltaTxt}`
+    : reason === 'install failed' ? 'Sandbox: the install failed, so nothing ran — not a finding'
     : reason && reason !== 'not applicable' && reason !== 'started' ? `Sandbox: installed; server not started (${reason}) — not a finding`
     : 'Sandbox: installed and imported, clean'
   const cfg = {

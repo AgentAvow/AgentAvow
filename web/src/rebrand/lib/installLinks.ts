@@ -185,6 +185,18 @@ export function packageInstallCommands(surface: string, name: string): Array<{ l
   ]
 }
 
+/** A skill inside a multi-skill collection repo: clone to a temp dir, then copy the one
+ * folder whose SKILL.md declares `name: <skill>` into the skills directory. Cloning the
+ * whole collection into ~/.claude/skills/<repo> leaves no SKILL.md at the root. */
+export function collectionSkillInstallCommands(owner: string, repo: string, skill: string): Array<{ label: string; cmd: string }> {
+  const tmp = `/tmp/${repo}`
+  const find = `"$(dirname "$(grep -rlx --include=SKILL.md 'name: ${skill}' ${tmp} | head -1)")"`
+  return [
+    { label: 'Personal (all projects)', cmd: `git clone --depth 1 https://github.com/${owner}/${repo} ${tmp} && cp -r ${find} ~/.claude/skills/${skill}` },
+    { label: 'This project (committable)', cmd: `git clone --depth 1 https://github.com/${owner}/${repo} ${tmp} && cp -r ${find} .claude/skills/${skill}` },
+  ]
+}
+
 export function skillInstallCommands(owner: string, repo: string): Array<{ label: string; cmd: string }> {
   return [
     { label: 'Personal (all projects)', cmd: `git clone https://github.com/${owner}/${repo} ~/.claude/skills/${repo}` },
