@@ -183,6 +183,8 @@ Read `decision` / `decision_reason` to decide (`trust_score` / `trust_tier` unde
 
 A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** when its score drops by more than 5 points **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
 
+To see it end to end, run the [rug-pull demo](https://github.com/AgentAvow/AgentAvow/tree/main/demos/rugpull): an MCP server that was clean on approval day redefines its `send_email` tool, the ungated agent leaks the message, and the gated agent refuses the call before anything is sent.
+
 Definition-change alerts cover GitHub repos, OpenClaw skills and live MCP servers, where the scan pins the tool definitions. For a live MCP server the digest is per tool name, taken from the `tools/list` the server actually serves. npm and PyPI package watches alert on score only.
 
 Set the webhook under **Account → Alert webhook**, or with the account API (JWT or API key):

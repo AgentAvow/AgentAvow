@@ -4,9 +4,6 @@ Show that your tool is safe — with proof. An AgentAvow trust badge renders you
 score — a **0–100 number** and tier word (Trusted → Blocked), coloured green→red — and clicking it opens the
 full, verifiable report. It's free, needs no account, and **refreshes on its own, so it never goes stale.**
 
-> Staged rebrand doc. Serving URLs use `agentavow.com` (post-cutover host); verification identifiers stay on
-> `agentgraph.co`.
-
 ## One line
 
 Paste this into your `README.md` (swap `owner/repo`):

@@ -87,7 +87,8 @@ export default function RebrandBadge() {
   // level-up (the badge itself already renders the earned treatment server-side).
   const { data: certData } = useQuery({
     queryKey: ['badge-cert', owner, name],
-    enabled: !!(owner && name.length >= 2),
+    // Skip the you/your-repo placeholder: it is not a real repo and only 404s.
+    enabled: !!(repo.trim() && owner && name.length >= 2),
     retry: false,
     staleTime: 60_000,
     queryFn: async () => {

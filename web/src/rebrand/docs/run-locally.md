@@ -2,8 +2,6 @@
 
 Scan your own code **without sending it anywhere** — same engine, same score as a hosted AgentAvow scan, but offline. Built for the inner loop and for private repos.
 
-> Staged rebrand doc. Product URLs use `agentavow.com`; the signing keys (JWKS) stay on `agentgraph.co`.
-
 ## Why local
 
 The hosted `/check` scan reads a repo from GitHub, so it only sees **public** code. If your repo is private — or you just want a fast result in your editor/CI without a round-trip — run the same scanner locally. Nothing leaves your machine or your runner.

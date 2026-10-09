@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
+import { NoticeText } from '../components/NoticeText'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity } from '../catalog'
@@ -196,7 +197,7 @@ export default function RebrandHome() {
               Check
             </button>
           </form>
-          {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-amber-300">{notice}</p>}
+          {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-amber-300"><NoticeText text={notice} /></p>}
 
           <div className="mt-4 flex flex-wrap gap-2 justify-center items-center">
             <span className="font-mono text-[11.5px] text-text-muted/70">try one:</span>
@@ -386,7 +387,7 @@ export default function RebrandHome() {
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a score drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a score drops or a signed definition changes — the rug-pull you'd otherwise miss. <a href="https://github.com/AgentAvow/AgentAvow/tree/main/demos/rugpull" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:underline">See the rug-pull demo ↗</a></p>
               <Link to={rp("/rebrand/login")} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
             </div>
             <div className="glass rounded-2xl p-7 flex flex-col">

@@ -70,6 +70,10 @@ def _load(slug: str) -> str | None:
 
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+_ITALIC_RE = re.compile(
+    r"(?<![*\w])\*(?![\s*])([^*\n]+?)(?<!\s)\*(?![*\w])"
+    r"|(?<![\w])_(?![\s_])([^_\n]+?)(?<!\s)_(?!\w)"
+)
 # ./some-slug.md or ./some-slug.md#anchor  → /docs/some-slug or /docs/some-slug#anchor
 _INTRA_RE = re.compile(r"^\./([\w-]+)\.md(#[\w-]+)?$")
 _META_DESCRIPTION_MAX = 155
@@ -105,7 +109,7 @@ def _inline(text: str) -> str:
     """Render inline markdown for a single already-line-joined string.
 
     Order matters: pull out inline code spans first (their contents must NOT be
-    treated as markdown), then escape, then apply bold and links. Code-span and
+    treated as markdown), then escape, then apply links, bold and italic. Code-span and
     link/bold outputs are stitched back with placeholders so escaping never
     double-encodes generated tags.
     """
@@ -135,7 +139,13 @@ def _inline(text: str) -> str:
 
     text = _BOLD_RE.sub(_bold, text)
 
-    # 4. escape whatever plain text remains, then restore stashed fragments
+    # 4. italic *...* / _..._ (not inside words, so snake_case and 2*3*4 stay literal)
+    def _em(m: re.Match[str]) -> str:
+        return _stash(f"<em>{html.escape(m.group(1) or m.group(2))}</em>")
+
+    text = _ITALIC_RE.sub(_em, text)
+
+    # 5. escape whatever plain text remains, then restore stashed fragments
     text = html.escape(text)
 
     def _restore(m: re.Match[str]) -> str:
@@ -349,6 +359,10 @@ _STYLE = """
   .index a { display:block; padding:16px 0; color:var(--fg); text-decoration:none; font-weight:600; }
   .index a:hover { color:var(--accent); }
   .index .blurb { display:block; color:var(--muted); font-weight:400; font-size:14px; margin-top:2px; }
+  .top { display:flex; gap:10px; align-items:center; max-width:760px; margin:0 auto; padding:18px 24px 0; font-size:14px; color:var(--muted); }
+  .top a { color:var(--fg); text-decoration:none; font-weight:600; }
+  .top .check { margin-left:auto; color:var(--accent); }
+  em { font-style:italic; }
   .home { display:inline-block; margin-top:36px; color:var(--muted); font-size:14px; }
 """
 
@@ -365,6 +379,7 @@ def _page(title: str, description: str, canonical: str, body: str) -> str:
 <style>{_STYLE}</style>
 </head>
 <body>
+  <header class="top"><a href="https://agentavow.com/">AgentAvow</a><span>·</span><a href="/docs">Docs</a><a class="check" href="https://agentavow.com/check">Check a tool</a></header>
   <main class="wrap">
 {body}
     <a class="home" href="https://agentavow.com/">← Back to AgentAvow</a>
@@ -427,6 +442,9 @@ async def docs_page(slug: str) -> HTMLResponse:
         hub.status_code = 404
         return hub
     title = _TITLES[slug]
+    # The page already prints the title as its <h1>; drop the doc's own leading "# ..."
+    # so there is exactly one h1.
+    md = re.sub(r"\A\s*#\s+[^\n]*\n?", "", md, count=1)
     body = (
         f"<h1>{html.escape(title)}</h1>\n"
         '<p class="sub">AgentAvow Docs · agentavow.com</p>\n'

@@ -1,7 +1,7 @@
 import { Helmet } from 'react-helmet-async'
 
 const BASE_URL = 'https://agentavow.com'
-const DEFAULT_DESCRIPTION = 'AgentAvow gives any tool, MCP server, or package a signed, verifiable safety grade — check it free, verify it offline, and get alerted the moment it changes.'
+const DEFAULT_DESCRIPTION = 'Check any tool, MCP server, or package before your agent connects: Safe to connect, Review before you connect, or Do not connect. Signed trust score, adoption score, verifiable offline.'
 const OG_IMAGE = `${BASE_URL}/og-image.png`
 
 interface SEOHeadProps {
