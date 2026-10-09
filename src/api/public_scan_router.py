@@ -222,6 +222,9 @@ class PublicScanResponse(BaseModel):
     # #8 tool-definition pinning — signed into the JWS `scan` block
     tool_manifest_digest: str | None = None
     tool_digests: dict[str, str] = {}
+    # Display list of the served tools (name, declared annotations, digest, source).
+    # Unsigned — the signed per-tool digests are tool_digests above.
+    tool_list: list[dict] = []
     tool_drift: dict | None = None  # digest diff vs the previous scan (rug-pull signal)
     jws: str  # Signed attestation (EdDSA, RFC 7515)
     algorithm: str = "EdDSA"
@@ -533,6 +536,21 @@ async def _run_and_cache_behavioral(
         for f in behavioral_findings(res)
     ]
     block["declared_egress"] = sorted(expected_hosts or [])
+    # The tools the sandbox saw the server serve (name, declared annotations, digest of
+    # the observed definition) + the blast radius they imply. Unsigned display data;
+    # the signed observation below is unchanged.
+    try:
+        from src.scanner.mcp_scan import analyze_mcp
+        from src.scanner.mcp_tool_list import mcp_shaped, tool_list_from_transcript
+        _tr = getattr(res, "transcript", None)
+        if _tr is not None and getattr(_tr, "tools", None):
+            block["tool_list"] = tool_list_from_transcript(_tr)
+            _surf = analyze_mcp(mcp_shaped(_tr))
+            block["tool_surface"] = {"blast_radius": _surf.blast_radius,
+                                     "capabilities": _surf.capabilities,
+                                     "lethal_trifecta": _surf.lethal_trifecta}
+    except Exception:  # noqa: BLE001 — display data must never fail the block
+        pass
     try:
         block["grade_summary"] = grade_summary(res)
     except Exception:  # noqa: BLE001 — a UI summary must never fail the block
@@ -1347,6 +1365,7 @@ def _scan_result_to_dict(result: object) -> dict:
         "category_scores": getattr(result, "category_scores", {}),
         "tool_digests": getattr(result, "tool_digests", {}) or {},
         "tool_manifest_digest": getattr(result, "tool_manifest_digest", None),
+        "tool_list": list(getattr(result, "tool_list", []) or []),
         # Phase 0/1: recompute-discipline coverage block (surface, scan_depth,
         # db_snapshots, evidence_anchors) + the OSV/deps.dev supply-chain summary.
         "coverage": getattr(result, "coverage", {}) or {},
@@ -1468,6 +1487,7 @@ def _package_response(
         jws=jws,
         tool_manifest_digest=data.get("tool_manifest_digest"),
         tool_digests=data.get("tool_digests", {}),
+        tool_list=data.get("tool_list", []) or [],
     )
 
 
@@ -3500,7 +3520,11 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
         # resolve to a github coordinate. Bare-endpoint MCPs (repo is a URL, or no
         # owner) have no registry signal → absent, not fabricated.
         r = repo.strip()
-        if owner.strip() and r and not r.lower().startswith("http"):
+        # The check page asks with owner="mcp" and repo=<endpoint URL>; a schemeless
+        # endpoint ("mcp.deepwiki.com/mcp") is still an endpoint, not a GitHub repo.
+        is_endpoint = r.lower().startswith("http") or (
+            owner.strip().lower() == "mcp" and "." in r.split("/", 1)[0])
+        if owner.strip() and r and not is_endpoint:
             stars = await _github_stars(owner.strip(), r)
             if stars is not None:
                 headline = {"count": stars, "unit": "stars"}
@@ -3519,6 +3543,23 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
                         **{k: _mcp[k] for k in _ekeys if k in _mcp}))
             except Exception:
                 logger.debug("axis-E fetch failed for mcp %s/%s", owner, r, exc_info=True)
+        elif is_endpoint:
+            # A bare endpoint: the official MCP registry listing that serves this exact
+            # URL, and the stars of the GitHub repo that listing names. Not listed, or
+            # no linked repo → no count (never a guess). See mcp_endpoint_adoption.py.
+            from src.scanner.mcp_endpoint_adoption import (
+                endpoint_registry_listing,
+                linked_github,
+            )
+            listing = await endpoint_registry_listing(r)
+            gh = linked_github(listing.get("repository")) if listing.get("listed") else None
+            if gh:
+                stars = await _github_stars(gh[0], gh[1])
+                if stars is not None:
+                    headline = {"count": stars, "unit": "stars (linked repo)",
+                                "source": f"github.com/{gh[0]}/{gh[1]}",
+                                "registry_name": listing.get("name")}
+                    axes.append(build_axis_stars(stars=stars))
     elif s == "github":
         stars = await _github_stars(owner.strip(), repo.strip())
         if stars is not None:

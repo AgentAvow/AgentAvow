@@ -170,6 +170,9 @@ class ScanResult:
     # path -> "sha256:..."; on the live MCP surface the key is "tool:<name>"
     tool_digests: dict[str, str] = field(default_factory=dict)
     tool_manifest_digest: str | None = None  # combined digest folded into the attestation
+    # The served tools as a display list: name + declared annotations (+ digest where
+    # we hold the full definition). Unsigned; see src/scanner/mcp_tool_list.py.
+    tool_list: list[dict] = field(default_factory=list)
     # Phase 0/1 supply-chain: the recompute-discipline coverage block (surface,
     # scan_depth, db_snapshots, point_in_time) and the OSV/deps.dev summary. Both
     # are additive — a scan with the OSV pipeline disabled/unreachable leaves them
@@ -4395,6 +4398,9 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         result.artifact_scan["repository"] = _repo_url[:300]
     if eco == "crates" and (fetched.packaged_manifest or {}).get("license"):
         result.has_license = True  # crates.io records the SPDX license per version
+    if result.artifact_scan["is_mcp_server"]:
+        from src.scanner.mcp_tool_list import static_tool_list
+        result.tool_list = static_tool_list(fetched.files)
     result.coverage = build_coverage(
         surface=eco,
         artifact_digest=fetched.digest,
@@ -4461,6 +4467,8 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     # gate can bind an authorization to the named tool that was graded.
     result.tool_digests = compute_tool_digests(data.get("tools"))
     result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
+    from src.scanner.mcp_tool_list import build_tool_list
+    result.tool_list = build_tool_list(data.get("tools"))
     result.files_scanned = mcp.tool_count
     result.total_scannable_files = mcp.tool_count
     result.primary_language = "MCP"

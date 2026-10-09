@@ -28,7 +28,21 @@ type ScanLike = {
   package_version?: string | null
   tool_digests?: Record<string, string> | null
   tool_manifest_digest?: string | null
+  tool_list?: ToolRow[] | null
   surface_detail?: Record<string, unknown> | null
+  behavioral?: {
+    tool_list?: ToolRow[] | null
+    exercise?: { tools?: { name?: string; annotations?: Record<string, unknown> | null }[] | null } | null
+  } | null
+}
+
+type ToolSource = 'live' | 'sandbox' | 'source'
+type ToolRow = {
+  name: string
+  title?: string
+  annotations?: Record<string, unknown> | null
+  digest?: string
+  source?: ToolSource
 }
 
 const SEV: Record<string, string> = {
@@ -131,26 +145,74 @@ export function AdvisoriesPanel({ scan: raw }: { scan: unknown }) {
   )
 }
 
-/** The tools a live MCP server serves, each with the digest of its signed definition.
- * A consumer recomputes a tool's digest from tools/list to detect a silent change. */
+/** Pick the best tool list we hold for this result: the live endpoint's tools/list, else
+ * what the sandbox saw the package's server serve, else registrations found in its code,
+ * else the bare signed digests (older cached results). */
+function pickTools(scan: ScanLike): { rows: ToolRow[]; source: ToolSource } | null {
+  const live = (scan.tool_list ?? []).filter((t) => t?.name)
+  if (live.length && live[0].source !== 'source') return { rows: live, source: live[0].source ?? 'live' }
+  const sb = (scan.behavioral?.tool_list ?? []).filter((t) => t?.name)
+  if (sb.length) return { rows: sb, source: 'sandbox' }
+  const ex = (scan.behavioral?.exercise?.tools ?? []).filter((t) => t?.name)
+  if (ex.length) return { rows: ex.map((t) => ({ name: String(t.name), annotations: t.annotations ?? {} })), source: 'sandbox' }
+  if (live.length) return { rows: live, source: 'source' }
+  const dig = Object.entries(scan.tool_digests ?? {}).filter(([k]) => k.startsWith('tool:'))
+  if (dig.length) return { rows: dig.map(([k, d]) => ({ name: k.slice(5), digest: d })), source: 'live' }
+  return null
+}
+
+const TOOL_NOTE: Record<ToolSource, string> = {
+  live: 'Each tool\'s definition (name, description, input schema, annotations) is hashed and signed into this result. If the server later changes a tool, its digest changes, which is how a watch catches a silent swap.',
+  sandbox: 'Listed by the server itself when we started the published package in the sandbox. Each digest pins the definition as the sandbox recorded it, so a later run can catch a changed tool.',
+  source: 'Found in the package\'s published code, not from a running server. Annotations are the ones written literally in the code; the sandbox run lists the served definitions.',
+}
+
+/** The declared MCP safety hints, as chips. Only hints the tool actually declares are
+ * shown: an undeclared hint is unknown, not false. */
+function AnnotationChips({ a }: { a?: Record<string, unknown> | null }) {
+  const chips: { label: string; cls: string; title: string }[] = []
+  if (a?.readOnlyHint === true) chips.push({ label: 'read-only', cls: 'text-success bg-success/10', title: 'readOnlyHint: true' })
+  if (a?.readOnlyHint === false) chips.push({ label: 'writes', cls: 'text-warning bg-warning/10', title: 'readOnlyHint: false' })
+  if (a?.destructiveHint === true) chips.push({ label: 'destructive', cls: 'text-danger bg-danger/10', title: 'destructiveHint: true' })
+  if (a?.destructiveHint === false && a?.readOnlyHint !== true) chips.push({ label: 'non-destructive', cls: 'text-text-muted bg-surface-hover', title: 'destructiveHint: false' })
+  if (a?.idempotentHint === true) chips.push({ label: 'idempotent', cls: 'text-text-muted bg-surface-hover', title: 'idempotentHint: true' })
+  if (a?.openWorldHint === true) chips.push({ label: 'open world', cls: 'text-text-muted bg-surface-hover', title: 'openWorldHint: true (reaches outside systems)' })
+  if (a?.openWorldHint === false) chips.push({ label: 'closed world', cls: 'text-text-muted bg-surface-hover', title: 'openWorldHint: false' })
+  if (!chips.length) return <span className="font-mono text-[10.5px] text-text-muted/70">no annotations</span>
+  return (
+    <span className="flex flex-wrap gap-1">
+      {chips.map((c) => <span key={c.label} title={c.title} className={`font-mono text-[10.5px] px-1.5 py-0.5 rounded ${c.cls}`}>{c.label}</span>)}
+    </span>
+  )
+}
+
+/** The tools an MCP server serves: name, its declared safety annotations, and (where we
+ * hold the full definition) the digest of that definition. Live endpoints, sandbox runs
+ * of published packages, and code registrations are labelled differently. */
 export function McpToolList({ scan: raw }: { scan: unknown }) {
   const scan = raw as ScanLike
-  const entries = Object.entries(scan.tool_digests ?? {}).filter(([k]) => k.startsWith('tool:'))
-  if (entries.length === 0) return null
+  const picked = pickTools(scan)
+  if (!picked) return null
+  const { rows, source } = picked
+  const annotated = rows.filter((r) => r.annotations && Object.keys(r.annotations).length).length
   return (
     <Reveal>
       <div className="mt-4 glass rounded-2xl p-6">
-        <h3 className={H3}>Tools it serves ({entries.length})</h3>
-        <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Each tool&apos;s definition (name, description, input schema, annotations) is hashed and signed into this result. If the server later changes a tool, its digest changes, which is how a watch catches a silent swap. <a className="underline" href="/docs/verify-attestations">How to recompute it</a></p>
+        <h3 className={H3}>Tools it serves ({rows.length})</h3>
+        <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">{TOOL_NOTE[source]}{' '}{source === 'live' && <a className="underline" href="/docs/verify-attestations">How to recompute it</a>}</p>
+        {rows.length > 0 && annotated === 0 && <p className="mt-1.5 text-[12px] text-text-muted/80 max-w-[64ch]">None of these tools declares safety annotations (read-only, destructive), so an agent can&apos;t tell from the definitions which ones change things.</p>}
         <ul className="mt-3 divide-y divide-border/50">
-          {entries.map(([k, digest]) => (
-            <li key={k} className="py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-3">
-              <span className="font-mono text-[13px] text-text break-all">{k.slice(5)}</span>
-              <span className="font-mono text-[11px] text-text-muted break-all" title={digest}>{digest.slice(0, 23)}…</span>
+          {rows.map((t) => (
+            <li key={t.name} className="py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3">
+              <span className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2.5">
+                <span className="font-mono text-[13px] text-text break-all">{t.name}</span>
+                <AnnotationChips a={t.annotations} />
+              </span>
+              {t.digest && <span className="font-mono text-[11px] text-text-muted break-all shrink-0" title={t.digest}>{t.digest.slice(0, 23)}…</span>}
             </li>
           ))}
         </ul>
-        {scan.tool_manifest_digest && (
+        {source === 'live' && scan.tool_manifest_digest && (
           <div className="mt-3 flex flex-col sm:flex-row sm:justify-between gap-0.5 sm:gap-3 text-[12px]">
             <span className="text-text-muted">Whole tool set</span>
             <span className="font-mono text-text-muted break-all">{scan.tool_manifest_digest.slice(0, 23)}…</span>

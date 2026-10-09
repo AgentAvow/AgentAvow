@@ -278,6 +278,7 @@ function AppRoutes() {
           <Route path="check/skill/:owner/:repo/*" element={<RebrandCheck />} />
           <Route path="check/pkg/:surface/*" element={<RebrandCheck />} />
           <Route path="check/:owner/:repo" element={<RebrandCheck />} />
+          <Route path="check/*" element={<RebrandCheck />} />
           <Route path="login" element={<RebrandLogin />} />
           <Route path="account" element={<RebrandAccount />} />
           <Route path="tools" element={<RebrandMyTools />} />
