@@ -40,6 +40,14 @@ function WidgetPreview({ slug }: { slug: string }) {
   )
 }
 
+type BadgeStyle = 'compact' | 'card' | 'classic'
+
+const BADGE_STYLES: [BadgeStyle, string, string][] = [
+  ['compact', 'Compact', 'One line, both meters: the answer, trust score and adoption.'],
+  ['card', 'Card', 'The same card the website embed shows, as an image.'],
+  ['classic', 'Classic', 'The previous shields-style badge.'],
+]
+
 const REPO_HINTS = ['owner/repo', 'your-org/mcp-server', 'your-agent-toolkit', 'your-python-package']
 
 const DEV_RESOURCES: [string, string, string][] = [
@@ -62,17 +70,23 @@ export default function RebrandBadge() {
   const [repo, setRepo] = useState('')
   const [copied, setCopied] = useState(false)
   const [copiedW, setCopiedW] = useState(false)
-  // Trust, or Trust + Adoption (combined) — adoption never travels alone.
-  const [variant, setVariant] = useState<'trust' | 'combined'>('trust')
+  // One design system for the README badge and the website embed: Compact (20px, both
+  // meters) is the README default, Card is the embed's card as an image, Classic is the
+  // previous shields-style pill.
+  const [style, setStyle] = useState<BadgeStyle>('compact')
   const navigate = useNavigate()
   const slug = repo.trim() || 'you/your-repo'
   const [owner, name] = slug.includes('/') ? slug.split('/') : ['', '']
   // Dynamic origin so the copied badge resolves NOW (agentgraph.co) and after
   // cutover (agentavow.com) — never a dead hardcoded agentavow.com link pre-DNS.
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
-  const _qs = variant === 'combined' ? '?metric=combined' : ''
+  const _qs = style === 'compact' ? '' : `?style=${style}`
   const badgeSrc = `${origin}/api/v1/public/scan/${slug}/badge${_qs}`
-  const badgeAlt = variant === 'trust' ? 'AgentAvow Trust' : 'AgentAvow'
+  // Before a repo is entered, preview the chosen style on our own repo.
+  const exampleSrc = `${origin}/api/v1/public/scan/AgentAvow/AgentAvow/badge${_qs}`
+  // A real repo typed in (not the you/your-repo placeholder, which would 404 or scan).
+  const hasRepo = !!(repo.trim() && owner && name)
+  const badgeAlt = 'AgentAvow'
   const markdown = `[![${badgeAlt}](${badgeSrc})](${origin}/check/${slug})`
 
   const copy = () => {
@@ -144,16 +158,17 @@ export default function RebrandBadge() {
           </button>
         </div>
 
-        {/* choose: badge variant */}
+        {/* choose: badge style */}
         <div className="mt-5 flex items-center gap-5 flex-wrap">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Badge</span>
-            <div className="inline-flex rounded-lg border border-border overflow-hidden">
-              {([['trust', 'Trust'], ['combined', 'Trust + Adoption']] as const).map(([v, lbl]) => (
-                <button key={v} onClick={() => setVariant(v)} className={`px-3 py-1 font-mono text-[12px] transition-colors ${variant === v ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{lbl}</button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-[11px] uppercase tracking-wide text-text-muted">Style</span>
+            <div className="inline-flex rounded-lg border border-border overflow-hidden" role="radiogroup" aria-label="Badge style">
+              {BADGE_STYLES.map(([v, lbl]) => (
+                <button key={v} role="radio" aria-checked={style === v} onClick={() => setStyle(v)} className={`px-3 py-1 font-mono text-[12px] transition-colors ${style === v ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{lbl}</button>
               ))}
             </div>
           </div>
+          <span className="text-[12px] text-text-muted">{BADGE_STYLES.find(([v]) => v === style)?.[2]}</span>
         </div>
 
         {isCertified && (
@@ -167,22 +182,13 @@ export default function RebrandBadge() {
         )}
 
         <div className="mt-4 flex items-center gap-3 flex-wrap">
-          <span className="font-mono text-[11.5px] text-text-muted">{owner && name ? 'Live badge:' : 'Preview:'}</span>
-          <span className="inline-flex p-3 rounded-lg bg-surface-hover">
-            {owner && name ? (
-              <img src={badgeSrc} alt={`${slug} ${badgeAlt}`} className="h-[24px] rounded shadow-md" />
-            ) : variant === 'trust' ? (
-              <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-                <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow Trust</span>
-                <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
-              </span>
-            ) : (
-              <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-                <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow</span>
-                <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
-                <span className="px-2.5 py-1.5 font-bold text-[#7fe9d9] bg-[#233047]">★ 490M</span>
-              </span>
-            )}
+          <span className="font-mono text-[11.5px] text-text-muted">{hasRepo ? 'Live badge:' : 'Example:'}</span>
+          <span className="inline-flex p-3 rounded-lg bg-surface-hover max-w-full overflow-x-auto">
+            <img
+              src={hasRepo ? badgeSrc : exampleSrc}
+              alt={hasRepo ? `${slug} ${badgeAlt}` : 'Example AgentAvow badge'}
+              className={style === 'card' ? 'w-[360px] max-w-full h-auto' : 'h-[20px] w-auto max-w-none'}
+            />
           </span>
         </div>
 
@@ -204,13 +210,13 @@ export default function RebrandBadge() {
           <span className="font-mono text-[11px] text-text-muted">card + offline verify · one script tag</span>
         </div>
         <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[58ch]">
-          The full dual-mark card, linked to the report — plus a <strong className="text-text">Verify offline</strong> button
+          The trust card (the answer, the trust bar and the adoption dial), linked to the report, plus a <strong className="text-text">Verify offline</strong> button
           that recomputes the Ed25519 signature in your reader's own browser. For docs sites, landing pages, and dashboards.
         </p>
         <div className="mt-4 grid sm:grid-cols-2 gap-5 items-start">
           <div>
             <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-1.5">Live preview</div>
-            {owner && name
+            {hasRepo
               ? <WidgetPreview slug={slug} />
               : <p className="text-text-muted text-[13px] italic">Enter a repo above to preview the live widget.</p>}
           </div>

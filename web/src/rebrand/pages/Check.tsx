@@ -452,19 +452,17 @@ function ShareRow({ owner, repo, score }: { owner: string; repo: string; score: 
 }
 
 /** Prominent badge promotion — dynamic origin so copied embeds always resolve. */
-/** "Show it off" — the two signed, LIVE, hosted assets: the README badge (Trust or
- * Trust+Adoption) and the dual-mark card. Both are served from a URL and regenerate
+/** "Show it off" — the two signed, LIVE, hosted assets: the README badge
+ * (compact: the answer + trust bar + adoption dial) and the trust card. Both are served from a URL and regenerate
  * from the current signed verdict — always current, embeddable anywhere, never a
  * stale download. */
 function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
-  const [tab, setTab] = useState<'trust' | 'combined'>('trust')
   const [copied, setCopied] = useState<'badge' | 'card' | null>(null)
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
   const link = `${origin}/check/${owner}/${repo}`
   const badgeBase = `${origin}/api/v1/public/scan/${owner}/${repo}/badge`
-  const badge = tab === 'trust'
-    ? { url: badgeBase, alt: 'AgentAvow Trust' }
-    : { url: `${badgeBase}?metric=combined`, alt: 'AgentAvow' }
+  // The compact README badge carries both meters (trust + adoption) — same design as the card.
+  const badge = { url: badgeBase, alt: 'AgentAvow' }
   const badgeMd = `[![${badge.alt}](${badge.url})](${link})`
   const cardUrl = `${origin}/api/v1/public/scan/${owner}/${repo}/card.svg`
   const cardMd = `[![AgentAvow scores](${cardUrl})](${link})`
@@ -487,18 +485,14 @@ function BadgePromo({ owner, repo }: { owner: string; repo: string }) {
         <p className="mt-1 text-text-muted text-[13.5px] max-w-[56ch]">Both are hosted, always-current images that regenerate from the live signed verdict — they can&apos;t go stale or be faked. Free, no account.</p>
 
         <div className="mt-5 grid md:grid-cols-2 gap-4 items-stretch">
-          {/* README badge — Trust or Trust+Adoption */}
+          {/* README badge — compact: the answer + trust and adoption meters */}
           <div className="rounded-xl border border-border bg-surface/40 p-5 flex flex-col">
             <div className="flex items-center justify-between gap-2">
               <div className="font-semibold text-[14px]">README badge</div>
-              <div className="inline-flex rounded-lg border border-border overflow-hidden font-mono text-[11px]">
-                {([['trust', 'Trust'], ['combined', '+ Adoption']] as const).map(([k, lbl]) => (
-                  <button key={k} onClick={() => setTab(k)} className={`px-2.5 py-1 transition-colors ${tab === k ? 'bg-primary/15 text-primary-light' : 'text-text-muted hover:text-text'}`}>{lbl}</button>
-                ))}
-              </div>
+              <Link to={rp('/rebrand/badge')} className="font-mono text-[11px] text-primary-light hover:text-primary">more styles →</Link>
             </div>
-            <a href={link} target="_blank" rel="noopener noreferrer" className="mt-4 flex items-center justify-center rounded-lg border border-border/60 bg-surface py-7">
-              <img src={badge.url} alt={badge.alt} className="h-[26px] rounded shadow-md" />
+            <a href={link} target="_blank" rel="noopener noreferrer" className="mt-4 flex items-center justify-center rounded-lg border border-border/60 bg-surface py-7 px-2 overflow-x-auto">
+              <img src={badge.url} alt={badge.alt} className="h-[20px] w-auto max-w-none" />
             </a>
             {codeBox('badge', badgeMd)}
             <p className="mt-2 font-mono text-[10.5px] text-text-muted/70">the badge row · regenerates on every view</p>

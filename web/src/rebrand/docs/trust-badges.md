@@ -1,18 +1,31 @@
 # Add a trust badge to your README
 
-Show that your tool is safe — with proof. An AgentAvow trust badge renders your repo's current answer
-(**Safe**, **Review** or **Do not connect**) and its signed **0–100 trust score**, coloured green→red, and
-clicking it opens the full, verifiable report. It's free, needs no account, and **refreshes on its own, so it never goes stale.**
+Show that your tool is safe, with proof. An AgentAvow badge shows your tool's current answer (**Safe to connect**, **Review before you connect** or **Do not connect**), its signed **trust score** (0–100) on a 10-segment bar, and its **adoption** on a small dial. Clicking it opens the full, verifiable report. It's free, needs no account, and **refreshes on its own, so it never goes stale.**
 
 ## One line
 
 Paste this into your `README.md` (swap `owner/repo`):
 
 ```markdown
-[![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/owner/repo/badge)](https://agentavow.com/check/owner/repo)
+[![AgentAvow](https://agentavow.com/api/v1/public/scan/owner/repo/badge)](https://agentavow.com/check/owner/repo)
 ```
 
-That's it. First render triggers a scan; after that it's cached and refreshed automatically.
+That's it. First render triggers a scan; after that it's cached and refreshed automatically. Packages work the same way: `/public/scan/npm/semver/badge`, `/public/scan/pypi/requests/badge`.
+
+## Styles
+
+One design runs through the README badge and the website card: the AgentAvow mark, the answer in its colour, the trust bar with the score, and the adoption dial with the count.
+
+| Style | URL | What it is |
+|---|---|---|
+| **Compact** (default) | `…/badge` | 20px tall, sits in a row of other badges. The mark, the answer, the trust bar + score, the adoption dial + count. |
+| **Card** | `…/badge?style=card` or `…/card.svg` | 360×230. The full phrase, the repo name, the trust bar with the score and tier word, the adoption dial with the count and level. This is what the [website widget](#on-your-website) shows. |
+| **Classic** | `…/badge?style=classic` | The previous shields-style badge ("Safe · 92/100"). |
+| **Adoption only** | `…/badge?metric=adoption` | "Adopted: 22.6k ★", or "Adoption: new". |
+
+Add `&theme=light` or `&theme=dark` to pin the colours. By default (`theme=auto`) the image follows the reader's light or dark setting by itself.
+
+A **Certified** tool shows the teal-to-magenta Certified mark only when it carries the mark: every Certified check passes **and** the answer is Safe to connect at a score of 81 or above, with the sandbox finished (the API's `certified_mark`). A tool that passes the checks but reads Review gets the plain Review badge, and the mark comes back on its own once that's resolved. A badge showing an imported repo's composite score never carries the mark, since the mark belongs to the scan's own score.
 
 ## The badge endpoint
 
@@ -20,43 +33,29 @@ That's it. First render triggers a scan; after that it's cached and refreshed au
 GET https://agentavow.com/api/v1/public/scan/{owner}/{repo}/badge
 ```
 
-- Returns an **SVG** (shields.io-compatible), served with `Access-Control-Allow-Origin: *` so it embeds
-  anywhere.
+- Returns an **SVG** served with `Access-Control-Allow-Origin: *`, so it embeds anywhere. It has no scripts or external fonts, so GitHub shows it as-is.
 - Shows the composite trust score if the repo is imported, else the security-scan score.
-- Shows the gradient **Certified** treatment only when the tool carries the Certified mark: every Certified
-  check passes **and** the answer is Safe to connect at a score of 81 or above (the API's `certified_mark`).
-  A tool that passes the checks but reads Review gets the plain Review badge. A badge showing an imported
-  repo's composite score never carries the mark, since the mark belongs to the scan's own score.
-- Cached, not static: served with `Cache-Control: public, max-age=300, s-maxage=3600` (five minutes in the
-  browser, an hour at the edge) over the hourly scan cache, so it tracks the current score and will not decay
-  to "not scanned" in a stranger's README.
+- Cached, not static: the badge is served with `Cache-Control: public, max-age=3600, s-maxage=86400` (an hour in the browser, a day at the edge) and the card with `max-age=300, s-maxage=3600`. Each regenerates from the current scan when its cache expires, so it tracks the current score and will not decay to "not scanned" in a stranger's README.
 
-## Two badges: trust and adoption
+## On your website
 
-The score answers *is it safe?* Add `?metric=adoption` for the second, separate signal — *do independent
-parties rely on it?* (downloads / dependents / stars, never a fabricated number):
+For a docs site, landing page or security page, one script tag renders the card, linked to the report, with a **Verify offline** button that checks the Ed25519 signature in the reader's own browser:
 
-```markdown
-[![Trust](https://agentavow.com/api/v1/public/scan/owner/repo/badge)](https://agentavow.com/check/owner/repo)
-[![Adoption](https://agentavow.com/api/v1/public/scan/owner/repo/badge?metric=adoption)](https://agentavow.com/check/owner/repo)
+```html
+<script src="https://agentavow.com/widget.js" data-tool="owner/repo"></script>
 ```
 
-The adoption badge reads "Adopted: 22.6k ★" (or "Adoption: new" when there's no signal yet). Adoption and
-trust are deliberately two badges — popular is not the same as safe, and one never inflates the other.
-
-## The badge builder
-
-The builder at `agentavow.com/badge` fills in the Markdown line for you, as either the trust badge or a
-combined badge that carries both scores (`?metric=combined`). It emits Markdown only. If your README is
-HTML rather than Markdown, the same SVG URL works in an `<img>` tag:
-
-**HTML**
+Optional: `data-theme="light"` or `"dark"`, and `data-verify="false"` to hide the button. If your README is HTML rather than Markdown, the badge URL works in an `<img>` tag:
 
 ```html
 <a href="https://agentavow.com/check/owner/repo">
-  <img src="https://agentavow.com/api/v1/public/scan/owner/repo/badge" alt="AgentAvow Trust" />
+  <img src="https://agentavow.com/api/v1/public/scan/owner/repo/badge" alt="AgentAvow" />
 </a>
 ```
+
+## The badge builder
+
+The builder at `agentavow.com/badge` fills in the Markdown line for you in any style, and gives you the widget snippet.
 
 ## Gate your CI on it
 
