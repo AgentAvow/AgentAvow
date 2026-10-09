@@ -2,41 +2,24 @@ import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { HelmetProvider } from 'react-helmet-async'
-import * as Sentry from '@sentry/react'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import { REBRAND_BASE } from './rebrand/basePath'
 
 // At cutover (VITE_CUTOVER=true) the rebrand becomes the root site and the old
 // pages it replaces step aside. Off (default) → everything is exactly as today.
 const CUTOVER = REBRAND_BASE === ''
-import Layout from './components/Layout'
 import { ToastProvider } from './components/Toasts'
 import { LiveUpdates } from './components/LiveUpdates'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ThemeProvider } from './hooks/useTheme'
 import { captureUtmParams } from './lib/analytics'
+import { initSentry } from './lib/sentry'
 
-// ─── Sentry ───
-const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN
-if (SENTRY_DSN) {
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    environment: import.meta.env.MODE,
-    integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration({ maskAllText: false, blockAllMedia: false })],
-    tracesSampleRate: import.meta.env.PROD ? 0.2 : 1.0,
-    replaysSessionSampleRate: 0.1,
-    replaysOnErrorSampleRate: 1.0,
-  })
-}
+// ─── Sentry (loaded on demand; nothing is fetched when no DSN is set) ───
+initSentry()
 
 // Capture UTM params from marketing links on initial page load
 captureUtmParams()
-
-// Eagerly loaded pages (entry points)
-import Home from './pages/Home'
-import Login from './pages/Login'
-import Register from './pages/Register'
-import NotFound from './pages/NotFound'
 
 // Deploy-safe lazy loading. When we redeploy, route chunks get new hashes and the
 // old files are removed — a tab opened before the deploy then 404s the old chunk on
@@ -65,7 +48,14 @@ function lazyWithReload<T extends { default: React.ComponentType<unknown> }>(
   )
 }
 
-// Lazy loaded pages
+// Lazy loaded pages. The legacy layout and its entry pages are lazy too: at cutover
+// the rebrand is the root site, so they only load when a legacy route is visited
+// instead of riding in the entry chunk (framer-motion + the legacy home) for everyone.
+const Layout = lazyWithReload(() => import('./components/Layout'))
+const Home = lazyWithReload(() => import('./pages/Home'))
+const Login = lazyWithReload(() => import('./pages/Login'))
+const Register = lazyWithReload(() => import('./pages/Register'))
+const NotFound = lazyWithReload(() => import('./pages/NotFound'))
 const AuthCallback = lazyWithReload(() => import('./pages/AuthCallback'))
 const Feed = lazyWithReload(() => import('./pages/Feed'))
 const Profile = lazyWithReload(() => import('./pages/Profile'))
@@ -118,6 +108,9 @@ const Research = lazyWithReload(() => import('./pages/Research'))
 
 // AgentAvow rebrand sandbox — isolated /rebrand/* tree (see docs/internal/rebrand-build-spec-and-loose-ends.md)
 const RebrandLayout = lazyWithReload(() => import('./rebrand/RebrandLayout'))
+// At cutover every public page sits under RebrandLayout. Start fetching it now so
+// it downloads alongside the page chunk instead of before it (layout → page waterfall).
+if (CUTOVER) void import('./rebrand/RebrandLayout').catch(() => {})
 const RebrandHome = lazyWithReload(() => import('./rebrand/pages/Home'))
 const RebrandNotFound = lazyWithReload(() => import('./rebrand/pages/NotFound'))
 const RebrandBrowse = lazyWithReload(() => import('./rebrand/pages/Browse'))

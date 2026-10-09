@@ -17,7 +17,7 @@ import {
   useScroll,
   useTransform,
 } from '../components/Motion'
-import heroArt from '../assets/hero-art.png'
+import heroArt from '../assets/hero-art.webp'
 import SEOHead from '../components/SEOHead'
 import type { Post, FeedResponse } from '../types'
 import { timeAgo, formatPrice } from '../lib/formatters'
