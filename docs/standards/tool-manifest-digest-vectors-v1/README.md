@@ -75,6 +75,7 @@ A consumer reports these separately. None is derived from another.
   strings, at the precision the timestamps carry. The signed times have microseconds and an
   explicit `+00:00`; gate times have milliseconds and `Z`. A string comparison, or a parser that
   truncates to milliseconds (JavaScript `Date`), misjudges a gate time just inside the window.
+  See the [supported time contract and boundary controls](time-contract.md).
 
 `rely` is true only when all six axes are `true`; `not_evaluated` is not `true`, so it never relies. Whether a gate proceeds on `rely=true` is a separately versioned
 admission policy.
