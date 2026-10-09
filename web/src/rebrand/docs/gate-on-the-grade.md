@@ -108,7 +108,7 @@ A stdio server has no URL — give it a coordinate with `tool_to_server={"tool":
 
 ### Vercel AI SDK
 
-`wrapTools` from `agentavow-trust/vercel-ai` runs the same gate as the Flue adapter below: one policy object, the three answers, the attestation verified against AgentAvow's public JWKS by default, and a tool whose definition changed since it was graded blocked by default. It wraps each tool's `execute`, because the SDK's `onToolExecutionStart` callback can watch a call but can't stop it. A tool that is not allowed returns `{ error, agentavow }` as its output: `error` leads with the answer ("Do not connect — 'send_email' was not run. …", with "· Certified" beside the answer when the tool carries the mark) and `agentavow` is the decision. `onReview: 'confirm'` sets `needsApproval`, so `generateText`, `streamText` and `ToolLoopAgent` pause for the user on a Review before you connect answer through the SDK's own approval flow. Do not connect is never put to the user.
+`wrapTools` from `agentavow-trust/vercel-ai` runs the same gate as the Flue adapter below: one policy object, the three answers, the attestation verified against AgentAvow's public JWKS by default, and a tool whose definition changed since it was scanned blocked by default. It wraps each tool's `execute`, because the SDK's `onToolExecutionStart` callback can watch a call but can't stop it. A tool that is not allowed returns `{ error, agentavow }` as its output: `error` leads with the answer ("Do not connect — 'send_email' was not run. …", with "· Certified" beside the answer when the tool carries the mark) and `agentavow` is the decision. `onReview: 'confirm'` sets `needsApproval`, so `generateText`, `streamText` and `ToolLoopAgent` pause for the user on a Review before you connect answer through the SDK's own approval flow. Do not connect is never put to the user.
 
 ```ts
 import { createMCPClient } from '@ai-sdk/mcp'
@@ -122,7 +122,7 @@ const tools = wrapTools(mcp.toolsFromDefinitions(listing), {
   servedTools: listing,   // the exact definitions, for the drift check
   allowFloor: 51,         // trust score that is safe without review (81 is strict)
   onReview: 'confirm',    // or 'block' | 'warn'
-  onDrift: 'block',       // a tool whose definition changed since it was graded
+  onDrift: 'block',       // a tool whose definition changed since it was scanned
 })
 const { text } = await generateText({ model, tools, prompt })
 ```
@@ -141,7 +141,7 @@ import { createFlueGate } from 'agentavow-trust/flue'
 export const gate = createFlueGate({
   allowFloor: 51,        // trust score that is safe without review (81 is strict)
   onReview: 'block',     // or 'warn' | 'confirm'
-  onDrift: 'block',      // a tool whose definition changed since it was graded
+  onDrift: 'block',      // a tool whose definition changed since it was scanned
   onApiError: 'block',   // fail closed when AgentAvow cannot answer
 })
 instrument(gate.instrumentation())
