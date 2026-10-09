@@ -231,7 +231,7 @@ export function VerdictBadge(
       metadata?: { files_scanned?: number | null } | null
       deprecation?: string | null
       behavioral?: {
-        ran?: boolean; pending?: boolean; plan?: string
+        ran?: boolean; pending?: boolean; plan?: string; state?: string
         canary_exfil?: unknown[]
         findings?: Array<{ severity?: string; name?: string; rule?: string }>
         exercise?: { launch_ok?: boolean; calls?: unknown[] } | null
@@ -261,6 +261,7 @@ export function VerdictBadge(
   const severe = bFindings.filter((f) => f.severity === 'critical' || f.severity === 'high')
   const leaked = !!(b?.ran && (b.canary_exfil?.length ?? 0) > 0)
   const sandboxLine = !b ? null
+    : b.pending && b.state === 'queued' ? 'Sandbox: waiting for a free slot — this answer may move to Review when it lands'
     : b.pending ? 'Sandbox: still running — this answer may move to Review when it lands'
     : !b.ran ? null
     : leaked ? `Sandbox: caught — a planted credential left the sandbox${deltaTxt}`

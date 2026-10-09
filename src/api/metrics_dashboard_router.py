@@ -799,6 +799,7 @@ BEHAVIORAL_PREFIX = f"{_METRICS_PREFIX}behavioral:"
 BEHAVIORAL_DAILY = (
     "runs", "exercised", "with_findings", "canary_leaks", "slot_rejected",
     "cache_hit", "cache_miss", "killed", "duration_sum", "duration_max",
+    "queued", "queue_started", "queue_dropped", "pending_expired",
 )
 BEHAVIORAL_START_REASONS = (
     "started", "needs_credentials", "needs_arguments", "missing_binary",
@@ -912,6 +913,13 @@ async def _behavioral_backfill_block(day_strs: list[str]) -> dict:
     }
 
 
+async def _behavioral_live() -> dict:
+    """Right now: how many sandbox slots are held and how deep the wait queue is."""
+    from src.scanner.behavioral import slots
+    return {"slots_held": await slots.slots_in_use(), "slots": slots.max_slots(),
+            "queue_depth": await slots.queue_depth()}
+
+
 async def _behavioral_aggregate(window: str) -> dict:
     from src.config import settings
 
@@ -936,6 +944,11 @@ async def _behavioral_aggregate(window: str) -> dict:
         "with_findings": tot("with_findings"),
         "canary_leaks": tot("canary_leaks"),
         "slot_rejected": slot_rejected,
+        "queued": tot("queued"),
+        "queue_started": tot("queue_started"),
+        "queue_dropped": tot("queue_dropped"),
+        "pending_expired": tot("pending_expired"),
+        "live": await _behavioral_live(),
         "killed": killed,
         "cache_hits": hits,
         "cache_misses": misses,

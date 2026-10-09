@@ -128,22 +128,27 @@ def slots(monkeypatch):
     log: list[str] = []
     state = {"refuse": 0}
 
-    async def acquire():
+    async def acquire(priority="normal", *, lock_key=""):
         log.append("acquire")
         if state["refuse"] > 0:
             state["refuse"] -= 1
             return None
         return "lease-1"
 
-    async def release(lease=None):
+    async def release(handle=None):
         log.append("release")
-        state["released_lease"] = lease
+        state["released_lease"] = handle
 
     from src.config import settings
 
     monkeypatch.setattr("src.api.public_scan_router._acquire_behavioral_slot", acquire)
     monkeypatch.setattr("src.api.public_scan_router._release_behavioral_slot", release)
     monkeypatch.setattr(settings, "behavioral_eval_slot_wait_sec", 0.05, raising=False)
+
+    async def no_drain():
+        return 0
+
+    monkeypatch.setattr("src.api.public_scan_router._drain_behavioral_queue", no_drain)
     return SimpleNamespace(log=log, state=state)
 
 

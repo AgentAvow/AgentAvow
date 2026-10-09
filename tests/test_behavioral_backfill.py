@@ -92,7 +92,8 @@ def _wire(monkeypatch, rows, scan_data, cached, outcomes):
     monkeypatch.setattr(psr, "_get_cached_behavioral", fake_block)
     calls = []
 
-    async def fake_enqueue(data, *, reason, priority="normal"):
+    async def fake_enqueue(data, *, reason, priority="normal", queue=True):
+        assert queue is False  # the backfill is its own queue: it defers, never queues
         calls.append((data["package_coordinate"]["name"], reason, priority))
         return outcomes[len(calls) - 1] if len(calls) - 1 < len(outcomes) else "started"
     monkeypatch.setattr(trigger, "enqueue_behavioral", fake_enqueue)

@@ -12,127 +12,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import time
 import uuid
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 import src.api.public_scan_router as router
 from src.scanner.behavioral import runner as behavioral_runner
-from src.scanner.behavioral import trigger
+from src.scanner.behavioral import slots, trigger
 from src.scanner.behavioral.runner import BehavioralResult
+from tests.behavioral_fake_redis import SlotFakeRedis
 
-TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 BM = "ag:metrics:behavioral"
 
 
-class _FakeRedis:
+class _FakeRedis(SlotFakeRedis):
     """Enough of redis.asyncio for the trigger + the router helpers it reuses."""
-
-    def __init__(self):
-        self.store: dict[str, object] = {}
-        self.hashes: dict[str, dict[str, str]] = {}
-        self.sets: dict[str, set[str]] = {}
-
-    async def get(self, key):
-        return self.store.get(key)
-
-    async def set(self, key, value, ex=None, nx=False):
-        if nx and key in self.store:
-            return None
-        self.store[key] = value
-        return True
-
-    async def delete(self, *keys):
-        n = 0
-        for k in keys:
-            n += 1 if self.store.pop(k, None) is not None else 0
-        return n
-
-    async def incr(self, key):
-        self.store[key] = int(self.store.get(key, 0)) + 1
-        return self.store[key]
-
-    async def incrby(self, key, by):
-        self.store[key] = int(self.store.get(key, 0)) + int(by)
-        return self.store[key]
-
-    async def decr(self, key):
-        self.store[key] = int(self.store.get(key, 0)) - 1
-        return self.store[key]
-
-    async def expire(self, key, ttl):
-        return True
-
-    async def scan(self, cursor=0, match=None, count=None):
-        import fnmatch
-        keys = [k for k in list(self.store) if match is None or fnmatch.fnmatchcase(k, match)]
-        return 0, keys
-
-    async def mget(self, keys):
-        return [self.store.get(k) for k in keys]
-
-    async def hset(self, key, field=None, value=None, mapping=None):
-        h = self.hashes.setdefault(key, {})
-        if mapping:
-            h.update({str(k): str(v) for k, v in mapping.items()})
-        if field is not None:
-            h[str(field)] = str(value)
-        return 1
-
-    async def hget(self, key, field):
-        return self.hashes.get(key, {}).get(field)
-
-    async def hgetall(self, key):
-        return dict(self.hashes.get(key, {}))
-
-    async def sadd(self, key, *members):
-        self.sets.setdefault(key, set()).update(members)
-        return len(members)
-
-    async def scard(self, key):
-        return len(self.sets.get(key, set()))
-
-    # sorted sets (the sandbox slot leases)
-    async def zadd(self, key, mapping):
-        z = self.zsets.setdefault(key, {})
-        z.update({m: float(s) for m, s in mapping.items()})
-        return len(mapping)
-
-    async def zrem(self, key, *members):
-        z = self.zsets.get(key, {})
-        return sum(1 for m in members if z.pop(m, None) is not None)
-
-    async def zcard(self, key):
-        return len(self.zsets.get(key, {}))
-
-    async def zremrangebyscore(self, key, lo, hi):
-        z = self.zsets.get(key, {})
-        lo = float("-inf") if lo == "-inf" else float(lo)
-        dead = [m for m, s in z.items() if lo <= s <= float(hi)]
-        for m in dead:
-            z.pop(m)
-        return len(dead)
-
-    @property
-    def zsets(self) -> dict[str, dict[str, float]]:
-        if not hasattr(self, "_zsets"):
-            self._zsets: dict[str, dict[str, float]] = {}
-        return self._zsets
-
-
-def _hold(r, n, *, expires_in=300.0):
-    """Seed ``n`` live (or, with a negative ``expires_in``, already-expired) leases."""
-    import time as _t
-    z = r.zsets.setdefault(router._BEHAVIORAL_SLOTS_KEY, {})
-    for _ in range(n):
-        z[uuid.uuid4().hex] = _t.time() + expires_in
-
-
-def _live(r):
-    import time as _t
-    return sum(1 for s in r.zsets.get(router._BEHAVIORAL_SLOTS_KEY, {}).values() if s > _t.time())
 
 
 @pytest.fixture
@@ -169,7 +66,22 @@ async def _settle():
 
 
 def _counter(r, name):
-    return int(r.store.get(f"{BM}:{name}:{TODAY}", 0))
+    """A daily counter's value, whatever UTC day it was written under. The fake is fresh
+    per test, so summing every ``<name>:<YYYY-MM-DD>`` key is exact — and a run that
+    crosses 00:00 UTC (the counter dated one day, the assertion the next) can't fail."""
+    pat = re.compile(rf"^{re.escape(BM)}:{re.escape(name)}:\d{{4}}-\d{{2}}-\d{{2}}$")
+    return sum(int(v) for k, v in r.store.items() if pat.match(k))
+
+
+def _hold(r, *tokens):
+    """Live leases (as other runs would hold them)."""
+    z = r.zsets.setdefault(slots.LEASES_KEY, {})
+    for t in tokens:
+        z[t] = time.time() + 300
+
+
+def _live(r):
+    return sum(1 for sc in r.zsets.get(slots.LEASES_KEY, {}).values() if sc > time.time())
 
 
 # ── enqueue: returns + priority semantics ────────────────────────────────────
@@ -181,7 +93,7 @@ async def test_enqueue_normal_starts_a_run_and_counts_the_reason(fake_redis, cap
     assert fake_redis.store.get(router._behavioral_cache_key("npm", "left-pad"))  # cached
     assert _counter(fake_redis, "trigger:unit") == 1
     assert _counter(fake_redis, "trigger:unit:started") == 1
-    # the slot lease was released when the run finished
+    # the slot was released when the run finished
     assert _live(fake_redis) == 0
 
 
@@ -200,28 +112,39 @@ async def test_enqueue_returns_locked_when_a_run_is_in_flight(fake_redis, captur
     assert captured_runs == []
 
 
-async def test_normal_defers_only_when_every_slot_is_busy(fake_redis, captured_runs):
-    _hold(fake_redis, 1)  # one of two busy
+async def test_normal_queues_only_when_every_slot_is_busy(fake_redis, captured_runs):
+    _hold(fake_redis, "other-run|")  # one of two busy
     assert await trigger.enqueue_behavioral(NPM, reason="unit") == "started"
     await _settle()
-    _hold(fake_redis, 1)  # both busy now (the first run released its own lease)
-    assert await trigger.enqueue_behavioral(
-        {**NPM, "package_coordinate": {"surface": "npm", "name": "other"}}, reason="unit",
-    ) == "deferred"
+    fake_redis.zsets[slots.LEASES_KEY] = {}
+    _hold(fake_redis, "a|", "b|")  # both busy
+    other = {**NPM, "package_coordinate": {"surface": "npm", "name": "other"}}
+    assert await trigger.enqueue_behavioral(other, reason="unit") == "queued"
     assert _counter(fake_redis, "slot_rejected") == 1
-    assert _live(fake_redis) == 2  # the rejected taker removed its own lease
-    # the lock was released so the next request can try again
+    # nobody else's lease was touched, and the rejected taker left nothing behind
+    assert set(fake_redis.zsets[slots.LEASES_KEY]) == {"a|", "b|"}
+    # the lock was released so the queue (or the next request) can start it
     assert router._behavioral_cache_key("npm", "other") + ":lock" not in fake_redis.store
+    assert await slots.queue_position(router._behavioral_cache_key("npm", "other")) == 0
+
+
+async def test_backfill_defers_instead_of_queueing(fake_redis, captured_runs):
+    _hold(fake_redis, "a|", "b|")
+    assert await trigger.enqueue_behavioral(
+        NPM, reason="backfill", priority="low", queue=False) == "deferred"
+    assert await slots.queue_depth() == 0
 
 
 async def test_low_defers_unless_a_slot_would_stay_free(fake_redis, captured_runs):
-    _hold(fake_redis, 1)  # 1 of 2 busy → low must not take the last
-    assert await trigger.enqueue_behavioral(NPM, reason="backfill", priority="low") == "deferred"
-    assert _live(fake_redis) == 1
+    _hold(fake_redis, "x|")  # 1 of 2 busy → low must not take the last
+    assert await trigger.enqueue_behavioral(
+        NPM, reason="backfill", priority="low", queue=False) == "deferred"
     assert _counter(fake_redis, "slot_rejected") == 0  # not a real request turned away
     assert _counter(fake_redis, "trigger:backfill:deferred") == 1
-    fake_redis.zsets[router._BEHAVIORAL_SLOTS_KEY].clear()  # idle → ok
-    assert await trigger.enqueue_behavioral(NPM, reason="backfill", priority="low") == "started"
+    assert set(fake_redis.zsets[slots.LEASES_KEY]) == {"x|"}  # nothing left behind
+    fake_redis.zsets[slots.LEASES_KEY] = {}  # idle → ok
+    assert await trigger.enqueue_behavioral(
+        NPM, reason="backfill", priority="low", queue=False) == "started"
     await _settle()
     assert len(captured_runs) == 1
 
@@ -327,6 +250,26 @@ async def test_version_change_drops_the_block_and_enqueues(fake_redis, captured_
     assert _counter(fake_redis, "trigger:version_change") == 1
     fresh = json.loads(fake_redis.store[key])  # the public block has no coordinate key
     assert fresh["ran"] is True and "declared_egress" in fresh  # fresh block written
+
+
+async def test_catalog_version_change_is_low_priority(fake_redis, captured_runs):
+    """A catalog re-score must not take the slot kept for user-facing runs: with slot 1
+    busy it queues behind viewers (low band) instead of taking slot 0."""
+    _hold(fake_redis, "viewer|")
+    new = {**NPM, "package_version": "1.4.0", "artifact_scan": {"version": "1.4.0"}}
+    assert await trigger.on_scan_change("npm", "npm", "left-pad", NPM, new) == "queued"
+    assert _live(fake_redis) == 1  # the last slot stayed free for viewers
+    member = router._behavioral_cache_key("npm", "left-pad")
+    assert slots.score_priority(fake_redis.zsets[slots.QUEUE_KEY][member]) == "low"
+
+
+async def test_watched_version_change_stays_normal(fake_redis, captured_runs):
+    _hold(fake_redis, "viewer|")
+    new = {**NPM, "package_version": "1.4.0", "artifact_scan": {"version": "1.4.0"}}
+    out = await trigger.on_scan_change("npm", "npm", "left-pad", NPM, new, watched=True)
+    assert out == "started"  # took slot 0
+    await _settle()
+    assert len(captured_runs) == 1
 
 
 async def test_no_change_does_nothing_and_keeps_the_block(fake_redis, captured_runs):
@@ -460,7 +403,8 @@ async def test_catalog_rescan_github_path_diffs_the_rewritten_cache(hook_spy, mo
 
     hook_spy["prev"] = {"package_version": "1.0.0"}
 
-    async def fake_public_scan(owner, repo, force, db):
+    async def fake_public_scan(owner, repo, force, db, behavioral=False):
+        hook_spy["priority"] = slots.current_priority()
         hook_spy["prev"] = {"package_version": "2.0.0"}  # public_scan rewrote the cache
         return SimpleNamespace(trust_score=90)
 
@@ -473,6 +417,9 @@ async def test_catalog_rescan_github_path_diffs_the_rewritten_cache(hook_spy, mo
     assert hook_spy["change"] == [("github", "acme", "widget", {"package_version": "1.0.0"},
                                    {"package_version": "2.0.0"}, False)]
     assert hook_spy["cache_set"] == []  # public_scan already wrote it
+    # the sandbox run the re-score's public_scan may start is background work: LOW
+    assert hook_spy["priority"] == "low"
+    assert slots.current_priority() == "normal"  # and only inside that call
 
 
 async def test_catalog_rescan_skips_the_hook_on_a_failed_scan(hook_spy, monkeypatch):
@@ -570,9 +517,15 @@ async def test_watch_rescan_skips_the_hook_when_the_scan_failed(hook_spy, monkey
 
 
 # ── slot leases: a crashed run can never wedge the cap (2026-10-08 incident) ────────
+def _hold_n(r, n, *, expires_in):
+    z = r.zsets.setdefault(slots.LEASES_KEY, {})
+    for i in range(n):
+        z[f"leaked-{i}|"] = time.time() + expires_in
+
+
 async def test_expired_leases_from_a_killed_run_do_not_block_new_runs(fake_redis, captured_runs):
     # A deploy killed the container mid-run: two leases were never released.
-    _hold(fake_redis, 2, expires_in=-1.0)  # already past their expiry
+    _hold_n(fake_redis, 2, expires_in=-1.0)  # already past their expiry
     assert await trigger.enqueue_behavioral(NPM, reason="unit") == "started"
     await _settle()
     assert len(captured_runs) == 1
@@ -583,24 +536,24 @@ async def test_rejected_attempts_do_not_extend_a_leaked_lease(fake_redis, captur
     # Two live leases (both slots busy). Rejected attempts must not push their expiry
     # out — the old counter refreshed its TTL on every attempt, so a leaked count never
     # expired while traffic kept arriving.
-    _hold(fake_redis, 2, expires_in=120.0)
-    before = sorted(fake_redis.zsets[router._BEHAVIORAL_SLOTS_KEY].values())
+    _hold_n(fake_redis, 2, expires_in=120.0)
+    before = sorted(fake_redis.zsets[slots.LEASES_KEY].values())
     for i in range(5):
         out = await trigger.enqueue_behavioral(
             {**NPM, "package_coordinate": {"surface": "npm", "name": f"p{i}"}}, reason="unit")
-        assert out == "deferred"
-    assert sorted(fake_redis.zsets[router._BEHAVIORAL_SLOTS_KEY].values()) == before
+        assert out == "queued"  # waits in the queue; the leases are untouched
+    assert sorted(fake_redis.zsets[slots.LEASES_KEY].values()) == before
     assert captured_runs == []
 
 
 async def test_release_removes_only_its_own_lease(fake_redis, captured_runs):
     a = await router._acquire_behavioral_slot()
     b = await router._acquire_behavioral_slot()
-    assert a and b and a != b
+    assert a and b and a.token != b.token
     assert await router._acquire_behavioral_slot() is None  # cap 2
     await router._release_behavioral_slot(a)
     assert _live(fake_redis) == 1
-    assert b in fake_redis.zsets[router._BEHAVIORAL_SLOTS_KEY]
+    assert b.token in fake_redis.zsets[slots.LEASES_KEY]
     assert await router.behavioral_slots_in_use() == 1
 
 

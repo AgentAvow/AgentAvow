@@ -1074,9 +1074,18 @@ def _sandbox_section(data: dict) -> list[str]:
     b = data.get("behavioral")
     if not isinstance(b, dict):
         return []
+    if b.get("pending") and b.get("state") == "queued":
+        pos = b.get("queue_position")
+        where = f" (position {pos} in the queue)" if isinstance(pos, int) else ""
+        return [f"**Sandbox:** waiting for a free sandbox slot{where} — every slot is busy. "
+                "The static result above stands; ask again in a few minutes for the "
+                "observed behavior."]
     if b.get("pending"):
         return ["**Sandbox:** running now — ask again in about a minute for the observed "
                 "behavior (tools called, network, files)."]
+    if b.get("state") == "unavailable":
+        return ["**Sandbox:** unavailable right now — this result is static analysis only "
+                "(final)."]
     if not b.get("ran"):
         return []
     if _is_live_probe(b):
@@ -1353,13 +1362,19 @@ def _split_pinned_version(surface: str, spec: str) -> tuple[str, str | None]:
 
 def _sandbox_struct(data: dict) -> dict | None:
     """The behavioral sandbox result as stable machine-readable fields. None when the
-    tier does not apply; ``pending`` True while the first run is still going."""
+    tier does not apply; ``pending`` True while the first run is still going or waiting
+    for a slot (``state`` running / queued; ``unavailable`` = final, static only)."""
     b = data.get("behavioral")
     if not isinstance(b, dict):
         return None
     if b.get("pending") or not b.get("ran"):
-        return {"ran": False, "pending": bool(b.get("pending")),
-                "reason": b.get("reason") or None}
+        out = {"ran": False, "pending": bool(b.get("pending")),
+               "reason": b.get("reason") or None}
+        if b.get("state") in ("running", "queued", "unavailable"):
+            out["state"] = b["state"]
+        if isinstance(b.get("queue_position"), int):
+            out["queue_position"] = b["queue_position"]
+        return out
     ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else {}
     gs = b.get("grade_summary") or {}
     eff = data.get("behavioral_score_effect") or {}

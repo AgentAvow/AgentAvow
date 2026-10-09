@@ -245,6 +245,22 @@ CASES = [
     ("deps_canary_branch_unchanged", _scan(45, 200, [_dep("high", "a@1 (GHSA-1)")],
                                            behavioral=_bev(canary_exfil=[{"host": "x"}])),
      "do_not_connect", True, "a planted credential left the sandbox"),
+    ("queued_for_slot", _scan(90, 300, behavioral={
+        "ran": False, "pending": True, "state": "queued", "queue_position": 3}),
+     "safe", False, "nothing found in 300 files; waiting for a sandbox slot"),
+    ("running_state_explicit", _scan(90, 300, behavioral={
+        "ran": False, "pending": True, "state": "running"}),
+     "safe", False, "nothing found in 300 files; sandbox still running"),
+    # past the pending age limit the API says final + static-only: decision is final
+    ("sandbox_unavailable_is_final", _scan(90, 300, behavioral={
+        "ran": False, "pending": False, "state": "unavailable",
+        "reason": "sandbox unavailable, static analysis only"}),
+     "safe", True, "nothing found in 300 files"),
+    ("deps_safe_queued", _scan(82, 300, [_dep("high", "a@1 (GHSA-1)")],
+                               behavioral={"ran": False, "pending": True, "state": "queued"}),
+     "safe", False,
+     "no critical or high findings in its code (dependencies: 1 high advisory); "
+     "waiting for a sandbox slot"),
     # ── odd shapes never raise ────────────────────────────────────────────────────
     ("empty", {}, "review", True, "trust score 0/100 is under 51"),
     ("garbage", {"trust_score": "x", "findings": "nope", "metadata": None,

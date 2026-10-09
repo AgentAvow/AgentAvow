@@ -1475,8 +1475,12 @@ async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
         prev = await cached_scan_data(surface, owner, repo)
         if surface == "github":
             from src.api.public_scan_router import public_scan
-            # public_scan re-scans and captures into community_scans itself.
-            await public_scan(owner=owner, repo=repo, force=True, db=db)
+            from src.scanner.behavioral.slots import low_priority
+            # public_scan re-scans and captures into community_scans itself. Any
+            # sandbox run it starts is background re-score work: LOW priority.
+            with low_priority():
+                await public_scan(owner=owner, repo=repo, force=True, behavioral=False,
+                                  db=db)
             await _store_catalog_adoption(surface, owner, repo, db)
             # Version / tool-digest moved → drop the cached sandbox block, re-run.
             fresh = await cached_scan_data(surface, owner, repo, stale=False)

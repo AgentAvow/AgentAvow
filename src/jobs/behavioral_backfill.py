@@ -182,7 +182,8 @@ async def run_behavioral_backfill(
                     await _mark(r, member, "cached", now)
                     continue
                 stats["attempted"] += 1
-                outcome = await enqueue_behavioral(shaped, reason="backfill", priority="low")
+                outcome = await enqueue_behavioral(shaped, reason="backfill", priority="low",
+                                                 queue=False)
                 if outcome == "deferred":
                     stats["deferred"] += 1
                     stop = True  # the sandbox is busy with real scans — try next pass
@@ -234,6 +235,22 @@ async def read_backfill_progress() -> dict:
     return out
 
 
+async def behavioral_queue_tick() -> None:
+    """Every loop pass: start queued sandbox runs whose slot freed up (a holder that
+    died lets its slot expire; nothing else would notice), then run the slot watchdog.
+    Runs before the backfill so queued viewer / watch requests go first."""
+    from src.config import settings
+    if not getattr(settings, "scanner_behavioral_enabled", False):
+        return
+    try:
+        from src.api.public_scan_router import _drain_behavioral_queue
+        from src.scanner.behavioral.slots import check_health
+        await _drain_behavioral_queue()
+        await check_health()
+    except Exception:
+        logger.debug("behavioral queue tick failed", exc_info=True)
+
+
 async def behavioral_backfill_loop(interval: int | None = None) -> None:
     """Scheduler loop: one pass every ``behavioral_backfill_interval_minutes`` while
     both the backfill and the sandbox tier are enabled. A short NX lock per pass
@@ -246,6 +263,7 @@ async def behavioral_backfill_loop(interval: int | None = None) -> None:
     logger.info("Behavioral backfill loop started (interval=%ds)", interval)
     await asyncio.sleep(getattr(settings, "catalog_rescan_startup_delay_sec", 300))
     while True:
+        await behavioral_queue_tick()
         try:
             if getattr(settings, "behavioral_backfill_enabled", True) and getattr(
                     settings, "scanner_behavioral_enabled", False):

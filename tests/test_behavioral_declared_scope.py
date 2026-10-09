@@ -14,8 +14,10 @@ import pytest
 
 import src.api.public_scan_router as router
 from src.scanner.behavioral import runner as behavioral_runner
+from src.scanner.behavioral import slots
 from src.scanner.behavioral.runner import BehavioralResult
 from src.scanner.scan import _declared_scope_from_artifact
+from tests.behavioral_fake_redis import SlotFakeRedis
 
 MANIFEST = "version: agentavow-manifest-v0\negress:\n  - api.example.com\ncapabilities:\n  - network:egress\n"
 
@@ -26,18 +28,8 @@ class _File:
     text: str | None = None
 
 
-class _FakeRedis:
-    def __init__(self):
-        self.store: dict[str, str] = {}
-
-    async def get(self, key):
-        return self.store.get(key)
-
-    async def set(self, key, value, ex=None, nx=False):
-        if nx and key in self.store:
-            return None
-        self.store[key] = value
-        return True
+class _FakeRedis(SlotFakeRedis):
+    pass
 
 
 @pytest.fixture
@@ -118,7 +110,8 @@ def test_cache_entry_is_keyed_by_the_declaration(fake_redis, captured_runs):
     asyncio.run(router._behavioral_block(base, force=True))
     asyncio.run(router._behavioral_block(declared, force=True))
     assert len(captured_runs) == 2, "a declaration must not reuse the undeclared verdict"
-    assert len(fake_redis.store) == 2
+    assert len([k for k in fake_redis.store if k.startswith("behavioral:npm:")]) == 2
+    assert not fake_redis.zsets.get(slots.LEASES_KEY), "both inline runs gave their slot back"
     # And the declared run is served from cache afterwards, without a third sandbox run.
     cached = asyncio.run(router._behavioral_block(declared, force=False))
     assert cached["declared_egress"] == ["api.example.com"]
@@ -203,41 +196,9 @@ def test_no_signed_observation_when_the_sandbox_did_not_run(fake_redis, monkeypa
 
 def test_global_slot_cap_limits_concurrent_sandbox_runs(fake_redis, captured_runs, monkeypatch):
     monkeypatch.setattr(router.settings, "scanner_behavioral_max_concurrent", 1, raising=False)
-
-    class _Redis(_FakeRedis):
-        async def incr(self, key):
-            self.store[key] = int(self.store.get(key, 0)) + 1
-            return self.store[key]
-
-        async def decr(self, key):
-            self.store[key] = int(self.store.get(key, 0)) - 1
-            return self.store[key]
-
-        async def expire(self, key, ttl):
-            return True
-
-        async def delete(self, key):
-            self.store.pop(key, None)
-
-        # sandbox slot leases (sorted set)
-        async def zadd(self, key, mapping):
-            self.store.setdefault(key, {}).update(mapping)
-
-        async def zrem(self, key, *members):
-            for m in members:
-                self.store.get(key, {}).pop(m, None)
-
-        async def zcard(self, key):
-            return len(self.store.get(key, {}))
-
-        async def zremrangebyscore(self, key, lo, hi):
-            z = self.store.get(key, {})
-            for m in [m for m, s in z.items() if s <= float(hi)]:
-                z.pop(m)
-    r = _Redis()
-    monkeypatch.setattr("src.redis_client.get_redis", lambda: r)
+    r = fake_redis
     started = []
-    monkeypatch.setattr(router.asyncio, "create_task",
+    monkeypatch.setattr(router._behavioral_slots, "spawn",
                         lambda coro: (started.append(coro), coro.close()))
 
     async def go():
@@ -250,12 +211,16 @@ def test_global_slot_cap_limits_concurrent_sandbox_runs(fake_redis, captured_run
 
     a, b = asyncio.run(go())
     assert a["pending"] and b["pending"]
+    assert a["state"] == "running" and b["state"] == "queued"
+    assert b["queue_position"] == 1 and "waiting for a sandbox slot" in b["reason"]
     assert len(started) == 1, "the second coordinate waits for a slot"
-    assert len(r.store[router._BEHAVIORAL_SLOTS_KEY]) == 1  # one live lease
+    (lease,) = r.zsets[slots.LEASES_KEY]
+    assert lease.endswith(":lock")  # member = run id | the coordinate's lock key
     assert not any(k.endswith("two:lock") or "two" in k and k.endswith(":lock") for k in r.store), \
-        "a coordinate that got no slot releases its lock so the next request can retry"
-    # a forced run with no slot is reported as busy, not run
+        "a coordinate that got no slot releases its lock so the queue can start it"
+    # a forced run with no slot is queued (as a forced re-run), not run
     busy = asyncio.run(router._behavioral_block(
         {"package_coordinate": {"surface": "npm", "name": "three"}}, force=True))
-    assert busy["pending"] and "busy" in busy["reason"]
+    assert busy["pending"] and busy["state"] == "queued"
+    assert json.loads(r.hashes[slots.QUEUE_PAYLOAD_KEY]["behavioral:npm:three"])["force"]
     assert captured_runs == []
