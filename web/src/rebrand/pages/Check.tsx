@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, Link, useLocation, useSearchParams, Navigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
+import { endpointFromCheckPath } from '../lib/endpointPath'
 import { NoticeText } from '../components/NoticeText'
 import ImageScanDepth from '../components/ImageScanDepth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -1901,6 +1902,12 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
 
       <PackageFacts scan={scan} surface={surface} />
       <McpToolList scan={scan} />
+      {(() => {
+        // An MCP server shipped as a package: the blast radius its served tools imply,
+        // from the sandbox run that started it (same rule the live-endpoint page uses).
+        const ts = (scan as { behavioral?: { tool_surface?: { blast_radius?: Record<string, unknown> } } | null }).behavioral?.tool_surface
+        return ts?.blast_radius ? <BlastRadius scan={{ surface_detail: { blast_radius: ts.blast_radius } }} /> : null
+      })()}
       <CapabilitiesPanel scan={scan} />
       <AdvisoriesPanel scan={scan} />
 
@@ -1951,6 +1958,11 @@ export default function RebrandCheck() {
   // Wallet route (/check/wallet/:addr): resolve to the linked tool, then its result.
   if (location.pathname.includes('/check/wallet/') && params.addr) {
     return <WalletResult addr={params.addr} />
+  }
+  // An MCP endpoint in the path (/check/mcp.deepwiki.com/mcp) → the live MCP check.
+  const pathEndpoint = endpointFromCheckPath(location.pathname)
+  if (pathEndpoint) {
+    return <Navigate replace to={`${rp('/rebrand/check/mcp')}?endpoint=${encodeURIComponent(pathEndpoint)}`} />
   }
   // OpenClaw / Agent Skill route (/check/skill/:owner/:repo).
   if (location.pathname.includes('/check/skill/') && params.owner && params.repo) {
