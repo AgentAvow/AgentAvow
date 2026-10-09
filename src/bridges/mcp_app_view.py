@@ -149,6 +149,9 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
   function ARC(cx,cy,r,a0,a1){ var s=P(cx,cy,r,a0),e=P(cx,cy,r,a1),lg=(a1-a0>180)?1:0; return "M"+s[0].toFixed(1)+" "+s[1].toFixed(1)+" A"+r+" "+r+" 0 "+lg+" 1 "+e[0].toFixed(1)+" "+e[1].toFixed(1); }
   function adoptionPct(c){ c=c||0; return c>0?Math.min(100,Math.round(Math.log10(c+1)/9*100)):0; }
   function adoptTier(p){ return p>=88?"Load-bearing":p>=65?"Widely relied":p>=40?"Established":p>=15?"Rising":"New"; }
+  // Short adoption units, identical to src/adoption_units.py (a test keeps them equal).
+  var SHORT_UNITS={"downloads/wk":"dl/wk","downloads/mo":"dl/mo","downloads/yr":"dl/yr","downloads/90d":"dl/90d","downloads":"dl","stars":"\u2605","stars (linked repo)":"\u2605","pulls":"pulls","dependents":"deps","installs":"installs","likes":"likes"};
+  function shortUnit(u){ u=String(u||"").trim(); if(!u) return ""; var k=u.toLowerCase(); return Object.prototype.hasOwnProperty.call(SHORT_UNITS,k)?SHORT_UNITS[k]:u.replace(/downloads/g,"dl"); }
 
   function renderTrust(score, certified){
     var t=tier(score), lv=Math.round(score/10), segs="";
@@ -174,7 +177,7 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
     document.getElementById("adopt").innerHTML =
       '<div class="pair"><svg class="dial" width="64" viewBox="0 0 200 94" style="overflow:visible" aria-hidden="true"><defs><linearGradient id="agrad" gradientUnits="userSpaceOnUse" x1="26" y1="0" x2="174" y2="0"><stop stop-color="#2dd4bf"/><stop offset="1" stop-color="#e879f9"/></linearGradient></defs>'+tr+fill+ticks+nd+'</svg>'
       +'<div class="ptxt"><div class="caplabel">Adoption</div>'
-      +'<div class="num anum">'+(has?compact(c):'<span class="mut">New</span>')+(has&&ad&&ad.unit?'<span class="unit">'+esc(ad.unit)+'</span>':'')+'</div>'
+      +'<div class="num anum"'+(has&&ad&&ad.unit?' title="'+esc(compact(c)+' '+ad.unit)+'"':'')+'>'+(has?compact(c):'<span class="mut">New</span>')+(has&&ad&&ad.unit?'<span class="unit">'+esc(shortUnit(ad.unit))+'</span>':'')+'</div>'
       +'<div class="tw atw">'+(has?'<span class="grad">'+adoptTier(pct)+'</span>':'<span class="mut">no signal yet</span>')+'</div></div></div>';
   }
   function renderFinds(list, mode){
@@ -248,7 +251,8 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
                low_signals:"No risks found; below the bar on non-finding signals, not detected risk." };
     if(lead){ whys.clean="Signed and recomputable offline."; whys.blocking_findings=(sc.critical||0)+" critical · "+(sc.high||0)+" high."; }
     var why=whys[reason]||"";
-    if(certified) why="Certified — artifact scanned, provenance verified, no drift, signed & recomputable. "+why;
+    // The Certified line already says "signed & recomputable"; don't repeat it.
+    if(certified) why="Certified — artifact scanned, provenance verified, no drift, signed & recomputable."+(reason==="clean"&&lead?"":" "+why);
     document.getElementById("why").textContent = why;
     // Incident history banner (context only — never part of the score). Red if the
     // current version is flagged malicious, amber for a past-and-cleaned compromise.

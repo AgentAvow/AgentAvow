@@ -10,7 +10,7 @@ No account, no install. Paste any of these into the check box, or hit the API di
 
 - a GitHub repo — `github.com/owner/repo` or `owner/repo`
 - an MCP server, an npm, PyPI or crates package, a Hugging Face model, or a Docker image
-- an Agent Skill (`skill:owner/repo`); a repo holding many skills is graded skill by skill, and its result is
+- an Agent Skill (`skill:owner/repo`); a repo holding many skills is checked skill by skill, and its result is
   the worst of them
 - a wallet address (`0x…` or a Solana address); it opens the result for the repo linked to that wallet, or
   says the wallet isn't linked to a tool yet
@@ -153,7 +153,7 @@ you can recompute it. See [Verify an AgentAvow attestation](./verify-attestation
 Tools change after you vet them. **Watch** a tool and we re-scan it and alert you the moment its score drops
 or its signed definition changes (every alert leads with the tool's current answer) — the rug-pull you'd otherwise miss. For an MCP server the attestation pins
 one digest per served tool (`scan.toolDigests`, keyed `tool:<name>`) plus a digest of the whole set, and a
-re-scan reports `toolDrift` — which tools were added, removed or changed since the last grade — so you can
+re-scan reports `toolDrift` — which tools were added, removed or changed since the last check — so you can
 see exactly what moved, not just that something did. A gate can recompute the digest of the tool it is about
 to call from the server's own `tools/list` and refuse on mismatch; see
 [Verify an AgentAvow attestation](./verify-attestations.md#tool-definitions-per-tool-digests-and-drift). Once the sandbox has run a watched tool, a

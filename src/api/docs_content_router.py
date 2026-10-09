@@ -105,6 +105,17 @@ def _meta_description(text: str, limit: int = _META_DESCRIPTION_MAX) -> str:
     return f"{cut}…"
 
 
+def _italics_html(text: str) -> str:
+    """Escape ``text`` and render the *...* / _..._ italics in it."""
+    out, last = [], 0
+    for m in _ITALIC_RE.finditer(text):
+        out.append(html.escape(text[last:m.start()]))
+        out.append(f"<em>{html.escape(m.group(1) or m.group(2))}</em>")
+        last = m.end()
+    out.append(html.escape(text[last:]))
+    return "".join(out)
+
+
 def _inline(text: str) -> str:
     """Render inline markdown for a single already-line-joined string.
 
@@ -133,9 +144,9 @@ def _inline(text: str) -> str:
 
     text = _LINK_RE.sub(_link, text)
 
-    # 3. bold **...**
+    # 3. bold **...** (italics inside bold still render: **does _not_ do**)
     def _bold(m: re.Match[str]) -> str:
-        return _stash(f"<strong>{html.escape(m.group(1))}</strong>")
+        return _stash(f"<strong>{_italics_html(m.group(1))}</strong>")
 
     text = _BOLD_RE.sub(_bold, text)
 

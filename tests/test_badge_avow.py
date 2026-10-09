@@ -79,7 +79,7 @@ def test_card_columns_share_baselines_with_text_right_of_the_meters():
     assert _text_y(svg, "92") == _text_y(svg, "3.1k")
     assert _text_y(svg, "Trusted") == _text_y(svg, "Established")
     assert _text_y(svg, "TRUST") == _text_y(svg, "ADOPTION")
-    assert _text_y(svg, "stars") == _text_y(svg, "3.1k")  # unit beside the count
+    assert _text_y(svg, "★") == _text_y(svg, "3.1k")  # short unit beside the count
     # text sits to the right of its meter
     bar_x = float(re.search(r'<rect x="([\d.]+)" y="[\d.]+" width="15" height="5.5"',
                             svg).group(1))
@@ -168,11 +168,11 @@ def test_arc_maths_matches_the_card():
 def test_card_adoption_shows_count_unit_and_gradient_level():
     svg = _render("card", "safe", 97, True, adoption=1_200_000, pct=91,
                   unit="downloads/wk")
-    assert ">1.2M<" in svg and ("downloads/wk<" in svg or ">dl/wk<" in svg)
+    assert ">1.2M<" in svg and ">dl/wk<" in svg  # always the short unit
     assert 'fill="url(#gW)"' in svg and "Load-bearing" in svg
     stacked = _render("card-stacked", "safe", 97, True, adoption=1_200_000, pct=91,
                       unit="downloads/wk")
-    assert ">1.2M<tspan" in stacked and ">downloads/wk</tspan>" in stacked
+    assert ">1.2M<tspan" in stacked and ">dl/wk</tspan>" in stacked
 
 
 def test_compact_adoption_is_a_small_needle_gauge():

@@ -31,6 +31,29 @@
     return String(tool || '').trim().replace(/^https?:\/\/[^/]+\//, '').replace(':', '/');
   }
 
+  // Published packages (scoped npm "@scope/name" and Hugging Face "org/model" included)
+  // use the /package/<surface>/<name> routes and the /check/pkg/ report; anything else
+  // is a GitHub owner/repo.
+  var PKG_SURFACES = { npm: 'npm', pypi: 'pypi', python: 'pypi', crates: 'crates',
+    crate: 'crates', huggingface: 'huggingface', hf: 'huggingface', docker: 'docker' };
+
+  function routesFor(path) {
+    var i = path.indexOf('/');
+    var head = i > 0 ? path.slice(0, i).toLowerCase() : '';
+    var surface = PKG_SURFACES[head];
+    if (surface && i < path.length - 1) {
+      var name = path.slice(i + 1);
+      return {
+        api: ORIGIN + '/api/v1/public/scan/package/' + surface + '/' + name,
+        report: ORIGIN + '/check/pkg/' + surface + '/' + name,
+      };
+    }
+    return {
+      api: ORIGIN + '/api/v1/public/scan/' + path,
+      report: ORIGIN + '/check/' + path,
+    };
+  }
+
   function b64urlToBytes(s) {
     s = String(s).replace(/-/g, '+').replace(/_/g, '/');
     while (s.length % 4) s += '=';
@@ -75,10 +98,10 @@
     var path = coordToPath(tool);
     if (!path) return;
     theme = (theme === 'light' || theme === 'dark') ? theme : 'auto';
-    var cardUrl = ORIGIN + '/api/v1/public/scan/' + path + '/card.svg' +
-      (theme === 'auto' ? '' : '?theme=' + theme);
-    var reportUrl = ORIGIN + '/check/' + path;
-    var verdictUrl = ORIGIN + '/api/v1/public/scan/' + path + '/verdict.json';
+    var routes = routesFor(path);
+    var cardUrl = routes.api + '/card.svg' + (theme === 'auto' ? '' : '?theme=' + theme);
+    var reportUrl = routes.report;
+    var verdictUrl = routes.api + '/verdict.json';
 
     var wrap = el('div', 'display:inline-block;width:100%;max-width:360px;' +
       'font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.4');

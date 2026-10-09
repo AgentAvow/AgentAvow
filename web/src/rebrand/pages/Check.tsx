@@ -43,6 +43,16 @@ const CAT_LABELS: Record<string, string> = {
 /** The one-line verdict for SEO/share copy: the three-phrase headline + its reason
  * (gradeSystem.decisionOf — the same decision VerdictBadge and summarize() read, so the
  * description never disagrees with the banner). "Safe to connect · Certified — …". */
+/** "mcp.deepwiki.com/mcp" from an endpoint URL, for titles. */
+function mcpHostLabel(endpoint: string): string {
+  try {
+    const u = new URL(endpoint)
+    return u.hostname + (u.pathname && u.pathname !== '/' ? u.pathname : '')
+  } catch {
+    return 'this MCP server'
+  }
+}
+
 function scanVerdict(scan: PublicScanResponse): string {
   const d = decisionOf(scan)
   return `${decisionHeadline(scan)} — ${d.reason}`
@@ -325,14 +335,14 @@ function ScoreDuo({ trustScore, trustLabel, surface, owner = '', repo, certified
     <div className="relative px-4 sm:px-7 py-6">
       <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
         <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
-        <div className="relative grid grid-cols-1 sm:grid-cols-2">
-          <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
+        <div className="relative grid grid-cols-2">
+          <div className="px-2 py-4 sm:p-6 pb-5 text-center flex flex-col items-center min-w-0">
             <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">{showCert ? <CertifiedMark score={trustScore} scale={big} /> : <TrustBar score={trustScore} scale={big} />}</div>
             <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: showCert ? undefined : t.color }}>{trustLabel}</div>
             <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
             <Percentile score={trustScore} />
           </div>
-          <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
+          <div className="px-2 py-4 sm:p-6 pb-5 text-center flex flex-col items-center min-w-0 border-l border-border/50">
             <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">
               <AdoptionNeedle count={has ? h!.count : 0} unit={has ? h!.unit : undefined} scorePct={data?.adoption_score_100} scale={big} />
             </div>
@@ -408,11 +418,11 @@ function DefinitionDrift({ owner, repo }: { owner: string; repo: string }) {
         return (await publicApi.get<{
           summary: { points: number; drift_events: number }
           history: { manifest_drift: boolean }[]
-        }>(`/public/drift/${owner}/${repo}`)).data
+        }>(`/public/drift/${owner}/${repo}`, { params: { quiet: 1 } })).data
       } catch { return null }
     },
   })
-  if (!data) return null
+  if (!data || !data.history.length) return null
   const driftCount = data.history.filter((h) => h.manifest_drift).length
   const feedUrl = `/api/v1/public/drift/${owner}/${repo}`
   return (
@@ -777,6 +787,7 @@ function Hero() {
   ]
   return (
     <div className="max-w-[1080px] mx-auto px-6 py-20 text-center">
+      <SEOHead title="Check a tool" description="Is this tool safe for your agent to connect? Paste a GitHub repo, MCP server, npm/PyPI/crates package, Docker image, Hugging Face model or agent skill for Safe to connect, Review before you connect, or Do not connect, with a signed trust score." path="/check" />
       <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">Is this tool <span className="gradient-text-bio">safe</span>?</h1>
       <p className="mt-4 text-text-muted max-w-[46ch] mx-auto">Paste anything your agent connects to. We'll tell you — in plain English — whether it's safe, and prove it with a signed score.</p>
       <form onSubmit={(e) => { e.preventDefault(); go() }} className="glass mt-7 mx-auto max-w-[560px] flex gap-2.5 rounded-2xl p-2 pl-4 shadow-lg shadow-primary/10">
@@ -795,7 +806,7 @@ function Hero() {
           </button>
         ))}
       </div>
-      <div className="mt-3 font-mono text-[11.5px] text-text-muted/70">no account · signed result you can verify offline · GitHub repos, npm &amp; PyPI packages</div>
+      <div className="mt-3 font-mono text-[11.5px] text-text-muted/70">no account · signed result you can verify offline · GitHub repos, MCP servers, npm, PyPI &amp; crates packages, Docker images, Hugging Face models, agent skills</div>
     </div>
   )
 }
@@ -1374,7 +1385,7 @@ function AddToAgent(props:
           const t = { name: mcpNameFromUrl(props.url), url: props.url }
           return (
             <>
-              <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">One click for Cursor, VS Code, or Goose — the graded server, ready to connect.</p>
+              <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">One click for Cursor, VS Code, or Goose — the checked server, ready to connect.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <a href={cursorInstall(t)} onClick={() => beacon('install_click')} target="_blank" rel="noopener noreferrer" className={deeplinkBtn}>▸ Add to Cursor</a>
                 <a href={vscodeInstall(t)} onClick={() => beacon('install_click')} className={deeplinkBtn}>▸ Add to VS Code</a>
@@ -1397,7 +1408,7 @@ function AddToAgent(props:
         {props.kind === 'package' && <PkgInstall surface={props.surface} name={props.name} isMcp={props.isMcp} />}
         {props.kind === 'skill' && (props.skillName && props.skillName.toLowerCase() !== props.repo.toLowerCase() ? (
           <>
-            <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">This repo holds a skills collection; we graded the <span className="font-mono text-text">{props.skillName}</span> skill. Cloning the whole repo into your skills directory won&apos;t load it. Copy that skill&apos;s folder instead:</p>
+            <p className="text-text-muted text-[13px] mt-1 max-w-[62ch]">This repo holds a skills collection; we checked the <span className="font-mono text-text">{props.skillName}</span> skill. Cloning the whole repo into your skills directory won&apos;t load it. Copy that skill&apos;s folder instead:</p>
             <div className="mt-3 flex flex-col gap-2">
               {collectionSkillInstallCommands(props.owner, props.repo, props.skillName).map((c) => <CopyRow key={c.label} label={c.label} cmd={c.cmd} multiline />)}
             </div>
@@ -1417,11 +1428,11 @@ function AddToAgent(props:
           </>
         ) : props.isMcpServer ? (
           <>
-            <p className="text-text-muted text-[13px] mt-1">This repo <span className="text-text">is an MCP server</span>, but it doesn&apos;t publish to a package registry we can resolve — so there&apos;s no 1-click. Clone it and follow its README to run it, then point your client at the command or URL it prints.</p>
+            <p className="text-text-muted text-[13px] mt-1">This repo <span className="text-text">contains MCP server code</span>, but no published package is confirmed for it, so there&apos;s no 1-click install. Clone it and follow its README to run it, then point your client at the command or URL it prints.</p>
             <div className="mt-3 flex flex-col gap-2">
               <CopyRow label="git" cmd={`git clone https://github.com/${props.owner}/${props.repo}`} />
             </div>
-            <p className="mt-2 text-[12px] text-text-muted">If you already run it as a Streamable-HTTP endpoint, paste that URL on the <Link to={rp('/rebrand/check')} className="text-primary-light hover:text-primary font-semibold">Check</Link> page for a live grade + 1-click.</p>
+            <p className="mt-2 text-[12px] text-text-muted">If you already run it as a Streamable-HTTP endpoint, paste that URL on the <Link to={rp('/rebrand/check')} className="text-primary-light hover:text-primary font-semibold">Check</Link> page for a live score + 1-click.</p>
           </>
         ) : (
           <>
@@ -1495,7 +1506,7 @@ function SkillCollection({ owner, repo, scan }: { owner: string; repo: string; s
     <Reveal>
       <div className="mt-4 glass rounded-2xl p-6">
         <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">Skills in this repo ({sd.skills_total ?? sd.skills.length})</h3>
-        <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">Each skill installs on its own, so each is graded on its own. The answer above is the <span className="text-text">worst of them</span>{sd.worst_skill ? <> (<span className="font-mono">{sd.worst_skill}</span>)</> : null}. Open a skill for its own result.</p>
+        <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">Each skill installs on its own, so each is checked on its own. The answer above is the <span className="text-text">worst of them</span>{sd.worst_skill ? <> (<span className="font-mono">{sd.worst_skill}</span>)</> : null}. Open a skill for its own result.</p>
         <div className="mt-3 flex flex-col divide-y divide-border">
           {sd.skills.map((k) => {
             const [txt, cls] = label[k.decision] ?? [k.decision, 'text-text-muted']
@@ -1507,7 +1518,7 @@ function SkillCollection({ owner, repo, scan }: { owner: string; repo: string; s
             )
           })}
         </div>
-        {left > 0 && <p className="mt-2 text-[12px] text-text-muted">{left} more skill{left === 1 ? '' : 's'} not graded in this pass (size or time cap); open them by path to grade each one.</p>}
+        {left > 0 && <p className="mt-2 text-[12px] text-text-muted">{left} more skill{left === 1 ? '' : 's'} not checked in this pass (size or time cap); open them by path to check each one.</p>}
       </div>
     </Reveal>
   )
@@ -1535,8 +1546,8 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
-        title={`${owner}/${repo} skill — safety score ${scan.trust_score}/100`}
-        description={`${verdict}. AgentAvow's signed capability grade for the ${owner}/${repo} Agent Skill: ${scan.trust_score}/100 (${t.name}), verifiable offline.`}
+        title={`Is ${skill ? `the ${skill.split('/').pop()} skill (${owner}/${repo})` : `the ${owner}/${repo} skill`} safe? ${decisionHeadline(scan)} · trust score ${scan.trust_score}/100`}
+        description={`${verdict}. AgentAvow's signed capability score for the ${owner}/${repo} Agent Skill: ${scan.trust_score}/100 (${t.name}), verifiable offline.`}
         path={`/check/skill/${owner}/${repo}${skill ? `/${skill}` : ''}`}
         image={`https://agentavow.com/api/v1/public/scan/${owner}/${repo}/og-image`}
         jsonLd={scanReviewJsonLd(`${owner}/${repo}`, scan.trust_score)}
@@ -1546,7 +1557,7 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
           <div className="relative px-7 pt-7">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">Agent Skill</span>
-              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Capability-graded</span>
+              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">🔒 Capability-checked</span>
               <ClaimedBadge surface="openclaw" owner={owner} repo={repo} />
             </div>
             <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}{skill && <span className="text-text-muted">/{skill}</span>}</h1>
@@ -1568,12 +1579,17 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
       <BlastRadius scan={scan} />
       <CapabilitiesPanel scan={scan} />
 
+      {skill && (
+        <p className="mt-4 px-1 text-[12.5px] text-text-muted">
+          The sandbox runs the whole <span className="font-mono">{owner}/{repo}</span> repo, so the run below covers every skill in it, not only <span className="font-mono">{skill.split('/').pop()}</span>.
+        </p>
+      )}
       <BehavioralPanel owner={owner} repo={repo} surface="skill" skill auto={(scan as { behavioral?: BehavioralData | null }).behavioral} effect={(scan as { behavioral_score_effect?: ScoreEffect | null }).behavioral_score_effect} />
 
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we graded</h3>
-          <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">A skill&apos;s <span className="text-text">SKILL.md is injected into your model every session</span>, and its <span className="text-text font-mono">allowed-tools</span> pre-approves tools to run <span className="text-text">without asking</span>. We graded that auto-exec grant, hidden instructions in the always-loaded description, lifecycle-hook escalation, and credential-exfil in the bundled scripts.</p>
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
+          <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">A skill&apos;s <span className="text-text">SKILL.md is injected into your model every session</span>, and its <span className="text-text font-mono">allowed-tools</span> pre-approves tools to run <span className="text-text">without asking</span>. We checked that auto-exec grant, hidden instructions in the always-loaded description, lifecycle-hook escalation, and credential-exfil in the bundled scripts.</p>
           {(() => {
             const sd = (scan as { surface_detail?: { skill_name?: string; allowed_tools?: string[]; has_lifecycle_hooks?: boolean } }).surface_detail
             const tools = sd?.allowed_tools ?? []
@@ -1721,8 +1737,8 @@ function McpResult({ endpoint }: { endpoint: string }) {
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
-        title={`MCP server — safety score ${scan.trust_score}/100`}
-        description={`${verdict}. AgentAvow live-graded this MCP server's served tool surface: ${scan.trust_score}/100 (${t.name}).`}
+        title={`Is ${mcpHostLabel(endpoint)} safe? ${decisionHeadline(scan)} · trust score ${scan.trust_score}/100`}
+        description={`${verdict}. AgentAvow live-checked this MCP server's served tool surface: ${scan.trust_score}/100 (${t.name}).`}
         path={`/check/mcp?endpoint=${encodeURIComponent(endpoint)}`}
         jsonLd={scanReviewJsonLd(endpoint, scan.trust_score)}
       />
@@ -1731,7 +1747,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
           <div className="relative px-7 pt-7">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary-light uppercase">MCP server</span>
-              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">⚡ Live-graded</span>
+              <span className="inline-block font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-success/15 text-success">⚡ Live-checked</span>
               <ClaimedBadge surface="mcp" repo={endpoint} />
             </div>
             <h1 className="mt-2 text-lg font-extrabold tracking-tight break-all font-mono">{endpoint}</h1>
@@ -1755,8 +1771,8 @@ function McpResult({ endpoint }: { endpoint: string }) {
 
       <Reveal>
         <div className="mt-4 glass rounded-2xl p-6">
-          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we graded</h3>
-          <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We connected to the server and graded the <span className="text-text">tool surface it actually serves</span> — input-schema risk, hidden instructions in tool descriptions, dangerous capabilities, and the lethal trifecta across its tools. This is what a repo scan can&apos;t see.</p>
+          <h3 className="text-[13px] font-mono uppercase tracking-wide text-text-muted">What we checked</h3>
+          <p className="mt-2 text-[13.5px] text-text-muted max-w-[62ch]">We connected to the server and checked the <span className="text-text">tool surface it actually serves</span> — input-schema risk, hidden instructions in tool descriptions, dangerous capabilities, and the lethal trifecta across its tools. This is what a repo scan can&apos;t see.</p>
         </div>
       </Reveal>
 
@@ -1769,7 +1785,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
         const caps = sd.capabilities && Object.keys(sd.capabilities).length
           ? Object.keys(sd.capabilities) : []
         const facts: string[] = []
-        if (sd.tool_count != null) facts.push(`${sd.tool_count} tool${sd.tool_count === 1 ? '' : 's'} graded`)
+        if (sd.tool_count != null) facts.push(`${sd.tool_count} tool${sd.tool_count === 1 ? '' : 's'} checked`)
         if (sd.resource_count) facts.push(`${sd.resource_count} resource${sd.resource_count === 1 ? '' : 's'}`)
         if (sd.prompt_count) facts.push(`${sd.prompt_count} prompt${sd.prompt_count === 1 ? '' : 's'}`)
         return (
@@ -1779,7 +1795,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
               <div className="mt-3 flex flex-col gap-2 text-[13px]">
                 <div className="flex justify-between gap-3"><span className="text-text-muted">Server</span><span className="font-mono break-all">{sd.server_name || 'unnamed'}</span></div>
                 <div className="flex justify-between gap-3"><span className="text-text-muted">Endpoint</span><span className="font-mono text-success">live · streamable-HTTP</span></div>
-                <div className="flex justify-between gap-3"><span className="text-text-muted">Point-in-time</span><span className="font-mono">served surface, graded now</span></div>
+                <div className="flex justify-between gap-3"><span className="text-text-muted">Point-in-time</span><span className="font-mono">served surface, checked now</span></div>
                 {sd.lethal_trifecta != null && (
                   <div className="flex justify-between gap-3"><span className="text-text-muted">Lethal trifecta</span><span className={`font-mono ${sd.lethal_trifecta ? 'text-danger' : 'text-success'}`}>{sd.lethal_trifecta ? 'present ⚠' : 'not present ✓'}</span></div>
                 )}
@@ -1807,7 +1823,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
       {/* A live endpoint is graded on the tool definitions it serves; its server code is
           never fetched, so the code-category scores would read as passes we didn't earn. */}
       <CategoryFindings categoryScores={null} findings={f} maxFindings={15} emptyMessage="✓ No capability-surface risks found — clean tool set." />
-      <Reveal><p className="mt-3 text-[12px] text-text-muted/80">Code categories (secret hygiene, code safety, data handling, filesystem, dependencies) are not scored for a live endpoint: we grade the tools it serves, not its server code, which we can&apos;t see. Scan its repo or package for those.</p></Reveal>
+      <Reveal><p className="mt-3 text-[12px] text-text-muted/80">Code categories (secret hygiene, code safety, data handling, filesystem, dependencies) are not scored for a live endpoint: we check the tools it serves, not its server code, which we can&apos;t see. Scan its repo or package for those.</p></Reveal>
 
       <VerifyPanel scan={scan} />
 
@@ -1851,7 +1867,7 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
   return (
     <div className="max-w-[760px] mx-auto px-6 py-14">
       <SEOHead
-        title={`${name} (${surface}) — safety score ${scan.trust_score}/100`}
+        title={`Is ${name} (${surface}) safe? ${decisionHeadline(scan)} · trust score ${scan.trust_score}/100`}
         description={`${verdict}. AgentAvow's signed score for ${surface}:${name}${version ? `@${version}` : ''}: ${scan.trust_score}/100 (${t.name}) — scanned on the published artifact, verifiable offline.`}
         path={`/check/pkg/${surface}/${name}${versionQs}`}
         jsonLd={scanReviewJsonLd(`${surface}:${name}`, scan.trust_score)}
@@ -2116,14 +2132,14 @@ function Result({ owner, repo, privateResult }: {
         <div className="relative px-4 sm:px-7 py-6">
           <div className="relative rounded-2xl border border-border/70 overflow-hidden bg-gradient-to-b from-surface/50 to-surface/10">
             <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(460px 200px at 24% -25%, ${t.color}20, transparent 70%), radial-gradient(460px 200px at 78% -25%, rgba(45,212,191,0.13), transparent 70%)` }} />
-            <div className="relative grid grid-cols-1 sm:grid-cols-2">
-              <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center">
+            <div className="relative grid grid-cols-2">
+              <div className="px-2 py-4 sm:p-6 pb-5 text-center flex flex-col items-center min-w-0">
                 <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center">{isCertified(scan) ? <CertifiedMark score={scan.trust_score} scale={heroBig} /> : <TrustBar score={scan.trust_score} scale={heroBig} />}</div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em]" style={{ color: t.color }}>Attestation Trust</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">Signed · verifiable now</div>
                 <Percentile score={scan.trust_score} />
               </div>
-              <div className="p-4 sm:p-6 pb-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
+              <div className="px-2 py-4 sm:p-6 pb-5 text-center flex flex-col items-center min-w-0 border-l border-border/50">
                 <div className="min-h-[100px] sm:min-h-[132px] md:min-h-[150px] flex items-center justify-center"><AdoptionNeedle count={adCount} unit={adUnit} scorePct={adoptionScore?.adoption_score_100} scale={heroBig} /></div>
                 <div className="mt-3 font-mono text-[10.5px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                 <div className="mt-0.5 text-[11.5px] text-text-muted">{adoption ? adoption.sub : 'no adoption signal yet'}</div>
