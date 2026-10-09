@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { motion, useScroll, useTransform } from 'framer-motion'
 import { GradientBreath } from './Motion'
 import { useTheme } from '../hooks/useTheme'
-import heroArt from '../assets/hero-art.png'
+import heroArt from '../assets/hero-art.webp'
 
 // ─── Types ───
 
@@ -137,7 +137,7 @@ function ParallaxHeroFace({ intensity, reducedMotion }: { intensity: Intensity; 
           opacity: baseOpacity,
           mixBlendMode: theme === 'light' ? 'multiply' : 'screen',
           filter: theme === 'light' ? 'contrast(1.2) brightness(0.9)' : 'none',
-          // The bottom fade is now baked into hero-art.png's alpha channel (fades
+          // The bottom fade is now baked into hero-art.webp's alpha channel (fades
           // with the image content regardless of object-cover crop), so no CSS mask.
         }}
       />

@@ -154,7 +154,10 @@ function ToolCard({ row }: { row: CatalogRow }) {
   const fnd = findingsLine(row)
   const sbx = sandboxMark(row.sandbox)
   return (
-    <div className="glass card-hover rounded-xl p-[18px]">
+    // The whole card opens the report: the "See report" link is stretched over the
+    // card with an ::after overlay (a real <a>, so cmd/middle-click and keyboard
+    // work). The "Why this score" toggle sits above the overlay (relative z-10).
+    <div className={`glass card-hover rounded-xl p-[18px]${href ? ' relative cursor-pointer has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-primary/60' : ''}`}>
       <div className="flex items-center justify-between gap-2.5">
         <span className="min-w-0 flex items-center gap-2">
           {surfaceBadge && <span className="font-mono text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/12 text-primary-light shrink-0">{surfaceBadge}</span>}
@@ -189,7 +192,12 @@ function ToolCard({ row }: { row: CatalogRow }) {
           </span>
         )}
       </div>
-      <button onClick={() => setOpen(!open)} className="mt-3 text-[12.5px] text-primary-light hover:text-primary">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open) }}
+        className="relative z-10 mt-3 text-[12.5px] text-primary-light hover:text-primary"
+      >
         {open ? 'Hide' : 'Why this score'} {open ? '▴' : '▾'}
       </button>
       {open && (
@@ -199,7 +207,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
       )}
       {href && (
         <div className="mt-3">
-          <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">
+          <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary focus-visible:outline-none after:absolute after:inset-0 after:rounded-xl after:content-['']">
             {row.trust_score != null ? 'See report & install →' : 'View →'}
           </Link>
         </div>
