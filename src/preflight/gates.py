@@ -27,6 +27,13 @@ def _cat(data: dict, name: str) -> int:
     return int((data.get("findings", {}).get("categories", {}) or {}).get(name, 0))
 
 
+def _cat_sev(data: dict, name: str, severities: tuple[str, ...]) -> int:
+    """Findings of category ``name`` at the given severities, from the listed items."""
+    items = (data.get("findings", {}) or {}).get("items") or []
+    return sum(1 for i in items if isinstance(i, dict) and i.get("category") == name
+               and str(i.get("severity") or "").lower() in severities)
+
+
 def _gate(gate_id, label, status, severity, detail, stores):
     return {
         "id": gate_id,
@@ -71,14 +78,37 @@ def evaluate_gates(data: dict, *, surface: str, auth: dict | None = None) -> dic
 
     lie = _cat(data, "annotation_lie")
     if surface == "mcp":
-        gates.append(_gate(
-            "truthful_annotations", "Tool safety annotations are truthful",
-            PASS if lie == 0 else FAIL, BLOCKER,
-            "readOnlyHint/destructiveHint match each tool's real capabilities." if lie == 0
-            else f"{lie} tool(s) mark themselves read-only but can "
-                 "write/exec — reviewers verify this.",
-            ["anthropic"],
-        ))
+        # Kenne 2026-10-08: only a lie backed by evidence (HIGH: a freeform
+        # command/script parameter on a read-only tool, or the sandbox watching it
+        # write) blocks. A MEDIUM one is inferred from description wording alone, so it
+        # is a warning to look at, not a predicted rejection.
+        lie_high = _cat_sev(data, "annotation_lie", ("critical", "high"))
+        lie_soft = max(lie - lie_high, 0)
+        if lie_high:
+            gates.append(_gate(
+                "truthful_annotations", "Tool safety annotations are truthful",
+                FAIL, BLOCKER,
+                f"{lie_high} tool(s) mark themselves read-only but can write or execute "
+                "(a command/script parameter, or observed in the sandbox); reviewers "
+                "verify this.",
+                ["anthropic"],
+            ))
+        elif lie_soft:
+            gates.append(_gate(
+                "truthful_annotations", "Tool safety annotations are truthful",
+                WARN, WARNING,
+                f"{lie_soft} read-only tool(s) have descriptions that read as writing or "
+                "executing something. Check the wording or the annotation; this alone is "
+                "not a predicted rejection.",
+                ["anthropic"],
+            ))
+        else:
+            gates.append(_gate(
+                "truthful_annotations", "Tool safety annotations are truthful",
+                PASS, BLOCKER,
+                "readOnlyHint/destructiveHint match each tool's real capabilities.",
+                ["anthropic"],
+            ))
 
     lethal = bool(detail.get("lethal_trifecta"))
     if surface == "mcp":
