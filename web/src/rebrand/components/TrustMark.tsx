@@ -180,9 +180,9 @@ export function DecisionLine({ row, className = '' }: {
 }) {
   const d = decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } })
   const p = decisionPhrase(d.decision)
-  // The mark only ever sits beside Safe to connect; a catalog row carries it as the
-  // stored A+ (which follows the Certified mark), an API result as certified_mark.
-  const cert = d.decision === 'safe' && (isCertified(row) || row.grade === 'A+')
+  // The mark only ever sits beside Safe to connect; catalog rows and API results both
+  // carry it as certified_mark (never inferred from a stored letter grade).
+  const cert = d.decision === 'safe' && isCertified(row)
   return (
     <div className={`text-[12.5px] font-semibold ${className}`} style={{ color: p.color }} data-decision={p.value}>
       {p.phrase}{cert && <span className="ml-1" style={GRAD_TEXT}>· Certified</span>}
@@ -237,10 +237,9 @@ export function TrustPill({ score, className = '' }: { score: number; showTier?:
 }
 
 /**
- * Binary verdict banner (Shawn #4) — the plain decision above the number.
- * Derived from the already-signed scan; never a rescore. Safe = A/A+ (>=81) AND
- * no blocking critical/high (the server's certified.checks.no_critical_or_high
- * gate). Verb is surface-aware (connect / install / use).
+ * The answer banner — the three-phrase decision above the number (decide(), the
+ * twin of src/scanner/verdict.py). Derived from the already-signed scan; never a
+ * rescore. Verb is surface-aware (connect / install / use).
  */
 export function VerdictBadge(
   { scan, className = '' }: {

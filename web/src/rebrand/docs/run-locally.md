@@ -138,5 +138,5 @@ The local path imports the hosted scanner's detection and scoring directly — i
 ## Next
 
 - [Reading your scan score](./check-guide.md)
-- [Gate on the score](./gate-on-the-grade.md)
+- [Gate on the answer](./gate-on-the-grade.md)
 - [Declare your tool's scope](./check-guide.md)

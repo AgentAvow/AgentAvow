@@ -1,7 +1,7 @@
 {
   "name": "agentavow-trust",
   "displayName": "AgentAvow Trust",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "Know which of your MCP servers and dependencies are safe before Claude uses them. At your next session start, Claude opens with one line: how many of your servers AgentAvow checked, how many are Safe to connect, and the one to look at first, plus the same for your project's direct dependencies. Add a server with `claude mcp add` and it is checked before it is added; Do not connect asks you first, anything else just tells you. Every result leads with Safe to connect, Review before you connect, or Do not connect and its reason, over a signed 0-100 trust score you can verify offline. Also bundles the AgentAvow connector (scan any MCP server, package, or repo on demand), a /scan command, and a per-call gate that refuses tools on a server that reads Do not connect and asks before a tool whose definition changed since it was checked. Fail-open; only the server URL or package name being graded leaves your machine.",
   "author": {
     "name": "AgentAvow",

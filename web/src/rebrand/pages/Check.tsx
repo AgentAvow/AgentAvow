@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
-import { getGradeInfo, getTrustTier, decisionOf, headline as decisionHeadline, isCertified, certifiedMarkNote } from '../../components/trust/gradeSystem'
+import { getTrustTier, decisionOf, headline as decisionHeadline, isCertified, certifiedMarkNote } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
@@ -358,7 +358,7 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
   const x = (i: number) => PAD + (i / (pts.length - 1)) * (W - 2 * PAD)
   const y = (s: number) => H - PAD - (s / 100) * (H - 2 * PAD) // fixed 0–100 axis
   const line = pts.map((p, i) => `${x(i)},${y(p.score)}`).join(' ')
-  const lastG = getGradeInfo(pts[pts.length - 1].score)
+  const lastG = getTrustTier(pts[pts.length - 1].score)
   const fmt = (at?: number) => at ? new Date(at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'now'
   const firstDate = fmt(pts[0].at)
   const lastDate = fmt(pts[pts.length - 1].at)
@@ -382,7 +382,7 @@ function ScoreHistory({ history, current }: { history: { score: number; at?: num
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[90px]" preserveAspectRatio="none" aria-hidden="true">
           {[0, 50, 100].map((g) => <line key={g} x1={PAD} y1={y(g)} x2={W - PAD} y2={y(g)} stroke="currentColor" className="text-border" strokeWidth="0.5" opacity="0.5" />)}
           <polyline points={line} fill="none" stroke={lastG.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-          {pts.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.score)} r={i === pts.length - 1 ? 4 : 2.5} fill={getGradeInfo(p.score).color} />)}
+          {pts.map((p, i) => <circle key={i} cx={x(i)} cy={y(p.score)} r={i === pts.length - 1 ? 4 : 2.5} fill={getTrustTier(p.score).color} />)}
         </svg>
         {/* time axis labels */}
         <div className="flex justify-between font-mono text-[10.5px] text-text-muted/70 mt-1">

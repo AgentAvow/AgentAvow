@@ -85,7 +85,7 @@ async def _llm_draft(owner: str, repo: str, description: str, score: int | None,
         f"Maintainer's tool: {owner}/{repo}\n"
         f"One-line description: {description or '(none)'}\n"
         f"AgentAvow score: {score}/100"
-        f"{' — CERTIFIED, the earned top tier' if certified else ''}\n"
+        f"{' — CERTIFIED, the earned mark' if certified else ''}\n"
         f"Posture: {posture}\n"
         f"Top finding: {top_finding or 'none notable'}\n"
         f"Their signed report: https://agentavow.com/check/{owner}/{repo}\n\n"
@@ -118,7 +118,7 @@ def _rank(score: int | None, stars: int, has_shields: bool, certified: bool,
 
     if certified:
         channel = "personal note — lead with Certified (pride + proof)"
-        angle = "Certified — the earned top tier; strongest possible proof point"
+        angle = "Certified — the earned mark; strongest possible proof point"
     elif s >= _BADGE_ASK_MIN:
         channel = "personal note — badge ask (pride + proof)"
         angle = f"scored {s}/100 — high; offer the signed README badge"
