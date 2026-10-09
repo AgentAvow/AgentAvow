@@ -1,4 +1,4 @@
-# AgentAvow Safety Model — v1.0
+# AgentAvow Safety Model — v1 (`safety-model-v1`, `safety-model-v1.1`)
 
 **Status:** Stable · **Model versions:** `safety-model-v1`, `safety-model-v1.1` (§4.2; selection rule in §10) · **Last updated:** 2026-10-09 (added §4.2 `safety-model-v1.1` graduated curve, the §10 selection rule, and §11.1 thin coverage; 2026-10-02: §5 tier table aligned with the API's six `trust_tier` values)
 

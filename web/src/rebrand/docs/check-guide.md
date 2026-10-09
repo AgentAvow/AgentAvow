@@ -162,7 +162,7 @@ later run that adds behavioral findings (a leaked canary, a new undeclared host)
 In CI, the [GitHub Action](https://github.com/AgentAvow/AgentAvow/tree/main/github-action) prints the answer
 first, then a `Sandbox:` line with the result; it fails the build on **Do not connect** by default
 (`fail_on`), and `fail_on_behavioral: true` also fails it on a high or critical sandbox finding. See
-[Gate on the score](./gate-on-the-grade.md).
+[Gate on the answer](./gate-on-the-grade.md).
 
 ## Next
 

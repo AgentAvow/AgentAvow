@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.25"
+__version__ = "0.1.26"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -833,7 +833,8 @@ def _verdict(data: dict) -> dict:
         # The Certified MARK (the API's display rule: Safe to connect, final, score >= 81,
         # not thin), never the raw provenance gate; a response without it shows no mark.
         "certified": data.get("certified_mark") is True,
-        "verdict": "safe" if (score >= 81 and blocking == 0) else "needs review",
+        # Legacy two-way field for older cache readers; follows the answer.
+        "verdict": "safe" if decision == "safe" else "needs review",
         "reason": str(data.get("verdict_reason") or ""),
         "blocking": blocking,
         "critical": critical,

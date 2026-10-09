@@ -25,7 +25,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.rate_limit import rate_limit_reads
@@ -68,7 +68,10 @@ class GatewayCheckRequest(BaseModel):
     """Request to check trust for a tool before execution."""
     repo: str  # owner/repo format (e.g. "crewAIInc/crewAI")
     action: str = "execute"  # what the agent wants to do
-    min_tier: str = "standard"  # minimum acceptable tier
+    min_tier: str = "standard"  # minimum acceptable tier (an extra floor under fail_on)
+    # Deny on the tool's answer: "do_not_connect" (default) denies Do not connect;
+    # "review" also denies Review before you connect. Same knob as the other gates.
+    fail_on: str = "do_not_connect"
     context: str | None = None  # optional context (e.g. "data_analysis")
     include_external: bool = False  # opt-in: query external providers (adds latency)
 
@@ -89,12 +92,14 @@ class GatewayDecision(BaseModel):
     repo: str
     trust_score: int  # security scan score (0-100)
     trust_tier: str
-    grade: str  # A+/A/B/C/D/F
-    decision_reason: str  # why the gateway allowed / blocked (tier vs min_tier policy)
+    # Deprecated: the letter band of trust_score, kept only for existing clients.
+    # Read scan_decision (the answer) and trust_score instead.
+    grade: str = Field("", deprecated=True)
+    decision_reason: str  # why the gateway allowed / blocked (answer, then tier policy)
     # The tool's three-phrase headline from its scan, UNSIGNED and outside the gateway's
     # signed payload: {decision: safe|review|do_not_connect, decision_final,
-    # decision_reason}. Display it ("Review before you connect: one high finding: …");
-    # ``allowed`` stays the gateway's own policy answer.
+    # decision_reason}. Display it ("Review before you connect: one high finding: …").
+    # ``allowed`` is false whenever this answer trips ``fail_on``.
     scan_decision: dict = {}
     recommended_limits: dict
     category_scores: dict = {}
@@ -139,6 +144,23 @@ def _score_to_grade(score: int) -> str:
     return grade_from_score(score)
 
 
+_FAIL_ON = {
+    "do_not_connect": ("do_not_connect",),
+    "review": ("review", "do_not_connect"),
+}
+
+
+def _check_fail_on(fail_on: str) -> tuple[str, ...]:
+    if fail_on not in _FAIL_ON:
+        raise HTTPException(400, f"fail_on must be one of {list(_FAIL_ON)}")
+    return _FAIL_ON[fail_on]
+
+
+def _answer_label(decision: str) -> str:
+    from src.trust_tiers import verdict_phrase
+    return verdict_phrase(decision)
+
+
 def _tier_meets_minimum(actual_tier: str, min_tier: str) -> bool:
     """Check if the actual tier meets or exceeds the minimum."""
     return TIER_ORDER.get(actual_tier, 0) >= TIER_ORDER.get(min_tier, 0)
@@ -166,7 +188,8 @@ async def gateway_check(
         POST /api/v1/gateway/check
         {"repo": "crewAIInc/crewAI", "min_tier": "standard"}
 
-        → {"allowed": true, "trust_tier": "verified", "grade": "A+", ...}
+        → {"allowed": true, "trust_tier": "verified",
+           "scan_decision": {"decision": "safe", ...}, ...}
     """
     start = time.monotonic()
 
@@ -176,6 +199,7 @@ async def gateway_check(
     # Parse owner/repo
     if "/" not in request.repo:
         raise HTTPException(400, "repo must be in owner/repo format")
+    deny_on = _check_fail_on(request.fail_on)
     owner, repo = request.repo.split("/", 1)
 
     # Query the public scan API (uses cache internally)
@@ -225,11 +249,17 @@ async def gateway_check(
         except Exception:
             pass  # Best-effort
 
-    # Enforcement decision
-    allowed = _tier_meets_minimum(tier, request.min_tier)
-    reason = f"Tier {tier} meets minimum {request.min_tier}" if allowed else (
-        f"Tier {tier} below minimum {request.min_tier}"
-    )
+    # Enforcement decision: the tool's answer first (a Do not connect tool is denied
+    # whatever its score or tier), then the tier floor.
+    answer = scan_result.decision
+    if answer in deny_on:
+        allowed = False
+        reason = f"{_answer_label(answer)}: {scan_result.decision_reason}"
+    else:
+        allowed = _tier_meets_minimum(tier, request.min_tier)
+        reason = f"Tier {tier} meets minimum {request.min_tier}" if allowed else (
+            f"Tier {tier} below minimum {request.min_tier}"
+        )
 
     # Check category-level blocks
     if allowed and category_scores:
@@ -243,7 +273,6 @@ async def gateway_check(
     # Track decision metrics
     await _increment_metric(f"decisions:{'allowed' if allowed else 'blocked'}")
     await _increment_metric(f"tiers:{tier}")
-    await _increment_metric(f"grades:{grade}")
 
     decision_payload = {
         "type": "GatewayDecision",
@@ -252,7 +281,9 @@ async def gateway_check(
         "allowed": allowed,
         "trust_score": score,
         "trust_tier": tier,
-        "grade": grade,
+        "grade": grade,  # deprecated; kept so existing verifiers' field set holds
+        "decision": answer,
+        "fail_on": request.fail_on,
         "reason": reason,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -330,6 +361,7 @@ class ReverifyRequest(BaseModel):
     repo: str  # owner/repo format
     action_class: str = "reversible"  # irreversible | compensable | reversible
     min_tier: str = "standard"
+    fail_on: str = "do_not_connect"  # do_not_connect | review (see GatewayCheckRequest)
 
 
 class ReverifyDecision(BaseModel):
@@ -339,7 +371,9 @@ class ReverifyDecision(BaseModel):
     action_class: str
     trust_score: int
     trust_tier: str
-    grade: str
+    # Deprecated letter band of trust_score; read ``decision`` instead.
+    grade: str = Field("", deprecated=True)
+    decision: str | None = None  # safe | review | do_not_connect (the tool's answer)
     reason: str
     scan_age_seconds: int
     max_valid_until: str
@@ -392,6 +426,7 @@ async def gateway_re_verify(
             400,
             f"action_class must be one of {list(_REVERIFY_VERDICT_TTL.keys())}",
         )
+    deny_on = _check_fail_on(request.fail_on)
 
     owner, repo = request.repo.split("/", 1)
     now = datetime.now(timezone.utc)
@@ -455,6 +490,13 @@ async def gateway_re_verify(
     score = cached["trust_score"]
     tier = cached["trust_tier"]
     grade = _score_to_grade(score)
+    from src.scanner.verdict import decide
+    _d = cached.get("decision")
+    if isinstance(_d, str) and _d:
+        answer, answer_reason = _d, str(cached.get("decision_reason") or "")
+    else:
+        _dec = decide(cached)
+        answer, answer_reason = _dec.decision, _dec.reason
 
     if scan_age > max_scan_age:
         verified = False
@@ -464,6 +506,11 @@ async def gateway_re_verify(
         )
         await _increment_metric("reverify:failed")
         await _increment_metric("reverify:stale")
+    elif answer in deny_on:
+        verified = False
+        reason = f"answer_{answer}: {_answer_label(answer)}: {answer_reason}"
+        await _increment_metric("reverify:failed")
+        await _increment_metric(f"reverify:answer_{answer}")
     elif not _tier_meets_minimum(tier, request.min_tier):
         verified = False
         reason = f"tier_below_minimum: {tier} < {request.min_tier}"
@@ -485,7 +532,9 @@ async def gateway_re_verify(
         "action_class": request.action_class,
         "trust_score": score,
         "trust_tier": tier,
-        "grade": grade,
+        "grade": grade,  # deprecated
+        "decision": answer,
+        "fail_on": request.fail_on,
         "scan_age_seconds": scan_age,
         "issued_at": now.isoformat(),
         "max_valid_until": max_valid_until,
@@ -500,6 +549,7 @@ async def gateway_re_verify(
         trust_score=score,
         trust_tier=tier,
         grade=grade,
+        decision=answer,
         reason=reason,
         scan_age_seconds=scan_age,
         max_valid_until=max_valid_until,
@@ -537,17 +587,11 @@ async def gateway_stats() -> dict:
         if c > 0:
             tier_counts[t] = c
 
-    grade_counts = {}
-    for g in ["A+", "A", "B", "C", "D", "F"]:
-        c = await _get_metric(f"grades:{g}")
-        if c > 0:
-            grade_counts[g] = c
-
     return {
         "status": "operational",
         "version": "v1",
         "description": "Trust-tiered enforcement gateway for AI agent tool execution",
-        "docs": "https://agentavow.com/docs/trust-gateway",
+        "docs": "https://agentavow.com/docs/gate-on-the-grade",
         "endpoints": {
             "check": "POST /api/v1/gateway/check",
             "re_verify": "POST /api/v1/gateway/re-verify",
@@ -559,17 +603,10 @@ async def gateway_stats() -> dict:
             "allowed": allowed,
             "blocked": blocked,
             "by_tier": tier_counts,
-            "by_grade": grade_counts,
         },
         "supported_tiers": list(TIER_ORDER.keys()),
-        "grade_scale": {
-            "A+": "96-100 (Exceptional)",
-            "A": "81-95 (Trusted)",
-            "B": "61-80 (Good)",
-            "C": "41-60 (Fair)",
-            "D": "21-40 (Caution)",
-            "F": "0-20 (Fail)",
-        },
+        "answers": ["safe", "review", "do_not_connect"],
+        "fail_on": list(_FAIL_ON),
         "external_providers": ["RNWY", "MoltBridge", "AgentID"],
     }
 

@@ -165,7 +165,7 @@ class PublicScanResponse(BaseModel):
     # Plain "is this safe to connect?" verdict, shared verbatim with the MCP connector
     # (src/scanner/verdict.py) so the two surfaces never disagree. Adoption is never an
     # input — code-analysis only, matching trust_score.
-    verdict: str = "needs_review"  # safe | needs_review (score >= 81 and no critical/high)
+    verdict: str = "needs_review"  # safe | needs_review: "safe" iff decide() reads safe
     verdict_reason: str = "low_signals"  # clean | blocking_findings | thin_coverage | low_signals
     # The three-phrase headline every surface leads with (src/scanner/verdict.decide):
     # safe ("Safe to connect") | review ("Review before you connect") | do_not_connect
@@ -250,7 +250,7 @@ class PublicScanResponse(BaseModel):
     # Proxy gateway hint
     gateway_info: dict = {
         "status": "available",
-        "docs": "https://agentavow.com/docs/trust-gateway",
+        "docs": "https://agentavow.com/docs/gate-on-the-grade",
         "description": "Trust-tiered rate limiting gateway for AI agent tool execution",
     }
 
@@ -2068,7 +2068,8 @@ async def submit_tool(
                 public_scan(owner=owner, repo=repo, force=True, db=db), timeout=90,
             )
             return {"listed": True, "surface": "github", "identifier": f"{owner}/{repo}",
-                    "grade": resp.grade, "trust_score": resp.trust_score}
+                    "grade": resp.grade, "trust_score": resp.trust_score,
+                    "decision": resp.decision, "decision_reason": resp.decision_reason}
 
         if surface == "openclaw":
             if "/" not in ident:
@@ -2099,8 +2100,11 @@ async def submit_tool(
 
         data = _scan_result_to_dict(result)
         await _capture_community_scan(cap_owner, cap_repo, data, db, surface=surface)
+        from src.scanner.verdict import decide
+        _dec = decide(data)
         return {"listed": True, "surface": surface, "identifier": ident,
-                "grade": data.get("grade"), "trust_score": data.get("trust_score")}
+                "grade": data.get("grade"), "trust_score": data.get("trust_score"),
+                "decision": _dec.decision, "decision_reason": _dec.reason}
     except asyncio.TimeoutError:
         raise HTTPException(503, "Scan is taking longer than expected — please retry shortly.")
     except HTTPException:
@@ -3750,10 +3754,10 @@ async def scan_og_image(
 ) -> Response:
     """Return a 1200x630 SVG Open Graph preview card for social sharing.
 
-    Shows the letter grade, score, safety verdict, and findings summary.
-    Used as the ``og:image`` in ``/check/:owner/:repo`` pages so that
-    links shared on Twitter, Slack, Discord, and iMessage render a rich
-    preview card with the trust grade.
+    Shows the answer (Safe to connect / Review before you connect / Do not connect),
+    the trust score and the findings summary. Used as the ``og:image`` in
+    ``/check/:owner/:repo`` pages so that links shared on Twitter, Slack, Discord, and
+    iMessage render a rich preview card.
     """
     full_name = f"{owner}/{repo}"
 

@@ -13,7 +13,9 @@ is code-analysis only, matching the signed trust_score.
 """
 from __future__ import annotations
 
-SAFE_BAR = 81  # A/A+ floor for the binary "safe" call (matches the site verdict)
+# The old binary rule's score bar, kept for ``is_safe_legacy`` and the MCP connector's
+# legacy fields; the answer itself is ``decide()`` (Safe can read from 51).
+SAFE_BAR = 81
 
 
 def is_safe(data: dict) -> bool:

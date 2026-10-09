@@ -32,6 +32,7 @@ export interface CatalogRow {
   endpoint_url?: string | null
   trust_score: number | null
   grade?: string | null  // letter grade WITH the A+ certified gate (roadmap §7)
+  certified_mark?: boolean | null  // the Certified display mark; lists read this, never grade
   critical: number | null
   high: number | null
   findings_count: number | null

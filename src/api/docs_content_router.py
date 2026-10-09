@@ -29,7 +29,7 @@ router = APIRouter(prefix="/docpages", tags=["docs"])
 # slug -> human title, in the same order as Docs.tsx's DOCS array.
 DOCS: list[tuple[str, str]] = [
     ("how-grading-works", "How scoring works"),
-    ("gate-on-the-grade", "Gate on the score"),
+    ("gate-on-the-grade", "Gate on the answer"),
     ("check-guide", "Reading your scan score"),
     ("behavioral-sandbox", "Behavioral sandbox"),
     ("run-locally", "Run locally & in CI"),

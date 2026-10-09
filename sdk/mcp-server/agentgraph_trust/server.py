@@ -2,9 +2,9 @@
 
 A local/stdio MCP server that mirrors the flagship remote connector at
 https://agentavow.com/mcp: the same read-only, anonymous TRUST tools, calling
-AgentAvow's own public API and returning the SAME contract (0-100 trust score, a plain
-safe / needs-review verdict + machine reason, findings, certified eligibility, signed
-attestation links), plus the three-phrase headline every AgentAvow surface leads with:
+AgentAvow's own public API and returning the SAME contract (0-100 trust score, findings,
+the Certified mark, signed attestation links) led by the three-phrase answer every
+AgentAvow surface leads with:
 ``decision`` = safe ("Safe to connect") | review ("Review before you connect") |
 do_not_connect ("Do not connect"), with ``decision_reason``.
 
@@ -37,7 +37,7 @@ _BASE_URL = (
 ).rstrip("/")
 _WEB_BASE = _BASE_URL
 
-_VERSION = "0.6.4"
+_VERSION = "0.6.5"
 
 # Package-surface aliases, mirroring the public API + the remote connector.
 _SURFACE_ALIASES = {

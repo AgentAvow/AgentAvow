@@ -100,7 +100,7 @@ function statusChip(row: CatalogRow): { label: string; cls: string; title?: stri
     // Lead with the three-phrase short label (Safe / Review / Blocked); Certified rides beside.
     const d = decisionPhrase(row.decision ?? decide({ trust_score: row.trust_score, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision)
     const cls = d.value === 'safe' ? 'text-success bg-success/15' : d.value === 'review' ? 'text-warning bg-warning/15' : 'text-danger bg-danger/15'
-    return { label: d.label + (row.grade === 'A+' && d.value === 'safe' ? ' · ✦ Certified' : ''), cls, title: row.decision_reason ? `${d.phrase} — ${row.decision_reason}` : d.phrase }
+    return { label: d.label + (row.certified_mark && d.value === 'safe' ? ' · ✦ Certified' : ''), cls, title: row.decision_reason ? `${d.phrase} — ${row.decision_reason}` : d.phrase }
   }
   return { label: 'unscored', cls: 'text-text-muted bg-surface-hover' }
 }

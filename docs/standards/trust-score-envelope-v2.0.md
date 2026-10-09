@@ -180,8 +180,8 @@ Implementations claiming Trust Score v2 conformance MUST produce byte-identical 
 - **CTEF v0.3.2:** [agentgraph.co/docs/ctef-v0-3-2](https://agentgraph.co/docs/ctef-v0-3-2) — Layer 1 attestation spec; v2 envelopes consume CTEF attestations as `ctef_attestation` contributions.
 - **CTEF v0.4 transactional claim_type (planned Aug 15-22):** v2 envelope shape may extend to v2.1 to carry receipt-layer signals when v0.4 lands.
 - **AEOESS architecture (aeoess named on A2A #1628):** v2 envelope IS the attestation-layer aggregate; v0.4 receipt-layer composes via `action_ref` correlation.
-- **C1 substrate ([`semantic-divergence-boundary-v0`](semantic-divergence-boundary-v0.md)):** the discrimination tuple `(claim_type, evidenceType, source_provider_did)` in the v2 contribution shape directly enforces C1 injectivity at envelope assembly time.
-- **C4 substrate ([`cross-issuer-federation-v0`](cross-issuer-federation-v0.md)):** v2 envelopes aggregate across the 8 federation issuers; the methodology breakdown names every issuer per contribution.
+- **C1 substrate (`semantic-divergence-boundary-v0`, planned; not yet published):** the discrimination tuple `(claim_type, evidenceType, source_provider_did)` in the v2 contribution shape directly enforces C1 injectivity at envelope assembly time.
+- **C4 substrate (`cross-issuer-federation-v0`, planned; not yet published):** v2 envelopes aggregate across the 8 federation issuers; the methodology breakdown names every issuer per contribution.
 - **JCS substrate:** [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785), in-tree cross-impl runners at `tests/cross-impl/`.
 
 ---

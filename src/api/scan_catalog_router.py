@@ -22,6 +22,7 @@ import re
 import threading
 import time
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +128,9 @@ class CatalogRow(BaseModel):
     endpoint_url: str | None = None  # for x402 surface
     trust_score: int | None = None
     grade: str | None = None  # letter grade WITH the A+ certified gate (roadmap §7)
+    # The Certified display mark (src.scanner.verdict.certified_mark) for this row: a
+    # stored A+ written under the mark rule. Lists read this, never ``grade``.
+    certified_mark: bool | None = None
     critical: int | None = None
     high: int | None = None
     findings_count: int | None = None
@@ -151,6 +155,8 @@ class CatalogRow(BaseModel):
 
     @model_validator(mode="after")
     def _fill_decision(self) -> CatalogRow:
+        if self.certified_mark is None:
+            self.certified_mark = self.grade == "A+"
         if self.trust_score is not None and self.decision is None:
             from src.scanner.verdict import decide
             findings: dict[str, Any] = {}
@@ -320,6 +326,23 @@ def _row_grade(
         return None
     from src.api.public_scan_router import _display_grade
     return _display_grade(score, None, critical or 0)
+
+
+# Prod first served the certified_mark rule (#119, 308d7e64) at about 05:44Z; before
+# that a stored A+ followed raw ``certified.eligible`` (it could sit on a pending
+# sandbox or a thin-coverage scan). A stored A+ written earlier is not trusted as the
+# mark: it reads A until the row is re-scanned (fail closed).
+CERTIFIED_MARK_SINCE = datetime(2026, 10, 9, 6, 0, tzinfo=timezone.utc)
+
+
+def _stored_grade_for_mark(grade: str | None, scanned_at: datetime | None) -> str | None:
+    if grade != "A+":
+        return grade
+    if scanned_at is None:
+        return "A"
+    if scanned_at.tzinfo is None:
+        scanned_at = scanned_at.replace(tzinfo=timezone.utc)
+    return grade if scanned_at >= CERTIFIED_MARK_SINCE else "A"
 
 
 def _guard_stale_score(score: int | None, critical: int | None) -> int | None:
@@ -629,7 +652,8 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                     repository_url=repository_url,
                     endpoint_url=endpoint_url,
                     trust_score=c.trust_score,
-                    grade=_row_grade(c.trust_score, c.grade),
+                    grade=_row_grade(c.trust_score, _stored_grade_for_mark(
+                        c.grade, getattr(c, "last_scanned_at", None))),
                     critical=c.critical,
                     high=c.high,
                     findings_count=c.findings_count,
@@ -794,15 +818,17 @@ async def _catalog_view(
     elif severity == "skipped":
         filtered = [r for r in filtered if _severity_bucket(r) == BUCKET_SKIPPED]
 
-    # Grade filter (curation): "certified" = A+ only; a tier value (verified … minimal)
-    # = that tier's score floor and above (src/trust_tiers.py); A/B/C = the legacy
-    # letter band and above, kept for links already in the wild.
-    if grade in TIER_FLOORS:
+    # Grade filter (curation): "certified" = rows carrying the Certified mark; a tier
+    # value (verified … minimal) = that tier's score floor and above
+    # (src/trust_tiers.py); A/B/C = the legacy letter band and above, kept for links
+    # already in the wild.
+    if grade == "certified":
+        filtered = [r for r in filtered if r.certified_mark]
+    elif grade in TIER_FLOORS:
         _floor = TIER_FLOORS[grade]
         filtered = [r for r in filtered if r.trust_score is not None and r.trust_score >= _floor]
     elif grade:
         _min_ok = {
-            "certified": {"A+"},
             "A": {"A+", "A"},
             "B": {"A+", "A", "B"},
             "C": {"A+", "A", "B", "C"},

@@ -5,6 +5,7 @@ import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsuppor
 import { NoticeText } from '../components/NoticeText'
 import { publicApi } from '../../lib/scanApi'
 import SEOHead from '../../components/SEOHead'
+import { decide, decisionPhrase } from '../../components/trust/gradeSystem'
 
 /** Parse a pasted coordinate into {surface, identifier} for the submit endpoint —
  * mirrors the Check page's router logic, but returns the coordinate instead of routing. */
@@ -47,7 +48,7 @@ function scorePath(surface: string, identifier: string): string {
   return rp(`/rebrand/check/pkg/${surface}/${identifier}`)
 }
 
-type Listed = { surface: string; identifier: string; grade: string; trust_score: number }
+type Listed = { surface: string; identifier: string; grade: string; trust_score: number; decision?: string | null; decision_reason?: string | null }
 
 export default function Submit() {
   const navigate = useNavigate()
@@ -64,10 +65,10 @@ export default function Submit() {
     if (!coord) { setError("We couldn't read that. Try github.com/owner/repo, npm:chalk, hf:org/model, docker:nginx, or an MCP URL."); return }
     setBusy(true)
     try {
-      const { data } = await publicApi.post<{ listed: boolean; surface: string; identifier: string; grade: string; trust_score: number }>(
+      const { data } = await publicApi.post<{ listed: boolean; surface: string; identifier: string; grade: string; trust_score: number; decision?: string | null; decision_reason?: string | null }>(
         '/public/scan/submit', coord,
       )
-      setListed({ surface: data.surface, identifier: data.identifier, grade: data.grade, trust_score: data.trust_score })
+      setListed({ surface: data.surface, identifier: data.identifier, grade: data.grade, trust_score: data.trust_score, decision: data.decision, decision_reason: data.decision_reason })
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       setError(msg || 'Something went wrong listing that tool. Please try again.')
@@ -136,7 +137,16 @@ export default function Submit() {
         <div className="glass mt-8 rounded-2xl p-8 text-center border-l-4 border-success/60">
           <div className="text-success font-mono text-[12px] uppercase tracking-wide">✓ Listed in the catalog</div>
           <h2 className="mt-2 text-2xl font-extrabold tracking-tight break-all">{listed.identifier}</h2>
-          <div className="mt-2 text-[15px] text-text-muted">Scored <span className="font-bold text-text">{listed.trust_score}/100</span> — now in Browse.</div>
+          {(() => {
+            const p = decisionPhrase(listed.decision ?? decide({ trust_score: listed.trust_score }).decision)
+            return (
+              <div className="mt-2 text-[15px] text-text-muted">
+                <span className="font-bold" style={{ color: p.color }}>{p.phrase}</span>
+                {listed.decision_reason && <span> — {listed.decision_reason}</span>}
+                <span> · trust {listed.trust_score}/100 — now in Browse.</span>
+              </div>
+            )
+          })()}
           <div className="mt-6 flex gap-3 justify-center flex-wrap">
             <button onClick={() => navigate(scorePath(listed.surface, listed.identifier))} className="font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark">View your listing →</button>
             <Link to={rp('/rebrand/tools')} className="font-semibold px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claim it</Link>

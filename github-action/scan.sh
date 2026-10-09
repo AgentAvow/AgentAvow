@@ -168,6 +168,8 @@ ${DECISION_REASON:+${DECISION_REASON}
 }
 **Trust score ${SCORE}/100** (tier: ${TIER}) — ${SUMMARY}
 
+**Adoption:** ![Adoption](${BADGE_URL}?metric=adoption) — how widely the tool is relied on (stars or downloads); it never changes the answer.
+
 | Category | Score |
 |----------|-------|
 ${CATEGORIES}

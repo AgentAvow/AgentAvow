@@ -1,6 +1,6 @@
 {
   "name": "agentavow-trust",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "AgentAvow for JavaScript: a framework-agnostic gate that decides safe / review / do_not_connect for any tool, MCP server or package from AgentAvow's signed scan results (Ed25519 JWS verified offline), with adapters for Flue and the Vercel AI SDK, plus Trust Score v2 envelope verification. Formerly agentgraph-trust.",
   "type": "module",
   "license": "MIT",

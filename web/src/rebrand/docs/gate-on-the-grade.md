@@ -1,4 +1,4 @@
-# Gate on the score
+# Gate on the answer
 
 A score you don't act on is trivia. AgentAvow is built so a **machine** can read the answer and decide — block a risky tool, throttle an unproven one, or wave a Certified one through — in CI and at your agent's runtime. Every path below reads the same signed result you can recompute offline.
 
@@ -12,7 +12,7 @@ Every result leads with one of three answers, in `decision`, with the reason in 
 | `review` | Review before you connect | require approval, or allow with limits |
 | `do_not_connect` | Do not connect | deny |
 
-**Do not connect** means a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a high finding (code or sandbox), a published advisory on this version, a deprecated package, or a score under 51. A clean scan of very little code reads **Safe to connect**, and its reason says so. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer (`certified.eligible`), never instead of it.
+**Do not connect** means a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a high finding (code or sandbox), a published advisory on this version, a deprecated package, or a score under 51. A clean scan of very little code reads **Safe to connect**, and its reason says so. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer, never instead of it: read `certified_mark`, which is true only beside Safe to connect (a final sandbox result, a score of 81 or more, enough code inspected). `certified.eligible` alone can sit beside Review, so don't gate on it.
 
 ## What the score tells a machine to do
 
@@ -67,7 +67,7 @@ if (r.decision === 'review') await confirmWithUser(`Review before you connect: $
 
 For a package or a live MCP server, call the scan endpoints under **Gate anything** below; the response shape is the same.
 
-Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway`) enforces a policy server-side when you'd rather not embed the logic.
+Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway/check`) enforces a policy server-side when you'd rather not embed the logic: it denies a Do not connect tool whatever its tier, takes the same `fail_on` (`do_not_connect` by default, or `review`), and keeps `min_tier` as an extra floor.
 
 ### LangChain
 

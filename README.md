@@ -197,7 +197,7 @@ The public scanning API needs **no authentication**. All app endpoints use the `
 
 | Endpoint | Path | Description |
 |----------|------|-------------|
-| **Scan** | `GET /public/scan/{owner}/{repo}` | Scan a repo/tool; returns grade, tier, findings, and a signed JWS attestation. `?force=true` bypasses the 1-hour cache. |
+| **Scan** | `GET /public/scan/{owner}/{repo}` | Scan a repo/tool; returns the answer (`decision`) and its reason, the trust score, tier, findings, and a signed JWS attestation. `?force=true` bypasses the 1-hour cache. |
 | **Badge** | `GET /public/scan/{owner}/{repo}/badge` | 20px **SVG** README badge (open CORS): the answer, the trust bar with the score, the adoption dial with the count. `?style=card` for the 360×230 card, `?style=classic` for the previous badge, `?theme=light\|dark`. Cached an hour in the browser and a day at the edge. |
 | **Card** | `GET /public/scan/{owner}/{repo}/card.svg` | The trust card the `widget.js` embed shows. Cached five minutes in the browser and an hour at the edge. |
 | **Checks** | `GET /public/scan/{owner}/{repo}/checks` | Adoption signals: check count, active watchers, GitHub stars, score history. |

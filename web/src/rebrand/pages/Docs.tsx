@@ -26,7 +26,7 @@ import behavioralSandbox from '../docs/behavioral-sandbox.md?raw'
 const DOCS = [
   { slug: 'how-grading-works', title: 'How scoring works', body: howGradingWorks,
     blurb: 'How the 0–100 trust score and the adoption score are computed from scan findings, and why anyone can recompute them offline.' },
-  { slug: 'gate-on-the-grade', title: 'Gate on the score', body: gateOnTheGrade,
+  { slug: 'gate-on-the-grade', title: 'Gate on the answer', body: gateOnTheGrade,
     blurb: 'Block a tool below a minimum trust score — per call, in CI with the GitHub Action, at runtime in your agent, or anywhere via the API.' },
   { slug: 'check-guide', title: 'Reading your scan score', body: checkGuide,
     blurb: 'What a check result means: the trust score, the adoption score, subscores, findings, the recommended posture, and the signature under it.' },

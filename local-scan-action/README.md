@@ -3,8 +3,8 @@
 Run AgentAvow's tool-safety scan **inside your CI runner**, on your checked-out code.
 
 - **Private repos work.** The scan runs on the code already checked out in the runner — nothing is sent to AgentAvow, and no token is handed to us.
-- **Same grade as a hosted scan.** It uses the exact same detection engine and scoring (`src/scanner/local_scan.py` → shared `scan.py` helpers), over the same file set (git-tracked files only), so the score matches a hosted scan of the same tree.
-- **Actionable output.** Emits SARIF (inline PR annotations via code scanning) and a JSON findings file, and can fail the build on a minimum score or a severity threshold.
+- **Same answer and score as a hosted scan.** It uses the exact same detection engine and scoring (`src/scanner/local_scan.py` → shared `scan.py` helpers), over the same file set (git-tracked files only), so the score matches a hosted scan of the same tree.
+- **Actionable output.** Emits SARIF (inline PR annotations via code scanning) and a JSON findings file, and can fail the build on the answer — `fail-on: do_not_connect` or `fail-on: review` — or on a finding severity (`critical | high | medium`).
 
 > A local/CI scan proves the findings. It does **not** mint a signed attestation — that requires AgentAvow's key. For a third-party-verifiable attestation, use the hosted scan/REST API on top.
 
