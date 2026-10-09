@@ -14,10 +14,12 @@ sandbox that relays from a window other than window.parent; decodes string frame
 non-stalling handshake). The resource URI is versioned in mcp_streamable (_CARD_URI)
 to bust host caches on change.
 
-Artwork MATCHES the live site's locked marks (web/src/rebrand/components/TrustMark.tsx):
-vertical 10-segment trust bar (tier-tinted, or a teal->magenta gradient when Certified),
-the adoption VU needle, per-category subscores, top findings, and an install CTA for
-safe/certified packages. Plain string (not an f-string) so JS/SVG braces are literal; the
+Artwork: the trust + adoption pair follows the AgentAvow badge design (option C,
+``src/api/badge_avow.py``): the vertical 10-segment trust bar (tier-tinted, or a
+teal->magenta gradient when Certified) with the score and tier word to its right, and
+the adoption VU dial (the heavier card arc) with the count and level to its right;
+then per-category subscores, top findings, and an install CTA for safe/certified
+packages. Plain string (not an f-string) so JS/SVG braces are literal; the
 one substitution is the six-tier table (``__TRUST_TIERS_JS__``), generated from
 ``src.trust_tiers`` so the card's tier words, floors and colours match every other surface.
 """
@@ -52,8 +54,21 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
   .lead .lreason { font-weight:500; color:var(--fg); }
   .target { font-weight:700; font-size:15.5px; margin:8px 0 2px; word-break:break-all; }
   .posture { font-size:11.5px; color:var(--muted); margin-bottom:8px; min-height:0; }
-  .inst { display:flex; align-items:stretch; justify-content:center; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 6px; margin-top:4px; }
-  .col { flex:1; display:flex; flex-direction:column; align-items:center; padding:0 8px; }
+  .inst { display:flex; align-items:stretch; justify-content:center; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 6px; margin-top:4px; }
+  .col { flex:1 1 0; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0 8px; }
+  /* Trust + adoption (the AgentAvow badge design, option C): each meter with its number
+     and word to the right, the two columns on shared baselines; trust's numeral leads. */
+  .col > .caplabel { display:none; }
+  .pair { display:flex; align-items:center; gap:12px; width:100%; justify-content:center; }
+  .ptxt { display:flex; flex-direction:column; min-width:0; }
+  .ptxt .caplabel { margin-bottom:6px; }
+  .ptxt .num { margin-top:0; }
+  .num.tnum { font-size:30px; }
+  .num.anum { font-size:21px; opacity:.82; padding:7px 0 2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .anum .unit { margin-left:4px; }
+  .tw.atw { font-size:10px; opacity:.9; }
+  .dial { flex:none; display:block; }
+  @media (max-width:400px){ .pair{ gap:7px; } .col{ padding:0 4px; } .num.tnum{ font-size:26px; } .num.anum{ font-size:18px; padding:6px 0 2px; } .anum .unit{ display:none; } .dial{ width:46px; } }
   .divider { width:1px; background:var(--line); margin:2px 0; align-self:stretch; }
   .caplabel { font-size:9.5px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-bottom:9px; }
   .segs { display:flex; flex-direction:column-reverse; gap:2.5px; }
@@ -141,23 +156,26 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
     var numColor=certified?"#2dd4bf":t.color;
     var label=certified?'<span class="grad">CERTIFIED</span>':'<span style="color:'+t.color+'">'+t.name+'</span>';
     document.getElementById("trust").innerHTML =
-      '<div class="segs">'+segs+'</div>'
-      +'<div class="num" style="color:'+numColor+'">'+score+'<span class="unit">/100</span></div>'
-      +'<div class="tw">'+label+'</div>';
+      '<div class="pair"><div class="segs">'+segs+'</div>'
+      +'<div class="ptxt"><div class="caplabel">Trust</div>'
+      +'<div class="num tnum"'+(certified?' ><span class="grad">'+score+'</span>':' style="color:'+numColor+'">'+score)+'<span class="unit">/100</span></div>'
+      +'<div class="tw">'+label+'</div></div></div>';
   }
   function renderAdopt(ad){
     var c=ad?(ad.count||0):0, pct=ad?(ad.score_0_100!=null?ad.score_0_100:adoptionPct(c)):0, has=(pct>0||c>0);
-    var cx=100,cy=88,r=74,a0=180,a1=360, ang=a0+pct/100*180, n=P(cx,cy,r-16,ang), ticks="";
-    for(var i=0;i<9;i++){ var ta=a0+180*((i+1)/10),p0=P(cx,cy,r-6,ta),p1=P(cx,cy,r-((i+1===5)?14:10),ta);
-      ticks+='<line x1="'+p0[0].toFixed(1)+'" y1="'+p0[1].toFixed(1)+'" x2="'+p1[0].toFixed(1)+'" y2="'+p1[1].toFixed(1)+'" stroke="var(--muted)" stroke-width="'+((i+1===5)?1.6:1)+'" opacity="0.4"/>'; }
-    var fill=(has&&ang>a0+1.5)?'<path d="'+ARC(cx,cy,r,a0,ang)+'" fill="none" stroke="url(#agrad)" stroke-width="8" stroke-linecap="round"/>':'';
-    var tr='<path d="'+ARC(cx,cy,r,Math.max(ang,a0+0.5),a1)+'" fill="none" stroke="var(--track)" stroke-width="8"/>';
-    var nd=has?('<line x1="'+cx+'" y1="'+cy+'" x2="'+n[0].toFixed(1)+'" y2="'+n[1].toFixed(1)+'" stroke="#2dd4bf" stroke-width="3.4" stroke-linecap="round"/><circle cx="'+cx+'" cy="'+cy+'" r="5.5" fill="#2dd4bf"/>')
-                :('<circle cx="'+cx+'" cy="'+cy+'" r="5.5" fill="var(--muted)" opacity="0.3"/>');
+    // The heavier dial (the badge card's arc, close to the trust segments' weight).
+    var cx=100,cy=88,r=72,a0=180,a1=360, ang=a0+pct/100*180, n=P(cx,cy,r-22,ang), ticks="";
+    for(var i=0;i<9;i++){ var ta=a0+180*((i+1)/10),mid=(i+1===5),p0=P(cx,cy,r-13,ta),p1=P(cx,cy,r-13-(mid?8:4),ta);
+      ticks+='<line x1="'+p0[0].toFixed(1)+'" y1="'+p0[1].toFixed(1)+'" x2="'+p1[0].toFixed(1)+'" y2="'+p1[1].toFixed(1)+'" stroke="var(--muted)" stroke-width="'+(mid?1.6:1)+'" opacity="0.4"/>'; }
+    var tr='<path d="'+ARC(cx,cy,r,Math.max(ang,a0+0.5),a1)+'" fill="none" stroke="var(--track)" stroke-width="16" stroke-linecap="round"/>';
+    var fill=(has&&ang>a0+1.5)?'<path d="'+ARC(cx,cy,r,a0,ang)+'" fill="none" stroke="url(#agrad)" stroke-width="16" stroke-linecap="round"/>':'';
+    var nd=has?('<line x1="'+cx+'" y1="'+cy+'" x2="'+n[0].toFixed(1)+'" y2="'+n[1].toFixed(1)+'" stroke="#2dd4bf" stroke-width="6.5" stroke-linecap="round"/><circle cx="'+cx+'" cy="'+cy+'" r="9.5" fill="#2dd4bf"/>')
+                :('<circle cx="'+cx+'" cy="'+cy+'" r="9.5" fill="var(--muted)" opacity="0.3"/>');
     document.getElementById("adopt").innerHTML =
-      '<svg width="122" viewBox="0 0 200 94" style="overflow:visible" aria-hidden="true"><defs><linearGradient id="agrad" gradientUnits="userSpaceOnUse" x1="26" y1="0" x2="174" y2="0"><stop stop-color="#2dd4bf"/><stop offset="1" stop-color="#e879f9"/></linearGradient></defs>'+fill+tr+ticks+nd+'</svg>'
-      +'<div class="num">'+(has?compact(c):'<span class="mut">New</span>')+(has&&ad&&ad.unit?'<span class="unit">'+esc(ad.unit)+'</span>':'')+'</div>'
-      +'<div class="tw">'+(has?'<span class="grad">'+adoptTier(pct)+'</span>':'<span class="mut">no signal yet</span>')+'</div>';
+      '<div class="pair"><svg class="dial" width="64" viewBox="0 0 200 94" style="overflow:visible" aria-hidden="true"><defs><linearGradient id="agrad" gradientUnits="userSpaceOnUse" x1="26" y1="0" x2="174" y2="0"><stop stop-color="#2dd4bf"/><stop offset="1" stop-color="#e879f9"/></linearGradient></defs>'+tr+fill+ticks+nd+'</svg>'
+      +'<div class="ptxt"><div class="caplabel">Adoption</div>'
+      +'<div class="num anum">'+(has?compact(c):'<span class="mut">New</span>')+(has&&ad&&ad.unit?'<span class="unit">'+esc(ad.unit)+'</span>':'')+'</div>'
+      +'<div class="tw atw">'+(has?'<span class="grad">'+adoptTier(pct)+'</span>':'<span class="mut">no signal yet</span>')+'</div></div></div>';
   }
   function renderFinds(list, mode){
     var el=document.getElementById("finds"); el.innerHTML="";
