@@ -183,7 +183,10 @@ model by the attestation's signed `scannedAt` (the time the score was computed):
 | before 2026-10-08T17:36:57Z | `safety-model-v1` | — |
 | on or after 2026-10-08T17:36:57Z | `safety-model-v1.1` | §4.2 graduated curve |
 
-`scannedAt`, not `issuedAt`, selects the model: a cached result can be re-signed later
+`scannedAt` is stamped by the scoring run itself: every path that computes a score
+(including catalog re-scores) runs a fresh scan and stamps a fresh `scannedAt`, and no path
+recomputes a stored score under its old timestamp. `scannedAt`, not `issuedAt`, selects
+the model: a cached result can be re-signed later
 (a new `issuedAt`) without being re-scored, so `issuedAt` can postdate the model that
 computed the score. The boundary is the time production pulled the v1.1 change; the
 first scan recorded after it is at 17:45:07Z, so no score sits between the pull and the
