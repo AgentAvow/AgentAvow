@@ -72,7 +72,8 @@ export default function RebrandFAQ() {
   return (
     <div className="max-w-[820px] mx-auto px-6 py-16">
       <Helmet>
-        <title>FAQ — AgentAvow</title>
+        <title>FAQ · AgentAvow</title>
+        <link rel="canonical" href="https://agentavow.com/faq" />
         <meta name="description" content="Frequently asked questions about AgentAvow — signed, verifiable trust scores for the tools your AI agents connect to." />
         <script type="application/ld+json">{JSON.stringify(FAQ_JSONLD)}</script>
       </Helmet>

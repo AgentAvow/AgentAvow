@@ -83,9 +83,12 @@ export default function RebrandHowItWorks() {
               <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-text-muted">Example — a widely-used, safe tool</span>
               <span className="font-mono text-[10px] text-text-muted/70">illustrative</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 relative">
+            <div className="px-5 pt-4 text-[14px] font-semibold text-success" data-decision="safe">
+              Safe to connect <span className="font-normal text-text-muted">— nothing found in its shipped code</span>
+            </div>
+            <div className="grid grid-cols-2 relative">
               <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(340px 130px at 25% 0%, rgba(34,197,94,0.10), transparent 70%), radial-gradient(340px 130px at 78% 0%, rgba(45,212,191,0.10), transparent 70%)' }} />
-              <div className="relative p-6 text-center flex flex-col items-center border-b sm:border-b-0 sm:border-r border-border/50">
+              <div className="relative p-6 text-center flex flex-col items-center border-r border-border/50">
                 <div className="min-h-[100px] sm:min-h-[132px] flex items-center justify-center"><TrustBar score={94} /></div>
                 <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-success">Attestation Trust</div>
               </div>
@@ -128,7 +131,7 @@ export default function RebrandHowItWorks() {
             Reading code misses what only shows up at runtime. So we install npm, PyPI and Docker packages in a fresh
             gVisor container, start MCP servers and <strong className="text-text">call every tool</strong> with synthetic
             arguments, and fill the environment variables a tool reads with <strong className="text-text">canary
-            credentials</strong>. If a canary leaves the machine, that is credential exfiltration, graded critical. We also flag
+            credentials</strong>. If a canary leaves the machine, that is credential exfiltration, rated critical. We also flag
             undeclared network hosts and read-only tools that write files. Each run is signed as a
             <strong className="text-text"> BehavioralObservation</strong> and shown beside the score. Watches alert you when a later run turns up new sandbox findings, and the GitHub Action can fail a build on a
             high or critical sandbox finding.
@@ -196,10 +199,10 @@ agentavow scan . --fail-on do_not_connect`}</pre>
       <Reveal>
         <div id="verify" className="mt-12 glass rounded-2xl p-7 border-l-4 border-primary/60">
           <Eyebrow>Verify</Eyebrow>
-          <h2 className="mt-2 text-xl font-bold">Signed, so a tool can't show one grade and be another.</h2>
+          <h2 className="mt-2 text-xl font-bold">Signed, so a tool can't show one score and be another.</h2>
           <p className="mt-2 text-text-muted text-[14px] max-w-[64ch] leading-relaxed">
             Each result is signed with Ed25519 (JWS): the score <strong className="text-text">and</strong> the tool's definition,
-            captured the moment we graded it. Nobody can hand you a doctored number, and if a tool swaps its definition after
+            captured the moment we scanned it. Nobody can hand you a doctored number, and if a tool swaps its definition after
             you trusted it, the signed digest no longer matches and we flag it. Verify any attestation offline against our
             public keys — a <strong className="text-text">signature, not just a badge</strong>: you don't have to trust
             AgentAvow, you can check the math.

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
@@ -169,6 +170,14 @@ export default function RebrandTrustIndex() {
   const pypi = useBoard({ surface: 'pypi', sort: 'score-desc', severity: 'clean', limit: 10 }, 'pypi')
   const relied = useBoard({ sort: 'adoption', limit: 10 }, 'adoption')
   const certified = useBoard({ grade: 'certified', sort: 'score-desc', limit: 10 }, 'certified')
+  // /index#certified (linked from the Certified page): the board renders after its
+  // data loads, so scroll once it's there.
+  const certifiedReady = !!certified.data?.rows?.length
+  useEffect(() => {
+    if (certifiedReady && window.location.hash === '#certified') {
+      document.getElementById('certified')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [certifiedReady])
 
   const summary = mcp.data?.summary || npm.data?.summary
   const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
@@ -190,7 +199,7 @@ export default function RebrandTrustIndex() {
           </h1>
           <p className="mt-4 text-text-muted text-[16px] leading-relaxed">
             An independent, <strong className="text-text">signed</strong> index of the tools, MCP servers, and packages AI agents
-            connect to — graded from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.
+            connect to — checked from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.
           </p>
         </div>
       </Reveal>
@@ -208,13 +217,13 @@ export default function RebrandTrustIndex() {
               </div>
               <p className="text-text text-[15px]">
                 of scanned agent tools carry a <strong>high or critical</strong> safety finding.
-                {stat && <span className="text-text-muted"> ({stat.flagged.toLocaleString()} of {stat.scanned.toLocaleString()} graded.)</span>}
+                {stat && <span className="text-text-muted"> ({stat.flagged.toLocaleString()} of {stat.scanned.toLocaleString()} scanned.)</span>}
               </p>
             </div>
           </div>
           <div className="glass rounded-2xl p-6 flex flex-col justify-center">
             <div className="text-[40px] font-extrabold leading-none tabular-nums gradient-text">{totalScanned}</div>
-            <p className="mt-2 text-text-muted text-[13.5px]">tools, servers &amp; packages graded — every score signed &amp; recomputable.</p>
+            <p className="mt-2 text-text-muted text-[13.5px]">tools, servers &amp; packages scanned — every score signed &amp; recomputable.</p>
           </div>
         </div>
       </Reveal>
@@ -238,8 +247,8 @@ export default function RebrandTrustIndex() {
       <div className="mt-4"><Reveal><RecentFeed /></Reveal></div>
 
       {certified.data?.rows && certified.data.rows.length > 0 && (
-        <div className="mt-4">
-          <Board title="AgentAvow Certified" note="the top tier · gated" rows={certified.data.rows} isLoading={certified.isLoading} certified href={rp('/rebrand/certified')} />
+        <div id="certified" className="mt-4 scroll-mt-24">
+          <Board title="AgentAvow Certified" note="the earned mark · gated" rows={certified.data.rows} isLoading={certified.isLoading} certified href={rp('/rebrand/certified')} />
         </div>
       )}
 
@@ -247,7 +256,7 @@ export default function RebrandTrustIndex() {
       <Reveal>
         <div className="mt-16 text-center">
           <h2 className="text-2xl font-extrabold">Check the tool you're about to connect.</h2>
-          <p className="mt-2 text-text-muted text-[14.5px] max-w-[52ch] mx-auto">Paste any repo, package, or MCP server — get a signed, offline-verifiable grade in seconds. Free, no account.</p>
+          <p className="mt-2 text-text-muted text-[14.5px] max-w-[52ch] mx-auto">Paste any repo, package, or MCP server — get an answer and a signed, offline-verifiable trust score in seconds. Free, no account.</p>
           <div className="mt-5 flex gap-3 justify-center flex-wrap">
             <Link to={rp('/rebrand/check')} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Check a tool →</Link>
             <Link to={rp('/rebrand/browse')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Browse the full catalog</Link>

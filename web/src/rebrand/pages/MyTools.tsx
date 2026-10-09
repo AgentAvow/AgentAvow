@@ -89,11 +89,13 @@ function useClaims(enabled: boolean) {
     },
   })
 }
-function useAppStatus() {
+function useAppStatus(enabled = true) {
   return useQuery({
     queryKey: APP_KEY,
     queryFn: async () => (await api.get<{ installations: Installation[]; app_configured: boolean }>('/account/github-app/status')).data,
     retry: 0,
+    // Signed out, the endpoint 401s; don't ask until there's a user.
+    enabled,
   })
 }
 
@@ -538,7 +540,7 @@ export default function RebrandMyTools() {
   }, [authLoading, user, navigate])
 
   const { data, isLoading: cLoading } = useClaims(!!user)
-  const { data: appData } = useAppStatus()
+  const { data: appData } = useAppStatus(!!user)
   const [justClaimedId, setJustClaimedId] = useState<string | null>(null)
 
   // Owners arriving from a score page's "Manage" land on their tools list.

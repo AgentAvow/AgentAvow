@@ -32,7 +32,7 @@ agentavow scan . --min-score 60             # legacy: exit non-zero below a trus
 
 `--fail-on` can be repeated, so one run can gate on the answer and on a finding severity. The human summary leads with the answer (Safe to connect, Review before you connect, or Do not connect) and its reason, then the trust score.
 
-The scan covers **git-tracked files only** — the same surface the hosted grade is computed over — so your build artifacts, data dumps, and gitignored caches never skew the score.
+The scan covers **git-tracked files only** — the same surface the hosted score is computed over — so your build artifacts, data dumps, and gitignored caches never skew the score.
 
 ## GitHub Action (private repos)
 

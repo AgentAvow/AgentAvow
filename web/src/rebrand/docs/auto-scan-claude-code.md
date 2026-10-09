@@ -37,7 +37,7 @@ score: **Safe to connect**, **Review before you connect**, or **Do not connect**
 - **Dependencies are advice.** The session-start lines for your project's dependencies
   show the same answer and never block: they are already installed.
 - **A changed definition still pauses** for your confirmation, whatever the answer.
-- **Fail-open.** Any error, timeout or missing grade lets the call through.
+- **Fail-open.** Any error, timeout or missing result lets the call through.
 
 If you install the plugin, skip Option 2. It is the same pair of hooks, and running
 both scans everything twice.
@@ -137,28 +137,28 @@ per machine and makes no request for it.
 
 ## The per-call gate
 
-The session-start hook grades a server once. The gate acts on that grade every time
+The session-start hook checks a server once. The gate acts on that result every time
 Claude is about to call one of the server's tools (tool names look like
 `mcp__<server>__<tool>`). It makes no call to AgentAvow.
 
-- **Deny:** the server reads **Do not connect**, or its grade is in the `blocked`
+- **Deny:** the server reads **Do not connect**, or its score is in the `blocked`
   tier (0 to 10 out of 100). The reason Claude sees leads with the answer and its
   reason, then the score and the report link.
 - **Confirm** (`permissionDecision: "ask"`): a remote server now serves a definition for this tool that differs from
-  the one AgentAvow graded, or a tool the grade never saw. The gate fetches
+  the one AgentAvow checked, or a tool the check never saw. The gate fetches
   `tools/list` from the server itself (at most once per server per 15 minutes) and
   recomputes the per-tool digest the signed attestation carries, the same derivation
-  anyone can run offline. You decide; the server is re-graded at your next session
+  anyone can run offline. You decide; the server is re-checked at your next session
   start.
-- **Allow, silently:** everything else, including Review before you connect. A server with no grade on file, a stdio
-  server (nothing served to re-fetch, so only its grade applies), a network error, a
+- **Allow, silently:** everything else, including Review before you connect. A server with no result on file, a stdio
+  server (nothing served to re-fetch, so only its stored result applies), a network error, a
   timeout, a definition the gate cannot canonicalize.
 
 Settings, all optional, read from the environment and never sent anywhere:
 
 - `AGENTAVOW_GATE_DENY_BELOW` (default: deny only Do not connect and the `blocked`
   tier). A number
-  such as `51` denies any server graded below it. A tier name (`restricted`,
+  such as `51` denies any server scoring below it. A tier name (`restricted`,
   `minimal`, `standard`, `trusted`, `verified`) denies anything below that tier's
   floor. `off` never denies; a changed definition still pauses for confirmation.
 - `AGENTAVOW_GATE_RECHECK_SECONDS` (default `900`). How often a remote server's
@@ -166,7 +166,7 @@ Settings, all optional, read from the environment and never sent anywhere:
 - `AGENTAVOW_GATE=off` turns the gate off. With the manual install, removing the
   `PreToolUse` block does the same; with the plugin, uninstalling it does.
 
-**Test it** without starting Claude. With a graded server named `example` in your
+**Test it** without starting Claude. With a checked server named `example` in your
 config:
 
 ```

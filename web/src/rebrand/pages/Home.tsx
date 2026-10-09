@@ -7,7 +7,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
-import { getTrustTier } from '../../components/trust/gradeSystem'
+import { decisionOf, getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini, DecisionLine } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
 import { trackEvent } from '../../lib/analytics'
@@ -143,7 +143,12 @@ export default function RebrandHome() {
     const row = teaser[0]
     if (!row) return null
     const { display, repoPath } = rowIdentity(row)
-    return { row, display, repoPath, t: getTrustTier(row.trust_score as number) }
+    // The Certified mark as the report shows it: the row's certified_mark when the
+    // catalog carries it, else the stored A+.
+    const mark = (row as { certified_mark?: boolean | null }).certified_mark
+    const certified = decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision === 'safe'
+      && (typeof mark === 'boolean' ? mark : row.grade === 'A+')
+    return { row, display, repoPath, certified, t: getTrustTier(row.trust_score as number) }
   })()
   // Real adoption for the example card (stars/checks/watchers) — no "coming soon".
   const { data: exAdopt } = useQuery({
@@ -239,7 +244,7 @@ export default function RebrandHome() {
               [s?.total_scans ?? 0, 'tools scanned'],
               [s?.by_surface?.mcp ?? 0, 'MCP servers'],
               [s?.by_surface?.x402 ?? 0, 'x402 endpoints'],
-              [s?.repo_scans_scanned ?? s?.repo_scans_total ?? 0, 'repos graded'],
+              [s?.repo_scans_scanned ?? s?.repo_scans_total ?? 0, 'repos scanned'],
               [12, 'detection categories'],
             ].map(([n, l]) => (
               <div key={l as string}>
@@ -281,12 +286,12 @@ export default function RebrandHome() {
               {/* the dual mark — real artwork, tier-tinted, a preview of the score page */}
               <div className="relative border-b border-border/60 overflow-hidden">
                 <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(340px 130px at 25% -10%, ${example.t.color}1c, transparent 70%), radial-gradient(340px 130px at 78% -10%, rgba(45,212,191,0.12), transparent 70%)` }} />
-                <div className="relative grid grid-cols-1 sm:grid-cols-2">
+                <div className="relative grid grid-cols-2">
                   <div className="p-5 text-center flex flex-col items-center">
-                    <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center"><TrustBar score={example.row.trust_score as number} /></div>
+                    <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center">{example.certified ? <CertifiedMark score={example.row.trust_score as number} /> : <TrustBar score={example.row.trust_score as number} />}</div>
                     <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: example.t.color }}>Attestation Trust</div>
                   </div>
-                  <div className="p-5 text-center flex flex-col items-center border-t sm:border-t-0 sm:border-l border-border/50">
+                  <div className="p-5 text-center flex flex-col items-center border-l border-border/50">
                     <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center"><AdoptionNeedle count={exCount} unit={exUnit} /></div>
                     <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                   </div>
@@ -295,7 +300,7 @@ export default function RebrandHome() {
               <div className="p-5 flex flex-wrap gap-5 text-[13px] text-text-muted">
                 <span><b className="text-danger tabular-nums">{example.row.critical ?? 0}</b> critical</span>
                 <span><b className="text-warning tabular-nums">{example.row.high ?? 0}</b> high</span>
-                <span><b className="text-text tabular-nums">{example.row.findings_count ?? 0}</b> total findings</span>
+                <span><b className="text-text tabular-nums">{example.row.findings_count ?? 0}</b> {(example.row.findings_count ?? 0) === 1 ? 'finding' : 'findings'} (any severity)</span>
               </div>
               <div className="flex items-center gap-2.5 p-4 border-t border-dashed border-border flex-wrap">
                 <span className="flex items-center gap-2 font-mono text-[12px] text-success">
@@ -308,7 +313,7 @@ export default function RebrandHome() {
                 {example.repoPath && <Link to={rp(`/rebrand/check/${example.repoPath}`)} className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">See the full report →</Link>}
               </div>
               <div className="px-5 py-3.5 border-t border-border/60 text-[12.5px] text-text-muted leading-relaxed">
-                A signed record means a tool can't show you one grade and be another. Don't take our word for it — <Link to={rp('/rebrand/how-it-works#verify')} className="text-primary-light hover:text-primary font-semibold">verify the signature yourself, or tamper with it and watch it fail →</Link>
+                A signed record means a tool can't show you one score and be another. Don't take our word for it — <Link to={rp('/rebrand/how-it-works#verify')} className="text-primary-light hover:text-primary font-semibold">verify the signature yourself, or tamper with it and watch it fail →</Link>
               </div>
             </div>
           ) : (
@@ -381,7 +386,7 @@ export default function RebrandHome() {
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Check before it connects</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Add AgentAvow's MCP to your agent (Claude Code, Cursor, or your own runtime). It pulls a tool's signed grade before your agent connects, so an unsafe tool is stopped in the loop, not found after the fact.</p>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Add AgentAvow's MCP to your agent (Claude Code, Cursor, or your own runtime). It pulls a tool's signed answer and score before your agent connects, so an unsafe tool is stopped in the loop, not found after the fact.</p>
               <Link to={rp("/rebrand/how-it-works") + "#mcp-check"} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Set it up →</Link>
             </div>
             <div className="glass rounded-2xl p-7 flex flex-col">
@@ -455,7 +460,7 @@ export default function RebrandHome() {
               <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/15 blur-2xl" />
               <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Axis 03 · Tool-safety</div>
               <h3 className="mt-2 text-lg font-semibold gradient-text">Is what it connects to safe?</h3>
-              <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses — graded and <strong>signed so you can verify it</strong>. This is AgentAvow.</p>
+              <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses — scanned and <strong>signed so you can verify it</strong>. This is AgentAvow.</p>
             </div>
           </div>
           <p className="mt-5 text-[14px] text-text-muted">Our evidence format and conformance vectors are public and built in the open with the agent-trust standards community. <Link to={rp("/rebrand/how-it-works")} className="text-primary-light hover:text-primary font-semibold">See how it works & who we build with →</Link></p>

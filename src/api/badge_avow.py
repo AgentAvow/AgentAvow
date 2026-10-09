@@ -30,6 +30,7 @@ import math
 import re
 from html import escape
 
+from src.adoption_units import short_unit
 from src.api.badge_style import CERT_GRADIENT, verdana_width
 from src.bridges.mcp_app_view import TRUST_CARD_HTML
 from src.trust_tiers import decision_for, tier_for_score
@@ -170,7 +171,10 @@ class _Facts:
         self.adoption_pct = max(0, min(100, int(adoption_pct or 0)))
         self.has_adoption = self.adoption > 0 or self.adoption_pct > 0
         self.adoption_text = _compact(self.adoption) if self.adoption else "New"
-        self.adoption_unit = (adoption_unit or "").strip()
+        # The short unit on every display ("dl/wk", "★"); the full one stays in the
+        # accessible title.
+        self.adoption_unit_full = (adoption_unit or "").strip()
+        self.adoption_unit = short_unit(self.adoption_unit_full)
         self.adoption_word = (adoption_level(self.adoption_pct) if self.has_adoption
                               else "no signal yet")
         self.coordinate = coordinate
@@ -180,7 +184,7 @@ class _Facts:
         if not self.scored:
             return f"AgentAvow: {who}not scanned yet"
         cert = " · Certified" if self.cert else ""
-        adopt = (f"{self.adoption_text} {self.adoption_unit}".strip()
+        adopt = (f"{self.adoption_text} {self.adoption_unit_full}".strip()
                  if self.has_adoption else "new")
         return (f"AgentAvow: {who}{self.phrase}{cert} · trust {self.score}/100 "
                 f"({self.tier_word}) · adoption {adopt}")
@@ -458,12 +462,11 @@ def _card(f: _Facts, p: _Paint, brand: str) -> str:
     # adoption text — count (+ unit when it fits), level word under it
     if f.has_adoption:
         an = f.adoption_text
-        # A step below the trust numeral: 21px (18px if it must), muted a touch. The
-        # full unit, then the short one (downloads -> dl); the unit drops only when
-        # nothing fits (it stays in the accessible title).
+        # A step below the trust numeral: 21px (18px if it must), muted a touch. Always
+        # the short unit; it drops only when nothing fits (it stays in the accessible
+        # title).
         size, unit = 21, ""
-        units = [u for u in (f.adoption_unit, f.adoption_unit.replace("downloads", "dl"))
-                 if u] or [""]
+        units = [f.adoption_unit] if f.adoption_unit else [""]
         for sz in (21, 18):
             fit = next((u for u in units
                         if _w(an, sz, True) + (3 + _w(u, 9) * 0.95 if u else 0) <= avail),

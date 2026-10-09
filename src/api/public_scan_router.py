@@ -1640,6 +1640,50 @@ async def package_badge(
 
 
 @router.get(
+    "/package/{surface}/{name:path}/card.svg",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+)
+async def package_card(
+    surface: str,
+    name: str,
+    style: str = Query("card", pattern="^(card|card-stacked|classic)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """The website-embed card for a published package, including names with a slash
+    (scoped npm ``/package/npm/@scope/name/card.svg``, Hugging Face ``org/model``)."""
+    surface = (surface or "").strip().lower()
+    surface = {"hf": "huggingface", "python": "pypi", "crate": "crates"}.get(surface, surface)
+    name = (name or "").strip().strip("/")
+    if surface not in _PKG_BADGE_SURFACES:
+        raise HTTPException(404, "Unknown package surface")
+    if not name or len(name) > 214 or ".." in name or any(c.isspace() for c in name):
+        raise HTTPException(400, "Invalid package name")
+    return await scan_card(owner=surface, repo=name, style=style, theme=theme, db=db)
+
+
+@router.get(
+    "/package/{surface}/{name:path}/verdict.json",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+)
+async def package_verdict(
+    surface: str, name: str, db: AsyncSession = Depends(get_db),
+) -> Response:
+    """The widget's offline-verify payload for a package, names with a slash included.
+    Cache-only, like ``/{owner}/{repo}/verdict.json``."""
+    surface = (surface or "").strip().lower()
+    surface = {"hf": "huggingface", "python": "pypi", "crate": "crates"}.get(surface, surface)
+    name = (name or "").strip().strip("/")
+    if surface not in _PKG_BADGE_SURFACES:
+        raise HTTPException(404, "Unknown package surface")
+    if not name or len(name) > 214 or ".." in name or any(c.isspace() for c in name):
+        raise HTTPException(400, "Invalid package name")
+    return await scan_verdict(owner=surface, repo=name, db=db)
+
+
+@router.get(
     "/package/{surface}/{name:path}",
     response_model=PublicScanResponse,
     dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
@@ -2767,7 +2811,7 @@ async def scan_badge(
     if style != "classic":
         return await _avow_badge_response(
             owner, repo, style=style, theme=theme, score=score, certified=certified,
-            decision=decision if score is not None else None)
+            decision=decision if score is not None else None, db=db)
 
     # Combined = trust + adoption in one badge (adoption never travels alone)
     if metric == "combined":
@@ -2814,17 +2858,24 @@ async def scan_card(
     trust-bar + adoption-needle card; ``style=card-stacked`` keeps the round-3 stacked
     layout. ``theme`` = auto / light / dark."""
     full_name = f"{owner}/{repo}"
-    # Trust score — composite entity, else cached scan, else regenerate on demand.
+    is_pkg = owner.lower() in _PKG_BADGE_SURFACES
+    # Trust score — a package reads the PACKAGE result (the repo path would scan a
+    # GitHub repo named <surface>/<name>); a repo reads the composite entity, else the
+    # cached scan, else regenerates on demand.
     score: int | None = None
-    entity_trust = await _get_entity_trust(full_name, db)
-    cached = await _get_cached(owner, repo)
-    scan_data: dict | None = cached
+    scan_data: dict | None = None
     composite = False
-    if entity_trust and entity_trust.get("composite_score") is not None:
-        score = entity_trust["composite_score"]
-        composite = True
+    if is_pkg:
+        scan_data = await _package_badge_data(owner.lower(), repo)
+        score = scan_data.get("trust_score") if scan_data else None
     else:
-        if cached:
+        entity_trust = await _get_entity_trust(full_name, db)
+        cached = await _get_cached(owner, repo)
+        scan_data = cached
+        if entity_trust and entity_trust.get("composite_score") is not None:
+            score = entity_trust["composite_score"]
+            composite = True
+        elif cached:
             score = cached["trust_score"]
         else:
             try:
@@ -2834,51 +2885,27 @@ async def scan_card(
             except Exception:
                 score = None
 
-    # Adoption — surface-aware headline + 0-100 score.
-    a_surface = owner.lower() if owner.lower() in (
-        "npm", "pypi", "crates", "huggingface", "docker",
-    ) else "github"
-    a_score100, a_count, _unit = await surface_adoption_summary(a_surface, owner, repo)
-    # Use the SAME full multi-axis adoption score the score page shows, so the card's
-    # tier word can never disagree with the report (surface_adoption_summary is a
-    # lighter, stars-only estimate for some surfaces). Keep its headline count.
-    try:
-        _full = await scan_adoption(owner=owner, repo=repo, db=db)
-        _fs = _full.get("adoption_score_100") if _full else None
-        if _fs is not None and not _full.get("insufficient_data"):
-            a_score100 = _fs
-    except Exception:
-        pass
-    coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
-
     decision, mark = await _badge_view(scan_data, score)
     cert = bool(mark and not composite and score is not None)
 
     if style in ("card", "card-stacked"):
-        from src.api.badge_avow import render_avow_badge
-        svg = render_avow_badge(
-            style=style,
-            decision=decision if score is not None else None,
-            score=int(score) if score is not None else None,
-            certified=cert,
-            brand=settings.badge_brand, theme=theme,
-            coordinate=full_name if a_surface == "github" else f"{owner}:{repo}",
-            adoption=a_count, adoption_unit=_unit, adoption_pct=a_score100,
-        )
-        return Response(
-            content=svg,
-            media_type="image/svg+xml",
-            headers={
-                "Cache-Control": "public, max-age=300, s-maxage=3600",
-                "Access-Control-Allow-Origin": "*",
-            },
-        )
+        # The same renderer, adoption source and cache headers as badge?style=card.
+        return await _avow_badge_response(
+            owner, repo, style=style, theme=theme, score=score, certified=cert,
+            decision=decision if score is not None else None, db=db,
+            cache_control="public, max-age=300, s-maxage=3600")
 
+    a_surface, a_score100, a_count, a_unit = await _card_adoption(owner, repo, db)
+    coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
     from src.api.card_svg import render_card_svg
+    adisp = _compact_int(a_count) or None
+    if adisp and a_unit:
+        from src.adoption_units import short_unit
+        adisp = f"{adisp} {short_unit(a_unit)}"
     svg = render_card_svg(
         coordinate=coordinate,
         score=int(score) if score is not None else None,
-        adoption_display=_compact_int(a_count) or None,
+        adoption_display=adisp,
         adoption_pct=int(a_score100 or 0),
         adoption_tier=None,
         decision=decision if score is not None else None,
@@ -2933,7 +2960,9 @@ async def scan_verdict(
                 "grade": cached.get("grade") or _grade_from_score(score100),
                 "jws": jws,
                 "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
-                "link": f"https://agentavow.com/check/{full_name}",
+                "link": (f"https://agentavow.com/check/pkg/{full_name}"
+                         if owner.lower() in _PKG_BADGE_SURFACES
+                         else f"https://agentavow.com/check/{full_name}"),
             }
         else:
             body = {"coordinate": full_name, "jws": None, "error": "not_scanned"}
@@ -3102,20 +3131,38 @@ def _certified_badge_response(score: int, decision: str | None = None) -> Respon
     )
 
 
+async def _card_adoption(
+    owner: str, repo: str, db: AsyncSession | None = None,
+) -> tuple[str, int | None, int | None, str | None]:
+    """(surface, adoption_score_100, headline_count, unit) for every badge and card
+    style, so the compact badge, ``badge?style=card`` and ``card.svg`` can never
+    disagree. The level comes from the full multi-axis score the report shows when it
+    has data; the headline count and unit come from the surface summary."""
+    a_surface = owner.lower() if owner.lower() in _PKG_BADGE_SURFACES else "github"
+    try:
+        a_pct, count, unit = await surface_adoption_summary(a_surface, owner, repo)
+    except Exception:
+        a_pct, count, unit = None, None, None
+    if db is not None and a_surface == "github":
+        try:
+            full = await scan_adoption(owner=owner, repo=repo, db=db)
+            fs = full.get("adoption_score_100") if full else None
+            if fs is not None and not full.get("insufficient_data"):
+                a_pct = fs
+        except Exception:
+            pass
+    return a_surface, a_pct, count, unit
+
+
 async def _avow_badge_response(
     owner: str, repo: str, *, style: str, theme: str, score: int | None,
-    certified: bool, decision: str | None,
+    certified: bool, decision: str | None, db: AsyncSession | None = None,
+    cache_control: str = "public, max-age=3600, s-maxage=86400",
 ) -> Response:
     """The opt-in Avow badge family (``src.api.badge_avow``) — same inputs and the same
     open-CORS, regenerate-per-view headers as the classic badge."""
     from src.api.badge_avow import render_avow_badge
-    a_surface = owner.lower() if owner.lower() in (
-        "npm", "pypi", "crates", "huggingface", "docker",
-    ) else "github"
-    try:
-        a_pct, adoption, a_unit = await surface_adoption_summary(a_surface, owner, repo)
-    except Exception:
-        a_pct, adoption, a_unit = None, None, None
+    a_surface, a_pct, adoption, a_unit = await _card_adoption(owner, repo, db)
     coordinate = f"{owner}/{repo}" if a_surface == "github" else f"{owner}:{repo}"
     svg = render_avow_badge(
         style=style, decision=decision, score=int(score) if score is not None else None,
@@ -3127,7 +3174,7 @@ async def _avow_badge_response(
         content=svg,
         media_type="image/svg+xml",
         headers={
-            "Cache-Control": "public, max-age=3600, s-maxage=86400",
+            "Cache-Control": cache_control,
             "Access-Control-Allow-Origin": "*",
         },
     )

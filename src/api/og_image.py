@@ -16,6 +16,8 @@ from __future__ import annotations
 import io
 import math
 
+from src.adoption_units import short_unit
+
 _W, _H = 1200, 630
 _BG = (11, 15, 23)          # #0b0f17 — the trust card's ground
 _PANEL = (15, 21, 34)       # #0f1522
@@ -38,6 +40,20 @@ def _mix(t: float) -> tuple[int, int, int]:
     return (round(_TEAL[0] + (_MAGENTA[0] - _TEAL[0]) * t),
             round(_TEAL[1] + (_MAGENTA[1] - _TEAL[1]) * t),
             round(_TEAL[2] + (_MAGENTA[2] - _TEAL[2]) * t))
+
+
+# Pillow's bundled default font has no glyph for these, so they render as a box
+# ("tofu"). Swap them for plain equivalents before drawing.
+_PLAIN = {"\u2014": "-", "\u2013": "-", "\u2605": "stars", "\u2713": "", "\u2192": "->",
+          "\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"', "\u2026": "..."}
+
+
+def _plain(text: str) -> str:
+    """Text the default font can draw (see ``_PLAIN``)."""
+    out = text or ""
+    for k, v in _PLAIN.items():
+        out = out.replace(k, v)
+    return out
 
 
 def _font(size: int):
@@ -193,6 +209,7 @@ def render_og_png(
     from src.trust_tiers import DECISION_BY_VALUE, decision_for, tier_for_score
 
     _ = grade  # legacy param — the card shows the 0-100 number, not a letter
+    title, subtitle = _plain(title), _plain(subtitle)
     scored = score is not None
     s = max(0, min(100, int(score))) if scored else 0
     if scored:
@@ -267,7 +284,7 @@ def render_og_png(
     tx = bx + seg_w + 40
     _spaced(d, (tx, cap_y), "TRUST", _font(24), _MUTED, 4)
     nf = _font(104)
-    num = str(s) if scored else "—"
+    num = str(s) if scored else "-"
     if cert:
         _gradient_text(img, (tx, num_y), num, nf)
     else:
@@ -299,15 +316,14 @@ def render_og_png(
                round(_FG[2] * .85 + _PANEL[2] * .15))
         avail = p1[0] - 30 - ax
         if has:
-            ct = _compact(c) if c else "—"
+            ct = _compact(c) if c else "-"
             d.text((ax, num_y + 25), ct, font=cf, fill=dim)
-            unit = (adoption_unit or "").strip()
+            # Always the short unit (src.adoption_units), drawable by the default font.
+            u = _plain(short_unit(adoption_unit))
             cw = d.textlength(ct, font=cf)
             uf = _font(26)
-            for u in (unit, unit.replace("downloads", "dl")):
-                if u and cw + 10 + d.textlength(u, font=uf) <= avail:
-                    d.text((ax + cw + 10, num_y + 66), u, font=uf, fill=_MUTED)
-                    break
+            if u and cw + 10 + d.textlength(u, font=uf) <= avail:
+                d.text((ax + cw + 10, num_y + 66), u, font=uf, fill=_MUTED)
             _gradient_text(img, (ax, word_y + 4), _adoption_level(pct), _font(30))
         else:
             d.text((ax, num_y + 25), "New", font=cf, fill=_MUTED)

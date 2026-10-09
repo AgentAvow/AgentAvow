@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react'
 import { getTrustTier, decisionOf, decisionPhrase, isCertified } from '../../components/trust/gradeSystem'
+import { shortUnit } from '../lib/adoptionUnit'
 
 /**
  * The AgentAvow dual mark (0–100 pivot 2026-08).
@@ -41,7 +42,8 @@ const GRAD_TEXT = { background: 'linear-gradient(100deg,#2dd4bf,#e879f9)', Webki
 // ── HERO ────────────────────────────────────────────────────────────────────
 
 /** Trust — the AgentAvow badge design (option C): the vertical segmented bar with the
- * score and tier word to its RIGHT. 10 segments, tier-tinted; the numeral is the
+ * score and tier word to its RIGHT (BELOW it on phones, ≤480px, so trust and adoption
+ * can sit side by side). 10 segments, tier-tinted; the numeral is the
  * heaviest number in the pair. `scale` resizes the whole instrument uniformly (the
  * hero passes 1.5 on desktop). Same design as card.svg / the README badge / the
  * Claude & ChatGPT trust card. */
@@ -49,7 +51,7 @@ export function TrustBar({ score, scale = 1 }: { score: number; scale?: number }
   const t = getTrustTier(score)
   const lv = Math.round(score / 10)
   return (
-    <div className="flex items-center text-left" style={{ gap: 14 * scale }}>
+    <div className="flex items-center text-left max-[480px]:flex-col max-[480px]:text-center" style={{ gap: 14 * scale }}>
       <Segments scale={scale} fill={(i) => (i < lv ? t.color : 'var(--color-border)')} />
       <PairText scale={scale}
         num={<span style={{ color: t.color }}>{score}</span>}
@@ -77,7 +79,7 @@ function PairText({ scale, num, unit, word, lead = true }: {
 }) {
   const size = (lead ? 30 : 21) * scale
   return (
-    <div className="flex flex-col min-w-0">
+    <div className="flex flex-col min-w-0 max-[480px]:items-center">
       <div className="font-extrabold leading-none tabular-nums whitespace-nowrap"
         style={{ fontSize: size, paddingTop: lead ? 0 : 7 * scale, paddingBottom: lead ? 0 : 2 * scale, opacity: lead ? 1 : 0.85 }}>
         {num}
@@ -102,7 +104,7 @@ export function AdoptionNeedle({ count, unit, scorePct, tier, scale = 1 }: { cou
   const ang = a0 + (pct / 100) * 180
   const [nx, ny] = P(cx, cy, r - 22, ang)
   return (
-    <div className="flex items-center text-left" style={{ gap: 12 * scale }}>
+    <div className="flex items-center text-left max-[480px]:flex-col max-[480px]:text-center" style={{ gap: 12 * scale }} title={has && unit ? `${compactNum(c)} ${unit}` : undefined}>
       <svg width={76 * scale} viewBox="0 0 200 94" className="text-text-muted shrink-0" style={{ overflow: 'visible' }} aria-hidden="true">
         <defs>
           <linearGradient id={gid} gradientUnits="userSpaceOnUse" x1="26" y1="0" x2="174" y2="0">
@@ -126,7 +128,7 @@ export function AdoptionNeedle({ count, unit, scorePct, tier, scale = 1 }: { cou
       </svg>
       <PairText scale={scale} lead={false}
         num={has ? <span className="text-text">{compactNum(c)}</span> : <span className="text-text-muted/70">New</span>}
-        unit={has && unit ? unit : undefined}
+        unit={has && unit ? shortUnit(unit) || undefined : undefined}
         word={has ? <span style={GRAD_TEXT}>{tierWord}</span> : <span className="text-text-muted font-semibold">no signal yet</span>} />
     </div>
   )
@@ -137,9 +139,9 @@ export function AdoptionNeedle({ count, unit, scorePct, tier, scale = 1 }: { cou
  * and CERTIFIED beneath. Only rendered for a tool that carries the Certified mark. */
 export function CertifiedMark({ score = 98, scale = 1 }: { score?: number; scale?: number }) {
   return (
-    <div className="flex items-center text-left" style={{ gap: 14 * scale }}>
+    <div className="flex items-center text-left max-[480px]:flex-col max-[480px]:text-center" style={{ gap: 14 * scale }}>
       <Segments scale={scale} fill={() => 'linear-gradient(90deg,#2dd4bf,#e879f9)'} />
-      <div className="flex flex-col items-start min-w-0">
+      <div className="flex flex-col items-start min-w-0 max-[480px]:items-center">
         <div className="inline-flex items-center rounded-full shadow-lg" style={{ gap: 6 * scale, paddingLeft: 13 * scale, paddingRight: 15 * scale, paddingTop: 5 * scale, paddingBottom: 5 * scale, background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', boxShadow: '0 6px 20px -6px rgba(45,212,191,0.5)' }}>
           <svg width={17 * scale} height={17 * scale} viewBox="0 0 40 40" fill="none" aria-hidden="true"><circle cx="20" cy="20" r="16.5" stroke="#06231f" strokeWidth="3.2" /><path d="M12 21l6 6 12-13" stroke="#06231f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>
           <span className="font-extrabold leading-none tabular-nums" style={{ fontSize: 24 * scale, color: '#06231f' }}>{score}</span>

@@ -304,7 +304,8 @@ async def registry_snippet(owner: str, repo: str):
 DRIFT_SCHEMA = "https://schema.agentgraph.co/attestation/drift/v1"
 
 
-async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession) -> dict:
+async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession,
+                         quiet: bool = False) -> dict:
     from src.models import ScanHistory
     from src.signing import canonicalize_jcs_strict as canonicalize
     from src.signing import create_jws
@@ -315,6 +316,11 @@ async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession) -> d
         .order_by(desc(ScanHistory.scanned_at))
         .limit(50)
     )).scalars().all()
+    if not rows and quiet:
+        # The site's own report pages ask with ?quiet=1: "no history yet" is a normal
+        # state there, not an error worth a red line in the console.
+        return {"subject": subject_id, "full_name": full_name, "history": [],
+                "summary": {"points": 0, "drift_events": 0}}
     if not rows:
         raise HTTPException(404, "No scan history yet for this tool — scan it first, "
                                  "then re-scan on your next release to build the feed.")
@@ -355,6 +361,9 @@ async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession) -> d
         "subject": subject_id,
         "full_name": full_name,
         "current_score": latest.trust_score,
+        # History points are the static scan's score; a report page can differ by the
+        # sandbox adjustment (behavioral_score_effect), which isn't recorded here.
+        "score_basis": "static scan, before any sandbox adjustment",
         "certified": latest.certified,
         "summary": {
             "points": len(points),
@@ -368,17 +377,20 @@ async def _drift_payload(full_name: str, subject_id: str, db: AsyncSession) -> d
 
 
 @router.get("/drift/pkg/{surface}/{name:path}", dependencies=[Depends(rate_limit_reads)])
-async def drift_pkg(surface: str, name: str, db: AsyncSession = Depends(get_db)):
-    """Signed score/definition drift timeline for a package (npm/pypi/crates/…)."""
+async def drift_pkg(surface: str, name: str, quiet: bool = Query(False),
+                    db: AsyncSession = Depends(get_db)):
+    """Signed score/definition drift timeline for a package (npm/pypi/crates/…).
+    ``quiet=1`` answers 200 with an empty history instead of 404 when there is none."""
     surface = surface.lower()
     full_name = f"{surface}:{name}"
-    return await _drift_payload(full_name, f"{surface}:{name}", db)
+    return await _drift_payload(full_name, f"{surface}:{name}", db, quiet=quiet)
 
 
 @router.get("/drift/{owner}/{repo}", dependencies=[Depends(rate_limit_reads)])
-async def drift_repo(owner: str, repo: str, db: AsyncSession = Depends(get_db)):
+async def drift_repo(owner: str, repo: str, quiet: bool = Query(False),
+                     db: AsyncSession = Depends(get_db)):
     """Signed score/definition drift timeline for a GitHub repo — the recompute-on-
     release feed: every version bump that moved the score or drifted the signed
     tool definition, offline-recomputable against our JWKS."""
     full_name = f"{owner}/{repo}"
-    return await _drift_payload(full_name, f"github:{full_name}", db)
+    return await _drift_payload(full_name, f"github:{full_name}", db, quiet=quiet)

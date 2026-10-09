@@ -139,7 +139,7 @@ export default function RebrandCertified() {
                   : <span key={label}>{pill}</span>
               })}
             </div>
-            <Link to={rp('/rebrand/index')} className="inline-block mt-4 text-[13px] font-semibold text-primary-light hover:text-primary">See the full Certified board →</Link>
+            <Link to={rp('/rebrand/index') + '#certified'} className="inline-block mt-4 text-[13px] font-semibold text-primary-light hover:text-primary">See the full Certified board →</Link>
           </div>
         </Reveal>
       )}
