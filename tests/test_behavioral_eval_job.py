@@ -377,6 +377,40 @@ def test_diff_fixture_regression_and_persisting_failure():
     assert d["fixture_fixed"] == ["benign"] and d["regression"] is False
 
 
+def _kg(name, rules, *, expect=(), ran=True, error=None):
+    return {"kind": "known_good", "surface": "pypi", "name": name, "launch_ok": True,
+            "ran": ran, "error": error, "rules": list(rules), "expect_rules": list(expect)}
+
+
+def test_diff_lost_expected_finding_is_a_regression():
+    # 2026-10-08: a full scratch disk truncated captures; fixtures still passed, but
+    # mcp-server-fetch silently lost its expected ssrf_internal_fetch.
+    prev = _rep(exercised_names=["a"])
+    prev["rows"].append(_kg("mcp-server-fetch", ["ssrf_internal_fetch"],
+                            expect=["ssrf_internal_fetch"]))
+    cur = _rep(exercised_names=["a"])
+    cur["rows"].append(_kg("mcp-server-fetch", [], expect=["ssrf_internal_fetch"]))
+    d = be.compute_diff(prev, cur)
+    assert d["lost_expected_findings"] == [
+        {"surface": "pypi", "name": "mcp-server-fetch", "rules": ["ssrf_internal_fetch"]}]
+    assert d["regression"] is True
+    title, body = be.summarize_regression({"diff": d})
+    assert "stopped catching known findings" in body and "mcp-server-fetch" in body
+
+
+def test_diff_lost_expected_ignores_runs_that_did_not_happen_and_never_caught():
+    prev = _rep()
+    prev["rows"] += [_kg("p", ["r"], expect=["r"]), _kg("q", [], expect=["r"])]
+    cur = _rep()
+    # p did not run this time (an outage is a different alert); q never produced it
+    cur["rows"] += [_kg("p", [], expect=["r"], ran=False, error="runner_unavailable"),
+                    _kg("q", [], expect=["r"])]
+    d = be.compute_diff(prev, cur)
+    assert d["lost_expected_findings"] == [] and d["regression"] is False
+    # first-ever run never alerts
+    assert be.compute_diff(None, cur)["lost_expected_findings"] == []
+
+
 def test_diff_exercised_drop_threshold():
     prev = _rep(exercised_names=["a", "b", "c", "d"])
     d = be.compute_diff(prev, _rep(exercised_names=["a", "b", "c"]))

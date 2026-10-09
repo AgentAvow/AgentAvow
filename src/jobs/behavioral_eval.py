@@ -359,6 +359,29 @@ def _failed_fixtures(report: dict) -> set[str]:
     return set((report.get("fixtures") or {}).get("failed") or [])
 
 
+def _kg_rows(report: dict) -> dict[str, dict]:
+    return {f"{r['surface']}:{r['name']}": r for r in report.get("rows") or []
+            if r.get("kind") == "known_good"}
+
+
+def _lost_expected(previous: dict, current: dict) -> list[dict]:
+    """Known-good packages that produced an EXPECTED finding last time, ran this time,
+    and no longer produce it. That is the sandbox going blind, not the package getting
+    safer: on 2026-10-08 a full scratch disk truncated every capture, the tiny fixtures
+    still passed, and mcp-server-fetch silently lost ssrf_internal_fetch."""
+    prev_rows, out = _kg_rows(previous), []
+    for key, row in sorted(_kg_rows(current).items()):
+        if not row.get("ran") or row.get("error"):
+            continue
+        expected = set(row.get("expect_rules") or [])
+        before = set((prev_rows.get(key) or {}).get("rules") or []) & expected
+        lost = sorted(before - set(row.get("rules") or []))
+        if lost:
+            surface, _, name = key.partition(":")
+            out.append({"surface": surface, "name": name, "rules": lost})
+    return out
+
+
 def compute_diff(previous: dict | None, current: dict) -> dict:
     """What changed since the last report. ``regression`` is the alert condition; it is
     never set on the first-ever run."""
@@ -376,10 +399,12 @@ def compute_diff(previous: dict | None, current: dict) -> dict:
         "newly_not_exercised": [],
         "newly_exercised": [],
         "exercised_delta": 0,
+        "lost_expected_findings": [],
         "regression": False,
     }
     if previous is None:
         return diff
+    diff["lost_expected_findings"] = _lost_expected(previous, current)
     prev_fp = _fp_map(previous)
     prev_failed = _failed_fixtures(previous)
     diff["fixture_regressions"] = sorted(set(cur_failed) - prev_failed)
@@ -397,7 +422,7 @@ def compute_diff(previous: dict | None, current: dict) -> dict:
     prev_count = (previous.get("known_good") or {}).get("exercised") or 0
     diff["exercised_delta"] = int(cur_ex) - int(prev_count)
     diff["regression"] = bool(
-        cur_failed or diff["new_false_positives"]
+        cur_failed or diff["new_false_positives"] or diff["lost_expected_findings"]
         or diff["exercised_delta"] <= -EXERCISED_DROP_ALERT)
     return diff
 
@@ -412,6 +437,11 @@ def summarize_regression(report: dict) -> tuple[str, str]:
         parts.append("new false positives: " + ", ".join(
             f"{f['surface']}:{f['name']} ({', '.join(f['rules'])})"
             for f in d["new_false_positives"]))
+    if d.get("lost_expected_findings"):
+        parts.append("sandbox stopped catching known findings (check capture health on "
+                     "the box): " + ", ".join(
+                         f"{f['surface']}:{f['name']} ({', '.join(f['rules'])})"
+                         for f in d["lost_expected_findings"]))
     if (d.get("exercised_delta") or 0) <= -EXERCISED_DROP_ALERT:
         parts.append(f"exercised dropped by {-d['exercised_delta']} "
                      f"({', '.join(d.get('newly_not_exercised') or []) or 'see report'})")
