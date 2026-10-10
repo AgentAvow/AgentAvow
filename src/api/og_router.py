@@ -294,14 +294,16 @@ def _og_verdict(score: int | None, data: dict | None = None) -> str:
 @router.get("/pkg/{surface}/{name:path}", response_class=HTMLResponse)
 async def og_package(surface: str, name: str) -> HTMLResponse:
     """OG tags for a package/model/container score page (/check/pkg/:surface/*)."""
-    from src.api.public_scan_router import _display_grade, _get_cached
+    from src.api.public_scan_router import _display_grade, _get_cached, _get_stale_cached
 
     surface = (surface or "").strip().lower()
     name = (name or "").strip().strip("/")
     full = f"{surface}:{name}"
     canonical_url = f"{BASE_URL}/check/pkg/{surface}/{name}"
     grade, score, subtitle = "", None, ""
-    cached = await _get_cached(surface, name)
+    # Fall back to the 7-day stale copy like the MCP and skill previews, so a package
+    # preview keeps its answer and score after the 1 h cache expires.
+    cached = await _get_cached(surface, name) or await _get_stale_cached(surface, name)
     if cached:
         score = cached.get("trust_score")
         grade = cached.get("grade") or _display_grade(score or 0, certified_mark(cached))
@@ -311,7 +313,9 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
         subtitle = verdict
     title = f"{name} ({surface})"
     _shown = "—" if score is None else f"{int(score)}/100"
-    description = f"{name} scored {_shown} on AgentAvow — {verdict}"
+    description = (f"{name} scored {_shown} on AgentAvow — {verdict}" if cached
+                   else f"Check {name} on AgentAvow: Safe to connect, Review before you "
+                        "connect, or Do not connect, signed and verifiable offline.")
     image_url = _og_image_url(full, grade, score, subtitle, cached,
                               adoption=await _adoption_for(surface, surface, name)
                               if cached else None)
@@ -319,10 +323,12 @@ async def og_package(surface: str, name: str) -> HTMLResponse:
 
 
 async def _adoption_for(surface: str, owner: str, repo: str) -> tuple | None:
-    """(score_0_100, count, unit) for the OG card's adoption dial; None when unknown."""
+    """(score_0_100, count, unit) for the OG card's adoption dial; None when unknown.
+    Same source as the badges and card.svg (``_card_adoption``)."""
     try:
-        from src.api.public_scan_router import surface_adoption_summary
-        return await surface_adoption_summary(surface, owner, repo)
+        from src.api.public_scan_router import _card_adoption
+        _surf, a_pct, count, unit = await _card_adoption(owner, repo)
+        return a_pct, count, unit
     except Exception:  # noqa: BLE001 — the card renders without adoption
         return None
 

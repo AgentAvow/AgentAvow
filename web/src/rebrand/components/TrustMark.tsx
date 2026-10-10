@@ -194,7 +194,7 @@ export function DecisionLine({ row, className = '' }: {
 }
 
 /** Adoption — mini VU needle + compact count, for list rows. */
-export function AdoptionMini({ count }: { count?: number | null }) {
+export function AdoptionMini({ count, unit }: { count?: number | null; unit?: string | null }) {
   const gid = useId()
   const c = count || 0
   const has = c > 0
@@ -219,6 +219,7 @@ export function AdoptionMini({ count }: { count?: number | null }) {
         )}
       </svg>
       <span className="text-[13px] font-extrabold leading-none" style={has ? GRAD_TEXT : { color: 'var(--color-text-muted)' }}>{has ? compactNum(c) : 'New'}</span>
+      {has && unit && shortUnit(unit) ? <span className="text-[11px] leading-none text-text-muted" title={unit}>{shortUnit(unit)}</span> : null}
     </span>
   )
 }

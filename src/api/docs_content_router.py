@@ -384,7 +384,7 @@ def _page(title: str, description: str, canonical: str, body: str) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(title)} · AgentAvow Docs</title>
+<title>{html.escape(title)}</title>
 <meta name="description" content="{html.escape(description, quote=True)}">
 <link rel="canonical" href="{html.escape(canonical, quote=True)}">
 <style>{_STYLE}</style>
@@ -430,7 +430,7 @@ async def docs_hub() -> HTMLResponse:
         f'<ul class="index">{"".join(items)}</ul>'
     )
     return HTMLResponse(_page(
-        "Documentation",
+        "Docs · AgentAvow",
         "AgentAvow documentation — how scoring works, gating on the score, verifying "
         "attestations, trust badges, and running locally.",
         "https://agentavow.com/docs",
@@ -462,7 +462,8 @@ async def docs_page(slug: str) -> HTMLResponse:
         f"{_render_body(md)}"
     )
     return HTMLResponse(_page(
-        title,
+        # Same title as the SPA's SEOHead ("<Doc> · Docs" + " · AgentAvow").
+        f"{title} · Docs · AgentAvow",
         _meta_description(_first_paragraph(md)) or f"AgentAvow documentation — {title}.",
         f"https://agentavow.com/docs/{slug}",
         body,
