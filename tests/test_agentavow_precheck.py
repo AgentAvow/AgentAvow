@@ -389,7 +389,7 @@ def test_graded_servers_produce_a_visible_summary_and_a_first_reply_instruction(
               "https://c.example/mcp": _ok(74, "needs review", 0)}
     out = _run_raw(hook, monkeypatch, capsys, targets, lambda t, force=False: scores[t["id"]])
     msg = out["systemMessage"]
-    assert msg.startswith("AgentAvow pre-check: graded 3 MCP servers — 2 Safe, 0 Review, 1 Blocked")
+    assert msg.startswith("AgentAvow pre-check: graded 3 MCP servers — 2 Safe, 0 Review, 1 Don't connect")
     assert "(needs attention: 'b' Do not connect — one critical finding: eval)" in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "has NOT seen this" in ctx and "first reply" in ctx

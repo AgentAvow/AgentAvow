@@ -296,7 +296,7 @@ def test_phrase_table():
     assert [(d.value, d.phrase, d.label) for d in DECISIONS] == [
         ("safe", "Safe to connect", "Safe"),
         ("review", "Review before you connect", "Review"),
-        ("do_not_connect", "Do not connect", "Blocked"),
+        ("do_not_connect", "Do not connect", "Don't connect"),
     ]
     assert REVIEW_PHRASE == "Review before you connect"
     assert verdict_phrase("do_not_connect") == "Do not connect"
@@ -304,7 +304,7 @@ def test_phrase_table():
     # an API response that already carries the decision is read, not re-decided
     assert verdict_phrase({"trust_score": 99, "decision": "review"}) == REVIEW_PHRASE
     assert verdict_phrase(40) == REVIEW_PHRASE and verdict_phrase(90) == "Safe to connect"
-    assert decision_label("do_not_connect") == "Blocked"
+    assert decision_label("do_not_connect") == "Don't connect"
     assert decision_color("safe") == "#22C55E"
 
 
@@ -334,9 +334,11 @@ def test_ts_twin_is_byte_identical():
 def test_ts_phrase_table_agrees():
     import re
     ts = (ROOT / "web/src/components/trust/gradeSystem.ts").read_text()
-    rows = re.findall(r"\{ value: '([a-z_]+)', phrase: '([^']+)', label: '([^']+)', "
-                      r"color: '(#[0-9A-F]{6})', colorText: '(#[0-9A-F]{6})' \}", ts)
-    assert rows == [(d.value, d.phrase, d.label, d.color, d.color_light) for d in DECISIONS]
+    found = re.findall(r"\{ value: '([a-z_]+)', phrase: '([^']+)', label: (['\"])(.+?)\3, "
+                       r"color: '(#[0-9A-F]{6})', colorText: '(#[0-9A-F]{6})' \}", ts)
+    # The label is double-quoted when it holds an apostrophe ("Don't connect").
+    found = [(v, p, lbl, c, ct) for v, p, _q, lbl, c, ct in found]
+    assert found == [(d.value, d.phrase, d.label, d.color, d.color_light) for d in DECISIONS]
 
 
 # ── The Certified mark (display rule) ──────────────────────────────────────────────

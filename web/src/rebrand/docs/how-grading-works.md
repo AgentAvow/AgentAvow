@@ -10,7 +10,7 @@ AgentAvow answers one question: **is this tool safe for your agent to connect to
 |---|---|---|---|
 | **Safe to connect** | Safe | `safe` | nothing below applies, including a clean scan of very little code (the reason says so) |
 | **Review before you connect** | Review | `review` | a high finding, a published advisory on this version, a deprecated package, or a score under 51 |
-| **Do not connect** | Blocked | `do_not_connect` | a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package |
+| **Do not connect** | Don't connect | `do_not_connect` | a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package |
 
 The reason always rides next to the phrase: "one high finding: undeclared network call", "nothing found in 1,200 files", "nothing found; little code to inspect", "a planted credential left the sandbox". The API returns it as `decision_reason`.
 

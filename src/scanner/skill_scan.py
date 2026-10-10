@@ -17,6 +17,9 @@ from __future__ import annotations
 import hashlib
 import re
 
+from src.scanner.skill_key_flow import SECRET_ENV_READ_RE as _SECRET_ENV_RE
+from src.scanner.skill_key_flow import analyze as _analyze_key_flow
+
 # Auto-exec risk weight per pre-approved tool — a skill's `allowed-tools` runs
 # these WITHOUT asking the user (roadmap §2.D). Higher = more dangerous to grant.
 _TOOL_RISK: dict[str, int] = {
@@ -66,16 +69,13 @@ _OVERRIDE_RE = re.compile(
 # ordinary code such as `def sort_key(` and `key=_sort_key`, flagging every Python
 # helper that sorts as credential exfiltration. `.env` must be a file name, not the
 # attribute in `process.env` / `os.environ`-style code.
-_EXFIL_RE = re.compile(
+_EXFIL_PATH_RE = re.compile(
     r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|(?<![\w\\])\.env\b"
     r"|169\.254\.169\.254|metadata\.google)"
-    # ...read through an env accessor ($VAR, ${VAR}, os.environ[...]/.get(...),
-    # os.getenv(...), process.env.VAR / ["VAR"], ENV["VAR"], os.Getenv("VAR")), not a
-    # name merely mentioned in a docstring or comment.
-    r"|(?:\$\{?|\benviron(?:\.get)?\s*[\[(]\s*[\"']|\bgetenv\s*\(\s*[\"']"
-    r"|\bprocess\.env(?:\.|\[\s*[\"'])|\bENV\[\s*[\"']|\bGetenv\(\s*\")"
-    r"[A-Z][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD)\b"
 )
+# The secret-named env READ (not a docstring mention) lives in skill_key_flow, which
+# also decides whether a known vendor key leaves for a non-vendor host.
+_EXFIL_RE = re.compile(_EXFIL_PATH_RE.pattern + "|" + _SECRET_ENV_RE.pattern)
 _SCRIPT_EXT = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
 
 
@@ -126,6 +126,15 @@ def _finding(category: str, name: str, severity: str, where: str, remediation: s
     return Finding(
         category=category, name=name, severity=severity,
         file_path=where, line_number=0, snippet="", remediation=remediation,
+    )
+
+
+def _capability(category: str, name: str, where: str, remediation: str, tag: str):
+    """A low, never-scored capability note (what the skill DOES, not a defect)."""
+    from src.scanner.scan import Finding
+    return Finding(
+        category=category, name=name, severity="low", file_path=where, line_number=0,
+        snippet="", remediation=remediation, kind="capability", capability=tag,
     )
 
 
@@ -282,14 +291,35 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
         if not text or not path.lower().endswith(_SCRIPT_EXT):
             continue
         result.script_count += 1
-        if _EXFIL_RE.search(text):
+        if _EXFIL_PATH_RE.search(text):
+            critical = True
+            uses = []
+        else:
+            # Kenne 2026-10-10: a known vendor's API key used only with that vendor's
+            # API is a capability, not exfiltration. Unknown secrets keep the old rule.
+            uses = _analyze_key_flow(text)
+            critical = any(u.leaves_vendor for u in uses)
+        if critical:
+            sent = sorted({h for u in uses if u.vendor for h in u.destinations if h != "?"})
             result.findings.append(_finding(
                 "exfiltration",
-                f"Bundled script {path} reads credentials / cloud-metadata / secret-named env",
+                f"Bundled script {path} reads credentials / cloud-metadata / secret-named env"
+                + (f" and sends a vendor key to {', '.join(sent[:3])}" if sent else ""),
                 "critical", path,
                 "Reading ~/.aws, ~/.ssh, .env, *_KEY/*_TOKEN, or 169.254.169.254 from a skill "
-                "script is a near-unambiguous exfiltration pattern.",
+                "script is a near-unambiguous exfiltration pattern. A vendor API key "
+                "(e.g. ANTHROPIC_API_KEY) is only flagged when it is sent somewhere other "
+                "than that vendor's API.",
             ))
+        else:
+            for vendor in sorted({u.vendor for u in uses if u.vendor}):
+                result.findings.append(_capability(
+                    "secret", f"Uses your {vendor} API key", path,
+                    f"The script reads your {vendor} API key and only calls {vendor}'s "
+                    f"API with it. Expected for a {vendor} integration; make sure you're "
+                    "happy to share that key.",
+                    "secret:vendor_api_key",
+                ))
         if _CAP_NETWORK_RE.search(text):
             net_scripts.append(path)
         if _CAP_EXEC_RE.search(text):

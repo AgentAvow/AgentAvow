@@ -163,7 +163,7 @@ export interface DecisionPhrase {
 export const DECISIONS: readonly DecisionPhrase[] = [
   { value: 'safe', phrase: 'Safe to connect', label: 'Safe', color: '#22C55E', colorText: '#15803D' },
   { value: 'review', phrase: 'Review before you connect', label: 'Review', color: '#F59E0B', colorText: '#B45309' },
-  { value: 'do_not_connect', phrase: 'Do not connect', label: 'Blocked', color: '#EF4444', colorText: '#B91C1C' },
+  { value: 'do_not_connect', phrase: 'Do not connect', label: "Don't connect", color: '#EF4444', colorText: '#B91C1C' },
 ]
 
 export const REVIEW_PHRASE = 'Review before you connect'

@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.26"
+__version__ = "0.1.27"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -560,12 +560,12 @@ _RANK = {"do_not_connect": 0, "review": 1, "safe": 2}
 
 
 def _counts(graded: list[tuple[str, dict]]) -> str:
-    """'3 Safe, 1 Review, 0 Blocked' — the short labels of the three answers."""
+    """'3 Safe, 1 Review, 0 Don't connect' — the short labels of the three answers."""
     n = {k: 0 for k in _RANK}
     for _, r in graded:
         n[_dval(r)] += 1
     out = f"{n['safe']} Safe, {n['review']} Review"
-    return out + (f", {n['do_not_connect']} Blocked" if n["do_not_connect"] else "")
+    return out + (f", {n['do_not_connect']} Don't connect" if n["do_not_connect"] else "")
 
 
 def _worst(graded: list[tuple[str, dict]]) -> tuple[str, dict] | None:
