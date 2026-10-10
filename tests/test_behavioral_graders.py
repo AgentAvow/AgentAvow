@@ -253,11 +253,38 @@ def test_writes_to_the_servers_own_hidden_state_folder_are_not_violations():
     "/work/.other-tool/state.json",          # hidden folder that is not this server's
     "/work/notes/commander.txt",             # a user file, even with the name in it
     "/work/.claude/settings.json",           # another agent's settings
+    # own folder, but not bookkeeping-shaped: real state/config the user would care about
+    "/work/.claude-server-commander/config.json",
+    "/work/.claude-server-commander/keys/id.json",
 ])
 def test_own_state_exemption_stays_narrow(path):
     r, t = _ro_result([path])
     fs = grade_readonly_violated(r, t)
     assert len(fs) == 1 and path in fs[0].snippet
+
+
+@pytest.mark.parametrize("server,coord,path", [
+    # a package sharing a name token with a credential / wallet folder is NEVER excused
+    ("solana-mcp", "solana-mcp", "/work/.solana/id.json"),
+    ("solana-mcp", "solana-mcp", "/work/.solana/validator.log"),  # even bookkeeping-shaped
+    ("cargo-audit-mcp", "cargo-audit-mcp", "/work/.cargo/credentials.toml"),
+    ("pulumi-mcp", "pulumi-mcp", "/work/.pulumi/credentials.json"),
+    ("terraform-mcp", "terraform-mcp", "/work/.terraform.d/credentials.tfrc.json"),
+    ("firefox-mcp", "firefox-mcp", "/work/.mozilla/firefox/abc.default/prefs.js"),
+    ("electrum-mcp", "electrum-mcp", "/work/.electrum/wallets/default_wallet"),
+    ("acme-mcp", "acme-mcp", "/work/.acme-wallet/history.jsonl"),     # sensitive word in name
+    ("acme-mcp", "acme-mcp", "/work/.acme-keys/tool.log"),
+])
+def test_credential_and_wallet_folders_are_never_own_state(server, coord, path):
+    r, t = _ro_result([path], server=server, coord=coord)
+    fs = grade_readonly_violated(r, t)
+    assert len(fs) == 1 and path in fs[0].snippet
+
+
+def test_the_bare_own_state_folder_itself_is_fine():
+    r, t = _ro_result(["/work/.claude-server-commander",
+                       "/work/.claude-server-commander/tool-history.jsonl"])
+    assert grade_readonly_violated(r, t) == []
 
 
 def test_own_state_needs_a_distinctive_shared_name():

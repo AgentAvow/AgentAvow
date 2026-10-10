@@ -203,12 +203,30 @@ def _generated_name_prefixes(transcript: ExerciseTranscript) -> set[str]:
 # The sandbox's HOME. A server's own state folder is a hidden dir directly under it.
 _SANDBOX_HOME = "/work/"
 # Hidden home dirs that are never "the server's own state", whatever the server is called:
-# credentials, shell/editor config, package-manager config, other agents' settings.
+# credentials, wallets, shell/editor config, package-manager config, browser profiles,
+# other agents' settings. (A package can trivially share a name token with these —
+# solana-mcp vs ~/.solana — so the name match alone must never be enough.)
 _SENSITIVE_HOME_DIRS = {
     "ssh", "aws", "gnupg", "gpg", "kube", "docker", "config", "local", "netrc", "npmrc",
     "pypirc", "git", "gitconfig", "bashrc", "zshrc", "profile", "bash_profile", "azure",
     "gcloud", "claude", "cursor", "vscode", "codex", "mcp",
+    # wallets / chains
+    "solana", "bitcoin", "electrum", "ethereum", "ethereum-classic", "litecoin", "monero",
+    "bitmonero", "dogecoin", "zcash", "cardano", "near-credentials", "sui", "aptos", "foundry",
+    "brownie", "metamask", "ledger", "wallet", "wallets",
+    # language / build / cloud credentials and state
+    "cargo", "rustup", "gem", "m2", "gradle", "ivy2", "nuget", "pulumi", "terraform",
+    "terraform.d", "vagrant.d", "android", "oci", "ibmcloud", "doctl", "heroku", "netlify",
+    "vercel", "fly", "supabase", "firebase", "config.d", "kube.d",
+    # secret stores, browsers, notebooks
+    "password-store", "pass", "keychain", "keyrings", "mozilla", "chrome", "chromium",
+    "thunderbird", "jupyter", "ipython", "pki", "certs", "nv", "local.d",
 }
+# A folder name containing any of these is never own-state either (~/.mytool-keys).
+_SENSITIVE_NAME_PARTS = ("wallet", "key", "cred", "secret", "token", "passw", "auth",
+                         "ssh", "cert", "seed", "mnemonic", "vault", "keystore")
+# Bookkeeping-shaped files: what a server's own call log / history / lock looks like.
+_BOOKKEEPING_SUFFIXES = (".log", ".jsonl", ".ndjson", ".lock", ".pid")
 _OWN_STATE_GENERIC = {"mcp", "server", "servers", "claude", "tool", "tools", "app", "cli",
                       "agent", "agents", "client", "node", "python", "core", "data"}
 
@@ -221,23 +239,47 @@ def _name_tokens(*names: str) -> set[str]:
     return toks - _OWN_STATE_GENERIC
 
 
+def _is_bookkeeping_file(name: str) -> bool:
+    n = name.lower()
+    if n.endswith(_BOOKKEEPING_SUFFIXES):
+        return True
+    stem, _, ext = n.rpartition(".")
+    return bool(stem) and ext in ("json", "txt") and ("history" in stem or stem.startswith("log"))
+
+
 def _is_own_state(path: str, tokens: set[str]) -> bool:
-    """A write inside the server's OWN hidden state folder in HOME — its tool-call log,
-    history, lock files (desktop-commander's ``~/.claude-server-commander/``). Internal
-    bookkeeping, not a change to the user's environment. Narrow on purpose: the folder must
-    sit directly under HOME, be hidden, share a distinctive name token with the server or
-    package, and never be a credential / config folder (``~/.ssh`` is always a violation).
-    Found 2026-10-09 when the 2 GB retry let desktop-commander start for the first time."""
-    p = (path or "").replace("\\", "/")
+    """A server's OWN bookkeeping in its own hidden state folder in HOME — a tool-call log,
+    history, lock or pid file (desktop-commander's ``~/.claude-server-commander/``), or the
+    bare folder itself. Not a change to the user's environment. Every lock must hold:
+      1. directly under HOME, hidden, sharing a distinctive name token with the server or
+         package;
+      2. not a credential / wallet / config / browser folder (``_SENSITIVE_HOME_DIRS``),
+         and no sensitive word in the folder name (``_SENSITIVE_NAME_PARTS``);
+      3. the written FILE is bookkeeping-shaped (``*.log``, ``*.jsonl``, ``*.lock``,
+         ``*.pid``, ``*history*.json``) — a keypair, ``credentials.toml`` or ``prefs.js``
+         never is, whatever folder it lands in.
+    Found 2026-10-09 (desktop-commander first exercised); tightened the same day after
+    review: a name token alone would have excused solana-mcp writing ~/.solana/id.json."""
+    p = (path or "").replace("\\", "/").rstrip("/")
     if not tokens or not p.startswith(_SANDBOX_HOME + "."):
         return False
-    folder = p[len(_SANDBOX_HOME) + 1:].split("/", 1)[0].lower()
-    if "/" not in p[len(_SANDBOX_HOME):] or not folder:
-        return False  # a hidden FILE directly in HOME (~/.bashrc) is never own-state
+    rest = p[len(_SANDBOX_HOME) + 1:]
+    folder, _, inner = rest.partition("/")
+    folder = folder.lower()
+    if not folder:
+        return False
     if folder in _SENSITIVE_HOME_DIRS or folder.split("-")[0] in _SENSITIVE_HOME_DIRS - {"claude"}:
         return False
+    if any(part in folder for part in _SENSITIVE_NAME_PARTS):
+        return False
     folder_toks = {t for t in re.split(r"[^a-z0-9]+", folder) if len(t) >= 4}
-    return bool(folder_toks & tokens)
+    if not folder_toks & tokens:
+        return False
+    if not inner:
+        # the folder itself (created on first use) — but a hidden FILE directly in HOME
+        # (~/.bashrc, ~/.netrc) has a dot-extension or is a known dotfile: never exempt
+        return "." not in folder
+    return _is_bookkeeping_file(inner.rsplit("/", 1)[-1])
 
 
 def grade_readonly_violated(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
