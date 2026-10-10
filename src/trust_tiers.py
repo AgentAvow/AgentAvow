@@ -76,7 +76,7 @@ class DecisionPhrase:
 DECISIONS: tuple[DecisionPhrase, ...] = (
     DecisionPhrase("safe", "Safe to connect", "Safe", "#22C55E", "#15803D"),
     DecisionPhrase("review", "Review before you connect", "Review", "#F59E0B", "#B45309"),
-    DecisionPhrase("do_not_connect", "Do not connect", "Blocked", "#EF4444", "#B91C1C"),
+    DecisionPhrase("do_not_connect", "Do not connect", "Don't connect", "#EF4444", "#B91C1C"),
 )
 DECISION_BY_VALUE: dict[str, DecisionPhrase] = {d.value: d for d in DECISIONS}
 

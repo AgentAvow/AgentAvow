@@ -47,7 +47,7 @@ Every result leads with one answer and the one condition that triggered it (`dec
   score stays capped at 74 or 82.
 - **Review before you connect** (`review`, *Review*) — a high finding in the code or the sandbox, a published
   advisory affecting the version scanned, a deprecated package, or a score under 51.
-- **Do not connect** (`do_not_connect`, *Blocked*) — a critical finding, a planted credential leaving the
+- **Do not connect** (`do_not_connect`, *Don't connect*) — a critical finding, a planted credential leaving the
   sandbox, a critical sandbox finding, or a known-malicious package or dependency.
 
 The popularity of a tool never changes the answer. While the sandbox is still running the reason ends

@@ -2,7 +2,7 @@
 
 **What you'll see.** Install the plugin and start a session. Claude's first reply opens with
 one line, for example: "AgentAvow pre-check: graded 8 MCP servers — 5 Safe, 2 Review, 1
-Blocked (needs attention: 'task-master' Do not connect — one critical finding: eval of
+Don't connect (needs attention: 'task-master' Do not connect — one critical finding: eval of
 input). Dependencies: graded 12 of 38 — 11 Safe, 1 Review (needs attention: 'left-pad'
 Review before you connect — the maintainer has deprecated this package)." Every line leads
 with one of three answers — **Safe to connect**, **Review before you connect** or **Do not
@@ -28,7 +28,7 @@ Scanning is free and needs no account.
 | `/scan` command | `/scan npm chalk`, `/scan owner/repo`, `/scan https://mcp.example.com/mcp` | Chat, Cowork, Claude Code |
 | `scan-before-connect` skill | When you ask Claude to add an MCP server or install a package you name, Claude scans it first and tells you the answer before it goes ahead. | Chat, Cowork, Claude Code |
 | Install-time hook | When a server is about to be added (`claude mcp add …`, or a write to `.mcp.json`), grades it first. "Do not connect": Claude Code asks you, with the answer as the reason. Anything else (Safe to connect; Review before you connect; not scannable): a one-line answer and the add proceeds. Never denies. | Claude Code, Cowork |
-| SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project) that it has not seen before, and the project's direct dependencies (package.json `dependencies`, requirements.txt, pyproject `[project].dependencies`; up to 15 per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns it off). Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many Safe / Review / Blocked, the one needing attention), and keeps one line per server and dependency for when you ask. Dependencies are already installed: their answer is advice, never a stop. | Claude Code, Cowork |
+| SessionStart hook | At the start of a session, grades each MCP server this session can use (user scope, this project) that it has not seen before, and the project's direct dependencies (package.json `dependencies`, requirements.txt, pyproject `[project].dependencies`; up to 15 per start, re-graded only when the declared version changes; `AGENTAVOW_PRECHECK_DEPS=off` turns it off). Servers for other projects are counted and graded when you open them. Claude opens its first reply with a one-line summary (how many Safe / Review / Don't connect, the one needing attention), and keeps one line per server and dependency for when you ask. Dependencies are already installed: their answer is advice, never a stop. | Claude Code, Cowork |
 | PreToolUse gate | Before each MCP tool call, checks the answer on file for that server. Denies a call to a server whose answer is "Do not connect" (and, as before, one in the blocked tier); asks before a tool whose definition changed since it was scanned. "Review before you connect" never prompts. | Claude Code, Cowork |
 
 The session-start hook and the skill warn; a low score adds context and you decide.

@@ -269,7 +269,7 @@ def test_dependency_lines_lead_with_the_phrase_and_never_block(hook, monkeypatch
     }
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
     msg = out["systemMessage"]
-    assert ("Dependencies: graded all 3 — 0 Safe, 2 Review, 1 Blocked (needs attention: "
+    assert ("Dependencies: graded all 3 — 0 Safe, 2 Review, 1 Don't connect (needs attention: "
             "'evil-pkg' Do not connect — 2 critical findings, including hardcoded key).") in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert ("⚠️ dependency 'fastapi' (pypi:fastapi): Review before you connect — 30 high "

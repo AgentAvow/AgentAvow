@@ -12,7 +12,7 @@
       "name": "agentavow-trust",
       "source": "./plugins/agentavow-trust",
       "description": "At your next session, Claude tells you which of your MCP servers and direct dependencies are safe. Anything you add with `claude mcp add` is checked before it is added. Each result leads with Safe to connect, Review before you connect, or Do not connect, over a signed 0-100 trust score you can verify offline, plus the AgentAvow connector, a /scan command, and a per-call gate for Do not connect or changed tools.",
-      "version": "0.1.26"
+      "version": "0.1.27"
     }
   ]
 }

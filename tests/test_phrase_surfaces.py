@@ -94,7 +94,7 @@ def test_embed_badge_value_leads_with_the_label():
 
 def test_entity_badge_scan_segment_is_the_short_label():
     from src.api.badge_router import _scan_badge_info
-    assert _scan_badge_info("do_not_connect") == ("Blocked", "#EF4444")
+    assert _scan_badge_info("do_not_connect") == ("Don't connect", "#EF4444")
     assert _scan_badge_info("review")[0] == "Review"
     assert _scan_badge_info("clean")[0].startswith("scan")  # legacy value still renders
 

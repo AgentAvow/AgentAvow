@@ -185,14 +185,14 @@ EXPECTED_PHRASES = {
 def test_phrase_table_is_the_three_locked_phrases():
     assert {d.value: d.phrase for d in DECISIONS} == EXPECTED_PHRASES
     assert {d.value: d.label for d in DECISIONS} == {
-        "safe": "Safe", "review": "Review", "do_not_connect": "Blocked"}
+        "safe": "Safe", "review": "Review", "do_not_connect": "Don't connect"}
     assert REVIEW_PHRASE == EXPECTED_PHRASES["review"]
     assert not any(hasattr(t, "verdict") for t in TIERS)  # tiers no longer carry a phrase
 
 
 def test_ts_phrase_table_agrees():
     ts = (ROOT / "web/src/components/trust/gradeSystem.ts").read_text()
-    rows = dict(re.findall(r"\{ value: '([a-z_]+)', phrase: '([^']+)', label: '", ts))
+    rows = dict(re.findall(r"\{ value: '([a-z_]+)', phrase: '([^']+)', label: ['\"]", ts))
     assert rows == EXPECTED_PHRASES
     m = re.search(r"export const REVIEW_PHRASE = '([^']+)'", ts)
     assert m and m.group(1) == REVIEW_PHRASE

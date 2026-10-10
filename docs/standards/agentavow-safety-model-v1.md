@@ -206,7 +206,7 @@ tier and Certified verdict above are unchanged by it; it adds no input to sectio
 |---|---|---|
 | `safe` | Safe to connect | Safe |
 | `review` | Review before you connect | Review |
-| `do_not_connect` | Do not connect | Blocked |
+| `do_not_connect` | Do not connect | Don't connect |
 
 Rule, first match wins:
 
