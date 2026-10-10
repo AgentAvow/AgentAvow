@@ -56,6 +56,16 @@ def _plain(text: str) -> str:
     return out
 
 
+def _star(draw, cx: float, cy: float, r: float, fill) -> None:
+    """A five-point star, for the ★ unit the default bitmap font can't draw."""
+    pts = []
+    for i in range(10):
+        rad = r if i % 2 == 0 else r * 0.45
+        a = math.pi / 2 + i * math.pi / 5
+        pts.append((cx + rad * math.cos(a), cy - rad * math.sin(a)))
+    draw.polygon(pts, fill=fill)
+
+
 def _font(size: int):
     from PIL import ImageFont
     try:
@@ -317,13 +327,28 @@ def render_og_png(
         avail = p1[0] - 30 - ax
         if has:
             ct = _compact(c) if c else "-"
-            d.text((ax, num_y + 25), ct, font=cf, fill=dim)
-            # Always the short unit (src.adoption_units), drawable by the default font.
-            u = _plain(short_unit(adoption_unit))
-            cw = d.textlength(ct, font=cf)
+            # Always the short unit (src.adoption_units). The default font has no ★, so
+            # a star unit is drawn as a small star shape instead of the word "stars".
+            raw_u = short_unit(adoption_unit) or ""
+            star = raw_u.strip() == "\u2605"
+            u = "" if star else _plain(raw_u)
             uf = _font(26)
-            if u and cw + 10 + d.textlength(u, font=uf) <= avail:
-                d.text((ax + cw + 10, num_y + 66), u, font=uf, fill=_MUTED)
+            uw = 26 if star else (d.textlength(u, font=uf) if u else 0)
+            # Step the count down (like the badge card) until count + unit fit.
+            size = 72
+            cf = _font(size)
+            while uw and size > 40 and d.textlength(ct, font=cf) + 10 + uw > avail:
+                size -= 4
+                cf = _font(size)
+            cw = d.textlength(ct, font=cf)
+            cy = num_y + 25 + (72 - size) // 2
+            d.text((ax, cy), ct, font=cf, fill=dim)
+            if uw and cw + 10 + uw <= avail:
+                ux, uy = ax + cw + 10, num_y + 66
+                if star:
+                    _star(d, ux + 13, uy + 14, 13, _MUTED)
+                else:
+                    d.text((ux, uy), u, font=uf, fill=_MUTED)
             _gradient_text(img, (ax, word_y + 4), _adoption_level(pct), _font(30))
         else:
             d.text((ax, num_y + 25), "New", font=cf, fill=_MUTED)

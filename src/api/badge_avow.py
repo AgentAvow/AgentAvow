@@ -571,6 +571,13 @@ def _compact_badge(f: _Facts, p: _Paint, brand: str) -> str:
         out.append(_text(x, 14.2, at, paint=p.fill("fg" if f.has_adoption else "muted"),
                          size=11, bold=True, width=aw))
         x += aw + 6
+        # The short unit ("dl/wk", "★") after the count, as on every other surface. The
+        # compact badge grows to fit, so it always has room.
+        if f.has_adoption and f.adoption and f.adoption_unit:
+            uw = _w(f.adoption_unit, 9, False)
+            out.append(_text(x - 3, 14, f.adoption_unit, paint=p.fill("muted"), size=9,
+                             bold=False, width=uw))
+            x += uw + 4
     total = x + 2
     stroke = 'stroke="url(#cB)"' if f.cert else f'stroke="{f.color}" stroke-opacity=".55"'
     frame = (f'<rect x=".5" y=".5" width="{total - 1:.1f}" height="{h - 1}" rx="4.5" '

@@ -126,7 +126,7 @@ function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; 
         <div className="font-mono text-[13.5px] truncate">{id.display}</div>
         <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted/70">{SURFACE_LABEL[row.surface] || row.surface}</div>
       </div>
-      {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} />}
+      {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} unit={row.adoption_unit} />}
       {certified
         ? <span className="inline-flex items-center gap-1 font-mono text-[10.5px] font-extrabold tracking-[0.12em] px-2 py-1 rounded-full shrink-0" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ {row.trust_score}</span>
         : row.trust_score != null && <TrustMini score={row.trust_score} />}
@@ -170,14 +170,18 @@ export default function RebrandTrustIndex() {
   const pypi = useBoard({ surface: 'pypi', sort: 'score-desc', severity: 'clean', limit: 10 }, 'pypi')
   const relied = useBoard({ sort: 'adoption', limit: 10 }, 'adoption')
   const certified = useBoard({ grade: 'certified', sort: 'score-desc', limit: 10 }, 'certified')
-  // /index#certified (linked from the Certified page): the board renders after its
-  // data loads, so scroll once it's there.
+  // /index#certified (linked from the Certified page): the boards above it load on
+  // their own schedule and push it down, so scroll once every board has settled, then
+  // once more on the next frame in case a late row changed the height.
   const certifiedReady = !!certified.data?.rows?.length
+  const allSettled = certifiedReady && !mcp.isLoading && !npm.isLoading && !pypi.isLoading && !relied.isLoading
   useEffect(() => {
-    if (certifiedReady && window.location.hash === '#certified') {
-      document.getElementById('certified')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }, [certifiedReady])
+    if (!allSettled || window.location.hash !== '#certified') return
+    const go = () => document.getElementById('certified')?.scrollIntoView({ block: 'start' })
+    go()
+    const raf = requestAnimationFrame(() => requestAnimationFrame(go))
+    return () => cancelAnimationFrame(raf)
+  }, [allSettled])
 
   const summary = mcp.data?.summary || npm.data?.summary
   const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
