@@ -229,6 +229,43 @@ def test_every_finding_carries_evidence_and_remediation():
         assert f.snippet and f.remediation and f.file_path == "<behavioral>"
 
 
+def _ro_result(writes, *, server="desktop-commander", coord="@wonderwhy-er/desktop-commander"):
+    t = _transcript(
+        server_info={"name": server, "version": "0.2.52"},
+        tools=[{"name": "get_config", "annotations": {"readOnlyHint": True}}],
+        calls=[{"tool": "get_config", "ok": True, "fs_writes": writes}])
+    return _result(t, coordinate=coord), t
+
+
+def test_writes_to_the_servers_own_hidden_state_folder_are_not_violations():
+    # 2026-10-09: desktop-commander's read-only tools log calls into ~/.claude-server-commander
+    r, t = _ro_result(["/work/.claude-server-commander/claude_tool_call.log",
+                       "/work/.claude-server-commander/tool-history.jsonl",
+                       "/work/.claude-server-commander/config.json.lock"])
+    assert grade_readonly_violated(r, t) == []
+
+
+@pytest.mark.parametrize("path", [
+    "/work/.ssh/authorized_keys",            # credentials: always a violation
+    "/work/.aws/credentials",
+    "/work/.config/desktop-commander/x",     # under ~/.config, not a hidden dir of its own
+    "/work/.bashrc",                         # a hidden FILE in HOME
+    "/work/.other-tool/state.json",          # hidden folder that is not this server's
+    "/work/notes/commander.txt",             # a user file, even with the name in it
+    "/work/.claude/settings.json",           # another agent's settings
+])
+def test_own_state_exemption_stays_narrow(path):
+    r, t = _ro_result([path])
+    fs = grade_readonly_violated(r, t)
+    assert len(fs) == 1 and path in fs[0].snippet
+
+
+def test_own_state_needs_a_distinctive_shared_name():
+    # a server called "mcp-server" shares only generic tokens with ~/.mcp-server-data
+    r, t = _ro_result(["/work/.mcp-server-data/log.txt"], server="mcp-server", coord="mcp-server")
+    assert len(grade_readonly_violated(r, t)) == 1
+
+
 def test_scratch_dirs_and_caches_are_not_readonly_violations_but_named_files_are():
     from src.scanner.behavioral.graders import _is_scratch, grade_readonly_violated
     from src.scanner.behavioral.runner import BehavioralResult

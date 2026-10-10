@@ -200,10 +200,52 @@ def _generated_name_prefixes(transcript: ExerciseTranscript) -> set[str]:
     return out
 
 
+# The sandbox's HOME. A server's own state folder is a hidden dir directly under it.
+_SANDBOX_HOME = "/work/"
+# Hidden home dirs that are never "the server's own state", whatever the server is called:
+# credentials, shell/editor config, package-manager config, other agents' settings.
+_SENSITIVE_HOME_DIRS = {
+    "ssh", "aws", "gnupg", "gpg", "kube", "docker", "config", "local", "netrc", "npmrc",
+    "pypirc", "git", "gitconfig", "bashrc", "zshrc", "profile", "bash_profile", "azure",
+    "gcloud", "claude", "cursor", "vscode", "codex", "mcp",
+}
+_OWN_STATE_GENERIC = {"mcp", "server", "servers", "claude", "tool", "tools", "app", "cli",
+                      "agent", "agents", "client", "node", "python", "core", "data"}
+
+
+def _name_tokens(*names: str) -> set[str]:
+    toks: set[str] = set()
+    for n in names:
+        s = (n or "").lower().lstrip("@")
+        toks |= {t for t in re.split(r"[^a-z0-9]+", s) if len(t) >= 4}
+    return toks - _OWN_STATE_GENERIC
+
+
+def _is_own_state(path: str, tokens: set[str]) -> bool:
+    """A write inside the server's OWN hidden state folder in HOME — its tool-call log,
+    history, lock files (desktop-commander's ``~/.claude-server-commander/``). Internal
+    bookkeeping, not a change to the user's environment. Narrow on purpose: the folder must
+    sit directly under HOME, be hidden, share a distinctive name token with the server or
+    package, and never be a credential / config folder (``~/.ssh`` is always a violation).
+    Found 2026-10-09 when the 2 GB retry let desktop-commander start for the first time."""
+    p = (path or "").replace("\\", "/")
+    if not tokens or not p.startswith(_SANDBOX_HOME + "."):
+        return False
+    folder = p[len(_SANDBOX_HOME) + 1:].split("/", 1)[0].lower()
+    if "/" not in p[len(_SANDBOX_HOME):] or not folder:
+        return False  # a hidden FILE directly in HOME (~/.bashrc) is never own-state
+    if folder in _SENSITIVE_HOME_DIRS or folder.split("-")[0] in _SENSITIVE_HOME_DIRS - {"claude"}:
+        return False
+    folder_toks = {t for t in re.split(r"[^a-z0-9]+", folder) if len(t) >= 4}
+    return bool(folder_toks & tokens)
+
+
 def grade_readonly_violated(result, transcript: ExerciseTranscript) -> list[BehavioralFinding]:
     """ONE finding per server naming every read-only-declared tool that wrote a real file.
-    Scratch dirs and caches (a browser's per-call temp profile) are not modifications."""
+    Scratch dirs, caches (a browser's per-call temp profile) and the server's own hidden
+    state folder (its call log / lock files) are not modifications."""
     generated = _generated_name_prefixes(transcript)
+    own = _name_tokens(transcript.server_name, str(getattr(result, "coordinate", "") or ""))
 
     def _is_generated(path: str) -> bool:
         p = (path or "").replace("\\", "/").rstrip("/")
@@ -217,7 +259,7 @@ def grade_readonly_violated(result, transcript: ExerciseTranscript) -> list[Beha
         for call in transcript.calls_for(tool.name):
             writes += [w for w in call.fs_writes
                        if w and not _is_cache_like(w) and not _is_scratch(w)
-                       and not _is_generated(w)]
+                       and not _is_generated(w) and not _is_own_state(w, own)]
         if writes:
             violators.append((tool.name, sorted(set(writes))))
     if not violators:
