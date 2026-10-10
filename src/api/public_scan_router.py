@@ -529,6 +529,10 @@ async def _run_and_cache_behavioral(
         logger.exception("behavioral tier failed for %s", name)
         return {"ran": False, "reason": "behavioral tier error"}
     _duration = time.monotonic() - _t0
+    if not res.ran and res.error:
+        # Runner-level failures, by reason, for the sandbox watchdog
+        # (src/jobs/sandbox_watchdog.py): sandbox_disk_low means the box itself is sick.
+        await _bump_behavioral(f"runner_error:{str(res.error).split(':', 1)[0][:40]}")
     block = res.to_public_dict()
     block["findings"] = [
         {"category": f.category, "name": f.name, "severity": f.severity,

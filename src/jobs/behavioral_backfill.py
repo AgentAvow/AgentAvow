@@ -244,9 +244,10 @@ async def behavioral_queue_tick() -> None:
         return
     try:
         from src.api.public_scan_router import _drain_behavioral_queue
+        from src.jobs.sandbox_watchdog import run_watchdog
         from src.scanner.behavioral.slots import check_health
         await _drain_behavioral_queue()
-        await check_health()
+        await run_watchdog(slot_warnings=await check_health())
     except Exception:
         logger.debug("behavioral queue tick failed", exc_info=True)
 

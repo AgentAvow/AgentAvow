@@ -483,6 +483,20 @@ async def alert_regression(report: dict) -> dict:
     HMAC-signed path watch alerts use). Returns what was delivered; never raises."""
     title, body = summarize_regression(report)
     logger.warning("%s %s — %s", ALERT_LOG_PREFIX, title, body)
+    return await notify_admins(title, body, reference_id="behavioral-eval", payload={
+        "type": WEBHOOK_TYPE, "event": "behavioral_eval_regression",
+        "title": title, "body": body, "ran_at": report.get("ran_at"),
+        "fixtures": report.get("fixtures"),
+        "known_good": {k: v for k, v in (report.get("known_good") or {}).items()
+                       if k != "not_started"},
+        "diff": report.get("diff"),
+    })
+
+
+async def notify_admins(title: str, body: str, *, reference_id: str, payload: dict) -> dict:
+    """An ops alert to every admin: an in-app notification plus the admin's HMAC-signed
+    alert webhook (``payload`` is the webhook body). Returns what was delivered; never
+    raises. Shared by the eval regression alert and the sandbox watchdog."""
     out = {"notified": 0, "webhooks": 0}
     try:
         from src.api.notification_router import create_notification
@@ -496,7 +510,7 @@ async def alert_regression(report: dict) -> dict:
             for admin in admins:
                 try:
                     await create_notification(db, admin.id, NOTIFICATION_KIND, title, body,
-                                              reference_id="behavioral-eval")
+                                              reference_id=reference_id)
                     out["notified"] += 1
                 except Exception:
                     logger.exception("%s notification to %s failed",
@@ -510,14 +524,7 @@ async def alert_regression(report: dict) -> dict:
                     hook = await _watcher_hook(db, admin.id)
                     if hook is None:
                         continue
-                    hook.last_status = await deliver_to_hook(hook, {
-                        "type": WEBHOOK_TYPE, "event": "behavioral_eval_regression",
-                        "title": title, "body": body, "ran_at": report.get("ran_at"),
-                        "fixtures": report.get("fixtures"),
-                        "known_good": {k: v for k, v in (report.get("known_good") or {}).items()
-                                       if k != "not_started"},
-                        "diff": report.get("diff"),
-                    })
+                    hook.last_status = await deliver_to_hook(hook, payload)
                     hook.last_delivery_at = datetime.now(timezone.utc)
                     out["webhooks"] += 1
                 except Exception:
