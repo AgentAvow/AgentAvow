@@ -26,6 +26,8 @@
     "src/jws.ts",
     "src/gate.ts",
     "src/vercel-ai.ts",
-    "src/flue.ts"
+    "src/flue.ts",
+    "src/claude-agent-sdk.ts",
+    "src/openai-agents.ts"
   ]
 }

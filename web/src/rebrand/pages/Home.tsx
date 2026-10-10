@@ -485,7 +485,7 @@ export default function RebrandHome() {
                         <span className="font-mono text-[13.5px] break-all">{display}</span>
                         <div className="flex items-center gap-3 shrink-0">
                           <TrustMini score={row.trust_score as number} />
-                          {(row as { adoption_count?: number }).adoption_count ? <AdoptionMini count={(row as { adoption_count?: number }).adoption_count} /> : null}
+                          {(row as { adoption_count?: number }).adoption_count ? <AdoptionMini count={(row as { adoption_count?: number }).adoption_count} unit={(row as { adoption_unit?: string | null }).adoption_unit} /> : null}
                         </div>
                       </div>
                       <DecisionLine row={row} className="mt-2" />
@@ -511,17 +511,12 @@ export default function RebrandHome() {
           </div>
           <div className="grid md:grid-cols-2 gap-6 items-center mt-6">
             <div className="min-w-0">
-              {/* real badge styles: Trust, and Trust + Adoption */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-                  <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow Trust</span>
-                  <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
-                </span>
-                <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-                  <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow</span>
-                  <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
-                  <span className="px-2.5 py-1.5 font-bold text-[#7fe9d9] bg-[#233047]">★ 490M</span>
-                </span>
+              {/* the live badges (compact README badge + website card) for our own repo */}
+              <div className="flex flex-col items-start gap-3">
+                <img src="/api/v1/public/scan/AgentAvow/AgentAvow/badge" alt="AgentAvow compact badge for AgentAvow/AgentAvow"
+                  height={20} className="h-5 w-auto" loading="lazy" />
+                <img src="/api/v1/public/scan/AgentAvow/AgentAvow/badge?style=card" alt="AgentAvow website card for AgentAvow/AgentAvow"
+                  width={320} className="w-full max-w-[320px] h-auto" loading="lazy" />
               </div>
               <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">
                 [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)

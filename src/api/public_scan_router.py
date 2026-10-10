@@ -3865,9 +3865,9 @@ async def scan_og_image(
     a_known, a_pct, a_count, a_unit = False, None, None, None
     if grade != "?":
         try:
-            _surf = owner.lower() if owner.lower() in (
-                "npm", "pypi", "crates", "huggingface", "docker") else "github"
-            a_pct, a_count, a_unit = await surface_adoption_summary(_surf, owner, repo)
+            # The same multi-axis level the badges and card.svg show (_card_adoption),
+            # so the preview never reads "Established" where the badge reads "Rising".
+            _surf, a_pct, a_count, a_unit = await _card_adoption(owner, repo, db)
             a_known = True
         except Exception:  # noqa: BLE001 — adoption is optional on the card
             a_known = False

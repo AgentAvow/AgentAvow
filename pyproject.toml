@@ -50,12 +50,19 @@ erc8004 = [
     "web3>=6.15,<8.0",
     "eth-account>=0.11,<1.0",
 ]
-# Tool-call gates (src/bridges/{langchain,google_adk}): optional, client-side.
+# Tool-call gates (src/bridges/{langchain,google_adk,claude_agent_sdk,openai_agents}):
+# optional, client-side.
 langchain = [
     "langchain>=1.0,<2.0",  # AgentMiddleware.wrap_tool_call (langchain.agents.middleware)
 ]
 adk = [
     "google-adk>=1.0,<3.0",  # LlmAgent(before_tool_callback=...)
+]
+claude-agent-sdk = [
+    "claude-agent-sdk>=0.1",  # ClaudeAgentOptions(hooks=..., mcp_servers=...)
+]
+openai-agents = [
+    "openai-agents>=0.2",  # agents.mcp.MCPServerStreamableHttp
 ]
 
 [project.scripts]

@@ -62,7 +62,7 @@ export const ISSUER_DID = 'did:web:agentgraph.co';
 export { DEFAULT_JWKS_URL };
 const WEB = 'https://agentavow.com';
 const MAX_REDIRECTS = 3;
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 // ── the per-tool digest, exactly as the attestation signs it ────────────────
 
