@@ -56,7 +56,7 @@ gate   DO NOT CONNECT: blocked 'send_email'. Not run.
   signature: INVALID (signature invalid): any edit to the signed result is caught
 ```
 
-`demo.cast` is the full asciinema recording (`asciinema play demo.cast`), recorded at 100 columns with `RUGPULL_PACE=2.6 ./run.sh --plain`. For slides: `media/rugpull-demo-1080p.mp4` (1920×1080, about 30 s) and `media/rugpull-demo.gif`, both rendered from `demo.cast` with `agg`; `still.png` is rendered from `media/still.html`.
+`demo.cast` is the full asciinema recording (`asciinema play demo.cast`), recorded at 100 columns with `RUGPULL_PACE=2.6 ./run.sh --plain`. For slides: `media/rugpull-demo-1080p.mp4` (1920×1080, about 30 s) and `media/rugpull-demo.gif`, both rendered from `demo.cast` with `agg`; `still.png` is rendered from `media/still.html`. For non-technical audiences, `media/rugpull-demo-captioned-1080p.mp4` (1920×1080, 41 s) tells the same run in four captioned beats (approved, the tool turns, blocked at call time, proven offline); its scenes are `media/captioned/scenes.html` (open `scenes.html?s=s0` … `?s=s5`), each screenshotted at 1920×1080 and joined with 0.6 s crossfades in ffmpeg. The terminal lines in it are excerpts of this demo's real output.
 
 ### With a model
 
@@ -113,4 +113,4 @@ The `send_email` parameter for the message is `text`, not `body`. The scanner fl
 | `test/rugpull.test.js` | `npm test`: control leaks exactly one canary; protected leaks none and reports `do_not_connect` / drift with both digests |
 | `verify.mjs` | Offline check of the signed result: signature, digest match, and a tampered copy |
 | `demo.cast`, `demo.txt`, `still.png` | The recording, its transcript, and a still for a slide |
-| `media/` | `rugpull-demo-1080p.mp4` and `rugpull-demo.gif` for slides, `still.html` (the still's source) |
+| `media/` | `rugpull-demo-1080p.mp4` and `rugpull-demo.gif` for slides, `rugpull-demo-captioned-1080p.mp4` (captioned four-beat version, source in `captioned/scenes.html`), `still.html` (the still's source) |
