@@ -10,6 +10,12 @@ key, or a value built from it, reaches a network call whose destination is not t
 vendor's own API domain, or whose destination can't be resolved from the script.
 Otherwise it is a low capability note: "uses your <Vendor> API key".
 
+An unknown key counts as its own vendor's only in one strict case: its name minus the
+key suffix, lowercased with underscores dropped (``BROWSER_ACT_API_KEY`` →
+``browseract``, at least 4 characters), equals the registrable label of EVERY host the
+key reaches (``api.browseract.com``), it reaches at least one, and none is unresolved.
+Anything else about an unknown key stays critical.
+
 The check follows the value, not proximity: it taints the variable the key is
 assigned to (and values built from it, such as a headers dict), then looks at the
 network calls that carry a tainted value and resolves their URL from string
@@ -72,10 +78,12 @@ _STRICT_NET_RE = re.compile(
 )
 _URL_RE = re.compile(r"https?://([A-Za-z0-9.\-]+)")
 _BASE_URL_RE = re.compile(r"\b(?:base_url|baseURL|api_base|base_path)\s*[=:]\s*([^,)\n]+)")
+# Assignment targets may be dotted (``self.headers = {...}``, ``this.key = ...``).
 _ASSIGN_RE = re.compile(
-    r"^\s*(?:export\s+|(?:const|let|var|local)\s+)?([A-Za-z_]\w*)\s*(?::\s*[^=]+)?(?::=|=)(?!=)\s*(.+)$"
+    r"^\s*(?:export\s+|(?:const|let|var|local)\s+)?([A-Za-z_][\w.]*)\s*(?::\s*[^=]+)?"
+    r"(?::=|=)(?!=)\s*(.+)$"
 )
-_ITEM_ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s*\[[^\]]*\]\s*=(?!=)\s*(.+)$")
+_ITEM_ASSIGN_RE = re.compile(r"^\s*([A-Za-z_][\w.]*)\s*\[[^\]]*\]\s*=(?!=)\s*(.+)$")
 
 
 @dataclass
@@ -84,6 +92,31 @@ class KeyUse:
     vendor: str | None            # None = not a known vendor key
     leaves_vendor: bool = False   # True = critical (or unknown key)
     destinations: list[str] = field(default_factory=list)  # offending hosts ("?" = unresolved)
+
+
+_KEY_SUFFIX_RE = re.compile(
+    r"_(?:API_KEY|API_TOKEN|ACCESS_TOKEN|AUTH_TOKEN|SECRET_KEY|KEY|TOKEN|SECRET|PASSWORD)$")
+# Second-level labels under which the registrable label sits one further left
+# (example.co.uk, example.com.au).
+_SLD_SUFFIXES = {"co", "com", "net", "org", "ac", "gov", "edu"}
+
+
+def _name_prefix(env_name: str) -> str:
+    """BROWSER_ACT_API_KEY -> "browseract"; "" when too short to trust (< 4 chars)."""
+    stem = _KEY_SUFFIX_RE.sub("", env_name)
+    if stem == env_name:
+        return ""
+    p = stem.replace("_", "").lower()
+    return p if len(p) >= 4 else ""
+
+
+def _registrable_label(host: str) -> str:
+    labels = [x for x in host.lower().rstrip(".").split(".") if x]
+    if len(labels) < 2:
+        return ""
+    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _SLD_SUFFIXES:
+        return labels[-3]
+    return labels[-2]
 
 
 def _host_ok(host: str, domains: tuple[str, ...]) -> bool:
@@ -136,6 +169,25 @@ def _call_text(text: str, start: int) -> str:
     return text[start:limit]
 
 
+def _assignments(lines: list[str]) -> list[tuple[str, str]]:
+    """(target, right-hand side) per assignment. A right-hand side that opens a
+    bracket (``headers = {`` … ``}``) runs on until it balances, up to 30 lines."""
+    out: list[tuple[str, str]] = []
+    for i, ln in enumerate(lines):
+        m = _ASSIGN_RE.match(ln) or _ITEM_ASSIGN_RE.match(ln)
+        if not m:
+            continue
+        rhs = m.group(2)
+        depth = sum(rhs.count(c) for c in "([{") - sum(rhs.count(c) for c in ")]}")
+        j = i + 1
+        while depth > 0 and j < min(len(lines), i + 30):
+            rhs += "\n" + lines[j]
+            depth += sum(lines[j].count(c) for c in "([{") - sum(lines[j].count(c) for c in ")]}")
+            j += 1
+        out.append((m.group(1), rhs))
+    return out
+
+
 def _mentions(chunk: str, tokens: set[str]) -> bool:
     return any(re.search(r"(?<![\w$])\$?\{?" + re.escape(t) + r"\b", chunk) for t in tokens)
 
@@ -176,26 +228,22 @@ def analyze(text: str) -> list[KeyUse]:
                 continue
         calls.append(chunk)
 
-    uses: list[KeyUse] = []
-    for name in names:
-        vendor = VENDOR_KEYS.get(name)
-        if vendor is None:
-            uses.append(KeyUse(name, None, leaves_vendor=True))
-            continue
-        vname, domains = vendor
+    assigns = _assignments(lines)
+
+    def reached(name: str) -> list[str]:
+        """Every host the key (or a value built from it) is sent to; "?" = unresolved."""
         # Taint: the env name itself, the variables it is assigned to, and values
         # built from them (one assignment chain at a time, to a fixed point).
         tainted = {name}
         for _ in range(4):
             grew = False
-            for ln in lines:
-                m = _ASSIGN_RE.match(ln) or _ITEM_ASSIGN_RE.match(ln)
-                if m and m.group(1) not in tainted and _mentions(m.group(2), tainted):
-                    tainted.add(m.group(1))
+            for target, rhs in assigns:
+                if target not in tainted and _mentions(rhs, tainted):
+                    tainted.add(target)
                     grew = True
             if not grew:
                 break
-        bad: list[str] = []
+        out: list[str] = []
         for chunk in calls:
             if not _mentions(chunk, tainted):
                 continue
@@ -203,11 +251,29 @@ def analyze(text: str) -> list[KeyUse]:
             for v, vh in url_vars.items():
                 if re.search(r"\b" + re.escape(v) + r"\b", chunk):
                     hosts.extend(vh)
-            if not hosts:
-                bad.append("?")
-            bad.extend(h for h in hosts if not _host_ok(h, domains))
-        # An SDK client pointed at a non-vendor base URL sends the key there.
-        bad.extend(h for h in base_hosts if not _host_ok(h, domains))
+            out.extend(hosts or ["?"])
+        # An SDK client pointed at a base URL sends the key there.
+        out.extend(base_hosts)
+        return out
+
+    uses: list[KeyUse] = []
+    for name in names:
+        vendor = VENDOR_KEYS.get(name)
+        if vendor is None:
+            # Unknown key: its own vendor's only if every destination's registrable
+            # label equals the key-name prefix (strict; see the module docstring).
+            prefix = _name_prefix(name)
+            hosts = reached(name) if prefix else []
+            if hosts and "?" not in hosts and all(
+                    _registrable_label(h) == prefix for h in hosts):
+                labels = hosts[0].lower().rstrip(".").split(".")
+                domain = ".".join(labels[labels.index(prefix):])
+                uses.append(KeyUse(name, domain, leaves_vendor=False))
+            else:
+                uses.append(KeyUse(name, None, leaves_vendor=True))
+            continue
+        vname, domains = vendor
+        bad = [h for h in reached(name) if h == "?" or not _host_ok(h, domains)]
         uses.append(KeyUse(name, vname, leaves_vendor=bool(bad),
                            destinations=sorted(set(bad))))
     return uses
