@@ -373,6 +373,32 @@ async def _mark_from_cached_scan(owner: str, repo: str, trust_score: int | None)
         return False
 
 
+async def _mark_as_page_shows(owner: str, repo: str, trust_score: int | None) -> bool | None:
+    """The Certified mark the row's own result page shows right now, from the cached
+    scan plus the sandbox state (``_badge_view``: a pending or missing sandbox run
+    means no mark). None when no cached scan with this score exists (nothing to check
+    against); False on any error (fail closed). Read-only: never starts a run."""
+    try:
+        from src import cache
+        from src.api.public_scan_router import (
+            _CACHE_PREFIX,
+            _STALE_CACHE_PREFIX,
+            _badge_view,
+        )
+
+        key = f"{owner}/{repo}"
+        data = await cache.get(f"{_CACHE_PREFIX}{key}") or await cache.get(
+            f"{_STALE_CACHE_PREFIX}{key}")
+        if not isinstance(data, dict) or data.get("trust_score") != trust_score:
+            return None
+        static = {k: v for k, v in data.items()
+                  if k not in ("behavioral", "decision", "certified_mark")}
+        return (await _badge_view(static, trust_score))[1]
+    except Exception:
+        logger.debug("page mark check failed for %s/%s", owner, repo, exc_info=True)
+        return False
+
+
 def _guard_stale_score(score: int | None, critical: int | None) -> int | None:
     """Safety net for pre-calibration stored/seed rows. A row still reading Trusted
     (>=81) while carrying a critical is impossible under the fixed scorer — floor it so
@@ -672,6 +698,15 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                 await _mark_from_cached_scan(c.owner, c.repo, c.trust_score)
             ):
                 stored_grade = "A+"
+            if stored_grade == "A+":
+                # A stored A+ is written from the static scan, before the sandbox has
+                # run. The list shows the mark only when the row's own page does
+                # (sandbox final and clean); a row with no cached scan to check keeps
+                # its stored mark. Re-evaluated every COMMUNITY_ROWS_TTL_SECONDS, so a
+                # row gains the mark once its sandbox run lands.
+                page_mark = await _mark_as_page_shows(c.owner, c.repo, c.trust_score)
+                if page_mark is False:
+                    stored_grade = "A"
             # Route each community row by its real surface (default github for
             # pre-t18 rows): npm/pypi → package name, mcp → endpoint URL, else repo.
             surf = (getattr(c, "surface", None) or "github").lower()
