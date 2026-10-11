@@ -393,7 +393,7 @@ async def _mark_as_page_shows(owner: str, repo: str, trust_score: int | None) ->
             return None
         static = {k: v for k, v in data.items()
                   if k not in ("behavioral", "decision", "certified_mark")}
-        return (await _badge_view(static, trust_score))[1]
+        return (await _badge_view(static, trust_score, (owner, repo)))[1]
     except Exception:
         logger.debug("page mark check failed for %s/%s", owner, repo, exc_info=True)
         return False

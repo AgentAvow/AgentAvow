@@ -108,7 +108,7 @@ async def test_package_verdict_links_to_the_package_report(monkeypatch):
     async def _stale(owner, repo):
         return None
 
-    async def _view(data, score):
+    async def _view(data, score, coordinate=None):
         return "safe", False
 
     monkeypatch.setattr(r, "_get_cached", _cached)

@@ -2805,7 +2805,30 @@ async def _cached_behavioral_for(data: dict) -> dict | None:
         return None
 
 
-async def _behavioral_peek(data: dict) -> dict | None:
+def _package_sandbox_input(data: dict, coordinate: tuple[str, str] | None) -> dict:
+    """The input the result page hands ``_behavioral_block`` for this cached scan. A
+    cached scan carries no target of its own: the package page supplies the package
+    coordinate from its route and the repo page adds ``repo_full_name``. A badge, card,
+    OG image or catalog read must add the same, or it would see no sandbox target and
+    treat the result as final (showing a mark the page withholds)."""
+    data = data if isinstance(data, dict) else {}
+    if (not coordinate or (data.get("package_coordinate") or {}).get("name")
+            or data.get("repo_full_name")):
+        return data
+    owner, name = (str(coordinate[0]), str(coordinate[1]))
+    if not owner or not name:
+        return data
+    if owner.lower() in ("npm", "pypi", "docker"):
+        return {"package_coordinate": {"surface": owner.lower(), "name": name},
+                "declared_scope": data.get("declared_scope") or {},
+                "artifact_scan": data.get("artifact_scan") or data.get("surface_detail") or {},
+                "env_reads": data.get("env_reads") or []}
+    if owner.lower() in ("mcp", "skill", "crates", "huggingface"):
+        return data  # those pages have no sandbox target of this kind
+    return {**data, "repo_full_name": f"{owner}/{name}"}
+
+
+async def _behavioral_peek(data: dict, coordinate: tuple[str, str] | None = None) -> dict | None:
     """The sandbox state the result page would show for this scan, WITHOUT side effects
     (no run started, no queue entry, no pending clock). A cached run is returned as is.
     With none cached, a sandboxable tool reads pending (the page would start or queue a
@@ -2815,6 +2838,7 @@ async def _behavioral_peek(data: dict) -> dict | None:
     card, OG image or catalog row from showing the Certified mark while the page says
     the mark waits for the sandbox."""
     try:
+        data = _package_sandbox_input(data, coordinate)
         cached = await _cached_behavioral_for(data)
         if cached:
             return cached
@@ -2837,7 +2861,8 @@ async def _behavioral_peek(data: dict) -> dict | None:
         return _queued_block(None)
 
 
-async def _badge_view(scan_data: dict | None, score) -> tuple[str, bool]:
+async def _badge_view(scan_data: dict | None, score,
+                      coordinate: tuple[str, str] | None = None) -> tuple[str, bool]:
     """(decision, certified_mark) for a badge / card / OG render, read from the same
     applied data the result page shows (the cached sandbox block folded in). An API
     response already carries both. No scan → decided from the bare score, never a mark
@@ -2848,16 +2873,17 @@ async def _badge_view(scan_data: dict | None, score) -> tuple[str, bool]:
     mark = scan_data.get("certified_mark")
     if isinstance(d, str) and d and isinstance(mark, bool):
         return d, mark
-    block = await _behavioral_peek(scan_data)
+    block = await _behavioral_peek(scan_data, coordinate)
     applied = _apply_behavioral_score(scan_data, block) if block else dict(scan_data)
     marked = {**applied, "behavioral": block}
     dec = _decide(marked)
     return dec.decision, _certified_mark(marked, dec)
 
 
-async def _mark_for_cached(scan_data: dict | None) -> bool:
+async def _mark_for_cached(scan_data: dict | None,
+                           coordinate: tuple[str, str] | None = None) -> bool:
     """The Certified mark for a cached scan (see ``_badge_view``)."""
-    return (await _badge_view(scan_data, None))[1]
+    return (await _badge_view(scan_data, None, coordinate))[1]
 
 
 async def _skill_collection_data(owner: str, repo: str) -> dict | None:
@@ -3006,7 +3032,7 @@ async def scan_badge(
 
     # The DISPLAY gate (certified_mark via _badge_view): the mark shows only on a final
     # Safe to connect with the full conjunctive gate, never on an entity composite.
-    decision, certified = await _badge_view(scan_data, score)
+    decision, certified = await _badge_view(scan_data, score, (owner, repo))
     if composite or score is None:
         certified = False
 
@@ -3090,7 +3116,7 @@ async def scan_card(
             except Exception:
                 score = None
 
-    decision, mark = await _badge_view(scan_data, score)
+    decision, mark = await _badge_view(scan_data, score, (owner, repo))
     cert = bool(mark and not composite and score is not None)
 
     if style in ("card", "card-stacked"):
@@ -3153,7 +3179,7 @@ async def scan_verdict(
             jws = create_jws(canonicalize(payload))
             score100 = int(cached.get("trust_score") or 0)
             from src.scanner.verdict import decide
-            _dval, _mark = await _badge_view(cached, score100)
+            _dval, _mark = await _badge_view(cached, score100, (owner, repo))
             body = {
                 "coordinate": full_name,
                 **decide(cached).as_dict(),
@@ -4052,7 +4078,7 @@ async def scan_og_image(
     # The three-phrase headline (src.scanner.verdict.decide), with " · Certified" when
     # the tool carries the mark; the score + tier ride underneath as evidence.
     _decision = _badge_decision(scan_data, score) if grade != "?" else None
-    _cert = bool(scan_data) and await _mark_for_cached(scan_data)
+    _cert = bool(scan_data) and await _mark_for_cached(scan_data, (owner, repo))
     verdict = (_decision_for(_decision).phrase + (" · Certified" if _cert else "")
                if _decision else "Not yet scanned")
 
