@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
-import { getTrustTier, decisionOf, headline as decisionHeadline, isCertified, certifiedMarkNote } from '../../components/trust/gradeSystem'
+import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, isCertified, certifiedMarkNote } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
@@ -1562,6 +1562,7 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
             </div>
             <h1 className="mt-2 text-xl font-extrabold tracking-tight break-all font-mono">{owner}/{repo}{skill && <span className="text-text-muted">/{skill}</span>}</h1>
             {skill && <Link to={rp(`/rebrand/check/skill/${owner}/${repo}`)} className="mt-1 inline-block text-[12.5px] text-primary-light hover:text-primary">← All skills in {owner}/{repo}</Link>}
+            {!skill && (scan as { surface_detail?: { collection?: boolean } }).surface_detail?.collection && <p className="mt-1 text-[12.5px] text-text-muted max-w-[62ch]">This repo is a collection of agent skills, so its answer is its worst skill&apos;s. <Link to={`${rp(`/rebrand/check/${owner}/${repo}`)}?code=1`} className="text-primary-light hover:text-primary">See the repository code scan →</Link></p>}
             {(scan as { tool_description?: string }).tool_description && <div className="mt-1.5 text-[13.5px] text-text-muted max-w-[62ch]">{skillDescription((scan as { tool_description?: string }).tool_description)}</div>}
             {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/75 max-w-[62ch]">{(scan as { long_description?: string }).long_description}</div>}
           </div>
@@ -1961,6 +1962,15 @@ function PackageResult({ surface, name, version }: { surface: string; name: stri
   )
 }
 
+interface SkillCollectionLead {
+  trust_score: number
+  decision: string
+  decision_reason?: string
+  worst_skill?: string
+  skills_total?: number
+  report_url?: string
+}
+
 export default function RebrandCheck() {
   const params = useParams()
   const location = useLocation()
@@ -2002,16 +2012,19 @@ export default function RebrandCheck() {
     return <PackageResult surface={params.owner.toLowerCase()} name={params.repo} version={pinnedVersion} />
   }
   const { owner, repo } = params
+  // ?code=1 keeps the repository code scan in view for a repo that is a skill
+  // collection (otherwise it leads with the collection result, see Result).
+  const showCode = sp.get('code') === '1'
   // A private scan hands its result here via router state so the owner gets the
   // full detailed report on the real score page (a private repo can't be
   // re-fetched publicly). The token rides along so the Publish CTA can work.
   const state = location.state as { privateResult?: PublicScanResponse; token?: string } | null
   if (!owner || !repo) return <Hero />
-  return <Result owner={owner} repo={repo} privateResult={state?.privateResult} />
+  return <Result owner={owner} repo={repo} privateResult={state?.privateResult} showCode={showCode} />
 }
 
-function Result({ owner, repo, privateResult }: {
-  owner: string; repo: string; privateResult?: PublicScanResponse
+function Result({ owner, repo, privateResult, showCode = false }: {
+  owner: string; repo: string; privateResult?: PublicScanResponse; showCode?: boolean
 }) {
   const { user } = useAuth()
   // A one-time private scan arrives via router state — ephemeral, nothing is stored.
@@ -2057,6 +2070,12 @@ function Result({ owner, repo, privateResult }: {
   const heroBig = useIsDesktop() ? 1.5 : 1  // scale marks up on desktop; MUST be before any early return (hooks order)
 
   if (!oneTimePrivate && isLoading) return <ScanningLoader owner={owner} repo={repo} />
+  // A repo that is a collection of agent skills leads with the collection's answer
+  // (its worst skill), the same number its badge, card, preview and Browse row show.
+  const collection = (scan as { skill_collection?: SkillCollectionLead | null } | null)?.skill_collection
+  if (collection && !isPrivate && !showCode) {
+    return <Navigate replace to={rp(`/rebrand/check/skill/${owner}/${repo}`)} />
+  }
   // Public scan came back empty — we may still be checking the owner's private report.
   if (publicMissing && !!user && prLoading) return <ScanningLoader owner={owner} repo={repo} />
 
@@ -2126,6 +2145,7 @@ function Result({ owner, repo, privateResult }: {
           {(scan as { long_description?: string }).long_description && <div className="mt-1 text-[12.5px] leading-snug text-text-muted/70 max-w-[64ch]">{(scan as { long_description?: string }).long_description}</div>}
         </div>
 
+        {collection && <div className="px-7 mt-3 text-[13px] text-text-muted">Repository code scan. This repo is a collection of agent skills; its answer is <Link to={rp(`/rebrand/check/skill/${owner}/${repo}`)} className="font-semibold text-primary-light hover:text-primary">{decisionPhrase(collection.decision).phrase} · {collection.trust_score}/100</Link> (its worst skill).</div>}
         <div className="px-7 mt-3"><VerdictBadge scan={scan} verb="connect" /></div>
         <IncidentBanner scan={scan} />
         {/* the dual mark — one cohesive instrument: trust (green→red) | adoption (teal→magenta) */}

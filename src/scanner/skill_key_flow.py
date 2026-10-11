@@ -189,15 +189,29 @@ def _assignments(lines: list[str]) -> list[tuple[str, str]]:
 
 
 def _mentions(chunk: str, tokens: set[str]) -> bool:
-    return any(re.search(r"(?<![\w$])\$?\{?" + re.escape(t) + r"\b", chunk) for t in tokens)
+    # A string-prefix-shaped name directly followed by a quote (f"...", b'...') is a
+    # string literal, not a use of a variable called ``f``.
+    def pat(t: str) -> str:
+        tail = r"(?![\"'])" if t.lower() in _STR_PREFIXES else ""
+        return r"(?<![\w$])\$?\{?" + re.escape(t) + r"\b" + tail
+    return any(re.search(pat(t), chunk) for t in tokens)
 
 
-def analyze(text: str) -> list[KeyUse]:
-    """One KeyUse per distinct secret-named env var the script reads."""
-    names = sorted(set(SECRET_ENV_READ_RE.findall(text or "")))
-    if not names:
-        return []
-    joined = "\n".join(_logical_lines(text))
+_STR_PREFIXES = {"f", "b", "r", "u", "rb", "br", "fr", "rf"}
+
+
+@dataclass
+class _Flow:
+    lines: list[str]
+    joined: str
+    url_vars: dict[str, list[str]]
+    base_hosts: list[str]
+    calls: list[str]
+    assigns: list[tuple[str, str]]
+
+
+def _flow(text: str) -> _Flow:
+    joined = "\n".join(_logical_lines(text or ""))
     lines = joined.splitlines()
 
     # URL-valued variables: NAME = "https://host/..." (first literal on the RHS).
@@ -227,34 +241,64 @@ def analyze(text: str) -> list[KeyUse]:
             if not (named_url or re.search(r"(?i)headers|authorization|x-api-key|auth=", chunk)):
                 continue
         calls.append(chunk)
+    return _Flow(lines, joined, url_vars, base_hosts, calls, _assignments(lines))
 
-    assigns = _assignments(lines)
+
+# ``with open(x) as f`` / ``for line in f`` bind a new name from a tainted value.
+_BIND_RE = re.compile(r"\b(?:as|for)\s+([A-Za-z_]\w*)(?:\s*,\s*([A-Za-z_]\w*))?")
+
+
+def _taint(flow: _Flow, seeds: set[str]) -> set[str]:
+    tainted = set(seeds)
+    for _ in range(5):
+        grew = False
+        for target, rhs in flow.assigns:
+            if target not in tainted and _mentions(rhs, tainted):
+                tainted.add(target)
+                grew = True
+        for ln in flow.lines:
+            if _COMMENT_RE.match(ln):
+                continue
+            ln = _strip_comment(ln)
+            if _mentions(ln, tainted):
+                for m in _BIND_RE.finditer(ln):
+                    for name in m.groups():
+                        if name and name not in tainted and name not in ("in", "as"):
+                            tainted.add(name)
+                            grew = True
+        if not grew:
+            break
+    return tainted
+
+
+def _reached(flow: _Flow, tainted: set[str], include_base: bool = True) -> list[str]:
+    """Every host a tainted value is sent to; "?" = a call whose host is unresolved."""
+    out: list[str] = []
+    for chunk in flow.calls:
+        if not _mentions(chunk, tainted):
+            continue
+        hosts = list(_URL_RE.findall(chunk))
+        for v, vh in flow.url_vars.items():
+            if re.search(r"\b" + re.escape(v) + r"\b", chunk):
+                hosts.extend(vh)
+        out.extend(hosts or ["?"])
+    if include_base:
+        # An SDK client pointed at a base URL sends the key there.
+        out.extend(flow.base_hosts)
+    return out
+
+
+def analyze(text: str) -> list[KeyUse]:
+    """One KeyUse per distinct secret-named env var the script reads."""
+    names = sorted(set(SECRET_ENV_READ_RE.findall(text or "")))
+    if not names:
+        return []
+    flow = _flow(text)
 
     def reached(name: str) -> list[str]:
-        """Every host the key (or a value built from it) is sent to; "?" = unresolved."""
         # Taint: the env name itself, the variables it is assigned to, and values
         # built from them (one assignment chain at a time, to a fixed point).
-        tainted = {name}
-        for _ in range(4):
-            grew = False
-            for target, rhs in assigns:
-                if target not in tainted and _mentions(rhs, tainted):
-                    tainted.add(target)
-                    grew = True
-            if not grew:
-                break
-        out: list[str] = []
-        for chunk in calls:
-            if not _mentions(chunk, tainted):
-                continue
-            hosts = list(_URL_RE.findall(chunk))
-            for v, vh in url_vars.items():
-                if re.search(r"\b" + re.escape(v) + r"\b", chunk):
-                    hosts.extend(vh)
-            out.extend(hosts or ["?"])
-        # An SDK client pointed at a base URL sends the key there.
-        out.extend(base_hosts)
-        return out
+        return _reached(flow, _taint(flow, {name}))
 
     uses: list[KeyUse] = []
     for name in names:
@@ -277,3 +321,92 @@ def analyze(text: str) -> list[KeyUse]:
         uses.append(KeyUse(name, vname, leaves_vendor=bool(bad),
                            destinations=sorted(set(bad))))
     return uses
+
+
+# ---------------------------------------------------------------------------
+# The skill's OWN .env (Kenne, 2026-10-11)
+#
+# Loading a ``.env`` that sits next to the script (``Path(__file__).parent / ".env"``,
+# ``os.path.dirname(__file__)``, ``$(dirname "$0")/.env``, ``__dirname``) is how a skill
+# gets its own configuration; on its own it is not exfiltration. It stays critical
+# when the file's raw contents reach a network call, and the secret-named values it
+# loads still go through the key-flow rule above. Any ``.env`` that is not anchored to
+# the script's own directory (home dir, ``~``, a parent dir, an absolute path, or a bare
+# relative path, which resolves against the user's current project) stays critical.
+
+_ENV_FILE_RE = re.compile(r"(?<![\w\\])\.env\b")
+_OWN_ANCHOR_RE = re.compile(
+    r"__file__|__dirname|import\.meta|BASH_SOURCE|dirname\s+\\?\"?\$0|\$\{?0\b"
+    r"|\b(?:script_?dir|SCRIPT_?DIR|scriptDir|SKILL_?DIR|skill_?dir|skillDir|HERE|here|BASE_DIR)\b"
+)
+_FOREIGN_RE = re.compile(
+    r"~|\$HOME|\bHOME\b|expanduser|Path\.home|homedir|/root\b|/home/|/Users/|\.\./|\.\.[\\\"']"
+    r"|getcwd|process\.cwd|Path\.cwd|\bcwd\b"
+)
+_COMMENT_RE = re.compile(r"^\s*(?:#|//|\*|/\*)")
+
+
+def _strip_comment(line: str) -> str:
+    """Drop a trailing ``# …`` / ``// …`` comment (outside quotes, best effort)."""
+    quote = ""
+    for i, c in enumerate(line):
+        if quote:
+            if c == quote:
+                quote = ""
+        elif c in "\"'`":
+            quote = c
+        elif c == "#" or (c == "/" and line[i:i + 2] == "//" and (i == 0 or line[i - 1] != ":")):
+            return line[:i]
+    return line
+
+
+def env_file_reads(text: str) -> str:
+    """"none" (no .env file reference in code), "own" (every reference is anchored
+    to the script's own directory) or "foreign" (any other .env)."""
+    flow = _flow(text)
+    anchored = {t for t, rhs in flow.assigns if _OWN_ANCHOR_RE.search(rhs)
+                and not _FOREIGN_RE.search(rhs)}
+    for _ in range(4):  # script_dir = Path(__file__).parent; env_file = script_dir / ".env"
+        grew = False
+        for t, rhs in flow.assigns:
+            if t not in anchored and _mentions(rhs, anchored) and not _FOREIGN_RE.search(rhs):
+                anchored.add(t)
+                grew = True
+        if not grew:
+            break
+    seen = False
+    for raw in flow.lines:
+        if _COMMENT_RE.match(raw):
+            continue
+        ln = _strip_comment(raw)
+        if not _ENV_FILE_RE.search(ln):
+            continue
+        seen = True
+        if _FOREIGN_RE.search(ln):
+            return "foreign"
+        if _OWN_ANCHOR_RE.search(ln) or _mentions(ln, anchored):
+            continue
+        return "foreign"
+    return "own" if seen else "none"
+
+
+def own_env_contents_leave(text: str) -> bool:
+    """True when the raw contents of the skill's .env reach any network call."""
+    flow = _flow(text)
+    seeds = set()
+    for t, rhs in flow.assigns:
+        if _ENV_FILE_RE.search(_strip_comment(rhs)):
+            seeds.add(t)
+    for ln in flow.lines:
+        if _COMMENT_RE.match(ln):
+            continue
+        code = _strip_comment(ln)
+        if _ENV_FILE_RE.search(code):
+            for m in _BIND_RE.finditer(code):
+                seeds.update(n for n in m.groups() if n)
+    if not seeds:
+        return False
+    tainted = _taint(flow, seeds)
+    # A dotenv loader only writes os.environ; values read back from it are judged by
+    # the key-flow rule, so os.environ / load_dotenv calls are not a "send".
+    return bool(_reached(flow, tainted, include_base=False))

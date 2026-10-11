@@ -658,7 +658,15 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
             select(CommunityScan).order_by(CommunityScan.last_scanned_at.desc()).limit(2000)
         )
         out: list[CatalogRow] = []
+        seen: set[tuple[str, str]] = set()
         for c in result.scalars().all():
+            # Newest first: a case-only duplicate (Chris221/x vs chris221/x) of a
+            # GitHub/skill row is the same repo, so only its latest scan is listed.
+            _key = ((getattr(c, "surface", None) or "github").lower(), (c.full_name or "").lower())
+            if _key[0] in ("github", "openclaw"):
+                if _key in seen:
+                    continue
+                seen.add(_key)
             stored_grade = _stored_grade_for_mark(c.grade, getattr(c, "last_scanned_at", None))
             if _is_pre_rule_a_plus(c.grade, getattr(c, "last_scanned_at", None)) and (
                 await _mark_from_cached_scan(c.owner, c.repo, c.trust_score)
@@ -775,6 +783,42 @@ async def _cached_default_view(key: tuple[Any, ...], db: AsyncSession) -> Catalo
     return out
 
 
+async def _lead_with_skill_collections(rows: list[CatalogRow]) -> list[CatalogRow]:
+    """A repo graded as a collection of agent skills is ONE tool in Browse: its skill
+    row, scored as the collection (the worst skill), the same number its result page,
+    badge and card lead with. The plain GitHub row for that repo is dropped. Only repos
+    with a cached collection result are touched (cache-only, no scans)."""
+    # Only repos listed BOTH as a skill and as a plain repo need a look (a handful);
+    # the OpenClaw corpus alone is thousands of rows and must not cost a cache read each.
+    github_names = {(r.full_name or "").lower() for r in rows if r.surface == "github"}
+    skill_rows = {(r.full_name or "").lower(): r for r in rows
+                  if r.surface == "openclaw" and (r.full_name or "").lower() in github_names}
+    if not skill_rows:
+        return rows
+    from src.api.public_scan_router import _skill_collection_data
+
+    replaced: dict[int, CatalogRow] = {}  # id(original skill row) -> collection-scored copy
+    superseded: set[str] = set()
+    for key, srow in skill_rows.items():
+        if "/" not in key:
+            continue
+        owner, repo = (srow.full_name or "").split("/", 1)
+        coll = await _skill_collection_data(owner, repo)
+        if coll is None:
+            continue
+        superseded.add(key)
+        f = coll.get("findings") or {}
+        replaced[id(srow)] = srow.model_copy(update={
+            "trust_score": coll.get("trust_score", srow.trust_score),
+            "critical": f.get("critical", srow.critical),
+            "high": f.get("high", srow.high),
+        })
+    if not superseded:
+        return rows
+    return [replaced.get(id(r), r) for r in rows
+            if not (r.surface == "github" and (r.full_name or "").lower() in superseded)]
+
+
 async def _catalog_view(
     surface: str | None, q: str | None, severity: str | None, grade: str | None,
     category: str | None, decision: Any, sort: str, limit: int, offset: int,
@@ -804,6 +848,7 @@ async def _catalog_view(
     # except the dedicated 'community' tab (which shows them all, below).
     if community and surface != "community":
         rows = rows + community
+    rows = await _lead_with_skill_collections(rows)
 
     # Static rows are already categorized at build time (cached). Only categorize the
     # small community set here, and merge its counts onto the cached static counts.
