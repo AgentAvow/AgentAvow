@@ -210,3 +210,54 @@ async def test_page_mark_ignores_a_stale_mark_carried_in_the_cache(monkeypatch):
     _patch_scan_cache(monkeypatch, stale)
     _patch_sandbox(monkeypatch, cached=None, age=None)
     assert await _scr._mark_as_page_shows("pypi", "idna", 92) is False
+
+
+# --- a cached scan carries no target; badges and lists add it the way the page does ----
+
+def test_package_input_mirrors_the_package_page():
+    data = {**_cached(), "package_coordinate": {}, "env_reads": ["X"]}
+    probe = _psr._package_sandbox_input(data, ("npm", "react-dom"))
+    assert probe["package_coordinate"] == {"surface": "npm", "name": "react-dom"}
+    assert probe["env_reads"] == ["X"]
+    assert _psr._behavioral_target(probe) == ("npm", "react-dom")
+
+
+def test_repo_input_mirrors_the_repo_page():
+    probe = _psr._package_sandbox_input(_cached(), ("vercel", "next.js"))
+    assert probe["repo_full_name"] == "vercel/next.js"
+
+
+def test_input_left_alone_when_it_has_a_target_or_no_sandbox_kind():
+    has_pkg = {**_cached(), "package_coordinate": {"surface": "npm", "name": "x"}}
+    assert _psr._package_sandbox_input(has_pkg, ("npm", "y")) is has_pkg
+    has_repo = {**_cached(), "repo_full_name": "a/b"}
+    assert _psr._package_sandbox_input(has_repo, ("npm", "y")) is has_repo
+    plain = _cached()
+    assert _psr._package_sandbox_input(plain, ("mcp", "https://x")) is plain
+    assert _psr._package_sandbox_input(plain, None) is plain
+
+
+@pytest.mark.asyncio
+async def test_badge_view_finds_the_package_sandbox_from_the_coordinate(monkeypatch):
+    """The real bug: a cached npm scan has an empty package_coordinate, so without the
+    coordinate the badge saw no sandbox target and showed the mark while the page said
+    pending."""
+    from src.config import settings
+    from src.scanner.behavioral import slots
+
+    monkeypatch.setattr(settings, "scanner_behavioral_enabled", True, raising=False)
+    seen = {}
+
+    async def fake_cached(surface, name, declared=None, plan=None):
+        seen["coord"] = (surface, name)
+        return None
+
+    async def fake_age(member):
+        return None
+
+    monkeypatch.setattr(_psr, "_get_cached_behavioral", fake_cached)
+    monkeypatch.setattr(slots, "peek_pending_age", fake_age)
+    data = {**_cached(), "package_coordinate": {}}
+    assert (await _psr._badge_view(data, 92))[1] is True          # no coordinate: final
+    assert (await _psr._badge_view(data, 92, ("npm", "react-dom")))[1] is False
+    assert seen["coord"] == ("npm", "react-dom")
