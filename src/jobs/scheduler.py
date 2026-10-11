@@ -1575,11 +1575,23 @@ async def _run_catalog_rescan() -> None:
     # (a) Freshness — re-scan the stalest community_scans rows (surface-aware) so
     # on-demand catalog grades stay current instead of frozen at first-scan time.
     fresh_n = getattr(settings, "catalog_rescan_fresh_limit", 60)
+    from src.api.scan_catalog_router import CERTIFIED_MARK_SINCE
     async with async_session() as db:
-        rows = (await db.execute(
+        # A stored A+ written before the Certified display rule only keeps its mark
+        # through a 7-day cached copy of its scan; re-scan those FIRST so the fresh
+        # grade (written under the rule) is stored and the mark can't lapse silently.
+        pre_rule = (await db.execute(
+            select(CommunityScan.surface, CommunityScan.owner, CommunityScan.repo)
+            .where(CommunityScan.grade == "A+",
+                   CommunityScan.last_scanned_at < CERTIFIED_MARK_SINCE)
+            .order_by(CommunityScan.last_scanned_at.asc()).limit(fresh_n)
+        )).all()
+        stalest = (await db.execute(
             select(CommunityScan.surface, CommunityScan.owner, CommunityScan.repo)
             .order_by(CommunityScan.last_scanned_at.asc()).limit(fresh_n)
         )).all()
+    rows = list(dict.fromkeys([tuple(r) for r in pre_rule] + [tuple(r) for r in stalest]))
+    rows = rows[:max(fresh_n, len(pre_rule))]
     refreshed = 0
     for surface, owner, repo in rows:
         surf = (surface or "github").lower()

@@ -19,6 +19,8 @@ import re
 
 from src.scanner.skill_key_flow import SECRET_ENV_READ_RE as _SECRET_ENV_RE
 from src.scanner.skill_key_flow import analyze as _analyze_key_flow
+from src.scanner.skill_key_flow import env_file_reads as _env_file_reads
+from src.scanner.skill_key_flow import own_env_contents_leave as _own_env_contents_leave
 
 # Auto-exec risk weight per pre-approved tool — a skill's `allowed-tools` runs
 # these WITHOUT asking the user (roadmap §2.D). Higher = more dangerous to grant.
@@ -72,6 +74,10 @@ _OVERRIDE_RE = re.compile(
 _EXFIL_PATH_RE = re.compile(
     r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|(?<![\w\\])\.env\b"
     r"|169\.254\.169\.254|metadata\.google)"
+)
+# The same paths minus ``.env``: always critical, wherever they are read from.
+_CRED_PATH_RE = re.compile(
+    r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|169\.254\.169\.254|metadata\.google)"
 )
 # The secret-named env READ (not a docstring mention) lives in skill_key_flow, which
 # also decides whether a known vendor key leaves for a non-vendor host.
@@ -291,7 +297,12 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
         if not text or not path.lower().endswith(_SCRIPT_EXT):
             continue
         result.script_count += 1
-        if _EXFIL_PATH_RE.search(text):
+        # Kenne 2026-10-11: the skill's OWN .env (anchored to the script's directory)
+        # is configuration, not exfiltration, unless its raw contents are sent out.
+        # Any other .env, ~/.aws, ~/.ssh, keys and cloud metadata stay critical.
+        env_reads = _env_file_reads(text) if _EXFIL_PATH_RE.search(text) else "none"
+        if _CRED_PATH_RE.search(text) or env_reads == "foreign" or (
+                env_reads == "own" and _own_env_contents_leave(text)):
             critical = True
             uses = []
         else:

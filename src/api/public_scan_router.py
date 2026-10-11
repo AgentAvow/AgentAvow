@@ -226,6 +226,9 @@ class PublicScanResponse(BaseModel):
     # Display list of the served tools (name, declared annotations, digest, source).
     # Unsigned — the signed per-tool digests are tool_digests above.
     tool_list: list[dict] = []
+    # A repo that is a collection of agent skills leads with the collection result
+    # (its worst skill). The repo's own code scan stays in the fields above.
+    skill_collection: dict | None = None
     tool_drift: dict | None = None  # digest diff vs the previous scan (rug-pull signal)
     jws: str  # Signed attestation (EdDSA, RFC 7515)
     algorithm: str = "EdDSA"
@@ -978,6 +981,21 @@ async def _capture_community_scan(
         if _score is not None else None
     )
     surface = (surface or "github").lower()
+    if surface in ("github", "openclaw"):
+        # GitHub owner/repo names are case-insensitive: reuse an existing row's casing
+        # so "Chris221/x" and "chris221/x" update one row instead of making two.
+        try:
+            existing = (await db.execute(
+                select(CommunityScan.owner, CommunityScan.repo).where(
+                    CommunityScan.surface == surface,
+                    safunc.lower(CommunityScan.owner) == owner.lower(),
+                    safunc.lower(CommunityScan.repo) == repo.lower(),
+                ).order_by(CommunityScan.last_scanned_at.desc()).limit(1)
+            )).first()
+            if existing:
+                owner, repo = existing[0], existing[1]
+        except Exception:  # noqa: BLE001 — fall back to the name as given
+            logger.debug("community case lookup failed for %s/%s", owner, repo, exc_info=True)
     if surface in ("npm", "pypi", "crates", "huggingface", "docker"):
         _full = f"{surface}:{repo}"
     elif surface == "mcp":
@@ -2254,6 +2272,32 @@ async def public_scan(
     behavioral: bool = Query(
         False,
         description="Also run the behavioral sandbox tier (deep scan, ~45s; implies "
+        "a fresh scan).",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> PublicScanResponse:
+    """Scan a GitHub repo and return the three-phrase answer, trust score, tier and
+    findings, with a signed JWS attestation (see ``_public_scan_repo``). A repo that is
+    a collection of agent skills also carries ``skill_collection``: the collection's
+    answer (its worst skill), which the result page, badge and card lead with."""
+    resp = await _public_scan_repo(owner, repo, request, force, behavioral, db)
+    try:
+        coll = await _skill_collection_data(owner, repo)
+        if coll is not None:
+            resp.skill_collection = _skill_collection_summary(owner, repo, coll)
+    except Exception:  # noqa: BLE001
+        logger.debug("skill_collection attach failed for %s/%s", owner, repo, exc_info=True)
+    return resp
+
+
+async def _public_scan_repo(
+    owner: str,
+    repo: str,
+    request: Request = None,
+    force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    behavioral: bool = Query(
+        False,
+        description="Also run the behavioral sandbox tier (deep scan, ~45s; implies "
         "a fresh scan). Returns a separate `behavioral` block; never affects the "
         "signed score.",
     ),
@@ -2702,6 +2746,40 @@ async def _mark_for_cached(scan_data: dict | None) -> bool:
     return (await _badge_view(scan_data, None))[1]
 
 
+async def _skill_collection_data(owner: str, repo: str) -> dict | None:
+    """The cached multi-skill collection result for a GitHub repo (the same applied
+    data /check/skill/<owner>/<repo> shows), or None when the repo isn't a graded
+    collection. Cache-only: a repo page, badge or card never starts a skill scan."""
+    try:
+        key = f"{owner}/{repo}"
+        data = await _get_cached("skill", key) or await _get_stale_cached("skill", key)
+        if not isinstance(data, dict) or not (data.get("surface_detail") or {}).get("collection"):
+            return None
+        probe = {**data, "repo_full_name": key, "surface_kind": "skill"}
+        block = await _cached_behavioral_for(probe)
+        applied = _apply_behavioral_score(data, block) if block else dict(data)
+        return {**applied, "behavioral": block}
+    except Exception:  # noqa: BLE001 — best-effort; the repo scan still stands
+        logger.debug("skill collection lookup failed for %s/%s", owner, repo, exc_info=True)
+        return None
+
+
+def _skill_collection_summary(owner: str, repo: str, data: dict) -> dict:
+    sd = data.get("surface_detail") or {}
+    dec = _decide(data)
+    return {
+        "trust_score": data.get("trust_score"),
+        "decision": dec.decision,
+        "decision_final": dec.final,
+        "decision_reason": dec.reason,
+        "worst_skill": sd.get("worst_skill"),
+        "skills_total": sd.get("skills_total"),
+        "skills_graded": len(sd.get("skills") or []),
+        "report_url": f"https://agentavow.com/check/skill/{owner}/{repo}",
+        "api_url": f"https://agentavow.com/api/v1/public/scan/skill/{owner}/{repo}",
+    }
+
+
 def _trust_score_color(score: int) -> str:
     """0-100 Trust mark colour — delegates to the shared badge_style mapping so
     every badge/card/OG surface colours identically (green->red at 80/60/40/20)."""
@@ -2784,9 +2862,15 @@ async def scan_badge(
         score = scan_data.get("trust_score") if scan_data else None
         score_type = "Scan"
     else:
-        # No entity — fall back to security scan score
+        # No entity — a skill collection leads with its worst skill; else the
+        # security scan score.
+        coll = await _skill_collection_data(owner, repo)
         cached = await _get_cached(owner, repo)
-        if cached:
+        if coll is not None:
+            score = coll.get("trust_score")
+            score_type = "Scan"
+            scan_data = coll
+        elif cached:
             score = cached["trust_score"]
             score_type = "Scan"
             scan_data = cached
@@ -2875,10 +2959,13 @@ async def scan_card(
     else:
         entity_trust = await _get_entity_trust(full_name, db)
         cached = await _get_cached(owner, repo)
-        scan_data = cached
+        coll = await _skill_collection_data(owner, repo)
+        scan_data = coll if coll is not None else cached
         if entity_trust and entity_trust.get("composite_score") is not None:
             score = entity_trust["composite_score"]
             composite = True
+        elif coll is not None:
+            score = coll.get("trust_score")
         elif cached:
             score = cached["trust_score"]
         else:
@@ -3828,7 +3915,8 @@ async def scan_og_image(
         score = entity_trust["composite_score"]
         grade = entity_trust["grade"]
     else:
-        cached = await _get_cached(owner, repo)
+        # A skill collection leads with its worst skill (same as page/badge/card).
+        cached = await _skill_collection_data(owner, repo) or await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
             grade = cached.get("grade") or _display_grade(

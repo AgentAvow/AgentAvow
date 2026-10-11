@@ -99,12 +99,25 @@ async def og_check(
     image_url = f"{BASE_URL}/api/v1/public/scan/{owner}/{repo}/og-image"
 
     # Try to get cached scan data for rich tags
-    from src.api.public_scan_router import _get_cached, _get_entity_trust
+    from src.api.public_scan_router import (
+        _get_cached,
+        _get_entity_trust,
+        _skill_collection_data,
+    )
 
     # Check for entity trust (composite score) first
     entity_trust = await _get_entity_trust(full_name, db)
+    # A repo that is a collection of agent skills leads with its worst skill, the
+    # same number its result page, badge and card show.
+    collection = await _skill_collection_data(owner, repo)
 
-    if (
+    if collection is not None and not (
+        entity_trust and entity_trust.get("imported")
+        and entity_trust.get("composite_score") is not None
+    ):
+        score = collection.get("trust_score")
+        scan_data = collection
+    elif (
         entity_trust
         and entity_trust.get("imported")
         and entity_trust.get("composite_score") is not None
@@ -144,7 +157,7 @@ async def og_check(
         and entity_trust.get("imported")
         and entity_trust.get("composite_score") is not None
     ):
-        cached = await _get_cached(owner, repo)
+        cached = collection if collection is not None else await _get_cached(owner, repo)
         if cached:
             findings = cached.get("findings", {})
             critical = findings.get("critical", 0)
