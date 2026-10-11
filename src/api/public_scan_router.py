@@ -1945,6 +1945,84 @@ async def _skill_scan(
     return await _signed_response(data, cached=False)
 
 
+def _mcp_identity(endpoint: str) -> tuple[str, str]:
+    """(normalized url, cache key) for a live MCP endpoint, exactly as the scan route
+    computes them. Raises HTTPException(400) on a bad or credentialed URL."""
+    import hashlib
+
+    from src.ssrf import CredentialedURLError, mcp_endpoint_identity, validate_url_https
+
+    try:
+        url = mcp_endpoint_identity(validate_url_https(endpoint, field_name="endpoint"))
+    except CredentialedURLError:
+        raise HTTPException(400, "endpoint path looks like a credential")
+    except Exception:
+        raise HTTPException(400, "endpoint must be a valid https:// URL")
+    return url, "mcp_" + hashlib.sha256(url.encode()).hexdigest()[:22]
+
+
+async def _mcp_badge_data(url: str, key: str) -> dict | None:
+    """The endpoint's result for a badge or card: fresh, else stale, else one live scan
+    now (an embedded badge must not decay to grey). None when it can't be scanned."""
+    data = await _get_cached("mcp", key) or await _get_stale_cached("mcp", key)
+    if data:
+        return data
+    try:
+        from src.scanner.scan import scan_mcp
+        result = await asyncio.wait_for(scan_mcp(url), timeout=30)
+    except Exception:
+        logger.warning("badge MCP scan failed for %s", url, exc_info=True)
+        return None
+    if getattr(result, "error", None):
+        return None
+    data = _scan_result_to_dict(result)
+    await _set_cached("mcp", key, data)
+    return data
+
+
+async def _mcp_badge_svg(endpoint: str, style: str, theme: str) -> Response:
+    from src.api.badge_avow import render_avow_badge
+
+    url, key = _mcp_identity(endpoint)
+    data = await _mcp_badge_data(url, key)
+    score = data.get("trust_score") if data else None
+    decision, certified = await _badge_view(data, score)
+    a_pct, count, unit = await surface_adoption_summary("mcp", "mcp", url)
+    host = url.split("://", 1)[-1]
+    svg = render_avow_badge(
+        style=style, decision=decision if score is not None else None,
+        score=int(score) if score is not None else None,
+        certified=certified if score is not None else False,
+        brand=settings.badge_brand, theme=theme, coordinate=f"mcp:{host}",
+        adoption=count, adoption_unit=unit, adoption_pct=a_pct,
+    )
+    return Response(content=svg, media_type="image/svg+xml", headers={
+        "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "Access-Control-Allow-Origin": "*",
+    })
+
+
+@router.get("/mcp/badge", dependencies=[Depends(rate_limit_reads)], response_class=Response)
+async def mcp_badge(
+    endpoint: str = Query(..., description="The MCP server's Streamable-HTTP URL"),
+    style: str = Query("compact", pattern="^(compact|card|card-stacked)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
+) -> Response:
+    """README/website badge for a live MCP endpoint (`?endpoint=https://…`), in the
+    same design as the repo and package badges. Open CORS, regenerated per view."""
+    return await _mcp_badge_svg(endpoint, style, theme)
+
+
+@router.get("/mcp/card.svg", dependencies=[Depends(rate_limit_reads)], response_class=Response)
+async def mcp_card(
+    endpoint: str = Query(..., description="The MCP server's Streamable-HTTP URL"),
+    style: str = Query("card", pattern="^(card|card-stacked)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
+) -> Response:
+    """The website-embed card for a live MCP endpoint."""
+    return await _mcp_badge_svg(endpoint, style, theme)
+
+
 @router.get(
     "/mcp",
     response_model=PublicScanResponse,
@@ -2024,6 +2102,10 @@ async def scan_mcp_endpoint(
 
     data = _scan_result_to_dict(result)
     await _set_cached("mcp", key, data)
+    # A durable history point when the score or the signed tool-set digest changed:
+    # the endpoint page's score history and the /drift/mcp feed read it.
+    if len(full) <= 512:
+        await _record_scan_history(full, "mcp", "mcp", url[:255], data, db)
     # Only diff against a scan that pinned digests: a copy cached before live-MCP
     # digests existed has none, and every tool would read as newly added.
     drift = (

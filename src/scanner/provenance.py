@@ -226,6 +226,37 @@ def normalize_repo(url: str | None) -> str | None:
     return u or None
 
 
+_FORGE_HOSTS = frozenset({"github.com", "gitlab.com"})
+
+
+def declared_repo_from_pypi_meta(meta: dict | None) -> str | None:
+    """The source repository a PyPI project declares in its metadata
+    (``info.project_urls`` source/repository/code keys first, then ``home_page``),
+    normalized to ``host/owner/repo``. Only GitHub/GitLab repo URLs count; docs sites
+    and bare homepages are ignored. None when nothing qualifies."""
+    info = (meta or {}).get("info") or {}
+    urls = info.get("project_urls") or {}
+    preferred, other = [], []
+    if isinstance(urls, dict):
+        for k, v in urls.items():
+            key = str(k).strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+            if key in ("source", "sourcecode", "repository", "repo", "code", "github", "gitlab"):
+                preferred.append(v)
+            else:
+                other.append(v)
+    candidates = preferred + other + [info.get("home_page")]
+    for c in candidates:
+        if not isinstance(c, str) or not c.strip():
+            continue
+        low = c.strip().lower()
+        if "github.com/" not in low and "gitlab.com/" not in low:
+            continue
+        repo = normalize_repo(c)
+        if repo and repo.count("/") == 2 and repo.split("/")[0] in _FORGE_HOSTS:
+            return repo
+    return None
+
+
 def dsse_pae(payload_type: str, payload: bytes) -> bytes:
     """DSSE Pre-Authentication Encoding (what a DSSE signature actually covers).
 
@@ -659,6 +690,15 @@ def verify_material(
 
     # Signature verified. Now enforce the identity gate (§2.C gate 1).
     result.verification_level = "signature"
+    # A PEP 740 publish attestation carries no source repo in its predicate: the
+    # signed leaf certificate's SAN (the Trusted Publisher workflow URI) is the binding.
+    # Only the signed SAN is used, never the unsigned ``publisher`` metadata.
+    if surface == "pypi" and not result.binding.get("repo") and san:
+        derived = normalize_repo(san)
+        if derived and derived.count("/") == 2 and derived.split("/")[0] in _FORGE_HOSTS:
+            result.binding["repo"] = derived
+            if result.claimed_repo:
+                result.source_matches_claim = derived == result.claimed_repo
     issuer_trusted = issuer in TRUSTED_CI_ISSUERS
     # SAN identity must bind to the claimed source when we have one.
     san_binds = True

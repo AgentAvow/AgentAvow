@@ -411,3 +411,120 @@ export function PackageClaim({ surface, name }: { surface: string; name: string 
     </Reveal>
   )
 }
+
+// ── Live MCP endpoint panels ─────────────────────────────────────────────────────────
+
+const ANN_KEYS: [string, string][] = [
+  ['readOnlyHint', 'read-only'], ['destructiveHint', 'destructive'],
+  ['idempotentHint', 'idempotent'], ['openWorldHint', 'reaches the outside world'],
+]
+
+/** "What it can do" for a live endpoint: what its tools declare (annotations) and what
+ * the blast-radius check found, in one place. Hosted code is never fetched, so this is
+ * read from the tool surface only. */
+export function McpWhatItCanDo({ scan: raw }: { scan: unknown }) {
+  const scan = raw as ScanLike
+  const tools = scan.tool_list ?? []
+  const br = (scan.surface_detail?.blast_radius ?? null) as
+    { level?: string; why?: string; capabilities?: { key: string; label: string }[] } | null
+  if (!tools.length && !br) return null
+  const counts = ANN_KEYS.map(([k, label]) => [label, tools.filter((t) => t.annotations?.[k] === true).length] as const)
+    .filter(([, n]) => n > 0)
+  const unannotated = tools.filter((t) => !t.annotations || Object.keys(t.annotations).length === 0).length
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6">
+        <h3 className={H3}>What it can do</h3>
+        <ul className="mt-3 space-y-1.5 text-[13px]">
+          {tools.length > 0 && <li><span className="text-text">{tools.length} tool{tools.length === 1 ? '' : 's'}</span> <span className="text-text-muted">served at this endpoint</span></li>}
+          {counts.map(([label, n]) => <li key={label} className="text-text-muted">{n} declared <span className="text-text">{label}</span></li>)}
+          {unannotated > 0 && <li className="text-text-muted">{unannotated} with no safety annotations declared (no read-only or destructive hint)</li>}
+          {br?.capabilities?.map((c) => <li key={c.key} className="text-text">{c.label}</li>)}
+          {br?.why && <li className="text-text-muted">{br.why}</li>}
+        </ul>
+        <p className="mt-3 text-[11.5px] text-text-muted/70">Read from the tool definitions the server serves. Its hosted code isn&apos;t visible to us, so code-level capabilities can&apos;t be listed.</p>
+      </div>
+    </Reveal>
+  )
+}
+
+/** Score history for a live endpoint, from the signed drift feed. */
+export function McpHistory({ endpoint }: { endpoint: string }) {
+  const path = `/public/drift/mcp?endpoint=${encodeURIComponent(endpoint)}&quiet=1`
+  const { data } = useQuery({
+    queryKey: ['mcp-drift', endpoint],
+    retry: false,
+    queryFn: async () => {
+      try {
+        return (await publicApi.get<{ summary: { points: number }; history: { scanned_at: string | null; trust_score: number | null; score_delta: number | null; manifest_drift: boolean }[] }>(path)).data
+      } catch { return null }
+    },
+  })
+  const pts = data?.history?.slice(0, 8) ?? []
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className={H3}>Score history</h3>
+          {pts.length > 0 && <a href={`/api/v1${path.replace('&quiet=1', '')}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-primary-light hover:text-primary">signed feed ↗</a>}
+        </div>
+        {pts.length === 0
+          ? <p className="mt-1.5 text-[13px] text-text-muted">No recorded changes yet. A point is added each time a fresh check moves the score or changes the signed tool definitions; watch the endpoint to be alerted when that happens.</p>
+          : (
+            <div className="mt-3 flex flex-col gap-1.5 text-[12.5px]">
+              {pts.map((p, i) => (
+                <div key={i} className="flex justify-between gap-3">
+                  <span className="font-mono text-text-muted">{(p.scanned_at || '').slice(0, 10)}</span>
+                  <span className="font-mono">{p.trust_score ?? '–'}/100{p.score_delta ? <span className={p.score_delta > 0 ? 'text-success' : 'text-danger'}> ({p.score_delta > 0 ? '+' : ''}{p.score_delta})</span> : null}{p.manifest_drift ? <span className="text-warning"> · tools changed</span> : null}</span>
+                </div>
+              ))}
+            </div>
+          )}
+      </div>
+    </Reveal>
+  )
+}
+
+/** Badge + website card for a live endpoint, in the same design as repos and packages. */
+export function McpBadge({ endpoint }: { endpoint: string }) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://agentavow.com'
+  const q = `endpoint=${encodeURIComponent(endpoint)}`
+  const img = `${origin}/api/v1/public/scan/mcp/badge?${q}`
+  const card = `${origin}/api/v1/public/scan/mcp/card.svg?${q}`
+  const link = `${origin}/check/mcp?${q}`
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6">
+        <h3 className={H3}>Badge for this server</h3>
+        <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Run this server? Show its current signed result in your README or on your site. The image regenerates from the live result on every view.</p>
+        <a href={link} className="mt-3 inline-block"><img src={img} alt="AgentAvow Trust" className="h-[22px]" loading="lazy" /></a>
+        <div className="mt-3 space-y-2">
+          <CodeLine text={`[![AgentAvow Trust](${img})](${link})`} />
+          <CodeLine text={`<a href="${link}"><img src="${card}" alt="AgentAvow Trust" width="360"></a>`} />
+        </div>
+      </div>
+    </Reveal>
+  )
+}
+
+/** The honest one-liners for what a hosted endpoint can't have, plus Preflight. */
+export function McpNotes({ endpoint }: { endpoint: string }) {
+  const rows: [string, string][] = [
+    ['Adoption', 'Shown when the official MCP registry lists this exact endpoint with a linked repo; hosted endpoints have no public download or star count of their own.'],
+    ['Certified', 'Needs a published package with verifiable build provenance. A server checked by URL can earn it only through its published package; scan that package to see.'],
+    ['Advisories', 'Security advisories are published against packages, not hosted endpoints. Scan its package or repo for them.'],
+  ]
+  return (
+    <Reveal>
+      <div className="mt-4 glass rounded-2xl p-6">
+        <h3 className={H3}>What doesn&apos;t apply to a hosted endpoint</h3>
+        <dl className="mt-3 space-y-2 text-[13px]">
+          {rows.map(([k, v]) => (
+            <div key={k} className="grid grid-cols-[96px_1fr] gap-3"><dt className="text-text">{k}</dt><dd className="text-text-muted">{v}</dd></div>
+          ))}
+        </dl>
+        <Link to={rp(`/rebrand/preflight?target=${encodeURIComponent(endpoint)}`)} className="mt-4 inline-block text-[13px] font-semibold text-primary-light hover:text-primary">Submitting it to the Claude or ChatGPT directory? Run Preflight →</Link>
+      </div>
+    </Reveal>
+  )
+}

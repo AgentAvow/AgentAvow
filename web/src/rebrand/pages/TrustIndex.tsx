@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
-import { TrustMini, AdoptionMini } from '../components/TrustMark'
+import { TrustOrCertifiedMini, AdoptionMini } from '../components/TrustMark'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity, type CatalogRow } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { SandboxFindingsBlock } from '../components/SandboxStats'
@@ -43,7 +43,7 @@ function RecentFeed() {
                 <div className="font-mono text-[12.5px] truncate">{it.name || it.full_name}</div>
                 <div className="font-mono text-[10px] text-text-muted/70">{SURFACE_LABEL[it.surface] || it.surface} · {ago(it.at)}</div>
               </div>
-              {it.trust_score != null && <TrustMini score={it.trust_score} />}
+              {it.trust_score != null && <TrustOrCertifiedMini row={it as unknown as Record<string, unknown> & { trust_score: number }} />}
             </div>
           )
           return href ? <Link key={i} to={href} className="block">{inner}</Link> : <div key={i}>{inner}</div>
@@ -116,7 +116,7 @@ function linkFor(row: CatalogRow): string | null {
   return null
 }
 
-function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; certified?: boolean }) {
+function Row({ row, rank }: { row: CatalogRow; rank: number }) {
   const id = rowIdentity(row)
   const href = linkFor(row)
   const inner = (
@@ -127,9 +127,9 @@ function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; 
         <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted/70">{SURFACE_LABEL[row.surface] || row.surface}</div>
       </div>
       {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} unit={row.adoption_unit} />}
-      {certified
-        ? <span className="inline-flex items-center gap-1 font-mono text-[10.5px] font-extrabold tracking-[0.12em] px-2 py-1 rounded-full shrink-0" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ {row.trust_score}</span>
-        : row.trust_score != null && <TrustMini score={row.trust_score} />}
+      {/* The Certified mark follows certified_mark on every board, not just the
+          Certified one, so a certified tool reads the same wherever it is listed. */}
+      {row.trust_score != null && <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />}
     </div>
   )
   return href
@@ -137,7 +137,7 @@ function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; 
     : <div>{inner}</div>
 }
 
-function Board({ title, note, rows, isLoading, certified = false, href }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean; href?: string }) {
+function Board({ title, note, rows, isLoading, href }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean; href?: string }) {
   return (
     // min-w-0: grid items default to min-width:auto and won't shrink below their
     // content — a long tool name in a row was forcing the card past the viewport
@@ -154,7 +154,7 @@ function Board({ title, note, rows, isLoading, certified = false, href }: { titl
       <div className="mt-3 flex flex-col divide-y divide-border/40">
         {isLoading && <div className="py-8 text-center text-text-muted text-[13px]">loading…</div>}
         {!isLoading && (!rows || !rows.length) && <div className="py-8 text-center text-text-muted text-[13px]">no tools yet</div>}
-        {rows?.map((r, i) => <Row key={rowIdentity(r).display + i} row={r} rank={i + 1} certified={certified} />)}
+        {rows?.map((r, i) => <Row key={rowIdentity(r).display + i} row={r} rank={i + 1} />)}
       </div>
     </div>
   )

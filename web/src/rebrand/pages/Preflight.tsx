@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { getTrustTier } from '../../components/trust/gradeSystem'
 import api from '../../lib/api'
@@ -83,13 +83,17 @@ function GateRow({ g }: { g: Gate }) {
 }
 
 export default function RebrandPreflight() {
-  const [input, setInput] = useState('')
+  // ?target= prefills and runs (a score page links here with its own target).
+  const [sp] = useSearchParams()
+  const initial = sp.get('target') || ''
+  const [input, setInput] = useState(initial)
   const [data, setData] = useState<Preflight | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const autoRan = useRef(false)
 
-  const run = async () => {
-    const req = toRequest(input)
+  const run = async (value: string = input) => {
+    const req = toRequest(value)
     if (!req) { setError('Enter an owner/repo, a GitHub URL, or an https:// MCP endpoint.'); return }
     setLoading(true); setError(''); setData(null)
     try {
@@ -102,6 +106,12 @@ export default function RebrandPreflight() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (initial && !autoRan.current) { autoRan.current = true; void run(initial) }
+    // run once for the prefilled target only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial])
 
   const tier = data ? getTrustTier(data.trust_score) : null
   const blockers = data?.gates.filter((g) => g.severity === 'blocker') ?? []
@@ -136,7 +146,7 @@ export default function RebrandPreflight() {
             placeholder="owner/repo, a GitHub URL, or https://your-server/mcp"
             className="flex-1 min-w-[240px] px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary-light outline-none text-[14px] font-mono"
           />
-          <button onClick={run} disabled={loading} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 disabled:opacity-60">
+          <button onClick={() => run()} disabled={loading} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 disabled:opacity-60">
             {loading ? 'Checking…' : 'Run preflight →'}
           </button>
         </div>

@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSandbox, type CatalogSummary } from '../catalog'
-import { TrustMini, AdoptionMini } from '../components/TrustMark'
+import { TrustOrCertifiedMini, AdoptionMini } from '../components/TrustMark'
 import { DECISIONS, decide, decisionPhrase } from '../../components/trust/gradeSystem'
 
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
@@ -22,11 +22,12 @@ const SURFACES = [
   { key: 'openclaw', label: 'OpenClaw skills' },
   { key: 'npm', label: 'npm packages' },
   { key: 'pypi', label: 'Python packages' },
+  { key: 'github', label: 'GitHub repos' },
   { key: 'crates', label: 'Rust crates' },
   { key: 'huggingface', label: 'Hugging Face models' },
   { key: 'docker', label: 'Container images' },
   { key: 'x402', label: 'x402 endpoints' },
-  { key: 'community', label: 'Community' },
+  { key: 'community', label: 'All on-demand scans' },
 ]
 
 const SORTS = [
@@ -165,7 +166,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
         </span>
         {row.trust_score != null ? (
           <div className="flex flex-col items-end gap-1.5 shrink-0">
-            <TrustMini score={row.trust_score} />
+            <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />
             {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} unit={row.adoption_unit} />}
           </div>
         ) : (

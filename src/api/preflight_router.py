@@ -386,6 +386,16 @@ async def drift_pkg(surface: str, name: str, quiet: bool = Query(False),
     return await _drift_payload(full_name, f"{surface}:{name}", db, quiet=quiet)
 
 
+@router.get("/drift/mcp", dependencies=[Depends(rate_limit_reads)])
+async def drift_mcp(endpoint: str = Query(...), quiet: bool = Query(False),
+                    db: AsyncSession = Depends(get_db)):
+    """Signed score/tool-definition drift timeline for a live MCP endpoint."""
+    from src.api.public_scan_router import _mcp_identity
+
+    url, _key = _mcp_identity(endpoint)
+    return await _drift_payload(f"mcp:{url}", f"mcp:{url}", db, quiet=quiet)
+
+
 @router.get("/drift/{owner}/{repo}", dependencies=[Depends(rate_limit_reads)])
 async def drift_repo(owner: str, repo: str, quiet: bool = Query(False),
                      db: AsyncSession = Depends(get_db)):

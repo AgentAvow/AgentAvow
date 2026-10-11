@@ -4125,6 +4125,22 @@ def _apply_provenance_result(result: ScanResult, res, claimed_repo: str | None) 
         result.coverage["linked_repo"] = linked
 
 
+def _bind_pypi_declared_repo(res, manifest: dict | None) -> None:
+    """PEP 740: compare the verified Trusted Publisher repo (from the signed cert SAN)
+    with the repo the project declares on PyPI. A match sets ``source_matches_claim``
+    (what Certified needs). A mismatch or no declaration leaves it unset: never a
+    penalty, just not certifiable."""
+    from src.scanner.provenance import normalize_repo
+
+    declared = normalize_repo((manifest or {}).get("declared_repository"))
+    bound = (getattr(res, "binding", None) or {}).get("repo")
+    if not (getattr(res, "verified", False) and declared and bound):
+        return
+    if res.source_matches_claim is None and bound == declared:
+        res.claimed_repo = declared
+        res.source_matches_claim = True
+
+
 def _repo_from_manifest(manifest: dict | None) -> str | None:
     """Extract the declared source repository from an npm package.json ``repository``
     field (a string or a ``{"url": ...}`` object) — the claim provenance is checked
@@ -4305,6 +4321,8 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
                 artifact_digest=fetched.digest,
                 scan_depth=SCAN_DEPTH_ARTIFACT,
             )
+            if eco == "pypi":
+                _bind_pypi_declared_repo(res, fetched.packaged_manifest)
             _apply_provenance_result(result, res, claimed_repo)
         except Exception:
             logger.warning(
