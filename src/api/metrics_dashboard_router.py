@@ -240,10 +240,14 @@ def is_hook_request(path: str | None, user_agent: str | None) -> bool:
 
 async def record_hook_checkin(client_ip: str | None, user_agent: str | None) -> None:
     """One hook scan today, on one more distinct machine (salted per-day HLL, nothing
-    identifying stored). Best-effort — never raises."""
+    identifying stored). Best-effort — never raises.
+
+    A machine is keyed on its IP alone, not IP + User-Agent: the hook's User-Agent
+    carries the plugin version, so on a release day every upgrading machine would
+    otherwise count twice (10-08/10-09 read 80/91 against ~52/54 distinct IPs)."""
     try:
         await bump_metric("hook_scan")
-        await record_unique("hook:machines", client_ip, user_agent)
+        await record_unique("hook:machines", client_ip, None)
     except Exception:
         pass
 

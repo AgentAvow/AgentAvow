@@ -64,10 +64,13 @@ async def main():
     r = get_redis()
     out = {}
     for s in ("claude", "claude-code", "chatgpt", "other", "total"):
-        v = await r.get(f"ag:metrics:mcp:calls:total:{s}:{day}")
+        # The aggregate keys carry no surface segment (mcp_streamable._bump_s bumps
+        # "calls:total" and "calls:total:<surface>"), so "total" reads the bare key.
+        sfx = "" if s == "total" else f"{s}:"
+        v = await r.get(f"ag:metrics:mcp:calls:total:{sfx}{day}")
         out[f"calls_{s}"] = int(v) if v else 0
         try:
-            out[f"callers_{s}"] = await r.pfcount(f"ag:metrics:uniq:mcp:callers:{s}:{day}")
+            out[f"callers_{s}"] = await r.pfcount(f"ag:metrics:uniq:mcp:callers:{sfx}{day}")
         except Exception:
             out[f"callers_{s}"] = 0
     try:

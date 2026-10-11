@@ -250,6 +250,17 @@ async def test_hook_scan_counts_a_scan_and_a_machine_even_when_cached(redis):
 
 
 @pytest.mark.asyncio
+async def test_hook_machine_upgrading_the_plugin_counts_once(redis):
+    """A release day: the same machine scans on the old and the new plugin version
+    (different User-Agents). It is one machine, keyed on IP alone."""
+    assert (await _get("/api/v1/public/scan/package/npm/chalk", HOOK)).status_code == 200
+    newer = "agentavow-precheck/0.1.27 (plugin)"
+    assert (await _get("/api/v1/public/scan/package/npm/chalk", newer)).status_code == 200
+    assert redis.counters[f"ag:metrics:hook_scan:{_today()}"] == 2
+    assert await md._read_unique_by_day("hook:machines", [_today()]) == {_today(): 1}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("ua", [BROWSER, CC, "Claude-User", "curl/8.4", ""])
 async def test_other_callers_never_count_as_the_hook(redis, ua):
     assert (await _get("/api/v1/public/scan/package/npm/chalk", ua)).status_code == 200
