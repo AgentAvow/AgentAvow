@@ -235,9 +235,13 @@ function SummaryStrip({ s }: { s: CatalogSummary }) {
   const npmPypiCrit = (bc.npm ?? 0) + (bc.pypi ?? 0)
   const npmPypiHigh = (bh.npm ?? 0) + (bh.pypi ?? 0)
   const x402Total = s.x402_endpoints_total ?? bs.x402 ?? 0
+  // Count the surfaces that actually have rows ("community" is a bucket of on-demand
+  // scans across surfaces, not a surface), so the hint can't go stale as surfaces
+  // are added (it said "5" long after crates, Docker and Hugging Face joined).
+  const surfaceCount = Object.entries(bs).filter(([k, n]) => k !== 'community' && (n ?? 0) > 0).length
   return (
     <Reveal className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-6">
-      <StatCard label="Total scans" value={s.total_scans} hint="across 5 surfaces" />
+      <StatCard label="Total scans" value={s.total_scans} hint={`across ${surfaceCount} ${surfaceCount === 1 ? 'surface' : 'surfaces'}`} />
       <StatCard label="x402 endpoints" value={x402Total} hint={s.x402_compliant != null ? `${s.x402_compliant} compliant` : 'payment-gated APIs'} />
       <StatCard label="MCP servers" value={bs.mcp ?? 0} hint={`${bc.mcp ?? 0} critical · ${bh.mcp ?? 0} high`} />
       <StatCard label="OpenClaw skills" value={bs.openclaw ?? 0} hint={`${bc.openclaw ?? 0} critical · ${bh.openclaw ?? 0} high`} />

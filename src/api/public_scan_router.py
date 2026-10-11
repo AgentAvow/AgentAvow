@@ -2805,6 +2805,38 @@ async def _cached_behavioral_for(data: dict) -> dict | None:
         return None
 
 
+async def _behavioral_peek(data: dict) -> dict | None:
+    """The sandbox state the result page would show for this scan, WITHOUT side effects
+    (no run started, no queue entry, no pending clock). A cached run is returned as is.
+    With none cached, a sandboxable tool reads pending (the page would start or queue a
+    run), or unavailable once the page's pending clock is past ``PENDING_MAX_AGE``, the
+    same cut-off ``_behavioral_block`` applies. None when the tool has no sandbox target
+    or the tier is off, so the result is static and final. This is what keeps a badge,
+    card, OG image or catalog row from showing the Certified mark while the page says
+    the mark waits for the sandbox."""
+    try:
+        cached = await _cached_behavioral_for(data)
+        if cached:
+            return cached
+        from src.config import settings
+        if not getattr(settings, "scanner_behavioral_enabled", False):
+            return None
+        target = _behavioral_target(data)
+        if not target:
+            return None
+        surface, name = target
+        declared = _declared_egress(data)
+        plan = _behavioral_plan(data, surface)
+        age = await _behavioral_slots.peek_pending_age(
+            _behavioral_cache_key(surface, str(name), declared, plan))
+        if age is not None and age > _behavioral_slots.PENDING_MAX_AGE:
+            return {"ran": False, "pending": False, "state": "unavailable",
+                    "reason": BEHAVIORAL_UNAVAILABLE_REASON}
+        return _queued_block(None)
+    except Exception:  # noqa: BLE001 — unknown sandbox state never earns the mark
+        return _queued_block(None)
+
+
 async def _badge_view(scan_data: dict | None, score) -> tuple[str, bool]:
     """(decision, certified_mark) for a badge / card / OG render, read from the same
     applied data the result page shows (the cached sandbox block folded in). An API
@@ -2816,7 +2848,7 @@ async def _badge_view(scan_data: dict | None, score) -> tuple[str, bool]:
     mark = scan_data.get("certified_mark")
     if isinstance(d, str) and d and isinstance(mark, bool):
         return d, mark
-    block = await _cached_behavioral_for(scan_data)
+    block = await _behavioral_peek(scan_data)
     applied = _apply_behavioral_score(scan_data, block) if block else dict(scan_data)
     marked = {**applied, "behavioral": block}
     dec = _decide(marked)

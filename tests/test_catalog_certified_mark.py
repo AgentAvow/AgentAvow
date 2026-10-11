@@ -109,3 +109,104 @@ async def test_mark_from_cached_scan_fails_closed_on_error(monkeypatch):
 
     monkeypatch.setattr(cache, "get", boom)
     assert await _scr._mark_from_cached_scan("npm", "semver", 92) is False
+
+
+# --- lists show the mark only when the row's own page does (sandbox final + clean) ----
+
+from src.api import public_scan_router as _psr  # noqa: E402
+
+_CLEAN_RUN = {"ran": True, "pending": False, "findings": [], "unexpected_egress": []}
+
+
+def _patch_sandbox(monkeypatch, *, enabled=True, target=("pypi", "idna"), cached=None,
+                   age=None):
+    from src.config import settings
+    from src.scanner.behavioral import slots
+
+    monkeypatch.setattr(settings, "scanner_behavioral_enabled", enabled, raising=False)
+    monkeypatch.setattr(_psr, "_behavioral_target", lambda data: target)
+    monkeypatch.setattr(_psr, "_declared_egress", lambda data: set())
+    monkeypatch.setattr(_psr, "_behavioral_plan", lambda data, surface: None)
+
+    async def fake_cached(surface, name, declared=None, plan=None):
+        return cached
+
+    async def fake_age(member):
+        return age
+
+    monkeypatch.setattr(_psr, "_get_cached_behavioral", fake_cached)
+    monkeypatch.setattr(slots, "peek_pending_age", fake_age)
+
+
+@pytest.mark.asyncio
+async def test_peek_returns_the_cached_run(monkeypatch):
+    _patch_sandbox(monkeypatch, cached=_CLEAN_RUN)
+    assert await _psr._behavioral_peek(_cached()) == _CLEAN_RUN
+
+
+@pytest.mark.asyncio
+async def test_peek_reads_pending_when_no_run_is_cached(monkeypatch):
+    _patch_sandbox(monkeypatch, cached=None, age=None)
+    block = await _psr._behavioral_peek(_cached())
+    assert block["pending"] is True
+
+
+@pytest.mark.asyncio
+async def test_peek_reads_unavailable_past_the_pending_age(monkeypatch):
+    from src.scanner.behavioral import slots
+    _patch_sandbox(monkeypatch, cached=None, age=slots.PENDING_MAX_AGE + 60)
+    block = await _psr._behavioral_peek(_cached())
+    assert block["pending"] is False and block["state"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_peek_is_none_without_a_sandbox_target_or_tier(monkeypatch):
+    _patch_sandbox(monkeypatch, target=None)
+    assert await _psr._behavioral_peek(_cached()) is None
+    _patch_sandbox(monkeypatch, enabled=False)
+    assert await _psr._behavioral_peek(_cached()) is None
+
+
+@pytest.mark.asyncio
+async def test_badge_view_withholds_the_mark_while_the_sandbox_is_pending(monkeypatch):
+    _patch_sandbox(monkeypatch, cached=None, age=None)
+    _, mark = await _psr._badge_view(_cached(), 92)
+    assert mark is False
+    _patch_sandbox(monkeypatch, cached=_CLEAN_RUN)
+    _, mark = await _psr._badge_view(_cached(), 92)
+    assert mark is True
+
+
+def _patch_scan_cache(monkeypatch, data):
+    from src import cache
+
+    async def fake_get(key):
+        return data
+
+    monkeypatch.setattr(cache, "get", fake_get)
+
+
+@pytest.mark.asyncio
+async def test_page_mark_none_when_nothing_cached_or_score_differs(monkeypatch):
+    _patch_sandbox(monkeypatch, cached=_CLEAN_RUN)
+    _patch_scan_cache(monkeypatch, None)
+    assert await _scr._mark_as_page_shows("pypi", "idna", 92) is None
+    _patch_scan_cache(monkeypatch, _cached(score=88))
+    assert await _scr._mark_as_page_shows("pypi", "idna", 92) is None
+
+
+@pytest.mark.asyncio
+async def test_page_mark_follows_the_sandbox(monkeypatch):
+    _patch_scan_cache(monkeypatch, _cached())
+    _patch_sandbox(monkeypatch, cached=None, age=None)       # page: "after the sandbox"
+    assert await _scr._mark_as_page_shows("pypi", "idna", 92) is False
+    _patch_sandbox(monkeypatch, cached=_CLEAN_RUN)           # run landed clean
+    assert await _scr._mark_as_page_shows("pypi", "idna", 92) is True
+
+
+@pytest.mark.asyncio
+async def test_page_mark_ignores_a_stale_mark_carried_in_the_cache(monkeypatch):
+    stale = {**_cached(), "decision": "safe", "certified_mark": True}
+    _patch_scan_cache(monkeypatch, stale)
+    _patch_sandbox(monkeypatch, cached=None, age=None)
+    assert await _scr._mark_as_page_shows("pypi", "idna", 92) is False

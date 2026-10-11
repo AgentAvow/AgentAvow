@@ -378,6 +378,17 @@ async def pending_age(member: str) -> float:
         return 0.0
 
 
+async def peek_pending_age(member: str) -> float | None:
+    """Like ``pending_age`` but read-only: None when no viewer has been told this
+    coordinate is pending (or Redis is unreachable). Badges, cards and catalog rows use
+    it so a render never starts the pending clock."""
+    try:
+        since = _s(await _redis().get(PENDING_PREFIX + member))
+        return max(0.0, time.time() - float(since)) if since else None
+    except Exception:
+        return None
+
+
 async def clear_pending(member: str) -> None:
     with contextlib.suppress(Exception):
         await _redis().delete(PENDING_PREFIX + member)
