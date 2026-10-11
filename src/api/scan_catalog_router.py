@@ -712,7 +712,7 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
 @router.get("", response_model=CatalogResponse, dependencies=[Depends(rate_limit_reads)])
 async def scan_catalog(
     surface: str | None = Query(
-        None, pattern="^(x402|mcp|npm|pypi|crates|huggingface|docker|openclaw|community)$",
+        None, pattern="^(x402|mcp|npm|pypi|github|crates|huggingface|docker|openclaw|community)$",
     ),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),

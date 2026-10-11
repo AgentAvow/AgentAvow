@@ -622,10 +622,19 @@ def pypi_result_from_archive(
         unpacked_size=sum(f.size for f in files.values()),
         file_count=len(files),
         description=(meta.get("info") or {}).get("summary"),
+        # The source repo the project declares (project_urls / home_page): what a
+        # PEP 740 Trusted Publisher identity is compared against for Certified.
+        packaged_manifest=_pypi_declared_manifest(meta),
         deprecation=_pypi_deprecation(meta),
         published_at=_pypi_published(meta, url),
         installed_paths=installed_paths,
     )
+
+
+def _pypi_declared_manifest(meta: dict) -> dict | None:
+    from src.scanner.provenance import declared_repo_from_pypi_meta
+    repo = declared_repo_from_pypi_meta(meta)
+    return {"declared_repository": repo} if repo else None
 
 
 def _pypi_published(meta: dict, url: str) -> str | None:

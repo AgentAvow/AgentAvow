@@ -23,7 +23,7 @@ import api from '../../lib/api'
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
 import { useRotatingPlaceholder , useIsDesktop } from '../lib/hooks'
 import { summarize } from '../lib/summarize'
-import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageBadge, PackageClaim, PackageHistory, VerifyPanel } from '../components/ScanEvidence'
+import { CapabilitiesPanel, AdvisoriesPanel, McpToolList, PackageFacts, PackageBadge, PackageClaim, PackageHistory, VerifyPanel, McpWhatItCanDo, McpHistory, McpBadge, McpNotes } from '../components/ScanEvidence'
 
 /**
  * Rebrand-native check / trust-score page — built for ANY user, not just devs.
@@ -1826,7 +1826,11 @@ function McpResult({ endpoint }: { endpoint: string }) {
       <CategoryFindings categoryScores={null} findings={f} maxFindings={15} emptyMessage="✓ No capability-surface risks found — clean tool set." />
       <Reveal><p className="mt-3 text-[12px] text-text-muted/80">Code categories (secret hygiene, code safety, data handling, filesystem, dependencies) are not scored for a live endpoint: we check the tools it serves, not its server code, which we can&apos;t see. Scan its repo or package for those.</p></Reveal>
 
+      <McpWhatItCanDo scan={scan} />
       <VerifyPanel scan={scan} />
+      <McpHistory endpoint={endpoint} />
+      <McpBadge endpoint={endpoint} />
+      <McpNotes endpoint={endpoint} />
 
       <div className="mt-8 flex justify-center">
         <ShareRow owner="mcp" repo={endpoint} score={scan.trust_score} />

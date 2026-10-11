@@ -59,6 +59,11 @@ function toPath(raw: string): string | null {
   return null
 }
 
+const CERT_SURFACE_LABEL: Record<string, string> = {
+  npm: 'npm packages', pypi: 'Python packages', github: 'GitHub repos', mcp: 'MCP servers',
+  crates: 'Rust crates', docker: 'container images', huggingface: 'Hugging Face models', openclaw: 'skills',
+}
+
 export default function RebrandCertified() {
   const [input, setInput] = useState('')
   const [result, setResult] = useState<{ target: string; certified: Certified; mark: boolean; note: string } | null>(null)
@@ -66,15 +71,22 @@ export default function RebrandCertified() {
   const [error, setError] = useState('')
   const [cohort, setCohort] = useState<CatalogRow[]>([])
   const [cohortTotal, setCohortTotal] = useState<number | null>(null)
+  const [bySurface, setBySurface] = useState<[string, number][]>([])
 
   useEffect(() => {
     let alive = true
+    // One read of the whole Certified set (it is small): the first 16 are the cohort,
+    // and the per-surface split is what the Browse filters show for each tab.
     api.get<{ rows: CatalogRow[]; total?: number }>('/public/scan-catalog', {
-      params: { grade: 'certified', sort: 'score-desc', limit: 16 },
+      params: { grade: 'certified', sort: 'score-desc', limit: 200 },
     }).then((r) => {
       if (!alive) return
-      setCohort(r.data.rows ?? [])
-      setCohortTotal(r.data.total ?? null)
+      const rows = r.data.rows ?? []
+      setCohort(rows.slice(0, 16))
+      setCohortTotal(r.data.total ?? rows.length)
+      const counts: Record<string, number> = {}
+      for (const row of rows) counts[row.surface] = (counts[row.surface] ?? 0) + 1
+      setBySurface(Object.entries(counts).sort((a, b) => b[1] - a[1]))
     }).catch(() => { /* non-blocking */ })
     return () => { alive = false }
   }, [])
@@ -124,6 +136,14 @@ export default function RebrandCertified() {
           <div className="mt-12">
             <h2 className="text-xl font-bold">It's not theoretical — {cohortTotal ?? cohort.length} tools are Certified today</h2>
             <p className="mt-1.5 text-text-muted text-[14px] max-w-[64ch]">Earned, not assigned — each one publishes verifiable build provenance and clears every check below. Recognize a few? That's the point.</p>
+            {bySurface.length > 0 && (
+              <p className="mt-2 font-mono text-[12px] text-text-muted">
+                {bySurface.map(([surf, n], i) => (
+                  <span key={surf}>{i > 0 && ' · '}<Link className="hover:text-primary-light" to={rp(`/rebrand/browse?surface=${surf}&grade=certified`)}>{n} {CERT_SURFACE_LABEL[surf] || surf}</Link></span>
+                ))}
+              </p>
+            )}
+            <p className="mt-2 text-text-muted text-[12.5px] max-w-[64ch]">Certified needs a published package with verifiable build provenance: npm (Sigstore), PyPI (PEP 740 Trusted Publishing) or a GitHub repo whose package provenance points back at it. An MCP server checked by URL can earn it only through its published package; hosted code we can't inspect can't be certified.</p>
             <div className="mt-4 flex flex-wrap gap-2">
               {cohort.map((row) => {
                 const href = certLink(row)

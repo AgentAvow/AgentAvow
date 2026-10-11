@@ -171,6 +171,36 @@ export function TrustMini({ score }: { score: number }) {
   )
 }
 
+/** Certified — the list-scale form of CertifiedMark: the gradient mini bar, the score in
+ * the gradient and a small CERTIFIED caption. Shown in place of TrustMini on a row that
+ * carries `certified_mark` (the same rule as the scan page's big mark). */
+export function CertifiedMini({ score }: { score: number }) {
+  const n = 6
+  return (
+    <span className="inline-flex items-center gap-1.5" title={`Certified · trust ${score}/100`}>
+      <span className="inline-flex gap-[2px] items-end">
+        {Array.from({ length: n }).map((_, i) => (
+          <span key={i} className="w-[5px] h-[10px] rounded-[1px]" style={{ background: 'linear-gradient(180deg,#2dd4bf,#e879f9)' }} />
+        ))}
+      </span>
+      <span className="inline-flex flex-col items-start leading-none">
+        <span className="text-[14px] font-extrabold tabular-nums" style={GRAD_TEXT}>{score}</span>
+        <span className="font-mono text-[7.5px] font-extrabold tracking-[0.14em] mt-[2px]" style={GRAD_TEXT}>CERTIFIED</span>
+      </span>
+    </span>
+  )
+}
+
+/** Trust at list scale: CertifiedMini when the row carries the Certified mark (only ever
+ * beside Safe to connect), else TrustMini. */
+export function TrustOrCertifiedMini({ row }: { row: { trust_score?: number | null } & Record<string, unknown> }) {
+  if (row.trust_score == null) return null
+  const d = decisionOf({ ...row, findings: { critical: (row.critical as number) ?? 0, high: (row.high as number) ?? 0 } })
+  return d.decision === 'safe' && isCertified(row)
+    ? <CertifiedMini score={row.trust_score} />
+    : <TrustMini score={row.trust_score} />
+}
+
 /** The three-phrase headline for a list row / card: "Safe to connect · Certified" in the
  * phrase colour, with the reason (when known) muted beside it. Reads the row's own
  * `decision` (catalog / API) or decides from what the row carries. */

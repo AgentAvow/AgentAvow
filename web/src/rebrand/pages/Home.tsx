@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { decisionOf, getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini, DecisionLine } from '../components/TrustMark'
+import { TrustBar, AdoptionNeedle, CertifiedMark, TrustOrCertifiedMini, AdoptionMini, DecisionLine } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
 import { trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
@@ -484,7 +484,7 @@ export default function RebrandHome() {
                       <div className="flex items-center justify-between gap-2.5">
                         <span className="font-mono text-[13.5px] break-all">{display}</span>
                         <div className="flex items-center gap-3 shrink-0">
-                          <TrustMini score={row.trust_score as number} />
+                          <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />
                           {(row as { adoption_count?: number }).adoption_count ? <AdoptionMini count={(row as { adoption_count?: number }).adoption_count} unit={(row as { adoption_unit?: string | null }).adoption_unit} /> : null}
                         </div>
                       </div>
