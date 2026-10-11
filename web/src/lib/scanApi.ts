@@ -26,6 +26,20 @@ export async function fetchPublicScan(
   return data
 }
 
+/** Cache-only: is this GitHub repo a graded skill collection? Resolves to null
+ * when it isn't (404) or the lookup fails, so callers fall back to the repo scan. */
+export async function fetchSkillCollectionLead(
+  owner: string,
+  repo: string,
+): Promise<{ trust_score?: number; decision?: string } | null> {
+  try {
+    const { data } = await publicApi.get(`/public/scan/${owner}/${repo}/collection`, { timeout: 5_000 })
+    return data ?? null
+  } catch {
+    return null
+  }
+}
+
 /** Deep scan: also run the behavioral sandbox tier (~45s). Returns the same
  * response with a `behavioral` block attached (egress/fs/exit observed by
  * running the tool's package in isolation). Never affects the signed score. */

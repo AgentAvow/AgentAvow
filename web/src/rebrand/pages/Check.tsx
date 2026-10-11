@@ -7,7 +7,7 @@ import { NoticeText } from '../components/NoticeText'
 import ImageScanDepth from '../components/ImageScanDepth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
-import { fetchPublicScan, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
+import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
 import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, isCertified, certifiedMarkNote } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
@@ -2033,11 +2033,21 @@ function Result({ owner, repo, privateResult, showCode = false }: {
   const { user } = useAuth()
   // A one-time private scan arrives via router state — ephemeral, nothing is stored.
   const oneTimePrivate = !!privateResult
+  // Ask the cache first whether this repo is a known skill collection: if it is,
+  // redirect straight to its collection page instead of waiting on a full repo
+  // code scan (~25 s). Unknown repos fall through to the normal scan.
+  const checkCollection = !oneTimePrivate && !showCode
+  const { data: collectionLead, isFetched: collectionChecked } = useQuery({
+    queryKey: ['rebrand-skill-collection', owner, repo],
+    queryFn: () => fetchSkillCollectionLead(owner, repo),
+    retry: 0,
+    enabled: checkCollection,
+  })
   const { data: fetched, isLoading } = useQuery({
     queryKey: ['rebrand-scan', owner, repo],
     queryFn: () => fetchPublicScan(owner, repo),
     retry: 0,
-    enabled: !oneTimePrivate,
+    enabled: !oneTimePrivate && (!checkCollection || (collectionChecked && !collectionLead)),
   })
   // When the public scan finds nothing and the viewer is signed in, fall back to the
   // owner's stored private report (via the GitHub App). 404 → they have none stored.
@@ -2073,6 +2083,10 @@ function Result({ owner, repo, privateResult, showCode = false }: {
   })
   const heroBig = useIsDesktop() ? 1.5 : 1  // scale marks up on desktop; MUST be before any early return (hooks order)
 
+  if (checkCollection && collectionLead) {
+    return <Navigate replace to={rp(`/rebrand/check/skill/${owner}/${repo}`)} />
+  }
+  if (checkCollection && !collectionChecked) return <ScanningLoader owner={owner} repo={repo} />
   if (!oneTimePrivate && isLoading) return <ScanningLoader owner={owner} repo={repo} />
   // A repo that is a collection of agent skills leads with the collection's answer
   // (its worst skill), the same number its badge, card, preview and Browse row show.

@@ -3503,6 +3503,21 @@ async def _github_stars(owner: str, repo: str) -> int | None:
         return None
 
 
+@router.get("/{owner}/{repo}/collection", dependencies=[Depends(rate_limit_reads)])
+async def scan_skill_collection(owner: str, repo: str) -> dict:
+    """The skill-collection lead for a GitHub repo, from cache only.
+
+    The Check page asks this before requesting the repo scan, so a known skill
+    collection redirects to its collection page at once instead of waiting on a
+    full repo code scan. 404 when the repo isn't a graded collection (yet)."""
+    if not all(c.isalnum() or c in "-_." for c in owner + repo) or not owner or not repo:
+        raise HTTPException(status_code=404, detail="Not a skill collection")
+    coll = await _skill_collection_data(owner, repo)
+    if not coll:
+        raise HTTPException(status_code=404, detail="Not a skill collection")
+    return _skill_collection_summary(owner, repo, coll)
+
+
 @router.get("/{owner}/{repo}/checks", dependencies=[Depends(rate_limit_reads)])
 async def scan_checks(
     owner: str,
