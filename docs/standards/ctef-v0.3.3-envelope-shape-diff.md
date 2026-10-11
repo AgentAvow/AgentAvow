@@ -103,3 +103,7 @@ continue to validate the unchanged surface.
   permissive verifiers fall back gracefully (per the rfc9421-strict split).
 - Negative-path fixtures land in `aeoess/aps-conformance-suite/fixtures/composition/a2a-1496-negative-paths/`
   once aeoess scaffolds the directory.
+
+---
+
+*Licence: [CC BY 4.0](LICENSE-CC-BY-4.0.txt); see [CTEF-LICENSE.md](CTEF-LICENSE.md).*

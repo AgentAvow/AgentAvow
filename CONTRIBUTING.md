@@ -12,6 +12,7 @@ material and the Claude Code plugin take outside contributions; the product does
 | `docs/standards/tool-manifest-digest-vectors-v1/` | Apache-2.0 | Welcome: new vectors, verifier fixes, reproductions |
 | `docs/standards/attribution-record-v0/` | Apache-2.0 | Welcome: record format, fixtures, verifier fixes |
 | `plugins/agentavow-trust/` | MIT | Welcome: bug fixes and hook improvements |
+| CTEF specification documents in `docs/standards/` (listed in `docs/standards/CTEF-LICENSE.md`) | CC BY 4.0 | Welcome: spec diffs for the next version, corrections, worked examples |
 | Everything else (`src/`, `web/`, `sdk/`, `scripts/`, …) | All rights reserved (see `LICENSE`) | Not accepted. Please open an issue instead |
 
 Files under `docs/standards/attribution-record-v0/pins/` are byte copies of other projects'
@@ -19,8 +20,8 @@ artifacts under their own licences. Fix those upstream, not here.
 
 ## Terms
 
-A contribution to a folder that carries its own `LICENSE` file is accepted under that
-licence (inbound equals outbound). There is no separate contributor agreement.
+A contribution to a folder that carries its own `LICENSE` file, or to a file listed in
+`docs/standards/CTEF-LICENSE.md`, is accepted under that licence (inbound equals outbound). There is no separate contributor agreement.
 
 Sign off each commit to certify the [Developer Certificate of Origin](https://developercertificate.org/):
 
