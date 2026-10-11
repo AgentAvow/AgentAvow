@@ -48,13 +48,13 @@ export { GateError } from './gate.js';
 export type { Decision, GatePolicy, GateHooks } from './gate.js';
 export { headline, gateMessage } from './vercel-ai.js';
 
-/** The parts of an `MCPServer` the gate touches. */
+/** The parts of an `MCPServer` the gate touches. No index signature, so the SDK's own
+ *  classes (MCPServerStreamableHttp, MCPServerSSE, MCPServerStdio) are assignable. */
 export interface McpServerLike {
   name?: string;
   connect(): Promise<void>;
-  listTools(...args: any[]): Promise<Array<Record<string, unknown>>>;
+  listTools(...args: any[]): Promise<unknown[]>;
   callTool(toolName: string, args: any, ...rest: any[]): Promise<unknown>;
-  [k: string]: unknown;
 }
 
 export interface OpenAIAgentsGateOptions extends GatePolicy, GateHooks {
@@ -81,10 +81,14 @@ export interface OpenAIAgentsGate extends Gate {
 
 const WRAPPED = Symbol.for('agentavow-trust/openai-agents');
 
-/** The https URL an MCPServerStreamableHttp / MCPServerSSE was built with, if it keeps one. */
+/** The https URL an MCPServerStreamableHttp / MCPServerSSE was built with, if it keeps one.
+ *  @openai/agents (0.20) keeps it on the platform server it delegates to:
+ *  `server.underlying.params.url`. */
 function serverUrl(server: McpServerLike): string | null {
-  const s = server as Record<string, any>;
-  for (const v of [s.url, s.options?.url, s.params?.url, s.serverUrl, s._url]) {
+  const s = server as unknown as Record<string, any>;
+  const u = s.underlying;
+  for (const v of [s.url, s.options?.url, s.params?.url, s.serverUrl, s._url,
+    u?.params?.url, u?.url, u?.options?.url]) {
     if (typeof v === 'string' && /^https?:\/\//i.test(v)) return v;
     if (v instanceof URL) return v.toString();
   }
@@ -107,14 +111,15 @@ export function createOpenAIAgentsGate(options: OpenAIAgentsGateOptions = {}): O
     if ((server as Record<symbol, unknown>)[WRAPPED]) return server;
     const coord = coordinate ?? coordinateOf(server);
     const label = server.name || coord || 'MCP server';
-    const connect = server.connect.bind(server);
-    const listTools = server.listTools.bind(server);
-    const callTool = server.callTool.bind(server);
+    const srv = server as McpServerLike;
+    const connect = srv.connect.bind(server);
+    const listTools = srv.listTools.bind(server);
+    const callTool = srv.callTool.bind(server);
 
     Object.defineProperty(server, WRAPPED, { value: true });
     if (!coord) {
       const d = core.unmapped(`server ${label}`);
-      server.connect = async () => {
+      srv.connect = async () => {
         if (!d.allowed) throw new GateError(d);
         onWarn(`AgentAvow: MCP server "${label}" has no https URL and no coordinate (gate.wrap(server, 'npm:…')); not gated.`, d);
         return connect();
@@ -122,14 +127,14 @@ export function createOpenAIAgentsGate(options: OpenAIAgentsGateOptions = {}): O
       return server;
     }
 
-    server.connect = async () => {
+    srv.connect = async () => {
       const d = await core.check(coord);
       if (!d.allowed) {
         throw new GateError({ ...d, reason: `AgentAvow refused MCP server "${label}" (${coord}): ${d.reason}` });
       }
       return connect();
     };
-    server.listTools = async (...args: any[]) => {
+    srv.listTools = async (...args: any[]) => {
       const tools = await listTools(...args);
       if (!Array.isArray(tools)) return tools;
       const decisions = await core.observeTools(coord, tools as Array<Record<string, unknown>>);
@@ -137,9 +142,9 @@ export function createOpenAIAgentsGate(options: OpenAIAgentsGateOptions = {}): O
         .filter((d) => !d.allowed && (d.outcome === 'drift' || d.outcome === 'unknown_tool'))
         .map((d) => d.toolName));
       for (const d of decisions) if (d.toolName && drop.has(d.toolName)) onWarn(`AgentAvow: ${gateMessage(d, 'blocked')}`, d);
-      return drop.size ? tools.filter((t) => !drop.has(String(t?.name))) : tools;
+      return drop.size ? tools.filter((t) => !drop.has(String((t as { name?: unknown })?.name))) : tools;
     };
-    server.callTool = async (toolName: string, args: any, ...rest: any[]) => {
+    srv.callTool = async (toolName: string, args: any, ...rest: any[]) => {
       const d = await core.checkToolCall({ server: coord, toolName });
       if (!d.allowed) throw new GateError({ ...d, reason: gateMessage(d, 'blocked') });
       return callTool(toolName, args, ...rest);
