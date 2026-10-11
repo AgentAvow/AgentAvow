@@ -126,3 +126,26 @@ test('a stdio server needs a coordinate; without one it follows `unmapped`', asy
   assert.equal(mapped.coordinateOf(s3), 'npm:@modelcontextprotocol/server-filesystem');
   await assert.rejects(mapped.wrap(s3).connect(), (e) => e.decision.decision === 'do_not_connect');
 });
+
+// @openai/agents 0.20's MCPServerStreamableHttp delegates to a platform server and keeps
+// the URL there (server.underlying.params.url), not on itself. Found by a smoke test
+// against the real package: without this lookup a URL server was passed through ungated.
+class RealShapeServer {
+  constructor({ name = 'deepwiki', url = SERVER } = {}) {
+    this.name = name;
+    this.underlying = { params: { url } };
+    this.connected = false;
+  }
+  async connect() { this.connected = true; }
+  async listTools() { return [{ ...TOOL }, { ...OTHER }]; }
+  async callTool(name) { return [{ type: 'text', text: `ran ${name}` }]; }
+}
+
+test('wrap finds the URL on underlying.params (the real SDK shape) and gates it', async () => {
+  const g = oa.createOpenAIAgentsGate({ ...quiet, fetch: api(scanJson({ score: 30, critical: 1, decision: 'do_not_connect' })).fetch });
+  const s = new RealShapeServer();
+  assert.equal(g.coordinateOf(s), SERVER);
+  g.wrap(s);
+  await assert.rejects(() => s.connect(), /refused MCP server "deepwiki"/);
+  assert.equal(s.connected, false);
+});

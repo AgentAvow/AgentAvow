@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.4.0 (unreleased; prepared 2026-10-09)
+## 0.4.1 (unreleased; prepared 2026-10-11)
+
+- `openai-agents`: `wrap()` now finds the URL of a real `@openai/agents` `MCPServerStreamableHttp` / `MCPServerSSE`, which keeps it on `server.underlying.params.url`. In 0.4.0 such a server was passed through with a "not gated" warning unless you gave it a coordinate. Found by a smoke test against the real SDK (0.20.0).
+- `openai-agents`: `McpServerLike` no longer has an index signature, so the SDK's own server classes type-check when passed to `wrap()` / `connectAll()` under `strict`.
+
+## 0.4.0 (published 2026-10-10)
 
 - New `agentavow-trust/claude-agent-sdk`: `createClaudeAgentGate()` checks `mcpServers` before a Claude Agent SDK session (servers that fail are left out; drifted tools go into `disallowedTools`) and adds a `PreToolUse` hook that denies each `mcp__…` call that fails (`'ask'` for Review under `onReview: 'confirm'`), plus a `canUseTool` callback.
 - New `agentavow-trust/openai-agents`: `createOpenAIAgentsGate()` wraps an OpenAI Agents SDK MCP server (`connect` refused on a failing answer, drifted tools dropped from `listTools`, `callTool` refused per call) and `connectAll()` connects the servers that pass.
