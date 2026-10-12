@@ -17,6 +17,10 @@ code lands through the unified vocabulary (hosted in
 > folders as contribution surfaces; this file is under `docs/standards/` on
 > the maintainer's explicit in-thread invitation. Happy to re-home or convert
 > to an issue if a different path is preferred.
+>
+> **r2 (2026-10-12):** adopted review feedback from babyblueviper1 (§5
+> append-only requirement) and vdineshk (§4 `live_source` capture recipe), both
+> from PR review comments.
 
 ---
 
@@ -77,7 +81,13 @@ payload. Normative rules:
   mismatch is **tampering evidence** (hard failure).
 - **`live_source`** — the verifier recomputes against the live source. A
   mismatch is a **drift signal** (soft, time-bounded re-check), not proof of
-  tampering.
+  tampering. A `live_source` signal MUST carry a reproducible capture recipe —
+  source endpoint, request/initialization steps, canonical representation, and
+  capture time. Naming the recompute mode without the recipe still leaves two
+  independent verifiers free to hash different representations of the same
+  response. The recipe's availability and the availability of the historical
+  inputs are separate properties: a verifier MUST be able to see which one is
+  missing, and neither absence may be read as "no drift".
 
 The two values are what let the same boolean (recompute failed) route to two
 different verdict paths without ambiguity.
@@ -88,6 +98,16 @@ An `asserted` signal MAY carry a `settlement` URI pointing at where the issuer
 publicly commits to settle disputes about the asserted value. The pointer does
 not upgrade the signal's class and is not a recompute path; it makes the
 issuer's accountability addressable.
+
+A settlement URI only makes accountability addressable if the issuer cannot
+edit what it points to after a dispute starts; otherwise the pointer is a
+promise, not a commitment. The target SHOULD therefore be append-only and
+committed **before** the outcome it covers (hash-pinned or externally
+anchored), so a verifier can tell whether the commitment changed after the
+fact. A live worked example: babyblueviper1's decision-receipt slot (review
+comment on this PR) — a BIP-340 signature over salted commitments to the
+choice, a `conflicts` list that surfaces equivocation by the same key, and a
+daily Merkle log chained by `prev_root` whose root is OpenTimestamps-anchored.
 
 ## §6 — Gateway weighting rule (RECOMMENDED)
 
