@@ -51,18 +51,25 @@ export function RevealStagger({
   y?: number
 }) {
   const reduce = useReducedMotion()
+  // A `whileInView` with `once` fires a single time, so children mounted after the
+  // reveal (a filter that returns more rows than before) never got the "show"
+  // variant and stayed at opacity 0 until a full page reload. Once the first reveal
+  // has finished, every child animates to "show" on its own, new ones included.
+  const [revealed, setRevealed] = useState(false)
   if (reduce) return <div className={className}>{children}</div>
   return (
     <motion.div
       className={className}
       initial="hidden"
       whileInView="show"
+      onAnimationComplete={() => setRevealed(true)}
       viewport={{ once: true, margin: '-60px' }}
       variants={{ show: { transition: { staggerChildren: stagger } } }}
     >
       {children.map((child, i) => (
         <motion.div
           key={i}
+          animate={revealed ? 'show' : undefined}
           variants={{ hidden: { opacity: 0, y }, show: { opacity: 1, y: 0 } }}
           transition={{ duration: 0.45, ease: 'easeOut' }}
         >

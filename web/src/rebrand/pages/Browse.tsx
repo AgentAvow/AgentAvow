@@ -457,7 +457,7 @@ export default function RebrandBrowse() {
             {Array.from({ length: 9 }).map((_, i) => <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[128px]" />)}
           </div>
         ) : (
-          <RevealStagger key={`${surface}-${page}`} className="grid grid-cols-1 md:grid-cols-3 gap-3.5" stagger={0.035}>
+          <RevealStagger key={[surface, sort, severity, grade, decision, category, q, page].join('|')} className="grid grid-cols-1 md:grid-cols-3 gap-3.5" stagger={0.035}>
             {rows.map((row) => <ToolCard key={row.full_name || row.name} row={row} />)}
           </RevealStagger>
         )}
