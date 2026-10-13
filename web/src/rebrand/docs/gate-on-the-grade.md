@@ -222,6 +222,36 @@ async with gate.wrap(MCPServerStreamableHttp(name="deepwiki",
 
 `gate.wrap(server)` wraps three methods on that server. `connect()` reads the server's signed result first and refuses the connection (a `GateError`, `ToolGateBlockedError` in Python) when the answer fails your policy; `connectAll` / `connect_all` connects the servers that pass and returns the rest as `refused`, so the agent starts without them. `listTools()` checks each served definition against the per-tool digest in the attestation and drops a tool that changed since it was graded, so the model never sees it. `callTool()` re-checks each call; a call that is not allowed never reaches the server, and the model gets the reason (TypeScript throws, which the SDK's `errorFunction` turns into model-visible text; Python returns an MCP error result). A stdio server needs a coordinate (`gate.wrap(server, 'npm:@scope/server')`, `servers={...}` in Python). `onReview: 'confirm'` needs a `confirm` hook of yours, since MCP server tools have no SDK approval pause.
 
+### Open Policy Agent
+
+If your gateway, sidecar or service mesh already asks [OPA](https://www.openpolicyagent.org/) for decisions, the AgentAvow policy (`integrations/opa/` in the repository) answers "may this agent connect to this server, or call this tool?" from the server's signed result. It refuses Do not connect (or Review too, with `fail_on: "review"`), and when you pass the served definition's digest it refuses a tool that changed since the scan or that the scan never saw.
+
+```bash
+opa run --server integrations/opa/policy
+curl -s localhost:8181/v1/data/agentavow/authz/result \
+  -d '{"input": {"server": "https://mcp.deepwiki.com/mcp", "tool": "read_wiki_structure", "tool_digest": "sha256:…"}}'
+```
+
+`server` takes an MCP endpoint URL, `npm:`/`pypi:`/`crates:`/`docker:`/`huggingface:` package, or `owner/repo`. OPA caches each answer for an hour (`cache_seconds`); `fail_closed` (default on) refuses when AgentAvow can't answer. The repository includes an Envoy `ext_authz` example that puts the check in front of MCP traffic and reads the tool name from each JSON-RPC `tools/call`.
+
+### LiteLLM proxy
+
+For agents that reach MCP servers through [LiteLLM](https://docs.litellm.ai/)'s MCP gateway, the AgentAvow guardrail (`integrations/litellm/` and `src/bridges/litellm`) runs on every MCP tool call (`mode: pre_mcp_call`) and refuses one whose server reads Do not connect, or whose tool definition changed since the scan:
+
+```yaml
+guardrails:
+  - guardrail_name: agentavow
+    litellm_params:
+      guardrail: agentavow_guardrail.AgentAvowGuardrail
+      mode: pre_mcp_call
+      default_on: true
+      fail_on: do_not_connect          # or: review
+      servers:                         # stdio servers: grade them as their package
+        local_files: "npm:@modelcontextprotocol/server-filesystem"
+```
+
+https servers are graded by the URL in your `mcp_servers` config. A refused call returns to the caller as an MCP tool error with the reason, so the model sees why and the run continues. `on_fail: warn` logs instead of refusing. Tested with `litellm[proxy]` 1.105.
+
 ### Where each integration stands
 
 | Integration | Status |
@@ -229,10 +259,11 @@ async with gate.wrap(MCPServerStreamableHttp(name="deepwiki",
 | Claude Code plugin (session-start check, install check, per-call gate) | Shipped; listed in the Claude plugin directory |
 | MCP connector (`https://agentavow.com/mcp`) | Shipped; works in any MCP client |
 | ChatGPT app | In OpenAI review |
-| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue | Shipped (0.3.2) |
-| npm `agentavow-trust`: Claude Agent SDK and OpenAI Agents SDK adapters | In the repository (0.4.0); next npm release |
+| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue, Claude Agent SDK, OpenAI Agents SDK | Shipped (0.4.1) |
 | LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates (Python) | In this repository (`src/bridges/`); not on PyPI yet |
 | GitHub Action, local CLI, GitLab CI component, Bitbucket Pipe, Azure Pipelines template | Shipped |
+| Open Policy Agent policy (with an Envoy `ext_authz` example) | In this repository (`integrations/opa/`) |
+| LiteLLM proxy guardrail (MCP gateway) | In this repository (`integrations/litellm/`, `src/bridges/litellm`); not on PyPI yet |
 
 ## Gate anything (the API)
 

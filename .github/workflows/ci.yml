@@ -136,6 +136,21 @@ jobs:
           PYTHON: python
         run: npm ci --omit=optional && npm test
 
+  opa-policy:
+    name: OPA policy tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OPA
+        run: |
+          curl -sSfL -o /usr/local/bin/opa https://openpolicyagent.org/downloads/v1.21.2/opa_linux_amd64_static
+          chmod +x /usr/local/bin/opa
+          opa version
+      - name: Check and test the AgentAvow policy
+        run: |
+          opa check integrations/opa/policy integrations/opa/examples
+          opa test -v integrations/opa/policy integrations/opa/examples
+
   security:
     name: Security Scanning
     runs-on: ubuntu-latest
