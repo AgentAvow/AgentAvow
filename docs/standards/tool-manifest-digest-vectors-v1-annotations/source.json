@@ -1,0 +1,95 @@
+{
+  "note": "Pinned 2026-10-13 from the live scan endpoint (force=true, one request; response cached=false, scanned_at 2026-10-13T16:08:39.055Z); a fresh fetch yields a fresh attestation with new timestamps, so this file is the fixture, not the URL. observed_tools is the tools/list the server served at the same time, fetched directly from the server (MCP Streamable HTTP: initialize, notifications/initialized, tools/list) at 2026-10-13T16:08:38.515Z, immediately before the scan request, and again immediately after with an identical result; unmodified.",
+  "attestation_url": "https://agentavow.com/api/v1/public/scan/mcp?endpoint=https%3A%2F%2Fdocs.mcp.cloudflare.com%2Fmcp&force=true",
+  "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
+  "jwk": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "JwovTLVbpgk85zlMNruTiLzp85dAucsZWngs8NisBFg",
+    "kid": "agentgraph-security-v1",
+    "use": "sig",
+    "alg": "EdDSA"
+  },
+  "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTE0VDE2OjA4OjM5LjA2NFoiLCJpc3N1ZWRBdCI6IjIwMjYtMTAtMTNUMTY6MDg6MzkuMDY0WiIsImlzc3VlciI6eyJpZCI6ImRpZDp3ZWI6YWdlbnRncmFwaC5jbyIsIm5hbWUiOiJBZ2VudEF2b3ciLCJ1cmwiOiJodHRwczovL2FnZW50Z3JhcGguY28ifSwicmVjb21tZW5kZWRMaW1pdHMiOnsibWF4X3Rva2Vuc19wZXJfY2FsbCI6NDA5NiwicmVxdWVzdHNfcGVyX21pbnV0ZSI6MzAsInJlcXVpcmVfdXNlcl9jb25maXJtYXRpb24iOmZhbHNlfSwic2NhbiI6eyJjYXRlZ29yeVNjb3JlcyI6eyJjb2RlX3NhZmV0eSI6ODUsImRhdGFfaGFuZGxpbmciOjEwMCwiZGVwZW5kZW5jeV9oZWFsdGgiOjEwMCwiZmlsZXN5c3RlbV9hY2Nlc3MiOjEwMCwic2VjcmV0X2h5Z2llbmUiOjEwMH0sImNvdmVyYWdlIjp7ImRiX3NuYXBzaG90cyI6e30sImxpdmVfb2JzZXJ2ZWQiOnRydWUsInBvaW50X2luX3RpbWUiOiIyMDI2LTEwLTEzVDE2OjA4OjM5LjA1NTYwM1oiLCJwcm92ZW5hbmNlX2JpbmRpbmciOiJuL2EiLCJzY2FuX2RlcHRoIjoiYXJ0aWZhY3QrbGl2ZSIsInN1cmZhY2UiOiJtY3AifSwiZmlsZXNTY2FubmVkIjoyLCJmaWxlc1RvdGFsIjoyLCJmaW5kaW5ncyI6eyJjYXRlZ29yaWVzIjp7InNjaGVtYV9yaXNrIjoxfSwiY3JpdGljYWwiOjAsImNyaXRpY2FsX2FsbCI6MCwiaGlnaCI6MSwiaGlnaF9hbGwiOjEsIml0ZW1zIjpbeyJjYXBhYmlsaXR5IjoiIiwiY2F0ZWdvcnkiOiJzY2hlbWFfcmlzayIsImZpbGVfcGF0aCI6InRvb2w6c2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbjpwYXJhbTpxdWVyeSIsImluc3RhbGxlZCI6dHJ1ZSwia2luZCI6ImRlZmVjdCIsImxpbmVfbnVtYmVyIjowLCJuYW1lIjoiVG9vbCAnc2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbicgdGFrZXMgYSBmcmVlZm9ybSAncXVlcnknIiwicmVtZWRpYXRpb24iOiJDb25zdHJhaW4gJ3F1ZXJ5JyB3aXRoIGFuIGVudW0vcGF0dGVybjsgZnJlZWZvcm0gaXMgYW4gaW5qZWN0aW9uL1JDRSB2ZWN0b3IuIiwic2V2ZXJpdHkiOiJoaWdoIiwic2hpcHBlZCI6dHJ1ZX1dLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjoxfSwicG9zaXRpdmVTaWduYWxzIjpbIjIgdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0Ijoid2FybmluZ3MiLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDptaWdyYXRlX3BhZ2VzX3RvX3dvcmtlcnNfZ3VpZGUiOiJzaGEyNTY6NGNlYTQ4YjFkYTdlMWNmOWI5NjRkMzk1NjhjNzM1OTNiMmE3MjZkMDlmNTdmMDIwODBjZDg5Yjk3NTNiMmEwMSIsInRvb2w6c2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbiI6InNoYTI1Njo2Mjk0ZTk5MTk3ZjA2NWY0MDAxNGM4ZjQzYjBjZDYzMmFmZmIyMjdmNzkwZThlYzU3YjhjMjFlNzc5MzdhODRiIn0sInRvb2xNYW5pZmVzdERpZ2VzdCI6InNoYTI1NjoyMTFkNjRiNDk2NGMxZmE5YmJhN2Q0ZDIxYjdkMGY0ODZjN2U2MWY0MGYyZmI3MjA2NzAwNDUxOTJlZGM5ZGE1IiwidHJ1c3RTY29yZSI6NjMsInRydXN0VGllciI6InN0YW5kYXJkIn0sInNjYW5uZWRBdCI6IjIwMjYtMTAtMTNUMTY6MDg6MzkuMDU1WiIsInN1YmplY3QiOnsiaWQiOiJtY3A6aHR0cHM6Ly9kb2NzLm1jcC5jbG91ZGZsYXJlLmNvbS9tY3AiLCJyZXBvIjoibWNwOmh0dHBzOi8vZG9jcy5tY3AuY2xvdWRmbGFyZS5jb20vbWNwIn0sInR5cGUiOiJTZWN1cml0eVBvc3R1cmVBdHRlc3RhdGlvbiJ9.QIn7QsESz_mN3fOnF1DrS979f4EUJpuCdBYy3UIB1GtdYUpYuwC5LA6GJNNIM6y84KW5wPhoQwmWzJS7K8QcBg",
+  "observed_tools": [
+    {
+      "name": "search_cloudflare_documentation",
+      "description": "Search the Cloudflare documentation.\n\n\t\tThis tool should be used to answer any question about Cloudflare products or features, including:\n\t\t- Workers, Pages, R2, Images, Stream, D1, Durable Objects, KV, Workflows, Hyperdrive, Queues\n\t\t- AI Search, Workers AI, Vectorize, AI Gateway, Browser Run\n\t\t- Zero Trust, Access, Tunnel, Gateway, Browser Isolation, WARP, DDOS, Magic Transit, Magic WAN\n\t\t- CDN, Cache, DNS, Zaraz, Argo, Rulesets, Terraform, Account and Billing\n\n\t\tResults are returned as semantically similar chunks to the query.\n\t\t",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Search Cloudflare docs",
+        "readOnlyHint": true
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "similarity": {
+                  "type": "number",
+                  "description": "Similarity score from AI Search"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Source file ID"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Developer documentation URL"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Documentation page title"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Matching documentation chunk text"
+                }
+              },
+              "required": [
+                "similarity",
+                "id",
+                "url",
+                "title",
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "migrate_pages_to_workers_guide",
+      "description": "ALWAYS read this guide before migrating Pages projects to Workers.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Get Pages migration guide",
+        "readOnlyHint": true
+      }
+    }
+  ]
+}
