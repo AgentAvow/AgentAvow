@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "app-6aac4159c8a88191b820a458ef455b03",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Scan an MCP server, package, or GitHub repo for a signed 0-100 trust score before your agent connects to it.",
   "author": {
     "name": "AgentAvow",
@@ -22,7 +22,7 @@
       "interface": {
         "displayName": "AgentAvow",
         "shortDescription": "Is this tool safe to connect?",
-        "longDescription": "AgentAvow tells you whether a tool is safe before your agent connects to it. Give it an MCP server, a package (npm, PyPI, crates, Docker, or Hugging Face), or a GitHub repo, and it answers in plain words: Safe to connect, Review before you connect, or Do not connect, with the reason. Underneath are two scores: a 0–100 trust score, backed by a signed attestation anyone can recompute offline, and an adoption score built from real usage (downloads, stars, installs). It checks for known-malicious versions, published advisories, supply-chain and dependency risk, and code-safety issues, can run the tool in a sandbox to see what it actually does, and shows an interactive trust card. Eight read-only tools cover scanning a repo, package, or live MCP server; verifying a score; checking interaction safety before you connect; looking up an identity; and getting an embeddable badge. No account, no sign-in, and nothing is modified — every call is anonymous and read-only.",
+        "longDescription": "AgentAvow tells you whether a tool is safe before your agent connects to it. Give it an MCP server, a package from npm, PyPI, crates or Docker, or a GitHub repo, and it answers in plain words: Safe to connect, Review before you connect, or Do not connect, with the reason. Underneath are two scores: a 0–100 trust score, backed by a signed attestation anyone can recompute offline, and an adoption score built from real usage (downloads, stars, installs). It checks for known-malicious versions, published advisories, supply-chain and dependency risk, and code-safety issues, can run the tool in a sandbox to see what it actually does, and shows an interactive trust card. Eight read-only tools cover scanning a repo, package, or live MCP server; verifying a score; checking interaction safety before you connect; looking up an identity; and getting an embeddable badge. No account, no sign-in, and nothing is modified — every call is anonymous and read-only.",
         "developerName": "Kenne Ives",
         "category": "Developer Tools",
         "capabilities": [
