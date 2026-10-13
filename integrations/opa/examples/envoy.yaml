@@ -1,0 +1,18 @@
+# Excerpt: Envoy HTTP filter chain for an MCP route, asking OPA-Envoy (gRPC on
+# :9191, query data.agentavow.envoy.result) before the request reaches the server.
+http_filters:
+  - name: envoy.filters.http.ext_authz
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+      transport_api_version: V3
+      with_request_body:
+        max_request_bytes: 65536
+        allow_partial_message: false
+      failure_mode_allow: false   # if OPA is down, refuse (fail closed)
+      grpc_service:
+        envoy_grpc:
+          cluster_name: opa
+        timeout: 15s
+  - name: envoy.filters.http.router
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

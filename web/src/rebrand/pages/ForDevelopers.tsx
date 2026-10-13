@@ -164,6 +164,8 @@ export default function RebrandForDevelopers() {
               ['Flue', 'gate the tools a Flue agent connects to', '/rebrand/docs/gate-on-the-grade#flue'],
               ['Claude Agent SDK', 'leave out a server that fails, and deny each mcp__ call that does', '/rebrand/docs/gate-on-the-grade#claude-agent-sdk'],
               ['OpenAI Agents SDK', 'wrap an MCP server so connect, listTools and callTool are checked', '/rebrand/docs/gate-on-the-grade#openai-agents-sdk'],
+              ['Open Policy Agent', 'a Rego policy your gateway or Envoy asks before a server or tool call', '/rebrand/docs/gate-on-the-grade#open-policy-agent'],
+              ['LiteLLM proxy', 'a guardrail on every MCP tool call through LiteLLM\'s MCP gateway', '/rebrand/docs/gate-on-the-grade#litellm-proxy'],
               ['Behavioral sandbox', 'see what a package actually does when it runs', '/rebrand/sandbox'],
               ['Claim your repo', 'prove you own it and manage its listing', '/rebrand/claim'],
             ] as const).map(([h, p, to]) => (
