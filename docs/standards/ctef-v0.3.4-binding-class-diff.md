@@ -26,6 +26,10 @@ code lands through the unified vocabulary (hosted in
 > kenneives; bound each `live_source` recipe to a digest and explicit format /
 > canonicalization per follow-up from babyblueviper1 and vdineshk; added the
 > CTEF license line.
+>
+> **r4 (2026-10-13):** clarified that a verified recipe does not establish
+> historical-input availability or a live-source match, and unavailable
+> historical inputs do not mean “no drift,” per babyblueviper1's follow-up.
 
 ---
 
@@ -114,8 +118,12 @@ payload. Normative rules:
   body could not be retrieved), `digest_mismatch` (the retrieved or inline body
   does not match `recipe_sha256`), or `verified` (the body is available and its
   digest matches). Historical capture-input availability is a separate status,
-  even when the recipe is verified. The first three recipe outcomes do not
-  establish "no drift".
+  even when the recipe is verified. A `verified` recipe establishes only that
+  the recipe body matches its digest; it does not establish that historical
+  capture inputs were available or that the live source matched them. If the
+  historical inputs are unavailable, the observation cannot be repeated and
+  that absence MUST NOT be reported or inferred as "no drift." The first three
+  recipe outcomes also do not establish "no drift."
 
 The two values are what let the same boolean (recompute failed) route to two
 different verdict paths without ambiguity.
