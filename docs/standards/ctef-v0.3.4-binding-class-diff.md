@@ -21,15 +21,20 @@ code lands through the unified vocabulary (hosted in
 > **r2 (2026-10-12):** adopted review feedback from babyblueviper1 (§5
 > append-only requirement) and vdineshk (§4 `live_source` capture recipe), both
 > from PR review comments.
+>
+> **r3 (2026-10-13):** corrected the confidence-product explanation per
+> kenneives; bound each `live_source` recipe to a digest and explicit format /
+> canonicalization per follow-up from babyblueviper1 and vdineshk; added the
+> CTEF license line.
 
 ---
 
 ## §1 — Motivation
 
-The confidence arithmetic composes signal conficiencies multiplicatively. When
-`measured` and `asserted` signals enter one product, the asserted ones are
-silently upgraded to the geometric mean of the two trust levels — the product
-hides the split the arithmetic needs to respect.
+The confidence arithmetic composes signal confidences multiplicatively. When
+`measured` and `asserted` confidences are multiplied, nothing in the result
+distinguishes the asserted factor from the measured one, so the product carries
+a trust level only the issuer can vouch for.
 
 One attestation can also legitimately carry both classes. The decomposition
 kenneives gave for AgentAvow (A2A #1734, comment 18867889):
@@ -48,7 +53,17 @@ prevent; the class therefore attaches **per signal**, not per envelope.
 ```jsonc
 "binding": {
   "class": "measured",              // REQUIRED: "measured" | "asserted"
-  "recompute": "pinned_inputs",     // measured only: "pinned_inputs" | "live_source"
+  "recompute": "live_source",       // measured only: "pinned_inputs" | "live_source"
+  "recipe_sha256": "<64 lowercase hex>", // live_source only: pins the recipe body
+  "recipe_format": "ctef-live-capture-recipe/1", // live_source only
+  "recipe_canonicalization": "RFC8785-JCS", // live_source only
+  "recipe": {                        // exactly one of recipe / recipe_uri
+    "endpoint": "https://example.test/source",
+    "request": { "method": "GET" },
+    "canonical_representation": "RFC8785-JCS",
+    "captured_at": "2026-10-13T00:00:00Z"
+  },
+  // "recipe_uri": "https://…",      // use this instead of recipe for a reference
   "settlement": "https://…"         // asserted only: issuer's public settle commitment
 }
 ```
@@ -64,6 +79,9 @@ payload. Normative rules:
    `asserted` — fail-closed; unverifiable signals do not gain measured
    weighting by omitting the field.
 3. `recompute` and `settlement` are each valid only for their class (§4, §5).
+   A `live_source` binding MUST include `recipe_sha256`, `recipe_format`, and
+   `recipe_canonicalization`, and MUST provide exactly one of `recipe` (inline
+   body) or `recipe_uri` (reference).
 
 ## §3 — Class definitions
 
@@ -83,11 +101,21 @@ payload. Normative rules:
   mismatch is a **drift signal** (soft, time-bounded re-check), not proof of
   tampering. A `live_source` signal MUST carry a reproducible capture recipe —
   source endpoint, request/initialization steps, canonical representation, and
-  capture time. Naming the recompute mode without the recipe still leaves two
+  capture time. The required `binding.recipe_sha256` pins the recipe body
+  whether it is inline or referenced; `recipe_format` and
+  `recipe_canonicalization` identify how to interpret and canonicalize it. The
+  digest is SHA-256 over the recipe bytes produced by that canonicalization.
+  Naming the recompute mode without this bound recipe still leaves two
   independent verifiers free to hash different representations of the same
-  response. The recipe's availability and the availability of the historical
-  inputs are separate properties: a verifier MUST be able to see which one is
-  missing, and neither absence may be read as "no drift".
+  response.
+
+  A verifier MUST report one recipe outcome: `absent` (a required binding
+  member or body/reference is missing), `referenced_unavailable` (the referenced
+  body could not be retrieved), `digest_mismatch` (the retrieved or inline body
+  does not match `recipe_sha256`), or `verified` (the body is available and its
+  digest matches). Historical capture-input availability is a separate status,
+  even when the recipe is verified. The first three recipe outcomes do not
+  establish "no drift".
 
 The two values are what let the same boolean (recompute failed) route to two
 different verdict paths without ambiguity.
@@ -123,3 +151,5 @@ checkable downstream.
 that ignore unknown payload members are unaffected. No canonicalization change
 — JCS already covers the payload, so `binding` enters existing hashes without
 a migration.
+
+*Licence: CC BY 4.0; see CTEF-LICENSE.md.*
