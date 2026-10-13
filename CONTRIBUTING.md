@@ -10,6 +10,7 @@ material and the Claude Code plugin take outside contributions; the product does
 |---|---|---|
 | `docs/standards/tool-manifest-digest-vectors-v0/` | Apache-2.0 | Welcome: new vectors, verifier fixes, reproductions |
 | `docs/standards/tool-manifest-digest-vectors-v1/` | Apache-2.0 | Welcome: new vectors, verifier fixes, reproductions |
+| `docs/standards/tool-manifest-digest-vectors-v1-annotations/` | Apache-2.0 | Welcome: new vectors, verifier fixes, reproductions |
 | `docs/standards/attribution-record-v0/` | Apache-2.0 | Welcome: record format, fixtures, verifier fixes |
 | `plugins/agentavow-trust/` | MIT | Welcome: bug fixes and hook improvements |
 | CTEF specification documents in `docs/standards/` (listed in `docs/standards/CTEF-LICENSE.md`) | CC BY 4.0 | Welcome: spec diffs for the next version, corrections, worked examples |

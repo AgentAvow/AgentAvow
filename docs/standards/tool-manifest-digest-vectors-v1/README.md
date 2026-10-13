@@ -260,3 +260,7 @@ who performs it.
   (merged 2026-10-07) with per-claim records: an independent record for the key encoding, per-tool
   digests, canonical bytes, signature and case verdicts (a lab-operated run of a reader written by
   Probity), and independently operated runs of these verifiers for v0 and the one-axis property.
+
+## See also
+
+- [v1-annotations](../tool-manifest-digest-vectors-v1-annotations/): a separate pinned packet adding an annotation-only drift case; this packet and its run records are unchanged.
