@@ -954,6 +954,43 @@ async def _track_checker(request) -> None:
         pass
 
 
+def _qbool(v: object) -> bool:
+    """A route parameter as a real bool. Called directly (internal callers, scripts), an
+    omitted parameter is FastAPI's ``Query(False)`` object, which is TRUTHY; only a real
+    bool counts."""
+    return v if isinstance(v, bool) else False
+
+
+def _qstr(v: object) -> str | None:
+    """A route parameter as a str or None (an omitted ``Query(None)`` reads None)."""
+    return v if isinstance(v, str) else None
+
+
+async def _page_decision(
+    data: dict, coordinate: tuple[str, str] | None = None,
+) -> tuple[str, str]:
+    """(decision, reason) the tool's own result page leads with for this scan result:
+    ``decide()`` over the full scan data (advisories, deprecation, malicious
+    dependencies, coverage) with a CACHED sandbox block folded in, as
+    ``_package_response`` does. Cache-only: never starts a sandbox run. A run still
+    pending has no say in the decision, so it is left out and the stored reason carries
+    no "sandbox pending" suffix that would go stale."""
+    block = None
+    try:
+        block = await _cached_behavioral_for(_package_sandbox_input(data, coordinate))
+        if not isinstance(block, dict) or block.get("pending"):
+            block = None
+    except Exception:  # noqa: BLE001 — no block = the static answer
+        logger.debug("cached sandbox lookup failed for %s", coordinate, exc_info=True)
+    try:
+        applied = _apply_behavioral_score(data, block) if block else data
+    except Exception:  # noqa: BLE001
+        logger.debug("sandbox score effect failed for %s", coordinate, exc_info=True)
+        applied, block = data, None
+    d = _decide({**applied, "behavioral": block})
+    return d.decision, d.reason
+
+
 async def _capture_community_scan(
     owner: str, repo: str, data: dict, db: AsyncSession, surface: str = "github",
 ) -> None:
@@ -1002,6 +1039,8 @@ async def _capture_community_scan(
         _full = repo
     else:  # github / openclaw
         _full = f"{owner}/{repo}"
+    _dec, _dec_reason = await _page_decision(data, (owner, repo)) if _score is not None \
+        else (None, None)
     values = dict(
         surface=surface,
         owner=owner,
@@ -1013,6 +1052,8 @@ async def _capture_community_scan(
         high=findings.get("high"),
         findings_count=findings.get("total"),
         primary_language=lang,
+        decision=_dec,
+        decision_reason=_dec_reason,
         scan_count=1,
     )
     stmt = pg_insert(CommunityScan).values(**values).on_conflict_do_update(
@@ -1020,6 +1061,8 @@ async def _capture_community_scan(
         set_=dict(
             trust_score=values["trust_score"],
             grade=values["grade"],
+            decision=values["decision"],
+            decision_reason=values["decision_reason"],
             critical=values["critical"],
             high=values["high"],
             findings_count=values["findings_count"],
@@ -1730,6 +1773,8 @@ async def scan_package_endpoint(
     bytes (``scan_depth = artifact``) with the package's own build provenance
     verified. E.g. ``/public/scan/package/npm/chalk`` or
     ``/public/scan/package/pypi/requests?version=2.32.5``. Cached 1h."""
+    force, behavioral, stored = _qbool(force), _qbool(behavioral), _qbool(stored)
+    version = _qstr(version)
     surface = (surface or "").strip().lower()
     if surface == "python":
         surface = "pypi"
@@ -1851,7 +1896,7 @@ async def scan_skill_endpoint(
     scripts. `coverage.surface = openclaw`. E.g. `/public/scan/skill/owner/repo`.
     The behavioral sandbox (plan `skill`) clones the repo and runs its hooks and
     scripts; the signed observation comes back in `behavioral`."""
-    return await _skill_scan(owner, repo, None, request, force, behavioral)
+    return await _skill_scan(owner, repo, None, request, _qbool(force), _qbool(behavioral))
 
 
 @router.get(
@@ -1875,7 +1920,8 @@ async def scan_one_skill_endpoint(
     if (not skill_path or ".." in skill_path or len(skill_path) > 200
             or not all(c.isalnum() or c in "-_./" for c in skill_path)):
         raise HTTPException(400, "Invalid skill path")
-    return await _skill_scan(owner, repo, skill_path, request, force, behavioral)
+    return await _skill_scan(owner, repo, skill_path, request, _qbool(force),
+                             _qbool(behavioral))
 
 
 async def _skill_scan(
@@ -2050,6 +2096,8 @@ async def scan_mcp_endpoint(
     E.g. `/public/scan/mcp?endpoint=https://mcp.example.com/mcp`.
     `&probe=true` additionally runs the opt-in live probe (see `probe`)."""
     import hashlib
+
+    force, probe = _qbool(force), _qbool(probe)
 
     from src.ssrf import CredentialedURLError, mcp_endpoint_identity, validate_url_https
 
