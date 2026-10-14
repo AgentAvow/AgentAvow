@@ -118,6 +118,24 @@ SHELL_DANGER_RE = re.compile(
     r"""\bchmod\s+\+x\b|\beval\b|\b(?:ba)?sh\s+-c\b|\bpython3?\s+-c\b|\bnode\s+-e\b""",
     re.IGNORECASE,
 )
+# Precision PR 2: the PAYLOAD tokens of a shell string, i.e. what makes a shell command
+# more than "runs these programs": a downloader, a decoder, an inline interpreter, a
+# URL, a subshell, a /dev/tcp socket. Pipes, `;`, `&&` and redirects between fixed
+# programs are not on this list: a shell string whose text is visible and free of these
+# tokens is a medium, not a high.
+SHELL_PAYLOAD_DANGER_RE = re.compile(
+    r"""\$\(|`|>\s*/dev/(?:tcp|udp)|\bcurl\b|\bwget\b|https?://|\bbase64\b|\bnc\b|\bncat\b|"""
+    r"""\bsocat\b|\bchmod\s+\+x\b|\beval\b|\b(?:ba|z|da|k)?sh\s+-c\b|\bpython[\d.]*\s+-c\b|"""
+    r"""\bnode\s+-e\b|\bperl\s+-e\b|\bruby\s+-e\b|-enc(?:odedcommand)?\b|\biex\b|"""
+    r"""invoke-expression|downloadstring|frombase64string|"""
+    # piping into a shell / interpreter
+    r"""\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b|\|\s*(?:python[\d.]*|node|perl|ruby)\b|"""
+    # recursive delete of a root / home path
+    r"""\brm\s+-\w*[rR]\w*\s+(?:--no-preserve-root\s+)?(?:/|~|\$HOME|\$\{HOME\})(?=[\s*;&|'"]|$)|"""
+    # credential files
+    r"""\.ssh/|id_rsa|\.aws/credentials|/etc/(?:passwd|shadow)|\.netrc|\.npmrc|\.pypirc""",
+    re.IGNORECASE,
+)
 # An eval/exec argument that is DECODED first (base64 / hex / zlib / reversed) is the
 # obfuscated-loader shape, never a legitimate library pattern.
 DECODE_SINK_RE = re.compile(
@@ -237,7 +255,11 @@ EXFILTRATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "HTTP POST with sensitive data",
         re.compile(
-            r"""(?:requests\.post|httpx\.post|fetch|axios\.post)\s*\([^)]*(?:key|secret|token|password|credential)""",
+            # `fetch` is the global fetch() only: not a method (`db.fetch(key)`), not
+            # part of a name (`get_or_fetch(self._key)`), not a definition
+            # (`def fetch(self, key)`, `async fetch(key) {`). Precision PR 2.
+            r"""(?:requests\.post|httpx\.post|(?<![\w.$])(?<!def )(?<!function )(?<!async )"""
+            r"""fetch|axios\.post)\s*\([^)]*(?:key|secret|token|password|credential)""",
             re.IGNORECASE,
         ),
         "high",
@@ -256,7 +278,10 @@ EXFILTRATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "Base64 encode + send",
-        re.compile(r"base64\.b64encode.*(?:post|send|request)", re.IGNORECASE),
+        # The send must be a CALL (`.post(`, `send(`, `urlopen(`): the bare word matched
+        # OAuth's `request.body` / `request_token["key"]` (precision PR 2).
+        re.compile(r"base64\.b64encode.*\b(?:post|send\w*|request|urlopen|fetch)\s*\(",
+                   re.IGNORECASE),
         "high",
     ),
     (
@@ -301,7 +326,8 @@ DYNAMIC_REMOTE_LOAD_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "Remote response text fed to exec/eval (Python)",
-        re.compile(r"""(?:eval|exec)\s*\(.*\.(?:text|content|body|json\(\))"""),
+        # Bare eval/exec only: `ast.literal_eval(parsed.body)` is the safe parser.
+        re.compile(r"""(?<![\w.])(?:eval|exec)\s*\(.*\.(?:text|content|body|json\(\))"""),
         "high",
     ),
     (
@@ -742,7 +768,10 @@ OBFUSCATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "Reversed/rotated string decode",
         re.compile(
-            r"""(?:reversed|rot13|codecs\.decode)\s*\(.*(?:exec|eval|import)""",
+            # Bounded, and the sink must be a call: in a minified bundle a `reversed(`
+            # and the word "important" 10 KB apart are not decode-then-exec.
+            r"""(?<![\w.])(?:reversed|rot13|codecs\.decode)\s*\(.{0,200}?"""
+            r"""\b(?:exec|eval|__import__|import_module)\s*\(""",
             re.IGNORECASE,
         ),
         "high",

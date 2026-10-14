@@ -716,6 +716,7 @@ _HEX_SINK_RE = re.compile(
     r"\b(?:exec|eval|Function|fromhex|unhexlify|b64decode|decompress|compile)\s*\(|vm\.run",
 )
 _HEX_SKIP_LANGS = frozenset({"rust", "go", "java"})
+_HEX_SINK_CHARS = 400    # ... and within this many characters of the hex run
 _DECODED_EXEC_LINE_RE = next(
     p for n, p, _s in OBFUSCATION_PATTERNS if n == "Decoded payload fed to exec/eval"
 )
@@ -913,6 +914,48 @@ def _in_prose_string_at(line: str, pos: int, start_in: str | None = None) -> boo
     return len(line[str_start:pos].split()) >= 3
 
 
+# npm runs only these package.json scripts on a consumer's machine (`npm install` of the
+# package as a dependency); everything else under "scripts" is the maintainer's.
+_NPM_CONSUMER_SCRIPTS = frozenset({
+    "preinstall", "install", "postinstall", "prepare", "preprepare", "postprepare",
+})
+_PKG_JSON_SCRIPT_RE = re.compile(r'^\s*"([^"]+)"\s*:\s*"')
+_HELP_PRINT_RE = re.compile(
+    r"\b(?:console\.(?:log|error|warn|info)|print|echo|usage|USAGE|help|HELP)\b|"
+    r"process\.std(?:out|err)\.write|sys\.std(?:out|err)\.write")
+
+
+def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = None) -> bool:
+    """An `npx <pkg>` that never runs for a consumer (precision PR 2): a maintainer script
+    in package.json (not an install lifecycle hook), or help text a CLI prints, i.e.
+    the match sits in a string literal that is indented help (`'  npx foo\\n'`), carries
+    a `\\n` escape, or is on a print/usage line."""
+    if Path(file_path).name.lower() == "package.json":
+        m = _PKG_JSON_SCRIPT_RE.match(line)
+        return bool(m and m.group(1) not in _NPM_CONSUMER_SCRIPTS and m.end() <= pos)
+    in_str: str | None = start_in
+    escape = False
+    str_start = 0
+    for i, ch in enumerate(line[:pos]):
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+        elif ch in "'\"`":
+            in_str = ch
+            str_start = i + 1
+    if in_str is None:
+        return False
+    before = line[str_start:pos]
+    if before.startswith("  ") and not before.strip():
+        return True
+    tail = line[str_start:]
+    return "\\n" in tail or bool(_HELP_PRINT_RE.search(line))
+
+
 def _pem_has_body(lines: list[str], idx: int, marker_end: int) -> bool:
     """True when a real key body follows the PEM header at ``lines[idx]``: a base64 run
     of key-line length on the same line (after a ``\\n`` escape), within the next 2
@@ -944,6 +987,18 @@ def _generic_secret_plausible(value: str) -> bool:
     n = len(value)
     entropy = -sum((c / n) * math.log2(c / n) for c in counts.values())
     return entropy >= 3.5
+
+
+_SHARED_KEY_NAME_RE = re.compile(
+    r"(?i)(?:default|public|demo|shared|sample|example|dummy|fake|placeholder|community)")
+
+
+def _assigned_identifier(line: str, key_pos: int) -> str:
+    """The whole identifier the generic-key rule matched inside: `defaultApiKey` for a
+    match that starts at `ApiKey`, `DEMO_TOKEN` for one that starts at `TOKEN`."""
+    head = re.search(r"[\w$]*$", line[:key_pos])
+    tail = re.match(r"[\w$]*", line[key_pos:])
+    return (head.group(0) if head else "") + (tail.group(0) if tail else "")
 
 
 def _resolve_py_assignment(lines: list[str], idx: int, name: str):
@@ -1026,6 +1081,43 @@ def _cooccur(
     return best
 
 
+def _cooccur_flow(
+    lines: list[str], prose: set[int], is_src, re_b: re.Pattern, max_lines: int,
+    exclude_b: re.Pattern | None = None,
+) -> int | None:
+    """Like :func:`_cooccur`, but the ``re_b`` sink must USE the source: the source
+    expression inline on the sink's line after the sink, or a name tainted from a
+    source line (assigned from it, directly or through other names). Earliest 0-based
+    line of a qualifying pair within ``max_lines`` / ``_COOCCUR_MAX_CHARS``."""
+    offsets: list[int] = []
+    pos = 0
+    for ln in lines:
+        offsets.append(pos)
+        pos += len(ln) + 1
+    src_lines = [i for i, ln in enumerate(lines) if i not in prose and is_src(ln)]
+    if not src_lines:
+        return None
+    src_set = set(src_lines)
+    tainted = _tainted_names(lines, 0, len(lines), lambda n, _ln: n in src_set)
+    best: int | None = None
+    for bi, ln in enumerate(lines):
+        if bi in prose or (exclude_b and exclude_b.search(ln)):
+            continue
+        m = re_b.search(ln)
+        if not m:
+            continue
+        sink_tail = ln[m.start():] + "\n" + (lines[bi + 1] if bi + 1 < len(lines) else "")
+        uses = is_src(ln[m.start():]) or any(_uses_name(sink_tail, t) for t in tainted)
+        if not uses:
+            continue
+        bp = offsets[bi] + m.start()
+        for ai in src_lines:
+            if abs(ai - bi) <= max_lines and abs(offsets[ai] - bp) <= _COOCCUR_MAX_CHARS:
+                cand = min(ai, bi)
+                best = cand if best is None else min(best, cand)
+    return best
+
+
 _LOADER_CTX_RE = re.compile(
     r"fetch\s*\(|urlopen|urlretrieve|requests\.|httpx\.|axios|https?\.get|\bcurl\b|\bwget\b|"
     r"pip\s+install|npm\s+install|\bimport\b|\brequire\s*\(|download|\bexec\s*\(|"
@@ -1051,8 +1143,11 @@ _UNTRUSTED_DEF_RE = re.compile(
 
 
 def _untrusted_lines(lines: list[str]) -> list[int]:
+    # A comment that mentions a webhook / fetch is not an ingestion point (next.js
+    # run-tests.js: "parsed by the commenter webhook", precision PR 2).
     return [i for i, ln in enumerate(lines)
-            if UNTRUSTED_INPUT_RE.search(ln) and not _UNTRUSTED_DEF_RE.search(ln)]
+            if UNTRUSTED_INPUT_RE.search(ln) and not _UNTRUSTED_DEF_RE.search(ln)
+            and not ln.lstrip().startswith(("#", "//", "*", "/*"))]
 
 
 def _near(idxs: list[int], idx: int, window: int) -> bool:
@@ -1126,6 +1221,88 @@ def _untrusted_flows(lines: list[str], idx: int, call_src: str, untrusted: list[
     tainted = _tainted_names(lines, idx - _UNTRUSTED_WINDOW, idx + 1,
                              lambda n, _ln: n in src)
     return any(_uses_name(call_src, t) for t in tainted)
+
+
+# `'.'.join(ids[::-1])` reverses a LIST of names (IPython's completer); it is not the
+# reversed-string decode that `[::-1]` in DECODE_SINK_RE is for.
+_JOIN_REVERSED_LIST_RE = re.compile(r"""['"][^'"]+['"]\s*\.\s*join\s*\([^)]*\[::-1\]""")
+
+
+def _is_decode_line(line: str) -> bool:
+    return bool(DECODE_SINK_RE.search(line)) and not (
+        _JOIN_REVERSED_LIST_RE.search(line)
+        and not DECODE_SINK_RE.search(_JOIN_REVERSED_LIST_RE.sub(" ", line)))
+
+
+def _decoded_flows(lines: list[str], idx: int, call_src: str) -> bool:
+    """Does a DECODED value (base64 / hex / zlib / reversed string) build this call?
+    Inline in the call, or through a name assigned from a decode within 80 lines above.
+    A decoded payload handed to a shell keeps the shell finding high (precision PR 2)."""
+    if _is_decode_line(call_src):
+        return True
+    tainted = _tainted_names(lines, idx - 80, idx + 1,
+                             lambda _n, ln: _is_decode_line(ln))
+    return any(_uses_name(call_src, t) for t in tainted)
+
+
+_EVAL_METHOD_CALL_RE = re.compile(r"\.(?:eval|exec|runsource|runcode|run_code)\s*\(")
+_PY_CALL_RE = re.compile(r"(?<![\w.])(?:self\.|cls\.)?([A-Za-z_]\w*)\s*\(")
+
+
+def _untrusted_to_eval_method(lines: list[str], untrusted: list[int],
+                              prose: set[int]) -> int | None:
+    """0-based line of the first ``.eval(`` / ``.exec(`` / ``.runsource(`` method call
+    whose argument carries untrusted input: inline, through a name assigned from it, or
+    through the parameter of a function in this file that such a name is passed to (one
+    hop). ``None`` when there is no such flow."""
+    from src.scanner.exec_classify import extract_call, split_top_level_args
+
+    src = set(untrusted)
+    tainted = _tainted_names(lines, 0, len(lines), lambda n, _ln: n in src)
+    if not tainted and not any(_EVAL_METHOD_CALL_RE.search(lines[i]) for i in untrusted):
+        return None
+    # One hop: `self.execute_command(request, cmd, frame)` taints the matching parameter
+    # of `def execute_command(self, request, command, frame)`.
+    defs: dict[str, list[str]] = {}
+    for i, ln in enumerate(lines):
+        m = re.match(r"\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(", ln)
+        if m:
+            sig = " ".join(lines[i: i + 8])
+            got = extract_call([sig], 0, 0, lang="python", max_lines=1)
+            inner = got[0][got[0].find("(") + 1: -1] if got else ""
+            params = [re.split(r"[:=]", p)[0].strip().lstrip("*")
+                      for p in split_top_level_args(inner)]
+            defs[m.group(1)] = [p for p in params if p and p not in ("self", "cls", "/", "")]
+    hop: set[str] = set()
+    for i, ln in enumerate(lines):
+        if i in prose or not tainted:
+            continue
+        for m in _PY_CALL_RE.finditer(ln):
+            params = defs.get(m.group(1))
+            if not params:
+                continue
+            got = extract_call(lines, i, m.start(1), lang="python", max_lines=6)
+            if not got:
+                continue
+            call = got[0]
+            args = split_top_level_args(call[call.find("(") + 1: -1])
+            for k, a in enumerate(args):
+                if "=" in a.split("(")[0] or k >= len(params):
+                    continue
+                if any(_uses_name(a, t) for t in tainted):
+                    hop.add(params[k])
+    reach = tainted | hop
+    for i, ln in enumerate(lines):
+        if i in prose:
+            continue
+        m = _EVAL_METHOD_CALL_RE.search(ln)
+        if not m:
+            continue
+        got = extract_call(lines, i, m.start() + 1, lang="python", max_lines=6)
+        arg = got[0] if got else ln[m.start():]
+        if UNTRUSTED_INPUT_RE.search(arg) or any(_uses_name(arg, t) for t in reach):
+            return i
+    return None
 
 
 # JS: the program's OWN command line / environment.
@@ -1216,6 +1393,57 @@ def _cli_origin(lines: list[str], idx: int, has_cli_import: bool) -> bool:
     return False
 
 
+# Decorators that make a function's PARAMETERS come from a remote party: a web route, a
+# chat-bot command, an agent / MCP tool, an event handler. (A click / typer command is
+# the program's own CLI, see `_cli_origin`; this rule never applies in such a file.)
+_REMOTE_HANDLER_DECORATOR_RE = re.compile(
+    r"^\s*@(?:[\w.]+\.)?(?:route|get|post|put|patch|delete|websocket|command|tool|call_tool|"
+    r"event|listen|listener|message_handler|on_message|handler|task|slash_command|"
+    r"hybrid_command|app_command)\b"
+    r"|^\s*@(?:tool|mcp_tool|function_tool)\b",
+)
+_PY_PARAM_RE = re.compile(r"(?:^|,|\()\s*\*{0,2}([A-Za-z_]\w*)\s*(?=[:=,)])")
+
+
+def _remote_handler_params(lines: list[str], idx: int, has_cli_import: bool) -> set[str]:
+    """Parameters of the function enclosing ``lines[idx]`` when it is a remote-entry
+    handler (see above), else empty. Precision PR 2: with the shell ladder, such a
+    parameter reaching a command is "untrusted input in reach" (high)."""
+    if has_cli_import or idx >= len(lines):
+        return set()
+    cur = len(lines[idx]) - len(lines[idx].lstrip())
+    for n in range(idx - 1, max(-1, idx - 400), -1):
+        st = lines[n].lstrip()
+        if not st or st.startswith(("#", ")", "]", "}")):
+            continue
+        ind = len(lines[n]) - len(st)
+        if ind >= cur:
+            continue
+        cur = ind
+        if not st.startswith(("def ", "async def ")):
+            if ind == 0:
+                return set()
+            continue
+        decorated = False
+        for k in range(n - 1, max(-1, n - 15), -1):
+            dst = lines[k].lstrip()
+            if not dst.startswith("@") and not dst.startswith(")"):
+                if dst and len(lines[k]) - len(dst) <= ind:
+                    break
+                continue
+            if _REMOTE_HANDLER_DECORATOR_RE.match(lines[k]):
+                decorated = True
+                break
+        if not decorated:
+            return set()
+        sig = " ".join(lines[n: min(len(lines), n + 10)])
+        open_i = sig.find("(")
+        close_i = sig.find(")", open_i)
+        params = {m.group(1) for m in _PY_PARAM_RE.finditer(sig[open_i: close_i + 1])}
+        return params - {"self", "cls", "ctx", "context", "interaction", "request", "req"}
+    return set()
+
+
 def _in_py_string_literal(line: str, pos: int) -> bool:
     """Is ``line[pos]`` inside a single-line ``'…'`` / ``"…"`` literal? (A matched
     ``shell=True`` inside an error message is text, not a keyword argument.)"""
@@ -1237,6 +1465,52 @@ def _in_py_string_literal(line: str, pos: int) -> bool:
     return q is not None
 
 
+_JS_METHOD_DEF_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:async|static|public|private|protected|export|override)\s+)*\*?\s*$")
+_JS_METHOD_DEF_RE = re.compile(
+    r"[\w$]+\s*\([^()]*\)\s*(?::\s*[\w$<>\[\]|,. ]+)?\s*\{")
+
+
+def _js_call_is_text_or_def(line: str, pos: int, start_in: str | None = None) -> bool:
+    """Is the exec-family name at ``line[pos]`` NOT a call: inside a string literal or a
+    comment on this line, or the name of a definition (`function execSync(cmd) {`, a
+    class method `exec(cmd, opts) {`)? ``start_in`` seeds the state for a line that
+    begins inside a template literal opened earlier. Precision PR 2."""
+    in_str: str | None = start_in
+    escape = False
+    i = 0
+    while i < pos:
+        ch = line[i]
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+            elif in_str == "`" and line.startswith("${", i):
+                return False  # code inside a template expression
+            i += 1
+            continue
+        if line.startswith("//", i):
+            return True
+        if line.startswith("/*", i):
+            end = line.find("*/", i + 2)
+            if end == -1 or end >= pos:
+                return True
+            i = end + 2
+            continue
+        if ch in "'\"`":
+            in_str = ch
+        i += 1
+    if in_str is not None:
+        return True
+    head = line[:pos]
+    if re.search(r"\bfunction\s*\*?\s*$", head):
+        return True
+    return bool(_JS_METHOD_DEF_PREFIX_RE.match(head) and _JS_METHOD_DEF_RE.match(line, pos))
+
+
 def _classify_exec_match(
     lines: list[str], idx: int, match: re.Match, file_lang: str | None,
     untrusted: list[int], has_cli_import: bool = False, js_cli=None,
@@ -1256,15 +1530,22 @@ def _classify_exec_match(
     got = extract_call(lines, idx, start, lang=lang)
     call_src, consumed = (got if got else (lines[idx][start:], 1))
     flow = near and _untrusted_flows(lines, idx, call_src, untrusted)
+    payload = _decoded_flows(lines, idx, call_src)
+    if lang == "python" and not near:
+        # A remote handler's own parameter (web route, chat-bot command, agent tool)
+        # reaching the call is untrusted input in reach (precision PR 2).
+        params = _remote_handler_params(lines, idx, has_cli_import)
+        near = any(_uses_name(call_src, p) for p in params)
     if lang == "python":
         func = next(g for g in match.groups() if g)
         return classify_python_exec(
             call_src, func, untrusted_near=near, consumed=consumed,
             resolve_name=lambda nm: _resolve_py_assignment(lines, idx, nm),
             cli_origin=_cli_origin(lines, idx, has_cli_import), untrusted_flow=flow,
+            payload_flow=payload,
         )
     return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed,
-                            untrusted_flow=flow, is_cli_expr=js_cli)
+                            untrusted_flow=flow, is_cli_expr=js_cli, payload_flow=payload)
 
 
 def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted: list[int]):
@@ -1293,18 +1574,65 @@ def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted:
     if isinstance(node, _ast.Call) and node.args:
         s = _const_str(node.args[0])
         if s is not None:
-            if INLINE_CODE_DANGER_RE.search(s):
+            # Precision PR 2: a constant whose only "danger" is that it execs/evals a
+            # NAME is a compatibility shim (six's `exec_`, future's `exec_`, py's
+            # `exec_=exec`): `exec("exec _code_ in _globs_, _locs_")` runs whatever the
+            # caller passes, exactly like `exec(code)`. Judge it as dynamic evaluation.
+            # A constant that decodes / fetches / imports / spawns stays high.
+            if INLINE_CODE_DANGER_RE.search(_SHIM_EXEC_WORD_RE.sub(" ", s)):
                 return ExecVerdict("defect", "high",
                                    "constant code string that execs/decodes/fetches", "",
                                    consumed)
-            return ExecVerdict("capability", "info", "evaluates a constant code string",
-                               CAP_EVAL, consumed)
+            if not _SHIM_EXEC_WORD_RE.search(s):
+                return ExecVerdict("capability", "info", "evaluates a constant code string",
+                                   CAP_EVAL, consumed)
     if near:
-        return ExecVerdict("defect", "high", "dynamic code evaluation next to untrusted input",
-                           "", consumed)
+        # Flow, not proximity (precision PR 2): high only when the untrusted value
+        # reaches the evaluated expression; an unrelated fetch in the same file is a
+        # medium.
+        if _untrusted_flows(lines, idx, call_src, untrusted):
+            return ExecVerdict("defect", "high", "dynamic code evaluation of untrusted input",
+                               "", consumed)
+        return ExecVerdict("defect", "medium", "dynamic code evaluation in a file that reads "
+                           "untrusted input (no flow to the call found)", "", consumed)
     return ExecVerdict("capability", "low",
                        "evaluates code built at runtime (no untrusted input in reach)",
                        CAP_EVAL, consumed)
+
+
+# The exec/eval/compile words a compatibility shim's constant code may contain.
+_SHIM_EXEC_WORD_RE = re.compile(r"\b(?:exec|eval|compile)\b")
+
+
+def _classify_vm_match(lines: list[str], idx: int, match: re.Match,
+                       untrusted: list[int]) -> tuple[str, str, str]:
+    """``(kind, severity, label)`` for a Node ``vm.runInContext`` /
+    ``runInNewContext`` / ``compileFunction`` call: the eval rule's ladder."""
+    from src.scanner.exec_classify import (
+        _js_literal,
+        extract_call,
+        split_top_level_args,
+    )
+
+    got = extract_call(lines, idx, match.start(), lang="js")
+    call_src = got[0] if got else lines[idx][match.start():]
+    open_i, close_i = call_src.find("("), call_src.rfind(")")
+    inner = call_src[open_i + 1: close_i] if 0 <= open_i < close_i else ""
+    args = split_top_level_args(inner)
+    first = args[0] if args else ""
+    if _js_literal(first) is not None:
+        if INLINE_CODE_DANGER_RE.search(_js_literal(first) or ""):
+            return "defect", "high", "runs a constant script that execs/decodes/fetches"
+        return "capability", "info", "runs a constant script in a VM context"
+    if _is_decode_line(first) or _decoded_flows(lines, idx, call_src):
+        return "defect", "high", "runs a decoded payload in a VM context"
+    if _near(untrusted, idx, _UNTRUSTED_WINDOW):
+        if _untrusted_flows(lines, idx, call_src, untrusted):
+            return "defect", "high", "runs untrusted input as code in a VM context"
+        return ("defect", "medium", "runs code in a VM context in a file that reads untrusted "
+                "input (no flow to the call found)")
+    return "capability", "low", "runs code built at runtime in a VM context (no untrusted " \
+        "input in reach)"
 
 
 def _rmtree_is_dangerous(lines: list[str], idx: int, match: re.Match) -> bool:
@@ -1545,6 +1873,31 @@ _DEP_FILES = frozenset({
     "requirements.txt", "pyproject.toml", "setup.py", "setup.cfg",
     "Pipfile", "package.json", "Cargo.toml", "Gemfile",
 })
+
+
+# A package's own test module / test-support module shipped next to its code
+# (`coloredlogs/tests.py`, `transformers/testing_utils.py`, `safer-buffer/tests.js`):
+# test code, not runtime (precision PR 2). The name alone is not enough (`jinja2/tests.py`
+# holds Jinja's template tests, `click/testing.py` is a public API), so the content must
+# also be a test suite: it imports a test framework or defines test cases.
+_TEST_MODULE_STEMS = frozenset({
+    "tests", "test", "testing", "testing_utils", "testutils", "test_utils",
+})
+_TEST_SUITE_CONTENT_RE = re.compile(
+    r"^\s*(?:import\s+(?:unittest|pytest|nose)\b|from\s+(?:unittest|pytest|nose)\b)"
+    r"|^\s*class\s+\w+\s*\([^)]*TestCase\)"
+    r"|require\s*\(\s*['\"](?:tape|tap|mocha|ava|node:test|assert|chai)['\"]\s*\)"
+    r"|from\s+['\"](?:vitest|node:test|@jest/globals|ava|tape|chai)['\"]"
+    r"|^\s*(?:describe|it|test)\s*\(\s*['\"`]",
+    re.MULTILINE,
+)
+
+
+def _is_test_module(file_path: str, content: str | None) -> bool:
+    """A test-suite module by name AND content (see above)."""
+    if Path(file_path).stem.lower() not in _TEST_MODULE_STEMS or not content:
+        return False
+    return bool(_TEST_SUITE_CONTENT_RE.search(content))
 
 
 def _is_test_or_doc_file(file_path: str) -> bool:
@@ -2043,6 +2396,22 @@ def _benign_zero_width(line: str, pos: int) -> bool:
     return ch == "\u200c" and pc == "Lo" and (closes or nc == "Lo")
 
 
+_MINIFIED_LINE_CHARS = 1000
+_INJECTION_TAG_ONLY_RE = re.compile(
+    r"<\s*/?\s*(?:system|important|instructions?|SYSTEM|IMPORTANT|INSTRUCTIONS?)\s*>")
+
+
+def _bidi_cannot_reorder_code(line: str, in_prose: bool, file_lang: str | None) -> bool:
+    """A bidi control on a line that carries no code a reviewer reads: an interior line
+    of a multi-line string / comment (no quote or comment delimiter on it), or a
+    minified bundle line."""
+    if len(line) > _MINIFIED_LINE_CHARS and file_lang in ("javascript", "typescript"):
+        return True
+    if not in_prose:
+        return False
+    return not any(d in line for d in ('"""', "'''", "`", "*/", "/*"))
+
+
 def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
     """True when every hit of an invisible-Unicode rule on this line is a well-formed
     emoji tag sequence or a typographic joiner (precision PR 2: wcwidth's grapheme
@@ -2069,7 +2438,7 @@ def _scan_content(
     if allowlist is None:
         allowlist = set()
 
-    file_test_or_doc = _is_test_or_doc_file(file_path)
+    file_test_or_doc = _is_test_or_doc_file(file_path) or _is_test_module(file_path, content)
     # CI/infra files (#3) are graded like tests/docs so a Dockerfile / workflow recipe
     # can't dominate the grade with a critical.
     is_infra = _is_infra_file(file_path)
@@ -2114,6 +2483,7 @@ def _scan_content(
     # the per-line `shell=True` rule must not double-report inside that call.
     consumed_until = -1
     suppressed_lines: set[int] = set()
+    declares_tools: bool | None = None  # lazily: does this file declare agent tools?
 
     # Inline Rust unit tests (`#[cfg(test)] mod tests { … }`) compile only for
     # `cargo test`: lines inside them are graded like a file under tests/.
@@ -2184,6 +2554,13 @@ def _scan_content(
                 # is a protocol constant, not a secret.
                 if name == "Generic API Key assignment" and not _generic_secret_plausible(val):
                     continue
+                # Precision PR 2: a key the NAME says is a shipped default / public /
+                # demo value (ethers' `defaultApiKey` for its community endpoints) is
+                # published on purpose: reported, medium, not a leaked credential.
+                if (name == "Generic API Key assignment" and sev == "high"
+                        and _SHARED_KEY_NAME_RE.search(
+                            _assigned_identifier(line, match.start()))):
+                    sev = "medium"
                 # Precision pass #3: a PEM HEADER with no key body is key-HANDLING code
                 # (marker tuples, startswith(), regexes) — reported as a capability.
                 if name == "Private Key block" and not _pem_has_body(lines, idx, match.end()):
@@ -2252,13 +2629,23 @@ def _scan_content(
                     sm = pattern.search(line)
                     if sm and _in_py_string_literal(line, sm.start()):
                         continue
+                    # `def runcmd(cmd, shell=True):` is a parameter default, not a call;
+                    # the call inside the function is classified on its own line.
+                    if re.match(r"\s*(?:async\s+)?def\s", line):
+                        continue
                     stmt = "\n".join(lines[max(0, idx - 6): idx + 1])
-                    if (_near(untrusted, idx, _UNTRUSTED_WINDOW)
-                            and _untrusted_flows(lines, idx, stmt, untrusted)):
+                    near = _near(untrusted, idx, _UNTRUSTED_WINDOW)
+                    if near and _untrusted_flows(lines, idx, stmt, untrusted):
                         verdict = ("defect", "critical",
                                    "shell=True on untrusted input", "")
+                    elif near or _decoded_flows(lines, idx, stmt):
+                        verdict = ("defect", "high", "shell=True runs a shell command next "
+                                   "to untrusted input or a decoded value", "")
                     else:
-                        verdict = ("defect", "high", "shell=True runs a shell command", "")
+                        # Precision PR 2 ladder: a wrapper's shell=True with nothing
+                        # untrusted in reach is a medium.
+                        verdict = ("defect", "medium", "shell=True runs a shell command (no "
+                                   "untrusted input in reach)", "")
                 elif name in ("subprocess.run / Popen (Python)", "os.system / os.popen (Python)"):
                     m = _PY_EXEC_CALL_RE.search(line)
                     if m:
@@ -2267,9 +2654,16 @@ def _scan_content(
                         verdict = (v.kind, v.severity, v.label, v.capability)
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name == "execSync / spawn (Node.js)":
-                    m = _JS_EXEC_CALL_RE.search(line) or (
-                        js_cp_call_re.search(line) if js_cp_call_re is not None else None
-                    )
+                    cands = list(_JS_EXEC_CALL_RE.finditer(line)) + (
+                        list(js_cp_call_re.finditer(line)) if js_cp_call_re is not None else [])
+                    tpl_in = "`" if idx in tpl_continuation else None
+                    code_hits = [c for c in cands
+                                 if not _js_call_is_text_or_def(line, c.start(), tpl_in)]
+                    if cands and not code_hits:
+                        # Only inside a string / comment (`'Use the RegExp#exec() method'`,
+                        # `} // execSync()`) or a definition (`function execSync(cmd) {`).
+                        continue
+                    m = min(code_hits, key=lambda c: c.start()) if code_hits else None
                     if (m and m.group(1) in js_local_cp_names
                             and m.group(0).startswith(m.group(1))):
                         continue  # a local exec()/spawn()/fork(), not child_process
@@ -2445,6 +2839,32 @@ def _scan_content(
                 # Downgrade in test/doc/infra files like other groups
                 if is_downgraded and effective_severity in ("critical", "high"):
                     effective_severity = "medium"
+                if name.startswith("Unpinned npx") and _npx_not_a_load(
+                        file_path, line, dm.start(),
+                        "`" if idx in tpl_continuation else None):
+                    # Help text a CLI prints (`'  npx browserslist\n'`) or a maintainer
+                    # package.json script (`"release": "npx npmpub"`) never runs on a
+                    # consumer's machine (precision PR 2).
+                    effective_severity = "low"
+                if name.startswith("vm.runInContext"):
+                    # Precision PR 2: classified like eval(). A constant script
+                    # (`vm.runInContext("this", ctx)`) or code with no untrusted input in
+                    # reach (jsdom running a page's own scripts, a test runner's module
+                    # evaluator) is a capability; untrusted input reaching it is high.
+                    vk, vsev, vlabel = _classify_vm_match(lines, idx, dm, untrusted)
+                    findings.append(Finding(
+                        category="dynamic_remote_load",
+                        name=name,
+                        severity=("medium" if (vk == "defect" and is_downgraded
+                                               and vsev in ("critical", "high")) else vsev),
+                        file_path=file_path,
+                        line_number=line_num,
+                        snippet=stripped[:120],
+                        remediation=_why(vlabel, "dynamic_remote_load", vk),
+                        kind=vk,
+                        capability="code:eval" if vk == "capability" else "",
+                    ))
+                    break
                 # A one-time installer piping a remote script to the shell is how the
                 # tool is delivered, reported as what it does, not as a defect.
                 if is_installer and name == "curl/wget piped to shell":
@@ -2475,10 +2895,18 @@ def _scan_content(
             if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
+                effective_severity = severity
+                if name.startswith("Bidirectional") and _bidi_cannot_reorder_code(
+                        line, idx in prose_lines, file_lang):
+                    # Trojan Source deceives a human reading CODE: the reordering is per
+                    # line. A line wholly inside a docstring / template / block comment
+                    # has no code to reorder (bandit documents the attack in one); a
+                    # minified bundle line is not read by a reviewer (precision PR 2).
+                    effective_severity = "low"
                 findings.append(Finding(
                     category="hidden_unicode",
                     name=name,
-                    severity=severity,
+                    severity=effective_severity,
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
@@ -2498,6 +2926,18 @@ def _scan_content(
                 effective_severity = severity
                 if is_downgraded and not is_metadata and severity in ("critical", "high"):
                     effective_severity = "medium"
+                # Precision PR 2: a bare `<instructions>` / `</system>` tag in a library's
+                # OWN prompt template (langchain's summarization prompt) structures text
+                # it sends to its own model call. It is a high only where an agent reads
+                # it as a tool definition: metadata files and files that declare tools.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and all(_INJECTION_TAG_ONLY_RE.fullmatch(mm.group(0))
+                                for mm in pattern.finditer(line))):
+                    if declares_tools is None:
+                        declares_tools = bool(SSRF_TOOL_SURFACE_RE.search(content))
+                    if not declares_tools:
+                        effective_severity = "medium"
                 findings.append(Finding(
                     category="prompt_injection",
                     name=name,
@@ -2532,7 +2972,14 @@ def _scan_content(
                         break
                     lo = max(0, idx - _HEX_SINK_WINDOW)
                     hi = min(len(lines), idx + _HEX_SINK_WINDOW + 1)
-                    if not any(_HEX_SINK_RE.search(lines[n]) for n in range(lo, hi)):
+                    # Bounded by characters too (precision PR 2): on a minified bundle
+                    # line every sink in the file is "within 3 lines".
+                    hm = pattern.search(line)
+                    near_txt = (("\n".join(lines[lo:idx]))[-_HEX_SINK_CHARS:] + "\n"
+                                + line[max(0, hm.start() - _HEX_SINK_CHARS):
+                                       hm.end() + _HEX_SINK_CHARS] + "\n"
+                                + ("\n".join(lines[idx + 1:hi]))[:_HEX_SINK_CHARS])
+                    if not _HEX_SINK_RE.search(near_txt):
                         kind, effective_severity = "capability", "info"
                         capability = "binary:hex_literal"
                         emitted_name = "Long hex-escaped byte literal"
@@ -2568,8 +3015,12 @@ def _scan_content(
     # one file is the classic rug-pull loader the per-line scan can't see. Fire only
     # when they're within ~40 lines of each other (keeps the composite finding tight).
     # Docstring lines (prose) don't count as either leg.
+    # Precision PR 2: flow, not proximity: the exec sink must USE what was read (inline,
+    # or through a name assigned from the read). `ThreadedStream.fetch()` beside
+    # `exec(code, self.locals)` or `urlopen(target)` 30 lines above `eval(target, ns)`
+    # is co-occurrence, not a loader.
     if not is_downgraded and NET_READ_RE.search(content) and EXEC_SINK_RE.search(content):
-        hit = _cooccur(lines, prose_lines, NET_READ_RE, EXEC_SINK_RE, 40)
+        hit = _cooccur_flow(lines, prose_lines, NET_READ_RE.search, EXEC_SINK_RE, 40)
         if hit is not None:
             findings.append(Finding(
                 category="dynamic_remote_load",
@@ -2580,13 +3031,31 @@ def _scan_content(
                 snippet="network read + exec sink co-occur — remote payload may be swappable",
             ))
 
+    # Untrusted input handed to a code-evaluating METHOD (precision PR 2): werkzeug's
+    # debugger reads `cmd = request.args.get("cmd")`, passes it to
+    # `self.execute_command(request, cmd, frame)`, which runs `frame.eval(command)`. A
+    # flow, followed one call deep inside the file, not proximity.
+    if file_lang == "python" and untrusted and not is_downgraded:
+        f_eval = _untrusted_to_eval_method(lines, untrusted, prose_lines)
+        if f_eval is not None:
+            findings.append(Finding(
+                category="unsafe_exec",
+                name="Untrusted input passed to an eval/exec method (Python)",
+                severity="high",
+                file_path=file_path,
+                line_number=f_eval + 1,
+                snippet=lines[f_eval].strip()[:120],
+                remediation=_why("a request value reaches a method that evaluates code",
+                                 "unsafe_exec", "defect"),
+            ))
+
     # Split decode->exec across lines: `payload = base64.b64decode(...)` then
     # `exec(payload)` a few lines later is the obfuscated loader (OSV MAL- family); the
     # one-line form is the "Decoded payload fed to exec/eval" pattern above.
     if (not is_downgraded and DECODE_SINK_RE.search(content) and EXEC_SINK_RE.search(content)
             and not any(f.name == "Decoded payload fed to exec/eval" for f in findings)):
-        hit = _cooccur(lines, prose_lines, DECODE_SINK_RE, _PY_EVAL_CALL_RE, 10,
-                       exclude_b=_DEF_EVAL_EXEC_RE)
+        hit = _cooccur_flow(lines, prose_lines, _is_decode_line, _PY_EVAL_CALL_RE, 10,
+                            exclude_b=_DEF_EVAL_EXEC_RE)
         if hit is not None:
             findings.append(Finding(
                 category="obfuscation",
@@ -2999,6 +3468,10 @@ def _compute_manifest_digest(tool_digests: dict[str, str]) -> str | None:
     return "sha256:" + hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
+_RESPONSE_SEND_RE = re.compile(
+    r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(")
+
+
 def _composite_findings(
     content: str,
     file_path: str,
@@ -3033,7 +3506,10 @@ def _composite_findings(
         return out
 
     untrusted = _hits(UNTRUSTED_INPUT_RE)
-    outbound = _hits(OUTBOUND_SEND_RE)
+    # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
+    # request; it is not an outbound send to a third party (precision PR 2).
+    outbound = [n for n in _hits(OUTBOUND_SEND_RE)
+                if OUTBOUND_SEND_RE.search(_RESPONSE_SEND_RE.sub(" ", lines[n - 1]))]
     sensitive = _hits(SENSITIVE_READ_RE)
     file_read = _hits(FILE_READ_RE)
     if not (untrusted and outbound and (sensitive or file_read)):
