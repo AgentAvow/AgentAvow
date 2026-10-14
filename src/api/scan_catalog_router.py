@@ -399,6 +399,18 @@ async def _mark_as_page_shows(owner: str, repo: str, trust_score: int | None) ->
         return False
 
 
+_DECISIONS = frozenset({"safe", "review", "do_not_connect"})
+
+
+def _stored_decision(row: Any) -> str | None:
+    """A community row's stored ``decision`` when it is a valid answer and the row has
+    a score; else None (the CatalogRow validator recomputes it)."""
+    d = getattr(row, "decision", None)
+    if d in _DECISIONS and getattr(row, "trust_score", None) is not None:
+        return d
+    return None
+
+
 def _guard_stale_score(score: int | None, critical: int | None) -> int | None:
     """Safety net for pre-calibration stored/seed rows. A row still reading Trusted
     (>=81) while carrying a critical is impossible under the fixed scorer — floor it so
@@ -482,6 +494,18 @@ def _flagged_counts(rows: Iterable[CatalogRow]) -> dict[str, Any]:
     return c
 
 
+def _raw_decision(raw: dict, score: int | None) -> dict[str, Any]:
+    """The answer a launch-scan row stored at scan time (``decision`` /
+    ``decision_reason``, written by scripts/launch_scans/_common.summarize_scan_result
+    from decide() over the full result). Empty when absent, invalid or the row has no
+    score, so the CatalogRow validator recomputes it from score + counts."""
+    d = raw.get("decision")
+    if score is None or d not in _DECISIONS:
+        return {}
+    reason = raw.get("decision_reason")
+    return {"decision": d, "decision_reason": reason if isinstance(reason, str) else None}
+
+
 def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     """Convert a per-surface raw record into the unified row shape."""
     if surface == "x402":
@@ -515,6 +539,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
             findings_count=raw.get("findings_count"),
             primary_language=raw.get("primary_language"),
             scan_error=oc_err,
+            **_raw_decision(raw, oc_score),
             adoption_count=raw.get("adoption_count") or raw.get("stars"),
             adoption_unit=raw.get("adoption_unit") or ("stars" if raw.get("stars") else None),
             adoption_score=raw.get("adoption_score"),
@@ -539,6 +564,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
         is_mcp_server=raw.get("is_mcp_server"),
         scan_error=err,
         skipped=raw.get("skipped"),
+        **_raw_decision(raw, score),
         # Adoption signal: prefer a stored adoption_count (community rows), else fall
         # back to repo stars the scanner captured, so Browse shows adoption for the
         # static corpus too (was blank for everything but community scans).
@@ -548,7 +574,10 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     )
 
 
-def _load_surface(surface: str, path: Path, results_key: str = "results") -> list[CatalogRow]:
+def _load_surface(
+    surface: str, path: Path, results_key: str = "results",
+    failed: set[str] | None = None,
+) -> list[CatalogRow]:
     if not path.exists():
         logger.warning("scan_catalog: missing %s", path)
         return []
@@ -556,6 +585,8 @@ def _load_surface(surface: str, path: Path, results_key: str = "results") -> lis
         data = json.loads(path.read_text())
     except Exception as e:
         logger.error("scan_catalog: failed to parse %s: %s", path, e)
+        if failed is not None:
+            failed.add(path.name)
         return []
     results = data.get(results_key, data) if isinstance(data, dict) else data
     if not isinstance(results, list):
@@ -563,25 +594,56 @@ def _load_surface(surface: str, path: Path, results_key: str = "results") -> lis
     return [_normalize_row(surface, r) for r in results if isinstance(r, dict)]
 
 
-def _load_rows() -> list[CatalogRow]:
+# The launch-scan files the static catalog is built from: (surface, file, list key).
+# OpenClaw's 500-skills scan uses a top-level 'repos' key instead of 'results'.
+_CATALOG_SOURCES: tuple[tuple[str, str, str], ...] = (
+    ("x402", "x402-results.json", "results"),
+    ("mcp", "mcp-registry-results.json", "results"),
+    ("npm", "npm-agents-results.json", "results"),
+    ("pypi", "pypi-agents-results.json", "results"),
+    ("openclaw", "openclaw-results.json", "repos"),
+)
+
+
+def _load_rows(failed: set[str] | None = None) -> list[CatalogRow]:
     rows: list[CatalogRow] = []
-    rows += _load_surface("x402", _DATA_DIR / "x402-results.json")
-    rows += _load_surface("mcp", _DATA_DIR / "mcp-registry-results.json")
-    rows += _load_surface("npm", _DATA_DIR / "npm-agents-results.json")
-    rows += _load_surface("pypi", _DATA_DIR / "pypi-agents-results.json")
-    # OpenClaw 500-skills scan uses a different file shape: top-level
-    # 'repos' key instead of 'results'.
-    rows += _load_surface(
-        "openclaw", _DATA_DIR / "openclaw-results.json", results_key="repos"
-    )
+    for surface, fname, key in _CATALOG_SOURCES:
+        rows += _load_surface(surface, _DATA_DIR / fname, results_key=key, failed=failed)
     return rows
+
+
+def _source_signature() -> tuple[tuple[str, int | None, int | None], ...]:
+    """(file, mtime_ns, size) for every catalog source file; a missing file reads
+    (file, None, None). The host re-score scripts rewrite these files atomically
+    (tmp + rename), so any rewrite changes the signature."""
+    out: list[tuple[str, int | None, int | None]] = []
+    for _surface, fname, _key in _CATALOG_SOURCES:
+        try:
+            st = (_DATA_DIR / fname).stat()
+            out.append((fname, st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((fname, None, None))
+    return tuple(out)
 
 
 def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
     """Assemble the cached catalog (rows + summary + facets). `rows` defaults to the
-    launch-scan files on disk; tests pass fixture rows directly."""
+    launch-scan files on disk; tests pass fixture rows directly.
+
+    A catalog built from disk carries ``source_sig``, the signature of the files it was
+    read from (taken BEFORE reading, so a rewrite during the read triggers another
+    rebuild). ``reload_catalog_if_sources_changed`` compares it to the files now on
+    disk. A fixture-built catalog has none and is never reloaded."""
+    source_sig: tuple[Any, ...] | None = None
     if rows is None:
-        rows = _load_rows()
+        source_sig = _source_signature()
+        failed: set[str] = set()
+        rows = _load_rows(failed)
+        if failed:
+            # A file that did not parse must not be remembered as read: mark it so the
+            # next check sees a difference and retries.
+            source_sig = tuple(
+                (f, -1, -1) if f in failed else (f, m, s) for f, m, s in source_sig)
 
     # Categorize the static corpus ONCE at build time (cached) — doing it per request
     # over ~37k rows was a real CPU cost. Community rows (small, fresh) categorize per
@@ -633,7 +695,8 @@ def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
     )
     # Sorted score list for percentile lookups ("safer than X% of scanned tools").
     scores = sorted(r.trust_score for r in rows if r.trust_score is not None)
-    return {"rows": rows, "summary": summary, "static_cats": static_cats, "scores": scores}
+    return {"rows": rows, "summary": summary, "static_cats": static_cats, "scores": scores,
+            "source_sig": source_sig}
 
 
 def _get_catalog() -> dict[str, Any]:
@@ -647,6 +710,32 @@ def _get_catalog() -> dict[str, Any]:
         if _CATALOG_CACHE is None:
             _CATALOG_CACHE = _build_catalog()
         return _CATALOG_CACHE
+
+
+def reload_catalog_if_sources_changed() -> bool:
+    """Rebuild this process's static catalog when a launch-scan file on disk changed
+    since it was built. Blocking (a rebuild reads every file, ~6s): run it in a thread.
+    The old catalog keeps serving until the new one is swapped in; the view and
+    /flagged-stat caches are keyed on the catalog object, so the swap retires them.
+
+    This is how a host re-score run reaches Browse: the backend mounts
+    data/launch-scans read-only, and every uvicorn worker runs this from its
+    /flagged-stat timer (every FLAGGED_STAT_REFRESH_SECONDS). No HTTP call is needed,
+    and unlike the old POST /refresh (which reached one worker) it covers all of them.
+    Returns True when it rebuilt."""
+    global _CATALOG_CACHE
+    cached = _CATALOG_CACHE
+    if cached is None or cached.get("source_sig") is None:
+        return False  # nothing built yet (the first read builds it) or a fixture catalog
+    if _source_signature() == cached["source_sig"]:
+        return False
+    with _CATALOG_BUILD_LOCK:
+        if _CATALOG_CACHE is not cached:
+            return False  # rebuilt meanwhile (another thread or an admin refresh)
+        fresh = _build_catalog()
+        _CATALOG_CACHE = fresh
+    logger.info("scan_catalog: source files changed, rebuilt (%d rows)", len(fresh["rows"]))
+    return True
 
 
 async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
@@ -729,6 +818,12 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                     endpoint_url=endpoint_url,
                     trust_score=c.trust_score,
                     grade=_row_grade(c.trust_score, stored_grade),
+                    # The answer decided at scan time over the full result, as the
+                    # row's own page shows it; None on a pre-t24 row, which the
+                    # validator recomputes from score + counts.
+                    decision=_stored_decision(c),
+                    decision_reason=(getattr(c, "decision_reason", None)
+                                     if _stored_decision(c) else None),
                     critical=c.critical,
                     high=c.high,
                     findings_count=c.findings_count,
@@ -843,11 +938,19 @@ async def _lead_with_skill_collections(rows: list[CatalogRow]) -> list[CatalogRo
             continue
         superseded.add(key)
         f = coll.get("findings") or {}
-        replaced[id(srow)] = srow.model_copy(update={
+        update: dict[str, Any] = {
             "trust_score": coll.get("trust_score", srow.trust_score),
             "critical": f.get("critical", srow.critical),
             "high": f.get("high", srow.high),
-        })
+        }
+        if update["trust_score"] is not None:
+            # The collection's own answer, as its page leads with (model_copy does not
+            # re-run the validator, so the skill row's answer would otherwise stay).
+            from src.scanner.verdict import decide
+
+            d = decide(coll)
+            update["decision"], update["decision_reason"] = d.decision, d.reason
+        replaced[id(srow)] = srow.model_copy(update=update)
     if not superseded:
         return rows
     return [replaced.get(id(r), r) for r in rows
@@ -998,7 +1101,11 @@ async def refresh_catalog(
     current_entity: Entity = Depends(get_current_entity),
 ) -> dict[str, Any]:
     """Force-rebuild the in-memory catalog from disk. Admin only: the rebuild reads
-    every scan file on disk, so an anonymous caller must not be able to trigger it."""
+    every scan file on disk, so an anonymous caller must not be able to trigger it.
+
+    Host scripts do not call this: each worker reloads on its own when a launch-scan
+    file changes (``reload_catalog_if_sources_changed``). This rebuilds only the worker
+    that answers the request; it stays for an admin who wants it now."""
     require_admin(current_entity)
     global _CATALOG_CACHE
     _CATALOG_CACHE = None
@@ -1072,6 +1179,12 @@ async def _refresh_flagged_stat() -> None:
     global _FLAGGED_STAT_CACHE
     gen = _FLAGGED_STAT_GEN
     try:
+        # Pick up a host re-score's rewritten launch-scan files (see
+        # reload_catalog_if_sources_changed); the timer runs this in every worker.
+        try:
+            await asyncio.to_thread(reload_catalog_if_sources_changed)
+        except Exception:
+            logger.warning("scan catalog source reload failed", exc_info=True)
         catalog = await asyncio.to_thread(_get_catalog)
         from src.database import async_session
 

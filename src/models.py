@@ -2531,6 +2531,13 @@ class CommunityScan(Base):
     adoption_score = Column(Integer, nullable=True)          # 0-100 adoption tier score
     adoption_count = Column(BigInteger, nullable=True)       # headline count (dl/wk, stars)
     adoption_unit = Column(String(24), nullable=True)        # 'downloads/wk' | 'stars' | …
+    # The three-phrase answer (safe | review | do_not_connect) + its reason, from
+    # src.scanner.verdict.decide() over the full scan result at capture time, the same
+    # answer the tool's own page leads with (advisories, deprecation, malicious deps,
+    # a cached sandbox run included). Browse, the catalog API and the metrics read it.
+    # Null on rows captured before t24: the catalog recomputes from score + counts.
+    decision = Column(String(16), nullable=True)
+    decision_reason = Column(Text, nullable=True)
     first_scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_scanned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

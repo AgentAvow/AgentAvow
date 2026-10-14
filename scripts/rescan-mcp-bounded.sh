@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bounded MCP re-scan — re-fetches + re-analyzes the top N MCP corpus rows with the
-# CURRENT scorer (post the 2026-08-19 critical-consistency fix) and refreshes Browse.
+# CURRENT scorer (post the 2026-08-19 critical-consistency fix); Browse reloads by itself.
 # Re-scan (not recalc) is required: stored rows kept only score summaries, not the
 # per-finding paths the new shipped/non-shipped logic needs. Safe + non-destructive:
 # rescore_corpus.py updates scores IN PLACE and never drops a row.
@@ -25,8 +25,6 @@ if "$PY" scripts/launch_scans/rescore_corpus.py --surface mcp --limit "$LIMIT"; 
 else
   log "rescore FAILED (exit $?)"
 fi
-log "refreshing catalog cache"
-curl -fsS -X POST "https://agentavow.com/api/v1/public/scan-catalog/refresh" \
-  -H "Content-Type: application/json" --max-time 30 \
-  || log "catalog refresh failed (cache rebuilds on next request)"
+# No catalog refresh call: backend workers reload Browse when the results file changes.
+log "catalog: backend workers reload the rewritten results file within ~2 min"
 log "rescan-mcp: done"

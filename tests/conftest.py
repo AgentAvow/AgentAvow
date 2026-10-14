@@ -430,6 +430,10 @@ async def _clean_db_once():
             "adoption_count BIGINT",
             "ALTER TABLE IF EXISTS community_scans ADD COLUMN IF NOT EXISTS "
             "adoption_unit VARCHAR(24)",
+            "ALTER TABLE IF EXISTS community_scans ADD COLUMN IF NOT EXISTS "
+            "decision VARCHAR(16)",
+            "ALTER TABLE IF EXISTS community_scans ADD COLUMN IF NOT EXISTS "
+            "decision_reason TEXT",
             "ALTER TABLE IF EXISTS repo_claims ADD COLUMN IF NOT EXISTS surface "
             "VARCHAR(16) NOT NULL DEFAULT 'github'",
             "ALTER TABLE IF EXISTS repo_claims ADD COLUMN IF NOT EXISTS proof_method VARCHAR(24)",

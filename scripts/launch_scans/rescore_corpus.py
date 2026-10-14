@@ -59,6 +59,8 @@ def _apply_summary(surface: str, row: dict, summ: dict) -> None:
         row["findings_count"] = summ["findings_count"]
         row["files_scanned"] = summ["files_scanned"]
         row["error"] = summ["scan_error"]
+        row["decision"] = summ.get("decision")
+        row["decision_reason"] = summ.get("decision_reason")
     else:
         row.update(summ)
 

@@ -133,6 +133,7 @@ def summarize_scan_result(result: Any) -> dict:
     _ship_high = getattr(result, "shipped_high_count", None)
     _block_crit = _all_crit if _ship_crit is None else _ship_crit
     _block_high = _all_high if _ship_high is None else _ship_high
+    _decision, _reason = (None, None) if _err else _decision_for(result)
     return {
         # A fetch failure is UNSCANNABLE, not a 0 — null the score so the catalog
         # reads "fetch error", never "Blocked". (Previously defaulted to 0 on error.)
@@ -153,4 +154,23 @@ def summarize_scan_result(result: Any) -> dict:
         # community scans and is blank across most of Browse).
         "stars": getattr(result, "stars", None),
         "scan_error": getattr(result, "error", None),
+        # The three-phrase answer the tool's page leads with, decided over the FULL
+        # result (advisories, deprecation, malicious deps, coverage), so Browse shows
+        # the page's answer instead of re-deciding from the counts above.
+        "decision": _decision,
+        "decision_reason": _reason,
     }
+
+
+def _decision_for(result: Any) -> tuple[str | None, str | None]:
+    """(decision, reason) from src.scanner.verdict.decide() over the same dict the
+    public API builds from a ScanResult. (None, None) if that fails: the catalog then
+    decides from score + counts."""
+    try:
+        from src.api.public_scan_router import _scan_result_to_dict
+        from src.scanner.verdict import decide
+
+        d = decide(_scan_result_to_dict(result))
+        return d.decision, d.reason
+    except Exception:  # noqa: BLE001 — a summary never fails on the answer
+        return None, None
