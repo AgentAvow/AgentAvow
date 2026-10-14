@@ -3308,6 +3308,9 @@ def _scan_content(
 
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
     findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
+    findings.extend(_credential_exfil_findings(
+        content, file_path, lines, file_lang, allowlist,
+        payload=payload_mode and file_downgraded))
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.
@@ -3786,6 +3789,49 @@ def _composite_findings(
         line_number=line,
         snippet="capability composition — each part benign alone, dangerous together",
     )]
+
+
+_CREDENTIAL_EXFIL_NAME = "Credential file read sent outbound"
+_CREDENTIAL_KIND_LABELS = {
+    "ssh": "an SSH private key", "aws": "AWS credentials", "gcloud": "gcloud credentials",
+    "kube": "a kubeconfig", "netrc": "a .netrc / git credential store",
+    "npmrc": "an .npmrc token", "pypirc": "a .pypirc password",
+    "docker": "Docker registry credentials", "browser": "browser cookies / saved logins",
+    "wallet": "a crypto wallet file", "env": "a .env file",
+}
+
+
+def _credential_exfil_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], *, payload: bool,
+) -> list[Finding]:
+    """A credential file's contents reaching an outbound send (``credential_flow``).
+
+    Critical like the environment-dump rule, and never downgraded: in a test / doc
+    directory of a published artifact it is a payload (``payload``) and keeps its
+    severity."""
+    from src.scanner.credential_flow import credential_exfil_hits
+
+    if _is_allowlisted(file_path, _CREDENTIAL_EXFIL_NAME, allowlist):
+        return []
+    out = []
+    for line_no, kind in credential_exfil_hits(content, file_lang):
+        what = _CREDENTIAL_KIND_LABELS.get(kind, "a credential file")
+        out.append(Finding(
+            category="exfiltration",
+            name=_CREDENTIAL_EXFIL_NAME,
+            severity="critical",
+            file_path=file_path,
+            line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            remediation=(
+                f"This code reads {what} from the user's machine and sends the contents "
+                "over the network. A tool has no reason to ship a local credential file "
+                "anywhere; remove the read or the send."
+            ),
+            payload=payload,
+        ))
+    return out
 
 
 _DEP_CATEGORIES = frozenset({"dependency", "install_hook"})
