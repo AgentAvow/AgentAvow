@@ -138,6 +138,9 @@ _RATIO_MEMBER_FLOOR = 1024 * 1024          # members under 1MB are never ratio-c
 _RATIO_ARCHIVE_FLOOR = 256 * 1024 * 1024   # archive ratio is checked past 256MB walked
 _SPOOL_BYTES = 4 * 1024 * 1024             # downloads past this spool to a temp file
 _METADATA_MAX_BYTES = 8 * 1024 * 1024      # packument / pypi json ceiling
+# PyPI's project document lists every file of every release (grpcio: ~9MB) and has no
+# small "latest" variant, so it gets its own ceiling; versioned documents stay at 8MB.
+_PYPI_PROJECT_MAX_BYTES = 32 * 1024 * 1024
 _HTTP_TIMEOUT = 20.0
 _DOWNLOAD_TIMEOUT = 40.0
 
@@ -255,7 +258,9 @@ def _validate_registry_url(url: str) -> str:
 # HTTP (streaming download with a hard size cap, no redirects)
 # ---------------------------------------------------------------------------
 
-async def _get_json(url: str, client: httpx.AsyncClient) -> dict:
+async def _get_json(
+    url: str, client: httpx.AsyncClient, max_bytes: int | None = None,
+) -> dict:
     _validate_registry_url(url)
     resp = await client.get(url, timeout=_HTTP_TIMEOUT, follow_redirects=False)
     if resp.status_code in _REDIRECT_CODES:
@@ -264,7 +269,7 @@ async def _get_json(url: str, client: httpx.AsyncClient) -> dict:
         raise ArtifactFetchError(f"not found: {url}")
     if resp.status_code != 200:
         raise ArtifactFetchError(f"registry status {resp.status_code} for {url}")
-    if len(resp.content) > _METADATA_MAX_BYTES:
+    if len(resp.content) > (max_bytes or _METADATA_MAX_BYTES):
         raise ArtifactFetchError("registry metadata exceeds size cap")
     try:
         return resp.json()
@@ -928,7 +933,9 @@ async def fetch_pypi_artifact(
                 PYPI_VERSION_JSON.format(name=name, version=version), client,
             )
         else:
-            meta = await _get_json(PYPI_JSON.format(name=name), client)
+            meta = await _get_json(
+                PYPI_JSON.format(name=name), client, max_bytes=_PYPI_PROJECT_MAX_BYTES,
+            )
             version = (meta.get("info") or {}).get("version")
             if not version:
                 raise ArtifactFetchError(f"no version for pypi:{name}")

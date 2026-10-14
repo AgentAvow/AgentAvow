@@ -500,6 +500,36 @@ async def test_npm_fetch_falls_back_to_the_version_document_on_a_giant_packument
     assert res.published_at is None
 
 
+@pytest.mark.asyncio
+async def test_pypi_project_document_has_its_own_larger_ceiling(monkeypatch):
+    """grpcio's project JSON (~9MB, every file of every release) must not fail a scan."""
+    from src.scanner import artifact_fetch as af
+
+    monkeypatch.setattr(af, "_METADATA_MAX_BYTES", 200)
+    monkeypatch.setattr(af, "_PYPI_PROJECT_MAX_BYTES", 5000)
+    wheel_url = "https://files.pythonhosted.org/packages/x/big-1.0-py3-none-any.whl"
+    wheel = _zip({"big/__init__.py": b"x = 1\n"})
+    meta = {"info": {"version": "1.0"}, "pad": " " * 1000,
+            "urls": [{"url": wheel_url, "packagetype": "bdist_wheel",
+                      "filename": "big-1.0-py3-none-any.whl", "size": len(wheel)}]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/pypi/big/json":
+            return httpx.Response(200, json=meta)
+        if str(request.url) == wheel_url:
+            return httpx.Response(200, content=wheel)
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        res = await fetch_pypi_artifact("big", None, client=client)
+    assert res.ok and res.version == "1.0"
+
+    monkeypatch.setattr(af, "_PYPI_PROJECT_MAX_BYTES", 500)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(af.ArtifactFetchError, match="size cap"):
+            await af.fetch_pypi_artifact("big", None, client=client)
+
+
 # ── API shape (additive) ───────────────────────────────────────────────────────
 
 def test_scan_result_to_dict_carries_kind_installed_and_capabilities():
