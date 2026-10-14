@@ -3,9 +3,13 @@ github/npm/pypi/crates/docker/huggingface/openclaw/mcp) with the CURRENT scorer,
 they pick up the 2026-08-19 critical-consistency fix like the seed corpus does.
 
 The seed grind (rescore_corpus.py) only touches the seed *-results.json files; this
-covers the ~hundreds of rows that live only in the community_scans table. Calls the
-scan endpoints directly with request=None (reuses the full pipeline + the
-_capture_community_scan upsert, and skips the per-IP rate limits). Run on the host.
+covers the ~hundreds of rows that live only in the community_scans table. Each row goes
+through ``_rescan_catalog_row`` (src/jobs/scheduler.py), the same service path the
+catalog re-scan loop uses: scanner -> ``_capture_community_scan`` upsert (score, counts,
+decision) -> adoption -> scan cache. It does NOT call the FastAPI route functions: called
+directly, a parameter left out arrives as its ``Query(...)`` default object, which is
+truthy (a bogus ``version`` skipped the catalog write; ``behavioral`` / ``probe`` forced
+sandbox runs). Run on the host.
 
     ./.venv/bin/python3 scripts/launch_scans/rescore_community.py
 """
@@ -15,31 +19,15 @@ import asyncio
 
 from sqlalchemy import select
 
-_PKG = {"npm", "pypi", "crates", "docker", "huggingface"}
 
-
-async def _rescore_one(r) -> None:
-    from src.api.public_scan_router import (
-        public_scan,
-        scan_mcp_endpoint,
-        scan_package_endpoint,
-        scan_skill_endpoint,
-    )
+async def _rescore_one(r) -> bool:
+    """Re-scan one community row and upsert it. True on success."""
     from src.database import async_session
+    from src.jobs.scheduler import _rescan_catalog_row
 
     surface = (r.surface or "github").lower()
     async with async_session() as db:
-        if surface in _PKG:
-            await scan_package_endpoint(
-                surface=surface, name=r.repo, request=None, force=True, db=db)
-        elif surface == "openclaw":
-            await scan_skill_endpoint(
-                owner=r.owner, repo=r.repo, request=None, force=True, db=db)
-        elif surface == "mcp":
-            await scan_mcp_endpoint(endpoint=r.repo, request=None, force=True, db=db)
-        else:  # github / anything else
-            await public_scan(
-                owner=r.owner, repo=r.repo, request=None, force=True, db=db)
+        return await _rescan_catalog_row(surface, r.owner, r.repo, db)
 
 
 async def main() -> None:
@@ -53,12 +41,16 @@ async def main() -> None:
     ok = err = 0
     for i, r in enumerate(rows, 1):
         try:
-            await _rescore_one(r)
-            ok += 1
+            done = await _rescore_one(r)
         except Exception as e:  # noqa: BLE001 — fail-open per row
-            err += 1
+            done = False
             print(f"  {i}/{total} ERR {r.surface} {r.owner}/{r.repo}: {type(e).__name__}",
                   flush=True)
+        if done:
+            ok += 1
+        else:
+            err += 1
+            print(f"  {i}/{total} not re-scored: {r.surface} {r.owner}/{r.repo}", flush=True)
         if i % 25 == 0:
             print(f"  {i}/{total} (ok={ok} err={err})", flush=True)
     print(f"[rescore_community] done: ok={ok} err={err}", flush=True)

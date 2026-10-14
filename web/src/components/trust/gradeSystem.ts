@@ -240,6 +240,49 @@ function isBlockingItem(i: Obj): boolean {
   return i.shipped !== false
 }
 
+// Where the leading finding sits (wording only). Twin of `finding_where` in
+// src/scanner/verdict.py: path rules only, byte-identical output.
+const AGENT_FILE_NAMES = new Set([
+  'skill.md', 'agents.md', 'agent.md', 'claude.md', 'gemini.md', 'copilot-instructions.md',
+  '.cursorrules', '.windsurfrules', '.clinerules', 'llms.txt', 'llms-full.txt',
+  'mcp.json', '.mcp.json', 'server.json', 'ai-plugin.json', 'manifest.json',
+  'plugin.json', 'marketplace.json', 'tools.json', 'smithery.yaml', 'smithery.yml',
+  'agents.yaml', 'agents.yml', 'tasks.yaml', 'tasks.yml',
+])
+const AGENT_DIRS = new Set([
+  'skills', 'skill', '.claude', '.claude-plugin', '.cursor', '.windsurf', '.agents',
+  '.codex', '.gemini', 'agents', 'prompts', 'instructions', 'commands',
+])
+const TEXT_EXTS = ['.md', '.mdc', '.txt', '.yaml', '.yml', '.json', '.toml']
+const DATA_EXTS = ['.yaml', '.yml', '.json', '.jsonl', '.toml', '.xml', '.txt', '.csv', '.tsv']
+const EXECUTED_DATA_NAMES = new Set([
+  'package.json', 'pyproject.toml', 'setup.cfg', 'docker-compose.yml',
+  'docker-compose.yaml', 'compose.yml', 'compose.yaml', 'action.yml', 'action.yaml',
+  '.gitlab-ci.yml', '.travis.yml', 'azure-pipelines.yml', '.pre-commit-config.yaml',
+])
+const CI_DIRS = new Set(['.github', '.gitlab', '.circleci', '.buildkite', 'workflows'])
+
+export function findingWhere(i: Obj): string {
+  if (i.category === 'install_hook') return ' in its install script'
+  if (i.category === 'dependency') return ' in a dependency'
+  const path = String(i.file_path ?? '').replace(/\\/g, '/').toLowerCase()
+  if (path.startsWith('tool:') || path.startsWith('prompt:') || path.startsWith('resource:')) {
+    return ' in its tool definitions'
+  }
+  const parts = path.split('/').filter((p) => p)
+  const name = parts.length ? parts[parts.length - 1] : ''
+  if (AGENT_FILE_NAMES.has(name) || name.endsWith('.mdc') || (
+    TEXT_EXTS.some((e) => name.endsWith(e))
+    && (name.startsWith('readme') || parts.slice(0, -1).some((p) => AGENT_DIRS.has(p))))) {
+    return ' in instructions it gives agents'
+  }
+  if (DATA_EXTS.some((e) => name.endsWith(e)) && !EXECUTED_DATA_NAMES.has(name)
+    && !parts.slice(0, -1).some((p) => CI_DIRS.has(p))) {
+    return ' in a data file it ships'
+  }
+  return ' in its code'
+}
+
 function countPhrase(n: number, severity: string, label: string | null, where = ''): string {
   if (n === 1) return `one ${severity} finding${where}` + (label ? `: ${label}` : '')
   return `${n} ${severity} findings${where}` + (label ? `, including ${label}` : '')
@@ -335,8 +378,11 @@ export function decide(input: unknown): Decision {
     return [n, hits[0]]
   }
 
+  // The leading finding's place; without an item, ' in its code' only when the
+  // dependency clause needs the contrast.
+  const where = (item: Obj | undefined) => (item ? findingWhere(item) : inCode)
   const [nCrit, crit] = defect('critical')
-  if (nCrit) return done('do_not_connect', countPhrase(nCrit, 'critical', crit ? findingLabel(crit.name) : null, inCode) + plusDeps)
+  if (nCrit) return done('do_not_connect', countPhrase(nCrit, 'critical', crit ? findingLabel(crit.name) : null, where(crit)) + plusDeps)
   const bCrit = bFindings.filter((f) => sev(f) === 'critical')
   if (bCrit.length) {
     const f = bCrit[0]
@@ -346,7 +392,7 @@ export function decide(input: unknown): Decision {
 
   // review
   const [nHigh, high] = defect('high')
-  if (nHigh) return done('review', countPhrase(nHigh, 'high', high ? findingLabel(high.name) : null, inCode) + plusDeps)
+  if (nHigh) return done('review', countPhrase(nHigh, 'high', high ? findingLabel(high.name) : null, where(high)) + plusDeps)
   const bHigh = bFindings.filter((f) => sev(f) === 'high')
   if (bHigh.length) {
     const f = bHigh[0]

@@ -255,6 +255,65 @@ def _is_remote_mcp(data: dict) -> bool:
     return False
 
 
+# ── Where the leading finding sits (wording only) ─────────────────────────────────
+# "3 critical findings, including curl/wget piped to shell" read as "this package runs
+# curl|bash when installed" even when the command ships in instructions it hands an
+# agent. The reason names the leading finding's place. Path rules only (pure; the TS
+# twin ``findingWhere`` in gradeSystem.ts must match).
+WHERE_CODE = " in its code"
+WHERE_INSTALL = " in its install script"
+WHERE_AGENTS = " in instructions it gives agents"
+WHERE_TOOLS = " in its tool definitions"
+WHERE_DEPENDENCY = " in a dependency"
+
+# Files an agent is handed as instructions (mirrors src.scanner.package_context).
+_AGENT_FILE_NAMES = frozenset({
+    "skill.md", "agents.md", "agent.md", "claude.md", "gemini.md", "copilot-instructions.md",
+    ".cursorrules", ".windsurfrules", ".clinerules", "llms.txt", "llms-full.txt",
+    "mcp.json", ".mcp.json", "server.json", "ai-plugin.json", "manifest.json",
+    "plugin.json", "marketplace.json", "tools.json", "smithery.yaml", "smithery.yml",
+    "agents.yaml", "agents.yml", "tasks.yaml", "tasks.yml",
+})
+_AGENT_DIRS = frozenset({
+    "skills", "skill", ".claude", ".claude-plugin", ".cursor", ".windsurf", ".agents",
+    ".codex", ".gemini", "agents", "prompts", "instructions", "commands",
+})
+_TEXT_EXTS = (".md", ".mdc", ".txt", ".yaml", ".yml", ".json", ".toml")
+WHERE_DATA = " in a data file it ships"
+_DATA_EXTS = (".yaml", ".yml", ".json", ".jsonl", ".toml", ".xml", ".txt", ".csv", ".tsv")
+# Data-format files a tool executes (lifecycle scripts, CI, compose): read as code.
+_EXECUTED_DATA_NAMES = frozenset({
+    "package.json", "pyproject.toml", "setup.cfg", "docker-compose.yml",
+    "docker-compose.yaml", "compose.yml", "compose.yaml", "action.yml", "action.yaml",
+    ".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml", ".pre-commit-config.yaml",
+})
+_CI_DIRS = frozenset({".github", ".gitlab", ".circleci", ".buildkite", "workflows"})
+
+
+def finding_where(i: dict) -> str:
+    """`` in its code`` / `` in its install script`` / `` in instructions it gives
+    agents`` / `` in its tool definitions`` / `` in a data file it ships`` /
+    `` in a dependency`` for a listed finding."""
+    cat = i.get("category")
+    if cat == "install_hook":
+        return WHERE_INSTALL
+    if cat == "dependency":
+        return WHERE_DEPENDENCY
+    path = str(i.get("file_path") or "").replace("\\", "/").lower()
+    if path.startswith(("tool:", "prompt:", "resource:")):
+        return WHERE_TOOLS
+    parts = [p for p in path.split("/") if p]
+    name = parts[-1] if parts else ""
+    if name in _AGENT_FILE_NAMES or name.endswith(".mdc") or (
+            name.endswith(_TEXT_EXTS) and (name.startswith("readme")
+                                           or any(p in _AGENT_DIRS for p in parts[:-1]))):
+        return WHERE_AGENTS
+    if (name.endswith(_DATA_EXTS) and name not in _EXECUTED_DATA_NAMES
+            and not any(p in _CI_DIRS for p in parts[:-1])):
+        return WHERE_DATA
+    return WHERE_CODE
+
+
 def _count_phrase(n: int, severity: str, label: str | None, where: str = "") -> str:
     if n == 1:
         return f"one {severity} finding{where}" + (f": {label}" if label else "")
@@ -390,10 +449,15 @@ def decide(data: dict) -> Decision:
                     and i.get("installed") is not False and not is_advisory(i)]
         return n, (hits[0] if hits else None)
 
+    def where(item: dict | None) -> str:
+        """The leading finding's place; without an item, " in its code" only when the
+        dependency clause needs the contrast (as before)."""
+        return finding_where(item) if item is not None else in_code
+
     n_crit, crit = defect("critical")
     if n_crit:
         return done(DECISION_DO_NOT_CONNECT, _count_phrase(
-            n_crit, "critical", _label(crit.get("name")) if crit else None, in_code)
+            n_crit, "critical", _label(crit.get("name")) if crit else None, where(crit))
             + plus_deps)
     b_crit = [f for f in b_findings if sev(f) == "critical"]
     if b_crit:
@@ -406,7 +470,7 @@ def decide(data: dict) -> Decision:
     n_high, high = defect("high")
     if n_high:
         return done(DECISION_REVIEW, _count_phrase(
-            n_high, "high", _label(high.get("name")) if high else None, in_code)
+            n_high, "high", _label(high.get("name")) if high else None, where(high))
             + plus_deps)
     b_high = [f for f in b_findings if sev(f) == "high"]
     if b_high:
