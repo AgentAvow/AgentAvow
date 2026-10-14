@@ -443,6 +443,8 @@ interface TrafficRow {
   calls_claude_code?: number | null; callers_claude_code?: number | null; calls_claude?: number | null
   callers_claude?: number | null; calls_chatgpt?: number | null; hook_top_version?: string
   cc_machines_excl_owner?: number | null; hook_machines_excl_owner?: number | null; log_complete?: number | null
+  checked_machines?: number | null; checked_machines_excl_owner?: number | null
+  preinstall_machines?: number | null; preinstall_reqs?: number | null
 }
 interface Traffic { days?: string[]; rows?: TrafficRow[]; series?: Record<string, (number | null)[]>; latest?: TrafficRow | null; covered_days?: number; notes?: string[] }
 
@@ -457,6 +459,7 @@ function ClaudeTrafficPanel() {
   const num = (a?: (number | null)[]) => (a ?? []).map((v) => v ?? 0)
   const lines: TrendLine[] = mode === 'machines'
     ? [
+        { key: 'checked', label: 'Machines AgentAvow checked something for · excl. owner', color: '#22c55e', data: num(s.checked_machines_excl_owner) },
         { key: 'cc', label: 'Claude Code machines connecting', color: '#2dd4bf', data: num(s.cc_machines) },
         { key: 'new', label: 'New machines (30d)', color: '#fbbf24', data: num(s.cc_new_machines_30d) },
         { key: 'hook', label: 'Plugin hook machines', color: '#94a3b8', dashed: true, data: num(s.hook_machines_nginx) },
@@ -487,8 +490,9 @@ function ClaudeTrafficPanel() {
     </div>
   )
   return (
-    <Section title="Claude traffic — day by day" note="Traffic that originates in Anthropic surfaces, one row per UTC day, written by the nightly snapshot and kept without expiry (the nginx log itself only holds four days). 'Machines connecting' is distinct IPs that opened the plugin's MCP server from Claude Code — the headline adoption number — and is an nginx-origin count, NOT the tool-call counters in the panels above. 'excl. owner' strips the listed test machines. A row marked partial did not cover all 24 hours." right={toggle}>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
+    <Section title="Claude traffic — day by day" note="Traffic that originates in Anthropic surfaces, one row per UTC day, written by the nightly snapshot and kept without expiry (the nginx log itself only holds four days). 'Machines checked' is the headline usage number: distinct machines where the plugin checked something on its own that day — at session start or when a tool was being installed — excluding the owner's test machines. 'Machines connecting' is distinct IPs that opened the plugin's MCP server from Claude Code (installs, not use). Both are nginx-origin counts, NOT the tool-call counters in the panels above. A row marked partial did not cover all 24 hours." right={toggle}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
+        <Stat label="Machines checked" value={fmt(latest?.checked_machines_excl_owner)} sub={`${fmt(latest?.preinstall_machines)} at install time · excl. owner`} series={num(s.checked_machines_excl_owner)} />
         <Stat label="Machines connecting" value={fmt(latest?.cc_machines)} sub={`${fmt(latest?.cc_new_machines_30d)} new · ${latest?.day ?? '—'}${latest?.log_complete === 0 ? ' (partial)' : ''}`} series={num(s.cc_machines)} />
         <Stat label="claude.ai connector reqs" value={fmt(latest?.claudeai_reqs)} sub="via Anthropic's proxy" series={num(s.claudeai_reqs)} />
         <Stat label="Hook machines" value={fmt(latest?.hook_machines_nginx)} sub={`${fmt(latest?.hook_reqs)} scans · top ${latest?.hook_top_version ?? '—'}`} series={num(s.hook_machines_nginx)} />

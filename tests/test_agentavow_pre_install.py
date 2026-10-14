@@ -104,6 +104,20 @@ def test_targets_come_only_from_scannable_servers(hook):
 
 # --- what the person sees ---------------------------------------------------------
 
+def test_install_checks_identify_themselves_apart_from_session_start(hook, monkeypatch, capsys):
+    # Usage metrics count install-time checks by their own User-Agent; the scan code is
+    # shared with the session-start hook, so the label is the only thing that differs.
+    mod, pc = hook
+    seen = {}
+
+    def scan(t, force=False):
+        seen["ua"] = pc._user_agent()
+        return _ok(88, "safe")
+
+    _run(mod, monkeypatch, capsys, _bash("claude mcp add deepwiki https://mcp.deepwiki.com/mcp"), scan)
+    assert seen["ua"].startswith("agentavow-preinstall/" + mod.__version__ + " (")
+
+
 def test_safe_server_gives_a_visible_verdict_and_never_grants_permission(hook, monkeypatch, capsys):
     mod, pc = hook
     out = _run(mod, monkeypatch, capsys, _bash("claude mcp add deepwiki https://mcp.deepwiki.com/mcp"),

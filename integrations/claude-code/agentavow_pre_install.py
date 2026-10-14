@@ -36,7 +36,7 @@ import shlex
 import sys
 import time
 
-__version__ = "0.1.27"
+__version__ = "0.1.28"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -198,6 +198,7 @@ def main() -> None:
         return
     try:
         pc = _precheck()
+        pc.UA_PRODUCT = "agentavow-preinstall"  # count install-time checks separately
         targets = _targets_for(payload, pc)
     except Exception:
         return

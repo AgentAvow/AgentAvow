@@ -1023,8 +1023,14 @@ _TRAFFIC_INT_COLUMNS = (
     "calls_other", "callers_other", "calls_total", "hook_machines_hll",
     "owner_cc_reqs", "owner_cc_sessions", "owner_hook_reqs", "owner_scans_200",
     "cc_machines_excl_owner", "hook_machines_excl_owner", "log_complete",
+    "checked_machines", "checked_machines_excl_owner", "preinstall_reqs",
 )
 _TRAFFIC_NOTES = [
+    "checked_machines = distinct machines where the plugin checked something on its own "
+    "that day (session-start hook or install-time hook), excluding the owner's test "
+    "machines in the _excl_owner variant. This is the headline usage number: the plugin "
+    "earns its keep through these automatic checks far more than through hand-called "
+    "tools. Install-time checks are counted separately from plugin 0.1.28 (2026-10-14).",
     "Claude-origin traffic per UTC day, written once a day by scripts/ops/"
     "anthropic_traffic_snapshot.py on the prod host (cron 00:40 UTC for the previous day); "
     "kept in Redis without expiry so the series outlives the 4-day nginx log window.",
@@ -1091,7 +1097,9 @@ async def traffic_metrics(
         for col in ("cc_machines", "cc_new_machines_30d", "cc_sessions", "claudeai_reqs",
                     "hook_machines_nginx", "hook_reqs", "calls_claude_code",
                     "callers_claude_code", "calls_claude", "callers_claude", "calls_chatgpt",
-                    "cc_machines_excl_owner", "hook_machines_excl_owner")
+                    "cc_machines_excl_owner", "hook_machines_excl_owner",
+                    "checked_machines", "checked_machines_excl_owner", "preinstall_machines",
+                    "preinstall_reqs")
     }
     latest = rows[-1] if rows else None
     return {

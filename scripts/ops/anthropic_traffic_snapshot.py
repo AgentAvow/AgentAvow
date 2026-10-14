@@ -54,6 +54,10 @@ COLUMNS = [
     "hook_machines_hll",
     "owner_cc_reqs", "owner_cc_sessions", "owner_hook_reqs", "owner_scans_200",
     "cc_machines_excl_owner", "hook_machines_excl_owner", "log_complete",
+    # Headline usage number: distinct machines where the plugin checked something on its
+    # own (session-start hook OR install-time hook), owner excluded. Added 2026-10-14;
+    # install-time checks carry their own User-Agent from plugin 0.1.28.
+    "checked_machines", "checked_machines_excl_owner", "preinstall_reqs",
 ]
 
 REDIS_PROGRAM = r"""
@@ -187,6 +191,7 @@ def snapshot(day: str, since_hours: int) -> dict:
             gate_ips.add(ip)
         if ua.startswith(("agentavow-pre_install/", "agentavow-preinstall/")):
             pre_ips.add(ip)
+            n["preinstall_reqs"] += 1
         if "/api/v1/public/scan" in req and st == 200 and " /api/v1/public/scan/" in req:
             if "/badge" in req:
                 n["badges_200"] += 1
@@ -231,6 +236,9 @@ def snapshot(day: str, since_hours: int) -> dict:
         "owner_hook_reqs": n["owner_hook_reqs"], "owner_scans_200": n["owner_scans_200"],
         "cc_machines_excl_owner": len(cc_ips - owner),
         "hook_machines_excl_owner": len(hook_ips - owner),
+        "checked_machines": len(hook_ips | pre_ips),
+        "checked_machines_excl_owner": len((hook_ips | pre_ips) - owner),
+        "preinstall_reqs": n["preinstall_reqs"],
         "log_complete": int(bool(hours_seen) and min(hours_seen) == 0 and max(hours_seen) == 23),
     }
     # Redis names the surface "claude-code"; the CSV column is calls_claude_code.
