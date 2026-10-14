@@ -530,12 +530,13 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
                         has_install_hook = True
             continue
 
-        # The 12-category static engine over every scannable source file. Test /
-        # doc / example code shipped in an sdist is skipped — it isn't the runtime
-        # or install surface an agent executes, and penalizing it would grade a
-        # package on its test suite (the repo scanner downgrades these; for
-        # artifact-truth we skip them, since install hooks + drift are detected
-        # separately above).
+        # The 12-category static engine over every scannable source file, test / doc /
+        # example code included: a tests/ dir in a published artifact is installed next
+        # to the runtime code, which can import it (`from evilpkg.tests import go`).
+        # Those files are read for payloads only: payload-shaped findings (download+exec,
+        # pipe-to-shell, decoded exec, credential exfil, untrusted input reaching a sink,
+        # a provider secret) keep their severity and block (``payloads_full_severity``);
+        # everything else there is informational (below).
         # A shipped .git/config or .git/hooks/* in a tarball is a GitSpawn autorun vector
         # (a published artifact should never carry a .git/ dir) — scan it like the repo tree.
         if (
@@ -543,16 +544,30 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
             and len(af.text) <= _MAX_FILE_SIZE
             and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
             and not _skip(path)
-            and not _is_test_or_doc_file(path)
         ):
-            f, _positives, _suppressed = _scan_content(af.text, path, allowlist)
+            f, _positives, _suppressed = _scan_content(af.text, path, allowlist,
+                                                       payloads_full_severity=True)
             if not _installed(path):
                 # Not on a consumer's disk: keep the finding visible, never let it
                 # score or block (severity capped at info).
                 for item in f:
                     item.installed = False
+                    item.payload = False  # graded by `installed`, never as shipped
                     if item.kind == "defect" and item.severity != "info":
                         item.severity = "info"
+            if _is_test_or_doc_file(path):
+                # Test / doc / example code is read for payloads only. Anything else
+                # there is informational, like an uninstalled file's findings: a
+                # defect drops to info (no score, no review, no block), and the test
+                # suite's capabilities (pytest via subprocess, fixtures' eval) are not
+                # the tool's. Thin coverage measures runtime code, so these files are
+                # not counted in files_scanned.
+                f = [item for item in f if item.kind != "capability"]
+                for item in f:
+                    if item.kind == "defect" and not item.payload and item.severity != "info":
+                        item.severity = "info"
+                findings.extend(f)
+                continue
             findings.extend(f)
             files_scanned += 1
 
