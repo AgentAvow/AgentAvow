@@ -192,6 +192,90 @@ def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
     return classify_argv(elements, dynamic, untrusted_near=False).kind == "capability"
 
 
+# Precision PR 2: a build step that runs a TOOLCHAIN binary named by the environment or
+# the build config: `[os.environ.get("PKG_CONFIG", "pkg-config"), "--cflags", "libffi"]`
+# (cffi), `[self.pg_config_exe, "--libdir"]` (psycopg2), `check_output(str(proj))`
+# (pyproj), `[configure] + flags` (pynacl). It runs at install time, so it stays an
+# install hook, but without a shell or inline code it is a medium, the same as a
+# fixed-argv spawn. Inline code, a URL or a decode/fetch in any part keeps it high.
+_BUILD_PART_DANGER_RE = re.compile(
+    r"b64decode|a85decode|unhexlify|fromhex|decompress|urlopen|urlretrieve|requests\.|"
+    r"httpx\.|https?://|\bexec\b|\beval\b|__import__|marshal|pickle")
+
+
+def _is_build_binary_spawn(node: ast.Call, fname: str, assigns: dict) -> bool:
+    from src.scanner.exec_classify import (
+        _argv_nodes,
+        _basename,
+        _const_str,
+    )
+    from src.scanner.patterns import (
+        DANGEROUS_ARGV0_NET,
+        DANGEROUS_ARGV0_SHELLS,
+        DANGEROUS_ARGV_FLAGS,
+        INTERPRETER_ARGV0,
+        SHELL_PAYLOAD_DANGER_RE,
+    )
+
+    if fname in _AST_NET_CALLS:
+        return False
+    recv = node.func.value if isinstance(node.func, ast.Attribute) else None
+    if isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name) \
+            and recv.func.id == "__import__":
+        return False  # `__import__('os').system(...)`: the evasive form, never a build step
+    shell = fname in ("system", "popen") or any(
+        kw.arg == "shell" and not (isinstance(kw.value, ast.Constant) and kw.value.value is False)
+        for kw in node.keywords)
+    if shell:
+        # A LITERAL shell command a reviewer reads in place (`os.popen('brew --prefix
+        # libffi')`): the shell ladder's medium, unless it carries payload tokens.
+        cmd = node.args[0] if node.args else None
+        s = _const_str(cmd) if cmd is not None else None
+        return s is not None and not SHELL_PAYLOAD_DANGER_RE.search(s)
+    first = node.args[0] if node.args else next(
+        (kw.value for kw in node.keywords if kw.arg == "args"), None)
+    if isinstance(first, ast.Name):
+        if first.id not in assigns:
+            return False  # an opaque command we cannot read: not provably a build step
+        first = assigns[first.id]
+    if first is None:
+        return False
+    parts = _argv_nodes(first)
+    if parts is None:
+        # One program path, no shell: `check_output(str(proj))` / `run(exe_path)`. A
+        # string BUILT from pieces (f-string / concat / format) may be a shell-ish
+        # command line: not this class.
+        if isinstance(first, (ast.JoinedStr, ast.BinOp)) or (
+                isinstance(first, ast.Call) and isinstance(first.func, ast.Attribute)
+                and first.func.attr in ("format", "join")):
+            return False
+        parts = [first]
+    for i, el in enumerate(parts):
+        try:
+            src = ast.unparse(el)
+        except Exception:  # noqa: BLE001 — unreadable part: not provably a build step
+            return False
+        if _BUILD_PART_DANGER_RE.search(src):
+            return False
+        s = _const_str(el)
+        if s is None:
+            continue
+        if s in DANGEROUS_ARGV_FLAGS:
+            return False
+        if i == 0:
+            base = _basename(s)
+            if base in DANGEROUS_ARGV0_SHELLS or base in DANGEROUS_ARGV0_NET \
+                    or base in INTERPRETER_ARGV0:
+                return False
+    return True
+
+
+# setuptools commands that never run on `pip install` (a maintainer builds the sdist /
+# uploads / runs the tests): code inside a command class derived from one of these is
+# not an install hook.
+_NON_INSTALL_COMMAND_RE = re.compile(r"^(?:sdist|upload|register|clean|test|check)", re.I)
+
+
 # Receivers whose `.run()` / `.system()` / `.call()` is not a process or network call:
 # a setuptools command's `super().run()` / `self.run_command()`, `platform.system()`.
 _NON_EXEC_RECEIVERS = frozenset({"self", "cls", "platform"})
@@ -234,6 +318,27 @@ class _InstallExecVisitor(ast.NodeVisitor):
         self.has_dynamic_unguarded = False
         self.cmdclass = False
         self._guard_depth = 0
+        # `cmd = [pip, "install", path]` … `check_output(cmd)`: last simple assignment of
+        # a name to a list/tuple, so the call's argv can be read (precision PR 2).
+        self._assigns: dict[str, ast.AST] = {}
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
+                and isinstance(node.value, (ast.List, ast.Tuple, ast.BinOp)):
+            self._assigns[node.targets[0].id] = node.value
+        self.generic_visit(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        # `class sdist(sdist_orig): def run(self): os.system("git rev-parse …")` runs
+        # when the maintainer builds an sdist, never on `pip install` (precision PR 2).
+        bases = [b.id if isinstance(b, ast.Name) else b.attr if isinstance(b, ast.Attribute)
+                 else "" for b in node.bases]
+        if any(_NON_INSTALL_COMMAND_RE.match(b) for b in bases):
+            self._guard_depth += 1
+            self.generic_visit(node)
+            self._guard_depth -= 1
+            return
+        self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> None:
         if _is_cli_publish_guard(node.test):
@@ -257,7 +362,8 @@ class _InstallExecVisitor(ast.NodeVisitor):
                 self.unguarded.append((fname, getattr(node, "lineno", 1)))
                 if fname in _AST_NET_CALLS:
                     self.has_net_unguarded = True
-                if not _is_fixed_argv_spawn(node, fname):
+                if not (_is_fixed_argv_spawn(node, fname)
+                        or _is_build_binary_spawn(node, fname, self._assigns)):
                     self.has_dynamic_unguarded = True
         if fname == "setup":
             for kw in node.keywords:
@@ -313,7 +419,7 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
             line_number=line,
             snippet=(
                 f"install-time exec via {name}(...) in setup.py"
-                + (" (fixed argv, no shell)" if severity == "medium" else "")
+                + (" (argv, no shell)" if severity == "medium" else "")
             ),
             remediation=_REMEDIATION_HINTS.get("install_hook", "Audit install-time code"),
         ))
