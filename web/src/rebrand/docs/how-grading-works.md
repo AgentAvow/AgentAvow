@@ -50,6 +50,8 @@ The tier tells a gateway how hard to throttle; the phrase tells a person what to
 
 Every static finding carries a `kind`. A **defect** is something a reviewer would agree is wrong — a shell command built from a variable, `node -e` / `python -c` with dynamic code, a `curl … | sh`, a PEM key body, a payload decoded and exec'd — and it moves the trust score. A **capability** is something the tool *does* — runs a fixed command (`git status`), evaluates its own expressions, writes a file at a path you give it, unpickles its own cache — and is listed in `capabilities` so you can see it, but it never moves the score and never blocks. A finding in a file a consumer never installs (an sdist's `Makefile`, `scripts/`, `bench/`; anything absent from the wheel) is reported with `installed: false` and is informational only.
 
+A shell command is a **high** finding only when it is a real risk: untrusted input (a request, fetched content, a tool or bot-command parameter) is in reach of it, a decoded or fetched value builds it, or its text downloads, decodes, pipes into a shell, runs inline interpreter code or touches credential files. A shell library, test runner or REPL running a command built from its own values is a **medium** defect: reported and scored, but not on its own a reason to review.
+
 ### Certified — a separate mark beside Safe to connect
 
 **Certified is a separate, cryptographically-earned mark** — not one of the six tiers and not just a high number; it shows beside Safe to connect. A clean 100 we only saw the *repo* for is **Trusted, not Certified**. Certification requires **all six** of:
