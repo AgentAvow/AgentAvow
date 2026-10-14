@@ -2436,7 +2436,8 @@ def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
 # which can import it (`from evilpkg.tests import go`), so ``payloads_full_severity``
 # keeps the downgrade for capability-style findings (a test runner's subprocess, a
 # fixture's eval, a conftest's env read) but exempts the payload shapes below: they keep
-# their severity, carry ``Finding.payload`` and block like shipped code.
+# their severity, carry ``Finding.payload`` and block like shipped code. (The artifact
+# scan then makes the rest informational: ``artifact_scan.scan_artifact_files``.)
 #
 # Only in executable source: a `curl … | sh` in a .yaml / .json / .html fixture is text.
 _PAYLOAD_CODE_EXTS = frozenset({
@@ -3229,16 +3230,6 @@ def _scan_content(
 
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
     findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
-
-    # Artifact test / doc / example file: every other critical/high defect is capped at
-    # medium, the groups the repo scan leaves at full severity there (exfil, obfuscation,
-    # hidden unicode) included; only the payload shapes kept theirs. Manifest / skill
-    # metadata and git autorun files keep their own rules.
-    if (payloads_full_severity and file_test_or_doc and not is_metadata
-            and not _is_git_config_file(file_path) and not _is_git_hook_file(file_path)):
-        for f in findings:
-            if f.kind == "defect" and not f.payload and f.severity in ("critical", "high"):
-                f.severity = "medium"
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.

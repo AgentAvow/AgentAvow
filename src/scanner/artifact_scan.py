@@ -455,6 +455,7 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         _is_git_config_file,
         _is_git_hook_file,
         _is_source_file,
+        _is_test_or_doc_file,
         _load_allowlist,
         _scan_content,
         _scan_dependencies,
@@ -532,11 +533,10 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # The 12-category static engine over every scannable source file, test / doc /
         # example code included: a tests/ dir in a published artifact is installed next
         # to the runtime code, which can import it (`from evilpkg.tests import go`).
-        # Those files are graded the way the repo scan grades them (downgraded:
-        # capability-style findings capped at medium, non-blocking, a fraction of the
-        # weight), except that payload-shaped findings (download+exec, pipe-to-shell,
-        # decoded exec, credential exfil, untrusted input reaching a sink, a provider
-        # secret) keep their severity and block (``payloads_full_severity``).
+        # Those files are read for payloads only: payload-shaped findings (download+exec,
+        # pipe-to-shell, decoded exec, credential exfil, untrusted input reaching a sink,
+        # a provider secret) keep their severity and block (``payloads_full_severity``);
+        # everything else there is informational (below).
         # A shipped .git/config or .git/hooks/* in a tarball is a GitSpawn autorun vector
         # (a published artifact should never carry a .git/ dir) — scan it like the repo tree.
         if (
@@ -555,6 +555,19 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
                     item.payload = False  # graded by `installed`, never as shipped
                     if item.kind == "defect" and item.severity != "info":
                         item.severity = "info"
+            if _is_test_or_doc_file(path):
+                # Test / doc / example code is read for payloads only. Anything else
+                # there is informational, like an uninstalled file's findings: a
+                # defect drops to info (no score, no review, no block), and the test
+                # suite's capabilities (pytest via subprocess, fixtures' eval) are not
+                # the tool's. Thin coverage measures runtime code, so these files are
+                # not counted in files_scanned.
+                f = [item for item in f if item.kind != "capability"]
+                for item in f:
+                    if item.kind == "defect" and not item.payload and item.severity != "info":
+                        item.severity = "info"
+                findings.extend(f)
+                continue
             findings.extend(f)
             files_scanned += 1
 

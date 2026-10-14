@@ -494,9 +494,9 @@ def _scan_helpers():
 
 def _member_class(name: str) -> tuple[int, bool]:
     """``(tier, scannable)`` for an archive member path. ``scannable`` = the static
-    engine would read this file (a manifest, or source, test / doc source included) —
-    the files whose absence makes a scan partial. Conservative: it may count a file the
-    engine would still skip for another reason, never the reverse."""
+    engine would read this file (a manifest, or non-test/doc source) — the files whose
+    absence makes a scan partial. Conservative: it may count a file the engine would
+    still skip for another reason, never the reverse."""
     (skip_exts, _max, is_git_config, is_git_hook, is_source,
      is_test_or_doc) = _scan_helpers()
     p = PurePosixPath(name.replace("\\", "/"))
@@ -514,11 +514,6 @@ def _member_class(name: str) -> tuple[int, bool]:
         return (TIER_TEXT if ext in _DATA_TEXT_EXTS else TIER_CODE), True
     if test_or_doc and not source:
         return TIER_BULK, False  # test fixtures / doc assets: the first thing to drop
-    if source:
-        # Test / doc / example source: the engine reads it (a runtime module can import
-        # a shipped tests/ package), so dropping it makes the scan partial; it is
-        # still evicted before runtime code.
-        return TIER_TEXT, True
     return TIER_TEXT, False
 
 

