@@ -8,9 +8,9 @@ import re
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "AWS Access Key",
-        # Word-bounded: "AKIA" + 16 upper/digits inside a base64 blob (an embedded font
+        # Left-bounded: "AKIA" + 16 upper/digits inside a base64 blob (an embedded font
         # in pillow's ImageFont.py) is not a key.
-        re.compile(r"(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])"),
+        re.compile(r"(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}"),
         "critical",
     ),
     (
