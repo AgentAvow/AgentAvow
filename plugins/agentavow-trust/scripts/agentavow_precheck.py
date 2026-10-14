@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.27"
+__version__ = "0.1.28"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -1011,8 +1011,15 @@ def _install_source() -> str:
     return "plugin" if (plugin_root / ".claude-plugin").is_dir() else "manual"
 
 
+# Which hook is calling, for AgentAvow's usage counts only. The install-time hook
+# (agentavow_pre_install.py) reuses this module's scan code and sets this to
+# "agentavow-preinstall" so install-time checks can be counted apart from session-start
+# checks. Nothing else about the request changes.
+UA_PRODUCT = "agentavow-precheck"
+
+
 def _user_agent() -> str:
-    return f"agentavow-precheck/{__version__} ({_install_source()})"
+    return f"{UA_PRODUCT}/{__version__} ({_install_source()})"
 
 
 def _fetch(path: str, params: dict) -> dict:

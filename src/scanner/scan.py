@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import posixpath
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -2759,13 +2760,43 @@ _INERT_NODE_SNIPPET_RE = re.compile(
 )
 
 
+# A snippet whose only effect is loading a local file of the package itself, e.g. core-js's
+# ``try{require('./postinstall')}catch(e){}``. That is no more dangerous than the hook
+# running ``node ./postinstall.js`` (already medium). The path must be a constant
+# relative literal of plain path characters; the catch body may be empty or a constant
+# log line. Anything else (another call, a concatenated path, a bare module name such as
+# ``require('http')``) does not match and stays critical.
+_CONST_LOG = r"""console\.(?:log|warn|error)\(\s*(?:'[^'$`\\]*'|\d+)?\s*\)"""
+_LOCAL_PATH = r"""\.{1,2}/[A-Za-z0-9_./-]*"""
+_LOCAL_REQUIRE = rf"""require\(\s*(?:'{_LOCAL_PATH}'|"{_LOCAL_PATH}")\s*\)"""
+_INERT_LOCAL_REQUIRE_RE = re.compile(
+    rf"""^\s*(?:{_LOCAL_REQUIRE}\s*;?|"""
+    rf"""try\s*\{{\s*{_LOCAL_REQUIRE}\s*;?\s*\}}\s*catch\s*(?:\(\s*\w+\s*\))?\s*"""
+    rf"""\{{\s*(?:{_CONST_LOG}\s*;?\s*)?\}})\s*;?\s*$""",
+)
+
+_REQUIRE_PATH_RE = re.compile(r"""require\(\s*(['"])(.*?)\1""")
+
+
+def _is_inert_local_require(code: str) -> bool:
+    m = _INERT_LOCAL_REQUIRE_RE.match(code)
+    if not m:
+        return False
+    path = _REQUIRE_PATH_RE.search(code).group(2)
+    normalized = posixpath.normpath(path)
+    # Must resolve inside the package root (the hook's cwd): no `..` escape.
+    return normalized != ".." and not normalized.startswith("../")
+
+
 def _strip_inert_node_eval(cmd: str) -> str:
     """Remove ``node -e "<snippet>"`` segments whose snippet is a known no-op
-    (``process.exit(0)`` as an ``||`` fallback, a constant ``console.log``) before the
-    danger check. Anything else (``require(…)``, fetch, eval, shell expansion) stays."""
+    (``process.exit(0)`` as an ``||`` fallback, a constant ``console.log``) or only
+    requires a local file inside the package (optionally in an empty try/catch) before
+    the danger check. Anything else (other ``require(…)``, fetch, eval, shell expansion)
+    stays."""
     def _inert(m: re.Match) -> str:
         code = m.group(1) if m.group(1) is not None else m.group(2)
-        if _INERT_NODE_SNIPPET_RE.match(code):
+        if _INERT_NODE_SNIPPET_RE.match(code) or _is_inert_local_require(code):
             return "node <inert-inline>"
         return m.group(0)
     return _NODE_EVAL_SEGMENT_RE.sub(_inert, cmd)
