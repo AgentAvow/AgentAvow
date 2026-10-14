@@ -369,6 +369,22 @@ def test_nothing_to_scan_shows_the_intro_once_and_makes_no_request(hook, monkeyp
     assert json.loads(hook.CACHE.read_text())[hook.META_KEY]["intro_shown"] == hook.__version__
 
 
+def test_install_count_is_relayed_once_at_the_next_session_start(hook, monkeypatch, capsys):
+    # The install-time hook counted 3 package installs; nothing else is new this start.
+    hook.CACHE.write_text(json.dumps({hook.META_KEY: {
+        "intro_shown": hook.__version__,
+        hook.INSTALL_STATS_KEY: {"count": 3, "flagged": 0, "since": 1.0}}}))
+    calls = []
+    first = _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: calls.append(t))
+    assert first["systemMessage"] == (
+        "AgentAvow: Since the last session AgentAvow checked 3 package installs — "
+        "all Safe to connect.")
+    assert "do not mention it again" in first["hookSpecificOutput"]["additionalContext"]
+    # said once, then the counter is gone: the next start is silent again
+    assert _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: calls.append(t)) == {}
+    assert calls == []
+
+
 def test_manual_copy_intro_points_at_the_site_not_the_plugin_command(tmp_path, monkeypatch):
     manual = _load(MANUAL_COPY)
     msg = manual._intro_message()

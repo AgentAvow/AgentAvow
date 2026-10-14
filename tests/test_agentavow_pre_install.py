@@ -213,7 +213,8 @@ def test_transient_failure_and_non_install_commands_are_silent(hook, monkeypatch
         raise TimeoutError("slow")
 
     assert _run(mod, monkeypatch, capsys, _bash("claude mcp add x https://x.example/mcp"), boom) == {}
-    assert _run(mod, monkeypatch, capsys, _bash("npm install chalk"), lambda t, force=False: _ok(1, "x")) == {}
+    assert _run(mod, monkeypatch, capsys, _bash("echo npm install chalk && ls"),
+                lambda t, force=False, stored=False: _ok(1, "x")) == {}
     monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
     mod.main()
     assert capsys.readouterr().out == ""
@@ -227,3 +228,158 @@ def test_localhost_and_secret_urls_never_leave_the_machine(hook, monkeypatch, ca
     assert _run(mod, monkeypatch, capsys, _bash(
         "claude mcp add s https://h.example/mcp/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b"), scan) == {}
     assert calls == []
+
+
+# --- package installs (npm / pip / uv …) — quiet by design -----------------------------
+
+def _pkg(decision, reason, score=80, **extra):
+    base = {"score": score, "decision": decision, "decision_reason": reason,
+            "decision_final": True, "verdict": "safe" if decision == "safe" else "needs review",
+            "blocking": 0, "critical": 0, "advisories": 0, "incident": False, "tier": "trusted",
+            "grade": "", "tool_digests": {}, "tool_manifest_digest": None, "sandbox": "",
+            "deprecated": False, "certified": False, "stale": False, "reason": ""}
+    base.update(extra)
+    return base
+
+
+@pytest.mark.parametrize("cmd,want", [
+    ("npm install chalk", [("npm", "chalk", "")]),
+    ("npm i -D left-pad@1.3.0 @scope/x@^2", [("npm", "left-pad", "1.3.0"), ("npm", "@scope/x", "^2")]),
+    ("cd app && pnpm add zod; yarn add react", [("npm", "zod", ""), ("npm", "react", "")]),
+    ("bun add hono", [("npm", "hono", "")]),
+    ("pip install requests==2.32.3 'pydantic[email]>=2'",
+     [("pypi", "requests", "==2.32.3"), ("pypi", "pydantic", ">=2")]),
+    ("python3 -m pip install -U httpx", [("pypi", "httpx", "")]),
+    ("uv add fastapi && uv pip install rich", [("pypi", "fastapi", ""), ("pypi", "rich", "")]),
+    ("pipx install ruff", [("pypi", "ruff", "")]),
+    ("poetry add sqlalchemy", [("pypi", "sqlalchemy", "")]),
+    ("sudo FOO=1 pip3 install numpy", [("pypi", "numpy", "")]),
+    ("npm i a b c d e f g", [("npm", p, "") for p in "abcde"]),            # capped at 5
+    ("npm install chalk chalk", [("npm", "chalk", "")]),                   # de-duplicated
+])
+def test_package_installs_are_recognised(hook, cmd, want):
+    mod, pc = hook
+    assert mod._package_installs(cmd, pc) == want
+
+
+@pytest.mark.parametrize("cmd", [
+    "npm install", "npm ci", "pnpm install", "uv sync", "pip install -r requirements.txt",
+    "pip install -e .", "pip install ./dist/pkg-1.0.whl", "npm i ./local-pkg",
+    "npm i git+https://example.com/a/b.git", "npm i owner/repo", "npm i https://x/y.tgz",
+    "npm run build", "echo npm install x",
+])
+def test_lockfile_project_path_and_url_installs_are_left_alone(hook, cmd):
+    mod, pc = hook
+    assert mod._package_installs(cmd, pc) == []
+
+
+def _run_pkgs(mod, pc, monkeypatch, capsys, cmd, verdicts, queued=()):
+    calls = []
+
+    def scan(t, force=False, stored=False):
+        calls.append((t["pkg"], stored))
+        if stored and t["pkg"] in queued:
+            raise pc._QueuedError("queued")
+        v = verdicts.get(t["pkg"])
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    monkeypatch.setattr(pc, "_scan", scan)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(_bash(cmd))))
+    mod.main()
+    out = capsys.readouterr().out
+    return (json.loads(out) if out else {}), calls
+
+
+def test_safe_packages_are_silent_but_counted(hook, monkeypatch, capsys):
+    mod, pc = hook
+    out, calls = _run_pkgs(mod, pc, monkeypatch, capsys, "npm i chalk zod",
+                           {"chalk": _pkg("safe", "nothing found"),
+                            "zod": _pkg("safe", "nothing found")})
+    assert out == {}                                   # nothing shown
+    assert calls == [("chalk", True), ("zod", True)]   # stored grades only
+    meta = json.loads(pc.CACHE.read_text())[pc.META_KEY]
+    assert meta["install_checks"]["count"] == 2 and meta["install_checks"]["flagged"] == 0
+    assert mod.STATS_KEY == pc.INSTALL_STATS_KEY
+
+
+def test_deprecated_reads_as_deprecated_not_a_security_problem(hook, monkeypatch, capsys):
+    mod, pc = hook
+    out, _ = _run_pkgs(mod, pc, monkeypatch, capsys, "npm install left-pad",
+                       {"left-pad": _pkg("review", "the maintainer has deprecated this package",
+                                         deprecated=True)})
+    msg = out["systemMessage"]
+    assert "deprecated by its maintainer — not a security finding" in msg
+    assert "Review before you connect" not in msg
+    assert "permissionDecision" not in out["hookSpecificOutput"]  # never a prompt
+
+
+def test_review_is_a_one_line_note_and_the_install_proceeds(hook, monkeypatch, capsys):
+    mod, pc = hook
+    out, _ = _run_pkgs(mod, pc, monkeypatch, capsys, "npm install shelljs",
+                       {"shelljs": _pkg("review", "one high finding: exec with a variable",
+                                        score=48, blocking=1)})
+    msg = out["systemMessage"]
+    assert "⚠️ npm package 'shelljs': Review before you connect" in msg
+    assert "The install goes ahead" in msg
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+
+
+def test_do_not_connect_asks_first(hook, monkeypatch, capsys):
+    mod, pc = hook
+    out, _ = _run_pkgs(mod, pc, monkeypatch, capsys, "pip install evil-pkg",
+                       {"evil-pkg": _pkg("do_not_connect",
+                                         "a known-malicious package or dependency",
+                                         score=5, incident=True)})
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "ask"
+    assert "⛔ pypi package 'evil-pkg': Do not connect" in hso["permissionDecisionReason"]
+
+
+def test_never_graded_gets_one_fresh_scan_then_silence(hook, monkeypatch, capsys):
+    mod, pc = hook
+    out, calls = _run_pkgs(mod, pc, monkeypatch, capsys, "npm i new-a new-b",
+                           {"new-a": _pkg("safe", "nothing found"), "new-b": _pkg("safe", "x")},
+                           queued=("new-a", "new-b"))
+    assert out == {}
+    # stored then ONE fresh scan for new-a; new-b gets no fresh scan (FRESH_MAX = 1)
+    assert calls == [("new-a", True), ("new-a", False), ("new-b", True)]
+
+
+def test_unscannable_and_errors_are_silent(hook, monkeypatch, capsys):
+    mod, pc = hook
+    out, _ = _run_pkgs(mod, pc, monkeypatch, capsys, "npm i nope boom",
+                       {"nope": pc._UnscannableError("404"), "boom": TimeoutError("slow")})
+    assert out == {}
+
+
+def test_cached_grade_is_reused_without_a_request(hook, monkeypatch, capsys):
+    mod, pc = hook
+    _run_pkgs(mod, pc, monkeypatch, capsys, "npm i chalk", {"chalk": _pkg("safe", "nothing found")})
+    _, calls = _run_pkgs(mod, pc, monkeypatch, capsys, "npm i chalk", {})
+    assert calls == []
+
+
+def test_install_checks_can_be_switched_off(hook, monkeypatch, capsys):
+    mod, pc = hook
+    monkeypatch.setenv("AGENTAVOW_INSTALL_CHECKS", "off")
+    out, calls = _run_pkgs(mod, pc, monkeypatch, capsys, "npm install shelljs",
+                           {"shelljs": _pkg("review", "x", blocking=1)})
+    assert out == {} and calls == []
+
+
+def test_session_start_relays_the_install_count_once(hook, monkeypatch, capsys):
+    mod, pc = hook
+    _run_pkgs(mod, pc, monkeypatch, capsys, "npm i chalk zod left-pad", {
+        "chalk": _pkg("safe", "x"), "zod": _pkg("safe", "x"),
+        "left-pad": _pkg("review", "the maintainer has deprecated this package",
+                         deprecated=True)})
+    cache = pc._load_cache()
+    clause = pc._install_clause(cache)
+    assert clause == (" Since the last session AgentAvow checked 3 package installs; "
+                      "1 needed a look (reported at the time).")
+    assert pc._install_clause(cache) == ""        # reset after reading
+    cache[pc.META_KEY]["install_checks"] = {"count": 1, "flagged": 0}
+    assert pc._install_clause(cache) == (
+        " Since the last session AgentAvow checked 1 package install — all Safe to connect.")

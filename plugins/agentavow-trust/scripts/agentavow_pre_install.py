@@ -36,10 +36,21 @@ import shlex
 import sys
 import time
 
-__version__ = "0.1.29"
+__version__ = "0.1.30"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
+
+# Package installs (npm / pnpm / yarn / bun / pip / uv / pipx / poetry). Quiet by design:
+# Safe is silent, a deprecated package gets a plain "deprecated" note (not a security
+# finding), Review is a one-line note and the install goes ahead, Do not connect asks.
+# Stored grades first so an install is not held up; one bounded fresh scan at most;
+# anything slow, unknown or unscannable stays silent (fail-open).
+INSTALL_ENV = "AGENTAVOW_INSTALL_CHECKS"  # "off" disables package-install checks
+PKG_CAP = 5            # packages checked per command
+PKG_BUDGET = 14.0      # seconds for all package lookups in one command (hook timeout 20)
+FRESH_MAX = 1          # fresh scans per command for a package with no stored grade
+STATS_KEY = "install_checks"  # counter in the cache's meta entry, read at session start
 
 
 def _precheck():
@@ -123,6 +134,200 @@ def _servers_from_mcp_json(text: str) -> list[tuple[str, dict]]:
     return []
 
 
+def _install_checks_enabled() -> bool:
+    import os
+    return os.environ.get(INSTALL_ENV, "").strip().lower() not in ("off", "0", "false", "no")
+
+
+_SEGMENTS = re.compile(r"&&|\|\||;|\n|\|")
+_ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_JS_VERBS = {"npm": {"install", "i", "add", "in"}, "pnpm": {"add", "install", "i"},
+             "yarn": {"add"}, "bun": {"add", "install", "i"}}
+# Flags whose NEXT token is a value, never a package (a requirements file, an index URL,
+# a workspace, an editable path …).
+_VALUE_FLAGS = {
+    "--registry", "--prefix", "-w", "--workspace", "--filter", "-C", "--dir", "--cwd",
+    "-r", "--requirement", "-c", "--constraint", "-i", "--index-url", "--extra-index-url",
+    "-t", "--target", "--python", "-p", "--project", "--group", "-f", "--find-links",
+    "--root", "--src", "--platform", "--python-version", "--implementation", "--abi",
+    "--trusted-host", "--cache-dir", "--log", "--proxy", "--timeout", "--retries",
+    "-e", "--editable", "--extra", "--optional", "-G", "--with", "--tag", "--save-prefix",
+}
+_NPM_NAME = re.compile(r"^(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*$")
+
+
+def _install_argv(argv: list[str]) -> tuple[str, list[str]] | None:
+    """(registry, the args after the install verb) when ``argv`` installs packages."""
+    while argv and (_ENV_ASSIGN.match(argv[0]) or argv[0] in ("sudo", "env", "time",
+                                                               "command", "exec")):
+        argv = argv[1:]
+    if len(argv) < 2:
+        return None
+    tool = argv[0].rsplit("/", 1)[-1]
+    if tool in _JS_VERBS and argv[1] in _JS_VERBS[tool]:
+        return "npm", argv[2:]
+    if tool in ("pip", "pip3") and argv[1] == "install":
+        return "pypi", argv[2:]
+    if tool.startswith("python") and argv[1:4] == ["-m", "pip", "install"]:
+        return "pypi", argv[4:]
+    if tool == "uv" and argv[1:3] == ["pip", "install"]:
+        return "pypi", argv[3:]
+    if tool in ("uv", "poetry") and argv[1] == "add":
+        return "pypi", argv[2:]
+    if tool == "pipx" and argv[1] == "install":
+        return "pypi", argv[2:]
+    return None
+
+
+def _npm_spec(token: str) -> tuple[str, str] | None:
+    low = token.strip()
+    if not low or low.startswith(("file:", "link:", "git", "http", ".", "/", "~", "npm:",
+                                  "workspace:", "github:")) or low.endswith((".tgz", ".tar.gz")):
+        return None
+    if "/" in low and not low.startswith("@"):
+        return None  # owner/repo GitHub shorthand: no registry grade
+    if low.startswith("@"):
+        parts = low.split("@")  # ['', 'scope/name', 'ver']
+        pkg, spec = "@" + parts[1], (parts[2] if len(parts) > 2 else "")
+    else:
+        pkg, _, spec = low.partition("@")
+    pkg = pkg.lower()
+    return (pkg, spec) if _NPM_NAME.match(pkg) else None
+
+
+def _pypi_spec(token: str, pc) -> tuple[str, str] | None:
+    t = token.strip()
+    if not t or "/" in t or "\\" in t or t.endswith((".whl", ".zip", ".tar.gz")):
+        return None
+    return pc._pypi_name_spec(t)
+
+
+def _package_installs(command: str, pc) -> list[tuple[str, str, str]]:
+    """Every (registry, package, version spec) a shell command installs, in order,
+    de-duplicated, capped at PKG_CAP. A bare ``npm install`` (lockfile), a requirements
+    file, local paths, git URLs and tarballs are not registry packages and are skipped."""
+    out: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for seg in _SEGMENTS.split(command or ""):
+        try:
+            argv = shlex.split(seg)
+        except ValueError:
+            continue
+        hit = _install_argv(argv)
+        if not hit:
+            continue
+        registry, args = hit
+        skip_next = False
+        for a in args:
+            if skip_next:
+                skip_next = False
+                continue
+            if a == "--":
+                continue
+            if a in _VALUE_FLAGS:
+                skip_next = True
+                continue
+            if a.startswith("-"):
+                continue
+            parsed = _npm_spec(a) if registry == "npm" else _pypi_spec(a, pc)
+            if not parsed:
+                continue
+            key = (registry, parsed[0].lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((registry, parsed[0], parsed[1]))
+    return out[:PKG_CAP]
+
+
+def _is_deprecation_only(r: dict) -> bool:
+    """Review only because the maintainer deprecated it — a maintenance signal, not a
+    security finding (Kenne, 2026-10-14): worded as "deprecated" at install time."""
+    return (r.get("decision") == "review" and bool(r.get("deprecated"))
+            and not int(r.get("blocking") or 0) and not int(r.get("advisories") or 0)
+            and "deprecat" in str(r.get("decision_reason") or "").lower())
+
+
+def _package_line(t: dict, r: dict, pc) -> str | None:
+    """The one line for a package install, or None when there is nothing to say (Safe)."""
+    coord = f"{t['registry']} package '{t['pkg']}'"
+    url = f"{pc.WEB}/check/pkg/{t['registry']}/{t['pkg']}"
+    d = pc._dval(r)
+    if d == "safe":
+        return None
+    if _is_deprecation_only(r):
+        return (f"📦 {coord}: deprecated by its maintainer — not a security finding, but "
+                f"consider a maintained alternative. {url}")
+    if d == "review":
+        return f"⚠️ {coord}: {pc._answer(r)}. The install goes ahead. Report: {url}"
+    return f"⛔ {coord}: {pc._answer(r)}. Report: {url}"
+
+
+def _check_packages(command: str, pc, cache: dict, now: float
+                    ) -> tuple[list[str], bool, int]:
+    """(lines, needs_decision, packages checked) for the package installs in
+    ``command``. Never raises; anything uncertain is left silent."""
+    if not _install_checks_enabled():
+        return [], False, 0
+    try:
+        pkgs = _package_installs(command, pc)
+    except Exception:
+        return [], False, 0
+    lines: list[str] = []
+    needs = False
+    checked = 0
+    fresh = 0
+    started = time.monotonic()
+    for registry, pkg, spec in pkgs:
+        t = pc._dep(registry, pkg, spec)
+        entry = cache.get(t["name"])
+        r: dict | None = None
+        if pc._is_cached(entry, t["id"], now) and isinstance(entry, dict) and "score" in entry:
+            r = entry
+        else:
+            left = PKG_BUDGET - (time.monotonic() - started)
+            if left <= 1:
+                break
+            pc.TIMEOUT = min(TIMEOUT, max(1.0, left))
+            try:
+                r = pc._scan(t, stored=True)
+            except pc._QueuedError:
+                # never graded: one bounded fresh scan, else stay silent
+                left = PKG_BUDGET - (time.monotonic() - started)
+                if fresh >= FRESH_MAX or left <= 3:
+                    continue
+                fresh += 1
+                pc.TIMEOUT = min(TIMEOUT, left)
+                try:
+                    r = pc._scan(t)
+                except Exception:
+                    continue
+            except Exception:
+                continue  # unscannable / not found / transient: nothing to say
+            rec = pc._record(t, r, now)
+            rec["spec"] = spec
+            cache[t["name"]] = rec
+        checked += 1
+        line = _package_line(t, r, pc)
+        if line:
+            lines.append(line)
+        needs = needs or pc._dval(r) == "do_not_connect"
+    return lines, needs, checked
+
+
+def _bump_stats(cache: dict, pc, checked: int, flagged: int, now: float) -> None:
+    """Count install-time checks for the quiet session-start line."""
+    if not checked:
+        return
+    meta = cache.get(pc.META_KEY)
+    meta = dict(meta) if isinstance(meta, dict) else {}
+    st = meta.get(STATS_KEY) if isinstance(meta.get(STATS_KEY), dict) else {}
+    meta[STATS_KEY] = {"count": int(st.get("count") or 0) + checked,
+                       "flagged": int(st.get("flagged") or 0) + flagged,
+                       "since": st.get("since") or now}
+    cache[pc.META_KEY] = meta
+
+
 def _targets_for(payload: dict, pc) -> list[dict]:
     tool = str(payload.get("tool_name") or "")
     inp = payload.get("tool_input") or {}
@@ -202,7 +407,11 @@ def main() -> None:
         targets = _targets_for(payload, pc)
     except Exception:
         return
-    if not targets:
+    command = ""
+    if payload.get("tool_name") == "Bash" and isinstance(payload.get("tool_input"), dict):
+        command = str(payload["tool_input"].get("command") or "")
+    if not targets and not (command and _install_checks_enabled()
+                            and _package_installs(command, pc)):
         return
 
     cache = pc._load_cache()
@@ -222,11 +431,22 @@ def main() -> None:
         else:
             cache[t["name"]] = pc._record(t, r, now)
         needs_decision = needs_decision or _needs_decision(r)
-    if not lines:
-        return
+
+    pkg_lines: list[str] = []
+    if command:
+        pkg_lines, pkg_needs, checked = _check_packages(command, pc, cache, now)
+        needs_decision = needs_decision or pkg_needs
+        _bump_stats(cache, pc, checked, len(pkg_lines), now)
+        if checked:
+            pc._save_cache(cache)
+    if not lines and not pkg_lines:
+        return  # Safe packages and nothing else: silent by design
+    lines += pkg_lines
     pc._save_cache(cache)
 
-    body = "AgentAvow checked this before it is added:\n" + "\n".join(lines)
+    head = ("AgentAvow checked this before it is added:" if not pkg_lines else
+            "AgentAvow checked this before it is installed:")
+    body = head + "\n" + "\n".join(lines)
     out: dict = {
         "systemMessage": body,
         "hookSpecificOutput": {

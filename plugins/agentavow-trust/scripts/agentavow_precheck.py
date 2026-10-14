@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.29"
+__version__ = "0.1.30"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -1093,6 +1093,50 @@ def _intro_message() -> str:
             f"now, {how}.")
 
 
+INSTALL_STATS_KEY = "install_checks"  # written by agentavow_pre_install.py (STATS_KEY there)
+
+
+def _install_clause(cache: dict) -> str:
+    """' Since the last session AgentAvow checked 4 package installs — all Safe to
+    connect.' from the install-time hook's counter in the meta entry, then reset it.
+    Empty when nothing was installed (most session starts stay exactly as they were)."""
+    meta = cache.get(META_KEY)
+    if not isinstance(meta, dict):
+        return ""
+    st = meta.get(INSTALL_STATS_KEY)
+    if not isinstance(st, dict):
+        return ""
+    try:
+        n, flagged = int(st.get("count") or 0), int(st.get("flagged") or 0)
+    except (TypeError, ValueError):
+        n, flagged = 0, 0
+    meta = dict(meta)
+    meta.pop(INSTALL_STATS_KEY, None)
+    cache[META_KEY] = meta
+    if n <= 0:
+        return ""
+    what = f"{n} package install{'' if n == 1 else 's'}"
+    if not flagged:
+        return f" Since the last session AgentAvow checked {what} — all Safe to connect."
+    return (f" Since the last session AgentAvow checked {what}; {flagged} needed a look "
+            "(reported at the time).")
+
+
+def _print_install_only(clause: str) -> None:
+    """The quiet line when the install counter is the only news: one sentence for the
+    person, and Claude is asked to relay it once."""
+    print(json.dumps({
+        "systemMessage": "AgentAvow: " + clause,
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": (
+                "AgentAvow install checks. The user has NOT seen this. At the start of your "
+                f"first reply, in one short line, tell them: \"AgentAvow: {clause}\" Then "
+                "carry on; do not mention it again."),
+        },
+    }))
+
+
 def _show_intro_once() -> None:
     """On the first session with nothing to scan, tell the user so (a silent hook
     looks broken) and how to scan on demand. Shown once per machine, recorded in
@@ -1176,10 +1220,16 @@ def main() -> None:
     except Exception:
         deps = []
     if not targets and not deps:
+        cache = _load_cache()
+        clause = _install_clause(cache)
+        if clause and _save_cache(cache):
+            _print_install_only(clause.strip())
+            return
         _show_intro_once()
         return
 
     cache = _load_cache()
+    install_clause = _install_clause(cache)
     started = time.monotonic()
     now = time.time()
     results: dict[str, dict | None] = {}  # id -> verdict, None = unscannable
@@ -1239,6 +1289,9 @@ def main() -> None:
 
     _save_cache(cache)
     if not lines:
+        if install_clause:
+            _print_install_only(install_clause.strip())
+            return
         _quiet_context(cache, targets, deps)
         return
 
@@ -1247,7 +1300,7 @@ def main() -> None:
     except Exception:
         elsewhere = 0
     summary = _summary(graded, elsewhere, dep_clause, servers_present=bool(targets),
-                       server_news=bool(server_lines))
+                       server_news=bool(server_lines)) + install_clause
     try:
         earlier = _previously_graded(cache, targets, deps, lines)
     except Exception:
