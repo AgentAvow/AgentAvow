@@ -5215,21 +5215,21 @@
   },
   "pypi/langchain": {
    "version": "1.4.3",
-   "score": 78,
+   "score": 86,
    "label": "safe",
-   "reason": "no critical or high findings in 40 files",
+   "reason": "nothing found in 40 files",
    "files_scanned": 40,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 2,
-    "low": 0,
+    "medium": 0,
+    "low": 2,
     "info": 0
    },
    "capabilities": 2,
    "not_installed": 0,
    "rules": {
-    "medium: Injected system/role directive": 2
+    "low: Injected system/role directive": 2
    }
   },
   "pypi/langchain-core": {
