@@ -423,45 +423,48 @@ def _zip(members: dict[str, bytes]) -> bytes:
 
 
 @pytest.mark.asyncio
-async def test_pypi_fetch_reads_the_wheel_namelist():
-    sdist = _targz({"demo-1.0/setup.py": b"from setuptools import setup\nsetup(name='demo')\n",
-                    "demo-1.0/src/demo/__init__.py": b"x = 1\n",
-                    "demo-1.0/scripts/dev.py": b"x = 1\n"})
-    wheel = _zip({"demo/__init__.py": b"x = 1\n", "demo-1.0.dist-info/METADATA": b"Name: demo\n"})
+async def test_pypi_fetch_scans_the_wheel_when_one_exists():
+    # Wheel first: what `pip install` puts on disk. The sdist is never downloaded, and
+    # no installed-path filter is needed (the wheel IS the installed tree).
     sdist_url = "https://files.pythonhosted.org/packages/aa/demo-1.0.tar.gz"
+    wheel = _zip({"demo/__init__.py": b"x = 1\n", "demo-1.0.dist-info/METADATA": b"Name: demo\n"})
     wheel_url = "https://files.pythonhosted.org/packages/aa/demo-1.0-py3-none-any.whl"
+    seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
         if request.url.path == "/pypi/demo/json":
             return httpx.Response(200, json={"info": {"version": "1.0"}, "urls": [
-                {"packagetype": "bdist_wheel", "url": wheel_url},
                 {"packagetype": "sdist", "url": sdist_url},
+                {"packagetype": "bdist_wheel", "url": wheel_url},
             ]})
-        if str(request.url) == sdist_url:
-            return httpx.Response(200, content=sdist)
         if str(request.url) == wheel_url:
             return httpx.Response(200, content=wheel)
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         res = await fetch_pypi_artifact("demo", None, client=client)
-    assert res.ok and res.kind == "sdist"
-    assert res.installed_paths == {"demo/__init__.py"}
-    assert is_installed_path("src/demo/__init__.py", res.installed_paths)
-    assert not is_installed_path("scripts/dev.py", res.installed_paths)
+    assert res.ok and res.kind == "wheel" and res.download_url == wheel_url
+    assert res.installed_paths is None and "demo/__init__.py" in res.files
+    assert sdist_url not in seen
 
 
 @pytest.mark.asyncio
-async def test_pypi_fetch_fails_open_when_the_wheel_is_unavailable():
-    sdist = _targz({"demo-1.0/setup.py": b"from setuptools import setup\nsetup(name='demo')\n"})
+async def test_pypi_fetch_reads_the_sdist_when_no_wheel_fits():
+    # The only wheel is over the download cap: scan the sdist. Its namelist step finds
+    # no wheel under the cap either, so everything counts as installed (fail-open).
+    sdist = _targz({"demo-1.0/setup.py": b"from setuptools import setup\nsetup(name='demo')\n",
+                    "demo-1.0/src/demo/__init__.py": b"x = 1\n"})
     sdist_url = "https://files.pythonhosted.org/packages/aa/demo-1.0.tar.gz"
-    wheel_url = "https://files.pythonhosted.org/packages/aa/demo-1.0-py3-none-any.whl"
+    wheel_url = "https://files.pythonhosted.org/packages/aa/demo-1.0-cp312-cp312-linux_x86_64.whl"
+    from src.scanner import artifact_fetch as af
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/pypi/demo/json":
             return httpx.Response(200, json={"info": {"version": "1.0"}, "urls": [
-                {"packagetype": "sdist", "url": sdist_url},
-                {"packagetype": "bdist_wheel", "url": wheel_url},
+                {"packagetype": "bdist_wheel", "url": wheel_url,
+                 "size": af.MAX_DOWNLOAD_BYTES + 1},
+                {"packagetype": "sdist", "url": sdist_url, "size": len(sdist)},
             ]})
         if str(request.url) == sdist_url:
             return httpx.Response(200, content=sdist)
@@ -469,7 +472,8 @@ async def test_pypi_fetch_fails_open_when_the_wheel_is_unavailable():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         res = await fetch_pypi_artifact("demo", None, client=client)
-    assert res.ok and res.installed_paths is None
+    assert res.ok and res.kind == "sdist" and res.installed_paths is None
+    assert "setup.py" in res.files
 
 
 @pytest.mark.asyncio

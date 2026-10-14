@@ -13,9 +13,9 @@ Plus the pinned extras: ``pypi/mcp`` (official MCP Python SDK), the 20-package s
 the precision-pass scope report, and the sandbox eval's ``known_good`` MCP packages.
 
 Each package is pinned to the version current at build time, with the archive that
-production would scan (``_pick_pypi_url``: sdist preferred; npm: the tarball) and, for
-PyPI, the wheel whose member list decides the installed surface (``_pypi_sdist_and_wheel``),
-each with its sha256. Packages that are yanked, carry an OSV ``MAL-`` advisory, have no
+production would scan (``_pick_pypi_url``: a wheel first, the sdist only when no wheel
+fits the download cap; npm: the tarball) and, for a PyPI sdist, the wheel whose member
+list decides the installed surface (``_pypi_sdist_and_wheel``), each with its sha256. Packages that are yanked, carry an OSV ``MAL-`` advisory, have no
 downloadable files, or whose archive exceeds the production download cap are excluded
 (listed under ``excluded`` with the reason) and the next package backfills.
 
@@ -141,8 +141,6 @@ def resolve_npm(client: httpx.Client, name: str) -> dict:
     dist = v.get("dist") or {}
     if not dist.get("tarball"):
         return {"excluded": "no dist.tarball"}
-    if int(dist.get("unpackedSize") or 0) > 0 and int(dist["unpackedSize"]) > 50 * 1024 * 1024:
-        return {"excluded": f"unpacked size {dist['unpackedSize']} exceeds the production cap"}
     entry: dict = {
         "ecosystem": "npm", "name": name, "version": v.get("version"),
         "archive": {"kind": "tarball", "url": dist["tarball"], "sha256": None,
@@ -285,8 +283,9 @@ def main() -> int:
     out = {
         "_doc": (
             "Static known-good corpus (precision PR 2). Top PyPI + npm packages by "
-            "downloads, pinned to one version with the archive production scans and "
-            "(PyPI) the wheel whose member list is the installed surface. Archives are "
+            "downloads, pinned to one version with the archive production scans (PyPI: "
+            "a wheel first, the sdist only when no wheel fits; for an sdist, the wheel "
+            "whose member list is the installed surface). Archives are "
             "downloaded into a cache, verified by sha256, and NEVER executed or "
             "installed. Default expectation: no package is 'do_not_connect'. `expect` "
             "(safe|review) is recorded only after a human read the reason. Rebuild with "
