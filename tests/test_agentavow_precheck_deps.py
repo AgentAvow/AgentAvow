@@ -317,6 +317,16 @@ def test_verdict_reads_the_api_decision_and_falls_back_to_the_same_rule(hook):
                             "coverage": {"surface": "mcp"}})
     assert (remote["decision"], remote["decision_reason"]) == (
         "safe", "tool definitions clean; server code not inspected")
+    # zero files read (a metapackage) is thin too; a remote MCP with 0 tools keeps its
+    # own reason; a response with no files_scanned stays plain "no critical or high".
+    empty = hook._verdict({"trust_score": 74, "metadata": {"files_scanned": 0}})
+    assert (empty["decision"], empty["decision_reason"]) == (
+        "safe", "nothing found; no code to inspect")
+    no_tools = hook._verdict({"trust_score": 74, "metadata": {"files_scanned": 0},
+                              "coverage": {"surface": "mcp"}})
+    assert no_tools["decision_reason"] == "tool definitions clean; server code not inspected"
+    assert hook._verdict({"trust_score": 90})["decision_reason"] == \
+        "no critical or high findings"
     assert hook._verdict({"trust_score": 90, "behavioral": {
         "ran": True, "canary_exfil": [{"host": "x"}]}})["decision"] == "do_not_connect"
     assert hook._verdict({"trust_score": 90, "behavioral": {

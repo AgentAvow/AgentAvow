@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.corpus.run_static_corpus import THIN_COVERAGE_REASON
+from scripts.corpus.run_static_corpus import THIN_REASONS
 from src.scanner.artifact_fetch import ArtifactFetchResult, _make_file
 from src.scanner.artifact_scan import scan_artifact_files
 from src.scanner.scan import (
@@ -146,7 +146,7 @@ def test_no_known_good_package_is_do_not_connect_in_the_snapshot():
         if exp:
             assert r["label"] == exp, (pid, r["label"], exp)
         # Thin coverage reads safe with its reason (decided 2026-10-08, #19), never review.
-        if r.get("reason") == THIN_COVERAGE_REASON:
+        if r.get("reason") in THIN_REASONS:
             assert r["label"] == "safe", pid
 
 

@@ -4230,8 +4230,8 @@
    "version": "7.16.2",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found",
-   "files_scanned": 0,
+   "reason": "nothing found in 47 files",
+   "files_scanned": 47,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4239,7 +4239,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 0,
+   "capabilities": 8,
    "not_installed": 0,
    "rules": {}
   },

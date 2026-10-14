@@ -369,3 +369,20 @@ def test_aws_key_pattern_ignores_akia_inside_base64():
     assert not pat.search("QAHAEwAAQAAAAAAAgAHAGQAAQAwAaAKIAABCDEFGHIJ0123QAAAAA")
     assert pat.search('key = "AKIAABCDEFGHIJKLMNOP"')
     assert pat.search("AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP\n")
+
+
+def test_wheel_package_named_like_a_build_dir_is_scanned():
+    # coverage.py's wheel is all under coverage/, a repo-scan skip dir (coverage reports).
+    # In a wheel the top-level dir is the importable package, so it is read.
+    fetched = pypi_result_from_archive(
+        "coverage", "7.0", "wheel",
+        "https://files.pythonhosted.org/x/coverage-7.0-cp312-cp312-macosx_arm64.whl",
+        _zip([("coverage/__init__.py", b"x = 1\n"), ("coverage/control.py", b"y = 2\n"),
+              ("coverage/.git/config", b"[core]\n"),
+              ("coverage/node_modules/x.js", b"z = 1\n"),
+              ("coverage-7.0.dist-info/METADATA", b"Name: coverage\n")]),
+        installed_paths=None,
+    )
+    result = _scan("pypi", fetched)
+    # both modules + the shipped .git/config (always inspected); node_modules/ skipped
+    assert result.files_scanned == 3

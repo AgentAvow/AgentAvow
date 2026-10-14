@@ -341,6 +341,7 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     detector gains artifact-truth for free.
     """
     from src.scanner.artifact_fetch import is_installed_path
+    from src.scanner.patterns import SKIP_DIRS
     from src.scanner.scan import (
         _MAX_FILE_SIZE,
         _is_build_tooling_file,
@@ -369,7 +370,16 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     # packages are checked against OSV instead (``src.scanner.docker_image``).
     is_image = (fetched.ecosystem or "").lower() == "docker"
 
+    # A wheel's top-level directories are the importable packages themselves: a package
+    # named like a repo build/output dir (`coverage`, `build`, `env`, `target`) must not
+    # have its whole tree skipped. Nested dirs keep the usual rules.
+    is_wheel = (getattr(fetched, "kind", "") or "") == "wheel"
+
     def _skip(path: str) -> bool:
+        if is_wheel and "/" in path:
+            head, rest = path.split("/", 1)
+            if head in SKIP_DIRS and not head.startswith("."):
+                return _should_skip_path(rest)
         if not is_npm_tarball:
             return _should_skip_path(path)
         parts = [p for p in Path(path).parts if p not in ("dist", "build")]

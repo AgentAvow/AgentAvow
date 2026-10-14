@@ -3375,7 +3375,7 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # raises a score, and a findings-laden repo already sits below the cap so it's a no-op
     # there. Skipped/unscannable scans never reach here (their score is null).
     files = result.files_scanned or 0
-    if 0 < files < _EVIDENCE_MIN_FILES:
+    if 0 <= files < _EVIDENCE_MIN_FILES:
         cap = _EVIDENCE_VERY_THIN_CAP if files <= _EVIDENCE_VERY_THIN_FILES else _EVIDENCE_THIN_CAP
         if result.has_tests:
             cap += _EVIDENCE_TESTS_HEADROOM

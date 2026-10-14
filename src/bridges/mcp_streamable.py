@@ -593,7 +593,9 @@ def _scan_block(
 
     # Reason phrase, reused in the headline and the Next step (limited mode only).
     _files = (data.get("metadata") or {}).get("files_scanned")
-    if isinstance(_files, int) and 0 < _files < 8:
+    if isinstance(_files, int) and not isinstance(_files, bool) and _files == 0:
+        reason = "capped because there's no code to inspect (0 files)"
+    elif isinstance(_files, int) and 0 < _files < 8:
         reason = (f"capped because there's little code to inspect "
                   f"({_files} file{'' if _files == 1 else 's'})")
     else:
