@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Weekly re-scan: re-runs the four launch-scan datasets (x402 / MCP /
-# npm / PyPI) and invalidates the /scans catalog in-memory cache.
+# npm / PyPI); the backend reloads Browse from the rewritten files by itself.
 #
 # Press story: "we publish the trail, not a frozen PDF" — only works
 # if the trail keeps growing. This script is the cadence anchor.
@@ -43,11 +43,9 @@ else
   log "rescore FAILED (exit $?)"
 fi
 
-# Invalidate the /scans catalog cache. Backend runs in Docker, so localhost:8000 is not
-# reachable from the host — go through nginx on the public URL instead.
-log "refreshing catalog cache"
-curl -fsS -X POST "https://agentavow.com/api/v1/public/scan-catalog/refresh" \
-  -H "Content-Type: application/json" --max-time 30 \
-  || log "catalog refresh failed (cache will rebuild on next request)"
+# No catalog refresh call: every backend worker checks the launch-scan files' mtimes on
+# its /flagged-stat timer (~100s) and rebuilds Browse when one changed. (The old POST
+# /public/scan-catalog/refresh is admin-only since 2026-10-02 and reached one worker.)
+log "catalog: backend workers reload the rewritten results files within ~2 min"
 
 log "weekly_rescan: done"

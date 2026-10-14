@@ -3,7 +3,8 @@
 # openclaw) in chunks, re-fetching + re-scoring each row with the CURRENT scorer.
 # RESUMABLE: each surface persists a cursor (.rescore-cursor-<surface>.json), so a
 # re-launch continues where it left off; a chunk that dies just loses that chunk.
-# Refreshes Browse after every chunk so the catalog de-saturates progressively.
+# Browse reloads after every chunk (workers watch the results files), so the catalog
+# de-saturates progressively.
 #
 # Runs for ~2-3 days at ~400 scans/hr (GitHub-API-budget-limited). Safe to re-run.
 #   CHUNKS=40 CHUNK=800 nohup ./scripts/grind-rescan.sh > ~/grind.log 2>&1 &
@@ -20,11 +21,7 @@ echo "[$(ts)] grind: start ($CHUNKS chunks x $CHUNK rows; token=$([ -n "$GITHUB_
 for i in $(seq 1 "$CHUNKS"); do
   echo "[$(ts)] --- chunk $i/$CHUNKS ---"
   "$PY" scripts/launch_scans/rescore_corpus.py --limit "$CHUNK" 2>&1 | tail -3 || echo "[$(ts)] chunk $i rescore failed (continuing)"
-  if curl -fsS -X POST "https://agentavow.com/api/v1/public/scan-catalog/refresh" --max-time 30 >/dev/null 2>&1; then
-    echo "[$(ts)] chunk $i: catalog refreshed"
-  else
-    echo "[$(ts)] chunk $i: refresh failed (rebuilds on next request)"
-  fi
+  # No catalog refresh call: backend workers reload Browse when a results file changes.
   sleep 90   # brief breather so the GitHub API budget replenishes between chunks
 done
 echo "[$(ts)] grind: done ($CHUNKS chunks)"

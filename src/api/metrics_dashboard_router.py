@@ -308,11 +308,13 @@ _TIER_CASE = case(
 
 _TIER_ORDER = [t.value for t in TIERS]
 
-# The three-phrase headline over the same corpus, from what a catalog row stores (the
-# blocking critical / high counts + the score): the `decide()` rule without the inputs
-# a row does not keep (advisories, deprecation, coverage, sandbox), so it is the
-# catalog's view, matching CatalogRow.decision.
+# The three-phrase headline over the same corpus: the row's stored `decision` (decided
+# at scan time by `decide()` over the full result, as the tool's page shows it), else
+# for a pre-t24 row the `decide()` rule over what it stores (blocking critical / high
+# counts + the score). Matches CatalogRow.decision in Browse and the catalog API.
 _DECISION_CASE = case(
+    (CommunityScan.decision.in_(("safe", "review", "do_not_connect")),
+     CommunityScan.decision),
     (func.coalesce(CommunityScan.critical, 0) > 0, "do_not_connect"),
     (func.coalesce(CommunityScan.high, 0) > 0, "review"),
     (CommunityScan.trust_score < 51, "review"),
