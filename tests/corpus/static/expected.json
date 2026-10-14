@@ -243,8 +243,8 @@
    "version": "2.1.4",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 40 files",
-   "files_scanned": 40,
+   "reason": "nothing found in 55 files",
+   "files_scanned": 55,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -252,7 +252,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 0,
+   "capabilities": 2,
    "not_installed": 0,
    "rules": {}
   },
@@ -328,8 +328,8 @@
    "version": "1.32.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 247 files",
-   "files_scanned": 247,
+   "reason": "nothing found in 351 files",
+   "files_scanned": 351,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -345,8 +345,8 @@
    "version": "2026.8.31",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 39 files",
-   "files_scanned": 39,
+   "reason": "nothing found in 44 files",
+   "files_scanned": 44,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -432,8 +432,8 @@
    "version": "2.5.2",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 23 files",
-   "files_scanned": 23,
+   "reason": "nothing found in 36 files",
+   "files_scanned": 36,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -441,7 +441,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 2,
+   "capabilities": 4,
    "not_installed": 0,
    "rules": {}
   },
@@ -517,8 +517,8 @@
    "version": "26.6.4",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 89 files",
-   "files_scanned": 89,
+   "reason": "nothing found in 90 files",
+   "files_scanned": 90,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -783,8 +783,8 @@
    "version": "1.0.2",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 15 files",
-   "files_scanned": 15,
+   "reason": "nothing found in 16 files",
+   "files_scanned": 16,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -951,10 +951,10 @@
   },
   "npm/concat-map": {
    "version": "0.0.2",
-   "score": 74,
+   "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 3,
+   "files_scanned": 5,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1089,10 +1089,10 @@
   },
   "npm/dunder-proto": {
    "version": "1.0.1",
-   "score": 82,
+   "score": 88,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 7,
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1160,7 +1160,7 @@
    "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 5,
+   "files_scanned": 6,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1176,8 +1176,8 @@
    "version": "1.3.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 17 files",
-   "files_scanned": 17,
+   "reason": "nothing found in 18 files",
+   "files_scanned": 18,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1451,8 +1451,8 @@
    "version": "2.1.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 8 files",
-   "files_scanned": 8,
+   "reason": "nothing found in 16 files",
+   "files_scanned": 16,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1483,10 +1483,10 @@
   },
   "npm/fastq": {
    "version": "1.20.3",
-   "score": 82,
+   "score": 88,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 5,
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1658,7 +1658,7 @@
    "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 4,
+   "files_scanned": 5,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1672,10 +1672,10 @@
   },
   "npm/get-intrinsic": {
    "version": "1.3.0",
-   "score": 74,
+   "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 3,
+   "files_scanned": 4,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1691,8 +1691,8 @@
    "version": "1.0.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 9 files",
-   "files_scanned": 9,
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1774,10 +1774,10 @@
   },
   "npm/gopd": {
    "version": "1.2.0",
-   "score": 82,
+   "score": 88,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 7,
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -1825,10 +1825,10 @@
   },
   "npm/has-symbols": {
    "version": "1.1.0",
-   "score": 82,
+   "score": 88,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 7,
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2203,10 +2203,10 @@
   },
   "npm/json-schema-traverse": {
    "version": "1.0.0",
-   "score": 82,
+   "score": 88,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 7,
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2324,8 +2324,8 @@
    "version": "4.18.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 1,042 files",
-   "files_scanned": 1042,
+   "reason": "nothing found in 1,046 files",
+   "files_scanned": 1046,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2375,8 +2375,8 @@
    "version": "1.1.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 33 files",
-   "files_scanned": 33,
+   "reason": "nothing found in 34 files",
+   "files_scanned": 34,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2492,10 +2492,10 @@
   },
   "npm/minimist": {
    "version": "1.2.8",
-   "score": 74,
+   "score": 88,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 3,
+   "reason": "nothing found in 19 files",
+   "files_scanned": 19,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2679,10 +2679,10 @@
   },
   "npm/object-inspect": {
    "version": "1.13.4",
-   "score": 82,
+   "score": 88,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 6,
+   "reason": "nothing found in 29 files",
+   "files_scanned": 29,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2991,8 +2991,8 @@
    "version": "6.16.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 9 files",
-   "files_scanned": 9,
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3059,8 +3059,8 @@
    "version": "1.22.13",
    "score": 86,
    "label": "safe",
-   "reason": "no critical or high findings in 15 files",
-   "files_scanned": 15,
+   "reason": "no critical or high findings in 81 files",
+   "files_scanned": 81,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3747,8 +3747,8 @@
    "version": "2.9.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 216 files",
-   "files_scanned": 216,
+   "reason": "nothing found in 231 files",
+   "files_scanned": 231,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3849,8 +3849,8 @@
    "version": "3.14.4",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 53 files",
-   "files_scanned": 53,
+   "reason": "nothing found in 54 files",
+   "files_scanned": 54,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3883,8 +3883,8 @@
    "version": "1.20.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 57 files",
-   "files_scanned": 57,
+   "reason": "nothing found in 75 files",
+   "files_scanned": 75,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3892,7 +3892,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 3,
+   "capabilities": 9,
    "not_installed": 0,
    "rules": {}
   },
@@ -3918,7 +3918,7 @@
    "score": 74,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 1,
+   "files_scanned": 2,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4038,8 +4038,8 @@
    "version": "1.43.109",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 40 files",
-   "files_scanned": 40,
+   "reason": "nothing found in 53 files",
+   "files_scanned": 53,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4055,8 +4055,8 @@
    "version": "1.43.109",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 784 files",
-   "files_scanned": 784,
+   "reason": "nothing found in 1,072 files",
+   "files_scanned": 1072,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4064,7 +4064,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 2,
+   "capabilities": 3,
    "not_installed": 0,
    "rules": {}
   },
@@ -4087,10 +4087,10 @@
   },
   "pypi/certifi": {
    "version": "2026.7.22",
-   "score": 74,
+   "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 3,
+   "files_scanned": 4,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4206,10 +4206,10 @@
   },
   "pypi/colorama": {
    "version": "0.4.6",
-   "score": 82,
+   "score": 86,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 6,
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4293,8 +4293,8 @@
    "version": "0.4.1",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 14 files",
-   "files_scanned": 14,
+   "reason": "nothing found in 46 files",
+   "files_scanned": 46,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4302,7 +4302,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 27,
+   "capabilities": 131,
    "not_installed": 0,
    "rules": {}
   },
@@ -4512,20 +4512,22 @@
   },
   "pypi/fsspec": {
    "version": "2026.9.0",
-   "score": 86,
+   "score": 85,
    "label": "safe",
-   "reason": "nothing found in 48 files",
-   "files_scanned": 48,
+   "reason": "no critical or high findings in 57 files",
+   "files_scanned": 57,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 0,
+    "medium": 2,
     "low": 0,
     "info": 0
    },
-   "capabilities": 3,
+   "capabilities": 5,
    "not_installed": 0,
-   "rules": {}
+   "rules": {
+    "medium: os.system / os.popen (Python)": 2
+   }
   },
   "pypi/ghapi": {
    "version": "2.1.4",
@@ -4550,8 +4552,8 @@
    "version": "4.0.12",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 17 files",
-   "files_scanned": 17,
+   "reason": "nothing found in 24 files",
+   "files_scanned": 24,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4559,7 +4561,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 0,
+   "capabilities": 1,
    "not_installed": 0,
    "rules": {}
   },
@@ -4684,20 +4686,23 @@
   },
   "pypi/greenlet": {
    "version": "3.5.6",
-   "score": 74,
+   "score": 85,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 2,
+   "reason": "no critical or high findings in 29 files",
+   "files_scanned": 29,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 0,
+    "medium": 2,
     "low": 0,
     "info": 0
    },
-   "capabilities": 0,
+   "capabilities": 2,
    "not_installed": 0,
-   "rules": {}
+   "rules": {
+    "medium: os.system / os.popen (Python)": 1,
+    "medium: subprocess.run / Popen (Python)": 1
+   }
   },
   "pypi/grpcio": {
    "version": "1.84.0",
@@ -5130,27 +5135,29 @@
   },
   "pypi/joblib": {
    "version": "1.6.0",
-   "score": 86,
+   "score": 81,
    "label": "safe",
-   "reason": "nothing found in 43 files",
-   "files_scanned": 43,
+   "reason": "no critical or high findings in 67 files",
+   "files_scanned": 67,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 0,
+    "medium": 8,
     "low": 0,
     "info": 0
    },
-   "capabilities": 16,
+   "capabilities": 42,
    "not_installed": 0,
-   "rules": {}
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 8
+   }
   },
   "pypi/jsonschema": {
    "version": "4.26.0",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 25 files",
-   "files_scanned": 25,
+   "reason": "nothing found in 36 files",
+   "files_scanned": 36,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5158,7 +5165,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 1,
+   "capabilities": 5,
    "not_installed": 0,
    "rules": {}
   },
@@ -5166,8 +5173,8 @@
    "version": "2025.9.1",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 8 files",
-   "files_scanned": 8,
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5183,8 +5190,8 @@
    "version": "25.7.0",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 26 files",
-   "files_scanned": 26,
+   "reason": "nothing found in 28 files",
+   "files_scanned": 28,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5270,8 +5277,8 @@
    "version": "1.4.3",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 25 files",
-   "files_scanned": 25,
+   "reason": "nothing found in 31 files",
+   "files_scanned": 31,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5279,7 +5286,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 11,
+   "capabilities": 12,
    "not_installed": 0,
    "rules": {}
   },
@@ -5336,20 +5343,22 @@
   },
   "pypi/matplotlib": {
    "version": "3.11.2",
-   "score": 88,
+   "score": 87,
    "label": "safe",
-   "reason": "nothing found in 170 files",
-   "files_scanned": 170,
+   "reason": "no critical or high findings in 294 files",
+   "files_scanned": 294,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
-   "capabilities": 19,
+   "capabilities": 46,
    "not_installed": 0,
-   "rules": {}
+   "rules": {
+    "medium: os.system / os.popen (Python)": 1
+   }
   },
   "pypi/mcp": {
    "version": "2.3.0",
@@ -5525,21 +5534,21 @@
   },
   "pypi/mypy": {
    "version": "2.4.0",
-   "score": 84,
+   "score": 83,
    "label": "safe",
-   "reason": "no critical or high findings in 235 files",
-   "files_scanned": 235,
+   "reason": "no critical or high findings in 321 files",
+   "files_scanned": 321,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 1,
+    "medium": 3,
     "low": 0,
     "info": 0
    },
-   "capabilities": 26,
+   "capabilities": 83,
    "not_installed": 0,
    "rules": {
-    "medium: subprocess.run / Popen (Python)": 1
+    "medium: subprocess.run / Popen (Python)": 3
    }
   },
   "pypi/mypy-extensions": {
@@ -5563,8 +5572,8 @@
    "version": "3.7",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 288 files",
-   "files_scanned": 288,
+   "reason": "nothing found in 559 files",
+   "files_scanned": 559,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5572,7 +5581,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 1,
+   "capabilities": 38,
    "not_installed": 0,
    "rules": {}
   },
@@ -5598,20 +5607,24 @@
   },
   "pypi/numpy": {
    "version": "2.5.3",
-   "score": 88,
+   "score": 80,
    "label": "safe",
-   "reason": "nothing found in 165 files",
-   "files_scanned": 165,
+   "reason": "no critical or high findings in 396 files",
+   "files_scanned": 396,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 0,
+    "medium": 13,
     "low": 0,
     "info": 0
    },
-   "capabilities": 30,
+   "capabilities": 205,
    "not_installed": 0,
-   "rules": {}
+   "rules": {
+    "medium: Obfuscated eval (Python)": 1,
+    "medium: numpy.load allow_pickle=True (Python)": 8,
+    "medium: subprocess.run / Popen (Python)": 4
+   }
   },
   "pypi/oauthlib": {
    "version": "4.0.0",
@@ -5770,8 +5783,8 @@
    "version": "0.66b1",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 124 files",
-   "files_scanned": 124,
+   "reason": "nothing found in 125 files",
+   "files_scanned": 125,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5819,21 +5832,22 @@
   },
   "pypi/pandas": {
    "version": "3.0.6",
-   "score": 82,
+   "score": 79,
    "label": "safe",
-   "reason": "no critical or high findings in 285 files",
-   "files_scanned": 285,
+   "reason": "no critical or high findings in 1,315 files",
+   "files_scanned": 1315,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 1,
+    "medium": 6,
     "low": 0,
     "info": 0
    },
-   "capabilities": 20,
+   "capabilities": 75,
    "not_installed": 0,
    "rules": {
-    "medium: subprocess.run / Popen (Python)": 1
+    "medium: subprocess.run / Popen (Python)": 5,
+    "medium: yaml.load without SafeLoader (Python)": 1
    }
   },
   "pypi/paramiko": {
@@ -5946,8 +5960,8 @@
    "version": "4.6.2",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 68 files",
-   "files_scanned": 68,
+   "reason": "nothing found in 69 files",
+   "files_scanned": 69,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6065,20 +6079,22 @@
   },
   "pypi/pyarrow": {
    "version": "25.0.1",
-   "score": 88,
+   "score": 78,
    "label": "safe",
-   "reason": "nothing found in 32 files",
-   "files_scanned": 32,
+   "reason": "no critical or high findings in 104 files",
+   "files_scanned": 104,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 0,
+    "medium": 17,
     "low": 0,
     "info": 0
    },
-   "capabilities": 2,
+   "capabilities": 23,
    "not_installed": 0,
-   "rules": {}
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 17
+   }
   },
   "pypi/pyasn1": {
    "version": "0.6.4",
@@ -6341,8 +6357,8 @@
    "version": "1.6.1",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 11 files",
-   "files_scanned": 11,
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6441,10 +6457,10 @@
   },
   "pypi/referencing": {
    "version": "0.37.0",
-   "score": 82,
+   "score": 86,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 7,
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6458,10 +6474,10 @@
   },
   "pypi/regex": {
    "version": "2026.9.29",
-   "score": 74,
+   "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 3,
+   "files_scanned": 4,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6469,7 +6485,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 0,
+   "capabilities": 1,
    "not_installed": 0,
    "rules": {}
   },
@@ -6645,38 +6661,43 @@
   },
   "pypi/scikit-learn": {
    "version": "1.9.1",
-   "score": 88,
+   "score": 86,
    "label": "safe",
-   "reason": "nothing found in 345 files",
-   "files_scanned": 345,
+   "reason": "no critical or high findings in 615 files",
+   "files_scanned": 615,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 0,
+    "medium": 3,
     "low": 0,
     "info": 0
    },
-   "capabilities": 20,
+   "capabilities": 74,
    "not_installed": 0,
-   "rules": {}
+   "rules": {
+    "medium: Unrestricted file write (Python)": 2,
+    "medium: subprocess.run / Popen (Python)": 1
+   }
   },
   "pypi/scipy": {
    "version": "1.18.1",
-   "score": 82,
+   "score": 81,
    "label": "safe",
-   "reason": "no critical or high findings in 595 files",
-   "files_scanned": 595,
+   "reason": "no critical or high findings in 952 files",
+   "files_scanned": 952,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 1,
+    "medium": 3,
     "low": 0,
     "info": 0
    },
-   "capabilities": 29,
+   "capabilities": 84,
    "not_installed": 0,
    "rules": {
-    "medium: pickle.load(s) on untrusted data (Python)": 1
+    "medium: numpy.load allow_pickle=True (Python)": 1,
+    "medium: pickle.load(s) on untrusted data (Python)": 1,
+    "medium: subprocess.run / Popen (Python)": 1
    }
   },
   "pypi/setuptools": {
@@ -6735,10 +6756,10 @@
   },
   "pypi/smmap": {
    "version": "5.0.3",
-   "score": 82,
+   "score": 86,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
-   "files_scanned": 4,
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6752,10 +6773,10 @@
   },
   "pypi/sniffio": {
    "version": "1.3.1",
-   "score": 74,
+   "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 3,
+   "files_scanned": 4,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6803,21 +6824,21 @@
   },
   "pypi/sqlalchemy": {
    "version": "2.1.4",
-   "score": 82,
+   "score": 81,
    "label": "safe",
-   "reason": "no critical or high findings in 218 files",
-   "files_scanned": 218,
+   "reason": "no critical or high findings in 258 files",
+   "files_scanned": 258,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 1,
+    "medium": 2,
     "low": 0,
     "info": 0
    },
-   "capabilities": 13,
+   "capabilities": 16,
    "not_installed": 0,
    "rules": {
-    "medium: subprocess.run / Popen (Python)": 1
+    "medium: subprocess.run / Popen (Python)": 2
    }
   },
   "pypi/sse-starlette": {
@@ -7166,8 +7187,8 @@
    "version": "21.14.5",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 83 files",
-   "files_scanned": 83,
+   "reason": "nothing found in 84 files",
+   "files_scanned": 84,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -7217,8 +7238,8 @@
    "version": "1.9.2",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 15 files",
-   "files_scanned": 15,
+   "reason": "nothing found in 32 files",
+   "files_scanned": 32,
    "severity": {
     "critical": 0,
     "high": 0,

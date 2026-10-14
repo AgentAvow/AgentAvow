@@ -67,6 +67,10 @@ class ExecVerdict:
     label: str                # one-line reason, shown as the finding's remediation hint
     capability: str = ""      # taxonomy tag when kind == "capability"
     consumed_lines: int = 1   # how many source lines the call spanned (>=1)
+    # Payload-shaped: the call downloads / decodes / runs inline code, or untrusted
+    # input reaches it. Graded at full severity even where the file is downgraded
+    # (a test dir shipped inside a published artifact); see ``_scan_content``.
+    payload: bool = False
 
 
 def _flow(untrusted_near: bool, untrusted_flow: bool | None) -> bool:
@@ -79,8 +83,11 @@ def _flow(untrusted_near: bool, untrusted_flow: bool | None) -> bool:
     return untrusted_near and untrusted_flow
 
 
-def _defect(severity: str, label: str, consumed: int = 1) -> ExecVerdict:
-    return ExecVerdict("defect", severity, label, "", consumed)
+def _defect(severity: str, label: str, consumed: int = 1, *,
+            payload: bool = False) -> ExecVerdict:
+    # A critical needs untrusted input reaching the call: always payload-shaped.
+    return ExecVerdict("defect", severity, label, "", consumed,
+                       payload=payload or severity == "critical")
 
 
 def _cap(severity: str, label: str, tag: str, consumed: int = 1) -> ExecVerdict:
@@ -122,11 +129,30 @@ _RM_RECURSIVE_TAIL_RE = re.compile(
     r"""\brm\s+(?:-[\w-]+\s+)*-\w*[rR]\w*(?:\s+-[\w-]+)*\s*['"]?$""")
 
 
+# Inline interpreter code (`python -c`, `node -e`, a constant `exec("...")`) is
+# payload-shaped when its text carries shell payload tokens, or when it both decodes /
+# fetches and runs something. INLINE_CODE_DANGER_RE (pickle, ctypes, a bare import,
+# `requests.`) keeps such code a high defect; it is not on its own a payload
+# (`python -OO -c "import pickle; pickle.loads(pickle.dumps(x))"` in a test suite).
+_CODE_RUN_RE = re.compile(
+    r"\b(?:exec|eval|compile)\s*\(|\bFunction\s*\(|os\.system|os\.popen|subprocess"
+    r"|child_process|\bexecSync\s*\(|\bspawn(?:Sync)?\s*\(",
+)
+
+
+def inline_code_is_payload(code: str) -> bool:
+    """Does constant inline code download / decode AND run something (or carry shell
+    payload tokens)? The payload notion for ``Finding.payload`` (see scan.py)."""
+    if SHELL_PAYLOAD_DANGER_RE.search(code):
+        return True
+    return bool(_PAYLOAD_EXPR_RE.search(code) and _CODE_RUN_RE.search(code))
+
+
 def _literal_shell_verdict(how: str, text: str, consumed: int) -> ExecVerdict:
     """A shell command whose text is fully visible."""
     if SHELL_PAYLOAD_DANGER_RE.search(text):
         return _defect("high", f"{how} runs a literal shell command with download/decode/"
-                       "inline-code tokens", consumed)
+                       "inline-code tokens", consumed, payload=True)
     return _defect("medium", f"{how} runs a literal shell command (no download, decode or "
                    "inline-code tokens)", consumed)
 
@@ -142,10 +168,10 @@ def _dynamic_shell_verdict(
                        consumed)
     if payload_flow or any(_PAYLOAD_EXPR_RE.search(d) for d in dyn):
         return _defect("high", f"{how} runs a shell command built from a decoded or fetched "
-                       "value", consumed)
+                       "value", consumed, payload=True)
     if SHELL_PAYLOAD_DANGER_RE.search(" ".join(consts)):
         return _defect("high", f"{how} runs a shell command with download/decode/inline-code "
-                       "tokens", consumed)
+                       "tokens", consumed, payload=True)
     if dyn and any(_RM_RECURSIVE_TAIL_RE.search(c) for c in consts):
         return _defect("high", f"{how} recursively deletes a path chosen at runtime", consumed)
     if untrusted_near:
@@ -389,7 +415,7 @@ def classify_argv(
                 if INLINE_CODE_DANGER_RE.search(code):
                     return _defect(
                         "high", f"inline interpreter eval ({base} {el}) of code that execs/"
-                        "decodes/fetches", consumed,
+                        "decodes/fetches", consumed, payload=inline_code_is_payload(code),
                     )
                 return _cap(
                     "low", f"runs a constant inline {base} snippet ({el})", CAP_SPAWN, consumed,
@@ -791,7 +817,8 @@ def classify_python_exec(
                         if INLINE_CODE_DANGER_RE.search(text) or \
                                 SHELL_PAYLOAD_DANGER_RE.search(text):
                             return _defect("high", f"inline interpreter eval ({base} {el}) of "
-                                           "code that execs/decodes/fetches", consumed)
+                                           "code that execs/decodes/fetches", consumed,
+                                           payload=inline_code_is_payload(text))
                         return _cap("low", f"runs a constant inline {base} snippet ({el})",
                                     CAP_SPAWN, consumed)
                     if elements[i + 1] is None and not others_dynamic and _is_dynamic_string(
@@ -802,7 +829,8 @@ def classify_python_exec(
                         base = _basename(elements[0])
                         if INLINE_CODE_DANGER_RE.search(" ".join(consts)):
                             return _defect("high", f"inline interpreter eval ({base} {el}) of "
-                                           "code that execs/decodes/fetches", consumed)
+                                           "code that execs/decodes/fetches", consumed,
+                                           payload=inline_code_is_payload(" ".join(consts)))
                         return _dynamic_shell_verdict(
                             f"inline {base} {el} code built from a template", consts,
                             dyn or ["?"], untrusted_near=untrusted_near,
