@@ -2419,6 +2419,67 @@ def _bidi_cannot_reorder_code(line: str, in_prose: bool, file_lang: str | None) 
     return not any(d in line for d in ('"""', "'''", "`", "*/", "/*"))
 
 
+_EXAMPLE_INTRO_RE = re.compile(r"\b(?:example|e\.g\.|for instance)\b[^\"'`]{0,12}$",
+                               re.IGNORECASE)
+
+
+_SYSTEM_PROMPT_LABEL_RE = re.compile(r"system\s+prompt\s*:", re.IGNORECASE)
+# After the label: only escapes / whitespace, then a placeholder, then the string or the
+# template line ends (the label's whole value is the placeholder).
+_PLACEHOLDER_TAIL_RE = re.compile(
+    r"""^(?:\s|\\[nt])*(?:%[-#0 +]*\d*(?:\.\d+)?[sdrfi]|\{[^{}\n]{0,40}\}|\$\{[^{}\n]{0,40}\})"""
+    r"""[ \t]*(?:\\n|["'`])""")
+
+
+def _system_prompt_label_only(line: str, pattern: re.Pattern) -> bool:
+    """Every hit of the role-directive rule on this line is a "system prompt:" label
+    followed only by a format placeholder before the string closes."""
+    hits = list(pattern.finditer(line))
+    if not hits:
+        return False
+    for m in hits:
+        lm = _SYSTEM_PROMPT_LABEL_RE.search(m.group(0))
+        if lm is None:
+            return False
+        if not _PLACEHOLDER_TAIL_RE.match(line[m.end():]):
+            return False
+    return True
+
+
+# A value with a live provider prefix is a real credential even inside an "Example".
+_LIVE_KEY_PREFIX_RE = re.compile(
+    r"(?:sk[-_]|sk-ant-|sk_live_|rk_live_|pk_live_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|"
+    r"AKIA|ASIA|xox[abposr]-|AIza|glpat-|hf_|npm_|pypi-|SG\.|key-|shpat_|sq0)",
+)
+
+
+def _is_documented_example(line: str, pos: int) -> bool:
+    """The assignment at ``pos`` is prose inside a string literal, introduced right
+    before by "Example" / "e.g." (``"…Example api_key='…'"``)."""
+    before = line[:pos]
+    if not _EXAMPLE_INTRO_RE.search(before):
+        return False
+    # Inside a string: an odd number of unescaped double quotes before it.
+    return before.count('"') % 2 == 1 or before.count("'") % 2 == 1
+
+
+_PY_POST_CALL_RE = re.compile(r"(?:requests|httpx|axios)\.post\s*\(", re.IGNORECASE)
+_PY_FETCH_SECRET_RE = re.compile(
+    r"""https?://|os\.environ|getenv|password|passwd|token|secret""", re.IGNORECASE)
+
+
+def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
+    """The exfil rule's ``fetch(`` branch is the JS global ``fetch``. Python has no
+    global ``fetch``: there it is a local function or parameter (litellm's
+    ``await fetch(include_key)`` reads a config object from a bucket), so a Python line
+    whose only hit is ``fetch(`` is not an HTTP POST. ``requests.post`` /
+    ``httpx.post`` still fire, and so does a line that carries a URL literal or reads a
+    secret (a local ``fetch = lambda u, d: urlopen(u, d)`` called with
+    ``password=os.environ[...]``)."""
+    return (file_lang == "python" and not _PY_POST_CALL_RE.search(line)
+            and not _PY_FETCH_SECRET_RE.search(line))
+
+
 def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
     """True when every hit of an invisible-Unicode rule on this line is a well-formed
     emoji tag sequence or a typographic joiner (precision PR 2: wcwidth's grapheme
@@ -2634,6 +2695,13 @@ def _scan_content(
                 if (name == "Generic API Key assignment" and sev == "high"
                         and _SHARED_KEY_NAME_RE.search(
                             _assigned_identifier(line, match.start()))):
+                    sev = "medium"
+                # A value introduced as an example inside help text ("…access logs.
+                # Example api_key='d5345c…'" in a FastAPI Query description) is
+                # documentation: reported, medium, never blocking.
+                if (name == "Generic API Key assignment" and sev == "high"
+                        and _is_documented_example(line, match.start())
+                        and not _LIVE_KEY_PREFIX_RE.match(val)):
                     sev = "medium"
                 # Precision pass #3: a PEM HEADER with no key body is key-HANDLING code
                 # (marker tuples, startswith(), regexes) — reported as a capability.
@@ -2896,6 +2964,9 @@ def _scan_content(
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
+                if name == "HTTP POST with sensitive data" and _py_local_fetch_only(
+                        line, file_lang):
+                    continue
                 # OAuth2 token exchange (client_secret/grant_type → token endpoint)
                 # is the required auth flow, not a leak. Relax ONLY the generic
                 # "POST with sensitive data" rule; the stronger critical exfil
@@ -3052,6 +3123,13 @@ def _scan_content(
                         declares_tools = bool(SSRF_TOOL_SURFACE_RE.search(content))
                     if not declares_tools:
                         effective_severity = "medium"
+                # A "System prompt:" LABEL whose only content is a format placeholder
+                # (`"failed to prepend system prompt: %s"`, `f"System prompt:\n{sp}"`)
+                # carries no instruction itself: medium, never blocking.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and _system_prompt_label_only(line, pattern)):
+                    effective_severity = "medium"
                 findings.append(Finding(
                     category="prompt_injection",
                     name=name,
@@ -3598,6 +3676,18 @@ _RESPONSE_SEND_RE = re.compile(
     r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(")
 
 
+_QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)
+
+
+def _near_read(reads: list[int], sends: list[int], near) -> int | None:
+    """The first read line that has a send within the window (``near`` is the
+    composite's window test)."""
+    for r in reads:
+        if near([r], sends) is not None:
+            return r
+    return None
+
+
 def _composite_findings(
     content: str,
     file_path: str,
@@ -3631,7 +3721,10 @@ def _composite_findings(
                 out.append(i + 1)
         return out
 
-    untrusted = _hits(UNTRUSTED_INPUT_RE)
+    # The bare word `webhook` counts as inbound input only as code (a `webhook` handler
+    # or object), not as a quoted string (`"webhook" in self.alerting`, a config value).
+    untrusted = [n for n in _hits(UNTRUSTED_INPUT_RE)
+                 if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
     # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
     # request; it is not an outbound send to a third party (precision PR 2).
     outbound = [n for n in _hits(OUTBOUND_SEND_RE)
@@ -3669,14 +3762,16 @@ def _composite_findings(
     if sensitive and _near(sensitive, outbound) is None:
         sensitive = []
 
+    # Report the read that sits next to the send (not the file's first read, which can
+    # be thousands of lines from the pair that fired).
     if sensitive:
         name = "Lethal trifecta: private-data read + untrusted input + outbound network"
         severity = "high"
-        line = sensitive[0]
+        line = _near_read(sensitive, outbound, _near) or sensitive[0]
     else:
         name = "Toxic flow: file read + untrusted input + outbound network"
         severity = "medium"
-        line = file_read[0]
+        line = _near_read(file_read, outbound, _near) or file_read[0]
 
     if _is_allowlisted(file_path, name, allowlist):
         return []
@@ -5007,6 +5102,11 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
 
     findings, files_scanned, has_hook = scan_artifact_files(fetched)
+    # npm / PyPI: text that matches an attack pattern in detection data, a prebuilt web
+    # bundle or a non-tool prompt template is not the package running it (no-op for
+    # other ecosystems).
+    from src.scanner.package_context import calibrate_package_findings
+    findings = calibrate_package_findings(findings, fetched)
     if eco == "huggingface":
         findings = findings + huggingface_weight_findings(fetched)
     elif eco == "docker":

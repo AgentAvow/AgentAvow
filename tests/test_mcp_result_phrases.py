@@ -66,7 +66,7 @@ def test_safe_certified_leads_with_the_phrase_and_suffix(follows):
 
 def test_review_leads_with_the_phrase_and_reason(follows):
     first = _first(REVIEW)
-    assert first.startswith("⚠️ Review before you connect — one high finding: unsafe eval "
+    assert first.startswith("⚠️ Review before you connect — one high finding in its code: unsafe eval "
                             "call. x · npm: trust 70/100.")
     text = ms._scan_block(REVIEW, "use", RP, "x · npm")
     assert "⚠ REVIEW" not in text and "**Top findings:**" in text
@@ -74,7 +74,7 @@ def test_review_leads_with_the_phrase_and_reason(follows):
 
 def test_do_not_connect_leads_with_the_phrase_and_reason(follows):
     first = _first(BLOCK)
-    assert first.startswith("⛔ Do not connect — one critical finding: hardcoded AWS key. "
+    assert first.startswith("⛔ Do not connect — one critical finding in its code: hardcoded AWS key. "
                             "x · npm: trust 40/100.")
     text = ms._scan_block(BLOCK, "use", RP, "x · npm", install_hint="npm install x")
     assert "npm install x" not in text
@@ -209,7 +209,7 @@ def test_card_leads_with_phrase_reason_and_certified():
 def test_card_review_and_do_not_connect():
     r = _render(_struct(REVIEW))
     assert "Review before you connect" in r["lead"]["html"]
-    assert "one high finding: unsafe eval call" in r["lead"]["html"]
+    assert "one high finding in its code: unsafe eval call" in r["lead"]["html"]
     assert r["pill"]["display"] == "none" and r["accent"] == "#F59E0B"
     b = _render(_struct(BLOCK))
     assert "Do not connect" in b["lead"]["html"] and b["accent"] == "#EF4444"
@@ -254,11 +254,11 @@ def test_next_line_per_decision():
     assert thin.startswith("**Next:** Safe to connect: connect it as usual. The score is "
                            "capped because there's little code to inspect (3 files)")
     review = _next(REVIEW)
-    assert review.startswith("**Next:** Review before you connect (one high finding: unsafe "
-                             "eval call): read the findings above")
+    assert review.startswith("**Next:** Review before you connect (one high finding in its "
+                             "code: unsafe eval call): read the findings above")
     block = _next(BLOCK, "npm install x")
-    assert block.startswith("**Next:** Do not connect or install it (one critical finding: "
-                            "hardcoded AWS key). The full report has the evidence: ")
+    assert block.startswith("**Next:** Do not connect or install it (one critical finding in "
+                            "its code: hardcoded AWS key). The full report has the evidence: ")
     assert "/check/pkg/npm/x" in block and "alternative" in block
 
 
