@@ -537,7 +537,7 @@ class TestWheelFirstClasses:
         # sqlalchemy/alembic tool_support: run a console-script entry point
         code = ('subprocess.run(\n    [\n        sys.executable,\n        "-c",\n'
                 '        "import %s; %s.%s()" % (impl.module, impl.module, impl.attr),\n'
-                '    ]\n)\n')
+                '    ]\n    + cmdline_options_list,\n)\n')
         f = [x for x in _defects(_scan(code, "tool_support.py")) if x.category == "unsafe_exec"]
         assert [x.severity for x in f] == ["medium"]
 

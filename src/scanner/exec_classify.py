@@ -740,8 +740,8 @@ def classify_python_exec(
                     if el not in DANGEROUS_ARGV_FLAGS:
                         continue
                     code = raw[i + 1]
-                    others_dynamic = any(e is None for j, e in enumerate(elements)
-                                         if j != i + 1)
+                    # Elements AFTER the code are the snippet's sys.argv, not code.
+                    others_dynamic = any(e is None for e in elements[:i + 1])
                     if elements[i + 1] is None and not others_dynamic and _is_dynamic_string(
                             code) and not (isinstance(code, ast.Call)
                                            and isinstance(code.func, ast.Attribute)
