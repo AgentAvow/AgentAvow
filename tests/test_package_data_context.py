@@ -191,7 +191,13 @@ class TestDetectionData:
         ("pkg/detectors/tool_defs.json", False),
         ("pkg/guardrails/system.yaml", False),
         ("pkg/filters/descriptions.json", False),
-        ("pkg/categories/prompt_injection_system_prompt.yaml", False),
+        # a leading attack-name prefix: the rest is the attack's sub-category
+        ("pkg/categories/prompt_injection_system_prompt.yaml", True),
+        ("pkg/categories/prompt-injection-tool-abuse.json", True),
+        ("pkg/categories/promptinjection_instructions.yaml", True),
+        # ...only as a prefix
+        ("pkg/categories/system_prompt_injection.yaml", False),
+        ("pkg/categories/system_prompt.yaml", False),
         # only the stem and the immediate parent are read
         ("content_filter_mcp/data/tools_list.json", False),
         ("prompt_guard/data/en.json", False),
@@ -200,6 +206,43 @@ class TestDetectionData:
     ])
     def test_name_evidence(self, path, expected):
         assert detection_name_evidence(path) is expected
+
+    # litellm's prompt_injection_system_prompt.yaml, its real shape ----------------
+    SP_PATH = f"{GUARD_DIR}/prompt_injection_system_prompt.yaml"
+    SP_BODY = (
+        '# System Prompt Extraction Detection\n'
+        'category_name: "prompt_injection_system_prompt"\n'
+        'default_action: "BLOCK"\n'
+        'identifier_words:\n'
+        '  - "system prompt"\n'
+        '  - "previous instructions"\n'
+        'always_block_keywords:\n'
+        '  - keyword: "ignore previous instructions"\n'
+        '    severity: "high"\n'
+        '  - keyword: "your new role is"\n'
+        '    severity: "high"\n'
+    )
+
+    def test_attack_prefix_signature_list_is_low(self):
+        r = _scan({self.SP_PATH: self.SP_BODY, "pkg/__init__.py": "X = 1\n"})
+        assert _sev(r, self.SP_PATH, category="prompt_injection") == {"low"}
+
+    def test_attack_prefix_free_text_stays_high(self):
+        r = _scan({self.SP_PATH: f"system: |\n  {INJ}\n"})
+        assert _sev(r, self.SP_PATH, category="prompt_injection") == {"high"}
+
+    def test_attack_prefix_named_by_exec_code_stays_high(self):
+        loader = ("import yaml\n"
+                  "d = yaml.safe_load(open('prompt_injection_system_prompt.yaml'))\n"
+                  "exec(d['always_block_keywords'][0]['keyword'])\n")
+        r = _scan({self.SP_PATH: self.SP_BODY, f"{GUARD_DIR}/loader.py": loader})
+        assert "high" in _sev(r, self.SP_PATH, category="prompt_injection")
+
+    @pytest.mark.parametrize("name", ["system_prompt_injection.yaml", "guardrail_prompts.yaml"])
+    def test_prefix_not_first_keeps_severity(self, name):
+        path = f"{GUARD_DIR}/{name}"
+        r = _scan({path: self.SP_BODY})
+        assert "high" in _sev(r, path, category="prompt_injection")
 
     def test_shape_and_entry(self):
         assert detection_shape(GUARD_BODY)

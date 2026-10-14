@@ -18,7 +18,9 @@ Data files are NEVER lowered by default (an MCP server's ``descriptions.json`` o
 1. the file's stem or its immediate parent directory names detection data
    (``prompt_injection``, ``guardrail``, ``jailbreak``, ``blocklist``, ``policy`` …), and
    the stem is not instruction-ish (``tool``, ``system``, ``instructions``,
-   ``description``, ``prompts``, ``skill``, ``mcp``, ``agent``);
+   ``description``, ``prompts``, ``skill``, ``mcp``, ``agent``), except after a leading
+   ``prompt_injection_`` prefix, where the rest names the attack's sub-category
+   (``prompt_injection_system_prompt``);
 2. the content has the shape of a detection list: at least two detection keys
    (``keyword``, ``patterns``, ``always_block_keywords``, ``utterances``, ``severity``,
    ``default_action`` …) and the matched line is a short list entry
@@ -82,6 +84,7 @@ _DETECTION_WORD_RE = re.compile(
 # A compound that NAMES the attack ("prompt_injection") is removed before looking for
 # instruction-ish tokens, so `prompt_injection_malicious_code` is not "a prompt file".
 _ATTACK_COMPOUND_RE = re.compile(r"prompt[_-]?injections?")
+_ATTACK_PREFIX_RE = re.compile(r"prompt[_-]?injections?[_-]")
 _INSTRUCTION_TOKENS = frozenset({
     "tool", "tools", "tooldefs", "tool_defs", "defs", "system", "instruction",
     "instructions", "description", "descriptions", "prompt", "prompts", "skill", "skills",
@@ -193,6 +196,11 @@ def detection_name_evidence(path: str) -> bool:
         return False
     stem = Path(parts[-1]).stem
     parent = parts[-2] if len(parts) > 1 else ""
+    # A stem that STARTS with the attack name (`prompt_injection_system_prompt`): the
+    # rest is the attack's sub-category, so an instruction-ish word after the prefix
+    # does not block (shape, list entry and reachability are still required).
+    if _ATTACK_PREFIX_RE.match(stem):
+        return True
     if _stem_tokens(stem) & _INSTRUCTION_TOKENS:
         return False
     return bool(_DETECTION_WORD_RE.search(stem) or _DETECTION_WORD_RE.search(parent))
