@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.28"
+__version__ = "0.1.29"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -732,11 +732,16 @@ def _decision(data: dict, advisories: int, incident: bool) -> tuple[str, str, bo
     files = (data.get("metadata") or {}).get("files_scanned")
     found = any(_sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 for i in items)
-    if isinstance(files, int) and 0 < files < 8 and not found:
+    # Thin coverage: 0-7 files read with nothing found (0 = the package held no code,
+    # e.g. a metapackage whose code ships in a dependency). Missing files_scanned = unknown.
+    if isinstance(files, int) and not isinstance(files, bool) and 0 <= files < 8 \
+            and not found:
         remote_mcp = any(isinstance(data.get(k), dict) and data[k].get("surface") == "mcp"
                          for k in ("coverage", "surface_detail"))
-        return out("safe", "tool definitions clean; server code not inspected" if remote_mcp
-                   else "nothing found; little code to inspect")
+        if remote_mcp:
+            return out("safe", "tool definitions clean; server code not inspected")
+        return out("safe", "nothing found; little code to inspect" if files
+                   else "nothing found; no code to inspect")
     return out("safe", "no critical or high findings")
 
 

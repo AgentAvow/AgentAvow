@@ -181,6 +181,8 @@ export const PENDING_SUFFIX = '; sandbox still running'
 /** Pending because every sandbox slot is busy (`behavioral.state === 'queued'`). */
 export const QUEUED_SUFFIX = '; waiting for a sandbox slot'
 export const THIN_REASON = 'nothing found; little code to inspect'
+/** Thin coverage at zero files: the package was read and held no code to scan. */
+export const THIN_REASON_NO_CODE = 'nothing found; no code to inspect'
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
 
@@ -277,7 +279,9 @@ export function decide(input: unknown): Decision {
   const findings = asObj(data.findings)
   const items = asList(findings.items)
   const meta = asObj(data.metadata)
-  const files = isInt(meta.files_scanned) ? meta.files_scanned : 0
+  // An explicit 0 (read, no code) is thin coverage; a missing files_scanned is unknown.
+  const filesKnown = isInt(meta.files_scanned)
+  const files: number = filesKnown ? (meta.files_scanned as number) : 0
 
   const b = isObj(data.behavioral) ? data.behavioral : null
   const pending = !!(b && b.pending)
@@ -365,14 +369,16 @@ export function decide(input: unknown): Decision {
   const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
     && i.kind !== 'capability' && i.installed !== false)
 
-  // safe — thin coverage (0 < files < 8, nothing found) reads Safe and says so in the
-  // reason (decided 2026-10-08, #19); the 74 / 82 score cap still shows it.
+  // safe — thin coverage (0 <= files < 8, nothing found) reads Safe and says so in the
+  // reason (decided 2026-10-08, #19); the 74 / 82 score cap still shows it. Zero files
+  // (a metapackage whose code ships in a dependency) says there was no code at all.
   if (deps) {
     const noun = depC + depH === 1 ? 'advisory' : 'advisories'
     return done('safe', `no critical or high findings in its code (dependencies: ${deps} ${noun})`)
   }
-  if (files > 0 && files < THIN_COVERAGE_FILES && !found) {
-    return done('safe', isRemoteMcp(data) ? THIN_REASON_REMOTE_MCP : THIN_REASON)
+  if (filesKnown && files >= 0 && files < THIN_COVERAGE_FILES && !found) {
+    if (isRemoteMcp(data)) return done('safe', THIN_REASON_REMOTE_MCP)
+    return done('safe', files > 0 ? THIN_REASON : THIN_REASON_NO_CODE)
   }
   let reason: string
   if (files > 0) {

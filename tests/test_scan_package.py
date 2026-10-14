@@ -108,3 +108,31 @@ async def test_scan_package_fetch_error_is_failopen(monkeypatch):
     res = await scan_package("npm", "demo", "9.9.9")
     assert res.error and "not found" in res.error.lower()
     assert res.trust_score == 0  # never raised
+
+
+@pytest.mark.asyncio
+async def test_scan_package_scans_the_tree_off_the_event_loop(monkeypatch):
+    # A big wheel is seconds of CPU: the unpacked-tree scan runs in a worker thread so
+    # the loop keeps serving other requests.
+    import threading
+
+    from src.scanner import artifact_fetch as af
+    from src.scanner import scan as scan_mod
+    monkeypatch.setattr(settings, "scanner_scan_artifact", True)
+    monkeypatch.setattr(settings, "scanner_verify_provenance", False)
+
+    async def fake_npm(name, version=None, *, client=None):
+        return _fetched(name=name)
+    monkeypatch.setattr(af, "fetch_npm_artifact", fake_npm)
+
+    seen = []
+    real = scan_mod.apply_artifact_scan
+
+    def spy(*a, **kw):
+        seen.append(threading.current_thread() is threading.main_thread())
+        return real(*a, **kw)
+    monkeypatch.setattr(scan_mod, "apply_artifact_scan", spy)
+
+    res = await scan_mod.scan_package("npm", "demo")
+    assert res.error is None and res.files_scanned >= 1
+    assert seen == [False]

@@ -75,7 +75,7 @@ def verdict_reason(data: dict, safe: bool | None = None) -> str:
                               a read-only tool that wrote, a leaked canary credential).
     - ``known_vulnerability`` — a published advisory (GHSA/CVE) affects this version.
     - ``deprecated``        — no risk found; the maintainer retired the package.
-    - ``thin_coverage``     — no risk found, but too little code to inspect (<8 files).
+    - ``thin_coverage``     — no risk found, but too little code to inspect (0-7 files).
     - ``low_signals``       — no risk found, held down by non-finding signals
                               (maintainer/provenance/adoption), not detected risk.
 
@@ -98,7 +98,8 @@ def verdict_reason(data: dict, safe: bool | None = None) -> str:
     if isinstance(dep, str) and dep.strip():
         return "deprecated"
     files = (data.get("metadata") or {}).get("files_scanned")
-    return "thin_coverage" if isinstance(files, int) and 0 < files < 8 else "low_signals"
+    thin = isinstance(files, int) and not isinstance(files, bool) and 0 <= files < 8
+    return "thin_coverage" if thin else "low_signals"
 
 
 def verdict_label(safe: bool) -> str:
@@ -148,6 +149,8 @@ PENDING_SUFFIX = "; sandbox still running"
 # because a run is going. Past the pending age limit the API stops saying pending.
 QUEUED_SUFFIX = "; waiting for a sandbox slot"
 THIN_REASON = "nothing found; little code to inspect"
+# Thin coverage at zero files: the package was read and held no code to scan.
+THIN_REASON_NO_CODE = "nothing found; no code to inspect"
 # A live MCP server scan reads the served tool definitions only (files = tools).
 THIN_REASON_REMOTE_MCP = "tool definitions clean; server code not inspected"
 
@@ -319,7 +322,10 @@ def decide(data: dict) -> Decision:
     items = [i for i in (findings.get("items") or []) if isinstance(i, dict)]
     meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     files = meta.get("files_scanned")
-    files = files if isinstance(files, int) and not isinstance(files, bool) else 0
+    # An explicit 0 (we read the package and it held no code) is thin coverage; a result
+    # with no files_scanned at all (older cached shapes) is unknown, not thin.
+    files_known = isinstance(files, int) and not isinstance(files, bool)
+    files = files if files_known else 0
 
     b = data.get("behavioral")
     b = b if isinstance(b, dict) else None
@@ -436,11 +442,14 @@ def decide(data: dict) -> Decision:
         noun = "advisory" if dep_c + dep_h == 1 else "advisories"
         return done(DECISION_SAFE,
                     f"no critical or high findings in its code (dependencies: {deps} {noun})")
-    # Thin coverage (0 < files < 8, nothing found) reads Safe and says so in the reason
+    # Thin coverage (0 <= files < 8, nothing found) reads Safe and says so in the reason
     # (Kenne, 2026-10-08, #19). The 74 / 82 evidence cap on the score still shows it.
-    if 0 < files < THIN_COVERAGE_FILES and not found:
-        return done(DECISION_SAFE, THIN_REASON_REMOTE_MCP if _is_remote_mcp(data)
-                    else THIN_REASON)
+    # Zero files (a metapackage whose code ships in a dependency, an image read only to
+    # its config) is the thinnest case and says there was no code at all.
+    if files_known and 0 <= files < THIN_COVERAGE_FILES and not found:
+        if _is_remote_mcp(data):
+            return done(DECISION_SAFE, THIN_REASON_REMOTE_MCP)
+        return done(DECISION_SAFE, THIN_REASON if files > 0 else THIN_REASON_NO_CODE)
     if files > 0:
         n = f"{files:,}"
         unit = "file" if files == 1 else "files"

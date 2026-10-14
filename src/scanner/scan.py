@@ -5,6 +5,7 @@ Designed to run against the recruitment_prospects table of discovered repos.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -3406,7 +3407,7 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # raises a score, and a findings-laden repo already sits below the cap so it's a no-op
     # there. Skipped/unscannable scans never reach here (their score is null).
     files = result.files_scanned or 0
-    if 0 < files < _EVIDENCE_MIN_FILES:
+    if 0 <= files < _EVIDENCE_MIN_FILES:
         cap = _EVIDENCE_VERY_THIN_CAP if files <= _EVIDENCE_VERY_THIN_FILES else _EVIDENCE_THIN_CAP
         if result.has_tests:
             cap += _EVIDENCE_TESTS_HEADROOM
@@ -3941,6 +3942,9 @@ async def _maybe_scan_artifact(
         "unpacked_size": art.unpacked_size,
         "drift": art.drift,
     }
+    if getattr(art, "skipped", None):
+        # The bounded unpack left members out (too large / past the budget): disclose it.
+        result.artifact_scan["skipped"] = art.skipped
 
     # Upgrade the coverage block: scan_depth=artifact + the real artifact digest +
     # a pinned registry snapshot date (Phase 0 recompute discipline).
@@ -4331,7 +4335,9 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         result.error = fetched.error or "artifact fetch failed"
         return result
 
-    apply_artifact_scan(result, eco, fetched)
+    # Unpacked-tree scanning is CPU-bound (a big wheel is seconds of regex work): run it
+    # off the event loop so other requests keep being served. No DB/session work here.
+    await asyncio.to_thread(apply_artifact_scan, result, eco, fetched)
 
     # Provenance verification on the exact coordinate — this is what makes A+
     # reachable for a package that publishes Sigstore/PEP-740 provenance. (Images:
@@ -4411,6 +4417,15 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     result.findings = findings
     result.files_scanned = files_scanned
     result.total_scannable_files = files_scanned
+    # A big artifact is read bounded: binaries / media / test data past the budget are
+    # skipped so the code still gets scanned. When any skipped member is one the engine
+    # would have read, the grade covers only part of the package: say so through the
+    # same disclosure a capped repo scan uses (sampled + the larger total; it is signed
+    # into the attestation and keeps the Certified full-coverage check from passing).
+    skipped = getattr(fetched, "skipped", None)
+    if skipped is not None and getattr(skipped, "scannable", 0) > 0:
+        result.sampled = True
+        result.total_scannable_files = files_scanned + skipped.scannable
     # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
     # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
     # tier judges observed egress against these declared hosts.
@@ -4445,6 +4460,8 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         "is_mcp_server": _looks_like_mcp_server(eco, fetched.name, fetched.packaged_manifest),
         "published_at": getattr(fetched, "published_at", None),
     }
+    if skipped is not None and getattr(skipped, "count", 0) > 0:
+        result.artifact_scan["skipped"] = skipped.summary()
     if isinstance(_hf, dict):
         from src.scanner.hf_facts import model_card_facts
         result.artifact_scan["model_card"] = model_card_facts(_hf)

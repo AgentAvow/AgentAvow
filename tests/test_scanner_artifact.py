@@ -109,25 +109,31 @@ def test_unpack_rejects_absolute_path_in_zip():
         _unpack_zip(raw)
 
 
-def test_unpack_enforces_per_file_cap(monkeypatch):
+def test_unpack_skips_member_over_per_file_cap(monkeypatch):
+    # Over the per-member cap: skipped unread and recorded, not a failed scan.
     monkeypatch.setattr(af, "MAX_MEMBER_BYTES", 8)
-    raw = _make_targz({"package/big.js": b"0123456789"})  # 10 bytes > 8
-    with pytest.raises(ArtifactFetchError):
-        _unpack_tar_gz(raw)
+    raw = _make_targz({"package/big.js": b"0123456789", "package/ok.js": b"1"})
+    report = af.SkipReport()
+    out = _unpack_tar_gz(raw, report)
+    assert set(out) == {"package/ok.js"}
+    assert report.count == 1 and report.reasons == {"too large": 1}
 
 
-def test_unpack_enforces_file_count_cap(monkeypatch):
+def test_unpack_file_count_cap_skips_instead_of_failing(monkeypatch):
     monkeypatch.setattr(af, "MAX_FILE_COUNT", 1)
     raw = _make_targz({"package/a.js": b"a", "package/b.js": b"b"})
-    with pytest.raises(ArtifactFetchError):
-        _unpack_tar_gz(raw)
+    report = af.SkipReport()
+    out = _unpack_tar_gz(raw, report)
+    assert len(out) == 1
+    assert report.count == 1 and report.scannable == 1
 
 
-def test_unpack_enforces_unpacked_size_cap(monkeypatch):
+def test_unpack_size_budget_skips_instead_of_failing(monkeypatch):
     monkeypatch.setattr(af, "MAX_UNPACKED_BYTES", 5)
     raw = _make_targz({"package/a.js": b"012345"})  # 6 > 5
-    with pytest.raises(ArtifactFetchError):
-        _unpack_tar_gz(raw)
+    report = af.SkipReport()
+    assert _unpack_tar_gz(raw, report) == {}
+    assert report.reasons == {"over budget": 1}
 
 
 @pytest.mark.asyncio

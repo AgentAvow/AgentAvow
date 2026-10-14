@@ -21,6 +21,7 @@ fetch/unpack error returns ``ok=False`` and the caller keeps the repo-only grade
 from __future__ import annotations
 
 import ast
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -60,6 +61,9 @@ class ArtifactScanResult:
     files_scanned: int = 0
     unpacked_size: int = 0
     file_count: int = 0
+    # Members the bounded unpack left out ({count, bytes, scannable, reasons, examples});
+    # empty when the artifact was read whole.
+    skipped: dict = field(default_factory=dict)
     drift: dict = field(default_factory=dict)
     registry_snapshot: str | None = None
     error: str | None = None
@@ -338,6 +342,7 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     detector gains artifact-truth for free.
     """
     from src.scanner.artifact_fetch import is_installed_path
+    from src.scanner.patterns import SKIP_DIRS
     from src.scanner.scan import (
         _MAX_FILE_SIZE,
         _is_build_tooling_file,
@@ -366,7 +371,16 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     # packages are checked against OSV instead (``src.scanner.docker_image``).
     is_image = (fetched.ecosystem or "").lower() == "docker"
 
+    # A wheel's top-level directories are the importable packages themselves: a package
+    # named like a repo build/output dir (`coverage`, `build`, `env`, `target`) must not
+    # have its whole tree skipped. Nested dirs keep the usual rules.
+    is_wheel = (getattr(fetched, "kind", "") or "") == "wheel"
+
     def _skip(path: str) -> bool:
+        if is_wheel and "/" in path:
+            head, rest = path.split("/", 1)
+            if head in SKIP_DIRS and not head.startswith("."):
+                return _should_skip_path(rest)
         if not is_npm_tarball:
             return _should_skip_path(path)
         parts = [p for p in Path(path).parts if p not in ("dist", "build")]
@@ -620,6 +634,9 @@ def _is_drift_ignorable(path: str) -> bool:
     return any(marker in low for marker in _DRIFT_IGNORE_DIR_MARKERS)
 
 
+_WHEEL_REPO_PREFIXES = ("src/", "lib/", "python/")
+
+
 def compute_drift(
     fetched: ArtifactFetchResult,
     repo_paths: set[str] | None,
@@ -652,12 +669,27 @@ def compute_drift(
 
     added: list[str] = []
     modified: list[str] = []
+    # A wheel lays the package out at its root; a src-layout repo keeps it under src/
+    # (or lib/, python/). Look a wheel path up under those too, so a wheel lines up with
+    # its repo the way the sdist did.
+    is_wheel = (getattr(fetched, "kind", "") or "") == "wheel"
+
+    def _repo_key(path: str, known) -> str | None:
+        if path in known:
+            return path
+        if is_wheel:
+            for prefix in _WHEEL_REPO_PREFIXES:
+                if prefix + path in known:
+                    return prefix + path
+        return None
+
     if release_blob_shas is not None:
         # Accurate basis: compare the artifact against its own release tag by git blob SHA.
         for path, af in fetched.files.items():
             if _is_drift_ignorable(path):
                 continue
-            tag_sha = release_blob_shas.get(path)
+            key = _repo_key(path, release_blob_shas)
+            tag_sha = release_blob_shas.get(key) if key else None
             if tag_sha is None:
                 added.append(path)
             elif af.git_blob_sha and af.git_blob_sha != tag_sha:
@@ -668,10 +700,11 @@ def compute_drift(
         for path, af in fetched.files.items():
             if _is_drift_ignorable(path):
                 continue
-            if path not in repo_paths and path not in repo_text_hashes:
+            key = _repo_key(path, repo_paths) or _repo_key(path, repo_text_hashes)
+            if key is None:
                 added.append(path)
             else:
-                repo_hash = repo_text_hashes.get(path)
+                repo_hash = repo_text_hashes.get(key)
                 if repo_hash and af.text_sha256 and repo_hash != af.text_sha256:
                     modified.append(path)
         have_repo_view = bool(repo_paths or repo_text_hashes)
@@ -826,7 +859,8 @@ async def scan_published_artifact(
             result.error = fetched.error or "artifact fetch failed"
             return result
 
-        findings, files_scanned, has_hook = scan_artifact_files(fetched)
+        # CPU-bound: off the event loop (see scan_package).
+        findings, files_scanned, has_hook = await asyncio.to_thread(scan_artifact_files, fetched)
         # Prefer comparing the artifact against the RELEASE TAG it was built from
         # (accurate); the resolver returns {path: git-blob-sha} for that tag, or None
         # when no matching tag exists — then compute_drift falls back to the branch view.
@@ -852,6 +886,7 @@ async def scan_published_artifact(
         result.files_scanned = files_scanned
         result.unpacked_size = fetched.unpacked_size
         result.file_count = fetched.file_count
+        result.skipped = fetched.skipped.summary() if fetched.skipped else {}
         result.drift = drift
         result.registry_snapshot = _registry_snapshot()
         return result

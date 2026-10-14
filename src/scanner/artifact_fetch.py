@@ -1,4 +1,4 @@
-"""Phase 2 — fetch + unpack the PUBLISHED artifact (npm tarball / PyPI sdist+wheel).
+"""Phase 2 — fetch + unpack the PUBLISHED artifact (npm tarball / PyPI wheel or sdist).
 
 The scanner grades the GitHub *repo* today, but an agent installs the *published
 package*, which can differ from the source ("clean repo, poisoned tarball" —
@@ -12,9 +12,16 @@ Hard rules (why this file is security-critical — it downloads untrusted bytes)
     ``src.ssrf`` AND its host must be on :data:`_ALLOWED_HOSTS`. Redirects are
     NOT followed (a 3xx to an arbitrary host is rejected).
   * **Size cap + zip-bomb / zip-slip guard.** Downloads abort past
-    :data:`MAX_DOWNLOAD_BYTES`; unpacking aborts past :data:`MAX_UNPACKED_BYTES`
-    or :data:`MAX_FILE_COUNT`; per-member size is capped; path-traversal
-    (``..`` / absolute) and non-regular members (symlink/hardlink/dev) are rejected.
+    :data:`MAX_DOWNLOAD_BYTES` and spool to an anonymous temp file, not memory.
+    Unpacking is BOUNDED, not all-or-nothing: past the soft budget
+    (:data:`MAX_UNPACKED_BYTES` kept, :data:`MAX_FILE_COUNT` members) and for any
+    member over :data:`MAX_MEMBER_BYTES`, low-priority members (binaries, media,
+    test data) are skipped or evicted so code and manifests are still read, and every
+    skip is recorded in ``ArtifactFetchResult.skipped`` (the scan then reports partial
+    coverage). It aborts only on a real bomb: an implausible compression ratio, more
+    than :data:`HARD_UNPACKED_BYTES` walked or :data:`HARD_ENTRY_COUNT` entries.
+    Path-traversal (``..`` / absolute) and non-regular members
+    (symlink/hardlink/dev) are rejected.
   * **No execution.** We only read bytes. setup.py / install hooks are inspected
     statically (AST) by :mod:`src.scanner.artifact_scan`, never run.
   * **Fail-closed on abuse, fail-open to the caller.** Guard violations raise
@@ -23,14 +30,19 @@ Hard rules (why this file is security-critical — it downloads untrusted bytes)
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import heapq
 import io
 import json
 import logging
 import re
 import tarfile
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
+from typing import IO
 from urllib.parse import urlparse
 
 import httpx
@@ -105,10 +117,26 @@ _HF_MAX_TEXT_FILES = 40
 _HF_MAX_TEXT_BYTES = 512 * 1024
 
 # --- Size / zip-bomb guards ---------------------------------------------------
+# Two kinds of limit. The SOFT budget (bytes kept in memory, members kept) never fails a
+# scan: past it, low-priority members (binaries, data, media, tests/docs) are skipped, or
+# evicted to make room for code and manifests, and every skip is recorded so the scan
+# reports partial coverage honestly. The HARD guards fail the fetch: they only trip on
+# an archive that really looks like a bomb (an absurd compression ratio, or more
+# decompressed bytes / entries than any real package ships).
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024      # 50MB compressed download ceiling
-MAX_UNPACKED_BYTES = 50 * 1024 * 1024      # 50MB total unpacked ceiling
-MAX_FILE_COUNT = 5_000                     # reject artifacts with too many members
-MAX_MEMBER_BYTES = 8 * 1024 * 1024         # per-file unpacked cap
+MAX_UNPACKED_BYTES = 50 * 1024 * 1024      # soft: bytes of member content kept in memory
+MAX_FILE_COUNT = 5_000                     # soft: members kept
+MAX_MEMBER_BYTES = 8 * 1024 * 1024         # members larger than this are skipped, unread
+HARD_UNPACKED_BYTES = 1024 * 1024 * 1024   # hard: total declared size walked (1GB)
+HARD_ENTRY_COUNT = 100_000                 # hard: archive entries walked
+# Compression-ratio bomb test. Per member (zip, where the compressed size is known) and
+# over the whole archive (tar.gz, where it is not); only above a size floor, so a tiny
+# file of zeros is not a bomb. Deflate tops out near 1032:1; real code is ~3-20:1.
+MAX_MEMBER_RATIO = 250
+MAX_ARCHIVE_RATIO = 100
+_RATIO_MEMBER_FLOOR = 1024 * 1024          # members under 1MB are never ratio-checked
+_RATIO_ARCHIVE_FLOOR = 256 * 1024 * 1024   # archive ratio is checked past 256MB walked
+_SPOOL_BYTES = 4 * 1024 * 1024             # downloads past this spool to a temp file
 _METADATA_MAX_BYTES = 8 * 1024 * 1024      # packument / pypi json ceiling
 _HTTP_TIMEOUT = 20.0
 _DOWNLOAD_TIMEOUT = 40.0
@@ -165,7 +193,49 @@ class ArtifactFetchResult:
     # and the tag's top-level manifest digest (what signatures are made over). Read by
     # ``src.scanner.docker_image`` for the CVE check and cosign provenance.
     image: dict | None = None
+    # Members the bounded unpack did not keep (too large, or past the soft budget). Not
+    # None means the archive was NOT read whole; ``skipped.scannable`` counts the ones
+    # the static engine would have read, which is what makes the scan ``sampled``.
+    skipped: SkipReport | None = None
     error: str | None = None
+
+
+@dataclass
+class SkipReport:
+    """What a bounded unpack left out, for the honest-coverage disclosure."""
+
+    count: int = 0                  # members not kept
+    bytes: int = 0                  # their declared (uncompressed) size
+    scannable: int = 0              # of those, files the static engine would have read
+    reasons: dict[str, int] = field(default_factory=dict)   # reason -> count
+    examples: list[dict] = field(default_factory=list)      # first few, for display
+
+    _MAX_EXAMPLES = 20
+
+    def add(self, path: str, size: int, reason: str, scannable: bool) -> None:
+        self.count += 1
+        self.bytes += max(0, int(size))
+        if scannable:
+            self.scannable += 1
+        self.reasons[reason] = self.reasons.get(reason, 0) + 1
+        if len(self.examples) < self._MAX_EXAMPLES:
+            self.examples.append({"path": path, "size": int(size), "reason": reason})
+
+    def strip_prefix(self, prefix: str) -> None:
+        if not prefix:
+            return
+        for ex in self.examples:
+            if ex["path"].startswith(prefix):
+                ex["path"] = ex["path"][len(prefix):]
+
+    def summary(self) -> dict:
+        return {
+            "count": self.count,
+            "bytes": self.bytes,
+            "scannable": self.scannable,
+            "reasons": dict(sorted(self.reasons.items())),
+            "examples": list(self.examples),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -221,36 +291,79 @@ async def _get_json_list(url: str, client: httpx.AsyncClient) -> list:
     return data if isinstance(data, list) else []
 
 
-async def _download(url: str, client: httpx.AsyncClient) -> bytes:
-    """Stream-download an artifact with a hard byte cap and no redirect following."""
+async def _download_spooled(url: str, client: httpx.AsyncClient) -> IO[bytes]:
+    """Stream-download an artifact with a hard byte cap and no redirect following,
+    into a temp file that stays in memory up to :data:`_SPOOL_BYTES` and spills to an
+    anonymous on-disk file past it (deleted on close; the OS reclaims it even if the
+    process dies). The caller owns the returned file and must close it; it is
+    rewound to offset 0."""
     _validate_registry_url(url)
-    buf = bytearray()
-    async with client.stream(
-        "GET", url, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=False,
-    ) as resp:
-        if resp.status_code in _REDIRECT_CODES:
-            # A redirect could point off the allowlisted host — refuse it.
-            raise ArtifactFetchError(f"redirect while downloading artifact: {url}")
-        if resp.status_code != 200:
-            raise ArtifactFetchError(f"download status {resp.status_code} for {url}")
-        clen = resp.headers.get("content-length")
-        if clen:
-            try:
-                if int(clen) > MAX_DOWNLOAD_BYTES:
-                    raise ArtifactFetchError("artifact Content-Length exceeds cap")
-            except ValueError:
-                pass
-        async for chunk in resp.aiter_bytes():
-            buf.extend(chunk)
-            if len(buf) > MAX_DOWNLOAD_BYTES:
-                raise ArtifactFetchError("artifact download exceeded size cap")
-    if not buf:
-        raise ArtifactFetchError("empty artifact download")
-    return bytes(buf)
+    out = tempfile.SpooledTemporaryFile(max_size=_SPOOL_BYTES)  # noqa: SIM115 — returned
+    try:
+        size = 0
+        async with client.stream(
+            "GET", url, timeout=_DOWNLOAD_TIMEOUT, follow_redirects=False,
+        ) as resp:
+            if resp.status_code in _REDIRECT_CODES:
+                # A redirect could point off the allowlisted host — refuse it.
+                raise ArtifactFetchError(f"redirect while downloading artifact: {url}")
+            if resp.status_code != 200:
+                raise ArtifactFetchError(f"download status {resp.status_code} for {url}")
+            clen = resp.headers.get("content-length")
+            if clen:
+                try:
+                    if int(clen) > MAX_DOWNLOAD_BYTES:
+                        raise ArtifactFetchError("artifact Content-Length exceeds cap")
+                except ValueError:
+                    pass
+            async for chunk in resp.aiter_bytes():
+                size += len(chunk)
+                if size > MAX_DOWNLOAD_BYTES:
+                    raise ArtifactFetchError("artifact download exceeded size cap")
+                out.write(chunk)
+        if not size:
+            raise ArtifactFetchError("empty artifact download")
+        out.seek(0)
+        return out
+    except BaseException:
+        out.close()
+        raise
 
 
-def _digest(raw: bytes) -> str:
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+async def _download(url: str, client: httpx.AsyncClient) -> bytes:
+    """:func:`_download_spooled`, read into memory (small artifacts and tests)."""
+    with await _download_spooled(url, client) as fh:
+        return fh.read()
+
+
+def _digest(raw: bytes | IO[bytes]) -> str:
+    """``sha256:<hex>`` of the artifact bytes; a file is hashed in chunks from offset 0
+    and rewound afterwards."""
+    if isinstance(raw, (bytes, bytearray, memoryview)):
+        return "sha256:" + hashlib.sha256(raw).hexdigest()
+    h = hashlib.sha256()
+    raw.seek(0)
+    for chunk in iter(lambda: raw.read(1024 * 1024), b""):
+        h.update(chunk)
+    raw.seek(0)
+    return "sha256:" + h.hexdigest()
+
+
+def _archive_size(raw: bytes | IO[bytes]) -> int:
+    if isinstance(raw, (bytes, bytearray, memoryview)):
+        return len(raw)
+    pos = raw.tell()
+    raw.seek(0, io.SEEK_END)
+    size = raw.tell()
+    raw.seek(pos)
+    return size
+
+
+def _as_fileobj(raw: bytes | IO[bytes]) -> IO[bytes]:
+    if isinstance(raw, (bytes, bytearray, memoryview)):
+        return io.BytesIO(raw)
+    raw.seek(0)
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -297,86 +410,304 @@ def _make_file(path: str, raw: bytes) -> ArtifactFile:
     )
 
 
+def _common_prefix(names) -> str:
+    """The single shared top-level directory (npm ``package/``, sdist
+    ``<name>-<ver>/``) with its trailing slash, or ``""`` when members do not all
+    share one (or any member sits at the archive root)."""
+    tops: set[str] = set()
+    for p in names:
+        if "/" not in p:
+            return ""
+        tops.add(p.split("/", 1)[0])
+        if len(tops) > 1:
+            return ""
+    return (next(iter(tops)) + "/") if tops else ""
+
+
 def _strip_common_prefix(raw_files: dict[str, bytes]) -> dict[str, bytes]:
     """Strip a single shared top-level directory (npm ``package/``, sdist
     ``<name>-<ver>/``) so artifact paths line up with repo-relative paths."""
     if not raw_files:
         return raw_files
-    tops = {p.split("/", 1)[0] for p in raw_files if "/" in p}
-    roots_at_top = [p for p in raw_files if "/" not in p]
-    # Only strip when EVERY member shares one top dir (no files at the archive root).
-    if len(tops) == 1 and not roots_at_top:
-        prefix = next(iter(tops)) + "/"
+    prefix = _common_prefix(raw_files)
+    if prefix:
         return {p[len(prefix):]: b for p, b in raw_files.items() if p != prefix.rstrip("/")}
     return raw_files
 
 
-def _unpack_tar_gz(raw: bytes) -> dict[str, bytes]:
-    out: dict[str, bytes] = {}
-    total = 0
+# --- Member priority for the bounded unpack ------------------------------------------
+# Lower tier = kept first. When the soft budget is full, a member only displaces members
+# of a strictly worse tier (largest first), so code and manifests always win over test
+# data, binaries and media, whatever order the archive lists them in.
+TIER_MANIFEST = 0   # install surface + metadata: package.json, setup.py, pyproject, README
+TIER_CODE = 1       # executable source the static engine reads
+TIER_TEXT = 2       # other text: data formats, tests, docs, examples
+TIER_BULK = 3       # binaries, native libraries, media, fonts, archives, test data blobs
+
+_MANIFEST_NAMES = frozenset({
+    "package.json", "setup.py", "setup.cfg", "pyproject.toml", "requirements.txt",
+    "pipfile", "cargo.toml", "build.rs", "binding.gyp", "manifest.in", "pkg-info",
+    "metadata", "entry_points.txt", "top_level.txt", "wheel", "record",
+    "npm-shrinkwrap.json", ".agentavow.yml", ".agentavow.yaml", "mcp.json",
+    "server.json", "smithery.yaml", "skill.md",
+})
+_MANIFEST_PREFIXES = ("readme", "license", "licence", "copying", "notice")
+# Never read by the static engine (it only reads text source). Native code, compiled
+# objects, media, fonts, archives and data blobs.
+_BULK_EXTS = frozenset({
+    ".so", ".dylib", ".pyd", ".dll", ".node", ".wasm", ".a", ".lib", ".o", ".obj",
+    ".exe", ".bin", ".dat", ".pyc", ".pyo", ".class", ".jar", ".whl", ".egg",
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tif", ".tiff", ".mpo",
+    ".psd", ".icns", ".heic", ".avif",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot", ".afm", ".pfb",
+    ".zip", ".gz", ".tgz", ".tar", ".bz2", ".xz", ".zst", ".7z", ".lz4",
+    ".mp3", ".mp4", ".wav", ".ogg", ".flac", ".avi", ".mov", ".webm",
+    ".pdf", ".npy", ".npz", ".pkl", ".pickle", ".h5", ".hdf5", ".parquet", ".feather",
+    ".arrow", ".db", ".sqlite", ".sqlite3", ".mat", ".nc", ".fits", ".fit", ".mo",
+    ".onnx", ".pt", ".pth", ".safetensors", ".tflite", ".pb", ".ckpt",
+})
+# Scanner-read formats that are data rather than code: kept after code, before bulk.
+_DATA_TEXT_EXTS = frozenset({
+    ".json", ".yaml", ".yml", ".toml", ".xml", ".html", ".htm", ".svg", ".ipynb",
+    ".cfg", ".ini", ".conf", ".env",
+})
+
+
+def _scan_helpers():
+    """The repo scanner's path predicates (lazy: ``scan`` imports this module)."""
+    from src.scanner.patterns import SKIP_EXTENSIONS
+    from src.scanner.scan import (
+        _MAX_FILE_SIZE,
+        _is_git_config_file,
+        _is_git_hook_file,
+        _is_source_file,
+        _is_test_or_doc_file,
+    )
+    return (SKIP_EXTENSIONS, _MAX_FILE_SIZE, _is_git_config_file, _is_git_hook_file,
+            _is_source_file, _is_test_or_doc_file)
+
+
+def _member_class(name: str) -> tuple[int, bool]:
+    """``(tier, scannable)`` for an archive member path. ``scannable`` = the static
+    engine would read this file (a manifest, or non-test/doc source) — the files whose
+    absence makes a scan partial. Conservative: it may count a file the engine would
+    still skip for another reason, never the reverse."""
+    (skip_exts, _max, is_git_config, is_git_hook, is_source,
+     is_test_or_doc) = _scan_helpers()
+    p = PurePosixPath(name.replace("\\", "/"))
+    base = p.name.lower()
+    ext = p.suffix.lower()
+    if (base in _MANIFEST_NAMES or base.endswith(".pth")
+            or base.startswith(_MANIFEST_PREFIXES)
+            or is_git_config(name) or is_git_hook(name)):
+        return TIER_MANIFEST, True
+    if ext in _BULK_EXTS:
+        return TIER_BULK, False
+    test_or_doc = is_test_or_doc(name)
+    source = is_source(name) and ext not in skip_exts and ".min." not in base
+    if source and not test_or_doc:
+        return (TIER_TEXT if ext in _DATA_TEXT_EXTS else TIER_CODE), True
+    if test_or_doc and not source:
+        return TIER_BULK, False  # test fixtures / doc assets: the first thing to drop
+    return TIER_TEXT, False
+
+
+class _BoundedMembers:
+    """Members kept under the soft budget, with priority eviction and the hard bomb
+    guards. Peak memory is about ``MAX_UNPACKED_BYTES`` plus one member."""
+
+    def __init__(self, archive_size: int, report: SkipReport) -> None:
+        self.archive_size = max(1, archive_size)
+        self.report = report
+        self.kept: dict[str, bytes] = {}
+        self.meta: dict[str, tuple[int, bool]] = {}      # name -> (tier, scannable)
+        self.kept_bytes = 0
+        self.tier_bytes = [0, 0, 0, 0]
+        self.tier_count = [0, 0, 0, 0]
+        self.heaps: list[list[tuple[int, str]]] = [[], [], [], []]  # (-size, name)
+        self.walked_bytes = 0
+        self.entries = 0
+
+    # -- hard guards (raise) -----------------------------------------------------
+    def walk(self, name: str, size: int, compressed: int | None = None) -> None:
+        """Account one archive entry before anything is read. Raises on a bomb."""
+        self.entries += 1
+        if self.entries > HARD_ENTRY_COUNT:
+            raise ArtifactFetchError(
+                f"archive has more than {HARD_ENTRY_COUNT:,} entries (zip bomb?)")
+        size = max(0, int(size))
+        self.walked_bytes += size
+        if self.walked_bytes > HARD_UNPACKED_BYTES:
+            raise ArtifactFetchError("archive decompresses past the hard ceiling (zip bomb?)")
+        if (compressed is not None and size >= _RATIO_MEMBER_FLOOR
+                and size > MAX_MEMBER_RATIO * max(1, compressed)):
+            raise ArtifactFetchError(
+                f"member compression ratio is implausible (zip bomb?): {name}")
+        if (self.walked_bytes >= _RATIO_ARCHIVE_FLOOR
+                and self.walked_bytes > MAX_ARCHIVE_RATIO * self.archive_size):
+            raise ArtifactFetchError("archive compression ratio is implausible (zip bomb?)")
+
+    # -- soft budget (skip / evict, never raise) -----------------------------------
+    def admit(self, name: str, size: int) -> bool:
+        """Decide BEFORE reading whether a member can be kept, evicting worse-tier
+        members to make room. A refused member is recorded as skipped."""
+        tier, scannable = _member_class(name)
+        if size > MAX_MEMBER_BYTES:
+            # The engine skips text past its own (much smaller) file cap, so an oversize
+            # file is not a coverage loss for scanning; it is still disclosed.
+            self.report.add(name, size, "too large", scannable and size <= _scan_helpers()[1])
+            return False
+        over_bytes = self.kept_bytes + size - MAX_UNPACKED_BYTES
+        over_count = len(self.kept) + 1 - MAX_FILE_COUNT
+        if over_bytes > 0 or over_count > 0:
+            worse_bytes = sum(self.tier_bytes[t] for t in range(tier + 1, 4))
+            worse_count = sum(self.tier_count[t] for t in range(tier + 1, 4))
+            if worse_bytes < over_bytes or worse_count < over_count:
+                self.report.add(name, size, "over budget", scannable)
+                return False
+            for t in range(3, tier, -1):          # worst tier first, largest first
+                heap = self.heaps[t]
+                while heap and (over_bytes > 0 or over_count > 0):
+                    _neg, victim = heapq.heappop(heap)
+                    freed = self._evict(victim, t)
+                    if freed is not None:
+                        over_bytes -= freed
+                        over_count -= 1
+        self.meta[name] = (tier, scannable)
+        return True
+
+    def keep(self, name: str, data: bytes) -> None:
+        tier, _scannable = self.meta[name]
+        if name in self.kept:  # duplicate member name: last one wins, like extraction
+            old = len(self.kept[name])
+            self.kept_bytes -= old
+            self.tier_bytes[tier] -= old
+            self.tier_count[tier] -= 1
+        self.kept[name] = data
+        self.kept_bytes += len(data)
+        self.tier_bytes[tier] += len(data)
+        self.tier_count[tier] += 1
+        heapq.heappush(self.heaps[tier], (-len(data), name))
+
+    def drop(self, name: str, size: int) -> None:
+        """An admitted member that could not be read after all (recorded)."""
+        _tier, scannable = self.meta.pop(name, (TIER_TEXT, False))
+        if name not in self.kept:
+            self.report.add(name, size, "unreadable", scannable)
+
+    def _evict(self, name: str, tier: int) -> int | None:
+        """Evict a kept member; returns the bytes freed (None if it was already gone,
+        e.g. a stale heap entry left by a duplicate member name)."""
+        data = self.kept.pop(name, None)
+        if data is None:
+            return None
+        _t, scannable = self.meta.pop(name, (tier, False))
+        self.kept_bytes -= len(data)
+        self.tier_bytes[tier] -= len(data)
+        self.tier_count[tier] -= 1
+        self.report.add(name, len(data), "over budget", scannable)
+        return len(data)
+
+
+def _unpack_tar_gz(raw: bytes | IO[bytes], report: SkipReport | None = None,
+                   ) -> dict[str, bytes]:
+    """Unpack a gzipped tar, bounded. Members past the soft budget are skipped (into
+    ``report``); only a bomb, a path-traversal or a malformed archive raises."""
+    report = report if report is not None else SkipReport()
     try:
-        tf = tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz")
+        tf = tarfile.open(fileobj=_as_fileobj(raw), mode="r:gz")
     except (tarfile.TarError, OSError) as exc:
         raise ArtifactFetchError(f"not a valid gzip tar: {exc}") from exc
+    box = _BoundedMembers(_archive_size(raw), report)
     with tf:
-        for member in tf:
-            if len(out) >= MAX_FILE_COUNT:
-                raise ArtifactFetchError("artifact exceeds file-count cap (zip bomb?)")
+        while True:
+            try:
+                member = tf.next()
+            except (tarfile.TarError, OSError, EOFError) as exc:
+                raise ArtifactFetchError(f"corrupt tar archive: {exc}") from exc
+            if member is None:
+                break
+            box.walk(member.name, member.size if member.isfile() else 0)
             if not member.isfile():
                 # Skip dirs, and REFUSE symlinks/hardlinks/devices outright.
                 continue
             if _is_unsafe_member_name(member.name):
                 raise ArtifactFetchError(f"unsafe member path: {member.name!r}")
-            if member.size > MAX_MEMBER_BYTES:
-                raise ArtifactFetchError(f"member exceeds per-file cap: {member.name}")
-            total += member.size
-            if total > MAX_UNPACKED_BYTES:
-                raise ArtifactFetchError("artifact exceeds unpacked-size cap (zip bomb?)")
+            if not box.admit(member.name, member.size):
+                continue
             try:
                 fobj = tf.extractfile(member)
                 data = fobj.read(MAX_MEMBER_BYTES + 1) if fobj else b""
             except (tarfile.TarError, OSError):
+                box.drop(member.name, member.size)
                 continue
-            if len(data) > MAX_MEMBER_BYTES:
-                raise ArtifactFetchError(f"member exceeds per-file cap: {member.name}")
-            out[member.name] = data
-    return out
+            if len(data) > member.size:
+                raise ArtifactFetchError(f"member larger than its header: {member.name}")
+            box.keep(member.name, data)
+    return box.kept
 
 
-def _unpack_zip(raw: bytes) -> dict[str, bytes]:
-    out: dict[str, bytes] = {}
-    total = 0
+def _unpack_zip(raw: bytes | IO[bytes], report: SkipReport | None = None,
+                ) -> dict[str, bytes]:
+    """Unpack a zip / wheel, bounded. The central directory gives every member's sizes
+    up front, so the bomb checks run before any byte is inflated and members are read in
+    priority order (manifests and code first)."""
+    report = report if report is not None else SkipReport()
     try:
-        zf = zipfile.ZipFile(io.BytesIO(raw))
+        zf = zipfile.ZipFile(_as_fileobj(raw))
     except (zipfile.BadZipFile, OSError) as exc:
         raise ArtifactFetchError(f"not a valid zip/wheel: {exc}") from exc
+    box = _BoundedMembers(_archive_size(raw), report)
     with zf:
+        infos = []
         for info in zf.infolist():
-            if len(out) >= MAX_FILE_COUNT:
-                raise ArtifactFetchError("artifact exceeds file-count cap (zip bomb?)")
             name = info.filename
-            if name.endswith("/"):
+            is_dir = name.endswith("/")
+            box.walk(name, 0 if is_dir else info.file_size,
+                     None if is_dir else info.compress_size)
+            if is_dir:
                 continue  # directory entry
             if _is_unsafe_member_name(name):
                 raise ArtifactFetchError(f"unsafe member path: {name!r}")
-            if info.file_size > MAX_MEMBER_BYTES:
-                raise ArtifactFetchError(f"member exceeds per-file cap: {name}")
-            total += info.file_size
-            if total > MAX_UNPACKED_BYTES:
-                raise ArtifactFetchError("artifact exceeds unpacked-size cap (zip bomb?)")
-            try:
-                data = zf.read(name)
-            except (zipfile.BadZipFile, OSError):
+            infos.append(info)
+        # Read in priority order so the budget goes to what the engine reads; ties keep
+        # archive order (stable sort), so the result is deterministic.
+        infos.sort(key=lambda i: _member_class(i.filename)[0])
+        for info in infos:
+            name = info.filename
+            if not box.admit(name, info.file_size):
                 continue
-            if len(data) > MAX_MEMBER_BYTES:
-                raise ArtifactFetchError(f"member exceeds per-file cap: {name}")
-            out[name] = data
+            try:
+                with zf.open(info) as fh:
+                    data = fh.read(MAX_MEMBER_BYTES + 1)
+            except (zipfile.BadZipFile, OSError, RuntimeError, NotImplementedError):
+                box.drop(name, info.file_size)
+                continue
+            if len(data) > info.file_size:
+                raise ArtifactFetchError(f"member larger than its header: {name}")
+            box.keep(name, data)
+    return box.kept
+
+
+def _build_file_map(raw_files: dict[str, bytes],
+                    report: SkipReport | None = None) -> dict[str, ArtifactFile]:
+    """Turn unpacked members into :class:`ArtifactFile` s (prefix stripped). Consumes
+    ``raw_files`` as it goes, so the raw bytes and the decoded text are never both held
+    for the whole tree. ``report`` (skipped members) gets the same prefix stripped."""
+    names = list(raw_files)
+    if report is not None and report.examples:
+        names += [ex["path"] for ex in report.examples]
+    prefix = _common_prefix(names) if raw_files else ""
+    if report is not None:
+        report.strip_prefix(prefix)
+    out: dict[str, ArtifactFile] = {}
+    for path in list(raw_files):
+        data = raw_files.pop(path)
+        if prefix and path == prefix.rstrip("/"):
+            continue
+        rel = path[len(prefix):] if prefix else path
+        out[rel] = _make_file(rel, data)
     return out
-
-
-def _build_file_map(raw_files: dict[str, bytes]) -> dict[str, ArtifactFile]:
-    stripped = _strip_common_prefix(raw_files)
-    return {path: _make_file(path, data) for path, data in stripped.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -422,24 +753,27 @@ async def fetch_npm_artifact(
         if not tarball:
             raise ArtifactFetchError(f"no dist.tarball for {name}@{version}")
 
-        raw = await _download(tarball, client)
-        return npm_result_from_tarball(
-            name, version, raw, tarball_url=tarball, vdata=vdata,
-            published_at=str((packument.get("time") or {}).get(version) or "")[:10] or None,
-        )
+        published_at = str((packument.get("time") or {}).get(version) or "")[:10] or None
+        with await _download_spooled(tarball, client) as raw:
+            # Unpack + hash is CPU-bound: off the event loop.
+            return await asyncio.to_thread(
+                npm_result_from_tarball, name, version, raw, tarball_url=tarball,
+                vdata=vdata, published_at=published_at,
+            )
     finally:
         if owns:
             await client.aclose()
 
 
 def npm_result_from_tarball(
-    name: str, version: str, raw: bytes, *, tarball_url: str | None = None,
+    name: str, version: str, raw: bytes | IO[bytes], *, tarball_url: str | None = None,
     vdata: dict | None = None, published_at: str | None = None,
 ) -> ArtifactFetchResult:
     """Unpack a downloaded npm tarball into the result ``fetch_npm_artifact`` returns.
-    Pure (no I/O): the static corpus runner builds the identical result from cached
+    Pure (no network): the static corpus runner builds the identical result from cached
     bytes, so the gate scans exactly what production scans."""
-    files = _build_file_map(_unpack_tar_gz(raw))
+    report = SkipReport()
+    files = _build_file_map(_unpack_tar_gz(raw, report), report)
 
     # The PACKAGED package.json (what actually ships) — install hooks live here.
     packaged_manifest = None
@@ -460,8 +794,7 @@ def npm_result_from_tarball(
         digest=_digest(raw),
         download_url=tarball_url,
         files=files,
-        unpacked_size=sum(f.size for f in files.values()),
-        file_count=len(files),
+        **_size_fields(files, report),
         packaged_manifest=packaged_manifest,
         description=(packaged_manifest or {}).get("description"),
         deprecation=_npm_deprecation(vdata or {}),
@@ -469,45 +802,85 @@ def npm_result_from_tarball(
     )
 
 
+def _size_fields(files: dict[str, ArtifactFile], report: SkipReport) -> dict:
+    """``unpacked_size`` / ``file_count`` describe the WHOLE artifact (kept + skipped
+    members), and ``skipped`` is set only when something was left out."""
+    return {
+        "unpacked_size": sum(f.size for f in files.values()) + report.bytes,
+        "file_count": len(files) + report.count,
+        "skipped": report if report.count else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # PyPI resolve + fetch
 # ---------------------------------------------------------------------------
 
 def _pick_pypi_url(urls: list[dict]) -> tuple[str, str] | None:
-    """Prefer the sdist (has setup.py / build backend); fall back to a wheel.
+    """The file a PyPI scan reads: a WHEEL when one fits the download cap (what ``pip
+    install`` actually puts on disk, and far smaller unpacked than the sdist of a big
+    package like numpy or botocore), else the sdist.
 
-    Returns ``(url, kind)`` where kind is ``"sdist"`` or ``"wheel"``.
+    Wheel order: the pure-Python ``*-none-any`` wheel (platform independent), else the
+    smallest platform wheel (the Python sources are the same in every platform build;
+    the native parts differ and are never read). Ties break on the URL, so the pick is
+    deterministic. Returns ``(url, kind)`` where kind is ``"wheel"`` or ``"sdist"``.
     """
     sdist, wheel = _pypi_sdist_and_wheel(urls)
-    if sdist:
-        return sdist, "sdist"
     if wheel:
         return wheel, "wheel"
-    return None
+    if sdist:
+        return sdist, "sdist"
+    # Every file is over the cap: try the smallest wheel anyway (the download cap then
+    # reports the real reason), else nothing.
+    over = _wheel_candidates(urls, fits_only=False)
+    return (over[0][2], "wheel") if over else None
+
+
+def _pypi_size(u: dict) -> int:
+    try:
+        return int(u.get("size") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _wheel_candidates(urls: list[dict], *, fits_only: bool = True,
+                      ) -> list[tuple[int, int, str]]:
+    """``(not_pure, size, url)`` for every wheel, best first. ``fits_only`` drops wheels
+    whose listed size is over :data:`MAX_DOWNLOAD_BYTES` (an unknown size counts as
+    fitting; the download cap still applies)."""
+    out = []
+    for u in urls or []:
+        if not isinstance(u, dict) or u.get("packagetype") != "bdist_wheel":
+            continue
+        url = u.get("url")
+        if not url or u.get("yanked"):
+            continue
+        size = _pypi_size(u)
+        if fits_only and size > MAX_DOWNLOAD_BYTES:
+            continue
+        filename = str(u.get("filename") or url.rsplit("/", 1)[-1])
+        pure = filename.endswith("-none-any.whl")
+        out.append((0 if pure else 1, size, url))
+    out.sort()
+    return out
 
 
 def _pypi_sdist_and_wheel(urls: list[dict]) -> tuple[str | None, str | None]:
     """``(sdist_url, wheel_url)`` from a PyPI release's ``urls`` list. The wheel is the
-    pure-Python one when present (its file list is platform-independent), else the
-    first wheel listed."""
+    best one under the download cap (see :func:`_pick_pypi_url`); the sdist is the first
+    one listed that fits (or the first one at all)."""
     sdist = None
-    wheel = None
-    pure_wheel = None
+    sdist_any = None
     for u in urls or []:
-        if not isinstance(u, dict):
+        if not isinstance(u, dict) or u.get("packagetype") != "sdist" or not u.get("url"):
             continue
-        pt = u.get("packagetype")
-        url = u.get("url")
-        if not url:
-            continue
-        if pt == "sdist" and sdist is None:
-            sdist = url
-        elif pt == "bdist_wheel":
-            if wheel is None:
-                wheel = url
-            if pure_wheel is None and "-none-any.whl" in url:
-                pure_wheel = url
-    return sdist, (pure_wheel or wheel)
+        if sdist_any is None:
+            sdist_any = u["url"]
+        if sdist is None and _pypi_size(u) <= MAX_DOWNLOAD_BYTES:
+            sdist = u["url"]
+    wheels = _wheel_candidates(urls)
+    return (sdist or sdist_any), (wheels[0][2] if wheels else None)
 
 
 _WHEEL_META_DIR_RE = re.compile(r"^[^/]+\.(?:dist-info|data)/")
@@ -564,52 +937,62 @@ async def fetch_pypi_artifact(
             raise ArtifactFetchError(f"no downloadable sdist/wheel for {name}=={version}")
         url, kind = picked
 
-        raw = await _download(url, client)
-
-        # Installed surface (precision pass #1): when we scanned the sdist but the
-        # consumer installs the wheel, read the wheel's member list (central directory
-        # only — nothing is unpacked or executed) so findings in files pip never puts
-        # on disk (scripts/, bench/, Makefile, _cffi_src/) are informational. Fail-open:
-        # any error leaves installed_paths None → everything counts as installed.
-        installed_paths: set[str] | None = None
-        if kind == "sdist":
-            _sd, wheel_url = _pypi_sdist_and_wheel(meta.get("urls") or [])
-            if wheel_url:
-                try:
-                    installed_paths = wheel_installed_paths_from_bytes(
-                        await _download(wheel_url, client))
-                except (ArtifactFetchError, zipfile.BadZipFile, OSError, httpx.HTTPError) as exc:
-                    logger.info("wheel namelist unavailable for %s==%s: %s", name, version, exc)
-                    installed_paths = None
-
-        return pypi_result_from_archive(
-            name, version, kind, url, raw, installed_paths=installed_paths, meta=meta,
-        )
+        with await _download_spooled(url, client) as raw:
+            installed_paths = await _sdist_installed_paths(name, version, kind, meta, client)
+            # Unpack + hash is CPU-bound: off the event loop.
+            return await asyncio.to_thread(
+                pypi_result_from_archive, name, version, kind, url, raw,
+                installed_paths=installed_paths, meta=meta,
+            )
     finally:
         if owns:
             await client.aclose()
 
 
-def wheel_installed_paths_from_bytes(wheel_raw: bytes) -> set[str]:
+async def _sdist_installed_paths(
+    name: str, version: str, kind: str, meta: dict, client: httpx.AsyncClient,
+) -> set[str] | None:
+
+    """Installed surface (precision pass #1): when we scan the sdist but the consumer
+    installs a wheel, read the wheel's member list (central directory only — nothing is
+    unpacked or executed) so findings in files pip never puts on disk (scripts/, bench/,
+    Makefile, _cffi_src/) are informational. Since wheels are scanned first this only
+    runs when no wheel fits the cap, so it usually finds none. Fail-open: any error
+    leaves None → everything counts as installed."""
+    if kind != "sdist":
+        return None
+    _sd, wheel_url = _pypi_sdist_and_wheel(meta.get("urls") or [])
+    if not wheel_url:
+        return None
+    try:
+        with await _download_spooled(wheel_url, client) as wraw:
+            return wheel_installed_paths_from_bytes(wraw)
+    except (ArtifactFetchError, zipfile.BadZipFile, OSError, httpx.HTTPError) as exc:
+        logger.info("wheel namelist unavailable for %s==%s: %s", name, version, exc)
+        return None
+
+
+def wheel_installed_paths_from_bytes(wheel_raw: bytes | IO[bytes]) -> set[str]:
     """The installed-path set from a wheel's central directory (nothing is unpacked).
     Raises ``zipfile.BadZipFile`` / ``OSError`` on a bad archive."""
-    with zipfile.ZipFile(io.BytesIO(wheel_raw)) as zf:
+    with zipfile.ZipFile(_as_fileobj(wheel_raw)) as zf:
         return _wheel_installed_paths(zf.namelist())
 
 
 def pypi_result_from_archive(
-    name: str, version: str, kind: str, url: str, raw: bytes, *,
+    name: str, version: str, kind: str, url: str, raw: bytes | IO[bytes], *,
     installed_paths: set[str] | None, meta: dict | None = None,
 ) -> ArtifactFetchResult:
     """Unpack a downloaded sdist/wheel into the result ``fetch_pypi_artifact`` returns.
-    Pure (no I/O): the static corpus runner builds the identical result from cached
+    Pure (no network): the static corpus runner builds the identical result from cached
     bytes."""
     meta = meta or {}
+    report = SkipReport()
     if kind == "wheel" or url.endswith(".zip") or url.endswith(".whl"):
-        raw_files = _unpack_zip(raw)
+        raw_files = _unpack_zip(raw, report)
     else:
-        raw_files = _unpack_tar_gz(raw)  # sdist .tar.gz
-    files = _build_file_map(raw_files)
+        raw_files = _unpack_tar_gz(raw, report)  # sdist .tar.gz
+    files = _build_file_map(raw_files, report)
     return ArtifactFetchResult(
         ecosystem="pypi",
         name=name,
@@ -619,8 +1002,7 @@ def pypi_result_from_archive(
         digest=_digest(raw),
         download_url=url,
         files=files,
-        unpacked_size=sum(f.size for f in files.values()),
-        file_count=len(files),
+        **_size_fields(files, report),
         description=(meta.get("info") or {}).get("summary"),
         # The source repo the project declares (project_urls / home_page): what a
         # PEP 740 Trusted Publisher identity is compared against for Certified.
@@ -667,6 +1049,10 @@ def _pypi_deprecation(meta: dict) -> str | None:
     return None
 
 
+def _unpack_crate(raw: IO[bytes], report: SkipReport) -> tuple[str, dict[str, ArtifactFile]]:
+    return _digest(raw), _build_file_map(_unpack_tar_gz(raw, report), report)
+
+
 async def fetch_crates_artifact(
     name: str, version: str | None = None, *, client: httpx.AsyncClient | None = None,
 ) -> ArtifactFetchResult:
@@ -692,8 +1078,10 @@ async def fetch_crates_artifact(
             if not version:
                 raise ArtifactFetchError(f"no version for crates:{name}")
         url = CRATES_DL.format(name=name, version=version)
-        raw = await _download(url, client)
-        files = _build_file_map(_unpack_tar_gz(raw))  # a .crate is a gzipped tar
+        report = SkipReport()
+        with await _download_spooled(url, client) as raw:
+            # a .crate is a gzipped tar; unpack + hash off the event loop
+            digest, files = await asyncio.to_thread(_unpack_crate, raw, report)
         vrow = next((v for v in (meta.get("versions") or [])
                      if isinstance(v, dict) and v.get("num") == version), {})
         return ArtifactFetchResult(
@@ -708,11 +1096,10 @@ async def fetch_crates_artifact(
             version=version,
             kind="crate",
             ok=True,
-            digest=_digest(raw),
+            digest=digest,
             download_url=url,
             files=files,
-            unpacked_size=sum(f.size for f in files.values()),
-            file_count=len(files),
+            **_size_fields(files, report),
             description=crate.get("description"),
         )
     finally:
