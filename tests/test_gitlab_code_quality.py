@@ -166,7 +166,10 @@ def test_verdict_for_tracks_shared_helpers():
 def _fixture_repo(tmp_path):
     _git_init(tmp_path)
     (tmp_path / "app.py").write_text(
-        "import os\ndef run(cmd):\n    os.system(cmd)\n\ndef run2(cmd):\n    os.system(cmd)\n"
+        # A shell command with payload tokens (nc): a high finding, so the verdict is
+        # Review (a plain os.system(cmd) is a medium since precision pass 2).
+        "import os\ndef run(cmd):\n    os.system('nc -z ' + cmd)\n\n"
+        "def run2(cmd):\n    os.system('nc -z ' + cmd)\n"
     )
     _commit_all(tmp_path)
     return tmp_path
