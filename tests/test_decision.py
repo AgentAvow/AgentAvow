@@ -293,6 +293,13 @@ CASES = [
                                                 file_path="package.json")], crit=1),
      "do_not_connect", True,
      "one critical finding in its install script: lifecycle script pipes to shell"),
+    ("where_data_file", _scan(55, 200, [_f("high", "Instruction-override phrase",
+                                           file_path="pkg/filters/prompt_injection.yaml")],
+                              high=1),
+     "review", True, "one high finding in a data file it ships: instruction-override phrase"),
+    ("where_ci_yaml_is_code", _scan(70, 200, [_f("high", "X",
+                                                 file_path=".github/workflows/ci.yml")], high=1),
+     "review", True, "one high finding in its code: X"),
     ("where_leading_item_decides", _scan(40, 200, [
         _f("critical", "curl/wget piped to shell", file_path="pkg/cli/_cli_utils.py"),
         _f("critical", "curl/wget piped to shell", file_path="SKILL.md")], crit=2),

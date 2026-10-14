@@ -254,6 +254,13 @@ const AGENT_DIRS = new Set([
   '.codex', '.gemini', 'agents', 'prompts', 'instructions', 'commands',
 ])
 const TEXT_EXTS = ['.md', '.mdc', '.txt', '.yaml', '.yml', '.json', '.toml']
+const DATA_EXTS = ['.yaml', '.yml', '.json', '.jsonl', '.toml', '.xml', '.txt', '.csv', '.tsv']
+const EXECUTED_DATA_NAMES = new Set([
+  'package.json', 'pyproject.toml', 'setup.cfg', 'docker-compose.yml',
+  'docker-compose.yaml', 'compose.yml', 'compose.yaml', 'action.yml', 'action.yaml',
+  '.gitlab-ci.yml', '.travis.yml', 'azure-pipelines.yml', '.pre-commit-config.yaml',
+])
+const CI_DIRS = new Set(['.github', '.gitlab', '.circleci', '.buildkite', 'workflows'])
 
 export function findingWhere(i: Obj): string {
   if (i.category === 'install_hook') return ' in its install script'
@@ -268,6 +275,10 @@ export function findingWhere(i: Obj): string {
     TEXT_EXTS.some((e) => name.endsWith(e))
     && (name.startsWith('readme') || parts.slice(0, -1).some((p) => AGENT_DIRS.has(p))))) {
     return ' in instructions it gives agents'
+  }
+  if (DATA_EXTS.some((e) => name.endsWith(e)) && !EXECUTED_DATA_NAMES.has(name)
+    && !parts.slice(0, -1).some((p) => CI_DIRS.has(p))) {
+    return ' in a data file it ships'
   }
   return ' in its code'
 }

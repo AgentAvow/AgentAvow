@@ -279,12 +279,21 @@ _AGENT_DIRS = frozenset({
     ".codex", ".gemini", "agents", "prompts", "instructions", "commands",
 })
 _TEXT_EXTS = (".md", ".mdc", ".txt", ".yaml", ".yml", ".json", ".toml")
+WHERE_DATA = " in a data file it ships"
+_DATA_EXTS = (".yaml", ".yml", ".json", ".jsonl", ".toml", ".xml", ".txt", ".csv", ".tsv")
+# Data-format files a tool executes (lifecycle scripts, CI, compose): read as code.
+_EXECUTED_DATA_NAMES = frozenset({
+    "package.json", "pyproject.toml", "setup.cfg", "docker-compose.yml",
+    "docker-compose.yaml", "compose.yml", "compose.yaml", "action.yml", "action.yaml",
+    ".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml", ".pre-commit-config.yaml",
+})
+_CI_DIRS = frozenset({".github", ".gitlab", ".circleci", ".buildkite", "workflows"})
 
 
 def finding_where(i: dict) -> str:
     """`` in its code`` / `` in its install script`` / `` in instructions it gives
-    agents`` / `` in its tool definitions`` / `` in a dependency`` for a listed
-    finding."""
+    agents`` / `` in its tool definitions`` / `` in a data file it ships`` /
+    `` in a dependency`` for a listed finding."""
     cat = i.get("category")
     if cat == "install_hook":
         return WHERE_INSTALL
@@ -299,6 +308,9 @@ def finding_where(i: dict) -> str:
             name.endswith(_TEXT_EXTS) and (name.startswith("readme")
                                            or any(p in _AGENT_DIRS for p in parts[:-1]))):
         return WHERE_AGENTS
+    if (name.endswith(_DATA_EXTS) and name not in _EXECUTED_DATA_NAMES
+            and not any(p in _CI_DIRS for p in parts[:-1])):
+        return WHERE_DATA
     return WHERE_CODE
 
 

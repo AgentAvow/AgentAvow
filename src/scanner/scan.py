@@ -2409,6 +2409,36 @@ _EXAMPLE_INTRO_RE = re.compile(r"\b(?:example|e\.g\.|for instance)\b[^\"'`]{0,12
                                re.IGNORECASE)
 
 
+_SYSTEM_PROMPT_LABEL_RE = re.compile(r"system\s+prompt\s*:", re.IGNORECASE)
+# After the label: only escapes / whitespace, then a placeholder, then the string or the
+# template line ends (the label's whole value is the placeholder).
+_PLACEHOLDER_TAIL_RE = re.compile(
+    r"""^(?:\s|\\[nt])*(?:%[-#0 +]*\d*(?:\.\d+)?[sdrfi]|\{[^{}\n]{0,40}\}|\$\{[^{}\n]{0,40}\})"""
+    r"""[ \t]*(?:\\n|["'`])""")
+
+
+def _system_prompt_label_only(line: str, pattern: re.Pattern) -> bool:
+    """Every hit of the role-directive rule on this line is a "system prompt:" label
+    followed only by a format placeholder before the string closes."""
+    hits = list(pattern.finditer(line))
+    if not hits:
+        return False
+    for m in hits:
+        lm = _SYSTEM_PROMPT_LABEL_RE.search(m.group(0))
+        if lm is None:
+            return False
+        if not _PLACEHOLDER_TAIL_RE.match(line[m.end():]):
+            return False
+    return True
+
+
+# A value with a live provider prefix is a real credential even inside an "Example".
+_LIVE_KEY_PREFIX_RE = re.compile(
+    r"(?:sk[-_]|sk-ant-|sk_live_|rk_live_|pk_live_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|"
+    r"AKIA|ASIA|xox[abposr]-|AIza|glpat-|hf_|npm_|pypi-|SG\.|key-|shpat_|sq0)",
+)
+
+
 def _is_documented_example(line: str, pos: int) -> bool:
     """The assignment at ``pos`` is prose inside a string literal, introduced right
     before by "Example" / "e.g." (``"…Example api_key='…'"``)."""
@@ -2420,6 +2450,8 @@ def _is_documented_example(line: str, pos: int) -> bool:
 
 
 _PY_POST_CALL_RE = re.compile(r"(?:requests|httpx|axios)\.post\s*\(", re.IGNORECASE)
+_PY_FETCH_SECRET_RE = re.compile(
+    r"""https?://|os\.environ|getenv|password|passwd|token|secret""", re.IGNORECASE)
 
 
 def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
@@ -2427,8 +2459,11 @@ def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
     global ``fetch``: there it is a local function or parameter (litellm's
     ``await fetch(include_key)`` reads a config object from a bucket), so a Python line
     whose only hit is ``fetch(`` is not an HTTP POST. ``requests.post`` /
-    ``httpx.post`` still fire."""
-    return file_lang == "python" and not _PY_POST_CALL_RE.search(line)
+    ``httpx.post`` still fire, and so does a line that carries a URL literal or reads a
+    secret (a local ``fetch = lambda u, d: urlopen(u, d)`` called with
+    ``password=os.environ[...]``)."""
+    return (file_lang == "python" and not _PY_POST_CALL_RE.search(line)
+            and not _PY_FETCH_SECRET_RE.search(line))
 
 
 def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
@@ -2584,7 +2619,8 @@ def _scan_content(
                 # Example api_key='d5345c…'" in a FastAPI Query description) is
                 # documentation: reported, medium, never blocking.
                 if (name == "Generic API Key assignment" and sev == "high"
-                        and _is_documented_example(line, match.start())):
+                        and _is_documented_example(line, match.start())
+                        and not _LIVE_KEY_PREFIX_RE.match(val)):
                     sev = "medium"
                 # Precision pass #3: a PEM HEADER with no key body is key-HANDLING code
                 # (marker tuples, startswith(), regexes) — reported as a capability.
@@ -2982,6 +3018,13 @@ def _scan_content(
                         declares_tools = bool(SSRF_TOOL_SURFACE_RE.search(content))
                     if not declares_tools:
                         effective_severity = "medium"
+                # A "System prompt:" LABEL whose only content is a format placeholder
+                # (`"failed to prepend system prompt: %s"`, `f"System prompt:\n{sp}"`)
+                # carries no instruction itself: medium, never blocking.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and _system_prompt_label_only(line, pattern)):
+                    effective_severity = "medium"
                 findings.append(Finding(
                     category="prompt_injection",
                     name=name,
