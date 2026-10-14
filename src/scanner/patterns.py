@@ -133,7 +133,10 @@ SHELL_PAYLOAD_DANGER_RE = re.compile(
     # recursive delete of a root / home path
     r"""\brm\s+-\w*[rR]\w*\s+(?:--no-preserve-root\s+)?(?:/|~|\$HOME|\$\{HOME\})(?=[\s*;&|'"]|$)|"""
     # credential files
-    r"""\.ssh/|id_rsa|\.aws/credentials|/etc/(?:passwd|shadow)|\.netrc|\.npmrc|\.pypirc""",
+    r"""\.ssh/|id_rsa|\.aws/credentials|/etc/(?:passwd|shadow)|\.netrc|\.npmrc|\.pypirc|"""
+    # a staged dropper: a shell running a script from a temp dir, or a .sh script there
+    r"""\b(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*['"]?/(?:tmp|var/tmp|dev/shm)/|"""
+    r"""(?:^|[\s'"=])/(?:tmp|var/tmp|dev/shm)/[^\s'"]*\.sh\b""",
     re.IGNORECASE,
 )
 # An eval/exec argument that is DECODED first (base64 / hex / zlib / reversed) is the

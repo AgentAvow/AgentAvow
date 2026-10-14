@@ -106,10 +106,20 @@ def _cap(severity: str, label: str, tag: str, consumed: int = 1) -> ExecVerdict:
 # answer "Review before you connect" on its own.
 
 # A dynamic part that is itself a decode / fetch expression is a payload, not a value.
+# Character-code assembly (`"".join(chr(c) for c in [...])`, `bytes([...]).decode()`,
+# `String.fromCharCode(...)`) is a decode: it hides the command text from a reader.
+ASSEMBLY_DECODE_RE = re.compile(
+    r"(?<![\w.])(?:chr|unichr)\s*\(|\bbytes\s*\(\s*[\[(]|\bbytearray\s*\("
+    r"|\bfromCharCode\s*\(|\bfromCodePoint\s*\(",
+)
 _PAYLOAD_EXPR_RE = re.compile(
     DECODE_SINK_RE.pattern + r"|\bfetch\s*\(|urlopen|urlretrieve|requests\.|httpx\.|axios"
-    r"|https?\.get\s*\(",
+    r"|https?\.get\s*\(|" + ASSEMBLY_DECODE_RE.pattern,
 )
+# `rm -rf ` / `rm -r -f ` immediately followed by a runtime value: the deleted path is
+# not visible, so it can be `$HOME` (adversarial review of #160).
+_RM_RECURSIVE_TAIL_RE = re.compile(
+    r"""\brm\s+(?:-[\w-]+\s+)*-\w*[rR]\w*(?:\s+-[\w-]+)*\s*['"]?$""")
 
 
 def _literal_shell_verdict(how: str, text: str, consumed: int) -> ExecVerdict:
@@ -136,6 +146,8 @@ def _dynamic_shell_verdict(
     if SHELL_PAYLOAD_DANGER_RE.search(" ".join(consts)):
         return _defect("high", f"{how} runs a shell command with download/decode/inline-code "
                        "tokens", consumed)
+    if dyn and any(_RM_RECURSIVE_TAIL_RE.search(c) for c in consts):
+        return _defect("high", f"{how} recursively deletes a path chosen at runtime", consumed)
     if untrusted_near:
         return _defect("high", f"{how} runs a shell command built at runtime next to untrusted "
                        "input", consumed)
@@ -550,6 +562,28 @@ def _py_command_parts(node: ast.AST, resolve_name=None, _depth: int = 0,
             return lc, ld + [_unparse(node.right)]
         rc, rd = _py_command_parts(node.right, resolve_name, _depth + 1)
         return lc + rc, ld + rd
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "join" and _const_str(node.func.value) is not None
+            and node.args and isinstance(node.args[0], (ast.List, ast.Tuple))):
+        # `" ".join(["curl", "-s", host, "|", "sh"])`: the assembled text is visible;
+        # read it as the string it builds so the payload check sees `curl … | sh`
+        # (adversarial review of #160: assembly must never be quieter than the string).
+        sep = _const_str(node.func.value) or ""
+        consts, dyn, run = [], [], []
+        for el in node.args[0].elts:
+            s = _const_str(el)
+            if s is not None:
+                run.append(s)
+                continue
+            if run:
+                consts.append(sep.join(run))
+                run = []
+            c, d = _py_command_parts(el, resolve_name, _depth + 1)
+            consts += c
+            dyn += d
+        if run:
+            consts.append(sep.join(run))
+        return consts, dyn
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
             and node.func.attr == "format":
         rc, rd = _py_command_parts(node.func.value, resolve_name, _depth + 1)
@@ -562,11 +596,19 @@ def _py_command_parts(node: ast.AST, resolve_name=None, _depth: int = 0,
             consts += c
             dyn += d
         return consts, dyn
-    if isinstance(node, ast.Name) and resolve_name is not None and _depth == 0:
+    if isinstance(node, ast.Name) and resolve_name is not None and _depth < 4:
         resolved = resolve_name(node.id)
         if resolved is not None:
             return _py_command_parts(resolved, resolve_name, _depth + 1)
     return [], [_unparse(node)]
+
+
+def _is_const_join(node: ast.AST) -> bool:
+    """`"<sep>".join([<only string constants>])`."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "join" and _const_str(node.func.value) is not None
+            and len(node.args) == 1 and isinstance(node.args[0], (ast.List, ast.Tuple))
+            and all(_const_str(e) is not None for e in node.args[0].elts))
 
 
 def _visible_shell_parts_py(nodes: list[ast.AST], resolve_name=None,
@@ -587,9 +629,9 @@ def _visible_shell_parts_py(nodes: list[ast.AST], resolve_name=None,
             if vals and len(vals) == 1:
                 consts.append(vals[0])
                 continue
-        if _is_dynamic_string(el) and not (
+        if _is_const_join(el) or (_is_dynamic_string(el) and not (
                 isinstance(el, ast.Call) and isinstance(el.func, ast.Attribute)
-                and el.func.attr in ("join", "replace")):
+                and el.func.attr in ("join", "replace"))):
             c, d = _py_command_parts(el, resolve_name)
             consts += c
             dyn += d
@@ -742,6 +784,16 @@ def classify_python_exec(
                     code = raw[i + 1]
                     # Elements AFTER the code are the snippet's sys.argv, not code.
                     others_dynamic = any(e is None for e in elements[:i + 1])
+                    if elements[i + 1] is None and not others_dynamic and _is_const_join(code):
+                        # `";".join(["import x", "x.main()"])`: constant code, assembled.
+                        text = " ".join(_py_command_parts(code, resolve_name)[0])
+                        base = _basename(elements[0])
+                        if INLINE_CODE_DANGER_RE.search(text) or \
+                                SHELL_PAYLOAD_DANGER_RE.search(text):
+                            return _defect("high", f"inline interpreter eval ({base} {el}) of "
+                                           "code that execs/decodes/fetches", consumed)
+                        return _cap("low", f"runs a constant inline {base} snippet ({el})",
+                                    CAP_SPAWN, consumed)
                     if elements[i + 1] is None and not others_dynamic and _is_dynamic_string(
                             code) and not (isinstance(code, ast.Call)
                                            and isinstance(code.func, ast.Attribute)
@@ -881,7 +933,15 @@ def _js_command_parts(arg: str) -> tuple[list[str], list[str]] | None:
     if len(a) >= 2 and a[0] == a[-1] == "`":
         body = a[1:-1]
         dyn = [m.group(1).strip() for m in _JS_INTERP_RE.finditer(body)]
-        return [_JS_INTERP_RE.sub(" ", body)], dyn
+        # One text piece per stretch between `${…}` holes, so a piece that ENDS where a
+        # runtime value begins (`rm -rf ${dir}`) stays visible as such.
+        pieces: list[str] = []
+        last = 0
+        for m in _JS_INTERP_RE.finditer(body):
+            pieces.append(body[last:m.start()])
+            last = m.end()
+        pieces.append(body[last:])
+        return pieces, dyn
     pieces = split_top_level_plus(a)
     if len(pieces) < 2:
         return None
@@ -965,6 +1025,9 @@ def _js_cli_calibration(arg: str, is_cli_expr, consumed: int) -> ExecVerdict | N
                    "environment (no untrusted input reaches it)", consumed)
 
 
+_JS_ARRAY_JOIN_RE = re.compile(r"""^\[(.*)\]\s*\.\s*join\s*\(\s*(['"`])(.*?)\2\s*\)$""", re.S)
+
+
 def _js_parts(arg: str) -> tuple[list[str], list[str]]:
     """Visible text pieces and runtime parts of one JS argument (a literal, a template,
     a ``+`` concatenation, an array literal; anything else is one opaque part)."""
@@ -972,6 +1035,27 @@ def _js_parts(arg: str) -> tuple[list[str], list[str]]:
     if lit is not None:
         return [lit], []
     a = arg.strip()
+    jm = _JS_ARRAY_JOIN_RE.match(a)
+    if jm:
+        # `['curl', '-s', host, '|', 'sh'].join(' ')`: read the text it assembles.
+        sep = jm.group(3)
+        consts: list[str] = []
+        dyn: list[str] = []
+        run: list[str] = []
+        for el in split_top_level_args(jm.group(1)):
+            lit = _js_literal(el)
+            if lit is not None:
+                run.append(lit)
+                continue
+            if run:
+                consts.append(sep.join(run))
+                run = []
+            c, d = _js_parts(el)
+            consts += c
+            dyn += d
+        if run:
+            consts.append(sep.join(run))
+        return consts, dyn
     if a.startswith("[") and a.endswith("]"):
         consts: list[str] = []
         dyn: list[str] = []

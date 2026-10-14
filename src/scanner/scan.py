@@ -1243,6 +1243,10 @@ _JOIN_REVERSED_LIST_RE = re.compile(r"""['"][^'"]+['"]\s*\.\s*join\s*\([^)]*\[::
 
 
 def _is_decode_line(line: str) -> bool:
+    from src.scanner.exec_classify import ASSEMBLY_DECODE_RE
+
+    if ASSEMBLY_DECODE_RE.search(line):
+        return True  # chr()/bytes([...])/fromCharCode assembly hides text like a decode
     return bool(DECODE_SINK_RE.search(line)) and not (
         _JOIN_REVERSED_LIST_RE.search(line)
         and not DECODE_SINK_RE.search(_JOIN_REVERSED_LIST_RE.sub(" ", line)))
@@ -1889,31 +1893,6 @@ _DEP_FILES = frozenset({
 })
 
 
-# A package's own test module / test-support module shipped next to its code
-# (`coloredlogs/tests.py`, `transformers/testing_utils.py`, `safer-buffer/tests.js`):
-# test code, not runtime (precision PR 2). The name alone is not enough (`jinja2/tests.py`
-# holds Jinja's template tests, `click/testing.py` is a public API), so the content must
-# also be a test suite: it imports a test framework or defines test cases.
-_TEST_MODULE_STEMS = frozenset({
-    "tests", "test", "testing", "testing_utils", "testutils", "test_utils",
-})
-_TEST_SUITE_CONTENT_RE = re.compile(
-    r"^\s*(?:import\s+(?:unittest|pytest|nose)\b|from\s+(?:unittest|pytest|nose)\b)"
-    r"|^\s*class\s+\w+\s*\([^)]*TestCase\)"
-    r"|require\s*\(\s*['\"](?:tape|tap|mocha|ava|node:test|assert|chai)['\"]\s*\)"
-    r"|from\s+['\"](?:vitest|node:test|@jest/globals|ava|tape|chai)['\"]"
-    r"|^\s*(?:describe|it|test)\s*\(\s*['\"`]",
-    re.MULTILINE,
-)
-
-
-def _is_test_module(file_path: str, content: str | None) -> bool:
-    """A test-suite module by name AND content (see above)."""
-    if Path(file_path).stem.lower() not in _TEST_MODULE_STEMS or not content:
-        return False
-    return bool(_TEST_SUITE_CONTENT_RE.search(content))
-
-
 def _is_test_or_doc_file(file_path: str) -> bool:
     """Check if a file is a test, doc, or example file (lower severity)."""
     lower = file_path.lower()
@@ -2452,7 +2431,7 @@ def _scan_content(
     if allowlist is None:
         allowlist = set()
 
-    file_test_or_doc = _is_test_or_doc_file(file_path) or _is_test_module(file_path, content)
+    file_test_or_doc = _is_test_or_doc_file(file_path)
     # CI/infra files (#3) are graded like tests/docs so a Dockerfile / workflow recipe
     # can't dominate the grade with a critical.
     is_infra = _is_infra_file(file_path)

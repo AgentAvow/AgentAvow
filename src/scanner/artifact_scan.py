@@ -455,7 +455,6 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         _is_git_config_file,
         _is_git_hook_file,
         _is_source_file,
-        _is_test_module,
         _is_test_or_doc_file,
         _load_allowlist,
         _scan_content,
@@ -545,7 +544,6 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
             and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
             and not _skip(path)
             and not _is_test_or_doc_file(path)
-            and not _is_test_module(path, af.text)
         ):
             f, _positives, _suppressed = _scan_content(af.text, path, allowlist)
             if not _installed(path):

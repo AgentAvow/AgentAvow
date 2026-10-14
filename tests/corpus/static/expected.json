@@ -3095,8 +3095,8 @@
    "version": "1.1.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 10 files",
-   "files_scanned": 10,
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3144,10 +3144,10 @@
   },
   "npm/safer-buffer": {
    "version": "2.1.2",
-   "score": 74,
+   "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 3,
+   "files_scanned": 4,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5132,8 +5132,8 @@
    "version": "1.6.0",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 42 files",
-   "files_scanned": 42,
+   "reason": "nothing found in 43 files",
+   "files_scanned": 43,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5141,7 +5141,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 15,
+   "capabilities": 16,
    "not_installed": 0,
    "rules": {}
   },
@@ -5600,8 +5600,8 @@
    "version": "2.5.3",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 164 files",
-   "files_scanned": 164,
+   "reason": "nothing found in 165 files",
+   "files_scanned": 165,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6256,8 +6256,8 @@
    "version": "3.3.3",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 13 files",
-   "files_scanned": 13,
+   "reason": "nothing found in 14 files",
+   "files_scanned": 14,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6664,8 +6664,8 @@
    "version": "1.18.1",
    "score": 82,
    "label": "safe",
-   "reason": "no critical or high findings in 594 files",
-   "files_scanned": 594,
+   "reason": "no critical or high findings in 595 files",
+   "files_scanned": 595,
    "severity": {
     "critical": 0,
     "high": 0,
