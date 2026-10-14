@@ -53,6 +53,8 @@ CAPABILITY_LABELS: dict[str, str] = {
 }
 
 _URL_RE = re.compile(r"https?://", re.IGNORECASE)
+_OSASCRIPT_DANGER_RE = re.compile(
+    r"do\s+shell\s+script|https?://|curl|wget|password|keychain|System Events", re.I)
 _PY_SHELL_FUNCS = frozenset({"system", "popen"})
 
 
@@ -355,7 +357,13 @@ def classify_argv(
                                           consumed)
         sev = "critical" if (dynamic and flow) else "high"
         return _defect(sev, f"spawns a shell ({base}) — a shell string is evaluated", consumed)
-    if base is not None and base in DANGEROUS_ARGV0_NET:
+    if base is not None and base in DANGEROUS_ARGV0_NET and base != "osascript":
+        # osascript is also an interpreter: `osascript -e "<constant>"` is judged by the
+        # inline-code rule below (Pillow's clipboard read), `do shell script` stays high.
+        return _defect("high", f"spawns a downloader/decoder binary ({base})", consumed)
+    if base == "osascript" and (
+            dynamic or any(_OSASCRIPT_DANGER_RE.search(c) for c in consts)
+            or not any(e in DANGEROUS_ARGV_FLAGS for e in elements[1:])):
         return _defect("high", f"spawns a downloader/decoder binary ({base})", consumed)
     if base is not None and (base in INTERPRETER_ARGV0 or argv0 == "python"):
         for i, el in enumerate(elements[1:], 1):
@@ -717,6 +725,38 @@ def classify_python_exec(
                     f"spawns a shell ({_basename(elements[0])}) that", vis[0], vis[1] or ["?"],
                     untrusted_near=untrusted_near, untrusted_flow=untrusted_flow,
                     payload_flow=payload_flow, consumed=consumed)
+        if dynamic and elements and elements[0] is not None and (
+                _basename(elements[0]) in INTERPRETER_ARGV0 or elements[0] == "python"):
+            # `[sys.executable, "-c", "import %s; %s.%s()" % (mod, mod, fn)]` (alembic's
+            # console-script hook): inline code from a VISIBLE template is judged on its
+            # text and reach, like a shell string. Opaque code (`["node", "-e", code]`)
+            # stays high in classify_argv.
+            arg_node = first
+            if isinstance(arg_node, ast.Name) and resolve_name is not None:
+                arg_node = resolve_name(arg_node.id) or arg_node
+            raw = _argv_nodes(arg_node)
+            if raw and len(raw) == len(elements):
+                for i, el in enumerate(elements[1:-1], 1):
+                    if el not in DANGEROUS_ARGV_FLAGS:
+                        continue
+                    code = raw[i + 1]
+                    others_dynamic = any(e is None for j, e in enumerate(elements)
+                                         if j != i + 1)
+                    if elements[i + 1] is None and not others_dynamic and _is_dynamic_string(
+                            code) and not (isinstance(code, ast.Call)
+                                           and isinstance(code.func, ast.Attribute)
+                                           and code.func.attr in ("join", "replace")):
+                        consts, dyn = _py_command_parts(code, resolve_name)
+                        base = _basename(elements[0])
+                        if INLINE_CODE_DANGER_RE.search(" ".join(consts)):
+                            return _defect("high", f"inline interpreter eval ({base} {el}) of "
+                                           "code that execs/decodes/fetches", consumed)
+                        return _dynamic_shell_verdict(
+                            f"inline {base} {el} code built from a template", consts,
+                            dyn or ["?"], untrusted_near=untrusted_near,
+                            untrusted_flow=untrusted_flow, payload_flow=payload_flow,
+                            consumed=consumed)
+                    break
         return classify_argv(elements, dynamic, untrusted_near=untrusted_near,
                              consumed=consumed, untrusted_flow=untrusted_flow)
 

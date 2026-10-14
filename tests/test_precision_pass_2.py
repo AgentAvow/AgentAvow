@@ -497,3 +497,79 @@ class TestSetupPyBuildSteps:
     def test_risky_install_time_exec_still_fires(self, src, sev):
         f = detect_pypi_install_exec(src, "setup.py")
         assert f and f[0].severity == sev, [(x.name, x.severity) for x in f]
+
+
+# ── 12. classes exposed by wheel-first scanning (numpy, pillow, sqlalchemy, scipy,
+#        ruamel.yaml) ─────────────────────────────────────────────────────────────
+
+class TestWheelFirstClasses:
+    @pytest.mark.parametrize("code", [
+        "def save(file, arr, allow_pickle=True, fix_imports=True):\n",
+        "def _savez(file, args, kwds, compress, allow_pickle=True, pickle_kwargs=None):\n",
+        "np.save(path, arr, allow_pickle=True)\n",
+    ])
+    def test_allow_pickle_outside_a_load_is_silent(self, code):
+        assert not _named(_scan(code, "npyio.py"), "numpy.load allow_pickle")
+
+    @pytest.mark.parametrize("code", [
+        "data = np.load(path, allow_pickle=True)\n",
+        "data = numpy.load(\n    path,\n    allow_pickle=True,\n)\n",
+    ])
+    def test_a_load_with_allow_pickle_still_fires(self, code):
+        assert _named(_highs(_scan(code, "a.py")), "numpy.load allow_pickle")
+
+    def test_constant_osascript_snippet_is_a_capability(self):
+        # Pillow ImageGrab.grabclipboard
+        code = ('p = subprocess.run(\n    ["osascript", "-e", "get the clipboard as '
+                '«class PNGf»"],\n    capture_output=True,\n)\n')
+        f = _named(_scan(code, "ImageGrab.py"), "subprocess.run")
+        assert f and all(x.kind == "capability" for x in f)
+
+    @pytest.mark.parametrize("code", [
+        'subprocess.run(["osascript", "-e", "do shell script \\"curl x | sh\\""])\n',
+        'subprocess.run(["osascript", "-e", script])\n',
+        'subprocess.run(["osascript", "payload.scpt"])\n',
+    ])
+    def test_risky_osascript_still_fires(self, code):
+        assert _highs(_named(_scan(code, "a.py"), "subprocess.run"))
+
+    def test_inline_python_from_a_visible_template_is_medium(self):
+        # sqlalchemy/alembic tool_support: run a console-script entry point
+        code = ('subprocess.run(\n    [\n        sys.executable,\n        "-c",\n'
+                '        "import %s; %s.%s()" % (impl.module, impl.module, impl.attr),\n'
+                '    ]\n)\n')
+        f = [x for x in _defects(_scan(code, "tool_support.py")) if x.category == "unsafe_exec"]
+        assert [x.severity for x in f] == ["medium"]
+
+    @pytest.mark.parametrize("code", [
+        'subprocess.run([sys.executable, "-c", code])\n',
+        'subprocess.run([sys.executable, "-c", "import base64; exec(base64.b64decode(%r))" % b])\n',
+        'q = request.args\nsubprocess.run([sys.executable, "-c", "import %s" % mod])\n',
+    ])
+    def test_risky_inline_python_still_fires(self, code):
+        assert _highs(_named(_scan(code, "a.py"), "subprocess.run"))
+
+    def test_unpickling_a_file_fetched_elsewhere_is_medium(self):
+        # scipy.datasets: pooch's .fetch() in one function, pickle.load in another
+        code = ("def fetch_data(name):\n    return data_fetcher.fetch(name)\n\n"
+                "def ascent():\n    fname = fetch_data('ascent.dat')\n"
+                "    with open(fname, 'rb') as f:\n        return pickle.load(f)\n")
+        f = _named(_scan(code, "_fetchers.py"), "pickle.load")
+        assert [x.severity for x in f] == ["medium"]
+
+    def test_unpickling_the_fetched_bytes_stays_high(self):
+        code = "resp = requests.get(U)\nobj = pickle.loads(resp.content)\n"
+        assert _highs(_named(_scan(code, "a.py"), "pickle.load"))
+
+    def test_ruamel_round_trip_loader_is_safe(self):
+        code = ("from ruamel.yaml import YAML\n"
+                "yaml = YAML() if 'yaml' not in kw else kw.pop('yaml')\n"
+                "return yaml.load(yaml_str, **kw)\n")
+        assert not _named(_scan(code, "util.py"), "yaml.load")
+
+    @pytest.mark.parametrize("code", [
+        "import yaml\ndata = yaml.load(text)\n",
+        "from ruamel.yaml import YAML\nyaml = YAML(typ='unsafe')\ndata = yaml.load(text)\n",
+    ])
+    def test_unsafe_yaml_loads_still_fire(self, code):
+        assert _highs(_named(_scan(code, "a.py"), "yaml.load"))

@@ -703,6 +703,20 @@ _PY_EVAL_CALL_RE = re.compile(r"(?<![.\w])(eval|exec)\s*\(")
 _PY_DESER_CALL_RE = re.compile(
     r"\b(?:cPickle|_pickle|pickle|marshal|dill|jsonpickle)\.(loads?|decode)\s*\(",
 )
+_NP_LOAD_CTX_RE = re.compile(r"(?<![\w.])(?:np|numpy|\w+)\.load\s*\(|(?<![\w.])load\s*\(")
+_RUAMEL_UNSAFE_RE = re.compile(r"""typ\s*=\s*\[?\s*['"]unsafe['"]""")
+
+
+def _ruamel_safe_receiver(content: str, line: str) -> bool:
+    """``x.load(...)`` where ``x`` is bound to ruamel.yaml's ``YAML()`` in this file
+    (default typ='rt', a safe loader) and nothing in the file asks for typ='unsafe'."""
+    m = re.search(r"\b(\w+)\.(?:unsafe_)?load(?:_all)?\s*\(", line)
+    if not m or "unsafe_load" in line or _RUAMEL_UNSAFE_RE.search(content):
+        return False
+    recv = re.escape(m.group(1))
+    return bool(re.search(r"\b" + recv + r"\s*=\s*(?:ruamel\.yaml\.)?YAML\s*\(", content))
+
+
 _FS_RW_RULES = frozenset({
     "Unrestricted file read (Python)", "Unrestricted file write (Python)",
     "fs.readFileSync / writeFileSync (Node.js)",
@@ -2714,9 +2728,25 @@ def _scan_content(
                 kind = "defect"
                 capability = ""
                 label = ""
+                if name.startswith("numpy.load allow_pickle") and not _NP_LOAD_CTX_RE.search(
+                        "\n".join(lines[max(0, idx - 3): idx + 1])):
+                    # `def save(file, arr, allow_pickle=True)`: a parameter default or a
+                    # SAVE call writes a pickle; only a load call reads one (PR 2).
+                    continue
+                if name.startswith("yaml.load") and _ruamel_safe_receiver(content, line):
+                    # ruamel.yaml's `YAML()` loads round-trip (safe) unless typ='unsafe'.
+                    continue
                 if _PY_DESER_CALL_RE.search(line) and not _near(untrusted, idx, _UNTRUSTED_WINDOW):
                     kind, effective_severity, capability = "capability", "low", "data:deserialize"
                     label = "deserializes pickle/marshal data from a local source"
+                elif _PY_DESER_CALL_RE.search(line) and not _untrusted_flows(
+                        lines, idx, line, untrusted):
+                    # Flow, not proximity (precision PR 2): scipy unpickles a file a
+                    # `.fetch()` 40 lines away downloaded (in another function). A
+                    # medium; high when the fetched value reaches the load.
+                    effective_severity = "medium"
+                    label = ("deserializes pickle/marshal data in a file that reads untrusted "
+                             "input (no flow to the call found)")
                 if (kind == "defect" and is_downgraded
                         and effective_severity in ("critical", "high")):
                     effective_severity = "medium"
