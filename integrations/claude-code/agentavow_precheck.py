@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.28"
+__version__ = "0.1.29"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
