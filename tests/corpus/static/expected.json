@@ -553,7 +553,7 @@
    "version": "0.2.52",
    "score": 50,
    "label": "review",
-   "reason": "one high finding: execSync / spawn (Node.js)",
+   "reason": "one high finding in its code: execSync / spawn (Node.js)",
    "files_scanned": 237,
    "severity": {
     "critical": 0,
@@ -1193,7 +1193,7 @@
    "version": "0.28.2",
    "score": 62,
    "label": "review",
-   "reason": "one high finding: execSync / spawn (Node.js)",
+   "reason": "one high finding in its code: execSync / spawn (Node.js)",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
@@ -4924,7 +4924,7 @@
    "version": "2.1.1",
    "score": 0,
    "label": "do_not_connect",
-   "reason": "3 critical findings, including curl/wget piped to shell",
+   "reason": "3 critical findings in its code, including curl/wget piped to shell",
    "files_scanned": 177,
    "severity": {
     "critical": 3,
@@ -5580,7 +5580,7 @@
    "version": "1.11.0",
    "score": 59,
    "label": "review",
-   "reason": "one high finding: subprocess.run / Popen (Python)",
+   "reason": "one high finding in its code: subprocess.run / Popen (Python)",
    "files_scanned": 1,
    "severity": {
     "critical": 0,
@@ -7251,7 +7251,7 @@
    "version": "3.1.9",
    "score": 65,
    "label": "review",
-   "reason": "one high finding: untrusted input passed to an eval/exec method (Python)",
+   "reason": "one high finding in its code: untrusted input passed to an eval/exec method (Python)",
    "files_scanned": 51,
    "severity": {
     "critical": 0,
