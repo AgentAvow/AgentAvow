@@ -431,21 +431,19 @@
   "npm/@notionhq/notion-mcp-server": {
    "version": "2.5.2",
    "score": 88,
-   "label": "review",
-   "reason": "one high finding: lethal trifecta: private-data read + untrusted input + outbound netwo\u2026",
+   "label": "safe",
+   "reason": "nothing found in 23 files",
    "files_scanned": 23,
    "severity": {
     "critical": 0,
-    "high": 1,
+    "high": 0,
     "medium": 0,
     "low": 0,
     "info": 0
    },
    "capabilities": 2,
    "not_installed": 0,
-   "rules": {
-    "high: Lethal trifecta: private-data read + untrusted input + outbound network": 1
-   }
+   "rules": {}
   },
   "npm/@playwright/mcp": {
    "version": "0.0.83",
@@ -555,19 +553,20 @@
    "version": "0.2.52",
    "score": 50,
    "label": "review",
-   "reason": "8 high findings, including execSync / spawn (Node.js)",
+   "reason": "one high finding: execSync / spawn (Node.js)",
    "files_scanned": 237,
    "severity": {
     "critical": 0,
-    "high": 8,
-    "medium": 5,
+    "high": 1,
+    "medium": 12,
     "low": 0,
     "info": 0
    },
    "capabilities": 60,
    "not_installed": 0,
    "rules": {
-    "high: execSync / spawn (Node.js)": 8,
+    "high: execSync / spawn (Node.js)": 1,
+    "medium: execSync / spawn (Node.js)": 7,
     "medium: fs.readFileSync / writeFileSync (Node.js)": 4,
     "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
    }
@@ -746,21 +745,21 @@
   },
   "npm/browserslist": {
    "version": "4.29.3",
-   "score": 72,
+   "score": 88,
    "label": "safe",
-   "reason": "no critical or high findings in 9 files",
+   "reason": "nothing found in 9 files",
    "files_scanned": 9,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 11,
-    "low": 0,
+    "medium": 0,
+    "low": 11,
     "info": 0
    },
    "capabilities": 3,
    "not_installed": 0,
    "rules": {
-    "medium: Unpinned npx/uvx package (no @version pin)": 11
+    "low: Unpinned npx/uvx package (no @version pin)": 11
    }
   },
   "npm/buffer": {
@@ -1014,7 +1013,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 5,
+   "capabilities": 3,
    "not_installed": 0,
    "rules": {}
   },
@@ -1054,21 +1053,21 @@
   },
   "npm/detect-libc": {
    "version": "2.1.2",
-   "score": 60,
-   "label": "review",
-   "reason": "2 high findings, including execSync / spawn (Node.js)",
+   "score": 80,
+   "label": "safe",
+   "reason": "no critical or high findings in 6 files",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
-    "high": 2,
-    "medium": 0,
+    "high": 0,
+    "medium": 2,
     "low": 0,
     "info": 0
    },
    "capabilities": 1,
    "not_installed": 0,
    "rules": {
-    "high: execSync / spawn (Node.js)": 2
+    "medium: execSync / spawn (Node.js)": 2
    }
   },
   "npm/dotenv": {
@@ -1192,14 +1191,14 @@
   },
   "npm/esbuild": {
    "version": "0.28.2",
-   "score": 59,
+   "score": 62,
    "label": "review",
    "reason": "one high finding: execSync / spawn (Node.js)",
    "files_scanned": 4,
    "severity": {
     "critical": 0,
     "high": 1,
-    "medium": 2,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
@@ -1207,7 +1206,6 @@
    "not_installed": 0,
    "rules": {
     "high: execSync / spawn (Node.js)": 1,
-    "medium: execSync / spawn (Node.js)": 1,
     "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
    }
   },
@@ -2919,21 +2917,21 @@
   },
   "npm/postcss-selector-parser": {
    "version": "7.1.6",
-   "score": 84,
+   "score": 88,
    "label": "safe",
-   "reason": "no critical or high findings in 33 files",
+   "reason": "nothing found in 33 files",
    "files_scanned": 33,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 1,
-    "low": 0,
+    "medium": 0,
+    "low": 1,
     "info": 0
    },
    "capabilities": 0,
    "not_installed": 0,
    "rules": {
-    "medium: Unpinned npx/uvx package (no @version pin)": 1
+    "low: Unpinned npx/uvx package (no @version pin)": 1
    }
   },
   "npm/pretty-format": {
@@ -3097,8 +3095,8 @@
    "version": "1.1.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 11 files",
-   "files_scanned": 11,
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3146,10 +3144,10 @@
   },
   "npm/safer-buffer": {
    "version": "2.1.2",
-   "score": 82,
+   "score": 74,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 4,
+   "files_scanned": 3,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3367,22 +3365,22 @@
   },
   "npm/task-master-ai": {
    "version": "0.43.1",
-   "score": 84,
+   "score": 88,
    "label": "safe",
-   "reason": "no critical or high findings in 24 files",
+   "reason": "nothing found in 24 files",
    "files_scanned": 24,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 1,
-    "low": 1,
+    "medium": 0,
+    "low": 2,
     "info": 0
    },
    "capabilities": 5,
    "not_installed": 0,
    "rules": {
-    "low: Unpinned remote resource (branch/latest/HEAD)": 1,
-    "medium: Unpinned npx/uvx package (no @version pin)": 1
+    "low: Unpinned npx/uvx package (no @version pin)": 1,
+    "low: Unpinned remote resource (branch/latest/HEAD)": 1
    }
   },
   "npm/tavily-mcp": {
@@ -3540,23 +3538,22 @@
   },
   "npm/update-browserslist-db": {
    "version": "1.3.4",
-   "score": 30,
-   "label": "review",
-   "reason": "10 high findings, including execSync / spawn (Node.js)",
+   "score": 72,
+   "label": "safe",
+   "reason": "no critical or high findings in 6 files",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
-    "high": 10,
-    "medium": 4,
-    "low": 0,
+    "high": 0,
+    "medium": 13,
+    "low": 1,
     "info": 0
    },
    "capabilities": 3,
    "not_installed": 0,
    "rules": {
-    "high: execSync / spawn (Node.js)": 10,
-    "medium: Unpinned npx/uvx package (no @version pin)": 1,
-    "medium: execSync / spawn (Node.js)": 3
+    "low: Unpinned npx/uvx package (no @version pin)": 1,
+    "medium: execSync / spawn (Node.js)": 13
    }
   },
   "npm/uri-js": {
@@ -3952,21 +3949,21 @@
   },
   "pypi/anyio": {
    "version": "4.15.1",
-   "score": 67,
-   "label": "review",
-   "reason": "one high finding: shell=True (Python)",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 43 files",
    "files_scanned": 43,
    "severity": {
     "critical": 0,
-    "high": 1,
-    "medium": 0,
+    "high": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 3,
    "not_installed": 0,
    "rules": {
-    "high: shell=True (Python)": 1
+    "medium: shell=True (Python)": 1
    }
   },
   "pypi/attrs": {
@@ -4056,22 +4053,20 @@
   },
   "pypi/botocore": {
    "version": "1.43.109",
-   "score": 67,
-   "label": "review",
-   "reason": "one high finding: exec() call (Python)",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 784 files",
    "files_scanned": 784,
    "severity": {
     "critical": 0,
-    "high": 1,
+    "high": 0,
     "medium": 0,
     "low": 0,
     "info": 0
    },
-   "capabilities": 1,
+   "capabilities": 2,
    "not_installed": 0,
-   "rules": {
-    "high: exec() call (Python)": 1
-   }
+   "rules": {}
   },
   "pypi/cachetools": {
    "version": "7.2.1",
@@ -5137,8 +5132,8 @@
    "version": "1.6.0",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 43 files",
-   "files_scanned": 43,
+   "reason": "nothing found in 42 files",
+   "files_scanned": 42,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5146,7 +5141,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 16,
+   "capabilities": 15,
    "not_installed": 0,
    "rules": {}
   },
@@ -5220,21 +5215,21 @@
   },
   "pypi/langchain": {
    "version": "1.4.3",
-   "score": 63,
-   "label": "review",
-   "reason": "2 high findings, including injected system/role directive",
+   "score": 78,
+   "label": "safe",
+   "reason": "no critical or high findings in 40 files",
    "files_scanned": 40,
    "severity": {
     "critical": 0,
-    "high": 2,
-    "medium": 0,
+    "high": 0,
+    "medium": 2,
     "low": 0,
     "info": 0
    },
    "capabilities": 2,
    "not_installed": 0,
    "rules": {
-    "high: Injected system/role directive": 2
+    "medium: Injected system/role directive": 2
    }
   },
   "pypi/langchain-core": {
@@ -5341,22 +5336,20 @@
   },
   "pypi/matplotlib": {
    "version": "3.11.2",
-   "score": 69,
-   "label": "review",
-   "reason": "one high finding: remote response text fed to exec/eval (Python)",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 170 files",
    "files_scanned": 170,
    "severity": {
     "critical": 0,
-    "high": 1,
+    "high": 0,
     "medium": 0,
     "low": 0,
     "info": 0
    },
    "capabilities": 19,
    "not_installed": 0,
-   "rules": {
-    "high: Remote response text fed to exec/eval (Python)": 1
-   }
+   "rules": {}
   },
   "pypi/mcp": {
    "version": "2.3.0",
@@ -5532,21 +5525,21 @@
   },
   "pypi/mypy": {
    "version": "2.4.0",
-   "score": 69,
-   "label": "review",
-   "reason": "one high finding: subprocess.run / Popen (Python)",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 235 files",
    "files_scanned": 235,
    "severity": {
     "critical": 0,
-    "high": 1,
-    "medium": 0,
+    "high": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 26,
    "not_installed": 0,
    "rules": {
-    "high: subprocess.run / Popen (Python)": 1
+    "medium: subprocess.run / Popen (Python)": 1
    }
   },
   "pypi/mypy-extensions": {
@@ -5585,60 +5578,57 @@
   },
   "pypi/nodeenv": {
    "version": "1.11.0",
-   "score": 54,
+   "score": 59,
    "label": "review",
-   "reason": "2 high findings, including subprocess.run / Popen (Python)",
+   "reason": "one high finding: subprocess.run / Popen (Python)",
    "files_scanned": 1,
    "severity": {
     "critical": 0,
-    "high": 2,
-    "medium": 0,
+    "high": 1,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 4,
    "not_installed": 0,
    "rules": {
-    "high: subprocess.run / Popen (Python)": 2
+    "high: subprocess.run / Popen (Python)": 1,
+    "medium: subprocess.run / Popen (Python)": 1
    }
   },
   "pypi/numpy": {
    "version": "2.5.3",
-   "score": 54,
-   "label": "review",
-   "reason": "7 high findings, including numpy.load allow_pickle=True (Python)",
-   "files_scanned": 165,
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 164 files",
+   "files_scanned": 164,
    "severity": {
     "critical": 0,
-    "high": 7,
+    "high": 0,
     "medium": 0,
     "low": 0,
     "info": 0
    },
    "capabilities": 30,
    "not_installed": 0,
-   "rules": {
-    "high: numpy.load allow_pickle=True (Python)": 7
-   }
+   "rules": {}
   },
   "pypi/oauthlib": {
    "version": "4.0.0",
-   "score": 67,
-   "label": "review",
-   "reason": "one high finding: base64 encode + send",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 73 files",
    "files_scanned": 73,
    "severity": {
     "critical": 0,
-    "high": 1,
+    "high": 0,
     "medium": 0,
     "low": 0,
     "info": 0
    },
    "capabilities": 0,
    "not_installed": 0,
-   "rules": {
-    "high: Base64 encode + send": 1
-   }
+   "rules": {}
   },
   "pypi/openai": {
    "version": "3.26.0",
@@ -5829,21 +5819,21 @@
   },
   "pypi/pandas": {
    "version": "3.0.6",
-   "score": 67,
-   "label": "review",
-   "reason": "one high finding: subprocess.run / Popen (Python)",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 285 files",
    "files_scanned": 285,
    "severity": {
     "critical": 0,
-    "high": 1,
-    "medium": 0,
+    "high": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 20,
    "not_installed": 0,
    "rules": {
-    "high: subprocess.run / Popen (Python)": 1
+    "medium: subprocess.run / Popen (Python)": 1
    }
   },
   "pypi/paramiko": {
@@ -5882,41 +5872,40 @@
   },
   "pypi/pillow": {
    "version": "12.3.0",
-   "score": 63,
-   "label": "review",
-   "reason": "2 high findings, including subprocess.run / Popen (Python)",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 98 files",
    "files_scanned": 98,
    "severity": {
     "critical": 0,
-    "high": 2,
-    "medium": 0,
+    "high": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
-   "capabilities": 24,
+   "capabilities": 25,
    "not_installed": 0,
    "rules": {
-    "high: os.system / os.popen (Python)": 1,
-    "high: subprocess.run / Popen (Python)": 1
+    "medium: os.system / os.popen (Python)": 1
    }
   },
   "pypi/pip": {
    "version": "26.2.1",
-   "score": 69,
-   "label": "review",
-   "reason": "one high finding: subprocess.run / Popen (Python)",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 394 files",
    "files_scanned": 394,
    "severity": {
     "critical": 0,
-    "high": 1,
-    "medium": 0,
+    "high": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 45,
    "not_installed": 0,
    "rules": {
-    "high: subprocess.run / Popen (Python)": 1
+    "medium: subprocess.run / Popen (Python)": 1
    }
   },
   "pypi/platformdirs": {
@@ -5972,21 +5961,21 @@
   },
   "pypi/prompt-toolkit": {
    "version": "3.0.53",
-   "score": 67,
-   "label": "review",
-   "reason": "one high finding: shell=True (Python)",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 143 files",
    "files_scanned": 143,
    "severity": {
     "critical": 0,
-    "high": 1,
-    "medium": 0,
+    "high": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 3,
    "not_installed": 0,
    "rules": {
-    "high: shell=True (Python)": 1
+    "medium: shell=True (Python)": 1
    }
   },
   "pypi/propcache": {
@@ -6267,8 +6256,8 @@
    "version": "3.3.3",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 14 files",
-   "files_scanned": 14,
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6588,22 +6577,20 @@
   },
   "pypi/ruamel-yaml": {
    "version": "0.19.1",
-   "score": 67,
-   "label": "review",
-   "reason": "one high finding: yaml.load without SafeLoader (Python)",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 32 files",
    "files_scanned": 32,
    "severity": {
     "critical": 0,
-    "high": 1,
+    "high": 0,
     "medium": 0,
     "low": 0,
     "info": 0
    },
    "capabilities": 3,
    "not_installed": 0,
-   "rules": {
-    "high: yaml.load without SafeLoader (Python)": 1
-   }
+   "rules": {}
   },
   "pypi/ruff": {
    "version": "0.16.10",
@@ -6675,42 +6662,41 @@
   },
   "pypi/scipy": {
    "version": "1.18.1",
-   "score": 64,
-   "label": "review",
-   "reason": "2 high findings, including pickle.load(s) on untrusted data (Python)",
-   "files_scanned": 595,
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 594 files",
+   "files_scanned": 594,
    "severity": {
     "critical": 0,
-    "high": 2,
-    "medium": 0,
+    "high": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 29,
    "not_installed": 0,
    "rules": {
-    "high: Remote fetch + dynamic exec in same file (possible rug-pull)": 1,
-    "high: pickle.load(s) on untrusted data (Python)": 1
+    "medium: pickle.load(s) on untrusted data (Python)": 1
    }
   },
   "pypi/setuptools": {
    "version": "84.0.0",
-   "score": 64,
-   "label": "review",
-   "reason": "2 high findings, including os.system / os.popen (Python)",
+   "score": 78,
+   "label": "safe",
+   "reason": "no critical or high findings in 223 files",
    "files_scanned": 223,
    "severity": {
     "critical": 0,
-    "high": 2,
-    "medium": 0,
+    "high": 0,
+    "medium": 2,
     "low": 0,
     "info": 0
    },
    "capabilities": 39,
    "not_installed": 0,
    "rules": {
-    "high: os.system / os.popen (Python)": 1,
-    "high: subprocess.run / Popen (Python)": 1
+    "medium: os.system / os.popen (Python)": 1,
+    "medium: subprocess.run / Popen (Python)": 1
    }
   },
   "pypi/shellingham": {
@@ -6732,22 +6718,20 @@
   },
   "pypi/six": {
    "version": "1.17.0",
-   "score": 62,
-   "label": "review",
-   "reason": "one high finding: exec() call (Python)",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
    "files_scanned": 1,
    "severity": {
     "critical": 0,
-    "high": 1,
+    "high": 0,
     "medium": 0,
     "low": 0,
     "info": 0
    },
-   "capabilities": 1,
+   "capabilities": 2,
    "not_installed": 0,
-   "rules": {
-    "high: exec() call (Python)": 1
-   }
+   "rules": {}
   },
   "pypi/smmap": {
    "version": "5.0.3",
@@ -6819,21 +6803,21 @@
   },
   "pypi/sqlalchemy": {
    "version": "2.1.4",
-   "score": 67,
-   "label": "review",
-   "reason": "one high finding: subprocess.run / Popen (Python)",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 218 files",
    "files_scanned": 218,
    "severity": {
     "critical": 0,
-    "high": 1,
-    "medium": 0,
+    "high": 0,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 13,
    "not_installed": 0,
    "rules": {
-    "high: subprocess.run / Popen (Python)": 1
+    "medium: subprocess.run / Popen (Python)": 1
    }
   },
   "pypi/sse-starlette": {
@@ -7265,22 +7249,22 @@
   },
   "pypi/werkzeug": {
    "version": "3.1.9",
-   "score": 63,
+   "score": 65,
    "label": "review",
-   "reason": "2 high findings, including exec() call (Python)",
+   "reason": "one high finding: untrusted input passed to an eval/exec method (Python)",
    "files_scanned": 51,
    "severity": {
     "critical": 0,
-    "high": 2,
-    "medium": 0,
+    "high": 1,
+    "medium": 1,
     "low": 0,
     "info": 0
    },
    "capabilities": 4,
    "not_installed": 0,
    "rules": {
-    "high: Remote fetch + dynamic exec in same file (possible rug-pull)": 1,
-    "high: exec() call (Python)": 1
+    "high: Untrusted input passed to an eval/exec method (Python)": 1,
+    "medium: exec() call (Python)": 1
    }
   },
   "pypi/wheel": {
