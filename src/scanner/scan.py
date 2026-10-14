@@ -5,6 +5,7 @@ Designed to run against the recruitment_prospects table of discovered repos.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -4303,7 +4304,9 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         result.error = fetched.error or "artifact fetch failed"
         return result
 
-    apply_artifact_scan(result, eco, fetched)
+    # Unpacked-tree scanning is CPU-bound (a big wheel is seconds of regex work): run it
+    # off the event loop so other requests keep being served. No DB/session work here.
+    await asyncio.to_thread(apply_artifact_scan, result, eco, fetched)
 
     # Provenance verification on the exact coordinate — this is what makes A+
     # reachable for a package that publishes Sigstore/PEP-740 provenance. (Images:

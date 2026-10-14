@@ -21,6 +21,7 @@ fetch/unpack error returns ``ok=False`` and the caller keeps the repo-only grade
 from __future__ import annotations
 
 import ast
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -858,7 +859,8 @@ async def scan_published_artifact(
             result.error = fetched.error or "artifact fetch failed"
             return result
 
-        findings, files_scanned, has_hook = scan_artifact_files(fetched)
+        # CPU-bound: off the event loop (see scan_package).
+        findings, files_scanned, has_hook = await asyncio.to_thread(scan_artifact_files, fetched)
         # Prefer comparing the artifact against the RELEASE TAG it was built from
         # (accurate); the resolver returns {path: git-blob-sha} for that tag, or None
         # when no matching tag exists — then compute_drift falls back to the branch view.

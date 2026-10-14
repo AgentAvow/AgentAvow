@@ -30,6 +30,7 @@ Hard rules (why this file is security-critical — it downloads untrusted bytes)
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import heapq
 import io
@@ -752,11 +753,12 @@ async def fetch_npm_artifact(
         if not tarball:
             raise ArtifactFetchError(f"no dist.tarball for {name}@{version}")
 
+        published_at = str((packument.get("time") or {}).get(version) or "")[:10] or None
         with await _download_spooled(tarball, client) as raw:
-            return npm_result_from_tarball(
-                name, version, raw, tarball_url=tarball, vdata=vdata,
-                published_at=str((packument.get("time") or {}).get(version) or "")[:10]
-                or None,
+            # Unpack + hash is CPU-bound: off the event loop.
+            return await asyncio.to_thread(
+                npm_result_from_tarball, name, version, raw, tarball_url=tarball,
+                vdata=vdata, published_at=published_at,
             )
     finally:
         if owns:
@@ -937,8 +939,10 @@ async def fetch_pypi_artifact(
 
         with await _download_spooled(url, client) as raw:
             installed_paths = await _sdist_installed_paths(name, version, kind, meta, client)
-            return pypi_result_from_archive(
-                name, version, kind, url, raw, installed_paths=installed_paths, meta=meta,
+            # Unpack + hash is CPU-bound: off the event loop.
+            return await asyncio.to_thread(
+                pypi_result_from_archive, name, version, kind, url, raw,
+                installed_paths=installed_paths, meta=meta,
             )
     finally:
         if owns:
@@ -1045,6 +1049,10 @@ def _pypi_deprecation(meta: dict) -> str | None:
     return None
 
 
+def _unpack_crate(raw: IO[bytes], report: SkipReport) -> tuple[str, dict[str, ArtifactFile]]:
+    return _digest(raw), _build_file_map(_unpack_tar_gz(raw, report), report)
+
+
 async def fetch_crates_artifact(
     name: str, version: str | None = None, *, client: httpx.AsyncClient | None = None,
 ) -> ArtifactFetchResult:
@@ -1072,9 +1080,8 @@ async def fetch_crates_artifact(
         url = CRATES_DL.format(name=name, version=version)
         report = SkipReport()
         with await _download_spooled(url, client) as raw:
-            digest = _digest(raw)
-            # a .crate is a gzipped tar
-            files = _build_file_map(_unpack_tar_gz(raw, report), report)
+            # a .crate is a gzipped tar; unpack + hash off the event loop
+            digest, files = await asyncio.to_thread(_unpack_crate, raw, report)
         vrow = next((v for v in (meta.get("versions") or [])
                      if isinstance(v, dict) and v.get("num") == version), {})
         return ArtifactFetchResult(
