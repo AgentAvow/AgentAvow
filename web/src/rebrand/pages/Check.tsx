@@ -730,7 +730,13 @@ function Hero() {
   const navigate = useNavigate()
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const go = (raw?: string) => {
+    // A pasted install command → its registry coordinate: `npm install chalk` → `npm:chalk`.
     const v = (raw ?? value).trim()
+      .replace(/^(?:npm\s+(?:install|i|add)|yarn\s+add|pnpm\s+(?:add|install|i)|bun\s+add)\s+(?:-{1,2}[\w-]+\s+)*/i, 'npm:')
+      .replace(/^(?:pip3?\s+install|uv\s+(?:add|pip\s+install)|poetry\s+add)\s+(?:-{1,2}[\w-]+\s+)*/i, 'pypi:')
+      .replace(/^cargo\s+(?:add|install)\s+/i, 'crates:')
+      // `npm core-js` / `pypi litellm`: a space works like the colon.
+      .replace(/^(npm|pypi|python|crates|cargo|hf|huggingface|docker)\s+(?=\S+$)/i, '$1:')
     setNotice(null)
     // A repo host we know but can't read yet: say so instead of scanning the same-named GitHub repo.
     const host = unsupportedRepoHost(v)
@@ -752,7 +758,9 @@ function Hero() {
         : (k === 'cargo' || k === 'rust') ? 'crates'
         : k === 'hf' ? 'huggingface'
         : (k === 'container' || k === 'oci') ? 'docker' : k
-      navigate(rp(`/rebrand/check/pkg/${surface}/${pkg[2].trim()}`))
+      // Drop a pinned version: `left-pad@1.3.0`, `@scope/pkg@2`, `litellm==1.0`.
+      const name = pkg[2].trim().replace(/(.)@[^@/]*$/, '$1').replace(/\s*(?:===?|>=|<=|~=|!=|[<>]).*$/, '')
+      navigate(rp(`/rebrand/check/pkg/${surface}/${name}`))
       return
     }
     // A pasted registry URL → the right package scan (before the bare-URL→MCP rule).
@@ -775,7 +783,9 @@ function Hero() {
       navigate(rp('/rebrand/check/mcp') + '?endpoint=' + encodeURIComponent(v)); return
     }
     const m = v.match(/(?:github\.com\/)?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/)
-    if (m) navigate(rp(`/rebrand/check/${m[1]}/${m[2]}`))
+    if (m) { navigate(rp(`/rebrand/check/${m[1]}/${m[2]}`)); return }
+    // A bare name is ambiguous across registries: say how to pick one instead of doing nothing.
+    if (/^@?[\w.-]+$/.test(v)) setNotice(`Which registry? Try npm:${v} or pypi:${v}`)
   }
   const EXAMPLES: Array<[string, string]> = [
     ['GitHub repo', 'github.com/vercel/next.js'],
