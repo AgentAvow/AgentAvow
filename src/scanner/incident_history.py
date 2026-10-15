@@ -13,6 +13,8 @@ HARD RULES:
 """
 from __future__ import annotations
 
+import re
+
 import httpx
 
 OSV_QUERY_URL = "https://api.osv.dev/v1/query"
@@ -31,13 +33,37 @@ def _is_mal(vuln: dict) -> bool:
     return any(str(a).upper().startswith("MAL-") for a in (vuln.get("aliases") or []))
 
 
-def _version_affected(vuln: dict, version: str | None) -> bool:
+def _norm_pkg(eco: str, name: str) -> str:
+    n = str(name or "").strip().lower()
+    return re.sub(r"[-_.]+", "-", n) if eco == "PyPI" else n
+
+
+def _affected_entries(vuln: dict, eco: str | None = None, name: str | None = None) -> list:
+    """The advisory's ``affected`` entries for THIS package. One advisory can cover several
+    packages (GHSA-f29h-pxvx-f335 lists eslint-config-prettier, synckit, got-fetch …), and
+    another package's range must never be applied to the scanned one. Entries without a
+    package name are kept (single-package records)."""
+    entries = [a for a in (vuln.get("affected") or []) if isinstance(a, dict)]
+    if not name:
+        return entries
+    want = _norm_pkg(eco or "", name)
+    out = []
+    for a in entries:
+        pkg = a.get("package") or {}
+        pname = pkg.get("name") if isinstance(pkg, dict) else None
+        if not pname or _norm_pkg(eco or "", pname) == want:
+            out.append(a)
+    return out
+
+
+def _version_affected(vuln: dict, version: str | None, eco: str | None = None,
+                      name: str | None = None) -> bool:
     """Best-effort: is ``version`` explicitly listed among the advisory's affected
     versions? Conservative — unknown ranges resolve to False (treat as historical, not a
     live warning), so we never over-claim that the current version is compromised."""
     if not version:
         return False
-    for aff in (vuln.get("affected") or []):
+    for aff in _affected_entries(vuln, eco, name):
         for v in (aff.get("versions") or []):
             if str(v) == str(version):
                 return True
@@ -101,11 +127,13 @@ def _range_affects(rng: dict, eco: str, version: str) -> bool:
     return affected
 
 
-def advisory_affects(vuln: dict, eco: str, version: str | None) -> bool:
-    """Does this advisory affect ``version`` (explicit versions list or ranges)?"""
+def advisory_affects(vuln: dict, eco: str, version: str | None,
+                     name: str | None = None) -> bool:
+    """Does this advisory affect ``version`` of package ``name`` (explicit versions list
+    or ranges)? Only the entries for ``name`` count when it is given."""
     if not version:
         return False
-    for aff in vuln.get("affected") or []:
+    for aff in _affected_entries(vuln, eco, name):
         if str(version) in [str(v) for v in (aff.get("versions") or [])]:
             return True
         if any(_range_affects(r, eco, version) for r in (aff.get("ranges") or [])):
@@ -113,8 +141,19 @@ def advisory_affects(vuln: dict, eco: str, version: str | None) -> bool:
     return False
 
 
-def _fixed_in(vuln: dict) -> str | None:
-    for aff in vuln.get("affected") or []:
+def _fixed_in(vuln: dict, eco: str | None = None, name: str | None = None,
+              version: str | None = None) -> str | None:
+    entries = _affected_entries(vuln, eco, name)
+    if version and eco:
+        # Prefer the range the scanned version sits in (an advisory can list one per
+        # release line: 8.10.x, 9.1.x, 10.1.x).
+        for aff in entries:
+            for r in aff.get("ranges") or []:
+                if _range_affects(r, eco, version):
+                    for ev in r.get("events") or []:
+                        if "fixed" in ev:
+                            return str(ev["fixed"])
+    for aff in entries:
         for r in aff.get("ranges") or []:
             for ev in r.get("events") or []:
                 if "fixed" in ev:
@@ -122,7 +161,8 @@ def _fixed_in(vuln: dict) -> str | None:
     return None
 
 
-def summarize_advisories(vulns: list[dict], eco: str, version: str | None) -> list[dict]:
+def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
+                         name: str | None = None) -> list[dict]:
     """Non-MAL advisories for the package itself, with whether the scanned version is
     affected. Deduplicated by alias (GHSA and PYSEC records describe the same flaw)."""
     out: list[dict] = []
@@ -142,14 +182,15 @@ def summarize_advisories(vulns: list[dict], eco: str, version: str | None) -> li
             "aliases": sorted(i for i in ids if i and i != primary)[:5],
             "summary": (v.get("summary") or "").strip()[:200],
             "severity": sev,
-            "fixed_in": _fixed_in(v),
-            "affects_scanned_version": advisory_affects(v, eco, version),
+            "fixed_in": _fixed_in(v, eco, name, version),
+            "affects_scanned_version": advisory_affects(v, eco, version, name),
         })
     out.sort(key=lambda a: (not a["affects_scanned_version"], a["id"] or ""))
     return out[:20]
 
 
-def summarize_incidents(vulns: list[dict], version: str | None = None) -> dict:
+def summarize_incidents(vulns: list[dict], version: str | None = None,
+                        eco: str | None = None, name: str | None = None) -> dict:
     """Pure reducer: OSV vulns -> the context-only incident_history dict. Network-free
     and unit-testable in isolation."""
     incidents: list[dict] = []
@@ -157,7 +198,7 @@ def summarize_incidents(vulns: list[dict], version: str | None = None) -> dict:
     for v in vulns:
         if not _is_mal(v):
             continue
-        aff = _version_affected(v, version)
+        aff = _version_affected(v, version, eco, name)
         current_affected = current_affected or aff
         incidents.append({
             "id": v.get("id"),
@@ -193,8 +234,8 @@ async def fetch_incident_history(
             vulns = resp.json().get("vulns") or []
     except (httpx.HTTPError, ValueError, KeyError):
         return {"checked": False}
-    summary = summarize_incidents(vulns, version)
+    summary = summarize_incidents(vulns, version, eco, name)
     # The package's own (non-MAL) advisories ride along; scan.py turns the ones that
     # affect the scanned version into findings. Not part of the never-scored history.
-    summary["advisories"] = summarize_advisories(vulns, eco, version)
+    summary["advisories"] = summarize_advisories(vulns, eco, version, name)
     return summary
