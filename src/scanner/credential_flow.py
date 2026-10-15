@@ -689,18 +689,27 @@ class _Analyzer:
                     self.sources[name] = ret
 
 
-def credential_exfil_hits(content: str, lang: str | None) -> list[tuple[int, str]]:
+# Cheap pre-check: some credential path word in the file.
+_CREDENTIAL_HINT_RE = re.compile(
+    r"\.ssh|id_(?:rsa|dsa|ecdsa|ed25519)|\.aws|gcloud|\.kube|netrc|"
+    r"git-credentials|\.npmrc|\.pypirc|\.docker|Login Data|Cookies|"
+    r"cookies\.sqlite|logins\.json|key[34]\.db|wallet|\.bitcoin|"
+    r"\.litecoin|\.dogecoin|\.dash\b|\.ethereum|keystore|[Ee]lectrum|"
+    r"solana|exodus|nkbihfbeogaeaoehlefnkodbefgpgknn|\.env\b")
+
+
+def credential_exfil_hits(content: str, lang: str | None, *,
+                          lf=None) -> list[tuple[int, str]]:
     """``(line_number, credential_kind)`` for each send that carries a credential file's
-    contents in ``content`` (``lang``: python / javascript / typescript)."""
+    contents in ``content`` (``lang``: python / javascript / typescript). ``lf``: the
+    caller's ``prefilter.LineFilter`` over ``content``, for a faster pre-check (same
+    answer)."""
     if lang not in ("python", "javascript", "typescript"):
         return []
     python = lang == "python"
-    # Cheap pre-check: some credential path word and some send word in the file.
-    if not re.search(r"\.ssh|id_(?:rsa|dsa|ecdsa|ed25519)|\.aws|gcloud|\.kube|netrc|"
-                     r"git-credentials|\.npmrc|\.pypirc|\.docker|Login Data|Cookies|"
-                     r"cookies\.sqlite|logins\.json|key[34]\.db|wallet|\.bitcoin|"
-                     r"\.litecoin|\.dogecoin|\.dash\b|\.ethereum|keystore|[Ee]lectrum|"
-                     r"solana|exodus|nkbihfbeogaeaoehlefnkodbefgpgknn|\.env\b", content):
+    hint = (lf.search(_CREDENTIAL_HINT_RE) if lf is not None
+            else _CREDENTIAL_HINT_RE.search(content))
+    if not hint:
         return []
     an = _Analyzer(content, python)
     if not any(an.lit_kinds):
