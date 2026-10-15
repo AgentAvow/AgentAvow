@@ -1077,6 +1077,19 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
     refetchIntervalInBackground: false,
   })
   const polled = (poll.data as { behavioral?: BehavioralData | null } | undefined)?.behavioral
+  // When the run lands, reload the page's main result too, so the answer, score and
+  // "sandbox still running" line above update instead of keeping the provisional copy.
+  const qc = useQueryClient()
+  const landed = !!polled && !polled.pending
+  const pkgSurface = pkg?.surface
+  const pkgName = pkg?.name
+  useEffect(() => {
+    if (!landed || !autoPending) return
+    const key = skill ? ['rebrand-skill-scan', owner, repo]
+      : pkgSurface ? ['rebrand-pkg-scan', pkgSurface, pkgName]
+      : ['rebrand-scan', owner, repo]
+    void qc.invalidateQueries({ queryKey: key })
+  }, [landed, autoPending, skill, pkgSurface, pkgName, owner, repo, qc])
   const b: BehavioralData | null | undefined = mut.data?.behavioral ?? (polled && !polled.pending ? polled : undefined) ?? auto
   const stillPending = !!b?.pending && !mut.isPending
   useEffect(() => {
