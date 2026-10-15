@@ -51,6 +51,9 @@ def _affected_entries(vuln: dict, eco: str | None = None, name: str | None = Non
     for a in entries:
         pkg = a.get("package") or {}
         pname = pkg.get("name") if isinstance(pkg, dict) else None
+        peco = pkg.get("ecosystem") if isinstance(pkg, dict) else None
+        if eco and peco and str(peco).split(":", 1)[0].lower() != eco.lower():
+            continue  # same name in another ecosystem (NuGet jQuery, Maven webjars …)
         if not pname or _norm_pkg(eco or "", pname) == want:
             out.append(a)
     return out

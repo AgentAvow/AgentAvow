@@ -91,3 +91,16 @@ def test_pypi_names_are_normalized():
          "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]}]}
     assert advisory_affects(adv, "PyPI", "1.0", "foo-bar") is True
     assert advisory_affects(adv, "PyPI", "3.0", "foo.bar") is False
+
+
+def test_other_ecosystems_with_the_same_name_do_not_count():
+    # GHSA-6c3j-c64m-qhgq: npm jquery <3.4.0, but also NuGet jQuery and RubyGems jquery-rails.
+    adv = {"id": "GHSA-6c3j-c64m-qhgq", "affected": [
+        {"package": {"ecosystem": "npm", "name": "jquery"},
+         "ranges": [{"type": "SEMVER", "events": [{"introduced": "1.1.4"}, {"fixed": "3.4.0"}]}]},
+        {"package": {"ecosystem": "RubyGems", "name": "jquery-rails"},
+         "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "4.3.4"}]}]},
+        {"package": {"ecosystem": "NuGet", "name": "jQuery"},
+         "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]}]}
+    assert advisory_affects(adv, "npm", "4.0.0", "jquery") is False
+    assert advisory_affects(adv, "npm", "3.3.1", "jquery") is True
