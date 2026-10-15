@@ -1,0 +1,23 @@
+{
+  "check-ids": "definition-digest/<key>, definition-count, key-encoding/NN (index into the file's key_encoding), case/<vector>/<axis>, plus the implementation's own checks (native: unsigned-map-equals-signed, key-encoding-count, property/*; probity: payload-digest)",
+  "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+  "controls": [
+    "control-key-encoding-01",
+    "control-definition-ask_wiki_question",
+    "control-case-tool-drift"
+  ],
+  "driver-files": {
+    "docs/standards/tool-manifest-digest-vectors-v1/compat/probity-pin.json": "a8b2f126764c92758e91522fc159c3b063979d5e7df0414573fbb86c6e17d0e9",
+    "docs/standards/tool-manifest-digest-vectors-v1/compat/probity_compat.py": "a50569bb2cd28d4f847f5d42083b3fb3ff2aa9be32f6ec6ec4f0e9a4e80b5b50",
+    "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py": "d2fb33a162143ccf3476ce1e9613226dfaf39549a3bbd2775bf8220ab770521f"
+  },
+  "implementation": "Probity signed-map reader (map_reader.py)",
+  "inputs": {
+    "vectors": {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    }
+  },
+  "key-source": "Probity's selection.json at the pinned commit, not the key in the vector file",
+  "pass-rule": "a check passes when the implementation's output equals the value the vector file states for it; otherwise it fails"
+}

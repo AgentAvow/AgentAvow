@@ -264,3 +264,4 @@ who performs it.
 ## See also
 
 - [v1-annotations](../tool-manifest-digest-vectors-v1-annotations/): a separate pinned packet adding an annotation-only drift case; this packet and its run records are unchanged.
+- [w3c-v01](w3c-v01/): the runs of this set by `verify.mjs`, the Probity reader and heldfast, written as v0.1 reports of the W3C Agent Conformance CG reporting format, with the command that re-runs them.

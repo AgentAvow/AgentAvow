@@ -1,0 +1,24 @@
+{
+  "command": "python3 emit.py --runner <runner> --runner-wrote <list> --out <dir> --python <python3.13+>",
+  "environment": {
+    "emitter-python": "3.14.3",
+    "node": "v22.22.0",
+    "os": "Darwin 27.0.0 arm64",
+    "reader-packages": {
+      "cryptography": "50.0.2",
+      "rfc8785": "0.1.4"
+    },
+    "reader-python": "3.14.3"
+  },
+  "note": "the only file that carries the runner and the environment; no clock is read",
+  "run-labels": {
+    "heldfast-profiles": "implementation written from the specification, run by the vector author",
+    "native-verify-mjs": "same implementation as the vector producer, run by the vector author",
+    "probity-map-reader": "implementation written from the specification, run by the vector author"
+  },
+  "runner": "Kenne Ives (AgentAvow)",
+  "runner-wrote": [
+    "native",
+    "vectors"
+  ]
+}
