@@ -31,7 +31,13 @@ Probity's reader needs Python 3.13 or newer (pass that interpreter as
 or newer.
 
 sha256 of `records/SHA256SUMS`:
-`c720c68a4dfe0f196ef132c8428649df11152d541403b342db37aad939acd82e`
+`0d47327bbaf5b172b8c3e30151df18920bd05ff0b9af21c08ec1153fa010eb3c`
+
+The records posted on 14 October were emitted at `fbbbd4a`, where this digest was
+`c720c68a4dfe0f196ef132c8428649df11152d541403b342db37aad939acd82e`. The only change
+since is the run label for other runners (see "Run it yourself"); every check
+result is the same. Because `emit.py` is pinned in each configuration, the
+configuration digests and therefore `SHA256SUMS` changed with it.
 
 ## What runs
 
@@ -168,9 +174,15 @@ for each implementation in `run.json`; it is declared, not checked.
 
 ## Run it yourself
 
-A run by someone who wrote neither the vectors nor the implementation under
-test is the only kind that would count as independent, and none exists yet. If
-you are in that position, run the command above with your own `--runner` and
+A run of the native verifier by anyone other than AgentAvow is a reproduction:
+it is the vector producer's own code. For the Probity and heldfast readers, a
+run by someone who wrote neither the vectors nor that reader is the nearest
+thing to an independent record this set has, with two limits: the expected
+answers are visible, and the readers run through our glue. The first such run
+was posted on 14 October (Nicolás Rocchia, from `fbbbd4a`, `--runner-wrote
+none`). Before this fix, `run.json` labelled all three of those runs "an
+independent run"; the native label now says reproduction. If you are in that
+position, run the command above with your own `--runner` and
 `--runner-wrote none`, and post your `SHA256SUMS` digest with your Node and
 Python versions. If your environment matches, every file except `run.json`
 and `SHA256SUMS` should be byte-identical to `records/`; if a report differs,

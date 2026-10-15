@@ -8,7 +8,7 @@
   "driver-files": {
     "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast-pin.json": "cd98f5b63132bfff170682e6f979296633f778ba032d5f40a1249f4915618002",
     "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast_compat.py": "f2949c2f90bed75e5b4c308799421140939e1861311679993aff0c953f1ff3af",
-    "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py": "d2fb33a162143ccf3476ce1e9613226dfaf39549a3bbd2775bf8220ab770521f"
+    "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py": "5ff729a8a94a8c346e39641a95b508158cbc29d186934d0cfabd83c8f81ef2d8"
   },
   "implementation": "heldfast agentavow.mcp-tool-definition.v1 profile (profiles.py)",
   "inputs": {
