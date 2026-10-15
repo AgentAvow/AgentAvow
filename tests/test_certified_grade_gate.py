@@ -116,6 +116,23 @@ def test_certified_status_drift_fails():
     assert status["checks"]["no_drift"] is False
 
 
+def test_certified_status_package_install_hook_fails_no_drift():
+    """A registry-only package scan has no repo diff (drift empty); its install hook
+    comes from the artifact summary and must still fail the no-hook check (core-js)."""
+    from src.scanner.scan import _certified_status
+
+    status = _certified_status(_clean_result(
+        drift={}, artifact_scan={"ok": True, "has_install_hook": True},
+    ))
+    assert status["eligible"] is False
+    assert status["checks"]["no_drift"] is False
+
+    status = _certified_status(_clean_result(
+        drift={}, artifact_scan={"ok": True, "has_install_hook": False},
+    ))
+    assert status["checks"]["no_drift"] is True
+
+
 def test_certified_status_sampled_fails_full_coverage():
     from src.scanner.scan import _certified_status
 

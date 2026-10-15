@@ -4025,9 +4025,12 @@ def _certified_status(result: ScanResult) -> dict:
             bool(prov.get("verified")) and bool(prov.get("source_matches_claim"))
         ),
         # 3. the published artifact matches its source (no injected/added files, no hook)
+        # A registry-only package scan has no repo to diff against (drift is empty), so
+        # its install hook is read from the artifact summary.
         "no_drift": not (
             drift.get("added_files") or drift.get("modified_files")
             or drift.get("has_install_hook")
+            or (getattr(result, "artifact_scan", None) or {}).get("has_install_hook")
         ),
         # 4. zero BLOCKING (shipped/known-malicious) critical or high, and no MAL dep.
         # Uses the blocking counts so Certified agrees with the headline number/grade —
