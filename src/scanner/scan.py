@@ -2478,6 +2478,23 @@ _PY_FETCH_SECRET_RE = re.compile(
     r"""https?://|os\.environ|getenv|password|passwd|token|secret""", re.IGNORECASE)
 
 
+# fetch()'s `credentials` option ('same-origin' | 'include' | 'omit') says whether the
+# browser sends cookies; it is not a credential being sent. Next.js inlines
+# `fetch(location.pathname+'?…',{credentials:'same-origin',headers:{…}})`.
+_FETCH_CREDENTIALS_OPTION_RE = re.compile(
+    r"""\bcredentials\s*:\s*(?:'|"|`|\\['"])(?:same-origin|include|omit)(?:'|"|`|\\['"])""",
+    re.IGNORECASE)
+
+
+def _only_fetch_credentials_option(line: str, pattern: re.Pattern[str]) -> bool:
+    """The exfil match rests only on fetch's `credentials` mode option: with every such
+    option removed the rule no longer matches. A real key/secret/token/password in the
+    same call still matches and is kept."""
+    if not _FETCH_CREDENTIALS_OPTION_RE.search(line):
+        return False
+    return not pattern.search(_FETCH_CREDENTIALS_OPTION_RE.sub("mode:''", line))
+
+
 def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
     """The exfil rule's ``fetch(`` branch is the JS global ``fetch``. Python has no
     global ``fetch``: there it is a local function or parameter (litellm's
@@ -3060,6 +3077,9 @@ def _scan_content(
                     continue
                 if name == "HTTP POST with sensitive data" and _py_local_fetch_only(
                         line, file_lang):
+                    continue
+                if (name == "HTTP POST with sensitive data"
+                        and _only_fetch_credentials_option(line, pattern)):
                     continue
                 # OAuth2 token exchange (client_secret/grant_type → token endpoint)
                 # is the required auth flow, not a leak. Relax ONLY the generic
