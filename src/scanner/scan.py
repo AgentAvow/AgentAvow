@@ -51,6 +51,7 @@ from src.scanner.patterns import (
     UNSAFE_EXEC_PATTERNS,
     UNTRUSTED_INPUT_RE,
 )
+from src.scanner.prefilter import AnyOf, LineFilter
 
 # Inline suppression marker — append to any line to skip scanning it
 _SUPPRESSION_COMMENT = "ag-scan:ignore"
@@ -685,7 +686,9 @@ def _js_cp_call_re(content: str) -> re.Pattern[str]:
     `<alias>.spawn(...)` for any alias this file binds. Before the precision pass the
     bare import was a file-wide high, which hid these; now that the import is only a
     capability, the calls themselves must be classified. Group 1 is the function name."""
-    aliases = {a for m in _JS_CP_ALIAS_RE.finditer(content) for a in m.groups() if a}
+    # (Both alias forms name the module, so a file without it has no alias.)
+    aliases = ({a for m in _JS_CP_ALIAS_RE.finditer(content) for a in m.groups() if a}
+               if "child_process" in content else set())
     quals = [r"require\s*\(\s*" + _JS_CP_MODULE + r"\s*\)"]
     quals += [r"(?<![\w$.])" + re.escape(a) for a in sorted(aliases)]
     return re.compile(r"(?:" + "|".join(quals) + r")\s*\.\s*" + _JS_CP_FUNCS + r"\s*\(")
@@ -700,6 +703,8 @@ def _js_defines_locally(content: str, name: str) -> bool:
     =>`` (not a ``require``/``import``), or a parameter ``function (exec)`` /
     ``(exec) =>``? Used only when the file never mentions child_process: then a bare
     ``exec(…)`` is that local function (wrap-ansi's line wrapper, a callback)."""
+    if name not in content:  # every pattern below needs the name verbatim
+        return False
     n = re.escape(name)
     if re.search(r"\bfunction\s*\*?\s*" + n + r"\s*\(", content):
         return True
@@ -1165,12 +1170,15 @@ _UNTRUSTED_DEF_RE = re.compile(
 )
 
 
-def _untrusted_lines(lines: list[str]) -> list[int]:
+def _untrusted_lines(lines: list[str], candidates=None) -> list[int]:
+    """``candidates``: the line indices UNTRUSTED_INPUT_RE can match on (from
+    ``LineFilter.lines``); None tries every line."""
     # A comment that mentions a webhook / fetch is not an ingestion point (next.js
     # run-tests.js: "parsed by the commenter webhook", precision PR 2).
-    return [i for i, ln in enumerate(lines)
-            if UNTRUSTED_INPUT_RE.search(ln) and not _UNTRUSTED_DEF_RE.search(ln)
-            and not ln.lstrip().startswith(("#", "//", "*", "/*"))]
+    idxs = range(len(lines)) if candidates is None else sorted(candidates)
+    return [i for i in idxs
+            if UNTRUSTED_INPUT_RE.search(lines[i]) and not _UNTRUSTED_DEF_RE.search(lines[i])
+            and not lines[i].lstrip().startswith(("#", "//", "*", "/*"))]
 
 
 def _near(idxs: list[int], idx: int, window: int) -> bool:
@@ -1204,6 +1212,8 @@ def _names_in(text: str) -> set[str]:
 
 
 def _uses_name(text: str, name: str) -> bool:
+    if name not in text:  # the regex below needs the name verbatim
+        return False
     return bool(re.search(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])", text))
 
 
@@ -2583,31 +2593,58 @@ def _scan_content(
     # prompt-injection / hidden-unicode there even if they look doc-ish.
     is_metadata = Path(file_path).name.lower() in AGENT_METADATA_FILES
     lines = content.split("\n")
+    # Which lines each regex can match on (see src/scanner/prefilter.py).
+    lf = LineFilter(content)
+
+    def _found(rx: re.Pattern[str]) -> bool:
+        """``bool(rx.search(content))`` (``LineFilter.search`` returns the same match)."""
+        return lf.search(rx) is not None
+
     # Precision pass #6: lines inside a Python docstring / multi-line string are prose
     # for the CODE pattern groups (exec, deserialization, fs, remote-load, exfil,
     # obfuscation). Secrets, hidden unicode and prompt injection still scan them.
-    tpl_continuation: set[int] = set()
-    if file_lang == "python":
-        prose_lines = _python_prose_lines(content)
-    elif file_lang in ("javascript", "typescript"):
-        prose_lines, tpl_continuation = _js_string_state(content)
-    else:
-        prose_lines = set()
+    # ``(prose_lines, tpl_continuation)``, computed on first use: a file with no line a
+    # code rule can match never needs it.
+    string_state: list[set[int]] = []
+
+    def _string_state() -> list[set[int]]:
+        if not string_state:
+            if file_lang == "python":
+                string_state.extend((_python_prose_lines(content), set()))
+            elif file_lang in ("javascript", "typescript"):
+                string_state.extend(_js_string_state(content))
+            else:
+                string_state.extend((set(), set()))
+        return string_state
+
     # Untrusted-input lines (request body / fetched content) for the "dynamic argv or
     # eval NEXT TO untrusted input" rules.
-    untrusted = _untrusted_lines(lines)
+    untrusted = _untrusted_lines(lines, lf.lines(UNTRUSTED_INPUT_RE))
     js_cp_call_re = _js_cp_call_re(content) if file_lang != "python" else None
-    has_cli_import = file_lang == "python" and bool(_CLI_IMPORT_RE.search(content))
-    js_cli = (_js_cli_expr_checker(content, lines)
-              if file_lang in ("javascript", "typescript") else None)
+    has_cli_import = file_lang == "python" and _found(_CLI_IMPORT_RE)
+    # The two JS helpers below are read only when a JS exec call is classified, so
+    # they are computed on first use (each is a pure function of the file).
+    js_lazy: dict[str, object] = {}
+
+    def _js_cli() -> object:
+        if "cli" not in js_lazy:
+            js_lazy["cli"] = (_js_cli_expr_checker(content, lines)
+                              if file_lang in ("javascript", "typescript") else None)
+        return js_lazy["cli"]
+
     # Precision PR 2: a bare JS `exec(` / `spawn(` / `fork(` is child_process only when
     # the file references the module at all — otherwise it is a local function (a
     # wrapAnsi helper, a `$exec` RegExp binding, an `exec` callback parameter).
     js_has_child_process = file_lang != "python" and "child_process" in content
-    js_local_cp_names = (
-        {n for n in _JS_AMBIGUOUS_CP if _js_defines_locally(content, n)}
-        if file_lang != "python" and not js_has_child_process else set()
-    )
+
+    def _js_local_cp_names() -> object:
+        if "local" not in js_lazy:
+            js_lazy["local"] = (
+                {n for n in _JS_AMBIGUOUS_CP if _js_defines_locally(content, n)}
+                if file_lang != "python" and not js_has_child_process else set()
+            )
+        return js_lazy["local"]
+
     # A TypeScript declaration file is types only: no code runs from it.
     is_declaration = file_path.lower().endswith((".d.ts", ".d.mts", ".d.cts"))
     # Lines swallowed by a multi-line exec call already classified at its first line —
@@ -2623,8 +2660,53 @@ def _scan_content(
         from src.scanner.rust_tests import rust_test_lines
         test_lines = rust_test_lines(content)
 
-    for line_num, line in enumerate(lines, 1):
-        idx = line_num - 1
+    # Per-line rule lists: each group's rules, minus those whose regex cannot match the
+    # line (it lacks every literal the regex requires; see src/scanner/prefilter.py),
+    # and, in the groups whose loop drops a language-tagged rule right after its search
+    # matches, minus the rules for other languages. Each loop below skips a rule whose
+    # search finds nothing, so trying only these rules gives the same findings.
+    def _other_lang(rule: tuple) -> bool:
+        return not _lang_ok(rule[0], file_lang)
+
+    exec_rules = UNSAFE_EXEC_PATTERNS
+    if js_cp_call_re is not None:
+        # "execSync / spawn (Node.js)" also fires on a call through a child_process
+        # alias; its line set is the union of both regexes' lines.
+        exec_rules = [
+            (n, AnyOf(p, js_cp_call_re), s) if n == "execSync / spawn (Node.js)"
+            else (n, p, s) for n, p, s in UNSAFE_EXEC_PATTERNS]
+    plans = [
+        lf.plan(SECRET_PATTERNS),
+        lf.plan(exec_rules, _other_lang),
+        lf.plan(INSECURE_DESERIALIZATION_PATTERNS, _other_lang),
+        lf.plan(FS_ACCESS_PATTERNS, _other_lang),
+        lf.plan(EXFILTRATION_PATTERNS),
+        lf.plan(DYNAMIC_REMOTE_LOAD_PATTERNS, _other_lang),
+        lf.plan(INVISIBLE_UNICODE_PATTERNS),
+        lf.plan(PROMPT_INJECTION_PATTERNS + (
+            METADATA_INJECTION_PATTERNS if (is_metadata or metadata_text) else [])),
+        lf.plan(OBFUSCATION_PATTERNS),
+    ]
+    (secret_plan, exec_plan, deser_plan, fs_plan, exfil_plan, remote_plan, unicode_plan,
+     injection_plan, obfuscation_plan) = ((p.table.get, p.default) for p in plans)
+    # A line no rule can match does nothing in the loop below unless it carries the
+    # suppression marker (counted even when nothing matches), so only these lines run.
+    if any(p.always_active for p in plans):
+        scan_idxs: list[int] | range = range(len(lines))
+    else:
+        scan_idxs = sorted(set().union(
+            *(p.table for p in plans), lf.lines_containing(_SUPPRESSION_COMMENT)))
+
+    for idx in scan_idxs:
+        line = lines[idx]
+        line_num = idx + 1
+        secret_rules = secret_plan[0](idx, secret_plan[1])
+        exec_rules_here = exec_plan[0](idx, exec_plan[1])
+        deser_rules = deser_plan[0](idx, deser_plan[1])
+        fs_rules = fs_plan[0](idx, fs_plan[1])
+        exfil_rules = exfil_plan[0](idx, exfil_plan[1])
+        remote_rules = remote_plan[0](idx, remote_plan[1])
+        obfuscation_rules = obfuscation_plan[0](idx, obfuscation_plan[1])
         if test_lines:
             in_test = idx in test_lines
             is_test_or_doc = file_test_or_doc or in_test
@@ -2633,7 +2715,18 @@ def _scan_content(
         stripped = line.strip()
         if stripped.startswith(("#", "//", "*", "/*")):
             continue
-        is_prose = idx in prose_lines or is_declaration
+        # Only the code groups read is_prose, and a line none of their regexes matches
+        # gives no finding either way: those lines skip the groups (and the
+        # string-state pass is never needed for them).
+        code_rules = (exec_rules_here, deser_rules, fs_rules, exfil_rules, remote_rules,
+                      obfuscation_rules)
+        if any(code_rules) and not any(
+                rule[1].search(line) for group in code_rules for rule in group):
+            exec_rules_here = deser_rules = fs_rules = ()
+            exfil_rules = remote_rules = obfuscation_rules = ()
+            is_prose = False
+        else:
+            is_prose = any(code_rules) and (idx in _string_state()[0] or is_declaration)
         # NOTE: (#6) we deliberately do NOT skip an entire line just because it contains
         # the word "example"/"placeholder" — that let an attacker neutralize any rule with
         # `# example` and silently ignored real code like
@@ -2655,7 +2748,7 @@ def _scan_content(
             # else: fall through — the critical/high finding is created below.
 
         # Check secrets
-        for name, pattern, severity in SECRET_PATTERNS:
+        for name, pattern, severity in secret_rules:
             match = pattern.search(line)
             if match:
                 # Skip if the MATCHED VALUE is clearly a placeholder (not the whole line).
@@ -2730,8 +2823,9 @@ def _scan_content(
 
         # Check unsafe exec (code group — skipped in docstrings; and a `def eval(` is a
         # definition, not the builtin).
-        if not is_prose and not _DEF_EVAL_EXEC_RE.search(stripped):
-            for name, pattern, severity in UNSAFE_EXEC_PATTERNS:
+        if exec_rules_here and not is_prose and not _DEF_EVAL_EXEC_RE.search(stripped):
+            for name, pattern, severity in exec_rules_here:
+                pattern = getattr(pattern, "first", pattern)
                 if not pattern.search(line) and not (
                     name == "execSync / spawn (Node.js)"
                     and js_cp_call_re is not None and js_cp_call_re.search(line)
@@ -2805,7 +2899,7 @@ def _scan_content(
                 elif name == "execSync / spawn (Node.js)":
                     cands = list(_JS_EXEC_CALL_RE.finditer(line)) + (
                         list(js_cp_call_re.finditer(line)) if js_cp_call_re is not None else [])
-                    tpl_in = "`" if idx in tpl_continuation else None
+                    tpl_in = "`" if idx in _string_state()[1] else None
                     code_hits = [c for c in cands
                                  if not _js_call_is_text_or_def(line, c.start(), tpl_in)]
                     if cands and not code_hits:
@@ -2813,12 +2907,12 @@ def _scan_content(
                         # `} // execSync()`) or a definition (`function execSync(cmd) {`).
                         continue
                     m = min(code_hits, key=lambda c: c.start()) if code_hits else None
-                    if (m and m.group(1) in js_local_cp_names
+                    if (m and m.group(1) in _js_local_cp_names()
                             and m.group(0).startswith(m.group(1))):
                         continue  # a local exec()/spawn()/fork(), not child_process
                     if m:
                         v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
-                                                 js_cli=js_cli)
+                                                 js_cli=_js_cli())
                         verdict = (v.kind, v.severity, v.label, v.capability)
                         payload = v.payload
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
@@ -2853,7 +2947,7 @@ def _scan_content(
         # capability; next to untrusted input it stays the original high. yaml.load /
         # allow_pickle / torch.load are unchanged.
         if not is_prose:
-            for name, pattern, severity in INSECURE_DESERIALIZATION_PATTERNS:
+            for name, pattern, severity in deser_rules:
                 if not pattern.search(line):
                     continue
                 if not _lang_ok(name, file_lang):
@@ -2903,7 +2997,7 @@ def _scan_content(
 
         # Check file system access
         if not is_prose:
-            for name, pattern, severity in FS_ACCESS_PATTERNS:
+            for name, pattern, severity in fs_rules:
                 if not pattern.search(line):
                     continue
                 # Language dispatch (#2)
@@ -2958,7 +3052,7 @@ def _scan_content(
                 break
 
         # Check data exfiltration
-        for name, pattern, severity in EXFILTRATION_PATTERNS:
+        for name, pattern, severity in exfil_rules:
             if is_prose:
                 break
             if pattern.search(line):
@@ -2992,7 +3086,7 @@ def _scan_content(
                 break
 
         # Check dynamic remote payload / rug-pull (external-URL-swap)
-        for name, pattern, severity in DYNAMIC_REMOTE_LOAD_PATTERNS:
+        for name, pattern, severity in remote_rules:
             if is_prose:
                 break
             dm = pattern.search(line)
@@ -3005,7 +3099,7 @@ def _scan_content(
                 # An `npx …` / branch-URL hint inside a string literal (an error
                 # message, a docstring line) is advice to a human, not a load.
                 if name.startswith("Unpinned") and _in_prose_string_at(
-                        line, dm.start(), "`" if idx in tpl_continuation else None):
+                        line, dm.start(), "`" if idx in _string_state()[1] else None):
                     continue
                 # A mutable branch URL is a rug-pull only when something LOADS it
                 # (fetch/urlopen/curl/pip/import within 2 lines); a `$id`, homepage
@@ -3019,7 +3113,7 @@ def _scan_content(
                     "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
-                        "`" if idx in tpl_continuation else None):
+                        "`" if idx in _string_state()[1] else None):
                     # Help text a CLI prints (`'  npx browserslist\n'`) or a maintainer
                     # package.json script (`"release": "npx npmpub"`) never runs on a
                     # consumer's machine (precision PR 2).
@@ -3076,13 +3170,13 @@ def _scan_content(
                 break
 
         # Check invisible / smuggled Unicode (dangerous anywhere — no downgrade)
-        for name, pattern, severity in INVISIBLE_UNICODE_PATTERNS:
+        for name, pattern, severity in unicode_plan[0](idx, unicode_plan[1]):
             if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
                 effective_severity = severity
                 if name.startswith("Bidirectional") and _bidi_cannot_reorder_code(
-                        line, idx in prose_lines, file_lang):
+                        line, idx in _string_state()[0], file_lang):
                     # Trojan Source deceives a human reading CODE: the reordering is per
                     # line. A line wholly inside a docstring / template / block comment
                     # has no code to reorder (bandit documents the attack in one); a
@@ -3100,9 +3194,7 @@ def _scan_content(
 
         # Check prompt injection / tool-description poisoning (metadata files also get the
         # wider tool-poisoning shapes that would be noisy on code lines).
-        injection_sets = PROMPT_INJECTION_PATTERNS + (
-            METADATA_INJECTION_PATTERNS if (is_metadata or metadata_text) else [])
-        for name, pattern, severity in injection_sets:
+        for name, pattern, severity in injection_plan[0](idx, injection_plan[1]):
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
@@ -3120,7 +3212,7 @@ def _scan_content(
                         and all(_INJECTION_TAG_ONLY_RE.fullmatch(mm.group(0))
                                 for mm in pattern.finditer(line))):
                     if declares_tools is None:
-                        declares_tools = bool(SSRF_TOOL_SURFACE_RE.search(content))
+                        declares_tools = _found(SSRF_TOOL_SURFACE_RE)
                     if not declares_tools:
                         effective_severity = "medium"
                 # A "System prompt:" LABEL whose only content is a format placeholder
@@ -3141,7 +3233,7 @@ def _scan_content(
                 break
 
         # Check code obfuscation
-        for name, pattern, severity in OBFUSCATION_PATTERNS:
+        for name, pattern, severity in obfuscation_rules:
             if is_prose:
                 break
             if pattern.search(line):
@@ -3220,8 +3312,8 @@ def _scan_content(
     # The three flow rules below are payload shapes: in a downgraded artifact file
     # (payload_mode) they run too, graded as shipped code.
     flow_rules = not is_downgraded or payload_mode
-    if flow_rules and NET_READ_RE.search(content) and EXEC_SINK_RE.search(content):
-        hit = _cooccur_flow(lines, prose_lines, NET_READ_RE.search, EXEC_SINK_RE, 40)
+    if flow_rules and _found(NET_READ_RE) and _found(EXEC_SINK_RE):
+        hit = _cooccur_flow(lines, _string_state()[0], NET_READ_RE.search, EXEC_SINK_RE, 40)
         if hit is not None:
             findings.append(Finding(
                 category="dynamic_remote_load",
@@ -3237,8 +3329,10 @@ def _scan_content(
     # debugger reads `cmd = request.args.get("cmd")`, passes it to
     # `self.execute_command(request, cmd, frame)`, which runs `frame.eval(command)`. A
     # flow, followed one call deep inside the file, not proximity.
-    if file_lang == "python" and untrusted and flow_rules:
-        f_eval = _untrusted_to_eval_method(lines, untrusted, prose_lines)
+    # (Only a line with an `.eval(` / `.exec(` method call can be the hit.)
+    if (file_lang == "python" and untrusted and flow_rules
+            and lf.may_match_a_line(_EVAL_METHOD_CALL_RE)):
+        f_eval = _untrusted_to_eval_method(lines, untrusted, _string_state()[0])
         if f_eval is not None:
             findings.append(Finding(
                 category="unsafe_exec",
@@ -3255,9 +3349,9 @@ def _scan_content(
     # Split decode->exec across lines: `payload = base64.b64decode(...)` then
     # `exec(payload)` a few lines later is the obfuscated loader (OSV MAL- family); the
     # one-line form is the "Decoded payload fed to exec/eval" pattern above.
-    if (flow_rules and DECODE_SINK_RE.search(content) and EXEC_SINK_RE.search(content)
+    if (flow_rules and _found(DECODE_SINK_RE) and _found(EXEC_SINK_RE)
             and not any(f.name == "Decoded payload fed to exec/eval" for f in findings)):
-        hit = _cooccur_flow(lines, prose_lines, _is_decode_line, _PY_EVAL_CALL_RE, 10,
+        hit = _cooccur_flow(lines, _string_state()[0], _is_decode_line, _PY_EVAL_CALL_RE, 10,
                             exclude_b=_DEF_EVAL_EXEC_RE)
         if hit is not None:
             findings.append(Finding(
@@ -3275,9 +3369,9 @@ def _scan_content(
     # low-confidence — the sandbox SSRF probe is the high-confidence detector. Fire once per
     # file, only on an MCP-tool surface with a url-shaped input, a variable-built request,
     # and NO guard token anywhere in the file.
-    if (SSRF_TOOL_SURFACE_RE.search(content) and SSRF_URL_INPUT_RE.search(content)
-            and SSRF_DYNAMIC_FETCH_RE.search(content)
-            and not SSRF_GUARD_RE.search(content)):
+    if (_found(SSRF_TOOL_SURFACE_RE) and _found(SSRF_URL_INPUT_RE)
+            and _found(SSRF_DYNAMIC_FETCH_RE)
+            and not _found(SSRF_GUARD_RE)):
         m = SSRF_DYNAMIC_FETCH_RE.search(content)
         line_no = content[:m.start()].count("\n") + 1
         findings.append(Finding(
@@ -3307,7 +3401,8 @@ def _scan_content(
     findings.extend(_scan_git_hooks(content, file_path))
 
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
-    findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
+    findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist,
+                                        lf=lf))
     findings.extend(_credential_exfil_findings(
         content, file_path, lines, file_lang, allowlist,
         payload=payload_mode and file_downgraded))
@@ -3326,7 +3421,12 @@ def _scan_content(
 
     # Check positive signals per-line, skipping comments and examples
     # (same filtering as negative patterns to prevent comment-trick gaming)
-    for line in lines:
+    positive_plan = lf.plan(AUTH_POSITIVE_PATTERNS)
+    positive_idxs = (range(len(lines)) if positive_plan.always_active
+                     else sorted(positive_plan.table))
+    for pidx in positive_idxs:
+        line = lines[pidx]
+        rules = positive_plan.table.get(pidx, positive_plan.default)
         stripped_pos = line.strip()
         if not stripped_pos:
             continue
@@ -3334,7 +3434,7 @@ def _scan_content(
             continue
         if "example" in stripped_pos.lower() or "placeholder" in stripped_pos.lower():
             continue
-        for name, pattern in AUTH_POSITIVE_PATTERNS:
+        for name, pattern in rules:
             if pattern.search(stripped_pos):
                 positives.append(name)
 
@@ -3697,6 +3797,8 @@ def _composite_findings(
     lines: list[str],
     is_test_or_doc: bool,
     allowlist: object,
+    *,
+    lf: LineFilter | None = None,
 ) -> list[Finding]:
     """#9 — the lethal trifecta: private-data read + untrusted input + outbound send.
 
@@ -3706,17 +3808,27 @@ def _composite_findings(
     reads an env key and posts to one endpoint, with no untrusted-content ingestion,
     does NOT trigger. Emits at most one finding per file.
     """
+    # ``lf`` (the caller's LineFilter over ``content``) only skips searches that cannot
+    # match: a regex whose required literals are absent from the file / the line.
+    if lf is None:
+        lf = LineFilter(content)
+
+    def _found(rx: re.Pattern[str]) -> bool:
+        return lf.search(rx) is not None
+
     # Cheap pre-check on the whole blob before the per-line pass
     if not (
-        UNTRUSTED_INPUT_RE.search(content)
-        and OUTBOUND_SEND_RE.search(content)
-        and (SENSITIVE_READ_RE.search(content) or FILE_READ_RE.search(content))
+        _found(UNTRUSTED_INPUT_RE)
+        and _found(OUTBOUND_SEND_RE)
+        and (_found(SENSITIVE_READ_RE) or _found(FILE_READ_RE))
     ):
         return []
 
     def _hits(rx: re.Pattern[str]) -> list[int]:
         out = []
-        for i, ln in enumerate(lines):
+        cand = lf.lines(rx)
+        for i in range(len(lines)) if cand is None else sorted(cand):
+            ln = lines[i]
             stripped = ln.strip()
             if not stripped or stripped.startswith(("#", "//", "*", "/*")):
                 continue
