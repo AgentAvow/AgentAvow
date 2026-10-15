@@ -1,0 +1,21 @@
+{
+  "check-ids": "definition-digest/<key>, definition-count, key-encoding/NN (index into the file's key_encoding), case/<vector>/<axis>, plus the implementation's own checks (native: unsigned-map-equals-signed, key-encoding-count, property/*; probity: payload-digest)",
+  "checker": "rufat325/heldfast@ca5a872264b486907ed5479247e5150c5122d33d/src/heldfast/profiles.py",
+  "controls": [
+    "control-key-encoding-01",
+    "control-definition-ask_wiki_question"
+  ],
+  "driver-files": {
+    "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast-pin.json": "cd98f5b63132bfff170682e6f979296633f778ba032d5f40a1249f4915618002",
+    "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast_compat.py": "f2949c2f90bed75e5b4c308799421140939e1861311679993aff0c953f1ff3af",
+    "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py": "d2fb33a162143ccf3476ce1e9613226dfaf39549a3bbd2775bf8220ab770521f"
+  },
+  "implementation": "heldfast agentavow.mcp-tool-definition.v1 profile (profiles.py)",
+  "inputs": {
+    "vectors": {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    }
+  },
+  "pass-rule": "a check passes when the implementation's output equals the value the vector file states for it; otherwise it fails"
+}

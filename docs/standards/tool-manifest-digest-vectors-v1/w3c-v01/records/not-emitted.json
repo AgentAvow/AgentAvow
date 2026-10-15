@@ -1,0 +1,9 @@
+[
+  {
+    "author": "APS (aeoess)",
+    "implementation": "APS-side consumer (agent-passport-system 7.2.0 primitives, examples/interop/agentavow)",
+    "reason": "No v1 run of this consumer has been reported. Its reported run is of the v0 vectors, and the v1 README lists it as awaiting a v1 report. There is no v1 result to record, and running its v0 example against the v1 file would not be its v1 run.",
+    "source": "https://github.com/aeoess/agent-passport-system/tree/fd47f34cc36fce060d092fe1216aff3f89fb8d88/examples/interop/agentavow",
+    "status": "not emitted"
+  }
+]

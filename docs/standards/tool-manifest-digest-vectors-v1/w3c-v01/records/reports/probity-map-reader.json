@@ -1,0 +1,794 @@
+{
+  "check-set": {
+    "digest-encoding": "jcs-sha256",
+    "leaf-count": 67,
+    "sha256": "b25206b6e7de32afa17773abe011cd5017d731e377f774aa727a8d52dcf9afd6",
+    "tree-shape": "flat"
+  },
+  "checks": [
+    {
+      "annotations": {
+        "expected": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+        "observed": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9"
+      },
+      "check": "definition-digest/tool:ask_wiki_question",
+      "discrimination": {
+        "ref": "e-control-definition-ask_wiki_question",
+        "value": "demonstrated"
+      },
+      "other-verdict": {
+        "ref": "e-control-definition-ask_wiki_question",
+        "value": "demonstrated"
+      },
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "sha256:3582a81089d120634d681ccf94e9ab7f15f471ddd48f4a82e06b05d10905d9c4",
+        "observed": "sha256:3582a81089d120634d681ccf94e9ab7f15f471ddd48f4a82e06b05d10905d9c4"
+      },
+      "check": "definition-digest/tool:read_wiki_contents",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "sha256:9bd57ff3e9534bbed54167ef1a74b2bc0e4b46128db28218767f0eed6e8f79a8",
+        "observed": "sha256:9bd57ff3e9534bbed54167ef1a74b2bc0e4b46128db28218767f0eed6e8f79a8"
+      },
+      "check": "definition-digest/tool:read_wiki_structure",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": 3,
+        "observed": 3
+      },
+      "check": "definition-count",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "5e159675e62845bd5411932a1f970ed08bb0ea768043cb898a8c2656bfd000fa",
+        "observed": "5e159675e62845bd5411932a1f970ed08bb0ea768043cb898a8c2656bfd000fa"
+      },
+      "check": "payload-digest",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:ask_wiki_question",
+        "name": "ask_wiki_question",
+        "observed": "tool:ask_wiki_question"
+      },
+      "check": "key-encoding/00",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:a%3Db",
+        "name": "a=b",
+        "observed": "tool:a%3Db"
+      },
+      "check": "key-encoding/01",
+      "discrimination": {
+        "ref": "e-control-key-encoding-01",
+        "value": "demonstrated"
+      },
+      "other-verdict": {
+        "ref": "e-control-key-encoding-01",
+        "value": "demonstrated"
+      },
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:x%25y",
+        "name": "x%y",
+        "observed": "tool:x%25y"
+      },
+      "check": "key-encoding/02",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:read%20file",
+        "name": "read file",
+        "observed": "tool:read%20file"
+      },
+      "check": "key-encoding/03",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:tab%09here",
+        "name": "tab\there",
+        "observed": "tool:tab%09here"
+      },
+      "check": "key-encoding/04",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:h%C3%A9llo",
+        "name": "héllo",
+        "observed": "tool:h%C3%A9llo"
+      },
+      "check": "key-encoding/05",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:search%20%F0%9F%99%82",
+        "name": "search 🙂",
+        "observed": "tool:search%20%F0%9F%99%82"
+      },
+      "check": "key-encoding/06",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "name": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "observed": "tool:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "check": "key-encoding/07",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc~a2efa32a90eaeb9b",
+        "name": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "observed": "tool:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc~a2efa32a90eaeb9b"
+      },
+      "check": "key-encoding/08",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~c2a908d98f5df987",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "observed": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~c2a908d98f5df987"
+      },
+      "check": "key-encoding/09",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9~2d18fe4b61f01139",
+        "name": "éééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "observed": "tool:%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9~2d18fe4b61f01139"
+      },
+      "check": "key-encoding/10",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%~cbaf05a1cc450848",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé",
+        "observed": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%~cbaf05a1cc450848"
+      },
+      "check": "key-encoding/11",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%C~a1a40b6757b6805f",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé",
+        "observed": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%C~a1a40b6757b6805f"
+      },
+      "check": "key-encoding/12",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-match/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-match/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-match/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-match/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-match/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-match/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-match/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/unknown-tool/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/unknown-tool/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/unknown-tool/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/unknown-tool/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "not_evaluated",
+        "observed": "not_evaluated"
+      },
+      "check": "case/unknown-tool/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/unknown-tool/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/unknown-tool/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-drift/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-drift/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-drift/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-drift/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/tool-drift/tool_digest_binds",
+      "discrimination": {
+        "ref": "e-control-case-tool-drift",
+        "value": "demonstrated"
+      },
+      "other-verdict": {
+        "ref": "e-control-case-tool-drift",
+        "value": "demonstrated"
+      },
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tool-drift/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/tool-drift/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/wrong-subject/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/wrong-subject/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/wrong-subject/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/wrong-subject/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/wrong-subject/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/wrong-subject/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/wrong-subject/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/past-expiry/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/past-expiry/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/past-expiry/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/past-expiry/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/past-expiry/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/past-expiry/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/past-expiry/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/tampered-payload/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tampered-payload/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tampered-payload/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tampered-payload/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tampered-payload/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/tampered-payload/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false
+      },
+      "check": "case/tampered-payload/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/boundary-fresh/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/boundary-fresh/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/boundary-fresh/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/boundary-fresh/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/boundary-fresh/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/boundary-fresh/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true
+      },
+      "check": "case/boundary-fresh/rely",
+      "state": "pass"
+    }
+  ],
+  "claim-ceiling": {
+    "source": "https://github.com/probityai/agent-evidence-vectors/tree/d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/README.md",
+    "stated_by": "Probity, in the reader README at the pinned commit",
+    "text": "The emitted pin is a static-definition input, not invocation authorization, a runtime result or independent custody. The 64-bit suffix does not prove injectivity of truncated keys. This remains a candidate consumer extraction policy, not AgentAvow or APS adoption."
+  },
+  "domain": {
+    "description": "the tool-manifest-digest v1 vector file (docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json, sha256 48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3), and the control inputs derived from it by the single changes listed in controls.json",
+    "id": "d-tmd-v1-48cf831840fc81db"
+  },
+  "evidence": [
+    {
+      "changed": "input artifact",
+      "compared": [
+        "verdict"
+      ],
+      "delta": {
+        "changes": [
+          {
+            "field": "/observed_tools/0/description",
+            "from": "Ask any question about a GitHub repository's codebase and get an AI-powered answer\ngrounded in its DeepWiki.",
+            "to": "Ask any question about a GitHub repository's codebase and get an AI-powered answer\ngrounded in its DeepWiki. This sentence was added after the grade."
+          }
+        ]
+      },
+      "fixed": {
+        "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+        "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14",
+        "domain": "d-tmd-v1-48cf831840fc81db"
+      },
+      "id": "e-control-definition-ask_wiki_question",
+      "moved": [
+        "verdict"
+      ],
+      "observations": [
+        {
+          "carried": {
+            "input": {
+              "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+              "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+            },
+            "rules": [],
+            "verdict": "pass"
+          }
+        },
+        {
+          "carried": {
+            "input": {
+              "ref": "controls/control-definition-ask_wiki_question.json",
+              "sha256": "2edc74755734ad6960b4474463deaaa0ca570e08dcf59e7e9f2bdb56f90c8447"
+            },
+            "rules": [],
+            "verdict": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "changed": "input artifact",
+      "compared": [
+        "verdict"
+      ],
+      "delta": {
+        "changes": [
+          {
+            "field": "/key_encoding/1/key",
+            "from": "tool:a%3Db",
+            "to": "tool:a=b"
+          }
+        ]
+      },
+      "fixed": {
+        "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+        "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14",
+        "domain": "d-tmd-v1-48cf831840fc81db"
+      },
+      "id": "e-control-key-encoding-01",
+      "moved": [
+        "verdict"
+      ],
+      "observations": [
+        {
+          "carried": {
+            "input": {
+              "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+              "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+            },
+            "rules": [],
+            "verdict": "pass"
+          }
+        },
+        {
+          "carried": {
+            "input": {
+              "ref": "controls/control-key-encoding-01.json",
+              "sha256": "ab3365fb6cb7e42f35457aa8b1b7d3f154a17ef0b61f99c460857cd1f52d53ac"
+            },
+            "rules": [],
+            "verdict": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "changed": "input artifact",
+      "compared": [
+        "verdict"
+      ],
+      "delta": {
+        "changes": [
+          {
+            "field": "/vectors/2/expect/tool_digest_binds",
+            "from": false,
+            "to": true
+          }
+        ]
+      },
+      "fixed": {
+        "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+        "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14",
+        "domain": "d-tmd-v1-48cf831840fc81db"
+      },
+      "id": "e-control-case-tool-drift",
+      "moved": [
+        "verdict"
+      ],
+      "observations": [
+        {
+          "carried": {
+            "input": {
+              "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+              "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+            },
+            "rules": [],
+            "verdict": "pass"
+          }
+        },
+        {
+          "carried": {
+            "input": {
+              "ref": "controls/control-case-tool-drift.json",
+              "sha256": "f25b6a5e56a19f03b31b3bcac6f369b22bd2ecfbb692673315181fd41bcfdb5c"
+            },
+            "rules": [],
+            "verdict": "fail"
+          }
+        }
+      ]
+    }
+  ],
+  "fixed": {
+    "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+    "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14"
+  },
+  "format": "public-agent-conformance/report/v0.1",
+  "producer": {
+    "author": "Probity (probityai)",
+    "implementation": "Probity signed-map reader (map_reader.py)",
+    "relationship-to-vectors": "implementation written from the specification",
+    "source": "https://github.com/probityai/agent-evidence-vectors/tree/d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1"
+  },
+  "roll-up": {
+    "carried": 6,
+    "completeness": {
+      "accounting": {
+        "claim": "satisfied",
+        "population": 67
+      },
+      "evidence": {
+        "claim": "not-satisfied",
+        "population": 67
+      },
+      "execution": {
+        "claim": "satisfied",
+        "population": 67
+      },
+      "no-void": {
+        "claim": "satisfied",
+        "population": 67
+      }
+    },
+    "declared": 67,
+    "exercised": 67,
+    "fail": 0,
+    "inconclusive": 0,
+    "negative-capable": {
+      "control": {
+        "checks": [
+          "definition-digest/tool:ask_wiki_question",
+          "key-encoding/01",
+          "case/tool-drift/tool_digest_binds"
+        ],
+        "fixed": {
+          "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+          "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14"
+        },
+        "fixtures": [
+          "control-key-encoding-01/probity-map-reader",
+          "control-definition-ask_wiki_question/probity-map-reader",
+          "control-case-tool-drift/probity-map-reader"
+        ],
+        "state": "fail"
+      },
+      "kind": "control-failed"
+    },
+    "not-exercised": 0,
+    "pass": 67,
+    "referenced": 0,
+    "void": 0
+  },
+  "scope": "byte agreement between this implementation's output and the expected values in the pinned v1 vector file, on those pinned inputs only. It says nothing about AgentAvow's safety grades, trust scores or answers, and nothing about any tool other than the one pinned server's three served definitions.",
+  "spec": "https://lists.w3.org/Archives/Public/public-agent-conformance/2026Sep/0087.html"
+}

@@ -1,0 +1,940 @@
+{
+  "check-set": {
+    "digest-encoding": "jcs-sha256",
+    "leaf-count": 76,
+    "sha256": "77d04b5cc5b81e41982a29c90f15acd7767f0bb39ac6638fefecbf1a5390021e",
+    "tree-shape": "flat"
+  },
+  "checks": [
+    {
+      "annotations": {
+        "expected": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+        "observed": "sha256:171a53c9725874258b0b1125bc1d1c517e1b02f91a236096a37f53cc3a763dc9",
+        "reader-line": "ok    tool:ask_wiki_question"
+      },
+      "check": "definition-digest/tool:ask_wiki_question",
+      "discrimination": {
+        "ref": "e-control-definition-ask_wiki_question",
+        "value": "demonstrated"
+      },
+      "other-verdict": {
+        "ref": "e-control-definition-ask_wiki_question",
+        "value": "demonstrated"
+      },
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "sha256:3582a81089d120634d681ccf94e9ab7f15f471ddd48f4a82e06b05d10905d9c4",
+        "observed": "sha256:3582a81089d120634d681ccf94e9ab7f15f471ddd48f4a82e06b05d10905d9c4",
+        "reader-line": "ok    tool:read_wiki_contents"
+      },
+      "check": "definition-digest/tool:read_wiki_contents",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "sha256:9bd57ff3e9534bbed54167ef1a74b2bc0e4b46128db28218767f0eed6e8f79a8",
+        "observed": "sha256:9bd57ff3e9534bbed54167ef1a74b2bc0e4b46128db28218767f0eed6e8f79a8",
+        "reader-line": "ok    tool:read_wiki_structure"
+      },
+      "check": "definition-digest/tool:read_wiki_structure",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": 3,
+        "observed": 3,
+        "reader-line": "ok    served tool count equals signed tool count"
+      },
+      "check": "definition-count",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    unsigned toolDigests map equals the signed scan.toolDigests"
+      },
+      "check": "unsigned-map-equals-signed",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": 13,
+        "observed": 13,
+        "reader-line": "ok    key_encoding pair count"
+      },
+      "check": "key-encoding-count",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:ask_wiki_question",
+        "name": "ask_wiki_question",
+        "observed": "tool:ask_wiki_question",
+        "reader-line": "ok    \"ask_wiki_question\" -> tool:ask_wiki_question"
+      },
+      "check": "key-encoding/00",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:a%3Db",
+        "name": "a=b",
+        "observed": "tool:a%3Db",
+        "reader-line": "ok    \"a=b\" -> tool:a%3Db"
+      },
+      "check": "key-encoding/01",
+      "discrimination": {
+        "ref": "e-control-key-encoding-01",
+        "value": "demonstrated"
+      },
+      "other-verdict": {
+        "ref": "e-control-key-encoding-01",
+        "value": "demonstrated"
+      },
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:x%25y",
+        "name": "x%y",
+        "observed": "tool:x%25y",
+        "reader-line": "ok    \"x%y\" -> tool:x%25y"
+      },
+      "check": "key-encoding/02",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:read%20file",
+        "name": "read file",
+        "observed": "tool:read%20file",
+        "reader-line": "ok    \"read file\" -> tool:read%20file"
+      },
+      "check": "key-encoding/03",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:tab%09here",
+        "name": "tab\there",
+        "observed": "tool:tab%09here",
+        "reader-line": "ok    \"tab\\there\" -> tool:tab%09here"
+      },
+      "check": "key-encoding/04",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:h%C3%A9llo",
+        "name": "héllo",
+        "observed": "tool:h%C3%A9llo",
+        "reader-line": "ok    \"héllo\" -> tool:h%C3%A9llo"
+      },
+      "check": "key-encoding/05",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:search%20%F0%9F%99%82",
+        "name": "search 🙂",
+        "observed": "tool:search%20%F0%9F%99%82",
+        "reader-line": "ok    \"search 🙂\" -> tool:search%20%F0%9F%99%82"
+      },
+      "check": "key-encoding/06",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "name": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "observed": "tool:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "reader-line": "ok    \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\" -> tool:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "check": "key-encoding/07",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc~a2efa32a90eaeb9b",
+        "name": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "observed": "tool:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc~a2efa32a90eaeb9b",
+        "reader-line": "ok    \"ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\" -> tool:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc~a2efa32a90eaeb9b"
+      },
+      "check": "key-encoding/08",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~c2a908d98f5df987",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "observed": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~c2a908d98f5df987",
+        "reader-line": "ok    \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" -> tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~c2a908d98f5df987"
+      },
+      "check": "key-encoding/09",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9~2d18fe4b61f01139",
+        "name": "éééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "observed": "tool:%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9~2d18fe4b61f01139",
+        "reader-line": "ok    \"éééééééééééééééééééééééééééééééééééééééééééééééééé\" -> tool:%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9~2d18fe4b61f01139"
+      },
+      "check": "key-encoding/10",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%~cbaf05a1cc450848",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé",
+        "observed": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%~cbaf05a1cc450848",
+        "reader-line": "ok    \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé\" -> tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%~cbaf05a1cc450848"
+      },
+      "check": "key-encoding/11",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%C~a1a40b6757b6805f",
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé",
+        "observed": "tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%C~a1a40b6757b6805f",
+        "reader-line": "ok    \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé\" -> tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%C~a1a40b6757b6805f"
+      },
+      "check": "key-encoding/12",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-match: signature_valid"
+      },
+      "check": "case/tool-match/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-match: canonical_bytes"
+      },
+      "check": "case/tool-match/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-match: subject_binds"
+      },
+      "check": "case/tool-match/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-match: tool_binds"
+      },
+      "check": "case/tool-match/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-match: tool_digest_binds"
+      },
+      "check": "case/tool-match/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-match: fresh"
+      },
+      "check": "case/tool-match/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-match: rely"
+      },
+      "check": "case/tool-match/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    unknown-tool: signature_valid"
+      },
+      "check": "case/unknown-tool/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    unknown-tool: canonical_bytes"
+      },
+      "check": "case/unknown-tool/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    unknown-tool: subject_binds"
+      },
+      "check": "case/unknown-tool/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    unknown-tool: tool_binds"
+      },
+      "check": "case/unknown-tool/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": "not_evaluated",
+        "observed": "not_evaluated",
+        "reader-line": "ok    unknown-tool: tool_digest_binds"
+      },
+      "check": "case/unknown-tool/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    unknown-tool: fresh"
+      },
+      "check": "case/unknown-tool/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    unknown-tool: rely"
+      },
+      "check": "case/unknown-tool/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-drift: signature_valid"
+      },
+      "check": "case/tool-drift/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-drift: canonical_bytes"
+      },
+      "check": "case/tool-drift/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-drift: subject_binds"
+      },
+      "check": "case/tool-drift/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-drift: tool_binds"
+      },
+      "check": "case/tool-drift/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    tool-drift: tool_digest_binds"
+      },
+      "check": "case/tool-drift/tool_digest_binds",
+      "discrimination": {
+        "ref": "e-control-case-tool-drift",
+        "value": "demonstrated"
+      },
+      "other-verdict": {
+        "ref": "e-control-case-tool-drift",
+        "value": "demonstrated"
+      },
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tool-drift: fresh"
+      },
+      "check": "case/tool-drift/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    tool-drift: rely"
+      },
+      "check": "case/tool-drift/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    wrong-subject: signature_valid"
+      },
+      "check": "case/wrong-subject/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    wrong-subject: canonical_bytes"
+      },
+      "check": "case/wrong-subject/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    wrong-subject: subject_binds"
+      },
+      "check": "case/wrong-subject/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    wrong-subject: tool_binds"
+      },
+      "check": "case/wrong-subject/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    wrong-subject: tool_digest_binds"
+      },
+      "check": "case/wrong-subject/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    wrong-subject: fresh"
+      },
+      "check": "case/wrong-subject/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    wrong-subject: rely"
+      },
+      "check": "case/wrong-subject/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    past-expiry: signature_valid"
+      },
+      "check": "case/past-expiry/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    past-expiry: canonical_bytes"
+      },
+      "check": "case/past-expiry/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    past-expiry: subject_binds"
+      },
+      "check": "case/past-expiry/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    past-expiry: tool_binds"
+      },
+      "check": "case/past-expiry/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    past-expiry: tool_digest_binds"
+      },
+      "check": "case/past-expiry/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    past-expiry: fresh"
+      },
+      "check": "case/past-expiry/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    past-expiry: rely"
+      },
+      "check": "case/past-expiry/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    tampered-payload: signature_valid"
+      },
+      "check": "case/tampered-payload/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tampered-payload: canonical_bytes"
+      },
+      "check": "case/tampered-payload/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tampered-payload: subject_binds"
+      },
+      "check": "case/tampered-payload/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tampered-payload: tool_binds"
+      },
+      "check": "case/tampered-payload/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tampered-payload: tool_digest_binds"
+      },
+      "check": "case/tampered-payload/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    tampered-payload: fresh"
+      },
+      "check": "case/tampered-payload/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": false,
+        "observed": false,
+        "reader-line": "ok    tampered-payload: rely"
+      },
+      "check": "case/tampered-payload/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    boundary-fresh: signature_valid"
+      },
+      "check": "case/boundary-fresh/signature_valid",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    boundary-fresh: canonical_bytes"
+      },
+      "check": "case/boundary-fresh/canonical_bytes",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    boundary-fresh: subject_binds"
+      },
+      "check": "case/boundary-fresh/subject_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    boundary-fresh: tool_binds"
+      },
+      "check": "case/boundary-fresh/tool_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    boundary-fresh: tool_digest_binds"
+      },
+      "check": "case/boundary-fresh/tool_digest_binds",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    boundary-fresh: fresh"
+      },
+      "check": "case/boundary-fresh/fresh",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    boundary-fresh: rely"
+      },
+      "check": "case/boundary-fresh/rely",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    positive case relies"
+      },
+      "check": "property/positive-case-relies",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    a tool the scan never saw does not bind, and its digest is not evaluated"
+      },
+      "check": "property/unknown-tool-does-not-bind",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    a changed definition for a known tool does not bind"
+      },
+      "check": "property/changed-definition-does-not-bind",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    a grade for one server cannot be re-attached to another"
+      },
+      "check": "property/wrong-subject-does-not-bind",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    a signed verdict does not verify forever"
+      },
+      "check": "property/expiry-applies",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    canonical form is not authenticity: tampered payload is canonical yet unsigned"
+      },
+      "check": "property/canonical-is-not-authentic",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    a gate time inside the window by a sub-millisecond remainder is fresh and relies"
+      },
+      "check": "property/boundary-fresh-relies",
+      "state": "pass"
+    },
+    {
+      "annotations": {
+        "expected": true,
+        "observed": true,
+        "reader-line": "ok    every negative fails exactly one axis"
+      },
+      "check": "property/negatives-fail-one-axis",
+      "state": "pass"
+    }
+  ],
+  "claim-ceiling": {
+    "stated_by": "AgentAvow, in the vector file's claim_ceiling field",
+    "text": "rely=true establishes exactly this: at evaluation_time, the named issuer had signed a static-analysis grade for this server, the grade covered a tool of this name, the definition the gate was served for that tool is the one the scan graded, and the signature, subject and validity window all check. It establishes nothing about runtime behavior, nothing about what the tool does when invoked, nothing about other tools on the server, and nothing about definitions the scan did not observe. Whether a gate proceeds on rely=true is a separately versioned admission policy."
+  },
+  "domain": {
+    "description": "the tool-manifest-digest v1 vector file (docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json, sha256 48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3), and the control inputs derived from it by the single changes listed in controls.json",
+    "id": "d-tmd-v1-48cf831840fc81db"
+  },
+  "evidence": [
+    {
+      "changed": "input artifact",
+      "compared": [
+        "verdict"
+      ],
+      "delta": {
+        "changes": [
+          {
+            "field": "/observed_tools/0/description",
+            "from": "Ask any question about a GitHub repository's codebase and get an AI-powered answer\ngrounded in its DeepWiki.",
+            "to": "Ask any question about a GitHub repository's codebase and get an AI-powered answer\ngrounded in its DeepWiki. This sentence was added after the grade."
+          }
+        ]
+      },
+      "fixed": {
+        "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+        "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3",
+        "domain": "d-tmd-v1-48cf831840fc81db"
+      },
+      "id": "e-control-definition-ask_wiki_question",
+      "moved": [
+        "verdict"
+      ],
+      "observations": [
+        {
+          "carried": {
+            "input": {
+              "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+              "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+            },
+            "rules": [],
+            "verdict": "pass"
+          }
+        },
+        {
+          "carried": {
+            "input": {
+              "ref": "controls/control-definition-ask_wiki_question.json",
+              "sha256": "2edc74755734ad6960b4474463deaaa0ca570e08dcf59e7e9f2bdb56f90c8447"
+            },
+            "rules": [],
+            "verdict": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "changed": "input artifact",
+      "compared": [
+        "verdict"
+      ],
+      "delta": {
+        "changes": [
+          {
+            "field": "/key_encoding/1/key",
+            "from": "tool:a%3Db",
+            "to": "tool:a=b"
+          }
+        ]
+      },
+      "fixed": {
+        "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+        "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3",
+        "domain": "d-tmd-v1-48cf831840fc81db"
+      },
+      "id": "e-control-key-encoding-01",
+      "moved": [
+        "verdict"
+      ],
+      "observations": [
+        {
+          "carried": {
+            "input": {
+              "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+              "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+            },
+            "rules": [],
+            "verdict": "pass"
+          }
+        },
+        {
+          "carried": {
+            "input": {
+              "ref": "controls/control-key-encoding-01.json",
+              "sha256": "ab3365fb6cb7e42f35457aa8b1b7d3f154a17ef0b61f99c460857cd1f52d53ac"
+            },
+            "rules": [],
+            "verdict": "fail"
+          }
+        }
+      ]
+    },
+    {
+      "changed": "input artifact",
+      "compared": [
+        "verdict"
+      ],
+      "delta": {
+        "changes": [
+          {
+            "field": "/vectors/2/expect/tool_digest_binds",
+            "from": false,
+            "to": true
+          }
+        ]
+      },
+      "fixed": {
+        "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+        "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3",
+        "domain": "d-tmd-v1-48cf831840fc81db"
+      },
+      "id": "e-control-case-tool-drift",
+      "moved": [
+        "verdict"
+      ],
+      "observations": [
+        {
+          "carried": {
+            "input": {
+              "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+              "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+            },
+            "rules": [],
+            "verdict": "pass"
+          }
+        },
+        {
+          "carried": {
+            "input": {
+              "ref": "controls/control-case-tool-drift.json",
+              "sha256": "f25b6a5e56a19f03b31b3bcac6f369b22bd2ecfbb692673315181fd41bcfdb5c"
+            },
+            "rules": [],
+            "verdict": "fail"
+          }
+        }
+      ]
+    }
+  ],
+  "fixed": {
+    "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+    "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3"
+  },
+  "format": "public-agent-conformance/report/v0.1",
+  "producer": {
+    "author": "AgentAvow",
+    "implementation": "verify.mjs (AgentAvow native verifier)",
+    "relationship-to-vectors": "same implementation as the vector producer"
+  },
+  "roll-up": {
+    "carried": 6,
+    "completeness": {
+      "accounting": {
+        "claim": "satisfied",
+        "population": 76
+      },
+      "evidence": {
+        "claim": "not-satisfied",
+        "population": 76
+      },
+      "execution": {
+        "claim": "satisfied",
+        "population": 76
+      },
+      "no-void": {
+        "claim": "satisfied",
+        "population": 76
+      }
+    },
+    "declared": 76,
+    "exercised": 76,
+    "fail": 0,
+    "inconclusive": 0,
+    "negative-capable": {
+      "control": {
+        "checks": [
+          "definition-digest/tool:ask_wiki_question",
+          "key-encoding/01",
+          "case/tool-drift/tool_digest_binds"
+        ],
+        "fixed": {
+          "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+          "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3"
+        },
+        "fixtures": [
+          "control-key-encoding-01/native-verify-mjs",
+          "control-definition-ask_wiki_question/native-verify-mjs",
+          "control-case-tool-drift/native-verify-mjs"
+        ],
+        "state": "fail"
+      },
+      "kind": "control-failed"
+    },
+    "not-exercised": 0,
+    "pass": 76,
+    "referenced": 0,
+    "void": 0
+  },
+  "scope": "byte agreement between this implementation's output and the expected values in the pinned v1 vector file, on those pinned inputs only. It says nothing about AgentAvow's safety grades, trust scores or answers, and nothing about any tool other than the one pinned server's three served definitions.",
+  "spec": "https://lists.w3.org/Archives/Public/public-agent-conformance/2026Sep/0087.html"
+}
