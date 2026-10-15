@@ -9,7 +9,7 @@
   "driver-files": {
     "docs/standards/tool-manifest-digest-vectors-v1/compat/probity-pin.json": "a8b2f126764c92758e91522fc159c3b063979d5e7df0414573fbb86c6e17d0e9",
     "docs/standards/tool-manifest-digest-vectors-v1/compat/probity_compat.py": "a50569bb2cd28d4f847f5d42083b3fb3ff2aa9be32f6ec6ec4f0e9a4e80b5b50",
-    "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py": "d2fb33a162143ccf3476ce1e9613226dfaf39549a3bbd2775bf8220ab770521f"
+    "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py": "5ff729a8a94a8c346e39641a95b508158cbc29d186934d0cfabd83c8f81ef2d8"
   },
   "implementation": "Probity signed-map reader (map_reader.py)",
   "inputs": {

@@ -606,7 +606,7 @@
       },
       "fixed": {
         "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
-        "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14",
+        "constraint-set": "configs/probity-map-reader.json@sha256:48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415",
         "domain": "d-tmd-v1-48cf831840fc81db"
       },
       "id": "e-control-definition-ask_wiki_question",
@@ -652,7 +652,7 @@
       },
       "fixed": {
         "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
-        "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14",
+        "constraint-set": "configs/probity-map-reader.json@sha256:48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415",
         "domain": "d-tmd-v1-48cf831840fc81db"
       },
       "id": "e-control-key-encoding-01",
@@ -698,7 +698,7 @@
       },
       "fixed": {
         "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
-        "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14",
+        "constraint-set": "configs/probity-map-reader.json@sha256:48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415",
         "domain": "d-tmd-v1-48cf831840fc81db"
       },
       "id": "e-control-case-tool-drift",
@@ -731,7 +731,7 @@
   ],
   "fixed": {
     "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
-    "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14"
+    "constraint-set": "configs/probity-map-reader.json@sha256:48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
   },
   "format": "public-agent-conformance/report/v0.1",
   "producer": {
@@ -773,7 +773,7 @@
         ],
         "fixed": {
           "checker": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
-          "constraint-set": "configs/probity-map-reader.json@sha256:2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14"
+          "constraint-set": "configs/probity-map-reader.json@sha256:48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
         },
         "fixtures": [
           "control-key-encoding-01/probity-map-reader",

@@ -29,7 +29,7 @@
     "target_check": {
       "check_id": "key-encoding/01",
       "checker_revision": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
-      "config_digest": "8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3"
+      "config_digest": "1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
     },
     "why_must_fail": "the expected key for the name a=b is written with = left literal, and the key rule percent-encodes = as %3D, so a correct encoder disagrees with it"
   },
@@ -63,7 +63,7 @@
     "target_check": {
       "check_id": "definition-digest/tool:ask_wiki_question",
       "checker_revision": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
-      "config_digest": "8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3"
+      "config_digest": "1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
     },
     "why_must_fail": "the served definition of ask_wiki_question has a sentence appended to its description, so its digest no longer equals the signed one"
   },
@@ -97,7 +97,7 @@
     "target_check": {
       "check_id": "case/tool-drift/tool_digest_binds",
       "checker_revision": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
-      "config_digest": "8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3"
+      "config_digest": "1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
     },
     "why_must_fail": "the tool-drift case expects tool_digest_binds true, but the definition the gate names differs from the signed one, so a correct reader computes false"
   },
@@ -131,7 +131,7 @@
     "target_check": {
       "check_id": "key-encoding/01",
       "checker_revision": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
-      "config_digest": "2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14"
+      "config_digest": "48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
     },
     "why_must_fail": "the expected key for the name a=b is written with = left literal, and the key rule percent-encodes = as %3D, so a correct encoder disagrees with it"
   },
@@ -165,7 +165,7 @@
     "target_check": {
       "check_id": "definition-digest/tool:ask_wiki_question",
       "checker_revision": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
-      "config_digest": "2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14"
+      "config_digest": "48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
     },
     "why_must_fail": "the served definition of ask_wiki_question has a sentence appended to its description, so its digest no longer equals the signed one"
   },
@@ -199,7 +199,7 @@
     "target_check": {
       "check_id": "case/tool-drift/tool_digest_binds",
       "checker_revision": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
-      "config_digest": "2e85691005fa73da80f42a81a1e3fbaba1d4ff052ffe5f28a4f6f45220689e14"
+      "config_digest": "48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
     },
     "why_must_fail": "the tool-drift case expects tool_digest_binds true, but the definition the gate names differs from the signed one, so a correct reader computes false"
   },
@@ -233,7 +233,7 @@
     "target_check": {
       "check_id": "key-encoding/01",
       "checker_revision": "rufat325/heldfast@ca5a872264b486907ed5479247e5150c5122d33d/src/heldfast/profiles.py",
-      "config_digest": "6155afc18c054f8bb15d330c7833ab900d4712c0d7a28bd0ac0fe25953010494"
+      "config_digest": "bf7e2345181367b267830ec025416bf9cf884a8f9388af7e3a1fdc697659ab7a"
     },
     "why_must_fail": "the expected key for the name a=b is written with = left literal, and the key rule percent-encodes = as %3D, so a correct encoder disagrees with it"
   },
@@ -267,7 +267,7 @@
     "target_check": {
       "check_id": "definition-digest/tool:ask_wiki_question",
       "checker_revision": "rufat325/heldfast@ca5a872264b486907ed5479247e5150c5122d33d/src/heldfast/profiles.py",
-      "config_digest": "6155afc18c054f8bb15d330c7833ab900d4712c0d7a28bd0ac0fe25953010494"
+      "config_digest": "bf7e2345181367b267830ec025416bf9cf884a8f9388af7e3a1fdc697659ab7a"
     },
     "why_must_fail": "the served definition of ask_wiki_question has a sentence appended to its description, so its digest no longer equals the signed one"
   }

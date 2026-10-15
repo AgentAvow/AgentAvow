@@ -587,9 +587,15 @@ def runner_label(impl: dict[str, Any], wrote: set[str]) -> str:
         who = "run by the vector author"
     elif impl["wrote_key"] in wrote:
         who = "run by the implementation author"
+    elif impl["wrote_key"] == "native":
+        # The native verifier is the vector producer's own code, so another operator's
+        # run of it is a reproduction (O8), never independent.
+        return f"{impl['relationship']}, run by another operator (a reproduction, " \
+               "not an independent run)"
     else:
         return f"{impl['relationship']}, run by a party that wrote neither the vectors nor " \
-               "the implementation (an independent run)"
+               "the implementation, with the expected answers visible and through " \
+               "AgentAvow's glue (the nearest thing to an independent record here)"
     return f"{impl['relationship']}, {who}"
 
 

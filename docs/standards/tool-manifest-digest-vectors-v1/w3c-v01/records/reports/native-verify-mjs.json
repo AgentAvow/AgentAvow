@@ -753,7 +753,7 @@
       },
       "fixed": {
         "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
-        "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3",
+        "constraint-set": "configs/native-verify-mjs.json@sha256:1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99",
         "domain": "d-tmd-v1-48cf831840fc81db"
       },
       "id": "e-control-definition-ask_wiki_question",
@@ -799,7 +799,7 @@
       },
       "fixed": {
         "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
-        "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3",
+        "constraint-set": "configs/native-verify-mjs.json@sha256:1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99",
         "domain": "d-tmd-v1-48cf831840fc81db"
       },
       "id": "e-control-key-encoding-01",
@@ -845,7 +845,7 @@
       },
       "fixed": {
         "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
-        "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3",
+        "constraint-set": "configs/native-verify-mjs.json@sha256:1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99",
         "domain": "d-tmd-v1-48cf831840fc81db"
       },
       "id": "e-control-case-tool-drift",
@@ -878,7 +878,7 @@
   ],
   "fixed": {
     "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
-    "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3"
+    "constraint-set": "configs/native-verify-mjs.json@sha256:1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
   },
   "format": "public-agent-conformance/report/v0.1",
   "producer": {
@@ -919,7 +919,7 @@
         ],
         "fixed": {
           "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
-          "constraint-set": "configs/native-verify-mjs.json@sha256:8fd91182bbe63444474c0dc64782ab9543b44d4094efa2febe1e9c89ad5057f3"
+          "constraint-set": "configs/native-verify-mjs.json@sha256:1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
         },
         "fixtures": [
           "control-key-encoding-01/native-verify-mjs",
