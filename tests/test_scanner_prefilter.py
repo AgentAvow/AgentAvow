@@ -16,6 +16,7 @@ import pytest
 from src.scanner import patterns as pat
 from src.scanner import prefilter as pf
 from src.scanner import scan as sc
+from src.scanner.credential_flow import _CREDENTIAL_HINT_RE
 from src.scanner.prefilter import (
     AnyOf,
     LineFilter,
@@ -36,7 +37,7 @@ _WHOLE_FILE = [
     pat.NET_READ_RE, pat.EXEC_SINK_RE, pat.DECODE_SINK_RE, pat.SSRF_TOOL_SURFACE_RE,
     pat.SSRF_URL_INPUT_RE, pat.SSRF_DYNAMIC_FETCH_RE, pat.SSRF_GUARD_RE, pat.UNTRUSTED_INPUT_RE,
     pat.OUTBOUND_SEND_RE, pat.SENSITIVE_READ_RE, pat.FILE_READ_RE, sc._CLI_IMPORT_RE,
-    sc._EVAL_METHOD_CALL_RE,
+    sc._EVAL_METHOD_CALL_RE, _CREDENTIAL_HINT_RE,
 ]
 
 

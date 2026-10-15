@@ -3405,7 +3405,7 @@ def _scan_content(
                                         lf=lf))
     findings.extend(_credential_exfil_findings(
         content, file_path, lines, file_lang, allowlist,
-        payload=payload_mode and file_downgraded))
+        payload=payload_mode and file_downgraded, lf=lf))
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.
@@ -3915,7 +3915,7 @@ _CREDENTIAL_KIND_LABELS = {
 
 def _credential_exfil_findings(
     content: str, file_path: str, lines: list[str], file_lang: str | None,
-    allowlist: set[tuple[str, str]], *, payload: bool,
+    allowlist: set[tuple[str, str]], *, payload: bool, lf: LineFilter | None = None,
 ) -> list[Finding]:
     """A credential file's contents reaching an outbound send (``credential_flow``).
 
@@ -3927,7 +3927,7 @@ def _credential_exfil_findings(
     if _is_allowlisted(file_path, _CREDENTIAL_EXFIL_NAME, allowlist):
         return []
     out = []
-    for line_no, kind in credential_exfil_hits(content, file_lang):
+    for line_no, kind in credential_exfil_hits(content, file_lang, lf=lf):
         what = _CREDENTIAL_KIND_LABELS.get(kind, "a credential file")
         out.append(Finding(
             category="exfiltration",
