@@ -235,7 +235,8 @@ def test_og_surfaces_lead_with_the_decision():
     high = {"trust_score": 85, "metadata": {"files_scanned": 40},
             "findings": {"high": 1, "items": [{"severity": "high", "name": "Eval of input"}]}}
     assert og_router._og_verdict(85, high) == (
-        f"{REVIEW_PHRASE}: one high finding: eval of input · signed, verifiable offline.")
+        f"{REVIEW_PHRASE}: one high finding in its code: eval of input · signed, "
+        "verifiable offline.")
     cert = {"trust_score": 98, "metadata": {"files_scanned": 40},
             "certified": {"eligible": True}}
     assert og_router._og_verdict(98, cert).startswith("Safe to connect · Certified: ")

@@ -137,6 +137,13 @@ class Finding:
     # True when the finding sits in test-only code INSIDE an otherwise-shipped file (an
     # inline Rust ``#[cfg(test)] mod``): graded like a finding under tests/.
     test_code: bool = False
+    # True for a payload-shaped defect (download+exec, pipe-to-shell, decoded or
+    # obfuscated exec, credential exfil, untrusted input reaching a sink, a provider
+    # secret) in a file that is otherwise downgraded: a test / doc / example dir shipped
+    # inside a published artifact, where the runtime code can import it. It keeps its
+    # severity and is graded as shipped code wherever it sits (``_scan_content``'s
+    # ``payloads_full_severity``).
+    payload: bool = False
 
 
 @dataclass
@@ -349,6 +356,8 @@ def finding_is_shipped(f) -> bool:
     """Whether a finding sits in the shipped surface (the public ``shipped`` tag):
     not a test/doc/example/benchmark path, not an infra/installer script, and not an
     inline test module inside a shipped file."""
+    if getattr(f, "payload", False):
+        return True
     path = f.file_path
     return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path)
                 or _is_unshipped_script(path) or getattr(f, "test_code", False))
@@ -1577,6 +1586,7 @@ def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted:
         _const_str,
         _parse_expr,
         extract_call,
+        inline_code_is_payload,
     )
 
     got = extract_call(lines, idx, match.start(), lang="python")
@@ -1587,7 +1597,8 @@ def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted:
         # ("Decoded payload fed to exec/eval"); don't report the same line twice.
         if _DECODED_EXEC_LINE_RE.search(lines[idx]):
             return None
-        return ExecVerdict("defect", "high", "exec/eval of a decoded payload", "", consumed)
+        return ExecVerdict("defect", "high", "exec/eval of a decoded payload", "", consumed,
+                           payload=True)
     node = _parse_expr(call_src)
     if isinstance(node, _ast.Call) and node.args:
         s = _const_str(node.args[0])
@@ -1600,7 +1611,7 @@ def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted:
             if INLINE_CODE_DANGER_RE.search(_SHIM_EXEC_WORD_RE.sub(" ", s)):
                 return ExecVerdict("defect", "high",
                                    "constant code string that execs/decodes/fetches", "",
-                                   consumed)
+                                   consumed, payload=inline_code_is_payload(s))
             if not _SHIM_EXEC_WORD_RE.search(s):
                 return ExecVerdict("capability", "info", "evaluates a constant code string",
                                    CAP_EVAL, consumed)
@@ -1610,7 +1621,7 @@ def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted:
         # medium.
         if _untrusted_flows(lines, idx, call_src, untrusted):
             return ExecVerdict("defect", "high", "dynamic code evaluation of untrusted input",
-                               "", consumed)
+                               "", consumed, payload=True)
         return ExecVerdict("defect", "medium", "dynamic code evaluation in a file that reads "
                            "untrusted input (no flow to the call found)", "", consumed)
     return ExecVerdict("capability", "low",
@@ -1953,6 +1964,9 @@ def _finding_is_blocking(f: object) -> bool:
     # short-circuits above / via _DEP_MAL_PENALTY). Only FIRST-PARTY shipped code blocks.
     if getattr(f, "category", "") in _DEP_CATEGORIES:
         return False
+    # A payload-shaped defect blocks wherever it sits in the artifact (see Finding.payload).
+    if getattr(f, "payload", False):
+        return True
     if getattr(f, "test_code", False):
         return False
     path = getattr(f, "file_path", None)
@@ -2405,6 +2419,67 @@ def _bidi_cannot_reorder_code(line: str, in_prose: bool, file_lang: str | None) 
     return not any(d in line for d in ('"""', "'''", "`", "*/", "/*"))
 
 
+_EXAMPLE_INTRO_RE = re.compile(r"\b(?:example|e\.g\.|for instance)\b[^\"'`]{0,12}$",
+                               re.IGNORECASE)
+
+
+_SYSTEM_PROMPT_LABEL_RE = re.compile(r"system\s+prompt\s*:", re.IGNORECASE)
+# After the label: only escapes / whitespace, then a placeholder, then the string or the
+# template line ends (the label's whole value is the placeholder).
+_PLACEHOLDER_TAIL_RE = re.compile(
+    r"""^(?:\s|\\[nt])*(?:%[-#0 +]*\d*(?:\.\d+)?[sdrfi]|\{[^{}\n]{0,40}\}|\$\{[^{}\n]{0,40}\})"""
+    r"""[ \t]*(?:\\n|["'`])""")
+
+
+def _system_prompt_label_only(line: str, pattern: re.Pattern) -> bool:
+    """Every hit of the role-directive rule on this line is a "system prompt:" label
+    followed only by a format placeholder before the string closes."""
+    hits = list(pattern.finditer(line))
+    if not hits:
+        return False
+    for m in hits:
+        lm = _SYSTEM_PROMPT_LABEL_RE.search(m.group(0))
+        if lm is None:
+            return False
+        if not _PLACEHOLDER_TAIL_RE.match(line[m.end():]):
+            return False
+    return True
+
+
+# A value with a live provider prefix is a real credential even inside an "Example".
+_LIVE_KEY_PREFIX_RE = re.compile(
+    r"(?:sk[-_]|sk-ant-|sk_live_|rk_live_|pk_live_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|"
+    r"AKIA|ASIA|xox[abposr]-|AIza|glpat-|hf_|npm_|pypi-|SG\.|key-|shpat_|sq0)",
+)
+
+
+def _is_documented_example(line: str, pos: int) -> bool:
+    """The assignment at ``pos`` is prose inside a string literal, introduced right
+    before by "Example" / "e.g." (``"…Example api_key='…'"``)."""
+    before = line[:pos]
+    if not _EXAMPLE_INTRO_RE.search(before):
+        return False
+    # Inside a string: an odd number of unescaped double quotes before it.
+    return before.count('"') % 2 == 1 or before.count("'") % 2 == 1
+
+
+_PY_POST_CALL_RE = re.compile(r"(?:requests|httpx|axios)\.post\s*\(", re.IGNORECASE)
+_PY_FETCH_SECRET_RE = re.compile(
+    r"""https?://|os\.environ|getenv|password|passwd|token|secret""", re.IGNORECASE)
+
+
+def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
+    """The exfil rule's ``fetch(`` branch is the JS global ``fetch``. Python has no
+    global ``fetch``: there it is a local function or parameter (litellm's
+    ``await fetch(include_key)`` reads a config object from a bucket), so a Python line
+    whose only hit is ``fetch(`` is not an HTTP POST. ``requests.post`` /
+    ``httpx.post`` still fire, and so does a line that carries a URL literal or reads a
+    secret (a local ``fetch = lambda u, d: urlopen(u, d)`` called with
+    ``password=os.environ[...]``)."""
+    return (file_lang == "python" and not _PY_POST_CALL_RE.search(line)
+            and not _PY_FETCH_SECRET_RE.search(line))
+
+
 def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
     """True when every hit of an invisible-Unicode rule on this line is a well-formed
     emoji tag sequence or a typographic joiner (precision PR 2: wcwidth's grapheme
@@ -2416,12 +2491,60 @@ def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
     return False
 
 
+# A downgraded (test / doc / example / infra) file's critical/high defects drop to
+# medium, never block, and weigh a fraction: the repo scan grades a tool on what it
+# ships. Inside a PUBLISHED ARTIFACT a tests/ dir is installed next to the runtime code,
+# which can import it (`from evilpkg.tests import go`), so ``payloads_full_severity``
+# keeps the downgrade for capability-style findings (a test runner's subprocess, a
+# fixture's eval, a conftest's env read) but exempts the payload shapes below: they keep
+# their severity, carry ``Finding.payload`` and block like shipped code. (The artifact
+# scan then makes the rest informational: ``artifact_scan.scan_artifact_files``.)
+#
+# Only in executable source: a `curl … | sh` in a .yaml / .json / .html fixture is text.
+_PAYLOAD_CODE_EXTS = frozenset({
+    ".py", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+    ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".vbs",
+    ".rb", ".pl", ".pm", ".php", ".lua", ".go", ".rs", ".java",
+})
+# Remote code / script loads (the unpinned-resource and pip-install rules are not).
+_PAYLOAD_REMOTE_LOAD_NAMES = frozenset({
+    "Remote fetch piped into eval/exec (Python)",
+    "Remote response text fed to exec/eval (Python)",
+    "Remote fetch into Function/eval (JS)",
+    "Remote pickle/marshal load from response",
+    "curl/wget piped to shell",
+})
+_PAYLOAD_OBFUSCATION_NAMES = frozenset({
+    "Decoded payload fed to exec/eval", "Hex-encoded string execution",
+})
+# `getattr(__builtins__, 'ex' + 'ec')(code)`: the builtin looked up is CALLED. A bare
+# `getattr(__builtins__, '__dict__', __builtins__)` (numpy's tests) reads a namespace.
+_OBFUSCATED_BUILTIN_CALL_RE = re.compile(r"""getattr\s*\(\s*__builtins__\s*,[^\n]*?\)\s*\(""")
+# Whole-environment dumps and DNS tunnels are exfil whatever file they sit in; a POST
+# of `key`/`token` (an auth test) is exfil only next to a credential-file read.
+_PAYLOAD_EXFIL_NAMES = frozenset({"Environment variable exfil", "DNS exfiltration pattern"})
+_CREDENTIAL_FILE_RE = re.compile(
+    r"""\.ssh/|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.aws/credentials|/etc/shadow|\.netrc\b|"""
+    r"""\.npmrc\b|\.pypirc\b|\.docker/config\.json|\.kube/config|\.git-credentials""",
+)
+_CREDENTIAL_WINDOW = 5
+# Distinctive provider credentials. A PEM private key under tests/ is a test keypair
+# (every TLS / JWT / SSH library ships them) and stays downgraded.
+_PAYLOAD_SECRET_NAMES = frozenset({
+    "AWS Access Key", "AWS Secret Key", "OpenAI API Key", "OpenAI Project Key",
+    "Anthropic API Key", "GitHub Token", "Slack Token",
+})
+
+
 def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
-    *, metadata_text: bool = False,
+    *, metadata_text: bool = False, payloads_full_severity: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Scan file content for security issues and positive signals.
+
+    ``payloads_full_severity`` (artifact scans): in a downgraded file, payload-shaped
+    defects keep their severity and are marked ``Finding.payload`` (see above).
 
     Returns (findings, positive_signals, suppressed_count).
     """
@@ -2438,6 +2561,21 @@ def _scan_content(
     # Findings in tests/docs/infra are downgraded (never suppressed).
     file_downgraded = file_test_or_doc or is_infra
     is_test_or_doc, is_downgraded = file_test_or_doc, file_downgraded
+    # Test / doc / example dirs only: CI recipes, build tooling and maintainer scripts
+    # (infra) never run for a consumer, and an inline Rust test module only compiles
+    # for `cargo test`; both keep the plain downgrade.
+    payload_mode = (payloads_full_severity and file_test_or_doc
+                    and Path(file_path).suffix.lower() in _PAYLOAD_CODE_EXTS)
+
+    def _graded(kind: str, severity: str, payload: bool) -> tuple[str, bool]:
+        """The downgrade for a defect on this line: ``(severity, Finding.payload)``.
+        Reads ``is_downgraded`` at call time (inline Rust test lines rebind it)."""
+        if kind != "defect" or not is_downgraded or severity not in ("critical", "high"):
+            return severity, False
+        if payload_mode and payload:
+            return severity, True
+        return "medium", False
+
     is_installer = _is_installer_script(file_path)
     # Per-file language for language-specific pattern dispatch (#2).
     file_lang = _EXT_TO_LANG.get(Path(file_path).suffix.lower())
@@ -2538,10 +2676,14 @@ def _scan_content(
                 # so it stays skipped there to avoid noise. Placeholder + allowlist filters
                 # (above) already removed the obvious fakes.
                 sev = severity
+                secret_payload = False
                 if is_test_or_doc:
                     if name.startswith("Generic"):
                         continue
-                    sev = "medium" if severity in ("critical", "high") else "low"
+                    if payload_mode and name in _PAYLOAD_SECRET_NAMES:
+                        secret_payload = True
+                    else:
+                        sev = "medium" if severity in ("critical", "high") else "low"
                 # Precision pass #4: a generic key must LOOK like a credential (entropy,
                 # letters+digits, no path separator) — `TOKEN = "auth-request-type/at"`
                 # is a protocol constant, not a secret.
@@ -2553,6 +2695,13 @@ def _scan_content(
                 if (name == "Generic API Key assignment" and sev == "high"
                         and _SHARED_KEY_NAME_RE.search(
                             _assigned_identifier(line, match.start()))):
+                    sev = "medium"
+                # A value introduced as an example inside help text ("…access logs.
+                # Example api_key='d5345c…'" in a FastAPI Query description) is
+                # documentation: reported, medium, never blocking.
+                if (name == "Generic API Key assignment" and sev == "high"
+                        and _is_documented_example(line, match.start())
+                        and not _LIVE_KEY_PREFIX_RE.match(val)):
                     sev = "medium"
                 # Precision pass #3: a PEM HEADER with no key body is key-HANDLING code
                 # (marker tuples, startswith(), regexes) — reported as a capability.
@@ -2575,6 +2724,7 @@ def _scan_content(
                     file_path=file_path,
                     line_number=line_num,
                     snippet=_redact_secret(stripped[:120], match),
+                    payload=secret_payload,
                 ))
                 break  # one finding per line for secrets
 
@@ -2606,6 +2756,7 @@ def _scan_content(
                 capability = ""
                 label = ""
                 verdict = None
+                payload = False
                 if name == "child_process (Node.js)":
                     # Importing child_process is a capability; the calls are what count.
                     # One finding per line: when this line also CALLS through the module
@@ -2631,9 +2782,13 @@ def _scan_content(
                     if near and _untrusted_flows(lines, idx, stmt, untrusted):
                         verdict = ("defect", "critical",
                                    "shell=True on untrusted input", "")
+                        payload = True
                     elif near or _decoded_flows(lines, idx, stmt):
                         verdict = ("defect", "high", "shell=True runs a shell command next "
                                    "to untrusted input or a decoded value", "")
+                        # A decoded value reaching the shell is the payload; untrusted
+                        # input merely nearby is not.
+                        payload = not near or _decoded_flows(lines, idx, stmt)
                     else:
                         # Precision PR 2 ladder: a wrapper's shell=True with nothing
                         # untrusted in reach is a medium.
@@ -2645,6 +2800,7 @@ def _scan_content(
                         v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
                                                  has_cli_import)
                         verdict = (v.kind, v.severity, v.label, v.capability)
+                        payload = v.payload
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name == "execSync / spawn (Node.js)":
                     cands = list(_JS_EXEC_CALL_RE.finditer(line)) + (
@@ -2664,6 +2820,7 @@ def _scan_content(
                         v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
                                                  js_cli=js_cli)
                         verdict = (v.kind, v.severity, v.label, v.capability)
+                        payload = v.payload
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name in ("eval() call (Python)", "exec() call (Python)"):
                     m = _PY_EVAL_CALL_RE.search(line)
@@ -2672,12 +2829,11 @@ def _scan_content(
                         if v is None:
                             break  # reported by the obfuscation rule on this line
                         verdict = (v.kind, v.severity, v.label, v.capability)
+                        payload = v.payload
                 if verdict is not None:
                     kind, effective_severity, label, capability = verdict
                 # Downgrade severity in test/doc/infra files (defects only)
-                if (kind == "defect" and is_downgraded
-                        and effective_severity in ("critical", "high")):
-                    effective_severity = "medium"
+                effective_severity, payload = _graded(kind, effective_severity, payload)
                 findings.append(Finding(
                     category="unsafe_exec",
                     name=name,
@@ -2688,6 +2844,7 @@ def _scan_content(
                     remediation=_why(label, "unsafe_exec", kind),
                     kind=kind,
                     capability=capability,
+                    payload=payload,
                 ))
                 break
 
@@ -2726,9 +2883,10 @@ def _scan_content(
                     effective_severity = "medium"
                     label = ("deserializes pickle/marshal data in a file that reads untrusted "
                              "input (no flow to the call found)")
-                if (kind == "defect" and is_downgraded
-                        and effective_severity in ("critical", "high")):
-                    effective_severity = "medium"
+                # Untrusted input reaching a pickle/marshal load is the payload shape
+                # (the two branches above took every other pickle/marshal call).
+                effective_severity, payload = _graded(
+                    kind, effective_severity, bool(_PY_DESER_CALL_RE.search(line)))
                 findings.append(Finding(
                     category="insecure_deserialization",
                     name=name,
@@ -2739,6 +2897,7 @@ def _scan_content(
                     remediation=_why(label, "insecure_deserialization", kind),
                     kind=kind,
                     capability=capability,
+                    payload=payload,
                 ))
                 break
 
@@ -2805,6 +2964,9 @@ def _scan_content(
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
+                if name == "HTTP POST with sensitive data" and _py_local_fetch_only(
+                        line, file_lang):
+                    continue
                 # OAuth2 token exchange (client_secret/grant_type → token endpoint)
                 # is the required auth flow, not a leak. Relax ONLY the generic
                 # "POST with sensitive data" rule; the stronger critical exfil
@@ -2812,6 +2974,12 @@ def _scan_content(
                 if (name == "HTTP POST with sensitive data"
                         and _looks_like_oauth(lines, line_num)):
                     continue
+                # Exfil is not downgraded; in a downgraded artifact file the payload
+                # shapes are also graded as shipped code.
+                exfil_payload = payload_mode and is_downgraded and (
+                    name in _PAYLOAD_EXFIL_NAMES or any(
+                        _CREDENTIAL_FILE_RE.search(ln) for ln in lines[
+                            max(0, idx - _CREDENTIAL_WINDOW): idx + _CREDENTIAL_WINDOW + 1]))
                 findings.append(Finding(
                     category="exfiltration",
                     name=name,
@@ -2819,6 +2987,7 @@ def _scan_content(
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
+                    payload=exfil_payload,
                 ))
                 break
 
@@ -2846,8 +3015,8 @@ def _scan_content(
                         and not _has_loader_context(lines, idx, dm.start())):
                     effective_severity = "low"
                 # Downgrade in test/doc/infra files like other groups
-                if is_downgraded and effective_severity in ("critical", "high"):
-                    effective_severity = "medium"
+                effective_severity, remote_payload = _graded(
+                    "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
                         "`" if idx in tpl_continuation else None):
@@ -2861,11 +3030,17 @@ def _scan_content(
                     # reach (jsdom running a page's own scripts, a test runner's module
                     # evaluator) is a capability; untrusted input reaching it is high.
                     vk, vsev, vlabel = _classify_vm_match(lines, idx, dm, untrusted)
+                    # A vm defect at high runs decoded or untrusted code; a constant
+                    # script is a payload only when it downloads / decodes AND runs.
+                    from src.scanner.exec_classify import inline_code_is_payload
+                    vsev, vm_payload = _graded(
+                        vk, vsev, not vlabel.startswith("runs a constant script")
+                        or inline_code_is_payload(line))
                     findings.append(Finding(
                         category="dynamic_remote_load",
                         name=name,
-                        severity=("medium" if (vk == "defect" and is_downgraded
-                                               and vsev in ("critical", "high")) else vsev),
+                        severity=vsev,
+                        payload=vm_payload,
                         file_path=file_path,
                         line_number=line_num,
                         snippet=stripped[:120],
@@ -2896,6 +3071,7 @@ def _scan_content(
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
+                    payload=remote_payload,
                 ))
                 break
 
@@ -2947,6 +3123,13 @@ def _scan_content(
                         declares_tools = bool(SSRF_TOOL_SURFACE_RE.search(content))
                     if not declares_tools:
                         effective_severity = "medium"
+                # A "System prompt:" LABEL whose only content is a format placeholder
+                # (`"failed to prepend system prompt: %s"`, `f"System prompt:\n{sp}"`)
+                # carries no instruction itself: medium, never blocking.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and _system_prompt_label_only(line, pattern)):
+                    effective_severity = "medium"
                 findings.append(Finding(
                     category="prompt_injection",
                     name=name,
@@ -3001,6 +3184,12 @@ def _scan_content(
                     snippet=stripped[:120],
                     kind=kind,
                     capability=capability,
+                    # Not downgraded (repo parity); graded as shipped when payload-shaped.
+                    payload=(payload_mode and is_downgraded and kind == "defect"
+                             and (emitted_name in _PAYLOAD_OBFUSCATION_NAMES
+                                  or (emitted_name == "Obfuscated eval (Python)"
+                                      and _OBFUSCATED_BUILTIN_CALL_RE.search(line)
+                                      is not None))),
                 ))
                 break
 
@@ -3028,7 +3217,10 @@ def _scan_content(
     # or through a name assigned from the read). `ThreadedStream.fetch()` beside
     # `exec(code, self.locals)` or `urlopen(target)` 30 lines above `eval(target, ns)`
     # is co-occurrence, not a loader.
-    if not is_downgraded and NET_READ_RE.search(content) and EXEC_SINK_RE.search(content):
+    # The three flow rules below are payload shapes: in a downgraded artifact file
+    # (payload_mode) they run too, graded as shipped code.
+    flow_rules = not is_downgraded or payload_mode
+    if flow_rules and NET_READ_RE.search(content) and EXEC_SINK_RE.search(content):
         hit = _cooccur_flow(lines, prose_lines, NET_READ_RE.search, EXEC_SINK_RE, 40)
         if hit is not None:
             findings.append(Finding(
@@ -3038,13 +3230,14 @@ def _scan_content(
                 file_path=file_path,
                 line_number=hit + 1,
                 snippet="network read + exec sink co-occur — remote payload may be swappable",
+                payload=is_downgraded,
             ))
 
     # Untrusted input handed to a code-evaluating METHOD (precision PR 2): werkzeug's
     # debugger reads `cmd = request.args.get("cmd")`, passes it to
     # `self.execute_command(request, cmd, frame)`, which runs `frame.eval(command)`. A
     # flow, followed one call deep inside the file, not proximity.
-    if file_lang == "python" and untrusted and not is_downgraded:
+    if file_lang == "python" and untrusted and flow_rules:
         f_eval = _untrusted_to_eval_method(lines, untrusted, prose_lines)
         if f_eval is not None:
             findings.append(Finding(
@@ -3056,12 +3249,13 @@ def _scan_content(
                 snippet=lines[f_eval].strip()[:120],
                 remediation=_why("a request value reaches a method that evaluates code",
                                  "unsafe_exec", "defect"),
+                payload=is_downgraded,
             ))
 
     # Split decode->exec across lines: `payload = base64.b64decode(...)` then
     # `exec(payload)` a few lines later is the obfuscated loader (OSV MAL- family); the
     # one-line form is the "Decoded payload fed to exec/eval" pattern above.
-    if (not is_downgraded and DECODE_SINK_RE.search(content) and EXEC_SINK_RE.search(content)
+    if (flow_rules and DECODE_SINK_RE.search(content) and EXEC_SINK_RE.search(content)
             and not any(f.name == "Decoded payload fed to exec/eval" for f in findings)):
         hit = _cooccur_flow(lines, prose_lines, _is_decode_line, _PY_EVAL_CALL_RE, 10,
                             exclude_b=_DEF_EVAL_EXEC_RE)
@@ -3073,6 +3267,7 @@ def _scan_content(
                 file_path=file_path,
                 line_number=hit + 1,
                 snippet="base64/hex/zlib decode and exec/eval within 10 lines",
+                payload=is_downgraded,
             ))
 
     # SSRF (structural): an MCP tool that builds an outbound request from a caller-supplied
@@ -3113,6 +3308,9 @@ def _scan_content(
 
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
     findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
+    findings.extend(_credential_exfil_findings(
+        content, file_path, lines, file_lang, allowlist,
+        payload=payload_mode and file_downgraded))
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.
@@ -3481,6 +3679,18 @@ _RESPONSE_SEND_RE = re.compile(
     r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(")
 
 
+_QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)
+
+
+def _near_read(reads: list[int], sends: list[int], near) -> int | None:
+    """The first read line that has a send within the window (``near`` is the
+    composite's window test)."""
+    for r in reads:
+        if near([r], sends) is not None:
+            return r
+    return None
+
+
 def _composite_findings(
     content: str,
     file_path: str,
@@ -3514,7 +3724,10 @@ def _composite_findings(
                 out.append(i + 1)
         return out
 
-    untrusted = _hits(UNTRUSTED_INPUT_RE)
+    # The bare word `webhook` counts as inbound input only as code (a `webhook` handler
+    # or object), not as a quoted string (`"webhook" in self.alerting`, a config value).
+    untrusted = [n for n in _hits(UNTRUSTED_INPUT_RE)
+                 if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
     # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
     # request; it is not an outbound send to a third party (precision PR 2).
     outbound = [n for n in _hits(OUTBOUND_SEND_RE)
@@ -3552,14 +3765,16 @@ def _composite_findings(
     if sensitive and _near(sensitive, outbound) is None:
         sensitive = []
 
+    # Report the read that sits next to the send (not the file's first read, which can
+    # be thousands of lines from the pair that fired).
     if sensitive:
         name = "Lethal trifecta: private-data read + untrusted input + outbound network"
         severity = "high"
-        line = sensitive[0]
+        line = _near_read(sensitive, outbound, _near) or sensitive[0]
     else:
         name = "Toxic flow: file read + untrusted input + outbound network"
         severity = "medium"
-        line = file_read[0]
+        line = _near_read(file_read, outbound, _near) or file_read[0]
 
     if _is_allowlisted(file_path, name, allowlist):
         return []
@@ -3574,6 +3789,49 @@ def _composite_findings(
         line_number=line,
         snippet="capability composition — each part benign alone, dangerous together",
     )]
+
+
+_CREDENTIAL_EXFIL_NAME = "Credential file read sent outbound"
+_CREDENTIAL_KIND_LABELS = {
+    "ssh": "an SSH private key", "aws": "AWS credentials", "gcloud": "gcloud credentials",
+    "kube": "a kubeconfig", "netrc": "a .netrc / git credential store",
+    "npmrc": "an .npmrc token", "pypirc": "a .pypirc password",
+    "docker": "Docker registry credentials", "browser": "browser cookies / saved logins",
+    "wallet": "a crypto wallet file", "env": "a .env file",
+}
+
+
+def _credential_exfil_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], *, payload: bool,
+) -> list[Finding]:
+    """A credential file's contents reaching an outbound send (``credential_flow``).
+
+    Critical like the environment-dump rule, and never downgraded: in a test / doc
+    directory of a published artifact it is a payload (``payload``) and keeps its
+    severity."""
+    from src.scanner.credential_flow import credential_exfil_hits
+
+    if _is_allowlisted(file_path, _CREDENTIAL_EXFIL_NAME, allowlist):
+        return []
+    out = []
+    for line_no, kind in credential_exfil_hits(content, file_lang):
+        what = _CREDENTIAL_KIND_LABELS.get(kind, "a credential file")
+        out.append(Finding(
+            category="exfiltration",
+            name=_CREDENTIAL_EXFIL_NAME,
+            severity="critical",
+            file_path=file_path,
+            line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            remediation=(
+                f"This code reads {what} from the user's machine and sends the contents "
+                "over the network. A tool has no reason to ship a local credential file "
+                "anywhere; remove the read or the send."
+            ),
+            payload=payload,
+        ))
+    return out
 
 
 _DEP_CATEGORIES = frozenset({"dependency", "install_hook"})
@@ -4890,6 +5148,11 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
 
     findings, files_scanned, has_hook = scan_artifact_files(fetched)
+    # npm / PyPI: text that matches an attack pattern in detection data, a prebuilt web
+    # bundle or a non-tool prompt template is not the package running it (no-op for
+    # other ecosystems).
+    from src.scanner.package_context import calibrate_package_findings
+    findings = calibrate_package_findings(findings, fetched)
     if eco == "huggingface":
         findings = findings + huggingface_weight_findings(fetched)
     elif eco == "docker":

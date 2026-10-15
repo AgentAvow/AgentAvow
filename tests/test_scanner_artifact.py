@@ -436,7 +436,10 @@ def test_setup_py_cmdclass_test_only_not_flagged():
     assert detect_pypi_install_exec(src, "setup.py") == []
 
 
-def test_artifact_scan_skips_test_files():
+def test_artifact_scan_reads_test_files_for_payloads_only():
+    """Test files are read (a runtime module can import a shipped tests/ dir), but a
+    non-payload finding there is informational and the file is not counted."""
+
     fetched = ArtifactFetchResult(
         ecosystem="pypi", name="x", version="1.0", kind="sdist", ok=True,
         files={
@@ -446,8 +449,10 @@ def test_artifact_scan_skips_test_files():
             "pkg/core.py": _af("pkg/core.py", "def add(a, b):\n    return a + b\n"),
         },
     )
-    findings, _scanned, _hook = scan_artifact_files(fetched)
-    assert not any("test" in (f.file_path or "") for f in findings)
+    findings, scanned, _hook = scan_artifact_files(fetched)
+    assert scanned == 1
+    in_tests = [f for f in findings if f.file_path == "tests/test_x.py"]
+    assert all(f.kind == "defect" and f.severity == "info" for f in in_tests)
 
 
 def test_drift_no_hook_finding_when_uncompared():

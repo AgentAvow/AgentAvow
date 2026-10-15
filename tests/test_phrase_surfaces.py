@@ -39,7 +39,8 @@ def test_package_response_carries_the_unsigned_decision():
     from src.api.public_scan_router import _package_response
     resp = _package_response("o/r", _data(85, items=[_high()], high=1), "jws", False)
     assert (resp.decision, resp.decision_final) == ("review", True)
-    assert resp.decision_reason == "one high finding: shell command built from user input"
+    assert resp.decision_reason == ("one high finding in its code: shell command built "
+                                    "from user input")
     # the binary verdict keeps its meaning beside it
     assert resp.verdict == "needs_review"
 
