@@ -14,7 +14,7 @@ import { rp } from '../basePath'
  */
 
 type Capability = { capability?: string; label?: string; count?: number; files?: string[] }
-type Advisory = { id?: string; aliases?: string[]; summary?: string; severity?: string; fixed_in?: string | null; affects_scanned_version?: boolean }
+type Advisory = { id?: string; aliases?: string[]; summary?: string; severity?: string; fixed_in?: string | null; last_affected?: string | null; affects_scanned_version?: boolean }
 type ScanLike = {
   repo?: string
   jws?: string
@@ -104,8 +104,18 @@ export function CapabilitiesPanel({ scan: raw }: { scan: unknown }) {
   )
 }
 
+/** Why a past advisory does not touch the scanned version, in the record's own terms: a
+ * release that fixed it, the last release it affected (a range closed by
+ * `last_affected`, with no fix event), or neither (its range simply excludes this one). */
+function clearedBy(a: Advisory): string {
+  if (a.fixed_in) return `fixed in ${a.fixed_in}`
+  if (a.last_affected) return `affected up to ${a.last_affected}`
+  return "doesn't affect this version"
+}
+
 /** The target's own published advisories (OSV/GHSA for this package), split into the
- * ones that hit the scanned version and the ones already fixed in it. */
+ * ones that hit the scanned version and the ones that do not (fixed in it, or never
+ * covering it). */
 export function AdvisoriesPanel({ scan: raw }: { scan: unknown }) {
   const scan = raw as ScanLike
   const all = (scan.advisories?.length ? scan.advisories : scan.incident_history?.advisories) ?? []
@@ -119,7 +129,7 @@ export function AdvisoriesPanel({ scan: raw }: { scan: unknown }) {
       <div className="min-w-0">
         <div className="text-text">{a.summary || a.id}</div>
         <div className="font-mono text-[11px] text-text-muted break-all">
-          {a.id}{a.aliases?.length ? ` · ${a.aliases.join(', ')}` : ''}{a.fixed_in ? ` · fixed in ${a.fixed_in}` : ''}
+          {a.id}{a.aliases?.length ? ` · ${a.aliases.join(', ')}` : ''}{a.affects_scanned_version ? (a.fixed_in ? ` · fixed in ${a.fixed_in}` : '') : ` · ${clearedBy(a)}`}
         </div>
       </div>
     </li>
@@ -135,7 +145,9 @@ export function AdvisoriesPanel({ scan: raw }: { scan: unknown }) {
         )}
         {fixed.length > 0 && (
           <>
-            <h3 className={`${H3} ${open.length ? 'mt-5' : ''}`}>{open.length ? 'Past advisories, fixed in this version' : `Past advisories, all fixed in this version${version}`}</h3>
+            <h3 className={`${H3} ${open.length ? 'mt-5' : ''}`}>{fixed.every((a) => a.fixed_in)
+              ? (open.length ? 'Past advisories, fixed in this version' : `Past advisories, all fixed in this version${version}`)
+              : (open.length ? 'Other advisories, none affects this version' : `Past advisories, none affects this version${version}`)}</h3>
             {!open.length && <p className="mt-1.5 text-[13px] text-text-muted max-w-[64ch]">Security advisories were published against older releases. None of them affects the version we scanned.</p>}
             <ul className="mt-3 space-y-2.5">{fixed.map(row)}</ul>
           </>

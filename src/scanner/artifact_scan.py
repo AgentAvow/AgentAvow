@@ -623,7 +623,15 @@ def scan_artifact_files(
     # have its whole tree skipped. Nested dirs keep the usual rules.
     is_wheel = (getattr(fetched, "kind", "") or "") == "wheel"
 
+    # A minified file the package itself runs (its package.json entrypoint, or required
+    # by its code) is read like any other code; other `.min.` files stay skipped.
+    from src.scanner.package_context import executed_minified_paths
+    run_min = executed_minified_paths(fetched) if not is_image else set()
+
     def _skip(path: str) -> bool:
+        if path in run_min:
+            p = Path(path)
+            path = str(p.with_name(p.name.replace(".min.", ".", 1)))
         if is_wheel and "/" in path:
             head, rest = path.split("/", 1)
             if head in SKIP_DIRS and not head.startswith("."):

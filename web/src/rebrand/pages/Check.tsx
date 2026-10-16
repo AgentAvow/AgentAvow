@@ -1164,7 +1164,7 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
           ) : b?.ran && (b.grade_summary?.start_reason === 'install_failed' || (isMcpRun && !ex && typeof b.exit_code === 'number' && b.exit_code !== 0)) ? (
             <><span className="inline-block w-2 h-2 rounded-full bg-warning" /><span className="text-text-muted">Ran, but the install failed, so nothing was exercised{observedAt ? ` · ${observedAt.toLocaleString()}` : ''}{b.plan ? ` · plan ${b.plan}` : ''}. Not a finding.</span></>
           ) : b?.ran ? (
-            <><span className="inline-block w-2 h-2 rounded-full bg-success" /><span className="text-text-muted">Completed{observedAt ? ` · observed ${observedAt.toLocaleString()}` : ''}{b.plan ? ` · plan ${b.plan}` : ''}</span></>
+            <><span className={`inline-block w-2 h-2 rounded-full ${b.timed_out || ex?.timed_out ? 'bg-warning' : 'bg-success'}`} /><span className="text-text-muted">{b.timed_out || ex?.timed_out ? 'Ran partly (hit its time limit)' : 'Completed'}{observedAt ? ` · observed ${observedAt.toLocaleString()}` : ''}{b.plan ? ` · plan ${b.plan}` : ''}</span></>
           ) : b ? (
             <><span className="inline-block w-2 h-2 rounded-full bg-text-muted" /><span className="text-text-muted">Not run</span></>
           ) : (
@@ -1269,7 +1269,7 @@ function BehavioralPanel({ owner, repo, surface, auto, pkg, skill, effect, probe
                 ))}
               </div>
             )}
-            {b.timed_out && <p className="text-[12px] text-warning">Note: the run hit its time limit — results may be partial.</p>}
+            {(b.timed_out || ex?.timed_out) && <p className="text-[12px] text-warning">Ran partly (hit its time limit) — behavior after that was not observed.</p>}
             {b.attestation?.jws && (
               <p className="text-[12px] text-text-muted">
                 <span className="font-mono text-[10.5px] uppercase tracking-wide mr-2">Signed observation</span>
