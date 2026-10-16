@@ -16,6 +16,7 @@ from pathlib import Path
 
 import httpx
 
+from src.scanner import npm_scripts
 from src.scanner.patterns import (
     AGENT_METADATA_FILES,
     AUTH_POSITIVE_PATTERNS,
@@ -1050,6 +1051,20 @@ def _npx_string_runs(lines: list[str], idx: int, line: str, pos: int, str_start:
         return False
     return any(n != idx and _RUN_CALL_RE.search(ln) and _uses_name(ln, name)
                for n, ln in enumerate(lines))
+
+
+def _maintainer_script_owners(content: str, memo: list, idx: int, line: str,
+                              pattern: re.Pattern[str]) -> set[str] | None:
+    """The package.json scripts holding EVERY match of ``pattern`` on line ``idx``
+    when none of them is reachable from an install lifecycle script; ``None`` when a
+    match is outside ``scripts``, in a reachable script, or the file is unparseable."""
+    if not memo:
+        memo.append(npm_scripts.parse_scripts(content))
+    info = memo[0]
+    if info is None:
+        return None
+    return npm_scripts.maintainer_scripts_at(
+        info, idx, [(m.start(), m.end()) for m in pattern.finditer(line)])
 
 
 def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = None,
@@ -2806,6 +2821,143 @@ def _only_fetch_credentials_option(line: str, pattern: re.Pattern[str]) -> bool:
     return not pattern.search(_FETCH_CREDENTIALS_OPTION_RE.sub("mode:''", line))
 
 
+# Keys whose value lists hosts / origins a server ACCEPTS (inbound), never a place data
+# is sent: Vite / webpack-dev-server allowedHosts, Django ALLOWED_HOSTS /
+# CSRF_TRUSTED_ORIGINS / CORS_*, Starlette TrustedHostMiddleware, cors({origin}).
+_HOST_ALLOWLIST_KEYS = frozenset({
+    "allowedhosts", "allowed_hosts", "trustedhosts", "trusted_hosts", "trustedorigins",
+    "trusted_origins", "csrf_trusted_origins", "cors_allowed_origins",
+    "cors_origin_whitelist", "cors_origins", "cors_allow_origins", "allowedorigins",
+    "allowed_origins", "allow_origins", "alloworigins", "origin", "origins",
+    "csrftrustedorigins", "allowedhostnames", "allowed_hostnames",
+})
+_ALLOWLIST_STR = r"""(?:"[^"\n]*"|'[^'\n]*'|`[^`\n$]*`)"""
+# `<key> [:=] [ [ ( { new Set([ ] "a", "b", "<host…` up to the matched host.
+_ALLOWLIST_PREFIX_RE = re.compile(
+    r"""(?P<key>[A-Za-z_][\w.]*|"[^"\n]+"|'[^'\n]+')\s*(?::\s*(?:list|set|tuple|"""
+    r"""string\[\]|str|List\[str\]|Set\[str\]|Array<string>)?\s*)?[:=]\s*"""
+    r"""(?:new\s+Set\s*\(\s*\[|[\[({])?\s*"""
+    r"""(?:""" + _ALLOWLIST_STR + r"""\s*,\s*)*["'`](?:https?://|wss?://)?[\w.\-*]*$""")
+_ALLOWLIST_ELEMS_ONLY_RE = re.compile(
+    r"""^\s*(?:""" + _ALLOWLIST_STR + r"""\s*,\s*)*["'`](?:https?://|wss?://)?[\w.\-*]*$""")
+_ALLOWLIST_CONT_LINE_RE = re.compile(
+    r"""^\s*(?:(?:""" + _ALLOWLIST_STR + r"""\s*,?\s*)*|//.*|#.*)$""")
+_ALLOWLIST_OPEN_LINE_RE = re.compile(
+    r"""(?P<key>[A-Za-z_][\w.]*|"[^"\n]+"|'[^'\n]+')\s*(?::\s*[\w\[\]<>, ]+)?\s*[:=]\s*"""
+    r"""(?:new\s+Set\s*\(\s*)?[\[(]\s*(?:""" + _ALLOWLIST_STR + r"""\s*,?\s*)*$""")
+# The host ends a plain literal element: `"x.ngrok.io"` then `,` / `]` / `)` / `}`.
+_ALLOWLIST_SUFFIX_RE = re.compile(r"""^[\w.\-:/]*["'`]\s*(?:[,\])}]|$)""")
+# A network call anywhere in the file (call-shaped; `os.environ.get(` is not one).
+_NET_SINK_CALL_RE = re.compile(
+    r"(?<![\w$])(?:fetch|axios|got|ky|request|superagent|needle|urlopen|"
+    r"XMLHttpRequest|sendBeacon|WebSocket|EventSource|createClient|Client|Session|"
+    r"(?:requests|httpx|aiohttp|urllib\w*|http|https|net|tls|dgram|axios|got|ky|"
+    r"undici|socket)\.\w+|"
+    r"[\w$\]\)]+\.(?:post|put|patch|send|request|fetch|connect|emit|write|open))\s*\(")
+# Keys that are a host allowlist only in a CORS context (`cors({ origin: [...] })`,
+# Django `CORS_*`); elsewhere `origin` can name a client's base URL.
+_CORS_ONLY_KEYS = frozenset({"origin", "origins"})
+
+
+def _allowlist_key_ok(key: str, lines: list[str], idx: int) -> bool:
+    k = key.strip("\"'").rsplit(".", 1)[-1].lower()
+    if k in _CORS_ONLY_KEYS:
+        # `cors({ origin: [...] })` / `@fastify/cors` options: the call opens on this
+        # line or just above (a comment that says "cors" does not count).
+        return any(re.search(r"\bcors\w*\s*\(|\bregister\s*\(\s*\w*cors", ln, re.I)
+                   and not _is_line_comment(ln) for ln in lines[max(0, idx - 3): idx + 1])
+    if k in _HOST_ALLOWLIST_KEYS:
+        return True
+    # Vite / webpack `hmr: { host: … }` is where the dev server's websocket listens.
+    return k == "host" and any(
+        re.search(r"\bhmr\b", ln) for ln in lines[max(0, idx - 3): idx + 1])
+
+
+def _host_allowlist_entry(lines: list[str], idx: int, pattern: re.Pattern[str]) -> set[str]:
+    """Every webhook/tunnel-host match on line ``idx`` is an element of a host / origin
+    ALLOWLIST (`allowedHosts: ["x.ngrok.io"]`): configuration of what a server accepts,
+    not a destination. Returns the allowlist key names, or an empty set when the key is
+    not an allowlist key (`url`, `endpoint`, `webhook`, `target`, `baseURL`), the file
+    has any network / exec / navigation sink, or the allowlist's name is read again
+    (`fetch(allowedHosts[0], …)`). The caller re-checks the rest of the tree
+    (npm_scripts.restore_externally_invoked)."""
+    line = lines[idx]
+    matches = list(pattern.finditer(line))
+    if not matches:
+        return set()
+    keys: set[str] = set()
+    for m in matches:
+        if not _ALLOWLIST_SUFFIX_RE.match(line[m.end():]):
+            return set()
+        prefix = line[:m.start()]
+        pm = _ALLOWLIST_PREFIX_RE.search(prefix)
+        if pm:
+            key = pm.group("key")
+        elif _ALLOWLIST_ELEMS_ONLY_RE.match(prefix):
+            # A multi-line list: walk up through element-only lines to the opener.
+            key = None
+            for j in range(idx - 1, max(-1, idx - 40), -1):
+                om = _ALLOWLIST_OPEN_LINE_RE.search(lines[j])
+                if om:
+                    key = om.group("key")
+                    break
+                if not _ALLOWLIST_CONT_LINE_RE.match(lines[j]):
+                    break
+            if key is None:
+                return set()
+        else:
+            return set()
+        if not _allowlist_key_ok(key, lines, idx):
+            return set()
+        keys.add(key.strip("\"'").rsplit(".", 1)[-1])
+    key_alt = "|".join(re.escape(k) for k in keys)
+    named_re = re.compile(r"(?<![\w$])(?:" + key_alt + r")(?![\w$])")
+    decl_re = re.compile(
+        r"\s*(?:(?:export|const|let|var|readonly|static|public|private)\s+)*"
+        r"(?:[\w$]+\.)*[\"']?(?:" + key_alt + r")[\"']?\s*(?::[^=\n]*?)?[:=]\s*"
+        r"(?:new\s+Set\s*\(\s*\[|[\[(])")
+    for n, ln in enumerate(lines):
+        # Any network / exec / navigation sink anywhere in the file (comments
+        # included: nothing is stripped, so nothing can hide behind a fake comment)
+        # disqualifies it. An allowlist file (a Vite config, Django settings) sends
+        # nothing, and a sink can reach the list without naming it
+        # (`Object.values(cfg)`, `cfg["allowed" + "Hosts"]`).
+        if _NET_SINK_CALL_RE.search(ln) or _OTHER_SINK_RE.search(ln):
+            return set()
+        if n == idx:
+            # `const allowedHosts = [...]; post(allowedHosts[0], env)` on one line
+            if len(named_re.findall(ln)) > 1:
+                return set()
+            continue
+        if _is_line_comment(ln):
+            continue
+        dm = decl_re.match(ln)
+        rest = ln[dm.end():] if dm else ln
+        if named_re.search(rest):
+            # The allowlist's name is read elsewhere (`fetch(allowedHosts[0])`, an
+            # alias `const u = allowedHosts[0]`): it may be a destination after all.
+            return set()
+    return keys
+
+
+# Sinks that are not a plain call: assigning a URL to an element / location, a
+# dynamic import, jQuery's ajax, process exec, Python's computed globals.
+_OTHER_SINK_RE = re.compile(
+    r"\.(?:src|href|action|location)\s*=|\blocation\s*=|\bimport\s*\(|\$\.\w+\s*\(|"
+    r"\bjQuery\b|\bexec\w*\s*\(|\bspawn\w*\s*\(|child_process|\bsubprocess\b|"
+    r"\bos\.(?:system|popen)|\bsystem\s*\(|\bglobals\s*\(|\bvars\s*\(|\bgetattr\s*\(|"
+    r"\beval\s*\(|\bFunction\s*\(|\bsetattr\s*\(|\bReflect\.|\bProxy\b|"
+    r"\bnavigator\.|\bWorker\s*\(|\bpostMessage\b|\bsocket\b|\bdgram\b",
+    re.IGNORECASE)
+
+
+def _is_line_comment(line: str) -> bool:
+    """A whole-line `//` comment, or a Python / shell `# ` comment (a JS private
+    member `#go()` is code)."""
+    t = line.lstrip()
+    return t.startswith("//") or re.match(r"#(?:\s|!|$)", t) is not None
+
+
 def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
     """The exfil rule's ``fetch(`` branch is the JS global ``fetch``. Python has no
     global ``fetch``: there it is a local function or parameter (litellm's
@@ -2946,6 +3098,8 @@ def _scan_content(
         return string_state
 
     sink_memo: list[bool] = []
+    # package.json only: the parsed ``scripts`` table, memoized ([None] = unparseable).
+    pkg_scripts: list[npm_scripts.ScriptsInfo | None] = []
 
     def _file_has_exec_sink() -> bool:
         """``_FILE_EXEC_SINK_RE`` on the file's code lines (docstrings and whole-line
@@ -3405,6 +3559,20 @@ def _scan_content(
                 if (name == "HTTP POST with sensitive data"
                         and _only_fetch_credentials_option(line, pattern)):
                     continue
+                # A tunnel host in a host / origin ALLOWLIST (Vite `allowedHosts`,
+                # Django `ALLOWED_HOSTS`) is what a server accepts, not where data goes.
+                if name == "Outbound webhook/exfil URL":
+                    keys = _host_allowlist_entry(lines, idx, pattern)
+                    if keys:
+                        # Reported low; the caller restores it when another file of
+                        # the tree reads the allowlist (settings.ALLOWED_HOSTS[0]).
+                        f_low = Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120])
+                        npm_scripts.mark_allowlist(f_low, severity, keys)
+                        findings.append(f_low)
+                        continue
                 # OAuth2 token exchange (client_secret/grant_type → token endpoint)
                 # is the required auth flow, not a leak. Relax ONLY the generic
                 # "POST with sensitive data" rule; the stronger critical exfil
@@ -3530,7 +3698,7 @@ def _scan_content(
                             remediation=printed_hint.WHY,
                         ))
                         break
-                findings.append(Finding(
+                finding = Finding(
                     category="dynamic_remote_load",
                     name=name,
                     severity=effective_severity,
@@ -3538,7 +3706,18 @@ def _scan_content(
                     line_number=line_num,
                     snippet=stripped[:120],
                     payload=remote_payload,
-                ))
+                )
+                if (name == "curl/wget piped to shell"
+                        and Path(file_path).name.lower() == "package.json"):
+                    # A maintainer-only package.json script (`test:e2e:docker`) that no
+                    # install lifecycle script reaches never runs for a consumer. The
+                    # caller re-checks the tree for a file that runs it
+                    # (npm_scripts.restore_externally_invoked).
+                    owners = _maintainer_script_owners(content, pkg_scripts, idx, line,
+                                                       pattern)
+                    if owners:
+                        npm_scripts.mark_maintainer(finding, owners)
+                findings.append(finding)
                 break
 
         # Check invisible / smuggled Unicode (dangerous anywhere — no downgrade)
@@ -6483,6 +6662,8 @@ async def scan_repo(
         # Phase 2: repo file content hashes (path -> sha256 of text), used to detect
         # repo↔artifact MODIFIED-file drift. Only populated for files we fetched.
         repo_text_hashes: dict[str, str] = {}
+        # Every fetched text, for npm_scripts.restore_externally_invoked below.
+        repo_texts: dict[str, str] = {}
 
         async def _scan_one(item: dict) -> tuple:
             """Fetch and scan a file.
@@ -6505,6 +6686,7 @@ async def scan_repo(
                 if not content:
                     return [], [], 0, None, None, False, content is None
                 f, p, s = _scan_content(content, path, allowlist)
+                repo_texts[path] = content
                 text_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 return (
                     f, p, s, (path, _canonical_tool_digest(content, path)),
@@ -6550,6 +6732,7 @@ async def scan_repo(
                 repo_text_hashes[text_hash[0]] = text_hash[1]
         if fetch_failed:
             gaps["fetch_failed"] = fetch_failed
+        npm_scripts.restore_externally_invoked(result.findings, repo_texts)
 
         # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
         oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)
