@@ -3513,6 +3513,23 @@ def _scan_content(
                         capability=CAP_INSTALLER,
                     ))
                     break
+                if name == "curl/wget piped to shell" and file_lang in (
+                        "javascript", "typescript", "python") and not is_declaration:
+                    from src.scanner import printed_hint
+                    if printed_hint.hint_only({file_path: content}, file_path, line_num,
+                                              pattern, package=False):
+                        # A string the code prints / logs / puts in an error message
+                        # and never runs (pm2's "Install NVM: $ curl … | bash").
+                        findings.append(Finding(
+                            category="dynamic_remote_load",
+                            name=name,
+                            severity="low",
+                            file_path=file_path,
+                            line_number=line_num,
+                            snippet=stripped[:120],
+                            remediation=printed_hint.WHY,
+                        ))
+                        break
                 findings.append(Finding(
                     category="dynamic_remote_load",
                     name=name,
