@@ -31,6 +31,10 @@ export interface RecommendedLimits {
 
 export interface ScanMetadata {
   files_scanned: number
+  // Partial coverage: scannable files before the file cap, and whether the grade covers
+  // only a sample (file cap, truncated tree, time budget, skipped package members).
+  files_total?: number
+  sampled?: boolean
   primary_language: string
   has_readme: boolean
   has_license: boolean
@@ -86,6 +90,10 @@ export interface PublicScanResponse {
   package_version?: string | null
   // Recompute-discipline coverage: scan_depth / provenance_binding / db_snapshots.
   coverage?: { scan_depth?: string; provenance_binding?: string; [k: string]: unknown }
+  // What the scan selected but could NOT read, by cause (only non-zero keys), and the
+  // same in plain English. A "nothing found" answer covers only what was read.
+  coverage_gaps?: Record<string, unknown>
+  not_checked?: string[]
   provenance?: { verified?: boolean; source_matches_claim?: boolean; [k: string]: unknown }
   // Per-surface detail: skill { skill_name, allowed_tools[], has_lifecycle_hooks },
   // MCP { tool_count, capabilities }, package { digest }.

@@ -628,14 +628,29 @@ class McpSession:
         return init.status_code
 
     async def list(self, method: str, key: str) -> list:
+        """The first page of ``method``'s ``key`` list ([] on any failure). Records the
+        methods that failed outright (``list_failed``: HTTP error, transport error, no
+        JSON-RPC result) and the ones whose answer said more pages exist
+        (``list_more_pages``: a ``nextCursor``), so a partial read is disclosed rather
+        than graded as the whole tool set."""
+        failed = self.__dict__.setdefault("list_failed", set())
+        more = self.__dict__.setdefault("list_more_pages", set())
         try:
             resp = await self._client.post(
                 self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
             if resp.status_code >= 400:
+                failed.add(method)
                 return []
             doc = _parse_jsonrpc_body(resp.text)
-            return ((doc or {}).get("result") or {}).get(key) or []
+            result = (doc or {}).get("result") if isinstance(doc, dict) else None
+            if not isinstance(result, dict):
+                failed.add(method)
+                return []
+            if result.get("nextCursor"):
+                more.add(method)
+            return result.get(key) or []
         except Exception:
+            failed.add(method)
             return []
 
     async def call_tool(self, name: str, arguments: dict, *, timeout: float) -> dict:
@@ -734,9 +749,16 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
             prompts = await session.list("prompts/list", "prompts")
             if not tools and not resources and not prompts:
                 return None
-            return {
+            out = {
                 "tools": tools, "resources": resources, "prompts": prompts,
                 "server_info": session.server_info,
             }
+            # Coverage disclosure: tools/list failed (graded on resources/prompts
+            # only), or the server paged its tool list and only page one was read.
+            if "tools/list" in getattr(session, "list_failed", set()):
+                out["tools_list_failed"] = True
+            if "tools/list" in getattr(session, "list_more_pages", set()):
+                out["tools_more_pages"] = True
+            return out
     except Exception:
         return None

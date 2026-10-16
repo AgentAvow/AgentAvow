@@ -168,6 +168,9 @@ def _build_payload(
                 if isinstance(vulns, dict) else 0
             ),
             "sampled": vulns.get("sampled", False) if isinstance(vulns, dict) else False,
+            # What the scan selected but could not read; omitted when nothing was.
+            **({"coverageGaps": vulns["coverage_gaps"]}
+               if isinstance(vulns, dict) and vulns.get("coverage_gaps") else {}),
             "primaryLanguage": vulns.get("primary_language", "") if isinstance(vulns, dict) else "",
         },
         "trust": {

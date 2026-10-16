@@ -440,10 +440,14 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
 # Scan the unpacked tree with the existing 12-category engine
 # ---------------------------------------------------------------------------
 
-def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
+def scan_artifact_files(
+    fetched: ArtifactFetchResult, oversized_out: list | None = None,
+) -> tuple[list, int, bool]:
     """Run the 12-category engine + install-hook detectors over the unpacked tree.
 
-    Returns ``(findings, files_scanned, has_install_hook)``. Reuses the repo
+    Returns ``(findings, files_scanned, has_install_hook)``. Pass ``oversized_out`` to
+    collect the paths of source files the engine did not read because their text is
+    over the 500 KB read cap (disclosed as a coverage gap; never scored). Reuses the repo
     scanner's ``_scan_content`` / ``_scan_dependencies`` verbatim, so every current
     detector gains artifact-truth for free.
     """
@@ -539,6 +543,14 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # everything else there is informational (below).
         # A shipped .git/config or .git/hooks/* in a tarball is a GitSpawn autorun vector
         # (a published artifact should never carry a .git/ dir) — scan it like the repo tree.
+        if (
+            oversized_out is not None
+            and af.text
+            and len(af.text) > _MAX_FILE_SIZE
+            and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
+            and not _skip(path)
+        ):
+            oversized_out.append(path)
         if (
             af.text
             and len(af.text) <= _MAX_FILE_SIZE

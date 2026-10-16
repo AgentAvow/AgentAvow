@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, useReducedMotion } from 'framer-motion'
 import { fetchPublicScan, fetchSkillCollectionLead, fetchBehavioralScan, fetchPackageScan, fetchPackageBehavioral, fetchMcpScan, fetchMcpProbe, fetchSkillScan, fetchSkillBehavioral, publicApi } from '../../lib/scanApi'
 import type { PublicScanResponse } from '../../types/scan'
-import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, isCertified, certifiedMarkNote } from '../../components/trust/gradeSystem'
+import { getTrustTier, decisionOf, decisionPhrase, headline as decisionHeadline, isCertified, certifiedMarkNote, coverageGapNotes } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, TrustPill, CertifiedMark, VerdictBadge } from '../components/TrustMark'
 import {
   mcpNameFromUrl, cursorInstall, vscodeInstall, gooseInstall, claudeCodeCmd,
@@ -1646,7 +1646,7 @@ function SkillResult({ owner, repo, skill }: { owner: string; repo: string; skil
           </div>
         </>
       ) : (
-        <Reveal><div className="mt-6 glass rounded-2xl p-6 text-[13.5px] text-success">✓ No capability-surface risks found — clean skill.</div></Reveal>
+        <Reveal><div className="mt-6 glass rounded-2xl p-6 text-[13.5px] text-success">{coverageGapNotes(scan).length ? '✓ No capability-surface risks found in what was read — see “Not checked” above.' : '✓ No capability-surface risks found — clean skill.'}</div></Reveal>
       )}
 
       <VerifyPanel scan={scan} />
@@ -1846,7 +1846,7 @@ function McpResult({ endpoint }: { endpoint: string }) {
 
       {/* A live endpoint is graded on the tool definitions it serves; its server code is
           never fetched, so the code-category scores would read as passes we didn't earn. */}
-      <CategoryFindings categoryScores={null} findings={f} maxFindings={15} emptyMessage="✓ No capability-surface risks found — clean tool set." />
+      <CategoryFindings categoryScores={null} findings={f} maxFindings={15} emptyMessage={coverageGapNotes(scan).length ? '✓ No capability-surface risks found in what was read — see “Not checked” above.' : '✓ No capability-surface risks found — clean tool set.'} />
       <Reveal><p className="mt-3 text-[12px] text-text-muted/80">Code categories (secret hygiene, code safety, data handling, filesystem, dependencies) are not scored for a live endpoint: we check the tools it serves, not its server code, which we can&apos;t see. Scan its repo or package for those.</p></Reveal>
 
       <McpWhatItCanDo scan={scan} />
@@ -2302,7 +2302,7 @@ function Result({ owner, repo, privateResult, showCode = false }: {
       {/* recompute-on-release drift feed — signed-definition integrity over time */}
       {!isPrivate && <DefinitionDrift owner={owner} repo={repo} />}
 
-      <CategoryFindings categoryScores={cats as Record<string, number>} findings={f} maxFindings={12} emptyMessage="✓ No risks found — clean across all categories." />
+      <CategoryFindings categoryScores={cats as Record<string, number>} findings={f} maxFindings={12} emptyMessage={coverageGapNotes(scan).length ? '✓ No risks found in what was read — see “Not checked” above.' : '✓ No risks found — clean across all categories.'} />
 
       {/* scan facts */}
       <Reveal>

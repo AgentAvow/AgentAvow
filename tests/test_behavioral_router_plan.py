@@ -194,8 +194,12 @@ def _block(b, **kw) -> str:
 def test_sandbox_section_absent_without_a_behavioral_block():
     assert _sandbox_line(_scan_data(None)) is None
     assert _sandbox_line({}) is None
-    assert _sandbox_line(_scan_data({"ran": False, "reason": "off"})) is None
-    text = _scan_block(_scan_data(None), "use", "/check/pkg/npm/x", "x · npm")
+    # A block that says the run did not happen is not silence: it is static-only, and
+    # the text says so (partial-coverage honesty, 2026-10-16).
+    assert _sandbox_line(_scan_data({"ran": False, "reason": "off"})) == (
+        "**Sandbox:** did not run (off) — this result is static analysis only; nothing "
+        "was observed running.")
+    text =_scan_block(_scan_data(None), "use", "/check/pkg/npm/x", "x · npm")
     assert "sandbox" not in text.lower()
 
 

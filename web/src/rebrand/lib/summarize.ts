@@ -3,7 +3,7 @@
  * straight from the scan data (no LLM, nothing to leak, nothing to hallucinate).
  * The goal: anyone can read this and decide "is this safe for me?" in ten seconds.
  */
-import { decisionOf, decisionPhrase, isCertified, type DecisionValue } from '../../components/trust/gradeSystem'
+import { coverageGapNotes, decisionOf, decisionPhrase, isCertified, type DecisionValue } from '../../components/trust/gradeSystem'
 
 const CAT_HUMAN: Record<string, { good: string; weak: string }> = {
   secret_hygiene: { good: 'keeps secrets and API keys out of its code', weak: 'may expose secrets or API keys' },
@@ -23,7 +23,8 @@ export interface ScanLike {
   findings?: { total?: number; critical?: number; high?: number } | null
   category_scores?: Record<string, number> | null
   positive_signals?: string[] | null
-  metadata?: { primary_language?: string | null; files_scanned?: number | null } | null
+  metadata?: { primary_language?: string | null; files_scanned?: number | null; files_total?: number | null; sampled?: boolean | null } | null
+  coverage_gaps?: Record<string, unknown> | null
 }
 
 export interface PlainSummary {
@@ -75,7 +76,12 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
   // The paragraph — plain, direct, no jargon.
   const short = repo.split('/').pop() || repo
   let paragraph: string
-  if (verdict === 'safe' && total === 0) {
+  // What the scan could not check: a clean result covers only what was read, so the
+  // paragraph says so instead of reading as a clean bill for the whole tool.
+  const gaps = coverageGapNotes(s)
+  if (verdict === 'safe' && total === 0 && gaps.length) {
+    paragraph = `We scanned ${short} across 12 safety categories and found nothing blocking in what we read. Not everything was read (${gaps.join('; ')}), so this covers the files we checked, not the whole tool.`
+  } else if (verdict === 'safe' && total === 0) {
     paragraph = `We scanned ${short} across 12 safety categories and found nothing blocking. It carries a signed, verifiable score — safe to connect to your agent.`
   } else if (verdict === 'safe') {
     paragraph = `${short} has no critical or high findings. We noted ${total} minor thing${total === 1 ? '' : 's'}, listed below for context — safe to connect.`
@@ -86,7 +92,14 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
   }
 
   const facts: string[] = ['Scanned across 12 safety categories', 'Result is signed (Ed25519) and verifiable offline']
-  if (s.metadata?.files_scanned) facts.unshift(`${s.metadata.files_scanned.toLocaleString()} files analyzed`)
+  const read = s.metadata?.files_scanned
+  const of = s.metadata?.files_total
+  if (read) {
+    facts.unshift(of && of > read
+      ? `${read.toLocaleString()} of ${of.toLocaleString()} files analyzed`
+      : `${read.toLocaleString()} files analyzed`)
+  }
+  for (const g of gaps) facts.push(`Not checked: ${g}`)
   if (s.metadata?.primary_language) facts.unshift(`Mostly ${s.metadata.primary_language}`)
 
   return { verdict, headline, reason, paragraph, goodPractices: goodPractices.slice(0, 5), risks: risks.slice(0, 5), facts }

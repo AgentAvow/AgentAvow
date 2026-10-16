@@ -314,6 +314,50 @@ function dependencyPhrase(crit: number, high: number): string {
   return parts.join(' and ')
 }
 
+// What the scan could not check (wording only). Twin of `coverage_gap_notes` /
+// `coverage_gap_suffix` in src/scanner/verdict.py: byte-identical output. A Safe reason
+// ends with these; nothing here changes the decision or the score.
+export const COVERAGE_GAP_REASON_MAX = 2
+const DEFAULT_FILE_CAP = 200
+const fmtInt = (n: number) => n.toLocaleString('en-US')
+const filesPhrase = (n: number, noun = 'file') => `${fmtInt(n)} ${noun}${n === 1 ? '' : 's'}`
+const was = (n: number) => (n === 1 ? 'was' : 'were')
+
+/** Plain-English notes for what the scan could not check (`coverage_gaps`). */
+export function coverageGapNotes(input: unknown): string[] {
+  const g = asObj(asObj(input).coverage_gaps)
+  const notes: string[] = []
+  let n = toInt(g.oversized_files)
+  if (n > 0) notes.push(`${filesPhrase(n)} over 500 KB ${was(n)} not read`)
+  n = toInt(g.fetch_failed)
+  if (n > 0) notes.push(`${filesPhrase(n)} could not be fetched`)
+  n = toInt(g.time_limit_unread)
+  if (n > 0) notes.push(`${filesPhrase(n)} ${was(n)} not read before the time limit`)
+  n = toInt(g.over_file_cap)
+  if (n > 0) {
+    const cap = toInt(g.file_cap) || DEFAULT_FILE_CAP
+    notes.push(`${filesPhrase(n)} past the ${fmtInt(cap)}-file limit ${was(n)} not read`)
+  }
+  if (g.tree_truncated === true) notes.push('GitHub returned only part of the file tree')
+  n = toInt(g.package_skipped)
+  if (n > 0) notes.push(`${filesPhrase(n)} in the package ${was(n)} skipped for size`)
+  n = toInt(g.dependency_files_unread)
+  if (n > 0) notes.push(`${filesPhrase(n, 'dependency file')} could not be read`)
+  if (g.advisory_lookup === 'failed') notes.push('the vulnerability database lookup failed')
+  if (g.tool_list_unread === true) notes.push("the server's tool list could not be read")
+  if (g.tool_list_paged === true) notes.push("only the first page of the server's tool list was read")
+  return notes
+}
+
+/** `; <note>; <note>; and N more coverage gaps` for a Safe reason ('' when none). */
+export function coverageGapSuffix(input: unknown): string {
+  const notes = coverageGapNotes(input)
+  if (!notes.length) return ''
+  const head = notes.slice(0, COVERAGE_GAP_REASON_MAX)
+  const rest = notes.length - head.length
+  return '; ' + head.join('; ') + (rest > 0 ? `; and ${filesPhrase(rest, 'more coverage gap')}` : '')
+}
+
 /** The three-phrase decision for a scan result (API response JSON). Byte-identical twin
  * of `decide()` in src/scanner/verdict.py. Never throws. */
 export function decide(input: unknown): Decision {
@@ -418,13 +462,16 @@ export function decide(input: unknown): Decision {
   // safe — thin coverage (0 <= files < 8, nothing found) reads Safe and says so in the
   // reason (decided 2026-10-08, #19); the 74 / 82 score cap still shows it. Zero files
   // (a metapackage whose code ships in a dependency) says there was no code at all.
+  // A Safe reason ends with what the scan could not check (wording only).
+  const gaps = coverageGapSuffix(data)
+  const safe = (reason: string): Decision => done('safe', reason + gaps)
   if (deps) {
     const noun = depC + depH === 1 ? 'advisory' : 'advisories'
-    return done('safe', `no critical or high findings in its code (dependencies: ${deps} ${noun})`)
+    return safe(`no critical or high findings in its code (dependencies: ${deps} ${noun})`)
   }
   if (filesKnown && files >= 0 && files < THIN_COVERAGE_FILES && !found) {
-    if (isRemoteMcp(data)) return done('safe', THIN_REASON_REMOTE_MCP)
-    return done('safe', files > 0 ? THIN_REASON : THIN_REASON_NO_CODE)
+    if (isRemoteMcp(data)) return safe(THIN_REASON_REMOTE_MCP)
+    return safe(files > 0 ? THIN_REASON : THIN_REASON_NO_CODE)
   }
   let reason: string
   if (files > 0) {
@@ -434,7 +481,7 @@ export function decide(input: unknown): Decision {
   } else {
     reason = found ? 'no critical or high findings' : 'nothing found'
   }
-  return done('safe', reason)
+  return safe(reason)
 }
 
 const DECISION_BY_VALUE = (v: unknown): DecisionPhrase | undefined => DECISIONS.find((d) => d.value === v)

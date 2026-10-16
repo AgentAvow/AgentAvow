@@ -305,6 +305,46 @@ CASES = [
         _f("critical", "curl/wget piped to shell", file_path="SKILL.md")], crit=2),
      "do_not_connect", True,
      "2 critical findings in its code, including curl/wget piped to shell"),
+    # ── coverage gaps: a Safe reason states what was not read (wording only) ─────
+    ("gap_oversized_one", _scan(92, 120, coverage_gaps={"oversized_files": 1}), "safe", True,
+     "nothing found in 120 files; 1 file over 500 KB was not read"),
+    ("gap_oversized_many", _scan(92, 120, coverage_gaps={"oversized_files": 3}), "safe", True,
+     "nothing found in 120 files; 3 files over 500 KB were not read"),
+    ("gap_over_cap", _scan(92, 200, coverage_gaps={"over_file_cap": 1800, "file_cap": 200}),
+     "safe", True, "nothing found in 200 files; 1,800 files past the 200-file limit were "
+     "not read"),
+    ("gap_three_kinds_counts_the_rest",
+     _scan(92, 150, coverage_gaps={"fetch_failed": 2, "time_limit_unread": 1,
+                                   "tree_truncated": True}),
+     "safe", True, "nothing found in 150 files; 2 files could not be fetched; 1 file was "
+     "not read before the time limit; and 1 more coverage gap"),
+    ("gap_thin", _scan(74, 3, coverage_gaps={"package_skipped": 4}), "safe", True,
+     "nothing found; little code to inspect; 4 files in the package were skipped for size"),
+    ("gap_deps_advisory_lookup", _scan(92, 50, coverage_gaps={
+        "dependency_files_unread": 1, "advisory_lookup": "failed"}), "safe", True,
+     "nothing found in 50 files; 1 dependency file could not be read; the vulnerability "
+     "database lookup failed"),
+    ("gap_remote_mcp_tool_list", _scan(80, 0, coverage={"surface": "mcp"},
+                                       coverage_gaps={"tool_list_unread": True}),
+     "safe", True, "tool definitions clean; server code not inspected; the server's tool "
+     "list could not be read"),
+    ("gap_mcp_paged", _scan(88, 12, coverage={"surface": "mcp"},
+                            coverage_gaps={"tool_list_paged": True}),
+     "safe", True, "nothing found in 12 files; only the first page of the server's tool "
+     "list was read"),
+    ("gap_pending_suffix_last", _scan(92, 120, coverage_gaps={"oversized_files": 2},
+                                      behavioral={"pending": True}),
+     "safe", False, "nothing found in 120 files; 2 files over 500 KB were not read; "
+     "sandbox still running"),
+    # a gap never changes a Review / Do-not-connect answer or its reason
+    ("gap_review_unchanged", _scan(70, 200, [_f("high", "X")], high=1,
+                                   coverage_gaps={"oversized_files": 5}),
+     "review", True, "one high finding in its code: X"),
+    ("gap_zero_values_ignored", _scan(92, 120, coverage_gaps={
+        "oversized_files": 0, "tree_truncated": False, "advisory_lookup": "ok"}),
+     "safe", True, "nothing found in 120 files"),
+    ("gap_garbage_shape", _scan(92, 120, coverage_gaps=["x"]), "safe", True,
+     "nothing found in 120 files"),
     # ── odd shapes never raise ────────────────────────────────────────────────────
     ("empty", {}, "review", True, "trust score 0/100 is under 51"),
     ("garbage", {"trust_score": "x", "findings": "nope", "metadata": None,
