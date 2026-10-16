@@ -166,6 +166,13 @@ class ScanResult:
     # so a partial-coverage grade is never presented as an authoritative whole-repo verdict.
     total_scannable_files: int = 0
     sampled: bool = False
+    # What the scan selected but could NOT read, by cause (only non-zero keys): files
+    # over the 500 KB read cap, fetches that failed or timed out, files left unread at
+    # the time budget, files past the file cap, a truncated GitHub tree, package members
+    # skipped by the bounded unpack, unread dependency files, a failed advisory lookup.
+    # Disclosure only (never a score or decision input): signed as scan.coverageGaps and
+    # stated beside every answer (src/scanner/verdict.py coverage_gap_notes).
+    coverage_gaps: dict = field(default_factory=dict)
     has_readme: bool = False
     has_license: bool = False
     has_tests: bool = False
@@ -429,9 +436,10 @@ class _BlobList(list):
     oversized: list[dict]
 
 
-def _tree_blobs(tree: list[dict]) -> list[dict]:
+def _tree_blobs(tree: list[dict], oversized_out: list | None = None) -> list[dict]:
     """Keep only blob (file) entries under the per-file size cap (the rest ride along in
-    ``.oversized``)."""
+    ``.oversized``, and are also appended to ``oversized_out`` for the coverage
+    disclosure when given)."""
     out = _BlobList(
         item for item in tree
         if item.get("type") == "blob"
@@ -439,6 +447,8 @@ def _tree_blobs(tree: list[dict]) -> list[dict]:
     )
     out.oversized = [item for item in tree
                      if item.get("type") == "blob" and item.get("size", 0) > _MAX_FILE_SIZE]
+    if oversized_out is not None:
+        oversized_out.extend(out.oversized)
     return out
 
 
@@ -547,10 +557,18 @@ async def _fetch_repo_tree(
             # Real-time rate-limit protection (metered call): alert + degrade flag.
             await _note_github(resp, f"repo tree {owner}/{repo}")
 
+        # Blobs over the read cap, for the coverage disclosure (meta_out["oversized"]),
+        # and the git tree sha: a content digest of exactly the tree that was listed.
+        _oversized: list | None = None
+        if meta_out is not None:
+            _oversized = meta_out.setdefault("oversized", [])
+
         if resp is not None and resp.status_code == 200:
             body = resp.json()
+            if meta_out is not None and isinstance(body.get("sha"), str):
+                meta_out["tree_sha"] = body["sha"]
             return (
-                _tree_blobs(body.get("tree", [])),
+                _tree_blobs(body.get("tree", []), _oversized),
                 bool(body.get("truncated")),
                 True,
                 default_branch,
@@ -574,7 +592,7 @@ async def _fetch_repo_tree(
             await _note_github(shallow, f"repo shallow tree {owner}/{repo}")
             if shallow.status_code == 200:
                 return (
-                    _tree_blobs(shallow.json().get("tree", [])),
+                    _tree_blobs(shallow.json().get("tree", []), _oversized),
                     True,
                     True,
                     default_branch,
@@ -2124,10 +2142,11 @@ _TAIL_CLOSERS = ('"""', "'''", "*/")
 
 
 def _oversized_scan_files(
-    tree: list[dict], user_excludes: set[str] | None = None,
+    tree: list[dict], user_excludes: set[str] | None = None, *, limit: int | None = None,
 ) -> list[dict]:
     """Source files in ``tree`` over ``_MAX_FILE_SIZE`` that ``_select_scan_files``
-    leaves out, shipped paths first, at most ``_MAX_OVERSIZED_FILES``."""
+    leaves out, shipped paths first, at most ``limit`` (default ``_MAX_OVERSIZED_FILES``;
+    ``0`` = all, for counting the coverage gap)."""
     excl = {e.lower() for e in (user_excludes or set())}
     big = [
         it for it in tree
@@ -2139,7 +2158,9 @@ def _oversized_scan_files(
     big.sort(key=lambda it: (
         _is_nonshipped_path(it["path"]) or _is_test_or_doc_file(it["path"]), it["path"],
     ))
-    return big[:_MAX_OVERSIZED_FILES]
+    if limit == 0:
+        return big
+    return big[:_MAX_OVERSIZED_FILES if limit is None else limit]
 
 
 def _is_oversized_code_file(path: str) -> bool:
@@ -4675,8 +4696,13 @@ async def _run_supply_chain(
     ref: str | None,
     sem,
     per_file_timeout: float,
+    gaps: dict | None = None,
 ) -> None:
     """Phase 0 coverage block + Phase 1 OSV supply-chain pass (fail-open).
+
+    ``gaps`` (the scan's coverage-gap dict) records what this pass could not check:
+    lockfiles it could not fetch, and an advisory lookup that failed — so a failed
+    lookup never reads the same as "no advisories". Disclosure only.
 
     Always attaches the Phase-0 ``coverage`` block (recompute discipline). When
     ``settings.scanner_use_osv`` is on it additionally fetches the repo's real
@@ -4720,6 +4746,8 @@ async def _run_supply_chain(
                 and it["path"].lower().endswith((".yml", ".yaml"))
             ][: settings.scanner_supply_chain_max_workflows]
 
+            unread: list[str] = []
+
             async def _fetch(path: str) -> tuple[str, str]:
                 try:
                     async with sem:
@@ -4727,12 +4755,20 @@ async def _run_supply_chain(
                             _fetch_file_content(owner, repo, path, token, ref=ref),
                             timeout=per_file_timeout,
                         )
+                    if content is None:
+                        unread.append(path)
                     return path, content or ""
                 except (asyncio.TimeoutError, Exception):
+                    unread.append(path)
                     return path, ""
 
             fetch_tasks = [_fetch(it["path"]) for it in (lock_items + wf_items)]
             fetched = await asyncio.gather(*fetch_tasks) if fetch_tasks else []
+            if gaps is not None:
+                # Unread lockfile paths (a set, so a file the regex pass also missed is
+                # counted once); the caller turns it into ``dependency_files_unread``.
+                gaps.setdefault("_dep_unread", set()).update(
+                    p for p in unread if Path(p).name.lower() in lock_names)
             lockfiles = {
                 p: c for p, c in fetched
                 if Path(p).name.lower() in lock_names and c
@@ -4794,6 +4830,8 @@ async def _run_supply_chain(
                 p == "Dependency pinning" for p in result.positive_signals
             ):
                 result.positive_signals.append("Dependency pinning")
+            if gaps is not None and not sc.ok and getattr(sc, "error", None):
+                gaps["advisory_lookup"] = "failed"
             db_snapshots = dict(sc.db_snapshots)
             sc_summary = {
                 "ok": sc.ok,
@@ -4810,6 +4848,8 @@ async def _run_supply_chain(
                 "db_snapshots": sc.db_snapshots,
             }
         except Exception:
+            if gaps is not None:
+                gaps["advisory_lookup"] = "failed"
             logger.warning(
                 "Supply-chain pass errored for %s/%s — keeping regex deps",
                 owner, repo, exc_info=True,
@@ -5498,13 +5538,24 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     # OSV for the package itself: MAL- incident history (context only, never scored) and
     # its own published advisories — one that affects the scanned version IS a finding.
     # Fetched BEFORE scoring so those findings count. Fail-open.
+    _osv_checked = False
     try:
         from src.scanner.incident_history import fetch_incident_history
         _ver = (result.artifact_scan or {}).get("version") or version
         result.incident_history = await fetch_incident_history(surface, name, _ver)
+        _osv_checked = (result.incident_history or {}).get("checked") is True
         result.findings = result.findings + _own_advisory_findings(
             name, _ver, (result.incident_history or {}).get("advisories") or [])
     except Exception:
+        pass
+    # An ecosystem OSV covers whose lookup did not complete: "no advisories" was not
+    # checked, so say so beside the answer (disclosure only, never scored).
+    try:
+        from src.scanner.incident_history import _OSV_ECOSYSTEM
+        if (surface or "").lower() in _OSV_ECOSYSTEM and not _osv_checked:
+            result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                    "advisory_lookup": "failed"}
+    except Exception:  # noqa: BLE001 — disclosure must never break a scan
         pass
 
     if eco == "docker":
@@ -5533,7 +5584,8 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     )
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
 
-    findings, files_scanned, has_hook = scan_artifact_files(fetched)
+    oversized: list[str] = []
+    findings, files_scanned, has_hook = scan_artifact_files(fetched, oversized_out=oversized)
     # npm / PyPI: text that matches an attack pattern in detection data, a prebuilt web
     # bundle or a non-tool prompt template is not the package running it (no-op for
     # other ecosystems).
@@ -5560,6 +5612,16 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     if skipped is not None and getattr(skipped, "scannable", 0) > 0:
         result.sampled = True
         result.total_scannable_files = files_scanned + skipped.scannable
+    # Coverage gaps (disclosure only; `sampled` above is unchanged): source files over
+    # the 500 KB read cap, kept or dropped at unpack, and members the bounded unpack
+    # skipped. Stated beside the answer so a partial read never reads as clean.
+    gaps: dict = {}
+    n_over = len(oversized) + int(getattr(skipped, "oversized_scannable", 0) or 0)
+    if n_over:
+        gaps["oversized_files"] = n_over
+    if skipped is not None and int(getattr(skipped, "scannable", 0) or 0) > 0:
+        gaps["package_skipped"] = int(skipped.scannable)
+    result.coverage_gaps = gaps
     # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
     # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
     # tier judges observed egress against these declared hosts.
@@ -5707,6 +5769,14 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     result.coverage = build_coverage(
         surface="mcp", scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=True,
     )
+    # Coverage gaps (disclosure only): a tools/list that failed, or a paged tool list
+    # read only to its first page, is not the whole tool set.
+    _gaps: dict = {}
+    if data.get("tools_list_failed"):
+        _gaps["tool_list_unread"] = True
+    if data.get("tools_more_pages"):
+        _gaps["tool_list_paged"] = True
+    result.coverage_gaps = _gaps
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
     result.certified = _certified_status(result)
@@ -6019,6 +6089,49 @@ def _tidy_desc(s: str) -> str:
     return re.sub(r"[\s–—\-·|:;,]+$", "", s or "").strip()
 
 
+REPO_SELECTION_RULE = (
+    f"default branch; source files up to {_MAX_FILE_SIZE // 1000} KB; "
+    f"first {_MAX_FILES_PER_REPO} shipped-first"
+)
+
+
+def files_read_digest(text_hashes: dict[str, str]) -> str | None:
+    """``sha256:`` over the sorted ``path NUL sha256(text)`` lines of every file read —
+    a digest of exactly what a "nothing found" claim covers (None when nothing read)."""
+    if not text_hashes:
+        return None
+    h = hashlib.sha256()
+    for path in sorted(text_hashes):
+        h.update(f"{path}\0{text_hashes[path]}\n".encode())
+    return "sha256:" + h.hexdigest()
+
+
+def _finish_repo_coverage(
+    result: ScanResult, gaps: dict, tree_sha: str | None, text_hashes: dict[str, str],
+) -> None:
+    """Fold the repo scan's coverage gaps + read scope into the result. Disclosure only:
+    nothing here touches the score, ``sampled`` or the Certified checks."""
+    dep_unread = gaps.pop("_dep_unread", None) or set()
+    if dep_unread:
+        gaps["dependency_files_unread"] = len(dep_unread)
+    art = result.artifact_scan if isinstance(result.artifact_scan, dict) else {}
+    skipped = art.get("skipped") if isinstance(art.get("skipped"), dict) else {}
+    if int(skipped.get("scannable") or 0) > 0:
+        gaps["package_skipped"] = int(skipped["scannable"])
+    if int(skipped.get("oversized_scannable") or 0) > 0:
+        gaps["oversized_files"] = (int(gaps.get("oversized_files") or 0)
+                                   + int(skipped["oversized_scannable"]))
+    result.coverage_gaps = {k: gaps[k] for k in sorted(gaps)}
+    if not isinstance(result.coverage, dict):
+        result.coverage = {}
+    result.coverage["selection"] = REPO_SELECTION_RULE
+    if tree_sha:
+        result.coverage["tree_sha"] = tree_sha
+    digest = files_read_digest(text_hashes)
+    if digest:
+        result.coverage["files_read_digest"] = digest
+
+
 async def scan_repo(
     full_name: str,
     stars: int = 0,
@@ -6220,6 +6333,21 @@ async def scan_repo(
         )
         result.sampled = result.sampled or _sel_sampled
 
+        # Coverage gaps (disclosure only — never a score / decision input; `sampled`
+        # and Certified are untouched). Oversized blobs are counted only when the scan
+        # would have read them (same selection rule as the files it did read).
+        gaps: dict = {}
+        n_oversized = len(_oversized_scan_files(
+            _repo_meta.get("oversized") or [], user_excludes, limit=0,
+        ))
+        if n_oversized:
+            gaps["oversized_files"] = n_oversized
+        if result.total_scannable_files > len(scan_files):
+            gaps["over_file_cap"] = result.total_scannable_files - len(scan_files)
+            gaps["file_cap"] = _MAX_FILES_PER_REPO
+        if tree_truncated:
+            gaps["tree_truncated"] = True
+
         # Load allowlist once for the whole scan
         allowlist = _load_allowlist()
 
@@ -6247,7 +6375,9 @@ async def scan_repo(
             ``scanned`` is True only when the file was actually fetched AND scanned —
             a failed fetch or empty file returns False so it does NOT inflate
             ``files_scanned`` (#7). ``text_hash`` is ``(path, sha256(text))`` for
-            Phase-2 drift comparison, or None.
+            Phase-2 drift comparison, or None. A seventh element, ``failed``, is True
+            when the fetch errored, timed out or returned nothing (not an empty file):
+            the file was selected but never read, which the coverage gaps disclose.
             """
             path = item["path"]
             try:
@@ -6257,15 +6387,15 @@ async def scan_repo(
                         timeout=per_file_timeout,
                     )
                 if not content:
-                    return [], [], 0, None, None, False
+                    return [], [], 0, None, None, False, content is None
                 f, p, s = _scan_content(content, path, allowlist)
                 text_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 return (
                     f, p, s, (path, _canonical_tool_digest(content, path)),
-                    (path, text_hash), True,
+                    (path, text_hash), True, False,
                 )
             except (asyncio.TimeoutError, Exception):
-                return [], [], 0, None, None, False
+                return [], [], 0, None, None, False, True
 
         tasks = [asyncio.ensure_future(_scan_one(item)) for item in scan_files]
         # Bound the phase: collect whatever finished within the budget, cancel the rest
@@ -6279,17 +6409,22 @@ async def scan_repo(
                 for t in pending:
                     t.cancel()
                 result.sampled = True
+                gaps["time_limit_unread"] = len(pending)
                 logger.warning(
                     "scan_repo file phase hit the %.0fs budget for %s/%s — %d/%d files (sampled)",
                     scan_phase_budget, owner, repo, len(done), len(tasks),
                 )
             scan_results = [t.result() for t in tasks if t in done and not t.cancelled()]
 
-        for findings_list, positives_list, suppressed, digest, text_hash, scanned in scan_results:
+        fetch_failed = 0
+        for (findings_list, positives_list, suppressed, digest, text_hash, scanned,
+             failed) in scan_results:
             # Only count files that were actually scanned (#7) — signed filesScanned
             # must reflect real coverage, not attempted fetches.
             if scanned:
                 result.files_scanned += 1
+            if failed:
+                fetch_failed += 1
             result.findings.extend(findings_list)
             result.positive_signals.extend(positives_list)
             result.suppressed_count += suppressed
@@ -6297,6 +6432,8 @@ async def scan_repo(
                 result.tool_digests[digest[0]] = digest[1]
             if text_hash and text_hash[1]:
                 repo_text_hashes[text_hash[0]] = text_hash[1]
+        if fetch_failed:
+            gaps["fetch_failed"] = fetch_failed
 
         # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
         oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)
@@ -6334,6 +6471,7 @@ async def scan_repo(
             if Path(item["path"]).name.lower() in dep_file_names
             and not _should_skip_path(item["path"])
         ]
+        dep_unread: set[str] = gaps.setdefault("_dep_unread", set())
         for dep_item in dep_files[:10]:  # cap at 10 dep files
             try:
                 async with sem:
@@ -6343,13 +6481,15 @@ async def scan_repo(
                         ),
                         timeout=per_file_timeout,
                     )
+                if dep_content is None:
+                    dep_unread.add(dep_item["path"])
                 if dep_content:
                     dep_findings = _scan_dependencies(
                         dep_content, dep_item["path"],
                     )
                     result.findings.extend(dep_findings)
             except (asyncio.TimeoutError, Exception):
-                pass
+                dep_unread.add(dep_item["path"])
 
         # --- Phase 1: real supply-chain (OSV / deps.dev / Scorecard) ----------
         # Parse the repo's real lockfiles → OSV → severity-weighted CVE/GHSA/MAL
@@ -6358,7 +6498,7 @@ async def scan_repo(
         # above stand and the scan proceeds. Every DB date is pinned into the
         # coverage block so the subscore is offline-recomputable (Phase 0).
         await _run_supply_chain(
-            result, owner, repo, tree, token, ref, sem, per_file_timeout,
+            result, owner, repo, tree, token, ref, sem, per_file_timeout, gaps,
         )
 
         # --- Phase 2: published-artifact fetch + scan + repo↔artifact drift ----
@@ -6419,6 +6559,12 @@ async def scan_repo(
         # negatives apply a small BOUNDED penalty (never a false-F). Capped at ~5
         # extra API calls, reusing the token.
         await _maybe_maintainer_signals(result, owner, repo, token)
+
+        # --- Coverage scope + gaps (disclosure only; never scored) -------------
+        # A "nothing found" answer covers only what was read: pin WHAT was read (the
+        # git tree listed, the selection rule, a digest of the exact file texts read)
+        # and record what was selected but not read, so silence never reads as clean.
+        _finish_repo_coverage(result, gaps, _repo_meta.get("tree_sha"), repo_text_hashes)
 
         # Dedupe before scoring: a repo scan grades BOTH the repo tree and the (same)
         # published artifact source, so an identical detection at the same site was

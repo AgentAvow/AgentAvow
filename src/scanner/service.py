@@ -122,6 +122,8 @@ async def run_security_scan(
         "files_scanned": result.files_scanned,
         "total_scannable_files": result.total_scannable_files,
         "sampled": result.sampled,
+        # What the scan selected but could not read (disclosure only; never scored).
+        "coverage_gaps": getattr(result, "coverage_gaps", {}) or {},
         "primary_language": result.primary_language,
         "critical_count": result.critical_count,
         "high_count": result.high_count,

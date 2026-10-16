@@ -226,7 +226,7 @@
    "version": "8.0.6",
    "score": 74,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
+   "reason": "nothing found; little code to inspect; 1 file over 500 KB was not fully read",
    "files_scanned": 3,
    "severity": {
     "critical": 0,
@@ -1027,7 +1027,7 @@
    "version": "3.2.3",
    "score": 74,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
+   "reason": "nothing found; little code to inspect; 1 file over 500 KB was not fully read",
    "files_scanned": 1,
    "severity": {
     "critical": 0,
@@ -1374,7 +1374,7 @@
    "version": "3.4.2",
    "score": 82,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
+   "reason": "nothing found; little code to inspect; 1 file over 500 KB was not fully read",
    "files_scanned": 5,
    "severity": {
     "critical": 0,
@@ -2146,7 +2146,7 @@
    "version": "2.7.0",
    "score": 80,
    "label": "safe",
-   "reason": "no critical or high findings in 10 files",
+   "reason": "no critical or high findings in 10 files; 1 file over 500 KB was not fully read",
    "files_scanned": 10,
    "severity": {
     "critical": 0,
@@ -2337,7 +2337,7 @@
    "version": "4.18.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 1,042 files",
+   "reason": "nothing found in 1,042 files; 1 file over 500 KB was not fully read",
    "files_scanned": 1042,
    "severity": {
     "critical": 0,
@@ -2407,7 +2407,7 @@
    "version": "0.14.3",
    "score": 82,
    "label": "safe",
-   "reason": "nothing found; little code to inspect",
+   "reason": "nothing found; little code to inspect; 2 files over 500 KB were not fully read",
    "files_scanned": 6,
    "severity": {
     "critical": 0,
@@ -3629,7 +3629,7 @@
    "version": "8.3.3",
    "score": 84,
    "label": "safe",
-   "reason": "no critical or high findings in 34 files",
+   "reason": "no critical or high findings in 34 files; 1 file over 500 KB was not fully read",
    "files_scanned": 34,
    "severity": {
     "critical": 0,
@@ -4076,7 +4076,7 @@
    "version": "1.43.109",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 784 files",
+   "reason": "nothing found in 784 files; 1 file over 500 KB was not fully read",
    "files_scanned": 784,
    "severity": {
     "critical": 0,
@@ -4552,7 +4552,7 @@
    "version": "2.1.4",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 13 files",
+   "reason": "nothing found in 13 files; 2 files over 500 KB were not fully read",
    "files_scanned": 13,
    "severity": {
     "critical": 0,
@@ -5843,7 +5843,7 @@
    "version": "3.0.6",
    "score": 82,
    "label": "safe",
-   "reason": "no critical or high findings in 285 files",
+   "reason": "no critical or high findings in 285 files; 1 file over 500 KB was not fully read",
    "files_scanned": 285,
    "severity": {
     "critical": 0,
@@ -7189,7 +7189,7 @@
    "version": "21.14.5",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 83 files",
+   "reason": "nothing found in 83 files; 1 file over 500 KB was not fully read",
    "files_scanned": 83,
    "severity": {
     "critical": 0,

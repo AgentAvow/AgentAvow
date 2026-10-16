@@ -36,6 +36,7 @@ from src.database import get_db
 from src.scanner.behavioral import slots as _behavioral_slots
 from src.scanner.verdict import certified_mark as _certified_mark
 from src.scanner.verdict import certified_mark_status as _certified_mark_status
+from src.scanner.verdict import coverage_gap_notes as _coverage_gap_notes
 from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_safe as _is_safe
 from src.scanner.verdict import verdict_label as _verdict_label
@@ -198,6 +199,11 @@ class PublicScanResponse(BaseModel):
     certified_mark_reason: str = ""
     coverage: dict = {}  # scan_depth / provenance_binding / db_snapshots (recompute discipline)
     supply_chain: dict = {}  # OSV/deps.dev summary (signed into the JWS; mirrored here for readers)
+    # What the scan selected but could NOT read, by cause (only non-zero keys; empty =
+    # everything selected was read). Signed as scan.coverageGaps. `not_checked` is the
+    # same in plain English; a Safe decision_reason ends with it. Never a score input.
+    coverage_gaps: dict = {}
+    not_checked: list[str] = []
     # Context-only incident history — OSV MAL- advisories for THIS package's own coordinate
     # ("was it ever compromised?"). NOT scored, NOT signed; empty for repos w/o a coordinate
     # or non-OSV ecosystems. {checked, has_incident, current_version_affected, count, incidents[]}.
@@ -1273,6 +1279,12 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
     _supply_chain = result_data.get("supply_chain") or {}
     if _supply_chain:
         scan_block["supplyChain"] = _supply_chain
+    # What the scan selected but could not read (oversized / unfetched / past the cap /
+    # truncated tree / skipped package members / failed advisory lookup). Signed so a
+    # verifier sees the "nothing found" claim's scope; omitted when nothing was missed.
+    _gaps = result_data.get("coverage_gaps") or {}
+    if _gaps:
+        scan_block["coverageGaps"] = _gaps
     # The signed sandbox observation that moved the score (see score_effect.py): with
     # the observation JWS (sha256 below) + staticScore, the number is recomputable.
     _bev = result_data.get("behavioral_evidence")
@@ -1436,6 +1448,8 @@ def _scan_result_to_dict(result: object) -> dict:
         # db_snapshots, evidence_anchors) + the OSV/deps.dev supply-chain summary.
         "coverage": getattr(result, "coverage", {}) or {},
         "supply_chain": getattr(result, "supply_chain", {}) or {},
+        # What the scan selected but could not read (disclosure only; never scored).
+        "coverage_gaps": getattr(result, "coverage_gaps", {}) or {},
         # Context-only incident history (OSV MAL- for the target's own coordinate).
         "incident_history": getattr(result, "incident_history", {}) or {},
         "deprecation": getattr(result, "deprecation", None),
@@ -1531,6 +1545,8 @@ def _package_response(
         certified=data.get("certified") or {},
         coverage=data.get("coverage", {}),
         supply_chain=data.get("supply_chain", {}),
+        coverage_gaps=data.get("coverage_gaps") or {},
+        not_checked=_coverage_gap_notes(data),
         incident_history=data.get("incident_history", {}),
         deprecation=data.get("deprecation"),
         package_version=data.get("package_version"),
@@ -2041,6 +2057,7 @@ async def _mcp_badge_svg(endpoint: str, style: str, theme: str) -> Response:
         certified=certified if score is not None else False,
         brand=settings.badge_brand, theme=theme, coordinate=f"mcp:{host}",
         adoption=count, adoption_unit=unit, adoption_pct=a_pct,
+        not_checked=len(_coverage_gap_notes(data or {})),
     )
     return Response(content=svg, media_type="image/svg+xml", headers={
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
@@ -3087,7 +3104,8 @@ async def scan_badge(
     if style != "classic":
         return await _avow_badge_response(
             owner, repo, style=style, theme=theme, score=score, certified=certified,
-            decision=decision if score is not None else None, db=db)
+            decision=decision if score is not None else None, db=db,
+            not_checked=len(_coverage_gap_notes(scan_data or {})))
 
     # Combined = trust + adoption in one badge (adoption never travels alone)
     if metric == "combined":
@@ -3172,7 +3190,8 @@ async def scan_card(
         return await _avow_badge_response(
             owner, repo, style=style, theme=theme, score=score, certified=cert,
             decision=decision if score is not None else None, db=db,
-            cache_control="public, max-age=300, s-maxage=3600")
+            cache_control="public, max-age=300, s-maxage=3600",
+            not_checked=len(_coverage_gap_notes(scan_data or {})))
 
     a_surface, a_score100, a_count, a_unit = await _card_adoption(owner, repo, db)
     coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
@@ -3437,6 +3456,7 @@ async def _avow_badge_response(
     owner: str, repo: str, *, style: str, theme: str, score: int | None,
     certified: bool, decision: str | None, db: AsyncSession | None = None,
     cache_control: str = "public, max-age=3600, s-maxage=86400",
+    not_checked: int = 0,
 ) -> Response:
     """The opt-in Avow badge family (``src.api.badge_avow``) — same inputs and the same
     open-CORS, regenerate-per-view headers as the classic badge."""
@@ -3447,7 +3467,7 @@ async def _avow_badge_response(
         style=style, decision=decision, score=int(score) if score is not None else None,
         certified=certified, brand=settings.badge_brand, theme=theme,
         coordinate=coordinate, adoption=adoption, adoption_unit=a_unit,
-        adoption_pct=a_pct,
+        adoption_pct=a_pct, not_checked=not_checked,
     )
     return Response(
         content=svg,
