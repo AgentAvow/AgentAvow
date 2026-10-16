@@ -37,6 +37,10 @@ code: it ``require``s or imports a Node core module, touches ``process.env`` /
 ``stdin`` / ``argv`` outside a string, declares MCP tools, or is named by
 ``package.json`` (``main`` / ``bin`` / ``exports``) or by any non-bundle code file.
 
+A ``curl … | bash`` string in JS / TS / Python code is lowered when its value reaches
+only human-facing output in every file of the package that reads it (a printed install
+hint: ``src.scanner.printed_hint``).
+
 Applied to npm and PyPI artifacts only; repository, MCP-server, skill, image and model
 scans are unchanged.
 """
@@ -44,6 +48,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+
+from src.scanner.printed_hint import WHY as WHY_HINT
+from src.scanner.printed_hint import Hints, is_supported
 
 PACKAGE_ECOSYSTEMS = frozenset({"npm", "pypi", "python"})
 
@@ -375,6 +382,7 @@ def calibrate_package_findings(findings: list, fetched) -> list:
         return findings
     pkg = _Package(fetched)
     data_ok: dict[str, bool] = {}
+    hints = Hints(pkg.texts, package=True)  # lazy: tokenizes only when asked
 
     for f in findings:
         if getattr(f, "kind", "defect") == "capability":
@@ -394,6 +402,11 @@ def calibrate_package_findings(findings: list, fetched) -> list:
               and (cat in _BUNDLE_CATEGORIES or f.name in _BUNDLE_REMOTE_LOAD_NAMES)
               and pkg.is_bundle(path)):
             _lower(f, WHY_BUNDLE)
+        elif (f.name == _PIPE_TO_SHELL and is_supported(path)
+              and hints.why_not(path, f.line_number, _pipe_to_shell_re()) is None):
+            # Printed install hint: the string reaches only print / log / error-message
+            # output in every file that reads it (``src.scanner.printed_hint``).
+            _lower(f, WHY_HINT)
         elif (cat == "prompt_injection" and Path(path).suffix.lower() in _CODE_EXTS
               and not pkg.declares_tools and f.name == _ROLE_DIRECTIVE
               and not _JAILBREAK_ROLE_RE.search(f.snippet or "")):
@@ -401,6 +414,14 @@ def calibrate_package_findings(findings: list, fetched) -> list:
             # "System prompt:" in its code structures its own model call.
             _lower(f, WHY_CODE_TEXT)
     return findings
+
+
+_PIPE_TO_SHELL = "curl/wget piped to shell"
+
+
+def _pipe_to_shell_re():
+    from src.scanner.patterns import DYNAMIC_REMOTE_LOAD_PATTERNS
+    return next(p for n, p, _s in DYNAMIC_REMOTE_LOAD_PATTERNS if n == _PIPE_TO_SHELL)
 
 
 def _lower(f, why: str) -> None:
