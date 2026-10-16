@@ -455,14 +455,17 @@ def scan_artifact_files(
     from src.scanner.patterns import SKIP_DIRS
     from src.scanner.scan import (
         _MAX_FILE_SIZE,
+        _OVERSIZED_WINDOW,
         _is_build_tooling_file,
         _is_git_config_file,
         _is_git_hook_file,
+        _is_oversized_code_file,
         _is_source_file,
         _is_test_or_doc_file,
         _load_allowlist,
         _scan_content,
         _scan_dependencies,
+        _scan_oversized_text,
         _should_skip_path,
     )
 
@@ -543,6 +546,10 @@ def scan_artifact_files(
         # everything else there is informational (below).
         # A shipped .git/config or .git/hooks/* in a tarball is a GitSpawn autorun vector
         # (a published artifact should never carry a .git/ dir) — scan it like the repo tree.
+        # A source file over the engine's size cap is scanned at its head and tail and
+        # disclosed (padding past the cap is a published evasion; _scan_oversized_text).
+        oversized = (bool(af.text) and len(af.text) > _MAX_FILE_SIZE
+                     and _is_oversized_code_file(path))
         if (
             oversized_out is not None
             and af.text
@@ -553,12 +560,18 @@ def scan_artifact_files(
             oversized_out.append(path)
         if (
             af.text
-            and len(af.text) <= _MAX_FILE_SIZE
+            and (len(af.text) <= _MAX_FILE_SIZE or oversized)
             and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
             and not _skip(path)
         ):
-            f, _positives, _suppressed = _scan_content(af.text, path, allowlist,
-                                                       payloads_full_severity=True)
+            if oversized:
+                f = _scan_oversized_text(
+                    af.text[:_OVERSIZED_WINDOW], af.text[-_OVERSIZED_WINDOW:], path,
+                    len(af.text.encode("utf-8", errors="replace")), allowlist,
+                    payloads_full_severity=True)
+            else:
+                f, _positives, _suppressed = _scan_content(af.text, path, allowlist,
+                                                           payloads_full_severity=True)
             if not _installed(path):
                 # Not on a consumer's disk: keep the finding visible, never let it
                 # score or block (severity capped at info).
@@ -581,7 +594,21 @@ def scan_artifact_files(
                 findings.extend(f)
                 continue
             findings.extend(f)
-            files_scanned += 1
+            if not oversized:  # a partly read file does not count as scanned
+                files_scanned += 1
+
+    # Source members too large to unpack at all (``MAX_MEMBER_BYTES``) were never read:
+    # disclose each one the skip report names, like a partly read file.
+    skipped = getattr(fetched, "skipped", None)
+    for ex in (getattr(skipped, "examples", None) or []):
+        path = str(ex.get("path") or "")
+        if (ex.get("reason") == "too large" and path and _is_oversized_code_file(path)
+                and not _skip(path) and path not in fetched.files):
+            for item in _scan_oversized_text(None, None, path, int(ex.get("size") or 0)):
+                if not _installed(path) or _is_test_or_doc_file(path):
+                    item.installed = _installed(path)
+                    item.severity = "info"
+                findings.append(item)
 
     return findings, files_scanned, has_install_hook
 

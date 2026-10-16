@@ -428,21 +428,28 @@ def _detect_language(files: list[dict]) -> str:
     return lang_map[top_ext]
 
 
-def _tree_blobs(tree: list[dict], oversized_out: list | None = None) -> list[dict]:
-    """Keep only blob (file) entries under the per-file size cap.
+class _BlobList(list):
+    """The scannable tree, plus the blobs over the per-file size cap in ``oversized``:
+    ``scan_repo`` reads their head and tail (``_oversized_scan_files``), so a padded file
+    is disclosed instead of silently dropped. Every other consumer sees the plain list."""
 
-    Blobs over the cap are never read. Pass ``oversized_out`` to collect them, so the
-    caller can disclose the ones the scan would have read (a payload padded past the
-    cap must not vanish into a clean result)."""
-    kept = []
-    for item in tree:
-        if item.get("type") != "blob":
-            continue
-        if item.get("size", 0) <= _MAX_FILE_SIZE:
-            kept.append(item)
-        elif oversized_out is not None:
-            oversized_out.append(item)
-    return kept
+    oversized: list[dict]
+
+
+def _tree_blobs(tree: list[dict], oversized_out: list | None = None) -> list[dict]:
+    """Keep only blob (file) entries under the per-file size cap (the rest ride along in
+    ``.oversized``, and are also appended to ``oversized_out`` for the coverage
+    disclosure when given)."""
+    out = _BlobList(
+        item for item in tree
+        if item.get("type") == "blob"
+        and item.get("size", 0) <= _MAX_FILE_SIZE
+    )
+    out.oversized = [item for item in tree
+                     if item.get("type") == "blob" and item.get("size", 0) > _MAX_FILE_SIZE]
+    if oversized_out is not None:
+        oversized_out.extend(out.oversized)
+    return out
 
 
 async def _note_github(resp: httpx.Response, context: str) -> None:
@@ -2072,6 +2079,7 @@ def _select_scan_files(
     scannable = [
         it for it in tree
         if not _should_skip_path(it["path"])
+        and it.get("size", 0) <= _MAX_FILE_SIZE
         and (_is_source_file(it["path"]) or _is_git_config_file(it["path"])
              or _is_git_hook_file(it["path"]))
         and not _excluded(it["path"])
@@ -2087,6 +2095,140 @@ def _select_scan_files(
             it["path"],
         ))
     return scannable[:_MAX_FILES_PER_REPO], total, sampled
+
+
+# Source files over ``_MAX_FILE_SIZE`` are not skipped silently: padding a file past a
+# scanner's size cap with filler, then putting the payload at the end, is a published
+# evasion (Pluto Security, "Malicious MCP servers, clean scans", 2026-09-15: 16.2 MiB of
+# weather text before the payload). The first and last ``_OVERSIZED_WINDOW`` bytes are
+# scanned and the file is disclosed as only partly read.
+_OVERSIZED_WINDOW = 256_000
+_MAX_OVERSIZED_FILES = 10
+# Closers of a multi-line string or comment. A tail window that begins inside the
+# filler docstring sees the closing quote as an OPENING one and would treat the code
+# after it as prose, so the text after the last closer is scanned on its own too.
+_TAIL_CLOSERS = ('"""', "'''", "*/")
+
+
+def _oversized_scan_files(
+    tree: list[dict], user_excludes: set[str] | None = None, *, limit: int | None = None,
+) -> list[dict]:
+    """Source files in ``tree`` over ``_MAX_FILE_SIZE`` that ``_select_scan_files``
+    leaves out, shipped paths first, at most ``limit`` (default ``_MAX_OVERSIZED_FILES``;
+    ``0`` = all, for counting the coverage gap)."""
+    excl = {e.lower() for e in (user_excludes or set())}
+    big = [
+        it for it in tree
+        if it.get("size", 0) > _MAX_FILE_SIZE
+        and not _should_skip_path(it["path"])
+        and _is_oversized_code_file(it["path"])
+        and not any(e in it["path"].lower() for e in excl)
+    ]
+    big.sort(key=lambda it: (
+        _is_nonshipped_path(it["path"]) or _is_test_or_doc_file(it["path"]), it["path"],
+    ))
+    if limit == 0:
+        return big
+    return big[:_MAX_OVERSIZED_FILES if limit is None else limit]
+
+
+def _is_oversized_code_file(path: str) -> bool:
+    """Code an interpreter runs (``_PAYLOAD_CODE_EXTS``). Oversized data files (a 1.2 MB
+    endpoints.json, a type table) can't hide a call, so they stay out of this pass."""
+    return Path(path).suffix.lower() in _PAYLOAD_CODE_EXTS and _is_source_file(path)
+
+
+def _looks_padded(head: str, file_path: str) -> bool:
+    """Whether the head of an oversized file is filler: one long line repeated over a
+    third of the rows, or (in Python) almost all docstring / multi-line string."""
+    from collections import Counter
+    rows = [ln.strip() for ln in head.split("\n") if ln.strip()]
+    if len(rows) < 200:
+        return False
+    line, n = Counter(r for r in rows if len(r) >= 30).most_common(1)[0] if any(
+        len(r) >= 30 for r in rows) else ("", 0)
+    if line and n / len(rows) >= 0.3:
+        return True
+    if Path(file_path).suffix.lower() == ".py":
+        total = head.count("\n") + 1
+        return len(_python_prose_lines(head)) / total >= 0.9
+    return False
+
+
+def _scan_oversized_text(
+    head: str | None, tail: str | None, file_path: str, size: int,
+    allowlist: set[tuple[str, str]] | None = None, *, payloads_full_severity: bool = False,
+) -> list[Finding]:
+    """Findings for a source file too large to scan whole: the static engine over its
+    first and last ``_OVERSIZED_WINDOW`` bytes (``None`` = not readable), plus one
+    disclosure finding. A tail finding's line number is unknown and reported as 0."""
+    windows: list[tuple[str, bool]] = []
+    if head:
+        cut = head.rfind("\n")
+        windows.append((head[:cut + 1] if cut > 0 else head, True))
+    if tail:
+        cut = tail.find("\n")
+        body = tail[cut + 1:] if 0 <= cut < len(tail) - 1 else tail
+        windows.append((body, False))
+        last = max((body.rfind(t) + len(t) for t in _TAIL_CLOSERS if t in body), default=-1)
+        if 0 < last < len(body):
+            windows.append((body[last:], False))
+    out: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for text, is_head in windows:
+        try:
+            found, _pos, _sup = _scan_content(
+                text, file_path, allowlist, payloads_full_severity=payloads_full_severity)
+        except Exception:  # noqa: BLE001 — a window that fails to scan is just unread
+            continue
+        for f in found:
+            key = (f.name, f.snippet)
+            if key in seen:
+                continue
+            seen.add(key)
+            if not is_head:
+                f.line_number = 0
+            out.append(f)
+    padded = bool(head) and _looks_padded(head, file_path)
+    read = ("first and last 256 KB scanned" if head and tail
+            else "first 256 KB scanned" if head else "not read")
+    out.append(Finding(
+        category="obfuscation",
+        name=("Oversized source file padded with filler" if padded
+              else "Source file too large to scan in full"),
+        # Padded, or not read at all: medium. Head and tail read, no filler: low.
+        severity="medium" if padded or not (head or tail) else "low",
+        file_path=file_path,
+        line_number=0,
+        snippet=f"{size:,} bytes; {read}",
+        remediation=_why(
+            "a source file this large is only partly scanned; padding past a scanner's "
+            "size limit hides code", "obfuscation", "defect"),
+    ))
+    return out
+
+
+async def _fetch_file_window(
+    owner: str, repo: str, path: str, ref: str | None, *, tail: bool,
+) -> str | None:
+    """The first (``tail=False``) or last ``_OVERSIZED_WINDOW`` bytes of a repo file over
+    the unmetered raw host, by HTTP Range. None without a ref or on any failure (a
+    private repo 404s there); the caller then discloses the file as not read."""
+    if not ref:
+        return None
+    rng = f"bytes=-{_OVERSIZED_WINDOW}" if tail else f"bytes=0-{_OVERSIZED_WINDOW - 1}"
+    url = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"Range": rng})
+    except httpx.HTTPError:
+        return None
+    if resp.status_code not in (200, 206):
+        return None
+    data = resp.content
+    if resp.status_code == 200:  # Range ignored: keep the window we asked for
+        data = data[-_OVERSIZED_WINDOW:] if tail else data[:_OVERSIZED_WINDOW]
+    return data.decode("utf-8", errors="replace")
 
 
 # Developer/build tooling that is NEVER part of an installed package: `pip install`
@@ -2377,6 +2519,25 @@ _SECRET_PLACEHOLDER_CORES = (
     "yoursecret", "yourtoken", "yourkey", "yourpassword", "dummy", "redacted",
     "notasecret", "insertkey", "insertyour", "todo", "fixme", "xxxx", "foobar",
 )
+
+
+def _is_counting_placeholder(val: str) -> bool:
+    """A key body made only of counting runs (``1234567890abcdef1234567890…``, ghapi's
+    spec example) is a made-up value, never random key material. Every maximal run of
+    consecutive characters (9 wraps to 0) must be 4+ long, over 16+ characters, so a
+    random key that merely contains ``1234`` is still a key."""
+    body = re.split(r"[_-]", val)[-1]
+    if len(body) < 16:
+        return False
+    run = 1
+    for prev, ch in zip(body, body[1:]):
+        if ord(ch) == ord(prev) + 1 or (prev == "9" and ch == "0"):
+            run += 1
+            continue
+        if run < 4:
+            return False
+        run = 1
+    return run >= 4
 
 # OAuth2 token exchange looks exactly like exfiltration (a client_secret POSTed
 # outbound), but it's the REQUIRED auth flow. These hints — grant types, token/
@@ -2797,7 +2958,8 @@ def _scan_content(
                 # Collapse separators/case so "CHANGE-ME-IN-PRODUCTION", "change_me",
                 # "your-api-key" all reduce to a comparable core before matching.
                 val_norm = re.sub(r"[^a-z0-9]", "", val.lower())
-                if any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES):
+                if (any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES)
+                        or _is_counting_placeholder(val)):
                     continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
@@ -3406,6 +3568,42 @@ def _scan_content(
                 snippet="base64/hex/zlib decode and exec/eval within 10 lines",
                 payload=is_downgraded,
             ))
+
+    # Evasion shapes from Pluto Security's clean-scan study (see src/scanner/evasion.py):
+    # a dangerous name assembled from string pieces at a lookup, and an XOR'd decoded
+    # payload run by exec/eval in another function. Both are payload-shaped.
+    if file_lang in ("python", "javascript", "typescript") and not is_declaration:
+        from src.scanner.evasion import assembled_name_hits, xor_decode_exec_hit
+        for i, joined, ctx, sev in assembled_name_hits(lines, file_lang, _string_state()[0]):
+            g_sev, g_payload = _graded("defect", sev, True)
+            findings.append(Finding(
+                category="obfuscation",
+                name=("Module name assembled from string pieces" if ctx == "module"
+                      else "Dangerous name assembled from string pieces"),
+                severity=g_sev,
+                file_path=file_path,
+                line_number=i + 1,
+                snippet=lines[i].strip()[:120],
+                remediation=_why(f"'{joined}' is built from pieces so the name never "
+                                 "appears in the source", "obfuscation", "defect"),
+                payload=g_payload,
+            ))
+        if file_lang == "python" and not any(
+                f.name.startswith("Decoded payload") for f in findings):
+            hit = xor_decode_exec_hit(lines, _string_state()[0])
+            if hit is not None:
+                g_sev, g_payload = _graded("defect", "high", True)
+                findings.append(Finding(
+                    category="obfuscation",
+                    name="XOR-decoded payload + exec/eval in same file (obfuscated loader)",
+                    severity=g_sev,
+                    file_path=file_path,
+                    line_number=hit + 1,
+                    snippet=lines[hit].strip()[:120],
+                    remediation=_why("bytes are decoded and XOR'd with a key in a file "
+                                     "that calls exec/eval", "obfuscation", "defect"),
+                    payload=g_payload,
+                ))
 
     # SSRF (structural): an MCP tool that builds an outbound request from a caller-supplied
     # URL with no destination validation (CVE-2026-14540 class). Whole-file, MEDIUM,
@@ -5482,6 +5680,16 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         server_info=data.get("server_info"),
     )
     result.findings = mcp.findings
+    # A server that serves agents different tools than it served the scanner: grade the
+    # agent's view too (its poisoning is what reaches an agent) and report the switch.
+    from src.scanner.mcp_scan import client_view_findings
+    _view = data.get("client_view")
+    if _view and _view.get("differs"):
+        result.findings.extend(client_view_findings(_view, data.get("tools")))
+        _seen = {(f.name, f.file_path) for f in result.findings}
+        for f in analyze_mcp(_view.get("tools"), server_info=data.get("server_info")).findings:
+            if (f.name, f.file_path) not in _seen:
+                result.findings.append(f)
     # Pin the served tool definitions, one digest per tool name. A later scan whose
     # digest differs proves the server changed what it serves (the rug-pull), and a
     # gate can bind an authorization to the named tool that was graded.
@@ -6078,9 +6286,9 @@ async def scan_repo(
         # and Certified are untouched). Oversized blobs are counted only when the scan
         # would have read them (same selection rule as the files it did read).
         gaps: dict = {}
-        _, n_oversized, _ = _select_scan_files(
-            _repo_meta.get("oversized") or [], user_excludes,
-        )
+        n_oversized = len(_oversized_scan_files(
+            _repo_meta.get("oversized") or [], user_excludes, limit=0,
+        ))
         if n_oversized:
             gaps["oversized_files"] = n_oversized
         if result.total_scannable_files > len(scan_files):
@@ -6175,6 +6383,33 @@ async def scan_repo(
                 repo_text_hashes[text_hash[0]] = text_hash[1]
         if fetch_failed:
             gaps["fetch_failed"] = fetch_failed
+
+        # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
+        oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)
+        if oversized:
+            result.sampled = True  # the middle of each file is not read
+
+            async def _scan_big(item: dict) -> list:
+                async with sem:
+                    head, tail = await asyncio.gather(
+                        _fetch_file_window(owner, repo, item["path"], ref, tail=False),
+                        _fetch_file_window(owner, repo, item["path"], ref, tail=True),
+                    )
+                return await asyncio.to_thread(
+                    _scan_oversized_text, head, tail, item["path"],
+                    int(item.get("size", 0)), allowlist,
+                )
+
+            big_tasks = [asyncio.ensure_future(_scan_big(it)) for it in oversized]
+            done_big, pending_big = await asyncio.wait(big_tasks, timeout=20.0)
+            for t in pending_big:
+                t.cancel()
+            for item, t in zip(oversized, big_tasks):
+                if t in done_big and not t.cancelled() and t.exception() is None:
+                    result.findings.extend(t.result())
+                else:
+                    result.findings.extend(_scan_oversized_text(
+                        None, None, item["path"], int(item.get("size", 0))))
 
         result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
 

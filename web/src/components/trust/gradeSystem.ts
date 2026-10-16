@@ -328,7 +328,7 @@ export function coverageGapNotes(input: unknown): string[] {
   const g = asObj(asObj(input).coverage_gaps)
   const notes: string[] = []
   let n = toInt(g.oversized_files)
-  if (n > 0) notes.push(`${filesPhrase(n)} over 500 KB ${was(n)} not read`)
+  if (n > 0) notes.push(`${filesPhrase(n)} over 500 KB ${was(n)} not fully read`)
   n = toInt(g.fetch_failed)
   if (n > 0) notes.push(`${filesPhrase(n)} could not be fetched`)
   n = toInt(g.time_limit_unread)

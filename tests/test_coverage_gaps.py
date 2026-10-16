@@ -243,10 +243,10 @@ def test_api_dict_signed_payload_and_response_carry_gaps():
     payload = _build_scan_payload("o/r", data)
     assert payload["scan"]["coverageGaps"] == {"oversized_files": 2}
     resp = _package_response("o/r", data, "jws", False)
-    assert resp.not_checked == ["2 files over 500 KB were not read"]
+    assert resp.not_checked == ["2 files over 500 KB were not fully read"]
     assert resp.coverage_gaps == {"oversized_files": 2}
     assert resp.decision == "safe"
-    assert resp.decision_reason.endswith("; 2 files over 500 KB were not read")
+    assert resp.decision_reason.endswith("; 2 files over 500 KB were not fully read")
     # nothing missed: no signed key, empty note list
     data2 = _scan_result_to_dict(scanmod.ScanResult(repo="o/r", stars=0, description="",
                                                    framework=""))
@@ -271,7 +271,7 @@ def test_mcp_text_lists_not_checked_and_silent_sandbox():
     data = {"trust_score": 92, "trust_tier": "trusted", "metadata": {"files_scanned": 120},
             "findings": {"items": [], "total": 0}, "coverage_gaps": {"oversized_files": 1}}
     text = _scan_block(data, "connect", "/check/o/r", "o/r")
-    assert "**Not checked:** 1 file over 500 KB was not read. A clean result covers only " \
+    assert "**Not checked:** 1 file over 500 KB was not fully read. A clean result covers only " \
            "what was read." in text
     assert "1 file over 500 KB" in text.splitlines()[0]  # in the Safe reason too
     assert "Not checked" not in _scan_block({**data, "coverage_gaps": {}}, "connect",

@@ -307,9 +307,9 @@ CASES = [
      "2 critical findings in its code, including curl/wget piped to shell"),
     # ── coverage gaps: a Safe reason states what was not read (wording only) ─────
     ("gap_oversized_one", _scan(92, 120, coverage_gaps={"oversized_files": 1}), "safe", True,
-     "nothing found in 120 files; 1 file over 500 KB was not read"),
+     "nothing found in 120 files; 1 file over 500 KB was not fully read"),
     ("gap_oversized_many", _scan(92, 120, coverage_gaps={"oversized_files": 3}), "safe", True,
-     "nothing found in 120 files; 3 files over 500 KB were not read"),
+     "nothing found in 120 files; 3 files over 500 KB were not fully read"),
     ("gap_over_cap", _scan(92, 200, coverage_gaps={"over_file_cap": 1800, "file_cap": 200}),
      "safe", True, "nothing found in 200 files; 1,800 files past the 200-file limit were "
      "not read"),
@@ -334,7 +334,7 @@ CASES = [
      "list was read"),
     ("gap_pending_suffix_last", _scan(92, 120, coverage_gaps={"oversized_files": 2},
                                       behavioral={"pending": True}),
-     "safe", False, "nothing found in 120 files; 2 files over 500 KB were not read; "
+     "safe", False, "nothing found in 120 files; 2 files over 500 KB were not fully read; "
      "sandbox still running"),
     # a gap never changes a Review / Do-not-connect answer or its reason
     ("gap_review_unchanged", _scan(70, 200, [_f("high", "X")], high=1,

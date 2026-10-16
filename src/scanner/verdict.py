@@ -394,7 +394,7 @@ def coverage_gap_notes(data: dict) -> list[str]:
     notes: list[str] = []
     n = _int(g.get("oversized_files"))
     if n > 0:
-        notes.append(f"{_files_phrase(n)} over 500 KB {_was(n)} not read")
+        notes.append(f"{_files_phrase(n)} over 500 KB {_was(n)} not fully read")
     n = _int(g.get("fetch_failed"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} could not be fetched")
