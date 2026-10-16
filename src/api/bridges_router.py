@@ -200,7 +200,18 @@ class FrameworkStatusOut(BaseModel):
 
 def _scan_to_out(scan) -> ScanResultOut:
     """Convert a FrameworkSecurityScan model to response schema."""
-    vulns = scan.vulnerabilities or []
+    # A bridge import stores a list of {pattern, severity, location, match}; a scanner
+    # re-scan (src/scanner/service.py) stores a dict whose findings sit under
+    # "findings". Iterating that dict walked its keys (str) and crashed on .get.
+    raw = scan.vulnerabilities
+    if isinstance(raw, dict):
+        vulns = [
+            {"pattern": f.get("name", ""), "severity": f.get("severity", ""),
+             "location": f.get("file_path", ""), "match": ""}
+            for f in (raw.get("findings") or []) if isinstance(f, dict)
+        ]
+    else:
+        vulns = [v for v in (raw or []) if isinstance(v, dict)]
     return ScanResultOut(
         id=str(scan.id),
         entity_id=str(scan.entity_id),
