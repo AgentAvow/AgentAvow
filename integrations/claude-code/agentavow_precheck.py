@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.30"
+__version__ = "0.1.31"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -927,10 +927,13 @@ def _sandbox_summary(b: object) -> str:
     ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else None
     hosts = sorted({str(h) for h in (b.get("egress_hosts") or []) if h} - _REGISTRY_HOSTS)
     net = f"network only {_hosts(hosts)}" if hosts else "no network beyond the registry"
+    # A run stopped by its time limit is partial; never let it read as a full run.
+    partial = bool(b.get("timed_out") or (ex or {}).get("timed_out"))
     if ex and ex.get("launch_ok"):
         called = len({c.get("tool") for c in (ex.get("calls") or [])
                       if isinstance(c, dict) and c.get("tool")})
-        return f"sandbox: called {called} tool{'' if called == 1 else 's'}, {net}"
+        return ("sandbox: " + ("ran partly (hit its time limit), " if partial else "")
+                + f"called {called} tool{'' if called == 1 else 's'}, {net}")
     plan = str(b.get("plan") or "")
     if ex is not None or plan.endswith("-mcp"):
         gs = b.get("grade_summary") if isinstance(b.get("grade_summary"), dict) else {}
@@ -940,6 +943,8 @@ def _sandbox_summary(b: object) -> str:
         else:
             why = _START_SHORT.get(reason, "")
         return "sandbox: not started" + (f" ({why})" if why else "")
+    if partial:
+        return f"sandbox: ran partly (hit its time limit), {net}"
     return f"sandbox: installed, {net}"
 
 

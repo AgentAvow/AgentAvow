@@ -194,8 +194,12 @@ def _block(b, **kw) -> str:
 def test_sandbox_section_absent_without_a_behavioral_block():
     assert _sandbox_line(_scan_data(None)) is None
     assert _sandbox_line({}) is None
-    assert _sandbox_line(_scan_data({"ran": False, "reason": "off"})) is None
-    text = _scan_block(_scan_data(None), "use", "/check/pkg/npm/x", "x · npm")
+    # A block that says the run did not happen is not silence: it is static-only, and
+    # the text says so (partial-coverage honesty, 2026-10-16).
+    assert _sandbox_line(_scan_data({"ran": False, "reason": "off"})) == (
+        "**Sandbox:** did not run (off) — this result is static analysis only; nothing "
+        "was observed running.")
+    text =_scan_block(_scan_data(None), "use", "/check/pkg/npm/x", "x · npm")
     assert "sandbox" not in text.lower()
 
 
@@ -326,6 +330,19 @@ def test_install_only_plans():
     assert "ran the container image; network: no connections." in _sandbox_line(_scan_data(b))
     b.update(plan="pypi", exit_code=1)
     assert "exited with code 1 (not a finding)" in _sandbox_line(_scan_data(b))
+
+
+def test_timed_out_run_says_partial():
+    # litellm: the report card said "installed and imported, clean" while the panel said
+    # "the run hit its time limit — results may be partial".
+    b = {"ran": True, "plan": "pypi", "egress_hosts": [], "findings": [], "exercise": None,
+         "timed_out": True}
+    assert "Ran partly (hit its time limit)" in _sandbox_line(_scan_data(b))
+    b["timed_out"] = False
+    assert "Ran partly" not in _sandbox_line(_scan_data(b))
+    ex = _exercised()
+    ex["exercise"]["timed_out"] = True
+    assert "Ran partly (hit its time limit)" in _sandbox_line(_scan_data(ex))
 
 
 # ── start_reason: a server that could not start says why ──────────────────────

@@ -259,7 +259,8 @@ def gate(manifest: dict, results: dict[str, dict]) -> list[str]:
 
 def _is_thin(r: dict) -> bool:
     """Safe on thin coverage: nothing found, little code to inspect."""
-    return r.get("label") == "safe" and r.get("reason") in THIN_REASONS
+    # A Safe reason may end with what was not read ("; 1 file over 500 KB was not read").
+    return r.get("label") == "safe" and str(r.get("reason") or "").startswith(THIN_REASONS)
 
 
 def public(r: dict) -> dict:

@@ -166,6 +166,13 @@ class ScanResult:
     # so a partial-coverage grade is never presented as an authoritative whole-repo verdict.
     total_scannable_files: int = 0
     sampled: bool = False
+    # What the scan selected but could NOT read, by cause (only non-zero keys): files
+    # over the 500 KB read cap, fetches that failed or timed out, files left unread at
+    # the time budget, files past the file cap, a truncated GitHub tree, package members
+    # skipped by the bounded unpack, unread dependency files, a failed advisory lookup.
+    # Disclosure only (never a score or decision input): signed as scan.coverageGaps and
+    # stated beside every answer (src/scanner/verdict.py coverage_gap_notes).
+    coverage_gaps: dict = field(default_factory=dict)
     has_readme: bool = False
     has_license: bool = False
     has_tests: bool = False
@@ -429,9 +436,10 @@ class _BlobList(list):
     oversized: list[dict]
 
 
-def _tree_blobs(tree: list[dict]) -> list[dict]:
+def _tree_blobs(tree: list[dict], oversized_out: list | None = None) -> list[dict]:
     """Keep only blob (file) entries under the per-file size cap (the rest ride along in
-    ``.oversized``)."""
+    ``.oversized``, and are also appended to ``oversized_out`` for the coverage
+    disclosure when given)."""
     out = _BlobList(
         item for item in tree
         if item.get("type") == "blob"
@@ -439,6 +447,8 @@ def _tree_blobs(tree: list[dict]) -> list[dict]:
     )
     out.oversized = [item for item in tree
                      if item.get("type") == "blob" and item.get("size", 0) > _MAX_FILE_SIZE]
+    if oversized_out is not None:
+        oversized_out.extend(out.oversized)
     return out
 
 
@@ -547,10 +557,18 @@ async def _fetch_repo_tree(
             # Real-time rate-limit protection (metered call): alert + degrade flag.
             await _note_github(resp, f"repo tree {owner}/{repo}")
 
+        # Blobs over the read cap, for the coverage disclosure (meta_out["oversized"]),
+        # and the git tree sha: a content digest of exactly the tree that was listed.
+        _oversized: list | None = None
+        if meta_out is not None:
+            _oversized = meta_out.setdefault("oversized", [])
+
         if resp is not None and resp.status_code == 200:
             body = resp.json()
+            if meta_out is not None and isinstance(body.get("sha"), str):
+                meta_out["tree_sha"] = body["sha"]
             return (
-                _tree_blobs(body.get("tree", [])),
+                _tree_blobs(body.get("tree", []), _oversized),
                 bool(body.get("truncated")),
                 True,
                 default_branch,
@@ -574,7 +592,7 @@ async def _fetch_repo_tree(
             await _note_github(shallow, f"repo shallow tree {owner}/{repo}")
             if shallow.status_code == 200:
                 return (
-                    _tree_blobs(shallow.json().get("tree", [])),
+                    _tree_blobs(shallow.json().get("tree", []), _oversized),
                     True,
                     True,
                     default_branch,
@@ -954,6 +972,37 @@ def _in_prose_string_at(line: str, pos: int, start_in: str | None = None) -> boo
     return len(line[str_start:pos].split()) >= 3
 
 
+def _in_string_literal_at(line: str, pos: int) -> bool:
+    """True if ``line[pos]`` sits inside a quoted string literal opened on that line."""
+    in_str: str | None = None
+    escape = False
+    for ch in line[:pos]:
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+        elif ch in "'\"`":
+            in_str = ch
+    return in_str is not None
+
+
+# Shell-script payload files run their text as commands; a `curl … | sh` there is code.
+_SHELL_PAYLOAD_EXTS = frozenset({".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".vbs"})
+# Anything in a file that can run a command string or hand it to code that does
+# (including indirect lookups), checked before treating a pipe-to-shell STRING in a
+# shipped test file as an executed payload.
+_FILE_EXEC_SINK_RE = re.compile(
+    r"\bsubprocess\b|\bos\.(?:system|popen|exec\w*|spawn\w*)\b|\bPopen\b|\bpty\.spawn\b|"
+    r"\bcommands\.getoutput\b|\bshlex\b|\bexec\s*\(|\beval\s*\(|\bcompile\s*\(|"
+    r"__import__|\bimportlib\b|\bgetattr\s*\(|\bchild_process\b|\bexec(?:Sync|File\w*)?\s*\(|"
+    r"\bspawn(?:Sync)?\s*\(|\bFunction\s*\(|\bvm\.\w+|\brequire\s*\(\s*[^'\"]|\bimport\s*\(|"
+    r"\bsh\s*\(|\$\s*`|\bzx\b|\bexeca\b|\bshelljs\b",
+)
+
+
 # npm runs only these package.json scripts on a consumer's machine (`npm install` of the
 # package as a dependency); everything else under "scripts" is the maintainer's.
 _NPM_CONSUMER_SCRIPTS = frozenset({
@@ -965,11 +1014,51 @@ _HELP_PRINT_RE = re.compile(
     r"process\.std(?:out|err)\.write|sys\.std(?:out|err)\.write")
 
 
-def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = None) -> bool:
+# A call that runs its string argument as a process (JS child_process / execa / zx,
+# Python subprocess / os). Used to tell a printed `npx` hint from one that is spawned.
+_RUN_CALL_RE = re.compile(
+    r"(?<![\w$])(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|execa|execaSync"
+    r"|execaCommand|execaCommandSync|execCommand|system|popen|Popen|run|call|check_call"
+    r"|check_output|getoutput|getstatusoutput|shell|sh)\s*\(|(?<![\w$])\$\s*`")
+_BOUND_NAME_RE = re.compile(r"([A-Za-z_$][\w$]*)\s*(?::\s*[\w$<>\[\]|. ]+)?=(?![=>])[^=]*$")
+
+
+def _npx_string_runs(lines: list[str], idx: int, line: str, pos: int, str_start: int,
+                     start_in: str | None) -> bool:
+    """Is the string holding this `npx …` spawned rather than printed? It is the
+    argument of a run call on this line (`console.log(execSync('npx foo'))`), or it is
+    bound to a name that a run call in the file uses (`const USAGE = 'npx foo'` …
+    `execSync(USAGE)`). Adversarial recall review of the help-text relaxation (#24)."""
+    if _RUN_CALL_RE.search(line[:pos]):
+        return True
+    name = None
+    if start_in is None:
+        m = _BOUND_NAME_RE.search(line[:max(0, str_start - 1)])
+        name = m.group(1) if m else None
+    else:
+        # A template literal opened on an earlier line: the binding is where it opened.
+        for n in range(idx - 1, max(-1, idx - 60), -1):
+            tick = lines[n].find("`")
+            if tick == -1:
+                continue
+            if _RUN_CALL_RE.search(lines[n][:tick + 1]):
+                return True
+            m = _BOUND_NAME_RE.search(lines[n][:tick])
+            name = m.group(1) if m else None
+            break
+    if not name or name in ("const", "let", "var"):
+        return False
+    return any(n != idx and _RUN_CALL_RE.search(ln) and _uses_name(ln, name)
+               for n, ln in enumerate(lines))
+
+
+def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = None,
+                    lines: list[str] | None = None, idx: int = 0) -> bool:
     """An `npx <pkg>` that never runs for a consumer (precision PR 2): a maintainer script
     in package.json (not an install lifecycle hook), or help text a CLI prints, i.e.
     the match sits in a string literal that is indented help (`'  npx foo\\n'`), carries
-    a `\\n` escape, or is on a print/usage line."""
+    a `\\n` escape, or is on a print/usage line, and the string is not itself spawned
+    (``_npx_string_runs``)."""
     if Path(file_path).name.lower() == "package.json":
         m = _PKG_JSON_SCRIPT_RE.match(line)
         return bool(m and m.group(1) not in _NPM_CONSUMER_SCRIPTS and m.end() <= pos)
@@ -988,6 +1077,9 @@ def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = 
             in_str = ch
             str_start = i + 1
     if in_str is None:
+        return False
+    if _npx_string_runs(lines if lines is not None else [line],
+                        idx if lines is not None else 0, line, pos, str_start, start_in):
         return False
     before = line[str_start:pos]
     if before.startswith("  ") and not before.strip():
@@ -1039,6 +1131,58 @@ def _assigned_identifier(line: str, key_pos: int) -> str:
     head = re.search(r"[\w$]*$", line[:key_pos])
     tail = re.match(r"[\w$]*", line[key_pos:])
     return (head.group(0) if head else "") + (tail.group(0) if tail else "")
+
+
+_JS_ASSIGN_RE_CACHE: dict[str, re.Pattern] = {}
+
+
+def _resolve_js_assignment(lines: list[str], idx: int, name: str) -> str | None:
+    """The expression last assigned to JS ``name`` in the ~80 lines above ``idx``
+    (``const C = 'cu' + 'rl …'``, ``let a = 'x', b = 'y'``), as source text. A compound
+    assignment (``C += …``) makes the value unknown: ``None``. Used only to RAISE an
+    exec verdict (see ``classify_js_exec``)."""
+    from src.scanner.exec_classify import split_top_level_args
+
+    rx = _JS_ASSIGN_RE_CACHE.get(name)
+    if rx is None:
+        rx = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\s*([-+*/%|&^]?)=(?![=>])")
+        _JS_ASSIGN_RE_CACHE[name] = rx
+    for n in range(idx - 1, max(-1, idx - 80), -1):
+        m = rx.search(lines[n])
+        if not m:
+            continue
+        if m.group(1):
+            return None
+        rest = lines[n][m.end():].strip()
+        # `const script =` with the value on the following line(s), or a `+` chain that
+        # continues: read on until the statement ends (rollup's dist/native.js).
+        k = n + 1
+        while k < min(len(lines), n + 8) and k < idx and (
+                not rest or rest.endswith(("+", "=", "(", ",")) and not rest.endswith(";")):
+            nxt = lines[k].strip()
+            if not nxt or nxt.startswith("//"):
+                k += 1
+                continue
+            rest = f"{rest} {nxt}".strip()
+            k += 1
+            if rest.endswith(";"):
+                break
+        args = split_top_level_args(rest)
+        rhs = (args[0] if args else "").rstrip().rstrip(";").strip()
+        return rhs or None
+    return None
+
+
+def _text_decode_flows(lines: list[str], idx: int, call_src: str) -> bool:
+    """Does percent-decoding / ``unescape`` / a reversed string / evaluated code build
+    this exec call, inline or through a name assigned from one (80 lines above)?"""
+    from src.scanner.exec_classify import TEXT_DECODE_RE
+
+    if TEXT_DECODE_RE.search(call_src):
+        return True
+    tainted = _tainted_names(lines, idx - 80, idx + 1,
+                             lambda _n, ln: bool(TEXT_DECODE_RE.search(ln)))
+    return any(_uses_name(call_src, t) for t in tainted)
 
 
 def _resolve_py_assignment(lines: list[str], idx: int, name: str):
@@ -1579,7 +1723,7 @@ def _classify_exec_match(
     got = extract_call(lines, idx, start, lang=lang)
     call_src, consumed = (got if got else (lines[idx][start:], 1))
     flow = near and _untrusted_flows(lines, idx, call_src, untrusted)
-    payload = _decoded_flows(lines, idx, call_src)
+    payload = _decoded_flows(lines, idx, call_src) or _text_decode_flows(lines, idx, call_src)
     if lang == "python" and not near:
         # A remote handler's own parameter (web route, chat-bot command, agent tool)
         # reaching the call is untrusted input in reach (precision PR 2).
@@ -1594,7 +1738,8 @@ def _classify_exec_match(
             payload_flow=payload,
         )
     return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed,
-                            untrusted_flow=flow, is_cli_expr=js_cli, payload_flow=payload)
+                            untrusted_flow=flow, is_cli_expr=js_cli, payload_flow=payload,
+                            resolve_name=lambda nm: _resolve_js_assignment(lines, idx, nm))
 
 
 def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted: list[int]):
@@ -2093,10 +2238,11 @@ _TAIL_CLOSERS = ('"""', "'''", "*/")
 
 
 def _oversized_scan_files(
-    tree: list[dict], user_excludes: set[str] | None = None,
+    tree: list[dict], user_excludes: set[str] | None = None, *, limit: int | None = None,
 ) -> list[dict]:
     """Source files in ``tree`` over ``_MAX_FILE_SIZE`` that ``_select_scan_files``
-    leaves out, shipped paths first, at most ``_MAX_OVERSIZED_FILES``."""
+    leaves out, shipped paths first, at most ``limit`` (default ``_MAX_OVERSIZED_FILES``;
+    ``0`` = all, for counting the coverage gap)."""
     excl = {e.lower() for e in (user_excludes or set())}
     big = [
         it for it in tree
@@ -2108,7 +2254,9 @@ def _oversized_scan_files(
     big.sort(key=lambda it: (
         _is_nonshipped_path(it["path"]) or _is_test_or_doc_file(it["path"]), it["path"],
     ))
-    return big[:_MAX_OVERSIZED_FILES]
+    if limit == 0:
+        return big
+    return big[:_MAX_OVERSIZED_FILES if limit is None else limit]
 
 
 def _is_oversized_code_file(path: str) -> bool:
@@ -2797,6 +2945,18 @@ def _scan_content(
                 string_state.extend((set(), set()))
         return string_state
 
+    sink_memo: list[bool] = []
+
+    def _file_has_exec_sink() -> bool:
+        """``_FILE_EXEC_SINK_RE`` on the file's code lines (docstrings and whole-line
+        comments that only MENTION ``subprocess.Popen`` don't count). Memoized."""
+        if not sink_memo:
+            prose = _string_state()[0]
+            sink_memo.append(any(
+                _FILE_EXEC_SINK_RE.search(ln) for i, ln in enumerate(lines)
+                if i not in prose and not ln.lstrip().startswith(("#", "//", "*"))))
+        return sink_memo[0]
+
     # Untrusted-input lines (request body / fetched content) for the "dynamic argv or
     # eval NEXT TO untrusted input" rules.
     untrusted = _untrusted_lines(lines, lf.lines(UNTRUSTED_INPUT_RE))
@@ -3283,7 +3443,10 @@ def _scan_content(
                 # An `npx …` / branch-URL hint inside a string literal (an error
                 # message, a docstring line) is advice to a human, not a load.
                 if name.startswith("Unpinned") and _in_prose_string_at(
-                        line, dm.start(), "`" if idx in _string_state()[1] else None):
+                        line, dm.start(), "`" if idx in _string_state()[1] else None) \
+                        and not _RUN_CALL_RE.search(line[:dm.start()]):
+                    # (`execSync('cd x && echo hi && npx foo')` reads like words but is
+                    # run: recall review of #24.)
                     continue
                 # A mutable branch URL is a rug-pull only when something LOADS it
                 # (fetch/urlopen/curl/pip/import within 2 lines); a `$id`, homepage
@@ -3295,9 +3458,17 @@ def _scan_content(
                 # Downgrade in test/doc/infra files like other groups
                 effective_severity, remote_payload = _graded(
                     "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
+                # A pipe-to-shell STRING in a shipped test file (a security test's sample
+                # attack input, nltk) is data unless the file can run a command: then it
+                # is graded like any other downgraded finding (medium, non-blocking).
+                if (remote_payload and name == "curl/wget piped to shell"
+                        and Path(file_path).suffix.lower() not in _SHELL_PAYLOAD_EXTS
+                        and _in_string_literal_at(line, dm.start())
+                        and not _file_has_exec_sink()):
+                    effective_severity, remote_payload = "medium", False
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
-                        "`" if idx in _string_state()[1] else None):
+                        "`" if idx in _string_state()[1] else None, lines, idx):
                     # Help text a CLI prints (`'  npx browserslist\n'`) or a maintainer
                     # package.json script (`"release": "npx npmpub"`) never runs on a
                     # consumer's machine (precision PR 2).
@@ -4641,8 +4812,13 @@ async def _run_supply_chain(
     ref: str | None,
     sem,
     per_file_timeout: float,
+    gaps: dict | None = None,
 ) -> None:
     """Phase 0 coverage block + Phase 1 OSV supply-chain pass (fail-open).
+
+    ``gaps`` (the scan's coverage-gap dict) records what this pass could not check:
+    lockfiles it could not fetch, and an advisory lookup that failed — so a failed
+    lookup never reads the same as "no advisories". Disclosure only.
 
     Always attaches the Phase-0 ``coverage`` block (recompute discipline). When
     ``settings.scanner_use_osv`` is on it additionally fetches the repo's real
@@ -4686,6 +4862,8 @@ async def _run_supply_chain(
                 and it["path"].lower().endswith((".yml", ".yaml"))
             ][: settings.scanner_supply_chain_max_workflows]
 
+            unread: list[str] = []
+
             async def _fetch(path: str) -> tuple[str, str]:
                 try:
                     async with sem:
@@ -4693,12 +4871,20 @@ async def _run_supply_chain(
                             _fetch_file_content(owner, repo, path, token, ref=ref),
                             timeout=per_file_timeout,
                         )
+                    if content is None:
+                        unread.append(path)
                     return path, content or ""
                 except (asyncio.TimeoutError, Exception):
+                    unread.append(path)
                     return path, ""
 
             fetch_tasks = [_fetch(it["path"]) for it in (lock_items + wf_items)]
             fetched = await asyncio.gather(*fetch_tasks) if fetch_tasks else []
+            if gaps is not None:
+                # Unread lockfile paths (a set, so a file the regex pass also missed is
+                # counted once); the caller turns it into ``dependency_files_unread``.
+                gaps.setdefault("_dep_unread", set()).update(
+                    p for p in unread if Path(p).name.lower() in lock_names)
             lockfiles = {
                 p: c for p, c in fetched
                 if Path(p).name.lower() in lock_names and c
@@ -4760,6 +4946,8 @@ async def _run_supply_chain(
                 p == "Dependency pinning" for p in result.positive_signals
             ):
                 result.positive_signals.append("Dependency pinning")
+            if gaps is not None and not sc.ok and getattr(sc, "error", None):
+                gaps["advisory_lookup"] = "failed"
             db_snapshots = dict(sc.db_snapshots)
             sc_summary = {
                 "ok": sc.ok,
@@ -4776,6 +4964,8 @@ async def _run_supply_chain(
                 "db_snapshots": sc.db_snapshots,
             }
         except Exception:
+            if gaps is not None:
+                gaps["advisory_lookup"] = "failed"
             logger.warning(
                 "Supply-chain pass errored for %s/%s — keeping regex deps",
                 owner, repo, exc_info=True,
@@ -5464,13 +5654,24 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     # OSV for the package itself: MAL- incident history (context only, never scored) and
     # its own published advisories — one that affects the scanned version IS a finding.
     # Fetched BEFORE scoring so those findings count. Fail-open.
+    _osv_checked = False
     try:
         from src.scanner.incident_history import fetch_incident_history
         _ver = (result.artifact_scan or {}).get("version") or version
         result.incident_history = await fetch_incident_history(surface, name, _ver)
+        _osv_checked = (result.incident_history or {}).get("checked") is True
         result.findings = result.findings + _own_advisory_findings(
             name, _ver, (result.incident_history or {}).get("advisories") or [])
     except Exception:
+        pass
+    # An ecosystem OSV covers whose lookup did not complete: "no advisories" was not
+    # checked, so say so beside the answer (disclosure only, never scored).
+    try:
+        from src.scanner.incident_history import _OSV_ECOSYSTEM
+        if (surface or "").lower() in _OSV_ECOSYSTEM and not _osv_checked:
+            result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                    "advisory_lookup": "failed"}
+    except Exception:  # noqa: BLE001 — disclosure must never break a scan
         pass
 
     if eco == "docker":
@@ -5499,7 +5700,8 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     )
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
 
-    findings, files_scanned, has_hook = scan_artifact_files(fetched)
+    oversized: list[str] = []
+    findings, files_scanned, has_hook = scan_artifact_files(fetched, oversized_out=oversized)
     # npm / PyPI: text that matches an attack pattern in detection data, a prebuilt web
     # bundle or a non-tool prompt template is not the package running it (no-op for
     # other ecosystems).
@@ -5526,6 +5728,16 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     if skipped is not None and getattr(skipped, "scannable", 0) > 0:
         result.sampled = True
         result.total_scannable_files = files_scanned + skipped.scannable
+    # Coverage gaps (disclosure only; `sampled` above is unchanged): source files over
+    # the 500 KB read cap, kept or dropped at unpack, and members the bounded unpack
+    # skipped. Stated beside the answer so a partial read never reads as clean.
+    gaps: dict = {}
+    n_over = len(oversized) + int(getattr(skipped, "oversized_scannable", 0) or 0)
+    if n_over:
+        gaps["oversized_files"] = n_over
+    if skipped is not None and int(getattr(skipped, "scannable", 0) or 0) > 0:
+        gaps["package_skipped"] = int(skipped.scannable)
+    result.coverage_gaps = gaps
     # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
     # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
     # tier judges observed egress against these declared hosts.
@@ -5673,6 +5885,14 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     result.coverage = build_coverage(
         surface="mcp", scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=True,
     )
+    # Coverage gaps (disclosure only): a tools/list that failed, or a paged tool list
+    # read only to its first page, is not the whole tool set.
+    _gaps: dict = {}
+    if data.get("tools_list_failed"):
+        _gaps["tool_list_unread"] = True
+    if data.get("tools_more_pages"):
+        _gaps["tool_list_paged"] = True
+    result.coverage_gaps = _gaps
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
     result.certified = _certified_status(result)
@@ -5985,6 +6205,49 @@ def _tidy_desc(s: str) -> str:
     return re.sub(r"[\s–—\-·|:;,]+$", "", s or "").strip()
 
 
+REPO_SELECTION_RULE = (
+    f"default branch; source files up to {_MAX_FILE_SIZE // 1000} KB; "
+    f"first {_MAX_FILES_PER_REPO} shipped-first"
+)
+
+
+def files_read_digest(text_hashes: dict[str, str]) -> str | None:
+    """``sha256:`` over the sorted ``path NUL sha256(text)`` lines of every file read —
+    a digest of exactly what a "nothing found" claim covers (None when nothing read)."""
+    if not text_hashes:
+        return None
+    h = hashlib.sha256()
+    for path in sorted(text_hashes):
+        h.update(f"{path}\0{text_hashes[path]}\n".encode())
+    return "sha256:" + h.hexdigest()
+
+
+def _finish_repo_coverage(
+    result: ScanResult, gaps: dict, tree_sha: str | None, text_hashes: dict[str, str],
+) -> None:
+    """Fold the repo scan's coverage gaps + read scope into the result. Disclosure only:
+    nothing here touches the score, ``sampled`` or the Certified checks."""
+    dep_unread = gaps.pop("_dep_unread", None) or set()
+    if dep_unread:
+        gaps["dependency_files_unread"] = len(dep_unread)
+    art = result.artifact_scan if isinstance(result.artifact_scan, dict) else {}
+    skipped = art.get("skipped") if isinstance(art.get("skipped"), dict) else {}
+    if int(skipped.get("scannable") or 0) > 0:
+        gaps["package_skipped"] = int(skipped["scannable"])
+    if int(skipped.get("oversized_scannable") or 0) > 0:
+        gaps["oversized_files"] = (int(gaps.get("oversized_files") or 0)
+                                   + int(skipped["oversized_scannable"]))
+    result.coverage_gaps = {k: gaps[k] for k in sorted(gaps)}
+    if not isinstance(result.coverage, dict):
+        result.coverage = {}
+    result.coverage["selection"] = REPO_SELECTION_RULE
+    if tree_sha:
+        result.coverage["tree_sha"] = tree_sha
+    digest = files_read_digest(text_hashes)
+    if digest:
+        result.coverage["files_read_digest"] = digest
+
+
 async def scan_repo(
     full_name: str,
     stars: int = 0,
@@ -6186,6 +6449,21 @@ async def scan_repo(
         )
         result.sampled = result.sampled or _sel_sampled
 
+        # Coverage gaps (disclosure only — never a score / decision input; `sampled`
+        # and Certified are untouched). Oversized blobs are counted only when the scan
+        # would have read them (same selection rule as the files it did read).
+        gaps: dict = {}
+        n_oversized = len(_oversized_scan_files(
+            _repo_meta.get("oversized") or [], user_excludes, limit=0,
+        ))
+        if n_oversized:
+            gaps["oversized_files"] = n_oversized
+        if result.total_scannable_files > len(scan_files):
+            gaps["over_file_cap"] = result.total_scannable_files - len(scan_files)
+            gaps["file_cap"] = _MAX_FILES_PER_REPO
+        if tree_truncated:
+            gaps["tree_truncated"] = True
+
         # Load allowlist once for the whole scan
         allowlist = _load_allowlist()
 
@@ -6213,7 +6491,9 @@ async def scan_repo(
             ``scanned`` is True only when the file was actually fetched AND scanned —
             a failed fetch or empty file returns False so it does NOT inflate
             ``files_scanned`` (#7). ``text_hash`` is ``(path, sha256(text))`` for
-            Phase-2 drift comparison, or None.
+            Phase-2 drift comparison, or None. A seventh element, ``failed``, is True
+            when the fetch errored, timed out or returned nothing (not an empty file):
+            the file was selected but never read, which the coverage gaps disclose.
             """
             path = item["path"]
             try:
@@ -6223,15 +6503,15 @@ async def scan_repo(
                         timeout=per_file_timeout,
                     )
                 if not content:
-                    return [], [], 0, None, None, False
+                    return [], [], 0, None, None, False, content is None
                 f, p, s = _scan_content(content, path, allowlist)
                 text_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 return (
                     f, p, s, (path, _canonical_tool_digest(content, path)),
-                    (path, text_hash), True,
+                    (path, text_hash), True, False,
                 )
             except (asyncio.TimeoutError, Exception):
-                return [], [], 0, None, None, False
+                return [], [], 0, None, None, False, True
 
         tasks = [asyncio.ensure_future(_scan_one(item)) for item in scan_files]
         # Bound the phase: collect whatever finished within the budget, cancel the rest
@@ -6245,17 +6525,22 @@ async def scan_repo(
                 for t in pending:
                     t.cancel()
                 result.sampled = True
+                gaps["time_limit_unread"] = len(pending)
                 logger.warning(
                     "scan_repo file phase hit the %.0fs budget for %s/%s — %d/%d files (sampled)",
                     scan_phase_budget, owner, repo, len(done), len(tasks),
                 )
             scan_results = [t.result() for t in tasks if t in done and not t.cancelled()]
 
-        for findings_list, positives_list, suppressed, digest, text_hash, scanned in scan_results:
+        fetch_failed = 0
+        for (findings_list, positives_list, suppressed, digest, text_hash, scanned,
+             failed) in scan_results:
             # Only count files that were actually scanned (#7) — signed filesScanned
             # must reflect real coverage, not attempted fetches.
             if scanned:
                 result.files_scanned += 1
+            if failed:
+                fetch_failed += 1
             result.findings.extend(findings_list)
             result.positive_signals.extend(positives_list)
             result.suppressed_count += suppressed
@@ -6263,6 +6548,8 @@ async def scan_repo(
                 result.tool_digests[digest[0]] = digest[1]
             if text_hash and text_hash[1]:
                 repo_text_hashes[text_hash[0]] = text_hash[1]
+        if fetch_failed:
+            gaps["fetch_failed"] = fetch_failed
 
         # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
         oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)
@@ -6300,6 +6587,7 @@ async def scan_repo(
             if Path(item["path"]).name.lower() in dep_file_names
             and not _should_skip_path(item["path"])
         ]
+        dep_unread: set[str] = gaps.setdefault("_dep_unread", set())
         for dep_item in dep_files[:10]:  # cap at 10 dep files
             try:
                 async with sem:
@@ -6309,13 +6597,15 @@ async def scan_repo(
                         ),
                         timeout=per_file_timeout,
                     )
+                if dep_content is None:
+                    dep_unread.add(dep_item["path"])
                 if dep_content:
                     dep_findings = _scan_dependencies(
                         dep_content, dep_item["path"],
                     )
                     result.findings.extend(dep_findings)
             except (asyncio.TimeoutError, Exception):
-                pass
+                dep_unread.add(dep_item["path"])
 
         # --- Phase 1: real supply-chain (OSV / deps.dev / Scorecard) ----------
         # Parse the repo's real lockfiles → OSV → severity-weighted CVE/GHSA/MAL
@@ -6324,7 +6614,7 @@ async def scan_repo(
         # above stand and the scan proceeds. Every DB date is pinned into the
         # coverage block so the subscore is offline-recomputable (Phase 0).
         await _run_supply_chain(
-            result, owner, repo, tree, token, ref, sem, per_file_timeout,
+            result, owner, repo, tree, token, ref, sem, per_file_timeout, gaps,
         )
 
         # --- Phase 2: published-artifact fetch + scan + repo↔artifact drift ----
@@ -6385,6 +6675,12 @@ async def scan_repo(
         # negatives apply a small BOUNDED penalty (never a false-F). Capped at ~5
         # extra API calls, reusing the token.
         await _maybe_maintainer_signals(result, owner, repo, token)
+
+        # --- Coverage scope + gaps (disclosure only; never scored) -------------
+        # A "nothing found" answer covers only what was read: pin WHAT was read (the
+        # git tree listed, the selection rule, a digest of the exact file texts read)
+        # and record what was selected but not read, so silence never reads as clean.
+        _finish_repo_coverage(result, gaps, _repo_meta.get("tree_sha"), repo_text_hashes)
 
         # Dedupe before scoring: a repo scan grades BOTH the repo tree and the (same)
         # published artifact source, so an identical detection at the same site was

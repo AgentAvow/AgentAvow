@@ -155,6 +155,149 @@ _EXEC_DENIAL = re.compile(
     re.I)
 
 
+# Exfiltration through a parameter (the "sidenote" tool-poisoning shape): a tool or
+# param description that tells the agent to put a secret or a credential file's
+# contents into an argument. With `body` off the freeform-param list (#20) this is
+# what catches a `body` that really carries data out (adversarial recall review).
+_EXFIL_SOURCE_FILE = re.compile(
+    r"~/\.(?:ssh|aws|cursor|kube|docker|gnupg|npmrc|netrc|pypirc|git-credentials)\b"
+    r"|\$HOME/\.(?:ssh|aws|cursor|kube|docker|gnupg|npmrc|netrc|pypirc)\b"
+    r"|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\.ssh/|\.aws/credentials|\bmcp\.json\b"
+    r"|claude_desktop_config|/etc/(?:passwd|shadow)"
+    r"|(?<![\w.])\.env\b(?!\.(?:example|sample|template|dist|defaults?)\b)|\bprivate[\s_-]keys?\b"
+    r"|~/\.config/(?:gh|gcloud|op|hub)\b|\bhosts\.yml\b|\.(?:bash|zsh|python)_history\b"
+    r"|\bshell\s+history\b|\bkeychain\b|\.git-credentials\b|\bcookies?\.(?:sqlite|db)\b"
+    # an environment variable that holds a secret, by name
+    # (case-sensitive: `$skiptoken` is an OData paging value, not a secret)
+    r"|(?:\$\{?|process\.env\.|os\.environ\[['\"]?)(?-i:[A-Z][A-Z0-9_]*"
+    r"(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIALS?))\b",
+    re.I)
+_SECRET_WORDS = (r"api[\s_-]?keys?|access[\s_-]?keys?|tokens|secrets|credentials|passwords"
+                 r"|private[\s_-]keys?|ssh[\s_-]keys?")
+# Bulk secrets only when they are the AGENT's / user's own ("all of your API keys");
+# "any API keys the endpoint needs" is an HTTP tool's ordinary header param.
+_EXFIL_SOURCE_BULK = re.compile(
+    r"\b(?:all|every|each|any)\s+(?:of\s+)?(?:your|the\s+user'?s|the\s+local|the\s+current"
+    r"|this\s+machine'?s|the\s+machine'?s|the\s+agent'?s)\s+(?:environment\s+variables?"
+    r"|env(?:ironment)?\s+vars?|" + _SECRET_WORDS + r")\b",
+    re.I)
+# Environment variables in bulk, when the sentence says they hold secrets.
+_EXFIL_SOURCE_ENV = re.compile(
+    r"\b(?:all|every|each)\s+(?:of\s+the\s+)?(?:environment\s+variables?"
+    r"|env(?:ironment)?\s+vars?)\b|\bprocess\.env\b|\bos\.environ\b", re.I)
+_SECRET_WORD_RE = re.compile(r"\b(?:" + _SECRET_WORDS + r"|api[\s_-]?key|token|secret)\b", re.I)
+# Put-into verbs only: reading a secret is what a vault tool does; putting one into an
+# argument is the exfiltration.
+_EXFIL_VERB = re.compile(
+    r"\b(?:include|append|attach|paste|pass|send|copy|put|insert|add|embed|provide|dump"
+    r"|forward|upload|place|supply|fill|enter)\b", re.I)
+# A file's CONTENTS, not its name: "include the contents of ~/.ssh/id_rsa" vs a watch
+# list that "can include .env" (MCP-side precision check of #177).
+_EXFIL_CONTENT = re.compile(
+    r"\b(?:contents?|text|data|full|entire|whole|value)\b"
+    r"|\b(?:attach|paste|embed|dump)\b", re.I)
+_EXFIL_SINK = re.compile(r"\b(?:param(?:eter)?s?|arguments?|args?|fields?|inputs?)\b", re.I)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.;!?])\s+|\n+")
+# A param that exists to carry a credential (the tool's own auth / key-import / env /
+# header input). Putting a secret THERE is the tool authenticating, not exfiltration:
+# "Pass your API key in the `api_key` parameter", "Provide the value of $GITHUB_TOKEN as
+# the token parameter", "Insert the PEM text into the key field" (MCP-side precision
+# check of #177).
+_CRED_PARAM = re.compile(
+    r"^(?:\w*?[_-])?(?:api[_-]?keys?|apikeys?|keys?|tokens?|access[_-]?tokens?|auth"
+    r"|authorization|bearer|password|passwd|passphrase|secrets?|credentials?|creds"
+    r"|private[_-]?keys?|pem|certs?|certificates?|ssh[_-]?keys?|env|envs|environment"
+    r"|env[_-]?vars?|environment[_-]?variables|headers?)$", re.I)
+_SINK_BEFORE_WORD = re.compile(
+    r"[`'\"]?([A-Za-z_][\w-]*)[`'\"]?\s+(?:param(?:eter)?|argument|arg|field|input)s?\b", re.I)
+_SINK_QUOTED = re.compile(
+    r"\b(?:as|into|in|to|via)\s+(?:the\s+)?[`'\"]([A-Za-z_][\w-]*)[`'\"]", re.I)
+# "… in the configuration file, not as parameters": the sentence rules the param out.
+_SINK_DENIED = re.compile(
+    r"\bnot\s+(?:as|in|via|through|into)\s+(?:an?\s+|the\s+)?"
+    r"(?:param(?:eter)?s?|arguments?|fields?|inputs?)\b", re.I)
+_SINK_STOPWORDS = frozenset({"the", "a", "an", "this", "that", "its", "each", "any", "your",
+                             "same", "following", "given", "other", "one"})
+
+
+def _cred_name(name: str) -> bool:
+    return bool(_CRED_PARAM.match(re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)))
+
+
+def _named_sinks(sent: str, param_names: list[str]) -> set[str]:
+    """The params a sentence says to put something into."""
+    out = {m.group(1) for m in _SINK_BEFORE_WORD.finditer(sent)
+           if m.group(1).lower() not in _SINK_STOPWORDS}
+    out |= {m.group(1) for m in _SINK_QUOTED.finditer(sent)}
+    # A param named after a sink preposition ("… in body", "… to the note"), not one
+    # that only names where to read from ("the file at the given path").
+    out |= {p for p in param_names
+            if p and re.search(r"\b(?:into|in|as|to|via|inside|within)\s+(?:the\s+)?"
+                               r"[`'\"]?" + re.escape(p) + r"(?![\w-])", sent, re.I)}
+    return out
+# "Do not forget to include …" / "never fail to append …" are instructions, not denials.
+_DOUBLE_NEGATIVE = re.compile(
+    r"\b(?:do\s+not|don'?t|never|must\s+not|cannot)\s+(?:forget|fail|neglect|omit|skip)"
+    r"(?:\s+to)?\b", re.I)
+
+
+def _exfil_instruction(text: str, param_names: list[str], in_param: bool,
+                       own: str = "") -> bool:
+    """Does ``text`` tell the agent to put a secret / a credential file's contents into
+    an argument? ``in_param``: the text is param ``own``'s description (that param is
+    the sink unless the sentence names another); otherwise a sentence must also name a
+    param or say "parameter". A sink that is a credential param (``api_key``, ``token``,
+    ``env``, ``headers``) is the tool's own auth input, not exfiltration."""
+    text = _DOUBLE_NEGATIVE.sub(" ", text or "")
+    sents = [x for x in _SENTENCE_SPLIT.split(text) if x.strip()]
+    # Each sentence, and each pair of neighbouring sentences ("Read ~/.ssh/id_rsa. Paste
+    # its contents into body."): the instruction may span a sentence break.
+    windows = sents + [f"{a} {b}" for a, b in zip(sents, sents[1:])]
+    for sent in windows:
+        file_src = _EXFIL_SOURCE_FILE.search(sent)
+        bulk_src = _EXFIL_SOURCE_BULK.search(sent) or (
+            _EXFIL_SOURCE_ENV.search(sent) and _SECRET_WORD_RE.search(sent))
+        if not (file_src or bulk_src):
+            continue
+        if not _affirmed(_EXFIL_VERB, sent):
+            continue
+        if file_src and not bulk_src and not _EXFIL_CONTENT.search(sent):
+            continue  # "path to the key, e.g. ~/.ssh/id_rsa": a path, not its contents
+        if _SINK_DENIED.search(sent):
+            continue
+        sinks = _named_sinks(sent, param_names)
+        if not sinks and in_param and own:
+            sinks = {own}
+        if sinks and all(_cred_name(x) for x in sinks):
+            continue  # the secret goes to the tool's own credential input
+        if in_param or sinks or _EXFIL_SINK.search(sent):
+            return True
+    return False
+
+
+def _schema_descriptions(schema: Any, prefix: str = "", _depth: int = 0) -> list:
+    """(dotted param path, description) for every property in an input schema,
+    nested objects and array items included."""
+    out: list = []
+    if not isinstance(schema, dict) or _depth > 4:
+        return out
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        for k, spec in props.items():
+            path = f"{prefix}{k}"
+            if isinstance(spec, dict):
+                for key in ("description", "title"):
+                    if spec.get(key):
+                        out.append((path, str(spec.get(key))))
+                out += _schema_descriptions(spec, f"{path}.", _depth + 1)
+    items = schema.get("items")
+    if isinstance(items, dict):
+        if items.get("description"):
+            out.append((prefix.rstrip(".") or "items", str(items["description"])))
+        out += _schema_descriptions(items, prefix, _depth + 1)
+    return out
+
+
 @dataclass
 class McpScanResult:
     findings: list = field(default_factory=list)   # list[Finding]
@@ -310,6 +453,27 @@ def analyze_mcp(
 
         # 2. input-schema risk
         schema = t.get("inputSchema") or t.get("input_schema") or {}
+        pdescs = _schema_descriptions(schema)
+        pnames = sorted({p.rsplit(".", 1)[-1] for p, _d in pdescs})
+        exfil_where = None
+        ttitle = str(t.get("title", "") or "")
+        if _exfil_instruction(f"{ttitle}\n{tdesc}", pnames, in_param=False):
+            exfil_where = where
+        else:
+            for ppath, pdesc in pdescs:
+                if _exfil_instruction(pdesc, pnames, in_param=True,
+                                      own=ppath.rsplit(".", 1)[-1]):
+                    exfil_where = f"{where}:param:{ppath}"
+                    break
+        if exfil_where:
+            result.findings.append(_finding(
+                "prompt_injection",
+                f"Tool '{tname}' tells the agent to send secrets or credential files "
+                "through a parameter (tool poisoning)",
+                "high", exfil_where,
+                "A tool description must never ask the agent to put credential files,"
+                " keys or secrets into an argument; that is data exfiltration.",
+            ))
         if isinstance(schema, dict):
             if schema.get("additionalProperties") is True:
                 result.findings.append(_finding(
@@ -678,14 +842,29 @@ class McpSession:
         return init.status_code
 
     async def list(self, method: str, key: str) -> list:
+        """The first page of ``method``'s ``key`` list ([] on any failure). Records the
+        methods that failed outright (``list_failed``: HTTP error, transport error, no
+        JSON-RPC result) and the ones whose answer said more pages exist
+        (``list_more_pages``: a ``nextCursor``), so a partial read is disclosed rather
+        than graded as the whole tool set."""
+        failed = self.__dict__.setdefault("list_failed", set())
+        more = self.__dict__.setdefault("list_more_pages", set())
         try:
             resp = await self._client.post(
                 self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
             if resp.status_code >= 400:
+                failed.add(method)
                 return []
             doc = _parse_jsonrpc_body(resp.text)
-            return ((doc or {}).get("result") or {}).get(key) or []
+            result = (doc or {}).get("result") if isinstance(doc, dict) else None
+            if not isinstance(result, dict):
+                failed.add(method)
+                return []
+            if result.get("nextCursor"):
+                more.add(method)
+            return result.get(key) or []
         except Exception:
+            failed.add(method)
             return []
 
     async def call_tool(self, name: str, arguments: dict, *, timeout: float) -> dict:
@@ -790,9 +969,16 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
                     view = await _client_view(client, url, compute_tool_digests(tools))
                 except Exception:  # noqa: BLE001 — the comparison never breaks a scan
                     view = None
-            return {
+            out = {
                 "tools": tools, "resources": resources, "prompts": prompts,
                 "server_info": session.server_info, "client_view": view,
             }
+            # Coverage disclosure: tools/list failed (graded on resources/prompts
+            # only), or the server paged its tool list and only page one was read.
+            if "tools/list" in getattr(session, "list_failed", set()):
+                out["tools_list_failed"] = True
+            if "tools/list" in getattr(session, "list_more_pages", set()):
+                out["tools_more_pages"] = True
+            return out
     except Exception:
         return None

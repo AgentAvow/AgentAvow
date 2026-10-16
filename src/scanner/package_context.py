@@ -35,7 +35,28 @@ under ``static/`` / ``assets/`` / ``public/``) has pipe-to-shell strings, prompt
 and the whole-file trifecta / SSRF heuristics lowered, unless the file can act as Node
 code: it ``require``s or imports a Node core module, touches ``process.env`` /
 ``stdin`` / ``argv`` outside a string, declares MCP tools, or is named by
-``package.json`` (``main`` / ``bin`` / ``exports``) or by any non-bundle code file.
+``package.json`` (``main`` / ``bin`` / ``exports``) or by any non-bundle code file. In
+such a bundle the zero-width-character rule is lowered too (minified UI libraries carry
+ZWJ / ZWSP in string tables); the Tags-block rule never is.
+
+The role-directive rule ("Injected system/role directive") in package CODE is lowered
+when the package declares no agent tool at all, or, in a package that does, when the
+finding is already a medium (scan.py demoted it: a bare tag in a file that declares no
+tool, or a "system prompt:" label) AND its own file defines no tool (MCP decorators,
+FastMCP ``add_tool``, LangChain, OpenAI function schemas, Vercel ``tool({…})``, WebMCP)
+AND the line is either a "system prompt:" label followed only by a placeholder or a
+tag that is the whole of a one-line string literal used as an element (no
+concatenation / join / formatting / f-string / ``${}`` on the line, and the file never
+holds the same tag as both an opening and a closing literal) AND no file that registers
+tools names the module, directly or through a package ``__init__`` / ``index`` it
+names (a constant the tool code imports can become a tool description). A tag inside a
+longer string, a role-override phrase, and anything in a metadata / instruction file
+keep their severity. Each condition is pinned by a recall-review fixture.
+
+Minified (``.min.``) files are skipped by the engine, except the ones the package runs:
+named by package.json ``main`` / ``bin`` / ``exports`` / ``scripts`` (with or without the
+extension), ``require``d / imported / run with ``node`` by code, transitively. Those are
+read as code and are never treated as browser bundles.
 
 A ``curl … | bash`` string in JS / TS / Python code is lowered when its value reaches
 only human-facing output in every file of the package that reads it (a printed install
@@ -149,6 +170,38 @@ _TOOL_DECL_RE = re.compile(
     r"""@(?:\w+\.)?tool\b|\.tool\s*\(|registerTool|addTool|CallToolRequest|"""
     r"""ListToolsRequest|tools/(?:call|list)|list_tools|inputSchema|input_schema""",
 )
+# Bundle disqualifier. Same as above, except a QUOTED `"mcp_list_tools"` (the OpenAI
+# Responses output item type a browser UI compares against, litellm's chunk) is not a
+# declaration; an unquoted `mcp_list_tools` (a handler, a key) still is. WebMCP
+# (`navigator.modelContext.registerTool / provideContext`) declares agent tools in a
+# browser, so `modelContext` / `provideContext` disqualify too (recall review).
+_BUNDLE_TOOL_DECL_RE = re.compile(
+    r"""@(?:\w+\.)?tool\b|\.tool\s*\(|registerTool|addTool|CallToolRequest|"""
+    r"""ListToolsRequest|tools/(?:call|list)|(?<!["'`]mcp_)list_tools|inputSchema|"""
+    r"""input_schema|modelContext|provideContext""",
+)
+# Other ways a FILE defines an agent tool that _TOOL_DECL_RE misses (recall review):
+# FastMCP `add_tool`, LangChain `StructuredTool.from_function` / `Tool(name=…)`, OpenAI
+# function schemas, Vercel AI `tool({…})`, WebMCP, OpenAI Agents `@function_tool`.
+_TOOL_DEF_EXTRA_RE = re.compile(
+    r"""\badd_tool\s*\(|\bStructuredTool\b|\bfrom_function\s*\(|\b\w*Tool\s*\(\s*name\s*=|"""
+    r"""["']type["']\s*:\s*["']function["']|\btool\s*\(\s*\{|modelContext|provideContext|"""
+    r"""function_tool|\bFastMCP\s*\(|\bMcpServer\s*\(|\bBaseTool\b""",
+)
+
+
+def _defines_tools(text: str) -> bool:
+    return bool(_TOOL_DECL_RE.search(text) or _TOOL_DEF_EXTRA_RE.search(text))
+
+
+# A file that REGISTERS / serves tools (not one that merely mentions `tools/list` in a
+# docstring or reads an `input_schema` as a gateway): the files whose imports decide
+# whether a prompt constant can end up in a tool description.
+_TOOL_REGISTER_RE = re.compile(
+    r"""@(?:\w+\.)*tool\b|\.tool\s*\(|registerTool|addTool|CallToolRequest|"""
+    r"""ListToolsRequest|@(?:\w+\.)+(?:list_tools|call_tool)\b|\bdef\s+\w*list_tools\b|"""
+    r"""\b\w*list_tools\s*[:=]""",
+)
 
 # Findings lowered.
 _DATA_TEXT_CATEGORIES = frozenset({
@@ -157,6 +210,10 @@ _DATA_TEXT_CATEGORIES = frozenset({
 })
 _BUNDLE_REMOTE_LOAD_NAMES = frozenset({"curl/wget piped to shell"})
 _BUNDLE_CATEGORIES = frozenset({"prompt_injection", "toxic_flow", "ssrf"})
+# Minifiers and UI libraries carry zero-width joiners / spaces in string tables (text
+# segmentation, emoji ZWJ sequences). The Tags-block and bidi rules are NOT in this set:
+# a Tags-block run is smuggled text wherever it is, and bidi already has its own rule.
+_BUNDLE_UNICODE_NAMES = frozenset({"Zero-width / invisible character"})
 
 WHY_DATA = ("Matched text is an entry in a detection list the package ships (a "
             "guardrail's list of attacks to block); no code in the package that could "
@@ -174,6 +231,56 @@ _ROLE_DIRECTIVE = "Injected system/role directive"
 _JAILBREAK_ROLE_RE = re.compile(r"you\s+are\s+now\b|your\s+(?:new|real|actual)\s+",
                                 re.IGNORECASE)
 _CODE_EXTS = frozenset({".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".mts", ".cts"})
+
+WHY_PROMPT_STRUCTURE = ("A prompt label or a tag used as a delimiter (a \"System prompt:\" "
+                        "label followed only by a placeholder, or a string that is only "
+                        "`</instructions>`) in the code of a file that declares no agent "
+                        "tool. It carries no instruction text. Reported for visibility; "
+                        "not scored.")
+# A tag that is the WHOLE content of a one-line string literal, as an element of a tuple,
+# list, call or assignment: `("# agents.md instructions for ", "</instructions>")`.
+# A tag inside a longer string (a multi-line template that wraps text between
+# `<important>` and `</important>`, Invariant Labs' tool-poisoning shape) does not match.
+_TAG_NAMES = r"(?:system|important|instructions?|SYSTEM|IMPORTANT|INSTRUCTIONS?)"
+_DELIM_LITERAL_RE = re.compile(
+    r"""(?:^|[\s(\[{,=:])(["'`])\s*<\s*(/?)\s*(""" + _TAG_NAMES + r""")\s*>\s*\1"""
+    r"""(?=\s*[,)\]};])""")  # an element; a literal ending the line may be implicit concat
+_ANY_TAG_RE = re.compile(r"<\s*/?\s*" + _TAG_NAMES + r"\s*>")
+# Building text on the line (concatenation, join, formatting, interpolation) disqualifies
+# the delimiter reading: `"<important>" + DIRECTIVE`, `"".join(("<important>", …))`,
+# `f"{OPEN} …"`, `` `${OPEN} …` `` assemble a description.
+_STRING_BUILD_RE = re.compile(
+    r"""\+|\bjoin\s*\(|\.format\s*\(|\bconcat\s*\(|%\s*[(\w]|\$\{|"""
+    r"""(?<![\w])[rRbB]?[fF][rRbB]?["']""")
+# A Python / JS module reference, for "does tool code import this file".
+_WORD_RE = re.compile(r"[A-Za-z_$][\w$]*")
+_INDEX_STEMS = frozenset({"__init__", "index"})
+
+
+def delimiter_tags_only(line: str, file_text: str = "") -> bool:
+    """Every role-directive tag on ``line`` is a whole one-line string literal used as a
+    delimiter, nothing on the line builds a string from it, and the file never holds the
+    same tag as BOTH an opening and a closing delimiter literal (a pair wraps text)."""
+    tags = list(_ANY_TAG_RE.finditer(line))
+    delims = list(_DELIM_LITERAL_RE.finditer(line))
+    if not tags or len(delims) != len(tags) or _STRING_BUILD_RE.search(line):
+        return False
+    for m in delims:
+        other = "" if m.group(2) else "/"
+        pair = re.compile(r"""["'`]\s*<\s*""" + other + r"\s*" + re.escape(m.group(3))
+                          + r"""\s*>\s*["'`]""", re.IGNORECASE)
+        if pair.search(file_text or ""):
+            return False
+    return True
+
+
+def system_prompt_label_only(line: str) -> bool:
+    """The role-directive hits on ``line`` are "system prompt:" labels followed only by a
+    format placeholder (``"failed to prepend system prompt: %s"``)."""
+    from src.scanner.patterns import PROMPT_INJECTION_PATTERNS
+    from src.scanner.scan import _system_prompt_label_only
+    pattern = next(p for n, p, _s in PROMPT_INJECTION_PATTERNS if n == _ROLE_DIRECTIVE)
+    return _system_prompt_label_only(line, pattern)
 
 
 def _parts(path: str) -> list[str]:
@@ -260,7 +367,7 @@ def node_capable(text: str | None) -> bool:
     """Bundle disqualifier: the file can act as Node code or declares MCP tools."""
     if not text:
         return False
-    if _NODE_MODULE_RE.search(text) or _TOOL_DECL_RE.search(text):
+    if _NODE_MODULE_RE.search(text) or _BUNDLE_TOOL_DECL_RE.search(text):
         return True
     hits = list(_NODE_GLOBAL_RE.finditer(text))
     if not hits:
@@ -299,9 +406,13 @@ class _Package:
         # Tool declarations are read package-wide: a description constant in one file
         # is registered from another (`@m.tool(description=DESC)`).
         self.declares_tools = any(
-            _TOOL_DECL_RE.search(t) for p, t in self.referencers.items()
+            _defines_tools(t) for p, t in self.referencers.items()
             if not bundle_shape(p, t))
         self._bundle: dict[str, bool] = {}
+        self._fetched = fetched
+        self._run_min: set[str] | None = None
+        self._tool_words: set[str] | None = None
+        self._reexport_words: set[str] = set()
 
     def text(self, path: str) -> str | None:
         return self.texts.get(path)
@@ -346,7 +457,11 @@ class _Package:
         if path in self._bundle:
             return self._bundle[path]
         text = self.text(path)
-        ok = bundle_shape(path, text) and not node_capable(text)
+        if self._run_min is None:
+            self._run_min = executed_minified_paths(self._fetched)
+        # A minified file the package runs is code, not a browser bundle.
+        ok = (bundle_shape(path, text) and not node_capable(text)
+              and path not in self._run_min)
         if ok:
             base = Path(path).name
             if base in self.manifest:
@@ -361,6 +476,48 @@ class _Package:
         self._bundle[path] = ok
         return ok
 
+    def prompt_structure(self, path: str, line_number: int) -> bool:
+        """The role-directive hit at ``path:line_number`` is prompt structure in code: the
+        file is code (not a bundle, not an agent-instruction file) that declares no tool
+        itself, and the line is a placeholder-only "system prompt:" label or a tag used
+        as a delimiter constant. A role-override phrase is never structure."""
+        if Path(path).suffix.lower() not in _CODE_EXTS or is_agent_instruction_file(path):
+            return False
+        text = self.text(path)
+        if not text or bundle_shape(path, text) or _defines_tools(text):
+            return False
+        lines = text.split("\n")
+        if not 0 < line_number <= len(lines):
+            return False
+        line = lines[line_number - 1]
+        if _JAILBREAK_ROLE_RE.search(line):
+            return False
+        if not (system_prompt_label_only(line) or delimiter_tags_only(line, text)):
+            return False
+        # A constant the package's tool code imports (directly, or re-exported through a
+        # package `__init__` / `index`) can become a tool description: never lowered.
+        return not self.imported_by_tool_code(path)
+
+    def _module_token(self, path: str) -> str:
+        p = Path(path)
+        return p.parent.name if p.stem in _INDEX_STEMS else p.stem
+
+    def imported_by_tool_code(self, path: str) -> bool:
+        if self._tool_words is None:
+            words: set[str] = set()
+            for p, t in self.referencers.items():
+                if Path(p).suffix.lower() in _CODE_EXTS and not bundle_shape(p, t) \
+                        and (_TOOL_REGISTER_RE.search(t) or _TOOL_DEF_EXTRA_RE.search(t)):
+                    words |= set(_WORD_RE.findall(t))
+            self._tool_words = words
+            # Package index files the tool code names: what they re-export counts too.
+            self._reexport_words = set()
+            for p, t in self.referencers.items():
+                if Path(p).stem in _INDEX_STEMS and self._module_token(p) in words:
+                    self._reexport_words |= set(_WORD_RE.findall(t))
+        tok = self._module_token(path)
+        return tok in self._tool_words or tok in self._reexport_words
+
     def is_detection_data(self, path: str) -> bool:
         name = Path(path).name.lower()
         if Path(name).suffix not in DATA_FILE_EXTS:
@@ -372,6 +529,82 @@ class _Package:
             return False
         return (detection_name_evidence(path) and detection_shape(self.text(path))
                 and not self.exec_reachable(path))
+
+
+def _manifest_entry_strings(manifest_text: str) -> set[str]:
+    """Every path string under package.json ``main`` / ``bin`` / ``exports`` (what Node
+    runs). ``browser`` / ``unpkg`` / ``jsdelivr`` name browser builds and are left out."""
+    import json
+    try:
+        data = json.loads(manifest_text or "")
+    except ValueError:
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    out: set[str] = set()
+
+    def walk(v) -> None:
+        if isinstance(v, str):
+            out.add(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+
+    for key in ("main", "bin", "exports", "scripts"):
+        walk(data.get(key))
+    return out
+
+
+_LOAD_REF_RE = r"""(?:require\s*\(\s*|import\s*\(\s*|\bfrom\s+|\bimport\s+)['"`][^'"`\n]*"""
+
+
+def executed_minified_paths(fetched) -> set[str]:
+    """``.min.`` files the package RUNS, though the engine skips minified files by
+    default: named by package.json ``main`` / ``bin`` / ``exports``, or ``require``d /
+    imported by a non-minified code file. A minified entrypoint is code, not a bundle."""
+    files = getattr(fetched, "files", None) or {}
+    mins = [p for p in files if ".min." in Path(p).name.lower()]
+    if not mins:
+        return set()
+    manifest_af = files.get("package.json")
+    # Manifest strings (entry paths, and `scripts` command lines such as
+    # `node setup.min.js` — an install hook running a minified file) split into tokens.
+    entry_tokens: set[str] = set()
+    for s in _manifest_entry_strings(getattr(manifest_af, "text", "") or ""):
+        for tok in re.split(r"""[\s'"`;&|()]+""", s):
+            if tok:
+                entry_tokens.add(Path(tok).name)
+    loaders = [af.text for p, af in files.items()
+               if getattr(af, "text", None) and Path(p).suffix.lower() in _REFERENCER_EXTS
+               and ".min." not in Path(p).name.lower()]
+    out: set[str] = set()
+    pending = list(mins)
+    changed = True
+    while changed:  # a run minified file can itself load another one
+        changed = False
+        for p in list(pending):
+            base = Path(p).name
+            stem = base[: -len(Path(base).suffix)] if Path(base).suffix else base
+            hit = base in entry_tokens or stem in entry_tokens  # Node adds `.js`
+            if not hit:
+                ref = re.compile(_LOAD_REF_RE + r"(?:" + re.escape(base) + "|"
+                                 + re.escape(stem) + r""")['"`]""")
+                # `require` / `import`, or a `node … x.min.js` command line (a bin shell
+                # script, a Python `subprocess.run(["node", ".../x.min.js"])`).
+                node_cmd = re.compile(r"\bnode\b[^\n]{0,200}" + re.escape(base))
+                hit = any(stem in t and (ref.search(t) or node_cmd.search(t))
+                          for t in loaders)
+            if hit:
+                out.add(p)
+                pending.remove(p)
+                t = getattr(files[p], "text", None)
+                if t:
+                    loaders.append(t)
+                changed = True
+    return out
 
 
 def calibrate_package_findings(findings: list, fetched) -> list:
@@ -399,7 +632,8 @@ def calibrate_package_findings(findings: list, fetched) -> list:
                     and is_list_entry(text.split("\n")[f.line_number - 1]):
                 _lower(f, WHY_DATA)
         elif (Path(path).suffix.lower() in _BUNDLE_EXTS
-              and (cat in _BUNDLE_CATEGORIES or f.name in _BUNDLE_REMOTE_LOAD_NAMES)
+              and (cat in _BUNDLE_CATEGORIES or f.name in _BUNDLE_REMOTE_LOAD_NAMES
+                   or (cat == "hidden_unicode" and f.name in _BUNDLE_UNICODE_NAMES))
               and pkg.is_bundle(path)):
             _lower(f, WHY_BUNDLE)
         elif (f.name == _PIPE_TO_SHELL and is_supported(path)
@@ -413,6 +647,11 @@ def calibrate_package_findings(findings: list, fetched) -> list:
             # A package that declares no agent tool anywhere: `<instructions>` /
             # "System prompt:" in its code structures its own model call.
             _lower(f, WHY_CODE_TEXT)
+        elif (cat == "prompt_injection" and f.name == _ROLE_DIRECTIVE
+              and f.severity == "medium" and pkg.prompt_structure(path, f.line_number)):
+            # A package that declares tools somewhere (litellm's MCP gateway), but this
+            # file declares none and the line is a bare label or a delimiter constant.
+            _lower(f, WHY_PROMPT_STRUCTURE)
     return findings
 
 

@@ -33,6 +33,7 @@ from src.bridges.mcp_app_view import trust_card_html
 from src.scanner.verdict import DECISION_VALUES as _DECISION_VALUES
 from src.scanner.verdict import SAFE_BAR as _SHARED_SAFE_BAR
 from src.scanner.verdict import Decision as _Decision
+from src.scanner.verdict import coverage_gap_notes as _coverage_gap_notes
 from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_safe as _shared_is_safe
 from src.scanner.verdict import verdict_reason as _shared_verdict_reason
@@ -679,6 +680,12 @@ def _scan_block(
         lines = [f"{head}. {target}: trust {score}/100.{_why}{adopt_clause}", ""]
     else:
         lines = [f"{head} — {target}, {score}/100. {why}{adopt_clause}", ""]
+    # What the scan could not check, right under the verdict: a clean result covers only
+    # what was read (coverage_gaps; disclosure only, never a score input).
+    _gaps = _coverage_gap_notes(data)
+    if _gaps:
+        lines[1:1] = [f"**Not checked:** {'; '.join(_gaps)}. A clean result covers only "
+                      "what was read."]
 
     # Compact 8-bit card. Left-aligned with a top/bottom rule (no right border, which is
     # what breaks alignment across renderers). Renders in any monospace view.
@@ -1089,7 +1096,11 @@ def _sandbox_section(data: dict) -> list[str]:
         return ["**Sandbox:** unavailable right now — this result is static analysis only "
                 "(final)."]
     if not b.get("ran"):
-        return []
+        # A run that did not happen (tier error, nothing installable) is not a clean run:
+        # say so rather than staying silent beside a static answer.
+        why = _clip(str(b.get("reason") or b.get("error") or "").strip(), 120)
+        return [f"**Sandbox:** did not run{f' ({why})' if why else ''} — this result is "
+                "static analysis only; nothing was observed running."]
     if _is_live_probe(b):
         return _live_probe_section(b)
     att = b.get("attestation") if isinstance(b.get("attestation"), dict) else None
@@ -1137,6 +1148,10 @@ def _sandbox_section(data: dict) -> list[str]:
                          f"(not a finding); {net}.")
         else:
             lines.append(head + f"{verb}; {net}.")
+    # A run stopped by the wall clock is partial; say so instead of reading as complete
+    # (the report's panel shows the same note).
+    if b.get("timed_out") or (ex or {}).get("timed_out"):
+        lines.append("- Ran partly (hit its time limit): behavior after that was not observed.")
     fs = _behavioral_findings(b)
     room = 6 - len(lines) - 1  # leave a line for the score effect
     for f in fs[: max(room, 1)]:

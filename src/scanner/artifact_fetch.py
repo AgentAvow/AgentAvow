@@ -210,6 +210,10 @@ class SkipReport:
     count: int = 0                  # members not kept
     bytes: int = 0                  # their declared (uncompressed) size
     scannable: int = 0              # of those, files the static engine would have read
+    # Source members dropped as too large for the engine's own 500 KB read cap. Not a
+    # sampling loss (the engine would skip them anyway) but never read: disclosed as a
+    # coverage gap so a payload padded past the cap can't vanish into a clean result.
+    oversized_scannable: int = 0
     reasons: dict[str, int] = field(default_factory=dict)   # reason -> count
     examples: list[dict] = field(default_factory=list)      # first few, for display
 
@@ -232,13 +236,16 @@ class SkipReport:
                 ex["path"] = ex["path"][len(prefix):]
 
     def summary(self) -> dict:
-        return {
+        out = {
             "count": self.count,
             "bytes": self.bytes,
             "scannable": self.scannable,
             "reasons": dict(sorted(self.reasons.items())),
             "examples": list(self.examples),
         }
+        if self.oversized_scannable:
+            out["oversized_scannable"] = self.oversized_scannable
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +568,8 @@ class _BoundedMembers:
             # The engine skips text past its own (much smaller) file cap, so an oversize
             # file is not a coverage loss for scanning; it is still disclosed.
             self.report.add(name, size, "too large", scannable and size <= _scan_helpers()[1])
+            if scannable and size > _scan_helpers()[1]:
+                self.report.oversized_scannable += 1
             return False
         over_bytes = self.kept_bytes + size - MAX_UNPACKED_BYTES
         over_count = len(self.kept) + 1 - MAX_FILE_COUNT
