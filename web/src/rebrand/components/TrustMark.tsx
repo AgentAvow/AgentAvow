@@ -1,5 +1,5 @@
 import { useId, type ReactNode } from 'react'
-import { getTrustTier, decisionOf, decisionPhrase, isCertified } from '../../components/trust/gradeSystem'
+import { getTrustTier, coverageGapNotes, decisionOf, decisionPhrase, isCertified } from '../../components/trust/gradeSystem'
 import { shortUnit } from '../lib/adoptionUnit'
 
 /**
@@ -287,8 +287,10 @@ export function VerdictBadge(
       high?: number | null
       metadata?: { files_scanned?: number | null } | null
       deprecation?: string | null
+      coverage_gaps?: Record<string, unknown> | null
       behavioral?: {
         ran?: boolean; pending?: boolean; plan?: string; state?: string
+        reason?: string | null; timed_out?: boolean
         canary_exfil?: unknown[]
         findings?: Array<{ severity?: string; name?: string; rule?: string }>
         exercise?: { launch_ok?: boolean; calls?: unknown[] } | null
@@ -320,11 +322,12 @@ export function VerdictBadge(
   const sandboxLine = !b ? null
     : b.pending && b.state === 'queued' ? 'Sandbox: waiting for a free slot — this answer may move to Review when it lands'
     : b.pending ? 'Sandbox: still running — this answer may move to Review when it lands'
-    : !b.ran ? null
+    : b.state === 'unavailable' ? 'Sandbox: unavailable — this answer is static analysis only'
+    : !b.ran ? (b.reason ? `Sandbox: did not run (${b.reason}) — this answer is static analysis only` : null)
     : leaked ? `Sandbox: caught — a planted credential left the sandbox${deltaTxt}`
     : severe.length ? `Sandbox: caught — ${severe[0].name ?? 'a behavioral finding'}${deltaTxt}`
     : bFindings.length ? `Sandbox: ran, ${bFindings.length} minor finding${bFindings.length === 1 ? '' : 's'}${deltaTxt}`
-    : b.exercise?.launch_ok ? `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'}, clean${deltaTxt}`
+    : b.exercise?.launch_ok ? `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'}, clean${deltaTxt}${b.timed_out ? ' (hit its time limit; later behavior not observed)' : ''}`
     : reason === 'install failed' ? 'Sandbox: the install failed, so nothing ran — not a finding'
     : reason && reason !== 'not applicable' && reason !== 'started' ? `Sandbox: installed; server not started (${reason}) — not a finding`
     : 'Sandbox: installed and imported, clean'
@@ -334,6 +337,8 @@ export function VerdictBadge(
     do_not_connect: { box: 'bg-danger/10 border-danger/30', fg: 'text-danger', icon: '✕' },
   }[d.decision]
   const why = d.reason ? d.reason[0].toUpperCase() + d.reason.slice(1) + '.' : ''
+  // What the scan could not check: a clean answer covers only what was read.
+  const gaps = coverageGapNotes(scan)
   return (
     <div className={`rounded-xl px-4 py-3 flex items-center gap-3 border ${cfg.box} ${className}`} data-decision={d.decision}>
       <span className={`text-lg leading-none ${cfg.fg}`} aria-hidden="true">{cfg.icon}</span>
@@ -345,6 +350,12 @@ export function VerdictBadge(
         </div>
         <div className="text-[12.5px] text-text-muted">{why}</div>
         {sandboxLine && <div className="text-[12px] text-text-muted mt-0.5"><span className="font-mono text-[10px] uppercase tracking-wide mr-1.5">gVisor</span>{sandboxLine}</div>}
+        {gaps.length > 0 && (
+          <div className="text-[12px] text-warning mt-0.5" data-testid="not-checked">
+            <span className="font-mono text-[10px] uppercase tracking-wide mr-1.5">Not checked</span>
+            {gaps.join('; ')}. This answer covers only what was read.
+          </div>
+        )}
       </div>
       <span className="ml-auto font-mono text-[10px] text-text-muted/60 shrink-0 hidden sm:block">from the signed findings</span>
     </div>

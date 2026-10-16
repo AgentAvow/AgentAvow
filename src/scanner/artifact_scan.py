@@ -574,10 +574,14 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
 # Scan the unpacked tree with the existing 12-category engine
 # ---------------------------------------------------------------------------
 
-def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
+def scan_artifact_files(
+    fetched: ArtifactFetchResult, oversized_out: list | None = None,
+) -> tuple[list, int, bool]:
     """Run the 12-category engine + install-hook detectors over the unpacked tree.
 
-    Returns ``(findings, files_scanned, has_install_hook)``. Reuses the repo
+    Returns ``(findings, files_scanned, has_install_hook)``. Pass ``oversized_out`` to
+    collect the paths of source files the engine did not read because their text is
+    over the 500 KB read cap (disclosed as a coverage gap; never scored). Reuses the repo
     scanner's ``_scan_content`` / ``_scan_dependencies`` verbatim, so every current
     detector gains artifact-truth for free.
     """
@@ -585,14 +589,17 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     from src.scanner.patterns import SKIP_DIRS
     from src.scanner.scan import (
         _MAX_FILE_SIZE,
+        _OVERSIZED_WINDOW,
         _is_build_tooling_file,
         _is_git_config_file,
         _is_git_hook_file,
+        _is_oversized_code_file,
         _is_source_file,
         _is_test_or_doc_file,
         _load_allowlist,
         _scan_content,
         _scan_dependencies,
+        _scan_oversized_text,
         _should_skip_path,
     )
 
@@ -673,14 +680,32 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # everything else there is informational (below).
         # A shipped .git/config or .git/hooks/* in a tarball is a GitSpawn autorun vector
         # (a published artifact should never carry a .git/ dir) — scan it like the repo tree.
+        # A source file over the engine's size cap is scanned at its head and tail and
+        # disclosed (padding past the cap is a published evasion; _scan_oversized_text).
+        oversized = (bool(af.text) and len(af.text) > _MAX_FILE_SIZE
+                     and _is_oversized_code_file(path))
         if (
-            af.text
-            and len(af.text) <= _MAX_FILE_SIZE
+            oversized_out is not None
+            and af.text
+            and len(af.text) > _MAX_FILE_SIZE
             and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
             and not _skip(path)
         ):
-            f, _positives, _suppressed = _scan_content(af.text, path, allowlist,
-                                                       payloads_full_severity=True)
+            oversized_out.append(path)
+        if (
+            af.text
+            and (len(af.text) <= _MAX_FILE_SIZE or oversized)
+            and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
+            and not _skip(path)
+        ):
+            if oversized:
+                f = _scan_oversized_text(
+                    af.text[:_OVERSIZED_WINDOW], af.text[-_OVERSIZED_WINDOW:], path,
+                    len(af.text.encode("utf-8", errors="replace")), allowlist,
+                    payloads_full_severity=True)
+            else:
+                f, _positives, _suppressed = _scan_content(af.text, path, allowlist,
+                                                           payloads_full_severity=True)
             if not _installed(path):
                 # Not on a consumer's disk: keep the finding visible, never let it
                 # score or block (severity capped at info).
@@ -703,7 +728,21 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
                 findings.extend(f)
                 continue
             findings.extend(f)
-            files_scanned += 1
+            if not oversized:  # a partly read file does not count as scanned
+                files_scanned += 1
+
+    # Source members too large to unpack at all (``MAX_MEMBER_BYTES``) were never read:
+    # disclose each one the skip report names, like a partly read file.
+    skipped = getattr(fetched, "skipped", None)
+    for ex in (getattr(skipped, "examples", None) or []):
+        path = str(ex.get("path") or "")
+        if (ex.get("reason") == "too large" and path and _is_oversized_code_file(path)
+                and not _skip(path) and path not in fetched.files):
+            for item in _scan_oversized_text(None, None, path, int(ex.get("size") or 0)):
+                if not _installed(path) or _is_test_or_doc_file(path):
+                    item.installed = _installed(path)
+                    item.severity = "info"
+                findings.append(item)
 
     return findings, files_scanned, has_install_hook
 

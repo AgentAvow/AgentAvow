@@ -365,6 +365,75 @@ def _dependency_phrase(crit: int, high: int) -> str:
     return " and ".join(parts)
 
 
+# ── What the scan could not check (wording only) ─────────────────────────────────
+# A "nothing found" answer covers only what was read. ``coverage_gaps`` (public JSON,
+# signed as ``scan.coverageGaps``) counts what the scan selected but could not read;
+# every surface states it next to the answer, and a Safe reason ends with it, so a
+# result with unread files never reads as a clean bill for the whole tool. Disclosure
+# only: nothing here changes the decision or the score. TS twin: ``coverageGapNotes``
+# in gradeSystem.ts (byte-identical; tests/test_decision.py runs both).
+COVERAGE_GAP_REASON_MAX = 2  # notes named in a Safe reason; the rest are counted
+DEFAULT_FILE_CAP = 200
+
+
+def _files_phrase(n: int, noun: str = "file") -> str:
+    return f"{n:,} {noun}" + ("" if n == 1 else "s")
+
+
+def _was(n: int) -> str:
+    return "was" if n == 1 else "were"
+
+
+def coverage_gap_notes(data: dict) -> list[str]:
+    """Plain-English notes for what the scan could not check, from ``coverage_gaps``
+    (empty when the scan read everything it selected, or for older cached shapes)."""
+    data = data if isinstance(data, dict) else {}
+    g = data.get("coverage_gaps")
+    if not isinstance(g, dict):
+        return []
+    notes: list[str] = []
+    n = _int(g.get("oversized_files"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} over 500 KB {_was(n)} not fully read")
+    n = _int(g.get("fetch_failed"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} could not be fetched")
+    n = _int(g.get("time_limit_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} {_was(n)} not read before the time limit")
+    n = _int(g.get("over_file_cap"))
+    if n > 0:
+        cap = _int(g.get("file_cap")) or DEFAULT_FILE_CAP
+        notes.append(f"{_files_phrase(n)} past the {cap:,}-file limit {_was(n)} not read")
+    if g.get("tree_truncated") is True:
+        notes.append("GitHub returned only part of the file tree")
+    n = _int(g.get("package_skipped"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} in the package {_was(n)} skipped for size")
+    n = _int(g.get("dependency_files_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'dependency file')} could not be read")
+    if g.get("advisory_lookup") == "failed":
+        notes.append("the vulnerability database lookup failed")
+    if g.get("tool_list_unread") is True:
+        notes.append("the server's tool list could not be read")
+    if g.get("tool_list_paged") is True:
+        notes.append("only the first page of the server's tool list was read")
+    return notes
+
+
+def coverage_gap_suffix(data: dict) -> str:
+    """``; <note>; <note>; and N more coverage gaps`` for a Safe reason ("" when
+    none)."""
+    notes = coverage_gap_notes(data)
+    if not notes:
+        return ""
+    head = notes[:COVERAGE_GAP_REASON_MAX]
+    rest = len(notes) - len(head)
+    more = f"; and {_files_phrase(rest, 'more coverage gap')}" if rest > 0 else ""
+    return "; " + "; ".join(head) + more
+
+
 def _first(items: list, pred) -> dict | None:
     for i in items:
         if pred(i):
@@ -502,18 +571,23 @@ def decide(data: dict) -> Decision:
                 and i.get("installed") is not False for i in items)
 
     # ── safe ──────────────────────────────────────────────────────────────────────
+    # A Safe reason ends with what the scan could not check (wording only).
+    gaps = coverage_gap_suffix(data)
+
+    def safe(reason: str) -> Decision:
+        return done(DECISION_SAFE, reason + gaps)
+
     if deps:
         noun = "advisory" if dep_c + dep_h == 1 else "advisories"
-        return done(DECISION_SAFE,
-                    f"no critical or high findings in its code (dependencies: {deps} {noun})")
+        return safe(f"no critical or high findings in its code (dependencies: {deps} {noun})")
     # Thin coverage (0 <= files < 8, nothing found) reads Safe and says so in the reason
     # (Kenne, 2026-10-08, #19). The 74 / 82 evidence cap on the score still shows it.
     # Zero files (a metapackage whose code ships in a dependency, an image read only to
     # its config) is the thinnest case and says there was no code at all.
     if files_known and 0 <= files < THIN_COVERAGE_FILES and not found:
         if _is_remote_mcp(data):
-            return done(DECISION_SAFE, THIN_REASON_REMOTE_MCP)
-        return done(DECISION_SAFE, THIN_REASON if files > 0 else THIN_REASON_NO_CODE)
+            return safe(THIN_REASON_REMOTE_MCP)
+        return safe(THIN_REASON if files > 0 else THIN_REASON_NO_CODE)
     if files > 0:
         n = f"{files:,}"
         unit = "file" if files == 1 else "files"
@@ -521,7 +595,7 @@ def decide(data: dict) -> Decision:
                   else f"nothing found in {n} {unit}")
     else:
         reason = "no critical or high findings" if found else "nothing found"
-    return done(DECISION_SAFE, reason)
+    return safe(reason)
 
 
 # ── The Certified mark (display rule) ─────────────────────────────────────────────
