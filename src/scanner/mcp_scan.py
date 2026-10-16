@@ -574,6 +574,55 @@ def _rpc(method: str, params: dict | None = None, rid: int | None = 1) -> dict:
     return body
 
 
+# How the scanner names itself in ``initialize``. A server can read this and serve a
+# clean tool list to scanners only (Pluto Security, "Malicious MCP servers, clean scans",
+# 2026-09-15), so ``fetch_mcp_tools`` also lists the tools under the name a mainstream
+# agent client sends and compares the two (``client_view``).
+SCANNER_CLIENT_INFO = {"name": "AgentAvow", "version": "1.0"}
+AGENT_CLIENT_INFO = {"name": "claude-ai", "version": "0.1.0"}
+
+
+async def _client_view(client, url: str, scanner_digests: dict[str, str]) -> dict | None:
+    """Whether the server serves different tool definitions to an agent client than to
+    the scanner. Lists ``tools/list`` once as ``AGENT_CLIENT_INFO`` and once more as the
+    scanner; a difference counts only when the two scanner lists agree with each other
+    (so a server whose list changes on every call is not read as fingerprinting).
+    Returns ``{"client", "differs", "tools"}`` or None when a view could not be read."""
+    agent = McpSession(client, url, AGENT_CLIENT_INFO)
+    if await agent.initialize() >= 400 or agent.init_status == 0:
+        return None
+    agent_tools = await agent.list("tools/list", "tools")
+    again = McpSession(client, url, SCANNER_CLIENT_INFO)
+    if await again.initialize() >= 400 or again.init_status == 0:
+        return None
+    rescan = compute_tool_digests(await again.list("tools/list", "tools"))
+    if rescan != scanner_digests:
+        return {"client": AGENT_CLIENT_INFO["name"], "differs": False, "tools": [],
+                "unstable": True}
+    differs = compute_tool_digests(agent_tools) != scanner_digests
+    return {"client": AGENT_CLIENT_INFO["name"], "differs": differs,
+            "tools": agent_tools if differs else []}
+
+
+def client_view_findings(view: dict | None, scanner_tools: list | None) -> list:
+    """The finding for a server that serves agents different tools than the scanner."""
+    if not view or not view.get("differs"):
+        return []
+    seen = compute_tool_digests(scanner_tools)
+    agent = compute_tool_digests(view.get("tools"))
+    changed = sorted(k for k in set(seen) | set(agent) if seen.get(k) != agent.get(k))
+    names = ", ".join(k.removeprefix("tool:") for k in changed[:5]) or "the tool list"
+    return [_finding(
+        "prompt_injection",
+        "Server shows a scanner different tool definitions than an agent client",
+        "critical",
+        f"tools/list as '{view.get('client')}': {names}",
+        "The server changes what it serves by the connecting client's name — a "
+        "scanner-evasion pattern. Do not connect; the definitions an agent receives were "
+        "not the ones reviewed.",
+    )]
+
+
 class McpSession:
     """One Streamable-HTTP MCP session over a (rebind-safe) httpx client: ``initialize``
     + ``notifications/initialized``, then ``tools/list`` / ``tools/call`` on the same
@@ -581,9 +630,10 @@ class McpSession:
     credentials, nothing else. Every method is fail-open (returns a status / None /
     an error record) and never raises past the transport."""
 
-    def __init__(self, client, url: str) -> None:
+    def __init__(self, client, url: str, client_info: dict | None = None) -> None:
         self._client = client
         self._url = url
+        self._client_info = dict(client_info or SCANNER_CLIENT_INFO)
         self._headers = dict(_MCP_HEADERS)
         self.server_info: dict = {}
         self.session_id: str | None = None
@@ -603,7 +653,7 @@ class McpSession:
                 {
                     "protocolVersion": _MCP_PROTOCOL_VERSION,
                     "capabilities": {},
-                    "clientInfo": {"name": "AgentAvow", "version": "1.0"},
+                    "clientInfo": self._client_info,
                 },
             ))
         except Exception:
@@ -628,14 +678,29 @@ class McpSession:
         return init.status_code
 
     async def list(self, method: str, key: str) -> list:
+        """The first page of ``method``'s ``key`` list ([] on any failure). Records the
+        methods that failed outright (``list_failed``: HTTP error, transport error, no
+        JSON-RPC result) and the ones whose answer said more pages exist
+        (``list_more_pages``: a ``nextCursor``), so a partial read is disclosed rather
+        than graded as the whole tool set."""
+        failed = self.__dict__.setdefault("list_failed", set())
+        more = self.__dict__.setdefault("list_more_pages", set())
         try:
             resp = await self._client.post(
                 self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
             if resp.status_code >= 400:
+                failed.add(method)
                 return []
             doc = _parse_jsonrpc_body(resp.text)
-            return ((doc or {}).get("result") or {}).get(key) or []
+            result = (doc or {}).get("result") if isinstance(doc, dict) else None
+            if not isinstance(result, dict):
+                failed.add(method)
+                return []
+            if result.get("nextCursor"):
+                more.add(method)
+            return result.get(key) or []
         except Exception:
+            failed.add(method)
             return []
 
     async def call_tool(self, name: str, arguments: dict, *, timeout: float) -> dict:
@@ -734,9 +799,22 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
             prompts = await session.list("prompts/list", "prompts")
             if not tools and not resources and not prompts:
                 return None
-            return {
+            view = None
+            if tools:
+                try:
+                    view = await _client_view(client, url, compute_tool_digests(tools))
+                except Exception:  # noqa: BLE001 — the comparison never breaks a scan
+                    view = None
+            out = {
                 "tools": tools, "resources": resources, "prompts": prompts,
-                "server_info": session.server_info,
+                "server_info": session.server_info, "client_view": view,
             }
+            # Coverage disclosure: tools/list failed (graded on resources/prompts
+            # only), or the server paged its tool list and only page one was read.
+            if "tools/list" in getattr(session, "list_failed", set()):
+                out["tools_list_failed"] = True
+            if "tools/list" in getattr(session, "list_more_pages", set()):
+                out["tools_more_pages"] = True
+            return out
     except Exception:
         return None

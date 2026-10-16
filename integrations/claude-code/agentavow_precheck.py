@@ -932,8 +932,8 @@ def _sandbox_summary(b: object) -> str:
     if ex and ex.get("launch_ok"):
         called = len({c.get("tool") for c in (ex.get("calls") or [])
                       if isinstance(c, dict) and c.get("tool")})
-        return (f"sandbox: called {called} tool{'' if called == 1 else 's'}"
-                + (" before hitting its time limit" if partial else "") + f", {net}")
+        return ("sandbox: " + ("ran partly (hit its time limit), " if partial else "")
+                + f"called {called} tool{'' if called == 1 else 's'}, {net}")
     plan = str(b.get("plan") or "")
     if ex is not None or plan.endswith("-mcp"):
         gs = b.get("grade_summary") if isinstance(b.get("grade_summary"), dict) else {}

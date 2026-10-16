@@ -75,7 +75,7 @@ function whyLines(row: CatalogRow): string[] {
     const parts = [sb.findings ? `${sb.findings} behavioral finding${sb.findings > 1 ? 's' : ''}` : 'no behavioral findings']
     if (sb.unexpected_egress) parts.push(`${sb.unexpected_egress} unexpected egress host${sb.unexpected_egress > 1 ? 's' : ''}`)
     if (sb.exercised === false) parts.push('server did not start')
-    if (sb.timed_out) parts.push('partial run (hit its time limit)')
+    if (sb.timed_out) parts.push('ran partly (hit its time limit)')
     out.push(`Sandbox run (not part of the signed score): ${parts.join(', ')}`)
   }
   return out

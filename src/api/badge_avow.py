@@ -155,8 +155,9 @@ class _Facts:
     """Everything a badge shows, resolved once so both styles say the same thing."""
 
     def __init__(self, decision, score, certified, adoption, adoption_unit, adoption_pct,
-                 coordinate, light):
+                 coordinate, light, not_checked=0):
         self.scored = score is not None
+        self.not_checked = max(0, int(not_checked or 0))
         self.score = max(0, min(100, int(score))) if self.scored else None
         d = decision_for(decision or self.score) if self.scored else None
         self.cert = bool(certified) and d is not None and d.value == "safe"
@@ -186,8 +187,12 @@ class _Facts:
         cert = " · Certified" if self.cert else ""
         adopt = (f"{self.adoption_text} {self.adoption_unit_full}".strip()
                  if self.has_adoption else "new")
+        gaps = ""
+        if self.not_checked:
+            n = self.not_checked
+            gaps = f" · partial scan: {n} coverage gap{'' if n == 1 else 's'}, see report"
         return (f"AgentAvow: {who}{self.phrase}{cert} · trust {self.score}/100 "
-                f"({self.tier_word}) · adoption {adopt}")
+                f"({self.tier_word}) · adoption {adopt}{gaps}")
 
 
 
@@ -595,9 +600,13 @@ def render_avow_badge(
     *, style: str, decision: str | None, score: int | None, certified: bool = False,
     brand: str = "AgentAvow", theme: str = "auto", coordinate: str = "",
     adoption: int | None = None, adoption_unit: str | None = None,
-    adoption_pct: int | None = None,
+    adoption_pct: int | None = None, not_checked: int = 0,
 ) -> str:
     """Render one AgentAvow badge as SVG text.
+
+    ``not_checked`` is how many coverage gaps the scan disclosed (things it selected
+    but could not read); when non-zero the accessible title / hover text says the scan
+    was partial. The drawn badge is unchanged.
 
     ``certified`` only takes effect on a Safe answer with a score. ``adoption`` is the
     headline count; ``adoption_pct`` is the 0-100 adoption score that sets the gauge
@@ -610,7 +619,7 @@ def render_avow_badge(
     if adoption_pct is None:
         adoption_pct = adoption_pct_from_count(adoption)
     f = _Facts(decision, score, certified, adoption, adoption_unit, adoption_pct,
-               coordinate, light=(theme == "light"))
+               coordinate, light=(theme == "light"), not_checked=not_checked)
     p = _Paint(theme)
     if style == "card":
         return _card(f, p, brand)
