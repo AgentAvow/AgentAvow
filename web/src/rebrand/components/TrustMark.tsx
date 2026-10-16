@@ -289,9 +289,10 @@ export function VerdictBadge(
       deprecation?: string | null
       behavioral?: {
         ran?: boolean; pending?: boolean; plan?: string; state?: string
+        timed_out?: boolean
         canary_exfil?: unknown[]
         findings?: Array<{ severity?: string; name?: string; rule?: string }>
-        exercise?: { launch_ok?: boolean; calls?: unknown[] } | null
+        exercise?: { launch_ok?: boolean; calls?: unknown[]; timed_out?: boolean } | null
         grade_summary?: { start_reason?: string } | null
         unexpected_egress?: string[]
       } | null
@@ -317,16 +318,22 @@ export function VerdictBadge(
   const deltaTxt = delta ? ` · score ${delta > 0 ? '+' : ''}${delta}` : ''
   const severe = bFindings.filter((f) => f.severity === 'critical' || f.severity === 'high')
   const leaked = !!(b?.ran && (b.canary_exfil?.length ?? 0) > 0)
+  // A run that hit its time limit is partial: the card must not read "clean" while the
+  // behavioral panel below says "results may be partial".
+  const partial = !!(b?.timed_out || b?.exercise?.timed_out)
   const sandboxLine = !b ? null
     : b.pending && b.state === 'queued' ? 'Sandbox: waiting for a free slot — this answer may move to Review when it lands'
     : b.pending ? 'Sandbox: still running — this answer may move to Review when it lands'
     : !b.ran ? null
     : leaked ? `Sandbox: caught — a planted credential left the sandbox${deltaTxt}`
     : severe.length ? `Sandbox: caught — ${severe[0].name ?? 'a behavioral finding'}${deltaTxt}`
-    : bFindings.length ? `Sandbox: ran, ${bFindings.length} minor finding${bFindings.length === 1 ? '' : 's'}${deltaTxt}`
-    : b.exercise?.launch_ok ? `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'}, clean${deltaTxt}`
+    : bFindings.length ? `Sandbox: ran${partial ? ' partly (hit its time limit)' : ''}, ${bFindings.length} minor finding${bFindings.length === 1 ? '' : 's'}${deltaTxt}`
+    : b.exercise?.launch_ok ? (partial
+      ? `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'} before hitting its time limit, nothing caught${deltaTxt}`
+      : `Sandbox: called ${calls} tool${calls === 1 ? '' : 's'}, clean${deltaTxt}`)
     : reason === 'install failed' ? 'Sandbox: the install failed, so nothing ran — not a finding'
     : reason && reason !== 'not applicable' && reason !== 'started' ? `Sandbox: installed; server not started (${reason}) — not a finding`
+    : partial ? `Sandbox: ran partly (hit its time limit), nothing caught${deltaTxt}`
     : 'Sandbox: installed and imported, clean'
   const cfg = {
     safe: { box: 'bg-success/10 border-success/30', fg: 'text-success', icon: '✓' },

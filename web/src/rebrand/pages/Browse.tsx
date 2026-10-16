@@ -75,6 +75,7 @@ function whyLines(row: CatalogRow): string[] {
     const parts = [sb.findings ? `${sb.findings} behavioral finding${sb.findings > 1 ? 's' : ''}` : 'no behavioral findings']
     if (sb.unexpected_egress) parts.push(`${sb.unexpected_egress} unexpected egress host${sb.unexpected_egress > 1 ? 's' : ''}`)
     if (sb.exercised === false) parts.push('server did not start')
+    if (sb.timed_out) parts.push('partial run (hit its time limit)')
     out.push(`Sandbox run (not part of the signed score): ${parts.join(', ')}`)
   }
   return out
@@ -85,6 +86,7 @@ function whyLines(row: CatalogRow): string[] {
 function sandboxMark(sb: CatalogSandbox | null | undefined): string | null {
   if (!sb?.ran) return null
   if (sb.findings) return `sandbox: ${sb.findings} finding${sb.findings > 1 ? 's' : ''}`
+  if (sb.timed_out) return 'sandbox: partial'
   return 'sandbox ✓'
 }
 

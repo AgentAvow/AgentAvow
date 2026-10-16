@@ -1137,6 +1137,10 @@ def _sandbox_section(data: dict) -> list[str]:
                          f"(not a finding); {net}.")
         else:
             lines.append(head + f"{verb}; {net}.")
+    # A run stopped by the wall clock is partial; say so instead of reading as complete
+    # (the report's panel shows the same note).
+    if b.get("timed_out") or (ex or {}).get("timed_out"):
+        lines.append("- The run hit its time limit, so this observation may be partial.")
     fs = _behavioral_findings(b)
     room = 6 - len(lines) - 1  # leave a line for the score effect
     for f in fs[: max(room, 1)]:

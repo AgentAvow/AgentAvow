@@ -79,9 +79,11 @@ async def test_page_is_decorated_with_one_mget(redis):
     assert len(redis.calls) == 1
     assert len(redis.calls[0]) == 1 + 1 + 2 + 1 + 1  # keys for the 5 package rows only
     assert out[0].sandbox.model_dump() == {
-        "ran": True, "exercised": True, "findings": 0, "unexpected_egress": 0}
+        "ran": True, "exercised": True, "findings": 0, "unexpected_egress": 0,
+        "timed_out": False}
     assert out[1].sandbox.model_dump() == {
-        "ran": True, "exercised": True, "findings": 2, "unexpected_egress": 1}
+        "ran": True, "exercised": True, "findings": 2, "unexpected_egress": 1,
+        "timed_out": False}
     assert out[2].sandbox.exercised is False
     assert out[3].sandbox is None  # pending is not a run
     assert out[4].sandbox is None
@@ -94,7 +96,16 @@ async def test_install_plan_without_exercise_has_null_exercised(redis):
     redis.store[_behavioral_cache_key("pypi", "lib")] = _block(exercise=False)
     (row,) = await _attach_sandbox([CatalogRow(surface="pypi", name="lib")])
     assert row.sandbox.model_dump() == {
-        "ran": True, "exercised": None, "findings": 0, "unexpected_egress": 0}
+        "ran": True, "exercised": None, "findings": 0, "unexpected_egress": 0,
+        "timed_out": False}
+
+
+async def test_timed_out_run_is_marked_partial(redis):
+    blk = json.loads(_block(exercise=False))
+    blk["timed_out"] = True
+    redis.store[_behavioral_cache_key("pypi", "slow")] = json.dumps(blk)
+    (row,) = await _attach_sandbox([CatalogRow(surface="pypi", name="slow")])
+    assert row.sandbox.timed_out is True
 
 
 async def test_no_package_rows_means_no_redis_call(redis):

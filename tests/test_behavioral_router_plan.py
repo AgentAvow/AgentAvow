@@ -328,6 +328,19 @@ def test_install_only_plans():
     assert "exited with code 1 (not a finding)" in _sandbox_line(_scan_data(b))
 
 
+def test_timed_out_run_says_partial():
+    # litellm: the report card said "installed and imported, clean" while the panel said
+    # "the run hit its time limit — results may be partial".
+    b = {"ran": True, "plan": "pypi", "egress_hosts": [], "findings": [], "exercise": None,
+         "timed_out": True}
+    assert "may be partial" in _sandbox_line(_scan_data(b))
+    b["timed_out"] = False
+    assert "partial" not in _sandbox_line(_scan_data(b))
+    ex = _exercised()
+    ex["exercise"]["timed_out"] = True
+    assert "may be partial" in _sandbox_line(_scan_data(ex))
+
+
 # ── start_reason: a server that could not start says why ──────────────────────
 
 def _not_started(reason=None, findings=(), attestation=None, hosts=(), detail=None):

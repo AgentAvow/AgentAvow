@@ -164,10 +164,31 @@ def _fixed_in(vuln: dict, eco: str | None = None, name: str | None = None,
     return None
 
 
+def _last_affected(vuln: dict, eco: str | None = None, name: str | None = None) -> str | None:
+    """The highest ``last_affected`` bound in this package's ranges, for an advisory whose
+    range is closed by a last affected release rather than a fix (GHSA-53gh-p8jc-7rg8:
+    introduced 1.40.3.dev2, last_affected 1.40.12). None when no range has one."""
+    best: tuple | None = None
+    for aff in _affected_entries(vuln, eco, name):
+        for r in aff.get("ranges") or []:
+            for ev in r.get("events") or []:
+                if "last_affected" not in ev:
+                    continue
+                raw = str(ev["last_affected"])
+                key = _parse_version(eco or "", raw)
+                if best is None or (key is not None and (best[0] is None or key > best[0])):
+                    best = (key, raw)
+    return best[1] if best else None
+
+
 def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
                          name: str | None = None) -> list[dict]:
     """Non-MAL advisories for the package itself, with whether the scanned version is
-    affected. Deduplicated by alias (GHSA and PYSEC records describe the same flaw)."""
+    affected. Deduplicated by alias (GHSA and PYSEC records describe the same flaw).
+
+    ``fixed_in`` is the release that fixes it; when the record has no fix event,
+    ``last_affected`` is the newest release it names as affected, so a reader is told
+    why the scanned version is clear ("affected up to 1.40.12") instead of "fixed"."""
     out: list[dict] = []
     seen: set[str] = set()
     for v in vulns:
@@ -186,6 +207,7 @@ def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
             "summary": (v.get("summary") or "").strip()[:200],
             "severity": sev,
             "fixed_in": _fixed_in(v, eco, name, version),
+            "last_affected": _last_affected(v, eco, name),
             "affects_scanned_version": advisory_affects(v, eco, version, name),
         })
     out.sort(key=lambda a: (not a["affects_scanned_version"], a["id"] or ""))

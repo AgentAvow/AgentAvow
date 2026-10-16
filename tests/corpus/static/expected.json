@@ -1725,8 +1725,8 @@
    "version": "13.0.6",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 31 files",
-   "files_scanned": 31,
+   "reason": "nothing found in 33 files",
+   "files_scanned": 33,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2118,8 +2118,8 @@
    "version": "4.0.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 19 files",
-   "files_scanned": 19,
+   "reason": "nothing found in 21 files",
+   "files_scanned": 21,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2172,7 +2172,7 @@
    "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 5,
+   "files_scanned": 7,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2324,8 +2324,8 @@
    "version": "4.18.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 1,042 files",
-   "files_scanned": 1042,
+   "reason": "nothing found in 1,043 files",
+   "files_scanned": 1043,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -2341,8 +2341,8 @@
    "version": "11.5.3",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 51 files",
-   "files_scanned": 51,
+   "reason": "nothing found in 57 files",
+   "files_scanned": 57,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3560,8 +3560,8 @@
    "version": "4.4.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 27 files",
-   "files_scanned": 27,
+   "reason": "nothing found in 29 files",
+   "files_scanned": 29,
    "severity": {
     "critical": 0,
     "high": 0,

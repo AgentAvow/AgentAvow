@@ -553,6 +553,13 @@ def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_pa
      "sandbox: not started"),
     ({"ran": True, "findings": [], "exercise": None, "egress_hosts": ["registry.npmjs.org"]},
      "sandbox: installed, no network beyond the registry"),
+    # A run stopped by its time limit is partial (litellm's page said "clean").
+    ({"ran": True, "findings": [], "exercise": None, "timed_out": True,
+      "egress_hosts": ["registry.npmjs.org"]},
+     "sandbox: ran partly (hit its time limit), no network beyond the registry"),
+    ({"ran": True, "findings": [], "egress_hosts": [],
+      "exercise": {"launch_ok": True, "timed_out": True, "calls": [{"tool": "a"}]}},
+     "sandbox: called 1 tool before hitting its time limit, no network beyond the registry"),
 ])
 def test_sandbox_summary_in_the_verdict(behavioral, expected):
     mod = _load(PLUGIN_COPY)

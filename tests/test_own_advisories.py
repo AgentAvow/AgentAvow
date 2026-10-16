@@ -104,3 +104,31 @@ def test_other_ecosystems_with_the_same_name_do_not_count():
          "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]}]}
     assert advisory_affects(adv, "npm", "4.0.0", "jquery") is False
     assert advisory_affects(adv, "npm", "3.3.1", "jquery") is True
+
+
+# litellm 1.105.1's page listed GHSA-53gh-p8jc-7rg8 / GHSA-5mg7-485q-xm76 under "fixed in
+# this version" with no fix: their OSV ranges close on `last_affected`, not `fixed`.
+LAST_AFFECTED = {
+    "id": "GHSA-53gh-p8jc-7rg8", "summary": "LiteLLM Vulnerable to Remote Code Execution",
+    "database_specific": {"severity": "HIGH"},
+    "affected": [{"package": {"ecosystem": "PyPI", "name": "litellm"},
+                  "ranges": [{"type": "ECOSYSTEM", "events": [
+                      {"introduced": "1.40.3.dev2"}, {"last_affected": "1.40.12"}]}]}],
+}
+
+
+def test_last_affected_range_reports_its_bound():
+    out = summarize_advisories([LAST_AFFECTED], "PyPI", "1.105.1", "litellm")
+    assert out[0]["affects_scanned_version"] is False
+    assert out[0]["fixed_in"] is None and out[0]["last_affected"] == "1.40.12"
+    hit = summarize_advisories([LAST_AFFECTED], "PyPI", "1.40.5", "litellm")
+    assert hit[0]["affects_scanned_version"] is True and hit[0]["last_affected"] == "1.40.12"
+
+
+def test_last_affected_picks_the_highest_bound_and_is_none_with_a_fix():
+    adv = {"id": "GHSA-y", "affected": [{"ranges": [
+        {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"last_affected": "1.9"}]},
+        {"type": "ECOSYSTEM", "events": [{"introduced": "2.0"}, {"last_affected": "2.10"}]},
+    ]}]}
+    assert summarize_advisories([adv], "PyPI", "3.0")[0]["last_affected"] == "2.10"
+    assert summarize_advisories([GHSA], "PyPI", "2026.8.18")[0]["last_affected"] is None
