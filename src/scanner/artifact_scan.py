@@ -208,7 +208,35 @@ _BUILD_PART_DANGER_RE = re.compile(
     r"httpx\.|https?://|\bexec\b|\beval\b|__import__|marshal|pickle"
     # A binary in (or defaulting to) a temp dir is a dropped file, not a toolchain
     # (adversarial recall review of #24: `os.environ.get('PG_CONFIG', '/tmp/pg_config')`).
-    r"|/tmp/|/var/tmp/|/dev/shm/|\btempfile\b|gettempdir|mkdtemp|mkstemp")
+    r"|/tmp/|/var/tmp/|/dev/shm/|\btempfile\b|gettempdir|mkdtemp|mkstemp"
+    r"|['\"](?:TMPDIR|TEMP|TMP)['\"]")
+
+# Modules whose import alone makes a later call a network fetch, under any alias
+# (`from urllib.request import urlopen as f`, `__import__('requests')`).
+_NET_MODULES = frozenset({
+    "requests", "httpx", "urllib3", "aiohttp", "pycurl", "wget", "socket", "ftplib",
+    "http.client", "urllib.request", "urllib2", "six.moves.urllib.request", "paramiko",
+    "smtplib", "telnetlib",
+})
+# A spawned VCS / package fetch: `git clone`, `pip download`, `svn checkout`.
+_SETUP_VCS_FETCH_RE = re.compile(
+    r"""['"](?:git|hg)['"]\s*,\s*(?:['"]-\w+['"]\s*,\s*)*['"](?:clone|fetch|pull)['"]"""
+    r"""|['"]pip[\d.]*['"]\s*,\s*['"]download['"]|['"]svn['"]\s*,\s*['"](?:checkout|co|export)['"]"""
+    r"""|\b(?:git|hg)\s+(?:clone|fetch|pull)\b|\bpip[\d.]*\s+download\b""")
+
+
+def _target_src(node: ast.AST) -> str:
+    try:
+        return ast.unparse(node)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+# An install-time decode: a blob inside setup.py turned into bytes (a dropped binary).
+_SETUP_DECODE_CALLS = frozenset({
+    "b64decode", "a85decode", "b32decode", "b16decode", "b85decode", "unhexlify",
+    "fromhex", "decompress", "extractall", "extract", "unpack_archive",
+})
 
 # An unguarded network fetch anywhere in setup.py. A toolchain binary is only a build
 # step when nothing at install time downloads; `requests.get(U)` → write `./pgc` → run
@@ -348,10 +376,59 @@ class _InstallExecVisitor(ast.NodeVisitor):
         self._values: dict[str, ast.AST] = {}
         # An unguarded network fetch (requests / httpx / urllib / socket) anywhere.
         self.net_fetch_unguarded = False
+        self._net_aliases: set[str] = set()
+        # An unguarded decode / archive extraction, or an environment variable the file
+        # itself points at a shell, an interpreter or a temp / relative path.
+        self.dropped_binary_unguarded = False
         # Unguarded execs that passed only as a fixed-argv spawn or a toolchain step.
         self.build_step_unguarded = False
 
+    def visit_Import(self, node: ast.Import) -> None:
+        for a in node.names:
+            if a.name in _NET_MODULES or a.name.split(".")[0] in _NET_MODULES:
+                self._net_aliases.add((a.asname or a.name).split(".")[0])
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        mod = node.module or ""
+        if mod in _NET_MODULES or mod.split(".")[0] in _NET_MODULES:
+            for a in node.names:
+                self._net_aliases.add(a.asname or a.name)
+        self.generic_visit(node)
+
+    def _env_write(self, target: ast.AST, value: ast.AST) -> None:
+        """`os.environ['PG_CONFIG'] = 'sh'` / `'./pgc'` / `'/tmp/x'` in setup.py itself."""
+        from src.scanner.exec_classify import _basename
+        from src.scanner.patterns import (
+            DANGEROUS_ARGV0_NET,
+            DANGEROUS_ARGV0_SHELLS,
+            INTERPRETER_ARGV0,
+        )
+        try:
+            tgt = ast.unparse(target)
+        except Exception:  # noqa: BLE001
+            return
+        if not re.match(r"^(?:os\.)?environ\b", tgt) or self._guard_depth:
+            return
+        v = value.value if isinstance(value, ast.Constant) else None
+        if not isinstance(v, str):
+            try:
+                src = ast.unparse(value)
+            except Exception:  # noqa: BLE001
+                return
+            if _BUILD_PART_DANGER_RE.search(src):
+                self.dropped_binary_unguarded = True
+            return
+        base = _basename(v)
+        if (base in DANGEROUS_ARGV0_SHELLS or base in DANGEROUS_ARGV0_NET
+                or base in INTERPRETER_ARGV0 or v.startswith(("./", "../"))
+                or _BUILD_PART_DANGER_RE.search(v)):
+            self.dropped_binary_unguarded = True
+
     def visit_Assign(self, node: ast.Assign) -> None:
+        for t in node.targets:
+            if isinstance(t, ast.Subscript):
+                self._env_write(t.value, node.value)
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             self._values[node.targets[0].id] = node.value
             if isinstance(node.value, (ast.List, ast.Tuple, ast.BinOp)):
@@ -390,8 +467,23 @@ class _InstallExecVisitor(ast.NodeVisitor):
                 target = ast.unparse(node.func)
             except Exception:  # noqa: BLE001
                 target = ""
-            if _SETUP_NET_FETCH_RE.search(target):
+            head = target.split(".")[0].split("(")[0]
+            if _SETUP_NET_FETCH_RE.search(target) or head in self._net_aliases:
                 self.net_fetch_unguarded = True
+            if fname in ("__import__", "import_module") and node.args \
+                    and isinstance(node.args[0], ast.Constant) \
+                    and str(node.args[0].value).split(".")[0] in _NET_MODULES:
+                self.net_fetch_unguarded = True
+            if fname in _AST_EXEC_CALLS and _SETUP_VCS_FETCH_RE.search(_target_src(node)):
+                self.net_fetch_unguarded = True  # `git clone git@host:…` fetches code
+            if fname in _SETUP_DECODE_CALLS:
+                self.dropped_binary_unguarded = True
+            if fname in ("setdefault", "putenv", "update") and node.args \
+                    and re.search(r"environ|putenv", target):
+                if fname == "putenv" and len(node.args) > 1:
+                    self._env_write(ast.Name(id="environ"), node.args[1])
+                elif fname == "setdefault" and len(node.args) > 1:
+                    self._env_write(ast.Name(id="environ"), node.args[1])
         if fname in _AST_EXEC_CALLS and not _is_non_exec_receiver(node):
             if self._guard_depth > 0:
                 self.guarded.append((fname, getattr(node, "lineno", 1)))
@@ -447,7 +539,8 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
         if visitor.has_net_unguarded:
             severity = "critical"
         elif visitor.has_dynamic_unguarded or (
-                visitor.net_fetch_unguarded and visitor.build_step_unguarded):
+                (visitor.net_fetch_unguarded or visitor.dropped_binary_unguarded)
+                and visitor.build_step_unguarded):
             severity = "high"
         else:
             severity = "medium"

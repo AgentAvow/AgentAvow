@@ -3202,7 +3202,10 @@ def _scan_content(
                 # An `npx …` / branch-URL hint inside a string literal (an error
                 # message, a docstring line) is advice to a human, not a load.
                 if name.startswith("Unpinned") and _in_prose_string_at(
-                        line, dm.start(), "`" if idx in _string_state()[1] else None):
+                        line, dm.start(), "`" if idx in _string_state()[1] else None) \
+                        and not _RUN_CALL_RE.search(line[:dm.start()]):
+                    # (`execSync('cd x && echo hi && npx foo')` reads like words but is
+                    # run: recall review of #24.)
                     continue
                 # A mutable branch URL is a rug-pull only when something LOADS it
                 # (fetch/urlopen/curl/pip/import within 2 lines); a `$id`, homepage

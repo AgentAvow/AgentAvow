@@ -124,12 +124,23 @@ SHELL_DANGER_RE = re.compile(
 # programs are not on this list: a shell string whose text is visible and free of these
 # tokens is a medium, not a high.
 SHELL_PAYLOAD_DANGER_RE = re.compile(
-    r"""\$\(|`|>\s*/dev/(?:tcp|udp)|\bcurl\b|\bwget\b|https?://|\bbase64\b|\bnc\b|\bncat\b|"""
-    r"""\bsocat\b|\bchmod\s+\+x\b|\beval\b|\b(?:ba|z|da|k)?sh\s+-c\b|\bpython[\d.]*\s+-c\b|"""
-    r"""\bnode\s+-e\b|\bperl\s+-e\b|\bruby\s+-e\b|-enc(?:odedcommand)?\b|\biex\b|"""
+    r"""\$\(|`|[<>]&?\s*/dev/(?:tcp|udp)|\bcurl\b|\bwget\b|https?://|\bbase64\b|\bnc\b|"""
+    r"""\bncat\b|\bsocat\b|\bchmod\s+\+x\b|\beval\b|\b(?:ba|z|da|k)?sh\s+-c\b|"""
+    # inline code, also with combined flags (`python3 -Bc`, `node -pe`, `node --eval`)
+    r"""\bpython[\d.]*\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*c|\bnode\s+(?:-[A-Za-z]*[ep]\b|--eval\b|"""
+    r"""--print\b)|\bperl\s+-\w*e\b|\bruby\s+-\w*e\b|-enc(?:odedcommand)?\b|\biex\b|"""
+    # PowerShell's encoded command under any accepted abbreviation (-e, -ec, -EncodedC…)
+    r"""\b(?:powershell|pwsh)(?:\.exe)?\b[^|;&\n]*\s[-/]e(?:c|n\w*)?\b|"""
     r"""invoke-expression|downloadstring|frombase64string|"""
-    # piping into a shell / interpreter
-    r"""\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b|\|\s*(?:python[\d.]*|node|perl|ruby)\b|"""
+    # Windows download-and-run binaries; a runtime that runs code from stdin / a URL
+    r"""\bcertutil\b[^|;&\n]*-urlcache|\bbitsadmin\b[^|;&\n]*/transfer|\bmshta\b|"""
+    r"""\bregsvr32\b[^|;&\n]*/i:|\|\s*(?:bun|deno)\b|"""
+    # installing from a git URL / tarball at runtime
+    r"""\b(?:npm|pnpm|yarn)\s+(?:i|install|add)\b[^|;&\n]*(?:\.tgz\b|github:|gitlab:|"""
+    r"""bitbucket:|git\+)|\bpip[\d.]*\s+install\b[^|;&\n]*git\+|"""
+    # piping into a shell / interpreter (also by path: `| /bin/sh`, `| /usr/bin/env bash`)
+    r"""\|\s*(?:sudo\s+)?(?:/[\w./-]*/)?(?:env\s+)?(?:ba|z|da|k)?sh\b|"""
+    r"""\|\s*(?:/[\w./-]*/)?(?:python[\d.]*|node|perl|ruby)\b|"""
     # recursive delete of a root / home path
     r"""\brm\s+-\w*[rR]\w*\s+(?:--no-preserve-root\s+)?(?:/|~|\$HOME|\$\{HOME\})(?=[\s*;&|'"]|$)|"""
     # credential files
@@ -402,8 +413,16 @@ DYNAMIC_REMOTE_LOAD_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         # The argv form (`spawn('npx', ['-y', 'some-tool'])`) is the same load: before the
         # adversarial recall review of #24 it was never matched at all.
         re.compile(
-            r"""(?:\b(?:npx|uvx)\s+|['"](?:npx|uvx)(?:\.cmd)?['"]\s*,\s*\[\s*"""
-            r"""(?:['"](?:-y|--yes)['"]\s*,\s*)?['"])"""
+            r"""(?:\b(?:npx|uvx)\s+"""
+            # `execSync('npx -y pkg')`: the auto-confirm flag, inside a run call
+            r"""|\b(?:exec\w*|spawn\w*|run|system|popen|Popen|check_call|check_output|call)"""
+            r"""\s*\(\s*['"`](?:[^'"`]*?\s)?(?:npx|uvx)\s+(?:(?:-y|--yes)\s+)+"""
+            # spawn('npx', ['-y', 'pkg']) / subprocess.run(['npx', 'pkg']): the argv form
+            r"""|['"](?:npx|uvx)(?:\.cmd)?['"]\s*,\s*\[\s*"""
+            r"""(?:['"](?:-y|--yes|-q|--quiet|-p|--package)['"]\s*,\s*)*['"]"""
+            r"""|(?:\b(?:run|call|Popen|check_call|check_output|spawn\w*|exec\w*)\s*\(\s*)\[\s*"""
+            r"""['"](?:npx|uvx)(?:\.cmd)?['"]\s*,\s*"""
+            r"""(?:['"](?:-y|--yes|-q|--quiet|-p|--package)['"]\s*,\s*)*['"])"""
             r"""(?!(?:vite|tsc|vue-tsc|svelte-check|tailwindcss|webpack|"""
             r"""rollup|esbuild|tsup|parcel|next|nuxt|astro|remix|eslint|prettier|biome|"""
             r"""stylelint|jest|vitest|mocha|ava|playwright|cypress|tsx|ts-node|nodemon|"""

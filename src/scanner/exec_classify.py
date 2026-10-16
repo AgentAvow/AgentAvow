@@ -130,7 +130,11 @@ _PAYLOAD_EXPR_RE = re.compile(
 # calibration (ledger #24). Used only for what builds an exec call.
 TEXT_DECODE_RE = re.compile(
     r"\bdecodeURI(?:Component)?\s*\(|(?<![\w.$])unescape\s*\("
-    r"|\bunquote(?:_plus|_to_bytes)?\s*\("
+    r"|\bunquote(?:_plus|_to_bytes)?\s*\(|\bJSON\.parse\s*\(\s*['\"`]"
+    # a Buffer decoded with an encoding the decode regex does not name (`base64url`, a
+    # variable): `Buffer.from(blob, enc).toString()`
+    r"|\bBuffer\.from\s*\([^()]*,\s*(?:['\"](?:base64url|latin1|binary|ucs2|utf16le)['\"]"
+    r"|[A-Za-z_$][\w$]*)\s*\)"
     r"|\.\s*split\s*\(\s*(?:''|\"\"|``)\s*\)\s*\.\s*reverse\s*\("
     r"|(?<![\w.$])eval\s*\(|\bFunction\s*\(",
 )
@@ -178,7 +182,7 @@ def _dynamic_shell_verdict(
         return _defect("critical", f"{how} runs a shell command built from untrusted input",
                        consumed)
     if payload_flow or any(_PAYLOAD_EXPR_RE.search(d) or TEXT_DECODE_RE.search(d)
-                           for d in dyn):
+                           or LITERAL_TRANSFORM_RE.match(d) for d in dyn):
         return _defect("high", f"{how} runs a shell command built from a decoded or fetched "
                        "value", consumed, payload=True)
     if SHELL_PAYLOAD_DANGER_RE.search(" ".join(consts)):
@@ -191,6 +195,17 @@ def _dynamic_shell_verdict(
                        "input", consumed)
     return _defect("medium", f"{how} runs a shell command built at runtime (no untrusted "
                    "input reaches it)", consumed)
+
+
+# A string CONSTANT rewritten at runtime before it runs (`'cuXrl … | sXh'.replace(/X/g,
+# '')`, `[...'hs | lruc'].reverse().join('')`, `'CURL …'.toLowerCase()`): the text a
+# reader sees is not the command. Programs do not build an ordinary command this way
+# (adversarial recall review, ledger #24).
+LITERAL_TRANSFORM_RE = re.compile(
+    r"""^\s*(?:(['"`])(?:\\.|(?!\1).)*\1|\[\s*\.\.\.\s*(['"`])(?:\\.|(?!\2).)*\2\s*\]"""
+    r"""|Array\.from\s*\(\s*(['"`])(?:\\.|(?!\3).)*\3\s*\))\s*\.\s*(?:replace|replaceAll|split"""
+    r"""|reverse|toLowerCase|toUpperCase|normalize|slice|substring|substr|repeat|padStart"""
+    r"""|padEnd|translate|swapcase|lower|upper|casefold)\b""", re.S)
 
 
 # ---------------------------------------------------------------------------
@@ -961,7 +976,32 @@ def _js_literal(arg: str) -> str | None:
             return None
     if escape:
         return None  # the final quote is escaped: unterminated
-    return a[1:-1]
+    return _js_unescape(a[1:-1])
+
+
+_JS_ESCAPE_RE = re.compile(r"\\(?:x([0-9A-Fa-f]{2})|u\{([0-9A-Fa-f]{1,6})\}|u([0-9A-Fa-f]{4})|(.))",
+                           re.S)
+_JS_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "b": "\b", "f": "\f",
+                      "v": "\v"}
+
+
+def _js_unescape(text: str) -> str:
+    """The runtime text of a JS string literal's body: ``'\\x63url'`` is ``curl`` (a
+    payload spelled in escapes is still that payload; recall review, ledger #24)."""
+    if "\\" not in text:
+        return text
+
+    def sub(m: re.Match) -> str:
+        hx = m.group(1) or m.group(2) or m.group(3)
+        if hx:
+            try:
+                return chr(int(hx, 16))
+            except (ValueError, OverflowError):
+                return m.group(0)
+        ch = m.group(4)
+        return _JS_SIMPLE_ESCAPES.get(ch, ch)
+
+    return _JS_ESCAPE_RE.sub(sub, text)
 
 
 def _js_array_elements(arg: str) -> tuple[list[str | None], bool] | None:
@@ -1126,6 +1166,7 @@ def _js_cli_calibration(arg: str, is_cli_expr, consumed: int) -> ExecVerdict | N
                    "environment (no untrusted input reaches it)", consumed)
 
 
+_JS_NAME_JOIN_RE = re.compile(r"""^([A-Za-z_$][\w$]*)\s*\.\s*join\s*\(""")
 _JS_ARRAY_JOIN_RE = re.compile(r"""^\[(.*)\]\s*\.\s*join\s*\(\s*(['"`])(.*?)\2\s*\)$""", re.S)
 
 
@@ -1147,6 +1188,13 @@ def _js_parts(arg: str, resolve=None) -> tuple[list[str], list[str]]:
                 # `const c = decodeURIComponent(...)`: the bound expression is the part.
                 c, d = _js_parts(rhs, None)
                 return c, d or [a]
+    if resolve is not None:
+        nm = _JS_NAME_JOIN_RE.match(a)
+        if nm:
+            rhs = (resolve(nm.group(1)) or "").strip()
+            if rhs.startswith("[") and rhs.endswith("]"):
+                # `const p = ['curl', u, '|', 'sh']; execSync(p.join(' '))`
+                a = rhs + a[nm.end(1):]
     jm = _JS_ARRAY_JOIN_RE.match(a)
     if jm:
         # `['curl', '-s', host, '|', 'sh'].join(' ')`: read the text it assembles.
@@ -1224,8 +1272,17 @@ def _classify_js_exec(
     # `exec('git', ['status'])` / `exec(cmd, [...args, ...files])` is an argv-taking
     # wrapper (tinyexec, execa, a project helper), never child_process.exec, whose second
     # parameter is an options object or a callback. Read it as a spawn (precision PR 2).
+    # The first argument must look like a PROGRAM, not a command line: a literal with a
+    # space (`exec('curl x | sh', ['pad'])`) is a shell string whatever follows it
+    # (adversarial recall review, ledger #24).
     argv_wrapper = (func_name in _JS_SHELL_FUNCS and len(args) > 1
                     and args[1].strip().startswith("["))
+    if argv_wrapper:
+        head = _js_literal(args[0])
+        if head is None and resolve is not None:
+            head = _js_const_text(args[0], resolve)
+        if head is not None and re.search(r"\s", head.strip()):
+            argv_wrapper = False
 
     if func_name in _JS_SHELL_FUNCS and not argv_wrapper:
         lit = _js_literal(args[0]) if args else None
@@ -1272,6 +1329,12 @@ def _classify_js_exec(
                              consumed=consumed, untrusted_flow=untrusted_flow)
 
     argv0 = _js_literal(args[0]) if args else None
+    if argv0 is None and args:
+        a0 = args[0].strip()
+        if re.fullmatch(r"process\s*\.\s*execPath|process\s*\.\s*argv\s*\[\s*0\s*\]", a0):
+            argv0 = "node"  # the running Node binary: `-e <code>` is inline code
+        elif resolve is not None:
+            argv0 = _js_const_text(a0, resolve)  # `const s = 'bash'; execFileSync(s, …)`
     elements = [argv0]
     dynamic = argv0 is None
     if len(args) > 1:
