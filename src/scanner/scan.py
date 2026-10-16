@@ -1093,6 +1093,19 @@ def _resolve_js_assignment(lines: list[str], idx: int, name: str) -> str | None:
         if m.group(1):
             return None
         rest = lines[n][m.end():].strip()
+        # `const script =` with the value on the following line(s), or a `+` chain that
+        # continues: read on until the statement ends (rollup's dist/native.js).
+        k = n + 1
+        while k < min(len(lines), n + 8) and k < idx and (
+                not rest or rest.endswith(("+", "=", "(", ",")) and not rest.endswith(";")):
+            nxt = lines[k].strip()
+            if not nxt or nxt.startswith("//"):
+                k += 1
+                continue
+            rest = f"{rest} {nxt}".strip()
+            k += 1
+            if rest.endswith(";"):
+                break
         args = split_top_level_args(rest)
         rhs = (args[0] if args else "").rstrip().rstrip(";").strip()
         return rhs or None

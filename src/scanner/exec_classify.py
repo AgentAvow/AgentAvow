@@ -1329,16 +1329,37 @@ def _classify_js_exec(
                              consumed=consumed, untrusted_flow=untrusted_flow)
 
     argv0 = _js_literal(args[0]) if args else None
-    if argv0 is None and args:
+    if argv0 is None and args and resolve is not None:
+        # Resolve-only (it can only RAISE the verdict, see classify_js_exec): the running
+        # Node binary is `node`, so `-e`/`-p` code is inline code; a name bound to a
+        # constant program is that program (`const s = 'bash'; execFileSync(s, …)`).
         a0 = args[0].strip()
         if re.fullmatch(r"process\s*\.\s*execPath|process\s*\.\s*argv\s*\[\s*0\s*\]", a0):
-            argv0 = "node"  # the running Node binary: `-e <code>` is inline code
-        elif resolve is not None:
-            argv0 = _js_const_text(a0, resolve)  # `const s = 'bash'; execFileSync(s, …)`
+            argv0 = "node"
+        else:
+            argv0 = _js_const_text(a0, resolve)
     elements = [argv0]
     dynamic = argv0 is None
     if len(args) > 1:
         arr = _js_array_elements(args[1])
+        if arr is not None and resolve is not None and arr[1]:
+            # Read each element that is a name / concatenation of constants in this file
+            # (rollup: `spawnSync(process.execPath, ['-p', script])` with `script` a
+            # constant probe). Anything still unreadable keeps the argv dynamic.
+            a1 = args[1].strip()
+            vals = [_js_const_text(el, resolve) for el in split_top_level_args(a1[1:-1])]
+            arr = (vals, any(v is None for v in vals))
+            if (not arr[1] and argv0 is not None and _basename(argv0) == "node"
+                    and len(vals) >= 2 and vals[0] in ("-e", "-p", "--eval", "--print")):
+                # Inline code assembled from constants in this file: what decides is
+                # whether that code is a payload (downloads / decodes AND runs, or shell
+                # payload tokens), not that it calls `require` (rollup's report probe).
+                if inline_code_is_payload(vals[1]):
+                    return _defect("high", f"{func_name} runs inline node code assembled "
+                                   "from constants that downloads / decodes and runs",
+                                   consumed, payload=True)
+                return _cap("low", "runs a constant inline node snippet assembled in this "
+                            "file", "process:spawn", consumed)
         if arr is not None:
             elements += arr[0]
             dynamic = dynamic or arr[1]

@@ -163,12 +163,14 @@ _EXFIL_SOURCE_FILE = re.compile(
     r"~/\.(?:ssh|aws|cursor|kube|docker|gnupg|npmrc|netrc|pypirc|git-credentials)\b"
     r"|\$HOME/\.(?:ssh|aws|cursor|kube|docker|gnupg|npmrc|netrc|pypirc)\b"
     r"|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\.ssh/|\.aws/credentials|\bmcp\.json\b"
-    r"|claude_desktop_config|/etc/(?:passwd|shadow)|(?<![\w.])\.env\b|\bprivate[\s_-]keys?\b"
+    r"|claude_desktop_config|/etc/(?:passwd|shadow)"
+    r"|(?<![\w.])\.env\b(?!\.(?:example|sample|template|dist|defaults?)\b)|\bprivate[\s_-]keys?\b"
     r"|~/\.config/(?:gh|gcloud|op|hub)\b|\bhosts\.yml\b|\.(?:bash|zsh|python)_history\b"
     r"|\bshell\s+history\b|\bkeychain\b|\.git-credentials\b|\bcookies?\.(?:sqlite|db)\b"
     # an environment variable that holds a secret, by name
-    r"|(?:\$\{?|process\.env\.|os\.environ\[['\"]?)[A-Z][A-Z0-9_]*"
-    r"(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIALS?)\b",
+    # (case-sensitive: `$skiptoken` is an OData paging value, not a secret)
+    r"|(?:\$\{?|process\.env\.|os\.environ\[['\"]?)(?-i:[A-Z][A-Z0-9_]*"
+    r"(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIALS?))\b",
     re.I)
 _SECRET_WORDS = (r"api[\s_-]?keys?|access[\s_-]?keys?|tokens|secrets|credentials|passwords"
                  r"|private[\s_-]keys?|ssh[\s_-]keys?")
@@ -189,21 +191,63 @@ _SECRET_WORD_RE = re.compile(r"\b(?:" + _SECRET_WORDS + r"|api[\s_-]?key|token|s
 _EXFIL_VERB = re.compile(
     r"\b(?:include|append|attach|paste|pass|send|copy|put|insert|add|embed|provide|dump"
     r"|forward|upload|place|supply|fill|enter)\b", re.I)
+# A file's CONTENTS, not its name: "include the contents of ~/.ssh/id_rsa" vs a watch
+# list that "can include .env" (MCP-side precision check of #177).
 _EXFIL_CONTENT = re.compile(
     r"\b(?:contents?|text|data|full|entire|whole|value)\b"
-    r"|\b(?:include|append|attach|paste|embed|dump|forward|upload)\b", re.I)
+    r"|\b(?:attach|paste|embed|dump)\b", re.I)
 _EXFIL_SINK = re.compile(r"\b(?:param(?:eter)?s?|arguments?|args?|fields?|inputs?)\b", re.I)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.;!?])\s+|\n+")
+# A param that exists to carry a credential (the tool's own auth / key-import / env /
+# header input). Putting a secret THERE is the tool authenticating, not exfiltration:
+# "Pass your API key in the `api_key` parameter", "Provide the value of $GITHUB_TOKEN as
+# the token parameter", "Insert the PEM text into the key field" (MCP-side precision
+# check of #177).
+_CRED_PARAM = re.compile(
+    r"^(?:\w*?[_-])?(?:api[_-]?keys?|apikeys?|keys?|tokens?|access[_-]?tokens?|auth"
+    r"|authorization|bearer|password|passwd|passphrase|secrets?|credentials?|creds"
+    r"|private[_-]?keys?|pem|certs?|certificates?|ssh[_-]?keys?|env|envs|environment"
+    r"|env[_-]?vars?|environment[_-]?variables|headers?)$", re.I)
+_SINK_BEFORE_WORD = re.compile(
+    r"[`'\"]?([A-Za-z_][\w-]*)[`'\"]?\s+(?:param(?:eter)?|argument|arg|field|input)s?\b", re.I)
+_SINK_QUOTED = re.compile(
+    r"\b(?:as|into|in|to|via)\s+(?:the\s+)?[`'\"]([A-Za-z_][\w-]*)[`'\"]", re.I)
+# "… in the configuration file, not as parameters": the sentence rules the param out.
+_SINK_DENIED = re.compile(
+    r"\bnot\s+(?:as|in|via|through|into)\s+(?:an?\s+|the\s+)?"
+    r"(?:param(?:eter)?s?|arguments?|fields?|inputs?)\b", re.I)
+_SINK_STOPWORDS = frozenset({"the", "a", "an", "this", "that", "its", "each", "any", "your",
+                             "same", "following", "given", "other", "one"})
+
+
+def _cred_name(name: str) -> bool:
+    return bool(_CRED_PARAM.match(re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)))
+
+
+def _named_sinks(sent: str, param_names: list[str]) -> set[str]:
+    """The params a sentence says to put something into."""
+    out = {m.group(1) for m in _SINK_BEFORE_WORD.finditer(sent)
+           if m.group(1).lower() not in _SINK_STOPWORDS}
+    out |= {m.group(1) for m in _SINK_QUOTED.finditer(sent)}
+    # A param named after a sink preposition ("… in body", "… to the note"), not one
+    # that only names where to read from ("the file at the given path").
+    out |= {p for p in param_names
+            if p and re.search(r"\b(?:into|in|as|to|via|inside|within)\s+(?:the\s+)?"
+                               r"[`'\"]?" + re.escape(p) + r"(?![\w-])", sent, re.I)}
+    return out
 # "Do not forget to include …" / "never fail to append …" are instructions, not denials.
 _DOUBLE_NEGATIVE = re.compile(
     r"\b(?:do\s+not|don'?t|never|must\s+not|cannot)\s+(?:forget|fail|neglect|omit|skip)"
     r"(?:\s+to)?\b", re.I)
 
 
-def _exfil_instruction(text: str, param_names: list[str], in_param: bool) -> bool:
+def _exfil_instruction(text: str, param_names: list[str], in_param: bool,
+                       own: str = "") -> bool:
     """Does ``text`` tell the agent to put a secret / a credential file's contents into
-    an argument? ``in_param``: the text is a param's own description (the param is
-    the sink); otherwise a sentence must also name a param or say "parameter"."""
+    an argument? ``in_param``: the text is param ``own``'s description (that param is
+    the sink unless the sentence names another); otherwise a sentence must also name a
+    param or say "parameter". A sink that is a credential param (``api_key``, ``token``,
+    ``env``, ``headers``) is the tool's own auth input, not exfiltration."""
     text = _DOUBLE_NEGATIVE.sub(" ", text or "")
     sents = [x for x in _SENTENCE_SPLIT.split(text) if x.strip()]
     # Each sentence, and each pair of neighbouring sentences ("Read ~/.ssh/id_rsa. Paste
@@ -219,11 +263,14 @@ def _exfil_instruction(text: str, param_names: list[str], in_param: bool) -> boo
             continue
         if file_src and not bulk_src and not _EXFIL_CONTENT.search(sent):
             continue  # "path to the key, e.g. ~/.ssh/id_rsa": a path, not its contents
-        if in_param:
-            return True
-        if _EXFIL_SINK.search(sent) or any(
-                re.search(r"(?<![\w-])" + re.escape(p) + r"(?![\w-])", sent)
-                for p in param_names if p):
+        if _SINK_DENIED.search(sent):
+            continue
+        sinks = _named_sinks(sent, param_names)
+        if not sinks and in_param and own:
+            sinks = {own}
+        if sinks and all(_cred_name(x) for x in sinks):
+            continue  # the secret goes to the tool's own credential input
+        if in_param or sinks or _EXFIL_SINK.search(sent):
             return True
     return False
 
@@ -414,7 +461,8 @@ def analyze_mcp(
             exfil_where = where
         else:
             for ppath, pdesc in pdescs:
-                if _exfil_instruction(pdesc, pnames, in_param=True):
+                if _exfil_instruction(pdesc, pnames, in_param=True,
+                                      own=ppath.rsplit(".", 1)[-1]):
                     exfil_where = f"{where}:param:{ppath}"
                     break
         if exfil_where:
