@@ -954,6 +954,37 @@ def _in_prose_string_at(line: str, pos: int, start_in: str | None = None) -> boo
     return len(line[str_start:pos].split()) >= 3
 
 
+def _in_string_literal_at(line: str, pos: int) -> bool:
+    """True if ``line[pos]`` sits inside a quoted string literal opened on that line."""
+    in_str: str | None = None
+    escape = False
+    for ch in line[:pos]:
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+        elif ch in "'\"`":
+            in_str = ch
+    return in_str is not None
+
+
+# Shell-script payload files run their text as commands; a `curl … | sh` there is code.
+_SHELL_PAYLOAD_EXTS = frozenset({".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".vbs"})
+# Anything in a file that can run a command string or hand it to code that does
+# (including indirect lookups), checked before treating a pipe-to-shell STRING in a
+# shipped test file as an executed payload.
+_FILE_EXEC_SINK_RE = re.compile(
+    r"\bsubprocess\b|\bos\.(?:system|popen|exec\w*|spawn\w*)\b|\bPopen\b|\bpty\.spawn\b|"
+    r"\bcommands\.getoutput\b|\bshlex\b|\bexec\s*\(|\beval\s*\(|\bcompile\s*\(|"
+    r"__import__|\bimportlib\b|\bgetattr\s*\(|\bchild_process\b|\bexec(?:Sync|File\w*)?\s*\(|"
+    r"\bspawn(?:Sync)?\s*\(|\bFunction\s*\(|\bvm\.\w+|\brequire\s*\(\s*[^'\"]|\bimport\s*\(|"
+    r"\bsh\s*\(|\$\s*`|\bzx\b|\bexeca\b|\bshelljs\b",
+)
+
+
 # npm runs only these package.json scripts on a consumer's machine (`npm install` of the
 # package as a dependency); everything else under "scripts" is the maintainer's.
 _NPM_CONSUMER_SCRIPTS = frozenset({
@@ -2797,6 +2828,18 @@ def _scan_content(
                 string_state.extend((set(), set()))
         return string_state
 
+    sink_memo: list[bool] = []
+
+    def _file_has_exec_sink() -> bool:
+        """``_FILE_EXEC_SINK_RE`` on the file's code lines (docstrings and whole-line
+        comments that only MENTION ``subprocess.Popen`` don't count). Memoized."""
+        if not sink_memo:
+            prose = _string_state()[0]
+            sink_memo.append(any(
+                _FILE_EXEC_SINK_RE.search(ln) for i, ln in enumerate(lines)
+                if i not in prose and not ln.lstrip().startswith(("#", "//", "*"))))
+        return sink_memo[0]
+
     # Untrusted-input lines (request body / fetched content) for the "dynamic argv or
     # eval NEXT TO untrusted input" rules.
     untrusted = _untrusted_lines(lines, lf.lines(UNTRUSTED_INPUT_RE))
@@ -3295,6 +3338,14 @@ def _scan_content(
                 # Downgrade in test/doc/infra files like other groups
                 effective_severity, remote_payload = _graded(
                     "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
+                # A pipe-to-shell STRING in a shipped test file (a security test's sample
+                # attack input, nltk) is data unless the file can run a command: then it
+                # is graded like any other downgraded finding (medium, non-blocking).
+                if (remote_payload and name == "curl/wget piped to shell"
+                        and Path(file_path).suffix.lower() not in _SHELL_PAYLOAD_EXTS
+                        and _in_string_literal_at(line, dm.start())
+                        and not _file_has_exec_sink()):
+                    effective_severity, remote_payload = "medium", False
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
                         "`" if idx in _string_state()[1] else None):
