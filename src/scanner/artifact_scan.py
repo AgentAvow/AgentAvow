@@ -752,6 +752,13 @@ def scan_artifact_files(
                     item.severity = "info"
                 findings.append(item)
 
+    # A pipe-to-shell in a maintainer-only package.json script was downgraded by the
+    # line engine; restore it when another file here can run that script.
+    from src.scanner.npm_scripts import restore_externally_invoked
+    restore_externally_invoked(
+        findings, {p: af.text for p, af in fetched.files.items() if af.text},
+        registry_artifact=is_npm_tarball)
+
     return findings, files_scanned, has_install_hook
 
 

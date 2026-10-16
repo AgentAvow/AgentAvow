@@ -304,6 +304,10 @@ def finding_where(i: dict) -> str:
         return WHERE_TOOLS
     parts = [p for p in path.split("/") if p]
     name = parts[-1] if parts else ""
+    # A deciding finding in package.json sits in its scripts: a maintainer-only script
+    # is low and never decides, so what is left runs from an install lifecycle script.
+    if name == "package.json":
+        return WHERE_INSTALL
     if name in _AGENT_FILE_NAMES or name.endswith(".mdc") or (
             name.endswith(_TEXT_EXTS) and (name.startswith("readme")
                                            or any(p in _AGENT_DIRS for p in parts[:-1]))):

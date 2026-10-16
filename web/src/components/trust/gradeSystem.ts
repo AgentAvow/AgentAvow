@@ -271,6 +271,9 @@ export function findingWhere(i: Obj): string {
   }
   const parts = path.split('/').filter((p) => p)
   const name = parts.length ? parts[parts.length - 1] : ''
+  // A deciding finding in package.json sits in its scripts: a maintainer-only script
+  // is low and never decides, so what is left runs from an install lifecycle script.
+  if (name === 'package.json') return ' in its install script'
   if (AGENT_FILE_NAMES.has(name) || name.endsWith('.mdc') || (
     TEXT_EXTS.some((e) => name.endsWith(e))
     && (name.startsWith('readme') || parts.slice(0, -1).some((p) => AGENT_DIRS.has(p))))) {

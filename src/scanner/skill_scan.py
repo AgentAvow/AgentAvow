@@ -386,6 +386,10 @@ def _scan_text(text: str, where: str) -> list:
         findings, _pos, _sup = _scan_content(text, where)
     except Exception:
         return []
+    # Only this file is in view: a maintainer-script downgrade stands only when no
+    # reachable install script runs a local file (npm_scripts).
+    from src.scanner.npm_scripts import restore_externally_invoked
+    restore_externally_invoked(findings, {where: text})
     for f in findings:
         f.file_path = where
     return findings
