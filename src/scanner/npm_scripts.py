@@ -309,6 +309,8 @@ def _segment_ok(seg: list[str], names: list[str]) -> bool:
             i += 1
     if i >= len(seg):
         return True
+    if "/" in seg[i] and not re.match(r"^(?:\./)?node_modules/\.bin/[^/]+$", seg[i]):
+        return False  # `./bin/tsc` runs a package file, not the tool its name suggests
     cmd = seg[i].rsplit("/", 1)[-1] if not seg[i].startswith("$") else seg[i]
     rest = [w for w in seg[i + 1:] if not w.startswith("-")]
     if cmd in _INERT_TOOLS:

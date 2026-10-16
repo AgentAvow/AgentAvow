@@ -295,6 +295,10 @@ def test_parse_and_closure_units():
     assert reachable_scripts(info.scripts) == {"prepare", "b", "c:1", "prec:1"}
     # A command the closure cannot follow (a dependency's bin) reaches everything.
     assert reachable_scripts({"postinstall": "some-bin", "d": "x"}) == {"postinstall", "d"}
+    # A path-qualified command is a package file, not the inert tool it is named after.
+    assert reachable_scripts({"postinstall": "./bin/tsc", "d": "x"}) == {"postinstall", "d"}
+    assert reachable_scripts({"postinstall": "node_modules/.bin/tsc", "d": "x"}) == {
+        "postinstall"}
     assert parse_scripts("not json") is None
     assert parse_scripts('{"scripts": "x"}') is None
 
