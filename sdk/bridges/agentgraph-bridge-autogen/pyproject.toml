@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    { name = "AgentAvow", email = "sdk@agentgraph.co" },
+    { name = "AgentAvow", email = "sdk@agentavow.com" },
 ]
 keywords = ["agentavow", "agentgraph", "autogen", "trust", "agents", "bridge"]
 classifiers = [

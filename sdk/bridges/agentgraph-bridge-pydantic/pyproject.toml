@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    { name = "AgentGraph", email = "sdk@agentgraph.co" },
+    { name = "AgentGraph", email = "sdk@agentavow.com" },
 ]
 keywords = ["agentgraph", "pydantic", "pydantic-ai", "trust", "agents", "bridge"]
 classifiers = [
