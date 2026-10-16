@@ -476,7 +476,9 @@ class _Analyzer:
                 return k
         if len(parts) > 1:
             joined = re.sub(r"/+", "/", "/".join(parts))
-            return credential_kind(joined)
+            # Pieces glued with ``+`` (``"/.s" + "sh/id_" + "rsa"``) hide the path from
+            # a per-literal match and from a path-separator join alike.
+            return credential_kind(joined) or credential_kind("".join(parts))
         return None
 
     def _hosts(self, st: _Stmt, a: int, b: int) -> list[str]:
@@ -696,6 +698,11 @@ _CREDENTIAL_HINT_RE = re.compile(
     r"cookies\.sqlite|logins\.json|key[34]\.db|wallet|\.bitcoin|"
     r"\.litecoin|\.dogecoin|\.dash\b|\.ethereum|keystore|[Ee]lectrum|"
     r"solana|exodus|nkbihfbeogaeaoehlefnkodbefgpgknn|\.env\b")
+# A path split into pieces (``"/.s" + "sh/id_" + "rsa"``) carries no credential word,
+# so the pre-check also passes a file that joins string literals with ``+`` and names
+# the home directory.
+_HOME_HINT_RE = re.compile(r"expanduser|homedir|Path\.home|USERPROFILE|['\"]~['\"/]|\bHOME\b")
+_LIT_CONCAT_HINT_RE = re.compile(r"""['"`]\s*\+\s*['"`]""")
 
 
 def credential_exfil_hits(content: str, lang: str | None, *,
@@ -709,6 +716,10 @@ def credential_exfil_hits(content: str, lang: str | None, *,
     python = lang == "python"
     hint = (lf.search(_CREDENTIAL_HINT_RE) if lf is not None
             else _CREDENTIAL_HINT_RE.search(content))
+    if not hint:
+        hint = ((lf.search(_LIT_CONCAT_HINT_RE) if lf is not None
+                 else _LIT_CONCAT_HINT_RE.search(content))
+                and _HOME_HINT_RE.search(content))
     if not hint:
         return []
     an = _Analyzer(content, python)
