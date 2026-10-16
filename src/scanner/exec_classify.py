@@ -123,6 +123,17 @@ _PAYLOAD_EXPR_RE = re.compile(
     DECODE_SINK_RE.pattern + r"|\bfetch\s*\(|urlopen|urlretrieve|requests\.|httpx\.|axios"
     r"|https?\.get\s*\(|" + ASSEMBLY_DECODE_RE.pattern,
 )
+# Text obfuscation that hides a command from a reader the way a decode does:
+# percent-decoding (`decodeURIComponent`, `urllib.parse.unquote`), `unescape`, a
+# reversed character string, and code evaluated to produce the command
+# (`execSync(eval('"cu"+"rl …"'))`). Adversarial recall review of the constant-command
+# calibration (ledger #24). Used only for what builds an exec call.
+TEXT_DECODE_RE = re.compile(
+    r"\bdecodeURI(?:Component)?\s*\(|(?<![\w.$])unescape\s*\("
+    r"|\bunquote(?:_plus|_to_bytes)?\s*\("
+    r"|\.\s*split\s*\(\s*(?:''|\"\"|``)\s*\)\s*\.\s*reverse\s*\("
+    r"|(?<![\w.$])eval\s*\(|\bFunction\s*\(",
+)
 # `rm -rf ` / `rm -r -f ` immediately followed by a runtime value: the deleted path is
 # not visible, so it can be `$HOME` (adversarial review of #160).
 _RM_RECURSIVE_TAIL_RE = re.compile(
@@ -166,7 +177,8 @@ def _dynamic_shell_verdict(
     if _flow(untrusted_near, untrusted_flow):
         return _defect("critical", f"{how} runs a shell command built from untrusted input",
                        consumed)
-    if payload_flow or any(_PAYLOAD_EXPR_RE.search(d) for d in dyn):
+    if payload_flow or any(_PAYLOAD_EXPR_RE.search(d) or TEXT_DECODE_RE.search(d)
+                           for d in dyn):
         return _defect("high", f"{how} runs a shell command built from a decoded or fetched "
                        "value", consumed, payload=True)
     if SHELL_PAYLOAD_DANGER_RE.search(" ".join(consts)):
@@ -927,13 +939,29 @@ def split_top_level_args(inner: str) -> list[str]:
 
 
 def _js_literal(arg: str) -> str | None:
-    """The text of a plain string literal (no interpolation), else None."""
+    """The text of a plain string literal (no interpolation), else None.
+
+    ``'cu' + 'rl x|s' + 'h'`` starts and ends with a quote but is a concatenation, not
+    one literal: the opening quote must close only at the very end (adversarial recall
+    review, ledger #24; it read as the text ``cu' + 'rl x|s' + 'h``)."""
     a = arg.strip()
-    if len(a) >= 2 and a[0] == a[-1] and a[0] in "\"'":
-        return a[1:-1]
-    if len(a) >= 2 and a[0] == a[-1] == "`" and "${" not in a:
-        return a[1:-1]
-    return None
+    if len(a) < 2 or a[0] != a[-1] or a[0] not in "\"'`":
+        return None
+    q = a[0]
+    escape = False
+    for i in range(1, len(a) - 1):
+        ch = a[i]
+        if escape:
+            escape = False
+        elif ch == "\\":
+            escape = True
+        elif ch == q:
+            return None
+        elif q == "`" and a.startswith("${", i):
+            return None
+    if escape:
+        return None  # the final quote is escaped: unterminated
+    return a[1:-1]
 
 
 def _js_array_elements(arg: str) -> tuple[list[str | None], bool] | None:
@@ -953,39 +981,84 @@ def _js_array_elements(arg: str) -> tuple[list[str | None], bool] | None:
 _JS_INTERP_RE = re.compile(r"\$\{((?:[^{}]|\{[^{}]*\})*)\}")
 
 
-def _js_command_parts(arg: str) -> tuple[list[str], list[str]] | None:
+_JS_IDENT_RE = re.compile(r"^[A-Za-z_$][\w$]*$")
+
+
+def _js_const_text(expr: str, resolve=None, _depth: int = 0) -> str | None:
+    """The constant text of ``expr``: a string literal, a ``+`` chain / template made
+    only of constants, or a bare name ``resolve`` binds to one (``const C = 'cu' + 'rl
+    …'``). ``None`` when any part is a runtime value."""
+    lit = _js_literal(expr)
+    if lit is not None:
+        return lit
+    if _depth >= 4:
+        return None
+    a = expr.strip()
+    if resolve is not None and _JS_IDENT_RE.match(a):
+        rhs = resolve(a)
+        return _js_const_text(rhs, resolve, _depth + 1) if rhs else None
+    if a.startswith("(") and a.endswith(")") and len(split_top_level_plus(a)) == 1:
+        return _js_const_text(a[1:-1], resolve, _depth + 1)
+    parts = _js_command_parts(a, resolve, _depth + 1)
+    if parts is None or parts[1]:
+        return None
+    return "".join(parts[0])
+
+
+def _js_command_parts(arg: str, resolve=None,
+                      _depth: int = 0) -> tuple[list[str], list[str]] | None:
     """Split a JS shell-command argument into (constant text pieces, dynamic
     expressions): a template literal's text vs its ``${...}`` parts, or a ``+``
-    concatenation of string literals and expressions. ``None`` if unreadable."""
+    concatenation of string literals and expressions. ``None`` if unreadable.
+
+    Constants that sit next to each other are ONE piece: ``'cu' + 'rl x|s' + 'h'``
+    reads as ``curl x|sh``, so splitting a payload token across literals does not
+    hide it. A name ``resolve`` binds to constant text counts as that text (adversarial
+    recall review, ledger #24)."""
     a = arg.strip()
     if len(a) >= 2 and a[0] == a[-1] == "`":
         body = a[1:-1]
-        dyn = [m.group(1).strip() for m in _JS_INTERP_RE.finditer(body)]
+        dyn: list[str] = []
         # One text piece per stretch between `${…}` holes, so a piece that ENDS where a
         # runtime value begins (`rm -rf ${dir}`) stays visible as such.
         pieces: list[str] = []
+        cur = ""
         last = 0
         for m in _JS_INTERP_RE.finditer(body):
-            pieces.append(body[last:m.start()])
+            cur += body[last:m.start()]
             last = m.end()
-        pieces.append(body[last:])
+            hole = m.group(1).strip()
+            const = _js_const_text(hole, resolve, _depth + 1)
+            if const is not None:
+                cur += const
+                continue
+            pieces.append(cur)
+            cur = ""
+            dyn.append(hole)
+        pieces.append(cur + body[last:])
         return pieces, dyn
     pieces = split_top_level_plus(a)
     if len(pieces) < 2:
         return None
     consts: list[str] = []
-    dyn: list[str] = []
+    dyn = []
+    glue = False  # the previous piece was constant text: the next constant joins it
     for p in pieces:
-        lit = _js_literal(p)
-        if lit is not None:
-            consts.append(lit)
+        const = _js_const_text(p, resolve, _depth + 1)
+        if const is not None:
+            if glue:
+                consts[-1] += const
+            else:
+                consts.append(const)
+            glue = True
             continue
-        sub = _js_command_parts(p) if p.startswith("`") else None
+        sub = _js_command_parts(p, resolve, _depth + 1) if p.startswith("`") else None
         if sub is not None:
             consts += sub[0]
             dyn += sub[1]
         else:
             dyn.append(p)
+        glue = False
     return consts, dyn
 
 
@@ -1056,13 +1129,24 @@ def _js_cli_calibration(arg: str, is_cli_expr, consumed: int) -> ExecVerdict | N
 _JS_ARRAY_JOIN_RE = re.compile(r"""^\[(.*)\]\s*\.\s*join\s*\(\s*(['"`])(.*?)\2\s*\)$""", re.S)
 
 
-def _js_parts(arg: str) -> tuple[list[str], list[str]]:
+def _js_parts(arg: str, resolve=None) -> tuple[list[str], list[str]]:
     """Visible text pieces and runtime parts of one JS argument (a literal, a template,
-    a ``+`` concatenation, an array literal; anything else is one opaque part)."""
+    a ``+`` concatenation, an array literal; anything else is one opaque part).
+    ``resolve`` (name -> assigned expression) reads a name bound to constant text."""
     lit = _js_literal(arg)
     if lit is not None:
         return [lit], []
     a = arg.strip()
+    if resolve is not None:
+        const = _js_const_text(a, resolve)
+        if const is not None:
+            return [const], []
+        if _JS_IDENT_RE.match(a):
+            rhs = resolve(a)
+            if rhs and _JS_IDENT_RE.match(rhs.strip()) is None:
+                # `const c = decodeURIComponent(...)`: the bound expression is the part.
+                c, d = _js_parts(rhs, None)
+                return c, d or [a]
     jm = _JS_ARRAY_JOIN_RE.match(a)
     if jm:
         # `['curl', '-s', host, '|', 'sh'].join(' ')`: read the text it assembles.
@@ -1078,7 +1162,7 @@ def _js_parts(arg: str) -> tuple[list[str], list[str]]:
             if run:
                 consts.append(sep.join(run))
                 run = []
-            c, d = _js_parts(el)
+            c, d = _js_parts(el, resolve)
             consts += c
             dyn += d
         if run:
@@ -1088,23 +1172,50 @@ def _js_parts(arg: str) -> tuple[list[str], list[str]]:
         consts: list[str] = []
         dyn: list[str] = []
         for el in split_top_level_args(a[1:-1]):
-            c, d = _js_parts(el)
+            c, d = _js_parts(el, resolve)
             consts += c
             dyn += d
         return consts, dyn
-    parts = _js_command_parts(a)
+    parts = _js_command_parts(a, resolve)
     if parts is not None:
         return parts
     return [], [a]
 
 
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
 def classify_js_exec(
     call_src: str, func_name: str, *, untrusted_near: bool, consumed: int = 1,
     untrusted_flow: bool | None = None, is_cli_expr=None, payload_flow: bool = False,
+    resolve_name=None,
 ) -> ExecVerdict:
     """Classify a child_process call: ``exec``/``execSync`` always go through a shell;
     ``spawn``/``execFile``/``fork`` take an argv (plus an options object whose
-    ``shell: true`` turns it back into a shell)."""
+    ``shell: true`` turns it back into a shell).
+
+    ``resolve_name`` (name -> the expression last assigned to it above the call) lets a
+    command held in a name be read (``const C = 'curl … | sh'; execSync(C)``). A name
+    can be shadowed or reassigned where a regex cannot see, so the resolved reading may
+    only RAISE the verdict, never lower it (adversarial recall review, ledger #24)."""
+    kw = dict(untrusted_near=untrusted_near, consumed=consumed,
+              untrusted_flow=untrusted_flow, is_cli_expr=is_cli_expr,
+              payload_flow=payload_flow)
+    base = _classify_js_exec(call_src, func_name, resolve=None, **kw)
+    if resolve_name is None:
+        return base
+    seen = _classify_js_exec(call_src, func_name, resolve=resolve_name, **kw)
+    rank = _SEVERITY_RANK
+    if seen.kind == "defect" and (
+            base.kind != "defect" or rank[seen.severity] > rank[base.severity]):
+        return seen
+    return base
+
+
+def _classify_js_exec(
+    call_src: str, func_name: str, *, untrusted_near: bool, consumed: int,
+    untrusted_flow: bool | None, is_cli_expr, payload_flow: bool, resolve,
+) -> ExecVerdict:
     open_i = call_src.find("(")
     close_i = call_src.rfind(")")
     inner = call_src[open_i + 1: close_i] if 0 <= open_i < close_i else ""
@@ -1125,7 +1236,7 @@ def classify_js_exec(
             cal = _js_cli_calibration(args[0], is_cli_expr, consumed)
             if cal is not None:
                 return cal
-        consts, dyn = _js_parts(args[0]) if args else ([], ["?"])
+        consts, dyn = _js_parts(args[0], resolve) if args else ([], ["?"])
         return _dynamic_shell_verdict(func_name, consts, dyn or ["?"],
                                       untrusted_near=untrusted_near,
                                       untrusted_flow=untrusted_flow,
@@ -1136,7 +1247,7 @@ def classify_js_exec(
         for a in args:
             if a.strip().startswith("{"):
                 continue  # the options object
-            c, d = _js_parts(a)
+            c, d = _js_parts(a, resolve)
             consts += c
             dyn += d
         how = f"{func_name} with shell: true"
@@ -1185,7 +1296,8 @@ def classify_js_exec(
                 consts.append(lit)
                 continue
             e = el.strip()
-            parts = _js_command_parts(e) if (e.startswith("`") or "+" in e) else None
+            parts = _js_command_parts(e, resolve) if (e.startswith("`") or "+" in e) \
+                else None
             if parts is None:
                 visible = False
                 break

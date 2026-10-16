@@ -72,12 +72,29 @@ _EXPECTED_HASHES: dict[str, str] = {
 }
 
 
-def _client() -> httpx.Client:
+def _client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
     return httpx.Client(
         timeout=_FETCH_TIMEOUT,
         headers={"User-Agent": _USER_AGENT},
         follow_redirects=True,
+        transport=transport,
     )
+
+
+# Any failure to obtain a partner document — transport error, timeout,
+# non-2xx (a 503 from aeoess.com failed PR #108's CI on 2026-10-09), or a
+# body that is not JSON — is a partner outage, not a regression on our
+# side. Every fetch therefore skips rather than errors.
+_FETCH_ERRORS = (httpx.HTTPError, httpx.TimeoutException, OSError, ValueError)
+
+
+def _fetch_json(client: httpx.Client, url: str, what: str):
+    try:
+        r = client.get(url)
+        r.raise_for_status()
+        return r.json()
+    except _FETCH_ERRORS as e:
+        pytest.skip(f"APS rotation-attestation {what} unreachable: {e}")
 
 
 @pytest.fixture(scope="module")
@@ -89,13 +106,8 @@ def live_index() -> dict:
     regression check, not a liveness probe. Drift detection still
     fires whenever the endpoint is reachable (which is the common case).
     """
-    try:
-        with _client() as c:
-            r = c.get(_INDEX_URL)
-            r.raise_for_status()
-            return r.json()
-    except (httpx.HTTPError, httpx.TimeoutException, OSError) as e:
-        pytest.skip(f"APS rotation-attestation index unreachable: {e}")
+    with _client() as c:
+        return _fetch_json(c, _INDEX_URL, "index")
 
 
 @pytest.fixture(scope="module")
@@ -104,10 +116,26 @@ def live_fixtures(live_index: dict) -> dict[str, dict]:
     out: dict[str, dict] = {}
     with _client() as c:
         for name, entry in live_index["fixtures"].items():
-            r = c.get(entry["url"])
-            r.raise_for_status()
-            out[name] = r.json()
+            out[name] = _fetch_json(c, entry["url"], f"fixture {name!r}")
     return out
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        lambda req: httpx.Response(503, text="Service Unavailable"),
+        lambda req: httpx.Response(500, text="boom"),
+        lambda req: httpx.Response(200, text="<html>not json</html>"),
+        lambda req: (_ for _ in ()).throw(httpx.ConnectError("down", request=req)),
+        lambda req: (_ for _ in ()).throw(httpx.ReadTimeout("slow", request=req)),
+    ],
+    ids=["503", "500", "non-json", "connect-error", "timeout"],
+)
+def test_partner_fetch_failure_skips_not_errors(handler):
+    """Regression (#31): one fixture fetch failing must skip, never error."""
+    with _client(httpx.MockTransport(handler)) as c:
+        with pytest.raises(pytest.skip.Exception):
+            _fetch_json(c, f"{_BASE_URL}/positive-basic.json", "fixture")
 
 
 def test_live_index_declares_all_five_fixtures(live_index: dict):

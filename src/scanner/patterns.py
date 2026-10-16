@@ -399,8 +399,12 @@ DYNAMIC_REMOTE_LOAD_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         # Excludes well-known LOCAL build/lint/test tools (vite, tsc, eslint, …): `npx vite
         # build` runs the repo's own devDependency, not a remote download — flagging it was
         # a false positive hitting nearly every JS/TS project's Dockerfile/CI.
+        # The argv form (`spawn('npx', ['-y', 'some-tool'])`) is the same load: before the
+        # adversarial recall review of #24 it was never matched at all.
         re.compile(
-            r"""\b(?:npx|uvx)\s+(?!(?:vite|tsc|vue-tsc|svelte-check|tailwindcss|webpack|"""
+            r"""(?:\b(?:npx|uvx)\s+|['"](?:npx|uvx)(?:\.cmd)?['"]\s*,\s*\[\s*"""
+            r"""(?:['"](?:-y|--yes)['"]\s*,\s*)?['"])"""
+            r"""(?!(?:vite|tsc|vue-tsc|svelte-check|tailwindcss|webpack|"""
             r"""rollup|esbuild|tsup|parcel|next|nuxt|astro|remix|eslint|prettier|biome|"""
             r"""stylelint|jest|vitest|mocha|ava|playwright|cypress|tsx|ts-node|nodemon|"""
             r"""storybook|turbo|nx|rimraf|cross-env|concurrently|npm-run-all|serve|"""

@@ -953,11 +953,51 @@ _HELP_PRINT_RE = re.compile(
     r"process\.std(?:out|err)\.write|sys\.std(?:out|err)\.write")
 
 
-def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = None) -> bool:
+# A call that runs its string argument as a process (JS child_process / execa / zx,
+# Python subprocess / os). Used to tell a printed `npx` hint from one that is spawned.
+_RUN_CALL_RE = re.compile(
+    r"(?<![\w$])(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|execa|execaSync"
+    r"|execaCommand|execaCommandSync|execCommand|system|popen|Popen|run|call|check_call"
+    r"|check_output|getoutput|getstatusoutput|shell|sh)\s*\(|(?<![\w$])\$\s*`")
+_BOUND_NAME_RE = re.compile(r"([A-Za-z_$][\w$]*)\s*(?::\s*[\w$<>\[\]|. ]+)?=(?![=>])[^=]*$")
+
+
+def _npx_string_runs(lines: list[str], idx: int, line: str, pos: int, str_start: int,
+                     start_in: str | None) -> bool:
+    """Is the string holding this `npx …` spawned rather than printed? It is the
+    argument of a run call on this line (`console.log(execSync('npx foo'))`), or it is
+    bound to a name that a run call in the file uses (`const USAGE = 'npx foo'` …
+    `execSync(USAGE)`). Adversarial recall review of the help-text relaxation (#24)."""
+    if _RUN_CALL_RE.search(line[:pos]):
+        return True
+    name = None
+    if start_in is None:
+        m = _BOUND_NAME_RE.search(line[:max(0, str_start - 1)])
+        name = m.group(1) if m else None
+    else:
+        # A template literal opened on an earlier line: the binding is where it opened.
+        for n in range(idx - 1, max(-1, idx - 60), -1):
+            tick = lines[n].find("`")
+            if tick == -1:
+                continue
+            if _RUN_CALL_RE.search(lines[n][:tick + 1]):
+                return True
+            m = _BOUND_NAME_RE.search(lines[n][:tick])
+            name = m.group(1) if m else None
+            break
+    if not name or name in ("const", "let", "var"):
+        return False
+    return any(n != idx and _RUN_CALL_RE.search(ln) and _uses_name(ln, name)
+               for n, ln in enumerate(lines))
+
+
+def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = None,
+                    lines: list[str] | None = None, idx: int = 0) -> bool:
     """An `npx <pkg>` that never runs for a consumer (precision PR 2): a maintainer script
     in package.json (not an install lifecycle hook), or help text a CLI prints, i.e.
     the match sits in a string literal that is indented help (`'  npx foo\\n'`), carries
-    a `\\n` escape, or is on a print/usage line."""
+    a `\\n` escape, or is on a print/usage line, and the string is not itself spawned
+    (``_npx_string_runs``)."""
     if Path(file_path).name.lower() == "package.json":
         m = _PKG_JSON_SCRIPT_RE.match(line)
         return bool(m and m.group(1) not in _NPM_CONSUMER_SCRIPTS and m.end() <= pos)
@@ -976,6 +1016,9 @@ def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = 
             in_str = ch
             str_start = i + 1
     if in_str is None:
+        return False
+    if _npx_string_runs(lines if lines is not None else [line],
+                        idx if lines is not None else 0, line, pos, str_start, start_in):
         return False
     before = line[str_start:pos]
     if before.startswith("  ") and not before.strip():
@@ -1027,6 +1070,45 @@ def _assigned_identifier(line: str, key_pos: int) -> str:
     head = re.search(r"[\w$]*$", line[:key_pos])
     tail = re.match(r"[\w$]*", line[key_pos:])
     return (head.group(0) if head else "") + (tail.group(0) if tail else "")
+
+
+_JS_ASSIGN_RE_CACHE: dict[str, re.Pattern] = {}
+
+
+def _resolve_js_assignment(lines: list[str], idx: int, name: str) -> str | None:
+    """The expression last assigned to JS ``name`` in the ~80 lines above ``idx``
+    (``const C = 'cu' + 'rl …'``, ``let a = 'x', b = 'y'``), as source text. A compound
+    assignment (``C += …``) makes the value unknown: ``None``. Used only to RAISE an
+    exec verdict (see ``classify_js_exec``)."""
+    from src.scanner.exec_classify import split_top_level_args
+
+    rx = _JS_ASSIGN_RE_CACHE.get(name)
+    if rx is None:
+        rx = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\s*([-+*/%|&^]?)=(?![=>])")
+        _JS_ASSIGN_RE_CACHE[name] = rx
+    for n in range(idx - 1, max(-1, idx - 80), -1):
+        m = rx.search(lines[n])
+        if not m:
+            continue
+        if m.group(1):
+            return None
+        rest = lines[n][m.end():].strip()
+        args = split_top_level_args(rest)
+        rhs = (args[0] if args else "").rstrip().rstrip(";").strip()
+        return rhs or None
+    return None
+
+
+def _text_decode_flows(lines: list[str], idx: int, call_src: str) -> bool:
+    """Does percent-decoding / ``unescape`` / a reversed string / evaluated code build
+    this exec call, inline or through a name assigned from one (80 lines above)?"""
+    from src.scanner.exec_classify import TEXT_DECODE_RE
+
+    if TEXT_DECODE_RE.search(call_src):
+        return True
+    tainted = _tainted_names(lines, idx - 80, idx + 1,
+                             lambda _n, ln: bool(TEXT_DECODE_RE.search(ln)))
+    return any(_uses_name(call_src, t) for t in tainted)
 
 
 def _resolve_py_assignment(lines: list[str], idx: int, name: str):
@@ -1567,7 +1649,7 @@ def _classify_exec_match(
     got = extract_call(lines, idx, start, lang=lang)
     call_src, consumed = (got if got else (lines[idx][start:], 1))
     flow = near and _untrusted_flows(lines, idx, call_src, untrusted)
-    payload = _decoded_flows(lines, idx, call_src)
+    payload = _decoded_flows(lines, idx, call_src) or _text_decode_flows(lines, idx, call_src)
     if lang == "python" and not near:
         # A remote handler's own parameter (web route, chat-bot command, agent tool)
         # reaching the call is untrusted input in reach (precision PR 2).
@@ -1582,7 +1664,8 @@ def _classify_exec_match(
             payload_flow=payload,
         )
     return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed,
-                            untrusted_flow=flow, is_cli_expr=js_cli, payload_flow=payload)
+                            untrusted_flow=flow, is_cli_expr=js_cli, payload_flow=payload,
+                            resolve_name=lambda nm: _resolve_js_assignment(lines, idx, nm))
 
 
 def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted: list[int]):
@@ -3133,7 +3216,7 @@ def _scan_content(
                     "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
-                        "`" if idx in _string_state()[1] else None):
+                        "`" if idx in _string_state()[1] else None, lines, idx):
                     # Help text a CLI prints (`'  npx browserslist\n'`) or a maintainer
                     # package.json script (`"release": "npx npmpub"`) never runs on a
                     # consumer's machine (precision PR 2).

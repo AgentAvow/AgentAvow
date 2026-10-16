@@ -189,7 +189,12 @@ def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
     elements, dynamic = seq
     if elements and elements[0] is None:
         return False
+    if elements and _TEMP_DIR_RE.search(elements[0]):
+        return False  # a binary dropped in a temp dir is not the package's own helper
     return classify_argv(elements, dynamic, untrusted_near=False).kind == "capability"
+
+
+_TEMP_DIR_RE = re.compile(r"^(?:/tmp/|/var/tmp/|/dev/shm/|/private/tmp/)")
 
 
 # Precision PR 2: a build step that runs a TOOLCHAIN binary named by the environment or
@@ -200,10 +205,24 @@ def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
 # fixed-argv spawn. Inline code, a URL or a decode/fetch in any part keeps it high.
 _BUILD_PART_DANGER_RE = re.compile(
     r"b64decode|a85decode|unhexlify|fromhex|decompress|urlopen|urlretrieve|requests\.|"
-    r"httpx\.|https?://|\bexec\b|\beval\b|__import__|marshal|pickle")
+    r"httpx\.|https?://|\bexec\b|\beval\b|__import__|marshal|pickle"
+    # A binary in (or defaulting to) a temp dir is a dropped file, not a toolchain
+    # (adversarial recall review of #24: `os.environ.get('PG_CONFIG', '/tmp/pg_config')`).
+    r"|/tmp/|/var/tmp/|/dev/shm/|\btempfile\b|gettempdir|mkdtemp|mkstemp")
+
+# An unguarded network fetch anywhere in setup.py. A toolchain binary is only a build
+# step when nothing at install time downloads; `requests.get(U)` → write `./pgc` → run
+# it is the download-and-run shape whatever the binary is called (recall review, #24).
+_SETUP_NET_FETCH_RE = re.compile(
+    r"^(?:requests|httpx|urllib3|aiohttp|pycurl|wget|socket|http\.client|urllib\.request"
+    r"|urllib2|six\.moves\.urllib\.request)\.|"
+    r"^(?:urlopen|urlretrieve|HTTPSConnection|HTTPConnection|create_connection"
+    r"|PoolManager|build_opener)$|\.(?:urlopen|urlretrieve|HTTPSConnection|HTTPConnection"
+    r"|create_connection|PoolManager|build_opener)$")
 
 
-def _is_build_binary_spawn(node: ast.Call, fname: str, assigns: dict) -> bool:
+def _is_build_binary_spawn(node: ast.Call, fname: str, assigns: dict,
+                           values: dict | None = None) -> bool:
     from src.scanner.exec_classify import (
         _argv_nodes,
         _basename,
@@ -253,6 +272,10 @@ def _is_build_binary_spawn(node: ast.Call, fname: str, assigns: dict) -> bool:
     for i, el in enumerate(parts):
         try:
             src = ast.unparse(el)
+            if isinstance(el, ast.Name) and values and el.id in values:
+                # `pg = os.environ.get('PG_CONFIG', '/tmp/pg_config')`: read what the
+                # name was bound to, not just the name.
+                src += " " + ast.unparse(values[el.id])
         except Exception:  # noqa: BLE001 — unreadable part: not provably a build step
             return False
         if _BUILD_PART_DANGER_RE.search(src):
@@ -321,11 +344,18 @@ class _InstallExecVisitor(ast.NodeVisitor):
         # `cmd = [pip, "install", path]` … `check_output(cmd)`: last simple assignment of
         # a name to a list/tuple, so the call's argv can be read (precision PR 2).
         self._assigns: dict[str, ast.AST] = {}
+        # Every simple `name = <expr>`, so a build binary held in a name is read too.
+        self._values: dict[str, ast.AST] = {}
+        # An unguarded network fetch (requests / httpx / urllib / socket) anywhere.
+        self.net_fetch_unguarded = False
+        # Unguarded execs that passed only as a fixed-argv spawn or a toolchain step.
+        self.build_step_unguarded = False
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
-                and isinstance(node.value, (ast.List, ast.Tuple, ast.BinOp)):
-            self._assigns[node.targets[0].id] = node.value
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            self._values[node.targets[0].id] = node.value
+            if isinstance(node.value, (ast.List, ast.Tuple, ast.BinOp)):
+                self._assigns[node.targets[0].id] = node.value
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
@@ -355,6 +385,13 @@ class _InstallExecVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         fname = _call_name(node)
+        if self._guard_depth == 0:
+            try:
+                target = ast.unparse(node.func)
+            except Exception:  # noqa: BLE001
+                target = ""
+            if _SETUP_NET_FETCH_RE.search(target):
+                self.net_fetch_unguarded = True
         if fname in _AST_EXEC_CALLS and not _is_non_exec_receiver(node):
             if self._guard_depth > 0:
                 self.guarded.append((fname, getattr(node, "lineno", 1)))
@@ -362,8 +399,11 @@ class _InstallExecVisitor(ast.NodeVisitor):
                 self.unguarded.append((fname, getattr(node, "lineno", 1)))
                 if fname in _AST_NET_CALLS:
                     self.has_net_unguarded = True
-                if not (_is_fixed_argv_spawn(node, fname)
-                        or _is_build_binary_spawn(node, fname, self._assigns)):
+                if _is_fixed_argv_spawn(node, fname):
+                    self.build_step_unguarded = True
+                elif _is_build_binary_spawn(node, fname, self._assigns, self._values):
+                    self.build_step_unguarded = True
+                else:
                     self.has_dynamic_unguarded = True
         if fname == "setup":
             for kw in node.keywords:
@@ -406,7 +446,8 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
         # script) still runs at install time, but it is auditable in place: medium.
         if visitor.has_net_unguarded:
             severity = "critical"
-        elif visitor.has_dynamic_unguarded:
+        elif visitor.has_dynamic_unguarded or (
+                visitor.net_fetch_unguarded and visitor.build_step_unguarded):
             severity = "high"
         else:
             severity = "medium"

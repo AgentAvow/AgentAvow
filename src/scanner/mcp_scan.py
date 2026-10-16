@@ -155,6 +155,65 @@ _EXEC_DENIAL = re.compile(
     re.I)
 
 
+# Exfiltration through a parameter (the "sidenote" tool-poisoning shape): a tool or
+# param description that tells the agent to put a secret or a credential file's
+# contents into an argument. With `body` off the freeform-param list (#20) this is
+# what catches a `body` that really carries data out (adversarial recall review).
+_EXFIL_SOURCE_FILE = re.compile(
+    r"~/\.(?:ssh|aws|cursor|kube|docker|gnupg|npmrc|netrc|pypirc|git-credentials)\b"
+    r"|\$HOME/\.(?:ssh|aws|cursor|kube|docker|gnupg|npmrc|netrc|pypirc)\b"
+    r"|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\.ssh/|\.aws/credentials|\bmcp\.json\b"
+    r"|claude_desktop_config|/etc/(?:passwd|shadow)|(?<![\w.])\.env\b|\bprivate[\s_-]keys?\b",
+    re.I)
+_SECRET_WORDS = (r"api[\s_-]?keys?|access[\s_-]?keys?|tokens|secrets|credentials|passwords"
+                 r"|private[\s_-]keys?|ssh[\s_-]keys?")
+# Bulk secrets only when they are the AGENT's / user's own ("all of your API keys");
+# "any API keys the endpoint needs" is an HTTP tool's ordinary header param.
+_EXFIL_SOURCE_BULK = re.compile(
+    r"\b(?:all|every|each|any)\s+(?:of\s+)?(?:your|the\s+user'?s|the\s+local|the\s+current"
+    r"|this\s+machine'?s|the\s+machine'?s|the\s+agent'?s)\s+(?:environment\s+variables?"
+    r"|env(?:ironment)?\s+vars?|" + _SECRET_WORDS + r")\b",
+    re.I)
+# Environment variables in bulk, when the sentence says they hold secrets.
+_EXFIL_SOURCE_ENV = re.compile(
+    r"\b(?:all|every|each)\s+(?:of\s+the\s+)?(?:environment\s+variables?"
+    r"|env(?:ironment)?\s+vars?)\b|\bprocess\.env\b|\bos\.environ\b", re.I)
+_SECRET_WORD_RE = re.compile(r"\b(?:" + _SECRET_WORDS + r"|api[\s_-]?key|token|secret)\b", re.I)
+# Put-into verbs only: reading a secret is what a vault tool does; putting one into an
+# argument is the exfiltration.
+_EXFIL_VERB = re.compile(
+    r"\b(?:include|append|attach|paste|pass|send|copy|put|insert|add|embed|provide|dump"
+    r"|forward|upload)\b", re.I)
+_EXFIL_CONTENT = re.compile(
+    r"\b(?:contents?|text|data|full|entire|whole)\b"
+    r"|\b(?:include|append|attach|paste|embed|dump|forward|upload)\b", re.I)
+_EXFIL_SINK = re.compile(r"\b(?:param(?:eter)?s?|arguments?|args?|fields?|inputs?)\b", re.I)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.;!?])\s+|\n+")
+
+
+def _exfil_instruction(text: str, param_names: list[str], in_param: bool) -> bool:
+    """Does ``text`` tell the agent to put a secret / a credential file's contents into
+    an argument? ``in_param``: the text is a param's own description (the param is
+    the sink); otherwise a sentence must also name a param or say "parameter"."""
+    for sent in _SENTENCE_SPLIT.split(text or ""):
+        file_src = _EXFIL_SOURCE_FILE.search(sent)
+        bulk_src = _EXFIL_SOURCE_BULK.search(sent) or (
+            _EXFIL_SOURCE_ENV.search(sent) and _SECRET_WORD_RE.search(sent))
+        if not (file_src or bulk_src):
+            continue
+        if not _affirmed(_EXFIL_VERB, sent):
+            continue
+        if file_src and not bulk_src and not _EXFIL_CONTENT.search(sent):
+            continue  # "path to the key, e.g. ~/.ssh/id_rsa": a path, not its contents
+        if in_param:
+            return True
+        if _EXFIL_SINK.search(sent) or any(
+                re.search(r"(?<![\w-])" + re.escape(p) + r"(?![\w-])", sent)
+                for p in param_names if p):
+            return True
+    return False
+
+
 @dataclass
 class McpScanResult:
     findings: list = field(default_factory=list)   # list[Finding]
@@ -310,6 +369,26 @@ def analyze_mcp(
 
         # 2. input-schema risk
         schema = t.get("inputSchema") or t.get("input_schema") or {}
+        _props = schema.get("properties") if isinstance(schema, dict) else None
+        pnames = [str(k) for k in _props] if isinstance(_props, dict) else []
+        exfil_where = None
+        if _exfil_instruction(tdesc, pnames, in_param=False):
+            exfil_where = where
+        elif isinstance(_props, dict):
+            for pname, pspec in _props.items():
+                if isinstance(pspec, dict) and _exfil_instruction(
+                        str(pspec.get("description", "") or ""), pnames, in_param=True):
+                    exfil_where = f"{where}:param:{pname}"
+                    break
+        if exfil_where:
+            result.findings.append(_finding(
+                "prompt_injection",
+                f"Tool '{tname}' tells the agent to send secrets or credential files "
+                "through a parameter (tool poisoning)",
+                "high", exfil_where,
+                "A tool description must never ask the agent to put credential files,"
+                " keys or secrets into an argument; that is data exfiltration.",
+            ))
         if isinstance(schema, dict):
             if schema.get("additionalProperties") is True:
                 result.findings.append(_finding(
