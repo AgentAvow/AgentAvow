@@ -2497,10 +2497,26 @@ _SECRET_PLACEHOLDER_CORES = (
     "changeme", "replaceme", "placeholder", "example", "yourapikey", "yourapitoken",
     "yoursecret", "yourtoken", "yourkey", "yourpassword", "dummy", "redacted",
     "notasecret", "insertkey", "insertyour", "todo", "fixme", "xxxx", "foobar",
-    # A run of sequential digits or letters is a made-up value, never random key
-    # material (ghapi's spec example `ghp_1234567890abcdef…`).
-    "1234567890", "0123456789", "abcdefghij",
 )
+
+
+def _is_counting_placeholder(val: str) -> bool:
+    """A key body made only of counting runs (``1234567890abcdef1234567890…``, ghapi's
+    spec example) is a made-up value, never random key material. Every maximal run of
+    consecutive characters (9 wraps to 0) must be 4+ long, over 16+ characters, so a
+    random key that merely contains ``1234`` is still a key."""
+    body = re.split(r"[_-]", val)[-1]
+    if len(body) < 16:
+        return False
+    run = 1
+    for prev, ch in zip(body, body[1:]):
+        if ord(ch) == ord(prev) + 1 or (prev == "9" and ch == "0"):
+            run += 1
+            continue
+        if run < 4:
+            return False
+        run = 1
+    return run >= 4
 
 # OAuth2 token exchange looks exactly like exfiltration (a client_secret POSTed
 # outbound), but it's the REQUIRED auth flow. These hints — grant types, token/
@@ -2921,7 +2937,8 @@ def _scan_content(
                 # Collapse separators/case so "CHANGE-ME-IN-PRODUCTION", "change_me",
                 # "your-api-key" all reduce to a comparable core before matching.
                 val_norm = re.sub(r"[^a-z0-9]", "", val.lower())
-                if any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES):
+                if (any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES)
+                        or _is_counting_placeholder(val)):
                     continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):

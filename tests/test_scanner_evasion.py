@@ -358,3 +358,10 @@ def test_sequential_placeholder_token_is_not_a_secret():
     tok = "gh" + "p_" + "1234567890abcdef" * 2 + "12345678"
     findings, _p, _s = _scan_content(f'EXAMPLE = {{"token": "{tok}"}}\n', "spec.py")
     assert "GitHub Token" not in {f.name for f in findings}
+
+
+def test_counting_placeholder_is_narrow():
+    from src.scanner.scan import _is_counting_placeholder
+    assert _is_counting_placeholder("ghp_1234567890abcdef1234567890abcdef12345678")
+    assert not _is_counting_placeholder("sk-ant-AAAA1234567890BBBB1234567890CCCC1234567890DD")
+    assert not _is_counting_placeholder("ghp_9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4cAAAA")
