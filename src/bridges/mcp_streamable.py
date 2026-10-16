@@ -1101,10 +1101,6 @@ def _sandbox_section(data: dict) -> list[str]:
         why = _clip(str(b.get("reason") or b.get("error") or "").strip(), 120)
         return [f"**Sandbox:** did not run{f' ({why})' if why else ''} — this result is "
                 "static analysis only; nothing was observed running."]
-    if b.get("timed_out") and not _is_live_probe(b):
-        _timed = ["- The run hit its time limit; behavior after that was not observed."]
-    else:
-        _timed = []
     if _is_live_probe(b):
         return _live_probe_section(b)
     att = b.get("attestation") if isinstance(b.get("attestation"), dict) else None
@@ -1132,7 +1128,6 @@ def _sandbox_section(data: dict) -> list[str]:
         lines.append(head + what)
         clauses = [net, _file_clause(ex), _credential_clause(ex, b)]
         lines.append("- " + _cap("; ".join(c for c in clauses if c)) + ".")
-        lines += _timed
     elif plan == "skill":
         reason, phrase = _start_phrase(b)
         if reason == "no_entrypoint":
@@ -1153,6 +1148,10 @@ def _sandbox_section(data: dict) -> list[str]:
                          f"(not a finding); {net}.")
         else:
             lines.append(head + f"{verb}; {net}.")
+    # A run stopped by the wall clock is partial; say so instead of reading as complete
+    # (the report's panel shows the same note).
+    if b.get("timed_out") or (ex or {}).get("timed_out"):
+        lines.append("- Ran partly (hit its time limit): behavior after that was not observed.")
     fs = _behavioral_findings(b)
     room = 6 - len(lines) - 1  # leave a line for the score effect
     for f in fs[: max(room, 1)]:

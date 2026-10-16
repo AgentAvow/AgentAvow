@@ -58,6 +58,7 @@ export interface CatalogSandbox {
   exercised?: boolean | null  // MCP server launched OK in the sandbox (null: not an MCP plan)
   findings: number
   unexpected_egress: number
+  timed_out?: boolean  // the run hit its time limit: partial
 }
 
 export interface CatalogResponse {

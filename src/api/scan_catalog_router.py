@@ -118,6 +118,7 @@ class CatalogSandbox(BaseModel):
     exercised: bool | None = None  # MCP server launched OK (None: not an MCP plan)
     findings: int = 0
     unexpected_egress: int = 0
+    timed_out: bool = False  # the run hit its time limit: partial, never "clean"
 
 
 class CatalogRow(BaseModel):
@@ -198,6 +199,7 @@ def _sandbox_summary(block: Any) -> CatalogSandbox | None:
         exercised=(bool(ex.get("launch_ok")) if ex is not None else None),
         findings=len([f for f in (block.get("findings") or []) if isinstance(f, dict)]),
         unexpected_egress=len(block.get("unexpected_egress") or []),
+        timed_out=bool(block.get("timed_out") or (ex or {}).get("timed_out")),
     )
 
 
