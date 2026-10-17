@@ -341,7 +341,10 @@ _CONSOLE_SHADOW_RE = re.compile(
     r"""process\s*\.\s*std(?:out|err)\s*(?:\.\s*write\s*)?=(?!=)|"""
     r"""defineProperty\s*\(\s*process\b|setPrototypeOf\s*\(\s*console\b|"""
     r"""['"`]console['"`]\s*\]\s*=|defineProperty\s*\([^,]*,\s*['"`]console['"`]|"""
-    r"""\bwith\s*\(""")
+    r"""\bwith\s*\(|"""
+    # `console` read as a value (`const c = console; c.log = …`): an alias that can be
+    # written through.
+    r"""(?<![=!<>])=\s*console\s*(?:[;,)}\n]|$)|\breturn\s+console\b|:\s*console\s*[,}]""")
 
 
 def _handler_body(text: str, start: int) -> str:
@@ -863,6 +866,9 @@ class _JsFlow:
             self.require_console_unshadowed()
             return None
         if names in (["process", "stdout", "write"], ["process", "stderr", "write"]):
+            # A replaced stream write (`process.stdout.write = s => execSync(s)`) is
+            # caught by the same guard as a replaced console.
+            self.require_console_unshadowed()
             return None
         if len(names) >= 2 and last in _OUTPUT_METHODS and names[0] != "console":
             self.require_method_safe(path, names, must_exist=True)

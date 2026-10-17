@@ -620,6 +620,19 @@ def calibrate_package_findings(findings: list, fetched) -> list:
     for f in findings:
         if getattr(f, "kind", "defect") == "capability":
             continue
+        pre = getattr(f, "pre_hint", None)
+        if pre is not None and f.name == _PIPE_TO_SHELL and f.remediation == WHY_HINT \
+                and f.severity == "low" and getattr(f, "installed", True):
+            # Lowered by the per-file pass, which sees one file. With the whole package
+            # in view (`console.log = s => execSync(s)` in another file, a name read
+            # elsewhere) it must hold again, or the finding gets back what it had.
+            path = getattr(f, "file_path", "") or ""
+            if not (is_supported(path) and hints.why_not(
+                    path, f.line_number, _pipe_to_shell_re()) is None):
+                f.severity, f.remediation = pre[0], ""
+                if hasattr(f, "payload"):
+                    f.payload = pre[1]
+            continue
         if f.severity not in ("critical", "high", "medium"):
             continue
         path = getattr(f, "file_path", "") or ""
