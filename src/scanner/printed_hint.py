@@ -32,8 +32,11 @@ A followed name must hold only the hint: a reassignment, an update, a destructur
 target, a loop variable, or a bare alias (``a = cmd``, ``a = c ? cmd : x``; building a
 new string such as ``"run " + cmd`` is followed) keeps the finding, in JS and Python.
 Colour formatting through esbuild's ``source_default`` (chalk re-exported from another
-chunk) is accepted in a package scan when the alias, and the object it aliases, run
-nothing. "Is ``console`` the real one?" is judged per statement: a stdout-to-stderr
+chunk) is accepted in a package scan only when it aliases a binding made straight from
+an allow-listed colour package (``require("chalk")``, ``import … from "chalk"``,
+``__toESM(require_chalk())`` over ``node_modules/chalk``) and no file in the package
+writes to, defines on, assigns into or re-prototypes either name.
+"Is ``console`` the real one?" is judged per statement: a stdout-to-stderr
 takeover, a ``new Console`` object, or a QuickJS / worker prelude string that nothing
 here evaluates does not count as a replacement.
 
@@ -460,6 +463,75 @@ def _node_core_binding(t: _Toks, text: str, name: str) -> bool:
         elif t.is_p(j, "(") and t.is_p(t.match[j] + 1, "=>", "{"):
             return False  # a parameter
     return found
+
+
+_FN_LITERAL_RE = re.compile(r"(?:async\s+)?(?:function\b|\([^()]*\)\s*(?:=>|\{)|[\w$]+\s*=>)")
+# Global functions that evaluate nothing.
+_JS_PLAIN_GLOBALS = frozenset({
+    "String", "Number", "Boolean", "BigInt", "Symbol", "Array", "Object", "Date", "Error",
+    "TypeError", "RangeError", "Map", "Set", "WeakMap", "WeakSet", "Promise", "RegExp",
+    "Uint8Array", "Int8Array", "DataView", "ArrayBuffer", "TextDecoder", "TextEncoder",
+    "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent",
+    "decodeURIComponent", "encodeURI", "decodeURI",
+})
+
+
+def _non_function_binding(text: str, name: str) -> bool:
+    """``name`` is bound (``name = …`` / ``name: …``) to something other than a
+    function literal somewhere in ``text``."""
+    for m in re.finditer(r"(?<![\w$])" + re.escape(name) + r"\s*(?::|=(?![=>]))\s*", text):
+        if not _FN_LITERAL_RE.match(text, m.end()):
+            return True
+    return False
+
+
+_COLOUR_LIBS = frozenset({
+    "chalk", "picocolors", "kleur", "colorette", "ansi-colors", "kolorist", "yoctocolors",
+})
+
+
+def _colour_lib_binding(text: str, name: str) -> bool:
+    """``name`` is bound exactly once in ``text``, straight to an allow-listed colour
+    library: ``var chalk = require("chalk")``, ``import chalk from "chalk"``, or
+    esbuild's ``var import_chalk = __toESM(require_chalk())`` where ``require_chalk``
+    wraps ``node_modules/chalk/…``."""
+    n = re.escape(name)
+    libs = "|".join(re.escape(x) for x in sorted(_COLOUR_LIBS))
+    spec = r"""['"](?:""" + libs + r""")['"]"""
+    req = re.findall(r"\b(?:var|let|const)\s+" + n + r"\s*=\s*require\s*\(\s*" + spec
+                     + r"\s*\)\s*[;,\n]", text)
+    imp = re.findall(r"\bimport\s+" + n + r"\s+from\s*" + spec, text)
+    esm = re.findall(r"\b(?:var|let|const)\s+" + n + r"\s*=\s*__toESM\s*\(\s*(require_[\w$]+)"
+                     r"\s*\(\s*\)\s*(?:,\s*1\s*)?\)\s*[;,\n]", text)
+    total = len(req) + len(imp) + len(esm)
+    binds = re.findall(r"\b(?:var|let|const|function|class)\s+" + n + r"\b|\bimport\s+" + n
+                       + r"\b|(?<![\w$])as\s+" + n + r"\b", text)
+    if total != 1 or len(binds) != 1:
+        return False
+    if esm:
+        w = re.escape(esm[0])
+        wrap = re.findall(r"\b" + w + r"""\s*=\s*__commonJS\s*\(\s*\{\s*['"]node_modules/(?:"""
+                          + libs + r""")/""", text)
+        if len(wrap) != 1 or len(re.findall(r"(?<![\w$.])" + w + r"\s*=(?![=>])", text)) != 1:
+            return False
+    return True
+
+
+def _object_written(text: str, name: str, *, allow_decl: bool) -> bool:
+    """``name`` (or a member of it) is written in ``text``: ``name = …`` beyond its one
+    declaration, ``name.x = …`` / ``name[k] = …``, or handed to defineProperty /
+    defineProperties / Object.assign / setPrototypeOf / Reflect.set /
+    Reflect.defineProperty, or ``__proto__``."""
+    n = re.escape(name)
+    if re.search(r"(?<![\w$])" + n + r"\s*(?:\.\s*[\w$]+|\[[^\]]*\]|\?\.\s*[\w$]+)+\s*"
+                 r"(?:=(?![=>])|[-+*/%&|^]=|\?\?=|&&=|\|\|=)", text):
+        return True
+    if re.search(r"(?:defineProperty|defineProperties|assign|setPrototypeOf|set|"
+                 r"__defineGetter__|__defineSetter__)\s*\(\s*" + n + r"\b|" + n
+                 + r"\s*\.\s*__proto__", text):
+        return True
+    plain = re.findall(r"(?<![\w$.])" + n + r"\s*(?:=(?![=>])|[-+*/%&|^]=|\?\?=|&&=|\|\|=)", text)
+    return len(plain) > (1 if allow_decl else 0)
 
 
 def _concise_body(text: str, j: int) -> str:
@@ -992,15 +1064,23 @@ class _JsFlow:
         if len(decl) != 1 or len(writes) != 1 or not _COLOR_LIB_RE.search(decl[0]) \
                 or re.search(r"\b(?:function|class)\s+" + r + r"\b", text):
             return False
-        # The aliased object, wherever it is defined, is checked like `chalk.bold(…)`,
-        # and so is the statement that builds it (`var chalk = createChalk()`).
-        self.require_method_safe(def_file, [decl[0], *names[1:]], must_exist=False)
-        built = re.findall(r"\b(?:var|let|const)\s+" + re.escape(decl[0])
-                           + r"\s*=\s*([^;\n]{0,300})", text)
-        if len(built) > 1 or any(_JS_SINK_RE.search(rhs) or "Proxy" in rhs for rhs in built):
+        lib = decl[0]
+        # The aliased object must be the colour library itself, bound straight to a
+        # require / import of an allow-listed specifier (or esbuild's
+        # `__toESM(require_chalk())` over `node_modules/chalk/…`), never something the
+        # package builds (`var chalk = createChalk()`, `make()`, `new Proxy(…)`).
+        if not _colour_lib_binding(text, lib):
             return False
-        for rhs in built:
-            self.check_bodies(def_file, [rhs], 2, set())
+        # Nobody in the package patches either name: an assignment, a member write,
+        # defineProperty / assign / setPrototypeOf / Reflect.set into it.
+        for p in self.code_paths:
+            ptext = self.files[p]
+            for n in (root, lib):
+                if n not in ptext:
+                    continue
+                if _object_written(ptext, n, allow_decl=(p == def_file)):
+                    return False
+        self.require_method_safe(def_file, [lib, *names[1:]], must_exist=False)
         return True
 
     # -- bindings ------------------------------------------------------------------
@@ -1573,21 +1653,31 @@ class _JsFlow:
             code = _PLAIN_STR_RE.sub("''", body)
             if _JS_EVAL_CODE_RE.search(code) or _JS_SINK_RE.search(code):
                 return True
-            for m in re.finditer(r"([A-Za-z_$][\w$]*)\s*\(", code):
-                n = m.group(1)
+            for m in re.finditer(r"(\.\s*)?([A-Za-z_$][\w$]*)\s*\(", code):
+                member, n = bool(m.group(1)), m.group(2)
                 if n in _KEYWORDS or n in seen:
                     continue
                 seen.add(n)
                 if len(seen) > 150:
                     return True
+                if member and re.search(r"(?<![\w$.])(?:globalThis|global|window|self)\s*"
+                                        r"(?:\?\.|\.)\s*$", code[:m.start() + 1]):
+                    return True  # `globalThis.go(src)`: set anywhere
                 spec = _binding_spec(text, n)
                 if spec is not None:
                     if spec.startswith((".", "/")) or spec.removeprefix("node:").split(
                             "/")[0] not in _NODE_INERT_BUILTINS:
                         return True
                     continue
-                if depth > 0 and self.reaches_evaluator(fp, _def_bodies(text, n), depth - 1,
-                                                        seen):
+                # A name bound to anything but a function literal (`const go =
+                # vm.runInThisContext`, `const F = [].map.constructor`) may be an
+                # evaluator: it counts as one.
+                if _non_function_binding(text, n):
+                    return True
+                bodies = _def_bodies(text, n)
+                if not bodies and not member and n not in _JS_PLAIN_GLOBALS:
+                    return True  # a bare call to something not defined here
+                if depth > 0 and self.reaches_evaluator(fp, bodies, depth - 1, seen):
                     return True
         return False
 

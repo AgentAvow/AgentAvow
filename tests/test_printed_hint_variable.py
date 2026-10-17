@@ -1,5 +1,10 @@
 """Printed install hints held in a variable, in a bundle chunk too large to scan whole.
 
+Note: after the peer gate's recall review, a colour alias is trusted only when chalk is
+bound straight to the real package. pi-coding-agent inlines chalk's source
+(`var chalk = createChalk()`), so its own shape stays critical; the fixtures below use a
+`require("chalk")` chunk for the lowered shape and pi's inlined chunk as a recall case.
+
 @earendil-works/pi-coding-agent 1.3.0 read "Do not connect" for
 
     let installerCommand = process.platform === "win32" ? '… | iex' : "curl … | sh";
@@ -64,8 +69,12 @@ def _crit(files: dict[str, str], path: str, eco: str = "npm") -> None:
                                          for f in r.findings if f.name == RULE]
 
 
-# esbuild's chalk chunk: `var source_default = chalk` exported to every other chunk.
-CHALK_CHUNK = (
+# A chunk re-exporting chalk under esbuild's name: `var source_default = chalk`, with
+# chalk bound straight to the real package (the only alias shape accepted).
+CHALK_CHUNK = 'var chalk=require("chalk");var source_default=chalk;export{source_default};\n'
+# pi-coding-agent's real shape: chalk's source inlined into the bundle and built by a
+# call. The package builds the object, so it is not trusted as a colour library.
+INLINED_CHALK_CHUNK = (
     'var styles={bold:[1,22],yellow:[33,39]};function createChalk(o){return{}}'
     'var chalk=createChalk(),chalkStderr=createChalk({level:0});'
     'var source_default=chalk;export{source_default};\n'
@@ -133,7 +142,7 @@ class TestPiCodingAgentShape:
             'function fnv1a(text){let h=2166136261;for(let i=0;i<text.length;i++)'
             'h^=text.charCodeAt(i),h=Math.imul(h,16777619);return(h>>>0).toString(16)}'
             'var PRELUDE_HASH=fnv1a(PRELUDE_SOURCE);'
-            'class Ctx{evalCode(code,filename="<eval>"){return this.ffi.QTS_Eval(code,filename)}}'
+            'class Ctx{evalCode(code,filename="<eval>"){return this.ffi.qtsEval(code,filename)}}'
             'function boot(vm){return vm.evalCode(PRELUDE_SOURCE,"prelude.js")}'
             'parentPort.on("message",m=>boot(m));\n'
         )
@@ -254,9 +263,51 @@ def _with_chunk(extra: dict[str, str], chunk: str = PI_CHUNK, chalk: str = CHALK
     'var source_default=chalk;export{source_default};\n',
     'import cp from"child_process";function createChalk(){return{bold:cp.execSync}}'
     'var chalk=createChalk();var source_default=chalk;export{source_default};\n',
+    # peer gate (adv185): Proxy split over lines, built by another module, patched with
+    # defineProperty / setPrototypeOf / a member write after a real require
+    'const cp=require("child_process");var chalk=new\n  Proxy({},{get:()=>(s)=>cp.execSync(s)});\n'
+    'var source_default=chalk;module.exports={source_default};\n',
+    'const make=require("./maker");var chalk=make();var source_default=chalk;'
+    'module.exports={source_default};\n',
+    'const cp=require("child_process");var chalk=require("chalk");'
+    'Object.defineProperty(chalk,"bold",{value:(s)=>cp.execSync(s)});'
+    'var source_default=chalk;module.exports={source_default};\n',
+    'const cp=require("child_process");var chalk=require("chalk");'
+    'Object.setPrototypeOf(chalk,{bold:(s)=>cp.execSync(s)});'
+    'var source_default=chalk;module.exports={source_default};\n',
+    'const cp=require("child_process");var chalk=require("chalk");'
+    'chalk.bold=(s)=>cp.execSync(s);var source_default=chalk;module.exports={source_default};\n',
+    # a lookalike specifier / an esbuild wrapper over something that is not chalk
+    'var chalk=require("chalk-extra");var source_default=chalk;export{source_default};\n',
+    'var require_chalk=__commonJS({"node_modules/evil/index.js"(e,m){}});'
+    'var chalk=__toESM(require_chalk());var source_default=chalk;export{source_default};\n',
+    # pi-coding-agent's own shape: chalk inlined and built by createChalk()
+    INLINED_CHALK_CHUNK,
 ])
 def test_colour_alias_that_runs_stays_critical(chalk):
-    _with_chunk({}, chalk=chalk)
+    _with_chunk({"dist/chunks/maker.js": 'const cp=require("child_process");'
+                                         'module.exports=()=>({bold:(s)=>cp.execSync(s)});\n'},
+                chalk=chalk)
+
+
+@pytest.mark.parametrize("patch", [
+    'const cp=require("child_process");import{source_default}from"./chunk-CHALK.js";'
+    'source_default.bold=(s)=>cp.execSync(s);\n',
+    'const cp=require("child_process");import{source_default}from"./chunk-CHALK.js";'
+    'Object.assign(source_default,{bold:(s)=>cp.execSync(s)});\n',
+    'const cp=require("child_process");import{source_default}from"./chunk-CHALK.js";'
+    'Reflect.set(source_default,"bold",(s)=>cp.execSync(s));\n',
+])
+def test_colour_alias_patched_in_another_file_stays_critical(patch):
+    _with_chunk({"dist/chunks/patch.js": patch})
+
+
+def test_esbuild_toesm_chalk_wrapper_is_accepted():
+    chunk = ('var require_chalk=__commonJS({"node_modules/chalk/source/index.js"(e,m){}});'
+             'var chalk=__toESM(require_chalk());var source_default=chalk;'
+             'export{source_default};\n')
+    _low({"dist/chunks/chunk-CHALK.js": chunk, "dist/chunks/chunk-PI.js": PI_CHUNK},
+         "dist/chunks/chunk-PI.js")
 
 
 def test_colour_alias_is_not_trusted_per_file():
@@ -305,6 +356,14 @@ def test_colour_alias_is_not_trusted_per_file():
     'class Q{evalCode(c){return c}}vm.evalCode(P);\n',
     # ... a console declared in another file (could be loaded as a classic script)
     'import{execSync}from"child_process";var console={log:(m)=>execSync(m)};\n',
+    # peer gate (adv185): the evaluator reached through an alias / Function's constructor
+    'const vm=require("vm");const go=vm.runInThisContext;'
+    'const P="console.log = (s) => process.mainModule.require(\'child_process\').execSync(s)";'
+    'function load(src){return go(src)}load(P);\n',
+    'const P="console.log = (s) => process.mainModule.require(\'child_process\').execSync(s)";'
+    'const F=[].map.constructor;function load(src){return F(src)()}load(P);\n',
+    'var P=`console.log = (m) => run(m)`;function load(s){return globalThis.go(s)}load(P);\n',
+    'var P=`console.log = (m) => run(m)`;function load(s){return undefinedGlobal(s)}load(P);\n',
     # a console replacement calling a function set in another file
     'console.log=(m)=>globalThis.run(m);\n',
     'console.log=(m)=>run(m);\n',
