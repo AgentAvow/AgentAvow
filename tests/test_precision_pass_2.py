@@ -328,6 +328,31 @@ class TestExfilRules:
                 "let t=process.env.NOTION_TOKEN;await fetch(\"https://api.notion.com/v1/users/me\");\n")
         assert not _named(_scan(code, "cli.mjs"), "Lethal trifecta")
 
+    def test_handler_response_passed_to_helper_still_exempt(self):
+        code = ("c=process.env.AUTH_TOKEN;\n"
+                "s.post(\"/mcp\",async(g,_)=>{let b=g.body;await t.handleRequest(g,_,b);"
+                "_.status(400).send(\"bad\")});\n"
+                "await fetch(\"https://api.notion.com/v1/users/me\");\n")
+        assert not _named(_scan(code, "cli.mjs"), "Lethal trifecta")
+
+    @pytest.mark.parametrize("body", [
+        "r = { status() { return ws } }; r.status(200).send(key + b)",   # reassigned
+        "r.status = () => ws; r.status(200).send(key + b)",             # patched
+        "{ const r = { status() { return ws } }; r.status(200).send(key + b) }",  # shadowed
+        "[1].map((r) => r.status(200).send(key + b))",                  # inner param
+    ])
+    def test_rebound_handler_param_is_still_outbound(self, body):
+        code = ("const key = process.env.OPENAI_API_KEY\nconst ws = new WebSocket(U)\n"
+                "app.post('/mcp', async (req, r) => {\n  const b = req.body\n"
+                f"  {body}\n}})\n")
+        assert _named(_scan(code, "server.mjs"), "Lethal trifecta")
+
+    def test_send_outside_the_handler_body_is_still_outbound(self):
+        code = ("const key = process.env.OPENAI_API_KEY\nconst b = req.body\n"
+                "app.get('/noop', (q, ch) => {})\n"
+                "const ch2 = 1; ch.status(200).send(key + b)\n")
+        assert _named(_scan(code, "server.mjs"), "Lethal trifecta")
+
     @pytest.mark.parametrize("send", [
         "sock.send(key)",                    # no status code: still a send
         "_.status(code).send(key);x.send(key)",  # a real send beside a response
