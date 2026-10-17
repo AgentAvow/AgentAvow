@@ -4364,72 +4364,14 @@ def _compute_manifest_digest(tool_digests: dict[str, str]) -> str | None:
 
 _RESPONSE_SEND_RE = re.compile(
     r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(")
-# Minifiers rename `res` (`s.post("/mcp",async(g,_)=>{..._.status(400).send(`). Inside a
-# route handler's body, its second parameter is the response object, so
-# `<that name>.status(NNN).send(` there is a response too. Only there: an outer object
-# whose status() returns a socket, or a parameter the body rebinds, patches or shadows,
-# is still an outbound send. Unparseable or huge bodies are not exempted (fail closed).
-_ROUTE_HANDLER_RES_RE = re.compile(
-    r"""\.\s*(?:get|post|put|patch|delete|all|use)\s*\([^()]{0,200}?,?\s*"""
-    r"""(?:async\s*)?(?:\(\s*[\w$]+\s*,\s*([\w$]+)\s*\)\s*=>|"""
-    r"""function\s*[\w$]*\s*\(\s*[\w$]+\s*,\s*([\w$]+)\s*\))\s*\{""")
-_HANDLER_BODY_CAP = 20_000
-_STATUS_SEND_AT_RE = re.compile(r"[\w$]+\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)\s*\.\s*send\s*\(")
-
-
-def _block_end(text: str, open_at: int) -> int | None:
-    """Index of the ``}`` closing the ``{`` at ``open_at`` (strings, template literals
-    and comments skipped), or ``None`` past the cap or when unbalanced."""
-    depth, i, n = 0, open_at, min(len(text), open_at + _HANDLER_BODY_CAP)
-    while i < n:
-        c = text[i]
-        if c in "'\"`":
-            i += 1
-            while i < n and text[i] != c:
-                i += 2 if text[i] == "\\" else 1
-        elif text.startswith("//", i):
-            j = text.find("\n", i)
-            i = n if j < 0 else j
-        elif text.startswith("/*", i):
-            j = text.find("*/", i + 2)
-            i = n if j < 0 else j + 1
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                return i
-        i += 1
-    return None
-
-
-def _handler_response_sends(content: str) -> set[int]:
-    """Offsets of ``X.status(NNN).send(`` calls that answer the request: X is the
-    route handler's 2nd parameter and the call sits in that handler's own body, which
-    never rebinds, patches or shadows X."""
-    out: set[int] = set()
-    for m in _ROUTE_HANDLER_RES_RE.finditer(content):
-        x = m.group(1) or m.group(2)
-        start = m.end() - 1
-        end = _block_end(content, start)
-        if end is None:
-            continue
-        body = content[start + 1:end]
-        ex = re.escape(x)
-        if re.search(r"(?<![\w$.])" + ex + r"\s*(?:=(?![=>])|\.\s*(?:status|send)\s*=)"
-                     r"|\b(?:var|let|const)\s+(?:[^;=]*?[\s,{\[])?" + ex + r"(?![\w$])"
-                     # an inner function / catch that declares X as a parameter
-                     r"|\(\s*(?:[^()]*?,\s*)?\.{0,3}" + ex + r"\s*(?:=[^,)]*)?(?:,[^()]*)?\)\s*=>"
-                     r"|(?<![\w$.])" + ex + r"\s*=>"
-                     r"|function\s*[\w$]*\s*\([^)]*(?<![\w$])" + ex + r"(?![\w$])[^)]*\)"
-                     r"|catch\s*\(\s*" + ex + r"\s*\)"
-                     # destructuring assignment into X
-                     r"|[\[{,]\s*" + ex + r"\s*[\]}][^=;]*=(?![=>])", body):
-            continue
-        for s in re.finditer(r"(?<![\w$.])" + ex + r"\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)"
-                             r"\s*\.\s*send\s*\(", body):
-            out.add(start + 1 + s.start())
-    return out
+# `X.status(NNN).send(<literal>)`: an HTTP error/status reply with a fixed message
+# (notion-mcp-server's minified `_.status(400).send("Invalid or missing session ID")`).
+# Keyed on the ARGUMENT, not on proving X is a response: a string or number literal
+# carries no data, so even if X were a socket in disguise this line moves nothing.
+_LITERAL_STATUS_SEND_RE = re.compile(
+    r"""[\w$]+\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)\s*\.\s*send\s*\(\s*"""
+    r"""(?:"[^"\\\n]*(?:\\.[^"\\\n]*)*"|'[^'\\\n]*(?:\\.[^'\\\n]*)*'|`[^`$\\\n]*`|\d+)"""
+    r"""\s*\)""")
 
 
 _QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)
@@ -4495,22 +4437,8 @@ def _composite_findings(
                  if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
     # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
     # request; it is not an outbound send to a third party (precision PR 2).
-    handler_sends = _handler_response_sends(content) if ".status" in content else set()
-    line_starts: list[int] = []
-    pos = 0
-    for ln in lines:
-        line_starts.append(pos)
-        pos += len(ln) + 1
-
     def _strip_responses(n: int) -> str:
-        ln = lines[n - 1]
-        base = line_starts[n - 1]
-        for off in sorted((o for o in handler_sends if base <= o < base + len(ln)),
-                          reverse=True):
-            m = _STATUS_SEND_AT_RE.match(ln, off - base)
-            if m:  # a chain split over lines stays an outbound hit (fail closed)
-                ln = ln[:m.start()] + " " + ln[m.end():]
-        return _RESPONSE_SEND_RE.sub(" ", ln)
+        return _RESPONSE_SEND_RE.sub(" ", _LITERAL_STATUS_SEND_RE.sub(" ", lines[n - 1]))
 
     outbound = [n for n in _hits(OUTBOUND_SEND_RE)
                 if OUTBOUND_SEND_RE.search(_strip_responses(n))]

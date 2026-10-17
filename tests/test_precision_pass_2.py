@@ -340,6 +340,11 @@ class TestExfilRules:
         "r.status = () => ws; r.status(200).send(key + b)",             # patched
         "{ const r = { status() { return ws } }; r.status(200).send(key + b) }",  # shadowed
         "[1].map((r) => r.status(200).send(key + b))",                  # inner param
+        "prep(r); r.status(200).send(key + b)",                          # helper patches
+        "Object.assign(r, { status: () => ws }); r.status(200).send(key + b)",
+        "Object.defineProperty(r, 'status', { value: () => ws }); r.status(200).send(key)",
+        "r.status(200).send(`${key}`)",                                  # template with data
+        "r.status(200).send('k=' + key)",                                # literal + data
     ])
     def test_rebound_handler_param_is_still_outbound(self, body):
         code = ("const key = process.env.OPENAI_API_KEY\nconst ws = new WebSocket(U)\n"
