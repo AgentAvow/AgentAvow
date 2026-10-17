@@ -4363,9 +4363,24 @@ def _compute_manifest_digest(tool_digests: dict[str, str]) -> str | None:
 
 
 _RESPONSE_SEND_RE = re.compile(
-    r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(|"
-    # any receiver with an HTTP status code: minifiers rename `res` (`_.status(400).send(`)
-    r"[\w$]\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)\s*\.\s*send\s*\(")
+    r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(")
+# Minifiers rename `res` (`s.post("/mcp",async(g,_)=>{..._.status(400).send(`). The second
+# parameter of a route handler is the response object, so `<that name>.status(NNN).send(`
+# is a response too -- but only for names bound that way in the file (an object with its
+# own status() method that returns a socket is still an outbound send).
+_ROUTE_HANDLER_RES_RE = re.compile(
+    r"""\.\s*(?:get|post|put|patch|delete|all|use)\s*\([^()]{0,200}?,?\s*"""
+    r"""(?:async\s*)?(?:\(\s*[\w$]+\s*,\s*([\w$]+)\s*[,)]|"""
+    r"""function\s*[\w$]*\s*\(\s*[\w$]+\s*,\s*([\w$]+)\s*[,)])""")
+
+
+def _handler_response_send_re(content: str) -> re.Pattern[str] | None:
+    names = {a or b for a, b in _ROUTE_HANDLER_RES_RE.findall(content)} - {""}
+    if not names:
+        return None
+    alt = "|".join(re.escape(n) for n in sorted(names))
+    return re.compile(r"(?<![\w$.])(?:" + alt + r")\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)"
+                      r"\s*\.\s*send\s*\(")
 
 
 _QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)
@@ -4431,8 +4446,14 @@ def _composite_findings(
                  if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
     # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
     # request; it is not an outbound send to a third party (precision PR 2).
+    handler_send = _handler_response_send_re(content)
+
+    def _strip_responses(ln: str) -> str:
+        ln = _RESPONSE_SEND_RE.sub(" ", ln)
+        return handler_send.sub(" ", ln) if handler_send else ln
+
     outbound = [n for n in _hits(OUTBOUND_SEND_RE)
-                if OUTBOUND_SEND_RE.search(_RESPONSE_SEND_RE.sub(" ", lines[n - 1]))]
+                if OUTBOUND_SEND_RE.search(_strip_responses(lines[n - 1]))]
     sensitive = _hits(SENSITIVE_READ_RE)
     file_read = _hits(FILE_READ_RE)
     if not (untrusted and outbound and (sensitive or file_read)):

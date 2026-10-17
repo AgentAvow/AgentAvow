@@ -331,6 +331,8 @@ class TestExfilRules:
     @pytest.mark.parametrize("send", [
         "sock.send(key)",                    # no status code: still a send
         "_.status(code).send(key);x.send(key)",  # a real send beside a response
+        # an object whose status() returns a socket is not a handler's response
+        "const ch = { status() { return ws } }; ch.status(200).send(key + b)",
     ])
     def test_minified_trifecta_still_fires(self, send):
         code = ("const key = process.env.OPENAI_API_KEY\n"
