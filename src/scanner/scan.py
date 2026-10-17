@@ -4364,6 +4364,15 @@ def _compute_manifest_digest(tool_digests: dict[str, str]) -> str | None:
 
 _RESPONSE_SEND_RE = re.compile(
     r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(")
+# `X.status(NNN).send(<literal>)`: an HTTP error/status reply with a fixed message
+# (notion-mcp-server's minified `_.status(400).send("Invalid or missing session ID")`).
+# Keyed on the ARGUMENT, not on proving X is a response: a string or number literal
+# carries no data, so even if X were a socket in disguise this line moves nothing.
+_LITERAL_STATUS_SEND_RE = re.compile(
+    r"""[\w$]+\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)\s*\.\s*send\s*\(\s*"""
+    r"""(?:"[^"\\\n]*(?:\\.[^"\\\n]*)*"|'[^'\\\n]*(?:\\.[^'\\\n]*)*'|`[^`$\\\n]*`|\d+)"""
+    # ...and the call ends the expression: its return value must not be used
+    r"""\s*\)(?!\s*(?:[.(\[`]|\?\.))""")
 
 
 _QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)
@@ -4429,8 +4438,22 @@ def _composite_findings(
                  if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
     # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
     # request; it is not an outbound send to a third party (precision PR 2).
+    def _strip_literal(m: re.Match[str]) -> str:
+        # ...and starts a statement, so its value is not assigned, returned or passed on
+        i = m.start() - 1
+        while i >= 0 and m.string[i].isspace():
+            i -= 1
+        before = m.string[max(0, i - 7):i + 1]  # bounded: no O(n^2) on minified lines
+        if before and before[-1] not in ";{})" and not re.search(r"(?<![\w$])else$", before):
+            return m.group(0)
+        return " "
+
+    def _strip_responses(n: int) -> str:
+        return _RESPONSE_SEND_RE.sub(" ", _LITERAL_STATUS_SEND_RE.sub(_strip_literal,
+                                                                      lines[n - 1]))
+
     outbound = [n for n in _hits(OUTBOUND_SEND_RE)
-                if OUTBOUND_SEND_RE.search(_RESPONSE_SEND_RE.sub(" ", lines[n - 1]))]
+                if OUTBOUND_SEND_RE.search(_strip_responses(n))]
     sensitive = _hits(SENSITIVE_READ_RE)
     file_read = _hits(FILE_READ_RE)
     if not (untrusted and outbound and (sensitive or file_read)):
