@@ -354,6 +354,7 @@ class TestExfilRules:
         "g(r.status(200).send('ok'), key + b)",
         "const o2 = { s: r.status(200).send('ok') }; o2.s(key)",
         "ok && r.status(200).send('ok')",
+        "const f2 =" + " " * 100 + "r.status(200).send('ok'); f2(key)",  # far-back `=`
     ])
     def test_rebound_handler_param_is_still_outbound(self, body):
         code = ("const key = process.env.OPENAI_API_KEY\nconst ws = new WebSocket(U)\n"

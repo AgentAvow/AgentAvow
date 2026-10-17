@@ -4440,7 +4440,10 @@ def _composite_findings(
     # request; it is not an outbound send to a third party (precision PR 2).
     def _strip_literal(m: re.Match[str]) -> str:
         # ...and starts a statement, so its value is not assigned, returned or passed on
-        before = m.string[max(0, m.start() - 64):m.start()].rstrip()
+        i = m.start() - 1
+        while i >= 0 and m.string[i].isspace():
+            i -= 1
+        before = m.string[max(0, i - 7):i + 1]  # bounded: no O(n^2) on minified lines
         if before and before[-1] not in ";{})" and not re.search(r"(?<![\w$])else$", before):
             return m.group(0)
         return " "
