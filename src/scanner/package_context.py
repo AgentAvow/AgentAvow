@@ -627,9 +627,8 @@ def calibrate_package_findings(findings: list, fetched) -> list:
             # in view (`console.log = s => execSync(s)` in another file, a name read
             # elsewhere) it must hold again, or the finding gets back what it had.
             path = getattr(f, "file_path", "") or ""
-            if not (is_supported(path) and hints.why_not(
-                    path, f.line_number, _pipe_to_shell_re()) is None):
-                f.severity, f.remediation = pre[0], ""
+            if not (is_supported(path) and _printed_hint(hints, pkg.text(path), f)):
+                f.severity, f.remediation = pre[0], pre[2]
                 if hasattr(f, "payload"):
                     f.payload = pre[1]
             continue
@@ -674,6 +673,31 @@ _PIPE_TO_SHELL = "curl/wget piped to shell"
 def _pipe_to_shell_re():
     from src.scanner.patterns import DYNAMIC_REMOTE_LOAD_PATTERNS
     return next(p for n, p, _s in DYNAMIC_REMOTE_LOAD_PATTERNS if n == _PIPE_TO_SHELL)
+
+
+_MAX_HINT_CANDIDATES = 8
+
+
+def _printed_hint(hints: Hints, text: str | None, f) -> bool:
+    """Is the pipe-to-shell finding ``f`` a printed hint, with the whole package in
+    view (``src.scanner.printed_hint``)?
+
+    A finding from the tail window of an oversized file carries line 0 (the windowed
+    scan does not know where it is in the file). The package holds the whole text, so
+    it is located by its snippet: EVERY line whose stripped text starts with the
+    snippet and matches the rule must be a printed hint, and there must be at least
+    one (and at most a few) such lines."""
+    pat = _pipe_to_shell_re()
+    if f.line_number > 0:
+        return hints.why_not(f.file_path, f.line_number, pat) is None
+    snippet = getattr(f, "snippet", "") or ""
+    if not text or not snippet:
+        return False
+    lines = [i for i, ln in enumerate(text.split("\n"), 1)
+             if ln.strip()[:120] == snippet and pat.search(ln)]
+    if not lines or len(lines) > _MAX_HINT_CANDIDATES:
+        return False
+    return all(hints.why_not(f.file_path, ln, pat) is None for ln in lines)
 
 
 def _lower(f, why: str) -> None:

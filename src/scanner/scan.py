@@ -3700,8 +3700,8 @@ def _scan_content(
                         # What it would have been: a package scan re-checks it with
                         # every file in view and restores this when that fails
                         # (`calibrate_package_findings`). Not a dataclass field, so it
-                        # never reaches serialized output.
-                        hint.pre_hint = (effective_severity, remote_payload)
+                        # never reaches serialized output. (severity, payload, remediation)
+                        hint.pre_hint = (effective_severity, remote_payload, "")
                         findings.append(hint)
                         break
                 finding = Finding(

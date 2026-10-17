@@ -92,6 +92,45 @@ def test_restored_finding_drops_the_hint_note():
     assert f.severity == "critical" and not f.remediation
 
 
+FILL = "".join(f"function helper{i}(a, b) {{ return a + b + {i}; }}\n" for i in range(14000))
+
+
+@pytest.mark.parametrize("text", [
+    FILL + f"console.log({CMD!r});\n",      # tail window: the finding has line 0
+    f"console.log({CMD!r});\n" + FILL,      # head window: a real line number
+])
+def test_oversized_file_printed_only_stays_low(text):
+    assert len(text) > 500_000
+    r = _pkg({"index.js": text})
+    assert _sev(r) == {"low"}
+
+
+@pytest.mark.parametrize("tail", [
+    f"console.log({CMD!r});\nexecSync({CMD!r});\n",
+    f"execSync({CMD!r});\nconsole.log({CMD!r});\n",
+    f"console.log({CMD!r});\nconsole.log({CMD!r}), execSync({CMD!r});\n",
+    f"const HINT = {CMD!r};\nconsole.log(HINT);\nconst HINT2 = {CMD!r};\nexecSync(HINT2);\n",
+])
+def test_oversized_tail_window_with_a_run_copy_stays_critical(tail):
+    r = _pkg({"index.js": "const { execSync } = require('child_process');\n" + FILL + tail})
+    assert "critical" in _sev(r)
+
+
+def test_restore_puts_back_the_original_remediation():
+    import src.scanner.package_context as pc
+    from src.scanner.printed_hint import WHY
+    from src.scanner.scan import Finding
+
+    f = Finding(category="dynamic_remote_load", name=RULE, severity="low",
+                file_path="index.js", line_number=2, snippet="x", remediation=WHY)
+    f.pre_hint = ("critical", True, "original why")
+    fetched = type("F", (), {"ecosystem": "npm", "files": {
+        "index.js": _make_file("index.js", (CP + "cp.execSync('" + CMD + "');\n").encode()),
+        "package.json": _make_file("package.json", b'{"name":"p"}')}})()
+    pc.calibrate_package_findings([f], fetched)
+    assert (f.severity, f.remediation, f.payload) == ("critical", "original why", True)
+
+
 def test_pre_hint_is_not_a_serialized_field():
     import dataclasses
     f, _p, _s = _scan_content(INDEX, "index.js")
