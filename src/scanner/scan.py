@@ -3688,7 +3688,7 @@ def _scan_content(
                                               pattern, package=False):
                         # A string the code prints / logs / puts in an error message
                         # and never runs (pm2's "Install NVM: $ curl … | bash").
-                        findings.append(Finding(
+                        hint = Finding(
                             category="dynamic_remote_load",
                             name=name,
                             severity="low",
@@ -3696,7 +3696,14 @@ def _scan_content(
                             line_number=line_num,
                             snippet=stripped[:120],
                             remediation=printed_hint.WHY,
-                        ))
+                        )
+                        # What it would have been: a package scan re-checks it with
+                        # every file in view and restores this when that fails
+                        # (`calibrate_package_findings`). Not a dataclass field, so it
+                        # never reaches serialized output. (severity, payload, remediation)
+                        hint.pre_hint = (effective_severity, remote_payload,
+                                         _REMEDIATION_HINTS["dynamic_remote_load"])
+                        findings.append(hint)
                         break
                 finding = Finding(
                     category="dynamic_remote_load",
