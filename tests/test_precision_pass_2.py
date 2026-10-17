@@ -345,6 +345,15 @@ class TestExfilRules:
         "Object.defineProperty(r, 'status', { value: () => ws }); r.status(200).send(key)",
         "r.status(200).send(`${key}`)",                                  # template with data
         "r.status(200).send('k=' + key)",                                # literal + data
+        "r.status(200).send('ok')(key + b)",                             # curried
+        "r.status(200).send('ok').to(key + b)",                          # chained member
+        "r.status(200).send('ok').call(null, key)",
+        "r.status(200).send('ok')?.to(key)",
+        "r.status(200).send('ok')[k](key)",
+        "const f = r.status(200).send('ok'); f(key + b)",              # value kept
+        "g(r.status(200).send('ok'), key + b)",
+        "const o2 = { s: r.status(200).send('ok') }; o2.s(key)",
+        "ok && r.status(200).send('ok')",
     ])
     def test_rebound_handler_param_is_still_outbound(self, body):
         code = ("const key = process.env.OPENAI_API_KEY\nconst ws = new WebSocket(U)\n"

@@ -4371,7 +4371,8 @@ _RESPONSE_SEND_RE = re.compile(
 _LITERAL_STATUS_SEND_RE = re.compile(
     r"""[\w$]+\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)\s*\.\s*send\s*\(\s*"""
     r"""(?:"[^"\\\n]*(?:\\.[^"\\\n]*)*"|'[^'\\\n]*(?:\\.[^'\\\n]*)*'|`[^`$\\\n]*`|\d+)"""
-    r"""\s*\)""")
+    # ...and the call ends the expression: its return value must not be used
+    r"""\s*\)(?!\s*(?:[.(\[`]|\?\.))""")
 
 
 _QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)
@@ -4437,8 +4438,16 @@ def _composite_findings(
                  if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
     # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
     # request; it is not an outbound send to a third party (precision PR 2).
+    def _strip_literal(m: re.Match[str]) -> str:
+        # ...and starts a statement, so its value is not assigned, returned or passed on
+        before = m.string[:m.start()].rstrip()
+        if before and before[-1] not in ";{})" and not re.search(r"(?<![\w$])else$", before):
+            return m.group(0)
+        return " "
+
     def _strip_responses(n: int) -> str:
-        return _RESPONSE_SEND_RE.sub(" ", _LITERAL_STATUS_SEND_RE.sub(" ", lines[n - 1]))
+        return _RESPONSE_SEND_RE.sub(" ", _LITERAL_STATUS_SEND_RE.sub(_strip_literal,
+                                                                      lines[n - 1]))
 
     outbound = [n for n in _hits(OUTBOUND_SEND_RE)
                 if OUTBOUND_SEND_RE.search(_strip_responses(n))]
