@@ -637,7 +637,7 @@ def calibrate_package_findings(findings: list, fetched) -> list:
               and pkg.is_bundle(path)):
             _lower(f, WHY_BUNDLE)
         elif (f.name == _PIPE_TO_SHELL and is_supported(path)
-              and hints.why_not(path, f.line_number, _pipe_to_shell_re()) is None):
+              and _printed_hint(hints, pkg.text(path), f)):
             # Printed install hint: the string reaches only print / log / error-message
             # output in every file that reads it (``src.scanner.printed_hint``).
             _lower(f, WHY_HINT)
@@ -661,6 +661,30 @@ _PIPE_TO_SHELL = "curl/wget piped to shell"
 def _pipe_to_shell_re():
     from src.scanner.patterns import DYNAMIC_REMOTE_LOAD_PATTERNS
     return next(p for n, p, _s in DYNAMIC_REMOTE_LOAD_PATTERNS if n == _PIPE_TO_SHELL)
+
+
+_MAX_HINT_CANDIDATES = 8
+
+
+def _printed_hint(hints: Hints, text: str | None, f) -> bool:
+    """Is the pipe-to-shell finding ``f`` a printed hint (``src.scanner.printed_hint``)?
+
+    A finding from the tail window of an oversized file carries line 0 (its position
+    in the file is not known to the windowed scan). The package holds the whole text,
+    so the finding is located by its snippet: EVERY line of the file whose stripped
+    text starts with the snippet and matches the rule must be a printed hint, and
+    there must be at least one (and only a few) such lines."""
+    pat = _pipe_to_shell_re()
+    if f.line_number > 0:
+        return hints.why_not(f.file_path, f.line_number, pat) is None
+    snippet = getattr(f, "snippet", "") or ""
+    if not text or not snippet:
+        return False
+    lines = [i for i, ln in enumerate(text.split("\n"), 1)
+             if ln.strip()[:120] == snippet and pat.search(ln)]
+    if not lines or len(lines) > _MAX_HINT_CANDIDATES:
+        return False
+    return all(hints.why_not(f.file_path, ln, pat) is None for ln in lines)
 
 
 def _lower(f, why: str) -> None:

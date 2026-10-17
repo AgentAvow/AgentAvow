@@ -28,6 +28,15 @@ was. ``files`` is the whole package for an artifact scan (exported names are fol
 into every file that mentions them) or just the one file for a per-file scan, where a
 name that leaves the file keeps its severity.
 
+A followed name must hold only the hint: a reassignment, an update, a destructuring
+target, a loop variable, or a bare alias (``a = cmd``, ``a = c ? cmd : x``; building a
+new string such as ``"run " + cmd`` is followed) keeps the finding, in JS and Python.
+Colour formatting through esbuild's ``source_default`` (chalk re-exported from another
+chunk) is accepted in a package scan when the alias, and the object it aliases, run
+nothing. "Is ``console`` the real one?" is judged per statement: a stdout-to-stderr
+takeover, a ``new Console`` object, or a QuickJS / worker prelude string that nothing
+here evaluates does not count as a replacement.
+
 Not applied to shell scripts, package.json lifecycle scripts, Markdown / agent
 instruction files or any other format: those are unchanged.
 """
@@ -341,7 +350,49 @@ _CONSOLE_SHADOW_RE = re.compile(
     r"""process\s*\.\s*std(?:out|err)\s*(?:\.\s*write\s*)?=(?!=)|"""
     r"""defineProperty\s*\(\s*process\b|setPrototypeOf\s*\(\s*console\b|"""
     r"""['"`]console['"`]\s*\]\s*=|defineProperty\s*\([^,]*,\s*['"`]console['"`]|"""
-    r"""\bwith\s*\(""")
+    r"""\bwith\s*\(|\bimport\s+console\b|\bas\s+console\b|"""
+    r"""(?:assign|setPrototypeOf)\s*\(\s*process\s*(?:\.\s*std(?:out|err)\s*)?[,)]|"""
+    r"""process\s*\.\s*std(?:out|err)\s*\[[^\]]*\]\s*=(?!=)""")
+# The lexical alternatives of _CONSOLE_SHADOW_RE (a declaration, an import, a
+# parameter, a destructured name, `with`): in the file of the print call they keep
+# the finding.
+_CONSOLE_LEXICAL_RE = re.compile(
+    r"""\b(?:var|let|const|function|class)\s+console\b|[(,]\s*console\s*[,)=]|"""
+    r"""\{\s*console\s*[,}:]|[,{]\s*console\s*\}|\bwith\s*\(|\bimport\s+console\b|"""
+    r"""\bas\s+console\b""")
+# Node core modules a console / stream replacement may use without running anything.
+_SAFE_STREAM_DEPS = frozenset({
+    "node:stream", "stream", "node:console", "console", "node:events", "events",
+    "node:tty", "tty", "node:string_decoder", "string_decoder",
+})
+_MAX_SHADOW_TOKENS = 4000
+# Built-in functions / methods a console or stream statement may call without them
+# being defined in the package (they run nothing).
+_BENIGN_CALLS = frozenset({
+    "String", "Number", "Boolean", "Symbol", "stringify", "parse", "bind", "write",
+    "toString", "join", "slice", "trim", "map", "filter", "push", "keys", "values",
+    "entries", "freeze", "includes", "startsWith", "endsWith", "replace", "split",
+    "concat", "indexOf", "Transform", "Console", "Date", "now", "toISOString",
+    "isArray", "min", "max", "floor", "padStart", "padEnd",
+})
+# Anything that turns a string into code in this realm (run over code with its '…' /
+# "…" literals blanked; template literals are kept, interpolations are code).
+_JS_EVAL_CODE_RE = re.compile(
+    r"""(?<![\w$])eval(?![\w$])|(?<![\w$])Function(?![\w$])|\brunIn(?:This|New)?Context\b|"""
+    r"""\bcompileFunction\b|(?<![\w$])Script(?![\w$])|\bconstructor\s*\(|"""
+    r"""\[\s*['"`]|\bimport\s*\(|\brequire\s*\(|\b_compile\b|\b_load\b|"""
+    r"""\bset(?:Timeout|Interval|Immediate)\s*\(\s*['"`]""")
+_PLAIN_STR_RE = re.compile(r"""'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*\"""")
+_EVALUATOR_NAMES = frozenset({
+    "eval", "Function", "runInThisContext", "runInNewContext", "runInContext",
+    "compileFunction", "Script", "constructor", "setTimeout", "setInterval",
+    "setImmediate", "require", "import", "apply", "call", "bind", "Reflect",
+})
+# Node built-ins a function handed inert source text may call into.
+_NODE_INERT_BUILTINS = frozenset({
+    "worker_threads", "path", "url", "util", "events", "stream", "buffer",
+    "string_decoder", "os", "crypto", "perf_hooks", "timers", "tty", "assert",
+})
 
 
 def _handler_body(text: str, start: int) -> str:
@@ -376,6 +427,39 @@ def _binding_spec(text: str, name: str) -> str | None:
         + r"""(?<![\w$])""" + r + r"""(?![\w$])[^}]*\}\s*=\s*require\s*\(\s*['"]"""
         + r"""([^'"]+)['"]""", text)
     return next((g for g in m.groups() if g), None) if m else None
+
+
+_NODE_CORE_SRC_RE = re.compile(
+    r"""\s*(?:=\s*(?:__)?require\s*\(\s*|from\s*)['"](?:node:)?(?:stream|console)['"]""")
+
+
+def _node_core_binding(t: _Toks, text: str, name: str) -> bool:
+    """Every binding of ``Transform`` / ``Console`` in the file is Node's own:
+    ``import { Transform } from "node:stream"`` / ``var { Console } =
+    __require("node:console")`` (esbuild), and nothing else defines the name."""
+    found = False
+    for k in t.by_val.get(name, []):
+        if t.is_p(k - 1, ".", "?.") or t.is_p(k + 1, ":"):
+            continue  # a member / an object key
+        if t.is_id(k - 1, "function", "class", "var", "let", "const", "as") \
+                or t.is_p(k + 1, "=", "=>"):
+            return False
+        # Inside `{ … }`: a pattern / import list when the group is followed by `=` or
+        # `from`, an object literal (a read) otherwise.
+        j = k - 1
+        while j >= 0 and not t.is_p(j, "{", "(", "[") \
+                and t.typ[j] not in ("tpl_head", "tpl_mid"):
+            j = (t.match[j] - 1) if (t.is_p(j, ")", "]", "}") or t.typ[j] == "tpl_tail") \
+                else j - 1
+        if t.is_p(j, "{"):
+            close = t.match[j]
+            if t.is_p(close + 1, "=") or t.is_id(close + 1, "from"):
+                if not _NODE_CORE_SRC_RE.match(text, t.en[close]):
+                    return False
+                found = True
+        elif t.is_p(j, "(") and t.is_p(t.match[j] + 1, "=>", "{"):
+            return False  # a parameter
+    return found
 
 
 def _concise_body(text: str, j: int) -> str:
@@ -438,7 +522,8 @@ class _JsFlow:
         self.followed: set[tuple] = set()
         self._catch_ok: bool | None = None
         self.uses = 0
-        self._console_ok: bool | None = None
+        self._console_ok: dict[str, bool] = {}
+        self._shadow_ok: dict[tuple[str, int], bool] = {}
         self.code_paths = [p for p in files if Path(p.lower()).suffix in JS_EXTS
                            and not p.lower().endswith(_DTS_SUFFIXES)]
 
@@ -585,9 +670,15 @@ class _JsFlow:
     # -- the value walk ----------------------------------------------------------
     def value(self, path: str, a: int, b: int, chain: bool = False) -> None:
         """Token range [a, b] of ``path`` evaluates to (a string built from) our
-        value. Raise _UnclassifiedError unless every place it can go is human output."""
+        value. Raise _UnclassifiedError unless every place it can go is human output.
+        ``chain``: [a, b] is a read of a followed name / property / call result, not
+        the literal itself (an assignment from it must build a new string)."""
         self.uses += 1
         t = self.toks(path)
+        # A read joined with other text (`${x}` inside a template, `"…" + x`) builds a
+        # new string; anything else assigned from it is an alias of the name.
+        derived = (a > 0 and t.typ[a - 1] in ("tpl_head", "tpl_mid")) \
+            or t.is_p(a - 1, "+") or t.is_p(b + 1, "+")
         while True:
             self.tick()
             if t.typ[a] in ("tpl", "tpl_head") and a > 0 and (
@@ -637,11 +728,10 @@ class _JsFlow:
             if t.is_p(p, "=>"):
                 self.arrow_returned(path, t, p)
                 return
-            if t.is_p(p, "="):
-                self.assigned(path, t, p)
-                return
-            if t.is_p(p, "+="):
-                self.assigned(path, t, p)
+            if t.is_p(p, "=", "+="):
+                if chain and not derived:
+                    raise _UnclassifiedError("the followed name is aliased")
+                self.assigned(path, t, p, a, b, from_read=chain)
                 return
             raise _UnclassifiedError(f"value after {t.val[p] or t.typ[p]}")
 
@@ -831,6 +921,8 @@ class _JsFlow:
             if not names:
                 raise _UnclassifiedError("unknown callee")
             return self.call(path, t, o, names, first, is_new)
+        if v in ("[", "{") and t.is_p(t.match[o] + 1, "="):
+            raise _UnclassifiedError("value in a destructuring target")
         if v == "[":
             j = o - 1
             if j >= 0 and (t.typ[j] in ("id", "str", "tpl", "tpl_tail")
@@ -848,6 +940,9 @@ class _JsFlow:
         last = names[-1]
         # String formatting: `chalk.bold(x)`, `import_chalk.default.dim(x)`, `String(x)`.
         lib_at = next((i for i, n in enumerate(names) if _COLOR_LIB_RE.search(n)), None)
+        if lib_at is None and len(names) >= 2 and all(n in _STYLE_NAMES for n in names[1:]) \
+                and self.color_alias(path, names):
+            lib_at = 0  # esbuild's `source_default` = chalk, imported from another chunk
         if names == ["String"] or (
                 lib_at is not None and all(n in _STYLE_NAMES for n in names[lib_at + 1:])):
             if len(names) > 1:
@@ -860,9 +955,10 @@ class _JsFlow:
             return None
         # Output.
         if names[0] == "console" and len(names) == 2 and last in _CONSOLE_METHODS:
-            self.require_console_unshadowed()
+            self.require_console_unshadowed(path)
             return None
         if names in (["process", "stdout", "write"], ["process", "stderr", "write"]):
+            self.require_console_unshadowed(path)
             return None
         if len(names) >= 2 and last in _OUTPUT_METHODS and names[0] != "console":
             self.require_method_safe(path, names, must_exist=True)
@@ -875,9 +971,47 @@ class _JsFlow:
             return None
         raise _UnclassifiedError(f"value passed to {'.'.join(names)}()")
 
+    def color_alias(self, path: str, names: list[str]) -> bool:
+        """``source_default.bold(x)``: the receiver is a package binding that is a plain
+        alias of a colour-library object (esbuild bundles chalk as ``var source_default =
+        chalk`` in one chunk and imports ``source_default`` everywhere else). Package
+        scans only; the aliased object's style methods must run nothing either."""
+        if not self.package:
+            return False
+        root = names[0]
+        try:
+            def_file = self.receiver_file(path, root)
+        except _UnclassifiedError:
+            return False
+        if def_file is None:
+            return False
+        text = self.files[def_file]
+        r = re.escape(root)
+        decl = re.findall(r"\b(?:var|let|const)\s+" + r + r"\s*=\s*([\w$]+)\s*[;,\n]", text)
+        writes = re.findall(r"(?<![\w$.])" + r + r"\s*(?:=(?![=>])|[-+*/%&|^]=|\?\?=)", text)
+        if len(decl) != 1 or len(writes) != 1 or not _COLOR_LIB_RE.search(decl[0]) \
+                or re.search(r"\b(?:function|class)\s+" + r + r"\b", text):
+            return False
+        # The aliased object, wherever it is defined, is checked like `chalk.bold(…)`,
+        # and so is the statement that builds it (`var chalk = createChalk()`).
+        self.require_method_safe(def_file, [decl[0], *names[1:]], must_exist=False)
+        built = re.findall(r"\b(?:var|let|const)\s+" + re.escape(decl[0])
+                           + r"\s*=\s*([^;\n]{0,300})", text)
+        if len(built) > 1 or any(_JS_SINK_RE.search(rhs) or "Proxy" in rhs for rhs in built):
+            return False
+        for rhs in built:
+            self.check_bodies(def_file, [rhs], 2, set())
+        return True
+
     # -- bindings ------------------------------------------------------------------
-    def assigned(self, path: str, t: _Toks, eq: int) -> None:
-        """``NAME = value`` / ``const NAME = value`` / ``NAME += value``."""
+    def assigned(self, path: str, t: _Toks, eq: int, a: int = -1, b: int = -1,
+                 from_read: bool = False) -> None:
+        """``NAME = value`` / ``const NAME = value`` / ``NAME += value``. From a read of
+        a followed name, the right side must build a new string (``"run " + x``): a
+        bare alias (``a = x``, ``a = c ? x : y``) keeps the finding."""
+        if from_read and not any(t.typ[j] in ("str", "tpl", "tpl_head") for j in
+                                 range(max(a, eq + 1), b + 1)):
+            raise _UnclassifiedError("the followed name is aliased")
         lhs = eq - 1
         if not t.is_id(lhs) or t.val[lhs] in _KEYWORDS:
             raise _UnclassifiedError("assignment to a member, pattern or keyword")
@@ -985,13 +1119,18 @@ class _JsFlow:
                 ft, r) != -1 and ft.is_p(self.enclosing_open(ft, r), "{") \
                 and not self.has_q_left(ft, r + 1):
             return  # `{ name: … }`: an object key
-        if ft.is_p(r + 1, "=", "+=") and not ft.is_p(r - 1, ",", "{", "["):
-            return  # overwritten / appended to: a write, not a read
+        if ft.is_p(r + 1, "=", "+=", "-=", "||=", "&&=", "??=", "++", "--") \
+                or ft.is_p(r - 1, "++", "--"):
+            # Reassigned / appended to / redeclared in a list: the name no longer holds
+            # only the hint.
+            raise _UnclassifiedError(f"{ft.val[r]} is reassigned")
+        if ft.is_id(r + 1, "of", "in") and ft.is_p(self.enclosing_open(ft, r), "("):
+            raise _UnclassifiedError(f"{ft.val[r]} is a loop variable")  # for (x of …)
         if ft.is_id(r - 1, "var", "let", "const", "function", "class"):
             raise _UnclassifiedError("name redeclared")
         if self.specifier(ft, r, fp):
             return
-        self.value(fp, r, r)
+        self.value(fp, r, r, chain=True)
 
     def specifier(self, t: _Toks, r: int, path: str) -> bool:
         """``import { NAME } from …`` / ``export { NAME }``: neutral in a package
@@ -1111,7 +1250,7 @@ class _JsFlow:
                         continue  # the declaration itself
                     if self.function_name_decl_at(ft, r):
                         continue
-                    self.value(fp, start, ft.match[r + 1])
+                    self.value(fp, start, ft.match[r + 1], chain=True)
                     continue
                 if ft.is_p(r + 1, "=", ":") and (self.function_def_follows(ft, r)):
                     continue  # `name = function (…)` / `name: (…) =>` definition
@@ -1219,12 +1358,388 @@ class _JsFlow:
             if lo <= k <= hi and t.is_p(k + 1, "(") and not t.is_p(k - 1, "."):
                 raise _UnclassifiedError("direct eval in scope")
 
-    def require_console_unshadowed(self) -> None:
-        if self._console_ok is None:
-            self._console_ok = not any(
-                _CONSOLE_SHADOW_RE.search(self.files[p]) for p in self.code_paths)
-        if not self._console_ok:
+    def require_console_unshadowed(self, path: str) -> None:
+        """``console`` / the std streams, as seen from ``path``, are the real ones.
+
+        In ``path`` itself any lexical rebinding (a declaration, an import, a
+        parameter, a destructured name, ``with``) keeps the finding. Every other match
+        anywhere (``console.log = …``, ``process.stdout.write = …``,
+        ``defineProperty(globalThis, "console", …)``, ``console`` handed to a function,
+        a declaration in another file …) keeps the finding unless the statement it is
+        in runs nothing (``runs_nothing``), only moves output between the std streams
+        (``stream_redirect``), or is source text inside a string that nothing here
+        evaluates (``inert_source_string``)."""
+        ok = self._console_ok.get(path)
+        if ok is None:
+            ok = True
+            for p in self.code_paths:
+                text = self.files[p]
+                for m in _CONSOLE_SHADOW_RE.finditer(text):
+                    if p == path and _CONSOLE_LEXICAL_RE.match(text, m.start()):
+                        ok = False
+                    elif not self.shadow_harmless(p, m.start()):
+                        ok = False
+                    if not ok:
+                        break
+                if not ok:
+                    break
+            self._console_ok[path] = ok
+        if not ok:
             raise _UnclassifiedError("console is reassigned or shadowed")
+
+    def shadow_harmless(self, fp: str, pos: int) -> bool:
+        key = (fp, pos)
+        if key not in self._shadow_ok:
+            span = None
+            try:
+                t = self.toks(fp)
+                k = t.at(pos)
+                if k >= 0 and t.typ[k] in ("str", "tpl", "tpl_head", "tpl_mid", "tpl_tail") \
+                        and t.st[k] < pos:
+                    # Inside a string: source text, judged only as such (below).
+                    raise _UnclassifiedError("match inside a string")
+                span = self.statement_span(fp, pos)
+                self._shadow_ok[key] = span is not None and self.runs_nothing(fp, *span)
+            except _UnclassifiedError:
+                self._shadow_ok[key] = False
+            if not self._shadow_ok[key] and span is not None:
+                self._shadow_ok[key] = self.stream_redirect(fp, *span)
+            if not self._shadow_ok[key]:
+                try:
+                    self._shadow_ok[key] = self.inert_source_string(fp, pos)
+                except _UnclassifiedError:
+                    pass
+        return self._shadow_ok[key]
+
+    def stream_redirect(self, fp: str, a: int, b: int) -> bool:
+        """A statement that only moves output between the std streams, judged without
+        name lookups across a big bundle: ``process.stdout.write = (chunk, enc, cb) =>
+        rawStderrWrite(String(chunk), cb)`` (stdout taken over for a TUI), its restore,
+        or ``this.logger = new Console({stdout: this.transform})`` (a new console object,
+        not the global one). Every free name in it is a parameter of a function written
+        in it, ``String`` / ``process``, a name every binding of which in the file is
+        ``process.std{out,err}.write[.bind(process.std{out,err})]``, or a name the
+        statement only assigns to; it names no runner and does not touch ``console``,
+        ``globalThis`` or exports."""
+        t = self.toks(fp)
+        text = self.files[fp]
+        region = text[t.st[a]:t.en[b]]
+        if _JS_SINK_RE.search(region) or _JS_EVAL_CODE_RE.search(_PLAIN_STR_RE.sub("''", region)):
+            return False
+        if re.search(r"(?<![\w$.])(?:console|globalThis|global|window|self|exports|module|"
+                     r"export|Object|Reflect)(?![\w$])", region):
+            return False
+        _local, free = self.local_names(t, a, b)
+        assigned_only = {t.val[i] for i in range(a, b + 1)
+                         if t.typ[i] == "id" and t.is_p(i + 1, "=")
+                         and not t.is_p(i - 1, ".", "?.")}
+        # No std stream is replaced here (a new Console / Transform object is built):
+        # a plain value it reads cannot run anything; only a call could.
+        replaces = re.search(r"process\s*\.\s*std(?:out|err)\s*(?:\.\s*write\s*)?=(?!=)", region)
+        for n in free:
+            if not replaces and n not in ("Transform", "Console") and not re.search(
+                    r"(?<![\w$.])" + re.escape(n) + r"\s*\(", region):
+                continue
+            if n not in ("Transform", "Console") and self.rebound_oddly(t, n):
+                return False
+            if n in ("String", "process", "Transform", "Console", "this"):
+                if n in ("Transform", "Console") and not _node_core_binding(t, text, n):
+                    return False
+                continue
+            if self.stream_alias(text, n):
+                continue
+            if n in assigned_only and not re.search(
+                    r"(?<![\w$.])" + re.escape(n) + r"\s*\(", region):
+                continue
+            return False
+        # `process` only as `process.stdout|stderr…` / `process.env…`.
+        for i in range(a, b + 1):
+            if t.is_id(i, "process") and not t.is_p(i - 1, ".", "?.") and not (
+                    t.is_p(i + 1, ".") and t.is_id(i + 2, "stdout", "stderr", "env")):
+                return False
+        return True
+
+    def rebound_oddly(self, t: _Toks, name: str) -> bool:
+        """``name`` is rebound somewhere in the file in a way the name-based checks
+        do not read: a destructuring target (``[f] = [execSync]``), ``++`` / ``--``,
+        a compound assignment, a ``for (… of …)`` variable."""
+        for k in t.by_val.get(name, []):
+            if t.is_p(k - 1, ".", "?."):
+                continue
+            if t.is_p(k + 1, "+=", "-=", "||=", "&&=", "??=", "++", "--") \
+                    or t.is_p(k - 1, "++", "--") or t.is_id(k + 1, "of", "in"):
+                return True
+            o = self.enclosing_open(t, k)
+            while o != -1 and t.is_p(o, "[", "{"):
+                if t.is_p(t.match[o] + 1, "="):
+                    return True
+                o = self.enclosing_open(t, o)
+        return False
+
+    def stream_alias(self, text: str, name: str) -> bool:
+        stream = r"process\s*\.\s*std(?:out|err)\s*\.\s*write"
+        rhs_ok = re.compile(stream + r"(?:\s*\.\s*bind\s*\(\s*process\s*\.\s*std(?:out|err)\s*\))?"
+                            r"\s*(?:[;,)}\n]|$)")
+        binds = list(re.finditer(r"(?<![\w$.])" + re.escape(name) + r"\s*=(?![=>])\s*", text))
+        if not binds or re.search(r"\b(?:function|class)\s+" + re.escape(name) + r"\b", text):
+            return False
+        return all(rhs_ok.match(text, m.end()) for m in binds)
+
+    def inert_source_string(self, fp: str, pos: int) -> bool:
+        """The match sits inside a plain string literal: source text for another realm
+        (a QuickJS / worker prelude that defines its own ``console``). It touches this
+        process's console only if something here evaluates it. Inert when the string
+        is a top-level constant of this file that no other file names, and every read
+        of it is a whole argument of a call whose function (three calls deep, in this
+        file) evaluates nothing in this realm (``eval``, ``Function``, ``vm.runIn…``,
+        a dynamic ``require`` / ``import`` …)."""
+        t = self.toks(fp)
+        k = t.at(pos)
+        if k < 0 or t.typ[k] not in ("str", "tpl", "tpl_head", "tpl_mid", "tpl_tail"):
+            return False
+        if t.typ[k] in ("tpl_head", "tpl_mid", "tpl_tail"):
+            # `${…}` runs here: only `${JSON.stringify(NAME)}` / `${NAME}` / `${"…"}`.
+            k = k if t.typ[k] == "tpl_head" else t.head[k]
+            for j in range(k + 1, t.match[k]):
+                if t.typ[j] in ("tpl_mid",):
+                    continue
+                if t.typ[j] in ("str", "num"):
+                    continue
+                if t.typ[j] == "id" and t.val[j] not in _KEYWORDS and (
+                        not t.is_p(j + 1, "(") or (t.val[j] == "stringify"
+                                                   and t.is_p(j - 1, ".")
+                                                   and t.is_id(j - 2, "JSON"))):
+                    continue
+                if t.is_p(j, ".", "(", ")", ","):
+                    continue
+                return False
+        end = t.match.get(k, k) if t.typ[k] == "tpl_head" else k
+        if t.is_p(k - 1, "(", ",") and t.is_p(end + 1, ")", ","):
+            # Handed straight to a call: `vm.evalCode(`(async (tools, console) => …)`)`.
+            return self.inert_call_arg(fp, t, k)
+        if not (t.is_p(k - 1, "=") and t.is_id(k - 2) and self.depth_of(t, k) == 0 and (
+                t.is_id(k - 3, "var", "let", "const")
+                or (t.is_p(k - 3, ",") and self.decl_of_list(t, k - 3) is not None))):
+            return False
+        if end + 1 < len(t) and not t.is_p(end + 1, ";", ",") and not t.nl[end + 1]:
+            return False  # part of a larger expression
+        name = t.val[k - 2]
+        if self.mentions_exported(fp, name):
+            return False
+        # Not exported, so another file naming it must be naming its own binding.
+        rx = re.compile(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])")
+        own = re.compile(r"(?:\b(?:var|let|const)\s+|,\s*)" + re.escape(name) + r"\s*=")
+        for p in self.files:
+            if p == fp or name not in self.files[p] or not rx.search(self.files[p]):
+                continue
+            if p not in self.code_paths or not own.search(self.files[p]) or _binding_spec(
+                    self.files[p], name) is not None:
+                return False
+        for r in t.by_val.get(name, []):
+            if r == k - 2:
+                continue
+            if not (t.is_p(r - 1, "(", ",") and t.is_p(r + 1, ")", ",")):
+                return False
+            if not self.inert_call_arg(fp, t, r):
+                return False
+        return True
+
+    def inert_call_arg(self, fp: str, t: _Toks, r: int) -> bool:
+        """Token ``r`` is a whole argument of a call whose function, as defined in
+        this file (three calls deep), evaluates nothing in this realm."""
+        o = self.enclosing_open(t, r)
+        c = self.callee(t, o) if t.is_p(o, "(") else None
+        if not c or not c[0]:
+            return False
+        names, first, _new = c
+        if any(t.is_id(j) and t.val[j] in _EVALUATOR_NAMES for j in range(first, t.match[o])):
+            return False
+        text = self.files[fp]
+        # The function name bound to anything but a function literal (`{ evalCode:
+        # eval }`, `run = vm.runInThisContext`) is not judged by its definitions.
+        for m in re.finditer(r"(?<![\w$])" + re.escape(names[-1])
+                             + r"\s*(?::|=(?![=>]))\s*", text):
+            if not re.match(r"(?:async\s+)?(?:function\b|\([^()]*\)\s*(?:=>|\{)|[\w$]+\s*=>)",
+                            text[m.end():m.end() + 200]):
+                return False
+        if self.rebound_oddly(t, names[-1]):
+            return False
+        bodies = _def_bodies(text, names[-1])
+        return bool(bodies) and not self.reaches_evaluator(fp, bodies, 3, set())
+
+    def reaches_evaluator(self, fp: str, bodies: list[str], depth: int, seen: set) -> bool:
+        text = self.files[fp]
+        for body in bodies:
+            code = _PLAIN_STR_RE.sub("''", body)
+            if _JS_EVAL_CODE_RE.search(code) or _JS_SINK_RE.search(code):
+                return True
+            for m in re.finditer(r"([A-Za-z_$][\w$]*)\s*\(", code):
+                n = m.group(1)
+                if n in _KEYWORDS or n in seen:
+                    continue
+                seen.add(n)
+                if len(seen) > 150:
+                    return True
+                spec = _binding_spec(text, n)
+                if spec is not None:
+                    if spec.startswith((".", "/")) or spec.removeprefix("node:").split(
+                            "/")[0] not in _NODE_INERT_BUILTINS:
+                        return True
+                    continue
+                if depth > 0 and self.reaches_evaluator(fp, _def_bodies(text, n), depth - 1,
+                                                        seen):
+                    return True
+        return False
+
+    def statement_span(self, fp: str, pos: int) -> tuple[int, int] | None:
+        """Token span of the statement around ``pos`` (through any enclosing call or
+        group, up to the enclosing block or an ASI line break); None when it is too
+        long to judge."""
+        t = self.toks(fp)
+        k = t.at(pos)
+        if k < 0:
+            k = bisect_right(t.st, pos)
+        if k >= len(t):
+            return None
+        a = k
+        j = k - 1
+        while j >= 0:
+            if t.nl[j + 1] and self.asi_break(t, j):
+                break
+            if t.is_p(j, ")", "]") or t.typ[j] == "tpl_tail":
+                a = t.match[j]
+                j = a - 1
+                continue
+            if t.is_p(j, ";", "{", "}") or t.typ[j] in ("tpl_head", "tpl_mid"):
+                break
+            a = j
+            j -= 1
+        # Forward from the statement's start, so a group opened left of `pos`
+        # (`globalThis["console"] = …`) is closed before the end is looked for.
+        b = a
+        j = a
+        while j < len(t):
+            if j > k and t.nl[j] and self.asi_break(t, j - 1):
+                break
+            if t.is_p(j, "(", "[", "{") or t.typ[j] == "tpl_head":
+                b = t.match[j]
+                j = b + 1
+                continue
+            if t.is_p(j, ";", ")", "]", "}") or t.typ[j] in ("tpl_mid", "tpl_tail"):
+                break
+            b = j
+            j += 1
+        if b - a > _MAX_SHADOW_TOKENS:
+            return None
+        return a, b
+
+    def local_names(self, t: _Toks, a: int, b: int) -> tuple[set[str], set[str]]:
+        """(names only ever used as parameters of a function written in [a, b] and
+        inside that function, names used anywhere else in [a, b]). Object keys and
+        ``.member`` names are neither."""
+        scopes: list[tuple[set[str], int, int]] = []
+        for q in range(a, b + 1):
+            params: set[str] = set()
+            if t.is_p(q, "=>"):
+                if t.is_id(q - 1):
+                    params, start = {t.val[q - 1]}, q - 1
+                elif t.is_p(q - 1, ")"):
+                    start = t.match[q - 1]
+                    params = self.param_ids(t, start)
+                else:
+                    continue
+                if t.is_p(q + 1, "{"):
+                    end = t.match[q + 1]
+                else:
+                    end = q + 1
+                    while end <= b:
+                        if t.is_p(end, "(", "[", "{") or t.typ[end] == "tpl_head":
+                            end = t.match[end] + 1
+                            continue
+                        if t.is_p(end, ",", ";", ")", "]", "}"):
+                            break
+                        end += 1
+                scopes.append((params, start, end))
+            elif t.is_p(q, ")") and t.is_p(q + 1, "{"):
+                po = t.match[q]
+                before = po - 1
+                if t.is_id(before) and t.val[before] in _KEYWORDS - {"function", "catch"}:
+                    continue
+                if not (t.is_id(before) or t.is_p(before, "*")):
+                    continue
+                scopes.append((self.param_ids(t, po), po, t.match[q + 1]))
+        local: set[str] = set()
+        free: set[str] = set()
+        for i in range(a, b + 1):
+            if t.typ[i] != "id" or t.val[i] in _KEYWORDS or t.is_p(i - 1, ".", "?."):
+                continue
+            if t.is_p(i + 1, ":") and t.is_p(i - 1, "{", ",") and not self.has_q_left(t, i + 1):
+                continue  # object key
+            if t.is_p(i + 1, "(") and t.is_p(i - 1, "{", ",") and t.is_p(
+                    t.match[i + 1] + 1, "{") and t.is_p(self.enclosing_open(t, i), "{"):
+                continue  # method shorthand key `{ transform(chunk, enc, cb) { … } }`
+            n = t.val[i]
+            if any(n in ps and s <= i <= e for ps, s, e in scopes):
+                local.add(n)
+            else:
+                free.add(n)
+        return local - free, free
+
+    def param_ids(self, t: _Toks, po: int) -> set[str]:
+        """Plain parameter names in the list opened at ``po`` (not default values or
+        destructuring patterns, which stay free and are checked)."""
+        out = set()
+        for j in range(po + 1, t.match[po]):
+            if t.is_id(j) and (t.is_p(j - 1, ",", "...") or j - 1 == po) \
+                    and t.is_p(j + 1, ",", ")", "="):
+                out.add(t.val[j])
+        return out
+
+    def runs_nothing(self, fp: str, a: int, b: int) -> bool:
+        """No command runner in the token span [a, b], in a function it calls or
+        names (three levels, relative imports followed), and no name in it bound to
+        one. Parameters of functions written in the span are their own locals."""
+        t = self.toks(fp)
+        region = self.files[fp][t.st[a]:t.en[b]]
+        local, names = self.local_names(t, a, b)
+        text = self.files[fp]
+        # Every function the statement calls must be one we can read: defined in this
+        # file, imported, or a plain built-in. `globalThis.run(m)` with `run` set in
+        # another file is not followed, so it keeps the finding.
+        for i in range(a, b + 1):
+            if t.typ[i] != "id" or not t.is_p(i + 1, "(") or t.val[i] in _KEYWORDS \
+                    or t.val[i] in local:
+                continue
+            n = t.val[i]
+            if n in _BENIGN_CALLS or _def_bodies(text, n) or _binding_spec(text, n) \
+                    or re.search(r"\b(?:var|let|const)\s+" + re.escape(n) + r"\s*=", text):
+                continue
+            raise _UnclassifiedError(f"{n}() is not defined where it can be read")
+        seen: set = set(local)
+        self.check_bodies(fp, [region], 3, seen)
+        if len(names) > 120:
+            raise _UnclassifiedError("statement names too much to follow")
+        for n in sorted(names):
+            if self.rebound_oddly(t, n):
+                raise _UnclassifiedError(f"{n} is rebound by a pattern or an update")
+            if self.aliased_to_sink(text, n):
+                raise _UnclassifiedError(f"{n} is bound to a command runner")
+            spec = _binding_spec(text, n)
+            if spec is not None and not spec.startswith((".", "/")):
+                if spec.split("/")[0] not in _SAFE_OUTPUT_DEPS | _SAFE_STREAM_DEPS:
+                    raise _UnclassifiedError(f"{n} comes from the dependency {spec}")
+                continue
+            if spec is not None:
+                target = self.resolve_import(fp, spec)
+                if target is None:
+                    raise _UnclassifiedError(f"cannot resolve {spec}")
+                if self.aliased_to_sink(self.files[target], n):
+                    raise _UnclassifiedError(f"{n} is bound to a command runner")
+                self.check_bodies(target, _def_bodies(self.files[target], n), 2, seen)
+                continue
+            if n not in seen:
+                self.check_bodies(fp, _def_bodies(text, n), 2, seen)
+        return True
 
     def require_not_redefined(self, name: str) -> None:
         rx = re.compile(r"\b(?:class|function)\s+" + name + r"\b|(?<![\w$.])" + name
@@ -1478,9 +1993,14 @@ class _PyFlow:
             raise _UnclassifiedError("a docstring / bare string")  # left to the prose rules
         self.value(path, best)
 
-    def value(self, path: str, node: ast.AST) -> None:
+    def value(self, path: str, node: ast.AST, chain: bool = False) -> None:
+        """``chain``: ``node`` reads a followed name / a call's result, not the literal
+        itself; an assignment from it must build a new string (no bare alias)."""
         self.uses += 1
         tr, parents = self.tree(path)
+        first = parents.get(node)
+        derived = isinstance(first, (ast.JoinedStr, ast.FormattedValue)) or (
+            isinstance(first, ast.BinOp) and isinstance(first.op, (ast.Add, ast.Mod)))
         while True:
             self.tick()
             par = parents.get(node)
@@ -1527,6 +2047,8 @@ class _PyFlow:
                 targets = par.targets if isinstance(par, ast.Assign) else [par.target]
                 if len(targets) != 1 or not isinstance(targets[0], ast.Name):
                     raise _UnclassifiedError("assignment to a non-name")
+                if chain and not derived:
+                    raise _UnclassifiedError("the followed name is aliased")
                 self.follow_name(path, targets[0].id, par)
                 return
             if isinstance(par, ast.Expr):
@@ -1656,14 +2178,25 @@ class _PyFlow:
         root = scope if scope is not None else tr
         self.check_strings(path, name, root)
         used_before = self.uses
+        own = at.targets[0] if isinstance(at, ast.Assign) else getattr(at, "target", None)
         for node in ast.walk(root):
             if isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
                 raise _UnclassifiedError("global / nonlocal")
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and \
                     node.func.id in ("locals", "globals", "vars", "eval", "exec"):
                 raise _UnclassifiedError("dynamic namespace access")
+            # Reassigned, deleted, or rebound by a parameter / except / import / def in
+            # scope: the name does not hold only the hint everywhere it is read.
+            if (isinstance(node, ast.Name) and node.id == name
+                    and isinstance(node.ctx, (ast.Store, ast.Del)) and node is not own) \
+                    or (isinstance(node, ast.arg) and node.arg == name) \
+                    or (isinstance(node, ast.ExceptHandler) and node.name == name) \
+                    or (isinstance(node, ast.alias) and (node.asname or node.name) == name) \
+                    or (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                        and node.name == name):
+                raise _UnclassifiedError(f"{name} is reassigned or shadowed")
             if isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load):
-                self.value(path, node)
+                self.value(path, node, chain=True)
         if scope is None:
             self.module_level(path, name)
         if self.uses == used_before:
@@ -1688,10 +2221,10 @@ class _PyFlow:
             for node in ast.walk(tr):
                 if isinstance(node, ast.Name) and node.id == name and isinstance(
                         node.ctx, ast.Load):
-                    self.value(fp, node)
+                    self.value(fp, node, chain=True)
                 elif isinstance(node, ast.Attribute) and node.attr == name and isinstance(
                         node.ctx, ast.Load):
-                    self.value(fp, node)
+                    self.value(fp, node, chain=True)
                 elif isinstance(node, ast.alias) and node.asname and node.name == name:
                     raise _UnclassifiedError("imported under another name")
         for fp in self.py_paths:
@@ -1733,7 +2266,7 @@ class _PyFlow:
                     continue
                 call = parents.get(node)
                 if isinstance(call, ast.Call) and call.func is node:
-                    self.value(fp, call)
+                    self.value(fp, call, chain=True)
                 else:
                     raise _UnclassifiedError(f"{fn.name} used other than by a call")
         if self.package:
