@@ -642,13 +642,11 @@ async def get_trust_badge_svg(
     scan_status = None
     if scan:
         # The scan segment shows the three-phrase decision (Safe / Review / Don't connect),
-        # decided from the stored findings + the scan's own score band.
-        from src.scanner.verdict import decide
-        vulns = [v for v in (scan.vulnerabilities or []) if isinstance(v, dict)]
-        scan_status = decide({
-            "trust_score": round(score * 100),
-            "findings": {"items": vulns},
-        }).decision if scan.scan_result != "error" else "error"
+        # decided from the stored findings + the scan's own score, by the same helper
+        # the bot security-scan report uses (so the badge never reads better than it).
+        from src.scanner.service import decide_stored_scan
+        dec = decide_stored_scan(scan, fallback_score=round(score * 100))
+        scan_status = dec.decision if dec is not None else "error"
 
     svg = _render_badge_svg(
         score=score,

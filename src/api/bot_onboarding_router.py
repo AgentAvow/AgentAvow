@@ -1293,21 +1293,38 @@ class SecurityScanResponse(BaseModel):
     findings: list[ScanFinding] = []
     scanned_at: str | None = None
     repo: str | None = None
+    # The three-phrase answer (safe / review / do_not_connect) and its reason, from
+    # src.scanner.service.decide_stored_scan: the same call the entity badges make.
+    # None for an errored scan.
+    decision: str | None = None
+    decision_reason: str | None = None
+
+
+async def _entity_score_100(db: AsyncSession, entity_id: uuid.UUID) -> int:
+    """The entity's 0-100 trust score: the decision's score for a stored scan that
+    carries none of its own (a framework bridge import), as the badges use."""
+    trust = await db.scalar(select(TrustScore).where(TrustScore.entity_id == entity_id))
+    return round((trust.score or 0.0) * 100) if trust else 0
 
 
 def _build_scan_response(
     entity_id: uuid.UUID,
     scan: object | None,
     repo: str | None = None,
+    fallback_score: int | None = None,
 ) -> SecurityScanResponse | None:
     """Build a SecurityScanResponse from a FrameworkSecurityScan record."""
     if scan is None:
         return None
 
     from src.models import FrameworkSecurityScan
+    from src.scanner.service import decide_stored_scan
 
     s: FrameworkSecurityScan = scan  # type: ignore[assignment]
-    vulns = s.vulnerabilities or {}
+    dec = decide_stored_scan(s, fallback_score=fallback_score)
+    # A framework bridge import stores a plain list of findings; the summary fields
+    # below read the scanner's dict shape, so a list reads as no summary.
+    vulns = s.vulnerabilities if isinstance(s.vulnerabilities, dict) else {}
 
     # Build category breakdown
     cat_counts = vulns.get("categories", {})
@@ -1364,6 +1381,8 @@ def _build_scan_response(
         findings=findings,
         scanned_at=s.scanned_at.isoformat() if s.scanned_at else None,
         repo=repo,
+        decision=dec.decision if dec is not None else None,
+        decision_reason=dec.reason if dec is not None else None,
     )
 
 
@@ -1387,7 +1406,8 @@ async def get_security_scan(
     if scan is None:
         raise HTTPException(404, "No security scan available")
     repo = _extract_github_repo(agent.source_url)
-    resp = _build_scan_response(agent_id, scan, repo)
+    resp = _build_scan_response(
+        agent_id, scan, repo, fallback_score=await _entity_score_100(db, agent_id))
     if resp is None:
         raise HTTPException(404, "No security scan available")
     return resp
@@ -1430,4 +1450,5 @@ async def trigger_security_scan(
     await db.commit()
     if scan is None:
         raise HTTPException(500, "Security scan failed — please try again.")
-    return _build_scan_response(agent_id, scan, repo)
+    return _build_scan_response(
+        agent_id, scan, repo, fallback_score=await _entity_score_100(db, agent_id))

@@ -162,12 +162,14 @@ async def get_embeddable_badge(
         .limit(1)
     )
     scan_status = scan.scan_result if scan else None
+    from src.scanner.service import stored_scan_decision_input
     from src.scanner.verdict import decide
-    dec = decide({
-        "trust_score": round(score * 100),
-        "findings": {"items": [v for v in ((scan.vulnerabilities if scan else None) or [])
-                               if isinstance(v, dict)]},
-    })
+    # Same input as the entity badge and the bot security-scan report. An errored scan
+    # has no findings to read (scan_status still says "error").
+    dec = decide(stored_scan_decision_input(
+        scan.vulnerabilities if scan is not None and scan.scan_result != "error" else None,
+        fallback_score=round(score * 100),
+    ))
 
     # Truncate long names to keep the badge readable
     max_name_len = 20
