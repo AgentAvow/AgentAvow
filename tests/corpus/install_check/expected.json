@@ -1,0 +1,7007 @@
+{
+ "_doc": "Committed snapshot of the install-check corpus (label, score and reason from verdict.decide(), defect counts). The nightly gate fails when a label moves. Regenerate with run_install_check_corpus.py --write-expected and review the diff in the same PR.",
+ "packages": {
+  "npm/@ai-sdk/openai": {
+   "version": "4.0.95",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 86 files",
+   "files_scanned": 86,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@ai-sdk/react": {
+   "version": "4.0.146",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 20 files",
+   "files_scanned": 20,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@angular-devkit/build-angular": {
+   "version": "22.2.3",
+   "score": 84,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 238,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 12,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/@angular/compiler": {
+   "version": "22.2.3",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect; 1 file over 500 KB was not fully read",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/@angular/compiler-cli": {
+   "version": "22.2.3",
+   "score": 84,
+   "label": "safe",
+   "reason": "nothing found in 343 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 343,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/@angular/core": {
+   "version": "22.2.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 87 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 87,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/@angular/forms": {
+   "version": "22.2.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@angular/platform-browser": {
+   "version": "22.2.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@angular/platform-browser-dynamic": {
+   "version": "22.2.3",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/cli": {
+   "version": "8.0.6",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/core": {
+   "version": "8.0.7",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 16 files",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/plugin-proposal-class-properties": {
+   "version": "7.18.6",
+   "score": 74,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/@babel/plugin-proposal-object-rest-spread": {
+   "version": "7.20.7",
+   "score": 74,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/@babel/plugin-transform-runtime": {
+   "version": "8.0.6",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/preset-env": {
+   "version": "8.0.7",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/preset-react": {
+   "version": "8.0.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/preset-typescript": {
+   "version": "8.0.7",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/register": {
+   "version": "8.0.6",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@babel/runtime": {
+   "version": "8.0.7",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 192 files",
+   "files_scanned": 192,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@commitlint/cli": {
+   "version": "21.2.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@commitlint/config-conventional": {
+   "version": "21.2.3",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@emotion/react": {
+   "version": "11.14.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 134 files",
+   "files_scanned": 134,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@rollup/plugin-babel": {
+   "version": "7.1.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@rollup/plugin-commonjs": {
+   "version": "29.0.3",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@rollup/plugin-json": {
+   "version": "6.1.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@rollup/plugin-node-resolve": {
+   "version": "16.0.3",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@rollup/plugin-typescript": {
+   "version": "12.3.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@storybook/addon-actions": {
+   "version": "9.0.8",
+   "score": 84,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@storybook/addon-essentials": {
+   "version": "8.6.14",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 34 files",
+   "files_scanned": 34,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@storybook/addon-links": {
+   "version": "10.6.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 15 files",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@storybook/addons": {
+   "version": "7.6.17",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@storybook/react": {
+   "version": "10.6.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 37 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 37,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/@supabase/supabase-js": {
+   "version": "2.118.0",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 24 files",
+   "files_scanned": 24,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Unpinned npx/uvx package (no @version pin)": 1
+   }
+  },
+  "npm/@testing-library/jest-dom": {
+   "version": "7.0.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 24 files",
+   "files_scanned": 24,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@testing-library/react": {
+   "version": "16.3.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 17 files",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@testing-library/user-event": {
+   "version": "14.6.8",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 306 files",
+   "files_scanned": 306,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/chai": {
+   "version": "5.2.3",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/express": {
+   "version": "5.0.6",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/jasmine": {
+   "version": "7.0.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/jest": {
+   "version": "30.0.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/lodash": {
+   "version": "4.17.26",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 702 files",
+   "files_scanned": 702,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/mocha": {
+   "version": "10.0.10",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/node": {
+   "version": "26.6.5",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 89 files",
+   "files_scanned": 89,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/react": {
+   "version": "19.3.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 14 files",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/react-dom": {
+   "version": "19.3.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 15 files",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@types/sinon": {
+   "version": "22.0.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@typescript-eslint/eslint-plugin": {
+   "version": "8.71.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 476 files",
+   "files_scanned": 476,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@typescript-eslint/parser": {
+   "version": "8.71.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/@vercel/speed-insights": {
+   "version": "2.0.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 29 files",
+   "files_scanned": 29,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/antd": {
+   "version": "6.6.6",
+   "score": 80,
+   "label": "safe",
+   "reason": "no critical or high findings in 3,978 files; 2 files over 500 KB were not fully read",
+   "files_scanned": 3978,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 3,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 2,
+    "low: Unpinned npx/uvx package (no @version pin)": 1,
+    "medium: Zero-width / invisible character": 2
+   }
+  },
+  "npm/async": {
+   "version": "3.2.6",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 133 files",
+   "files_scanned": 133,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/autoprefixer": {
+   "version": "10.6.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 80 files",
+   "files_scanned": 80,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/babel-core": {
+   "version": "6.26.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 31 files",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/babel-eslint": {
+   "version": "10.1.0",
+   "score": 84,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/babel-jest": {
+   "version": "30.5.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/babel-loader": {
+   "version": "10.1.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/babel-plugin-istanbul": {
+   "version": "8.0.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/babel-polyfill": {
+   "version": "6.26.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "medium: Zero-width / invisible character": 1
+   }
+  },
+  "npm/babel-register": {
+   "version": "6.26.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/babel-runtime": {
+   "version": "6.26.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 240 files",
+   "files_scanned": 240,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/bluebird": {
+   "version": "3.7.2",
+   "score": 80,
+   "label": "safe",
+   "reason": "no critical or high findings in 42 files",
+   "files_scanned": 42,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: ANSI escape sequence in text (hidden/spoofed content)": 2
+   }
+  },
+  "npm/body-parser": {
+   "version": "2.3.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/browserify": {
+   "version": "17.0.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in its code (dependencies: 1 critical advisory)",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 1,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 2
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "critical: Vulnerable dependency: shell-quote": 1
+   }
+  },
+  "npm/chai": {
+   "version": "6.3.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/chalk": {
+   "version": "6.0.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/classnames": {
+   "version": "2.5.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/clean-webpack-plugin": {
+   "version": "4.0.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/co": {
+   "version": "4.6.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/colors": {
+   "version": "1.4.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 17 files",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/commitizen": {
+   "version": "4.3.2",
+   "score": 87,
+   "label": "safe",
+   "reason": "no critical or high findings in 40 files",
+   "files_scanned": 40,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned npx/uvx package (no @version pin)": 1,
+    "medium: Unpinned npx/uvx package (no @version pin)": 1
+   }
+  },
+  "npm/concurrently": {
+   "version": "10.0.6",
+   "score": 80,
+   "label": "safe",
+   "reason": "no critical or high findings in 67 files",
+   "files_scanned": 67,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 8,
+   "not_installed": 0,
+   "rules": {
+    "medium: execSync / spawn (Node.js)": 2
+   }
+  },
+  "npm/copy-webpack-plugin": {
+   "version": "14.0.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/core-js": {
+   "version": "3.50.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "no critical or high findings in 3,717 files",
+   "files_scanned": 3717,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
+   }
+  },
+  "npm/cross-env": {
+   "version": "10.1.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/css-loader": {
+   "version": "7.1.5",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/cz-conventional-changelog": {
+   "version": "3.3.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/debug": {
+   "version": "4.4.3",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/del": {
+   "version": "9.0.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint": {
+   "version": "10.13.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 419 files",
+   "files_scanned": 419,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-config-airbnb": {
+   "version": "19.0.4",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 11 files",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "medium: execSync / spawn (Node.js)": 1
+   }
+  },
+  "npm/eslint-config-airbnb-base": {
+   "version": "15.0.0",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 13 files",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "medium: execSync / spawn (Node.js)": 1
+   }
+  },
+  "npm/eslint-config-prettier": {
+   "version": "10.1.8",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-config-react-app": {
+   "version": "7.0.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-config-standard": {
+   "version": "17.1.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-flowtype": {
+   "version": "8.0.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 80 files",
+   "files_scanned": 80,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-import": {
+   "version": "2.32.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 80 files",
+   "files_scanned": 80,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-jest": {
+   "version": "29.17.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 84 files",
+   "files_scanned": 84,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-jsx-a11y": {
+   "version": "6.10.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 113 files",
+   "files_scanned": 113,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-node": {
+   "version": "11.1.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 67 files",
+   "files_scanned": 67,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-prettier": {
+   "version": "5.5.7",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-promise": {
+   "version": "7.3.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 33 files",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-react": {
+   "version": "7.37.5",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 271 files",
+   "files_scanned": 271,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/eslint-plugin-react-hooks": {
+   "version": "7.1.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect; 2 files over 500 KB were not fully read",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 2,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 2
+   }
+  },
+  "npm/eslint-plugin-vue": {
+   "version": "10.11.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 340 files",
+   "files_scanned": 340,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/ethers": {
+   "version": "6.17.0",
+   "score": 72,
+   "label": "safe",
+   "reason": "no critical or high findings in 718 files; 4 files over 500 KB were not fully read",
+   "files_scanned": 718,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 18,
+    "low": 4,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 4,
+    "medium: Generic API Key assignment": 18
+   }
+  },
+  "npm/expo-router": {
+   "version": "58.0.22",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 1,220 files",
+   "files_scanned": 1220,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/expo-secure-store": {
+   "version": "58.0.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 36 files",
+   "files_scanned": 36,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/express": {
+   "version": "5.3.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/file-loader": {
+   "version": "6.2.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/fs-extra": {
+   "version": "11.4.1",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in its code (dependencies: 1 high advisory)",
+   "files_scanned": 30,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {
+    "high: Vulnerable dependency: minimist": 1
+   }
+  },
+  "npm/glob": {
+   "version": "13.0.6",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 33 files",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/globby": {
+   "version": "16.2.4",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/gulp": {
+   "version": "5.0.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/html-loader": {
+   "version": "5.1.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/html-webpack-plugin": {
+   "version": "5.6.8",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned npx/uvx package (no @version pin)": 1
+   }
+  },
+  "npm/husky": {
+   "version": "9.1.7",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/identity-obj-proxy": {
+   "version": "3.0.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/inquirer": {
+   "version": "14.2.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/jasmine-core": {
+   "version": "7.0.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/jest": {
+   "version": "30.5.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/jquery": {
+   "version": "4.0.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 151 files",
+   "files_scanned": 151,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/js-yaml": {
+   "version": "5.5.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/jsdom": {
+   "version": "30.1.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 664 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 664,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/jsonwebtoken": {
+   "version": "9.0.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/karma": {
+   "version": "6.4.4",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 78 files",
+   "files_scanned": 78,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 11,
+   "not_installed": 0,
+   "rules": {
+    "medium: execSync / spawn (Node.js)": 1
+   }
+  },
+  "npm/karma-chrome-launcher": {
+   "version": "3.2.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 5 files",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned npx/uvx package (no @version pin)": 1,
+    "medium: execSync / spawn (Node.js)": 1
+   }
+  },
+  "npm/karma-coverage": {
+   "version": "2.2.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/karma-jasmine": {
+   "version": "5.1.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/left-pad": {
+   "version": "1.3.0",
+   "score": 84,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/less": {
+   "version": "4.9.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 118 files; 3 files over 500 KB were not fully read",
+   "files_scanned": 118,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 3,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 3
+   }
+  },
+  "npm/less-loader": {
+   "version": "13.0.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/lint-staged": {
+   "version": "17.6.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 45 files",
+   "files_scanned": 45,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/lodash": {
+   "version": "4.18.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 1,043 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 1043,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/lodash-es": {
+   "version": "4.18.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 643 files",
+   "files_scanned": 643,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/lucide-react": {
+   "version": "1.58.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 2,178 files; 6 files over 500 KB were not fully read",
+   "files_scanned": 2178,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 6,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 6
+   }
+  },
+  "npm/marked": {
+   "version": "18.1.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/mini-css-extract-plugin": {
+   "version": "2.10.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 14 files",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/minimist": {
+   "version": "1.2.8",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/mkdirp": {
+   "version": "3.0.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 33 files",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/mocha": {
+   "version": "12.0.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 70 files",
+   "files_scanned": 70,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 13,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/moment": {
+   "version": "2.31.0",
+   "score": 72,
+   "label": "safe",
+   "reason": "no critical or high findings in 535 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 535,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 25,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1,
+    "medium: Zero-width / invisible character": 25
+   }
+  },
+  "npm/nock": {
+   "version": "15.0.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 31 files",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/node-fetch": {
+   "version": "3.3.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 15 files",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/nodemon": {
+   "version": "3.1.14",
+   "score": 72,
+   "label": "safe",
+   "reason": "no critical or high findings in 31 files",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 7,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {
+    "medium: execSync / spawn (Node.js)": 7
+   }
+  },
+  "npm/npm-run-all": {
+   "version": "4.1.5",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in its code (dependencies: 1 critical advisory)",
+   "files_scanned": 24,
+   "severity": {
+    "critical": 1,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "critical: Vulnerable dependency: shell-quote": 1
+   }
+  },
+  "npm/nyc": {
+   "version": "18.0.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 18 files",
+   "files_scanned": 18,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 10,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/object-assign": {
+   "version": "4.1.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/ora": {
+   "version": "9.4.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/path": {
+   "version": "0.12.7",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/postcss": {
+   "version": "8.5.30",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 52 files",
+   "files_scanned": 52,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/postcss-loader": {
+   "version": "8.2.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/prettier": {
+   "version": "3.9.10",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 48 files; 5 files over 500 KB were not fully read",
+   "files_scanned": 48,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 5,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 5
+   }
+  },
+  "npm/prop-types": {
+   "version": "15.8.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/react": {
+   "version": "19.3.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 25 files",
+   "files_scanned": 25,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/react-dom": {
+   "version": "19.3.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 37 files; 4 files over 500 KB were not fully read",
+   "files_scanned": 37,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 4
+   }
+  },
+  "npm/react-redux": {
+   "version": "9.3.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 39 files",
+   "files_scanned": 39,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/react-router-dom": {
+   "version": "7.18.4",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/react-scripts": {
+   "version": "5.0.1",
+   "score": 83,
+   "label": "safe",
+   "reason": "no critical or high findings in 20 files",
+   "files_scanned": 20,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 9,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 21,
+   "not_installed": 0,
+   "rules": {
+    "medium: execSync / spawn (Node.js)": 9
+   }
+  },
+  "npm/react-test-renderer": {
+   "version": "19.3.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect; 1 file over 500 KB was not fully read",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/redux": {
+   "version": "5.0.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 23 files",
+   "files_scanned": 23,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/reflect-metadata": {
+   "version": "0.2.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/request": {
+   "version": "2.88.2",
+   "score": 84,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/resolve": {
+   "version": "1.22.13",
+   "score": 86,
+   "label": "safe",
+   "reason": "no critical or high findings in 15 files",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: npm 'postinstall' lifecycle script (auto-runs on install)": 1
+   }
+  },
+  "npm/rimraf": {
+   "version": "6.1.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 68 files",
+   "files_scanned": 68,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/rollup": {
+   "version": "4.64.7",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 23 files; 2 files over 500 KB were not fully read",
+   "files_scanned": 23,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 2,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 2,
+    "medium: execSync / spawn (Node.js)": 1
+   }
+  },
+  "npm/rollup-plugin-terser": {
+   "version": "7.0.2",
+   "score": 82,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/rollup-plugin-typescript2": {
+   "version": "0.37.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 14 files; 2 files over 500 KB were not fully read",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 2,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 2
+   }
+  },
+  "npm/rxjs": {
+   "version": "7.8.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 1,221 files",
+   "files_scanned": 1221,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned npx/uvx package (no @version pin)": 1
+   }
+  },
+  "npm/sass": {
+   "version": "1.105.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 34 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 34,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/sass-loader": {
+   "version": "17.0.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/semantic-release": {
+   "version": "25.0.9",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 29 files",
+   "files_scanned": 29,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/semver": {
+   "version": "7.8.5",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 50 files",
+   "files_scanned": 50,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/shelljs": {
+   "version": "0.10.0",
+   "score": 76,
+   "label": "safe",
+   "reason": "no critical or high findings in 39 files",
+   "files_scanned": 39,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 19,
+   "not_installed": 0,
+   "rules": {
+    "medium: execSync / spawn (Node.js)": 3
+   }
+  },
+  "npm/should": {
+   "version": "13.2.3",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/sinon": {
+   "version": "22.1.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 44 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 44,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/size-limit": {
+   "version": "14.2.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 17 files",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/socket.io": {
+   "version": "4.8.4",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 23 files",
+   "files_scanned": 23,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/source-map-support": {
+   "version": "0.5.21",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/style-loader": {
+   "version": "4.0.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 17 files",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/styled-components": {
+   "version": "6.6.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 212 files",
+   "files_scanned": 212,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/stylelint": {
+   "version": "17.16.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 362 files",
+   "files_scanned": 362,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/supertest": {
+   "version": "7.3.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/terser-webpack-plugin": {
+   "version": "5.6.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/three": {
+   "version": "0.186.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 752 files; 6 files over 500 KB were not fully read",
+   "files_scanned": 752,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 4,
+    "info": 5
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 4
+   }
+  },
+  "npm/ts-jest": {
+   "version": "29.4.15",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 92 files",
+   "files_scanned": 92,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/ts-loader": {
+   "version": "9.6.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 35 files",
+   "files_scanned": 35,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/ts-node": {
+   "version": "10.9.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "no critical or high findings in 85 files",
+   "files_scanned": 85,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "medium: Vulnerable dependency: axios": 1
+   }
+  },
+  "npm/tslib": {
+   "version": "2.8.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/tslint": {
+   "version": "6.1.3",
+   "score": 84,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 442,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 12,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "npm/tsup": {
+   "version": "9.0.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 16 files",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/typedoc": {
+   "version": "0.28.20",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 214 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 214,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/typescript": {
+   "version": "7.0.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 187 files",
+   "files_scanned": 187,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/uglify-js": {
+   "version": "3.19.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 16 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/underscore": {
+   "version": "1.13.8",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 491 files",
+   "files_scanned": 491,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/url-loader": {
+   "version": "4.1.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/uuid": {
+   "version": "14.0.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 67 files",
+   "files_scanned": 67,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/vite": {
+   "version": "8.3.4",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 34 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 34,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1,
+    "medium: execSync / spawn (Node.js)": 1
+   }
+  },
+  "npm/vite-plugin-dts": {
+   "version": "5.1.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/vitest": {
+   "version": "5.0.5",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 100 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 100,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 17,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1
+   }
+  },
+  "npm/vue": {
+   "version": "3.5.44",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 30 files; 2 files over 500 KB were not fully read",
+   "files_scanned": 30,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 2,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 2
+   }
+  },
+  "npm/vue-loader": {
+   "version": "17.4.2",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 35 files",
+   "files_scanned": 35,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/vue-router": {
+   "version": "5.4.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 44 files",
+   "files_scanned": 44,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned remote resource (branch/latest/HEAD)": 1
+   }
+  },
+  "npm/vue-template-compiler": {
+   "version": "2.7.16",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/webpack-bundle-analyzer": {
+   "version": "5.4.0",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 21 files",
+   "files_scanned": 21,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "medium: Zero-width / invisible character": 1
+   }
+  },
+  "npm/webpack-cli": {
+   "version": "7.2.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/webpack-dev-server": {
+   "version": "6.0.0",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 26 files",
+   "files_scanned": 26,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "medium: execSync / spawn (Node.js)": 1
+   }
+  },
+  "npm/webpack-hot-middleware": {
+   "version": "2.26.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/webpack-merge": {
+   "version": "6.0.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/yargs": {
+   "version": "18.2.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 57 files",
+   "files_scanned": 57,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "npm/zone.js": {
+   "version": "0.16.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 70 files",
+   "files_scanned": 70,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/absl-py": {
+   "version": "2.5.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 15 files",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 1
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/aiofiles": {
+   "version": "25.1.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/aiosignal": {
+   "version": "1.4.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/anthropic": {
+   "version": "1.15.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 2,345 files",
+   "files_scanned": 2345,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/anyio": {
+   "version": "4.15.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 43 files",
+   "files_scanned": 43,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "medium: shell=True (Python)": 1
+   }
+  },
+  "pypi/appdirs": {
+   "version": "1.4.4",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/arrow": {
+   "version": "1.4.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "no critical or high findings in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Zero-width / invisible character": 3
+   }
+  },
+  "pypi/async-timeout": {
+   "version": "5.0.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/attrs": {
+   "version": "26.1.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 19 files",
+   "files_scanned": 19,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/backoff": {
+   "version": "2.2.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/bandit": {
+   "version": "1.9.4",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 64 files",
+   "files_scanned": 64,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "low: Bidirectional control character (Trojan Source)": 1
+   }
+  },
+  "pypi/bcrypt": {
+   "version": "5.0.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/beautifulsoup4": {
+   "version": "4.15.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 15 files",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/black": {
+   "version": "26.10.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 42 files",
+   "files_scanned": 42,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 8,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned remote resource (branch/latest/HEAD)": 1
+   }
+  },
+  "pypi/boto3": {
+   "version": "1.43.114",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 40 files",
+   "files_scanned": 40,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/build": {
+   "version": "1.6.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/cachetools": {
+   "version": "7.2.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/certifi": {
+   "version": "2026.7.22",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/cffi": {
+   "version": "2.1.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 20 files",
+   "files_scanned": 20,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 8,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/chardet": {
+   "version": "7.6.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 31 files",
+   "files_scanned": 31,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/charset-normalizer": {
+   "version": "3.5.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/click": {
+   "version": "8.5.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 17 files",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/colorama": {
+   "version": "0.4.6",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/coloredlogs": {
+   "version": "15.0.1",
+   "score": 78,
+   "label": "safe",
+   "reason": "no critical or high findings in 6 files",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 2
+   }
+  },
+  "pypi/coverage": {
+   "version": "7.16.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 47 files",
+   "files_scanned": 47,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 8,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/cryptography": {
+   "version": "50.0.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 80 files",
+   "files_scanned": 80,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/cython": {
+   "version": "3.3.0",
+   "score": 80,
+   "label": "safe",
+   "reason": "no critical or high findings in 125 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 125,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 46,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1,
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/dask": {
+   "version": "2026.8.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 180 files",
+   "files_scanned": 180,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 7
+   },
+   "capabilities": 10,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/dataclasses-json": {
+   "version": "0.6.7",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/datasets": {
+   "version": "5.1.0",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 125 files",
+   "files_scanned": 125,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {
+    "medium: torch.load (pickle-backed) (Python)": 1
+   }
+  },
+  "pypi/decorator": {
+   "version": "5.3.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/defusedxml": {
+   "version": "0.7.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/dill": {
+   "version": "0.4.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 14 files",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 27,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/djangorestframework": {
+   "version": "3.18.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 122 files",
+   "files_scanned": 122,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/dnspython": {
+   "version": "2.9.0",
+   "score": 84,
+   "label": "safe",
+   "reason": "nothing found in 161 files",
+   "files_scanned": 161,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/docker": {
+   "version": "7.2.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 66 files",
+   "files_scanned": 66,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/docopt": {
+   "version": "0.6.2",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/docutils": {
+   "version": "0.23",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 130 files",
+   "files_scanned": 130,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/fastapi": {
+   "version": "0.143.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 51 files",
+   "files_scanned": 51,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/fastmcp": {
+   "version": "4.1.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; no code to inspect",
+   "files_scanned": 0,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/filelock": {
+   "version": "4.2.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 23 files",
+   "files_scanned": 23,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/flake8": {
+   "version": "7.4.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 33 files",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/flask": {
+   "version": "3.1.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 24 files",
+   "files_scanned": 24,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/fonttools": {
+   "version": "4.67.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 340 files",
+   "files_scanned": 340,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 18,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/fsspec": {
+   "version": "2026.9.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 48 files",
+   "files_scanned": 48,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 2
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/future": {
+   "version": "1.0.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 185 files",
+   "files_scanned": 185,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 13,
+   "not_installed": 0,
+   "rules": {
+    "medium: Dynamic import with variable": 1
+   }
+  },
+  "pypi/gevent": {
+   "version": "26.9.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 85 files",
+   "files_scanned": 85,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 13
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/gitpython": {
+   "version": "3.2.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 37 files",
+   "files_scanned": 37,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/google-auth": {
+   "version": "2.62.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 77 files",
+   "files_scanned": 77,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/google-auth-oauthlib": {
+   "version": "1.5.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/graphviz": {
+   "version": "0.21",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 33 files",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/gunicorn": {
+   "version": "26.2.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 68 files",
+   "files_scanned": 68,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/h5py": {
+   "version": "3.16.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 17 files",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/html5lib": {
+   "version": "1.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 32 files",
+   "files_scanned": 32,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/httpx": {
+   "version": "0.28.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 23 files",
+   "files_scanned": 23,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/hypothesis": {
+   "version": "6.170.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 105 files",
+   "files_scanned": 105,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/idna": {
+   "version": "3.20",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/imageio": {
+   "version": "2.38.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 49 files",
+   "files_scanned": 49,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {
+    "medium: shell=True (Python)": 1
+   }
+  },
+  "pypi/importlib-metadata": {
+   "version": "9.0.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/importlib-resources": {
+   "version": "7.1.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/iniconfig": {
+   "version": "2.3.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/ipykernel": {
+   "version": "7.4.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 46 files",
+   "files_scanned": 46,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/ipython": {
+   "version": "9.17.1",
+   "score": 72,
+   "label": "safe",
+   "reason": "no critical or high findings in 148 files",
+   "files_scanned": 148,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 11,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 50,
+   "not_installed": 0,
+   "rules": {
+    "medium: eval() call (Python)": 1,
+    "medium: os.system / os.popen (Python)": 5,
+    "medium: subprocess.run / Popen (Python)": 5
+   }
+  },
+  "pypi/ipywidgets": {
+   "version": "8.1.9",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 37 files",
+   "files_scanned": 37,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/isort": {
+   "version": "9.0.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 45 files",
+   "files_scanned": 45,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/itsdangerous": {
+   "version": "2.2.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jinja2": {
+   "version": "3.1.6",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 25 files",
+   "files_scanned": 25,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jmespath": {
+   "version": "1.1.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/joblib": {
+   "version": "1.6.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 43 files",
+   "files_scanned": 43,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 8
+   },
+   "capabilities": 16,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/json5": {
+   "version": "0.17.3",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jsonschema": {
+   "version": "4.26.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 25 files",
+   "files_scanned": 25,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jupyter-client": {
+   "version": "8.10.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 38 files",
+   "files_scanned": 38,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/jupyterlab": {
+   "version": "4.6.4",
+   "score": 70,
+   "label": "safe",
+   "reason": "no critical or high findings in 688 files; 8 files over 500 KB were not fully read",
+   "files_scanned": 688,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 4,
+    "low": 26,
+    "info": 0
+   },
+   "capabilities": 28,
+   "not_installed": 0,
+   "rules": {
+    "low: Bidirectional control character (Trojan Source)": 6,
+    "low: Source file too large to scan in full": 8,
+    "low: Unpinned remote resource (branch/latest/HEAD)": 2,
+    "low: Zero-width / invisible character": 10,
+    "medium: ANSI escape sequence in text (hidden/spoofed content)": 2,
+    "medium: Unpinned remote resource (branch/latest/HEAD)": 2
+   }
+  },
+  "pypi/keyring": {
+   "version": "25.7.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 26 files",
+   "files_scanned": 26,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/kiwisolver": {
+   "version": "1.5.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/langchain": {
+   "version": "1.4.6",
+   "score": 78,
+   "label": "safe",
+   "reason": "no critical or high findings in 40 files",
+   "files_scanned": 40,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "medium: Injected system/role directive": 2
+   }
+  },
+  "pypi/loguru": {
+   "version": "0.7.3",
+   "score": 84,
+   "label": "safe",
+   "reason": "nothing found in 19 files",
+   "files_scanned": 19,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/markdown": {
+   "version": "3.11.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 32 files",
+   "files_scanned": 32,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/markdown-it-py": {
+   "version": "4.2.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 65 files",
+   "files_scanned": 65,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/markupsafe": {
+   "version": "3.0.4",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/marshmallow": {
+   "version": "4.3.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 14 files",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/mcp": {
+   "version": "2.3.0",
+   "score": 78,
+   "label": "safe",
+   "reason": "no critical or high findings in 122 files",
+   "files_scanned": 122,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 2
+   }
+  },
+  "pypi/mdurl": {
+   "version": "0.1.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/more-itertools": {
+   "version": "11.2.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/msgpack": {
+   "version": "1.2.3",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/mypy": {
+   "version": "2.4.0",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 235 files",
+   "files_scanned": 235,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 2
+   },
+   "capabilities": 26,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/nbconvert": {
+   "version": "7.17.2",
+   "score": 80,
+   "label": "safe",
+   "reason": "no critical or high findings in 81 files",
+   "files_scanned": 81,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 2
+   }
+  },
+  "pypi/nbformat": {
+   "version": "5.11.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 45 files",
+   "files_scanned": 45,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/networkx": {
+   "version": "3.7",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 288 files",
+   "files_scanned": 288,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/nh3": {
+   "version": "0.3.7",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/nltk": {
+   "version": "3.10.3",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 298 files",
+   "files_scanned": 298,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 4
+   },
+   "capabilities": 39,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/notebook": {
+   "version": "7.6.3",
+   "score": 78,
+   "label": "safe",
+   "reason": "no critical or high findings in 287 files; 5 files over 500 KB were not fully read",
+   "files_scanned": 287,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 14,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {
+    "low: Bidirectional control character (Trojan Source)": 3,
+    "low: Source file too large to scan in full": 5,
+    "low: Unpinned remote resource (branch/latest/HEAD)": 1,
+    "low: Zero-width / invisible character": 5,
+    "medium: ANSI escape sequence in text (hidden/spoofed content)": 1,
+    "medium: Unpinned remote resource (branch/latest/HEAD)": 1
+   }
+  },
+  "pypi/numba": {
+   "version": "0.68.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 307 files",
+   "files_scanned": 307,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 27
+   },
+   "capabilities": 37,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/oauthlib": {
+   "version": "4.0.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 73 files",
+   "files_scanned": 73,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/openai": {
+   "version": "3.31.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 1,942 files",
+   "files_scanned": 1942,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/openpyxl": {
+   "version": "3.1.5",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 190 files",
+   "files_scanned": 190,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/orjson": {
+   "version": "3.13.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/packaging": {
+   "version": "26.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 22 files",
+   "files_scanned": 22,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pandas": {
+   "version": "3.0.6",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 285 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 285,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 1,
+    "info": 5
+   },
+   "capabilities": 20,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 1,
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/paramiko": {
+   "version": "5.0.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 41 files",
+   "files_scanned": 41,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pendulum": {
+   "version": "3.3.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 86 files",
+   "files_scanned": 86,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pip": {
+   "version": "26.2.1",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 394 files",
+   "files_scanned": 394,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 45,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/pkginfo": {
+   "version": "1.13.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/platformdirs": {
+   "version": "4.13.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/plotly": {
+   "version": "7.1.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 1,518 files; 6 files over 500 KB were not fully read",
+   "files_scanned": 1518,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 5,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "low: Source file too large to scan in full": 5
+   }
+  },
+  "pypi/pluggy": {
+   "version": "1.7.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/polars": {
+   "version": "2.0.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 201 files",
+   "files_scanned": 201,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/pre-commit": {
+   "version": "4.7.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 68 files",
+   "files_scanned": 68,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 22,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/prettytable": {
+   "version": "3.18.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/prometheus-client": {
+   "version": "0.26.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 27 files",
+   "files_scanned": 27,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/protobuf": {
+   "version": "7.36.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 54 files",
+   "files_scanned": 54,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/psutil": {
+   "version": "7.2.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 10 files",
+   "files_scanned": 10,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/psycopg2": {
+   "version": "2.9.13",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/psycopg2-binary": {
+   "version": "2.9.13",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/py": {
+   "version": "1.11.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "no critical or high findings in 35 files",
+   "files_scanned": 35,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {
+    "medium: os.system / os.popen (Python)": 1,
+    "medium: subprocess.run / Popen (Python)": 2
+   }
+  },
+  "pypi/pyarrow": {
+   "version": "26.0.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 32 files",
+   "files_scanned": 32,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 17
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyasn1": {
+   "version": "0.6.4",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 32 files",
+   "files_scanned": 32,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pycparser": {
+   "version": "3.11",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pycryptodome": {
+   "version": "4.0.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 127 files",
+   "files_scanned": 127,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 37
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pydantic": {
+   "version": "2.14.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 103 files",
+   "files_scanned": 103,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 5,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pydantic-settings": {
+   "version": "2.16.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 22 files",
+   "files_scanned": 22,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pygments": {
+   "version": "2.21.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 343 files",
+   "files_scanned": 343,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 14,
+   "not_installed": 0,
+   "rules": {
+    "medium: Unrestricted file write (Python)": 1
+   }
+  },
+  "pypi/pyjwt": {
+   "version": "2.15.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pylint": {
+   "version": "4.1.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 186 files",
+   "files_scanned": 186,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 21,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pymongo": {
+   "version": "4.19.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 152 files",
+   "files_scanned": 152,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pymysql": {
+   "version": "1.2.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 17 files",
+   "files_scanned": 17,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyopenssl": {
+   "version": "26.4.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyparsing": {
+   "version": "3.3.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 14 files",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyperclip": {
+   "version": "1.11.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "no critical or high findings in 2 files",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 13,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/pyproj": {
+   "version": "3.8.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 24 files",
+   "files_scanned": 24,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest": {
+   "version": "9.1.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 80 files",
+   "files_scanned": 80,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 18,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest-asyncio": {
+   "version": "1.4.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 2,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest-cov": {
+   "version": "7.1.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest-mock": {
+   "version": "3.16.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest-runner": {
+   "version": "6.0.1",
+   "score": 74,
+   "label": "review",
+   "reason": "the maintainer has deprecated this package",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "medium: Package deprecated by its maintainer": 1
+   }
+  },
+  "pypi/pytest-timeout": {
+   "version": "2.4.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytest-xdist": {
+   "version": "3.8.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 18 files",
+   "files_scanned": 18,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/python-dateutil": {
+   "version": "2.9.0.post0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 18 files",
+   "files_scanned": 18,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/python-dotenv": {
+   "version": "1.2.4",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/python-magic": {
+   "version": "0.4.27",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/python-multipart": {
+   "version": "0.0.32",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/python-slugify": {
+   "version": "9.1.3",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pytz": {
+   "version": "2026.5",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/pyyaml": {
+   "version": "6.0.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 18 files",
+   "files_scanned": 18,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/redis": {
+   "version": "8.1.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 115 files",
+   "files_scanned": 115,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/regex": {
+   "version": "2026.9.29",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/requests": {
+   "version": "2.34.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 19 files",
+   "files_scanned": 19,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/requests-toolbelt": {
+   "version": "1.0.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 30 files",
+   "files_scanned": 30,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/rfc3986": {
+   "version": "2.0.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/rich": {
+   "version": "15.0.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 100 files",
+   "files_scanned": 100,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/ruamel.yaml": {
+   "version": "0.19.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 32 files",
+   "files_scanned": 32,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/scikit-image": {
+   "version": "0.26.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 195 files",
+   "files_scanned": 195,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 7,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/scikit-learn": {
+   "version": "1.9.1",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 345 files",
+   "files_scanned": 345,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 3
+   },
+   "capabilities": 20,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/seaborn": {
+   "version": "0.13.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 50 files",
+   "files_scanned": 50,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/selenium": {
+   "version": "4.51.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "no critical or high findings in 332 files",
+   "files_scanned": 332,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 3,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {
+    "medium: Base64 encoded long secret": 3
+   }
+  },
+  "pypi/semver": {
+   "version": "3.1.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/sentencepiece": {
+   "version": "0.2.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/sentry-sdk": {
+   "version": "2.72.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 200 files",
+   "files_scanned": 200,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/setuptools": {
+   "version": "84.0.0",
+   "score": 78,
+   "label": "safe",
+   "reason": "no critical or high findings in 223 files",
+   "files_scanned": 223,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 2,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 39,
+   "not_installed": 0,
+   "rules": {
+    "medium: os.system / os.popen (Python)": 1,
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/setuptools-scm": {
+   "version": "10.3.4",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 22 files",
+   "files_scanned": 22,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/shapely": {
+   "version": "2.2.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 43 files",
+   "files_scanned": 43,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/simplejson": {
+   "version": "4.2.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 9 files",
+   "files_scanned": 9,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/six": {
+   "version": "1.17.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/sniffio": {
+   "version": "1.3.1",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/starlette": {
+   "version": "1.8.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 36 files",
+   "files_scanned": 36,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/statsmodels": {
+   "version": "0.15.0",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 447 files",
+   "files_scanned": 447,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 2
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/sympy": {
+   "version": "1.14.0",
+   "score": 84,
+   "label": "safe",
+   "reason": "no critical or high findings in 828 files",
+   "files_scanned": 828,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 1
+   },
+   "capabilities": 43,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/tabulate": {
+   "version": "0.10.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tenacity": {
+   "version": "9.2.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 13 files",
+   "files_scanned": 13,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/termcolor": {
+   "version": "3.3.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 3,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/threadpoolctl": {
+   "version": "3.7.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tiktoken": {
+   "version": "0.14.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 7,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 1,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {
+    "low: Unpinned remote resource (branch/latest/HEAD)": 1
+   }
+  },
+  "pypi/toml": {
+   "version": "0.10.2",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tomli": {
+   "version": "2.5.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 4,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/toolz": {
+   "version": "1.2.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 16 files",
+   "files_scanned": 16,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tornado": {
+   "version": "6.5.10",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 34 files",
+   "files_scanned": 34,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 2
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tqdm": {
+   "version": "4.70.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 32 files",
+   "files_scanned": 32,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/traitlets": {
+   "version": "5.16.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 21 files",
+   "files_scanned": 21,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 6,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/transformers": {
+   "version": "5.20.1",
+   "score": 53,
+   "label": "review",
+   "reason": "one high finding in its code: generic API Key assignment",
+   "files_scanned": 2764,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 24,
+    "low": 2,
+    "info": 0
+   },
+   "capabilities": 110,
+   "not_installed": 0,
+   "rules": {
+    "high: Generic API Key assignment": 1,
+    "low: Unpinned remote resource (branch/latest/HEAD)": 2,
+    "medium: ANSI escape sequence in text (hidden/spoofed content)": 9,
+    "medium: torch.load (pickle-backed) (Python)": 15
+   }
+  },
+  "pypi/typeguard": {
+   "version": "4.6.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/typer": {
+   "version": "0.27.3",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 33 files",
+   "files_scanned": 33,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 9,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/types-requests": {
+   "version": "2.33.0.20261006",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/typing-extensions": {
+   "version": "4.16.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/tzlocal": {
+   "version": "5.4.4",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 5,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 1,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/ujson": {
+   "version": "6.0.0",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; no code to inspect",
+   "files_scanned": 0,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/unidecode": {
+   "version": "1.4.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 193 files",
+   "files_scanned": 193,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/urllib3": {
+   "version": "2.8.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 36 files",
+   "files_scanned": 36,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/uvicorn": {
+   "version": "0.54.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 39 files",
+   "files_scanned": 39,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/validators": {
+   "version": "0.36.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 32 files",
+   "files_scanned": 32,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/watchdog": {
+   "version": "6.0.0",
+   "score": 82,
+   "label": "safe",
+   "reason": "no critical or high findings in 24 files",
+   "files_scanned": 24,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {
+    "medium: subprocess.run / Popen (Python)": 1
+   }
+  },
+  "pypi/websocket-client": {
+   "version": "1.9.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 15 files",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/websockets": {
+   "version": "17.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 49 files",
+   "files_scanned": 49,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 3,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/werkzeug": {
+   "version": "3.1.9",
+   "score": 65,
+   "label": "review",
+   "reason": "one high finding in its code: untrusted input passed to an eval/exec method (Python)",
+   "files_scanned": 51,
+   "severity": {
+    "critical": 0,
+    "high": 1,
+    "medium": 1,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {
+    "high: Untrusted input passed to an eval/exec method (Python)": 1,
+    "medium: exec() call (Python)": 1
+   }
+  },
+  "pypi/wheel": {
+   "version": "0.48.0",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 15 files",
+   "files_scanned": 15,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/wrapt": {
+   "version": "2.5.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 14 files",
+   "files_scanned": 14,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/xgboost": {
+   "version": "3.4.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 28 files",
+   "files_scanned": 28,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 2,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/xlrd": {
+   "version": "2.0.2",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 11 files",
+   "files_scanned": 11,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 4,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/xmltodict": {
+   "version": "1.0.4",
+   "score": 74,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 1,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/yarl": {
+   "version": "1.25.1",
+   "score": 86,
+   "label": "safe",
+   "reason": "nothing found in 8 files",
+   "files_scanned": 8,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  },
+  "pypi/zipp": {
+   "version": "4.1.1",
+   "score": 82,
+   "label": "safe",
+   "reason": "nothing found; little code to inspect",
+   "files_scanned": 6,
+   "severity": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "info": 0
+   },
+   "capabilities": 0,
+   "not_installed": 0,
+   "rules": {}
+  }
+ }
+}
