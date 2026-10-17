@@ -1,0 +1,19 @@
+intake reader: https://github.com/probityai/agent-evidence-vectors at 7e501506c35ddfe5da64bb5885d668f505f7d6d3
+module sha256: 3d7733e02ef2e38e5a3204d3188f2312876b6b615195bbb93b23ce122c5c1a11
+
+C1, from the repository root:
+$ PYTHONPATH=aev/packaging PYTHONHASHSEED=0 python3 -m agent_evidence_vectors.w3cintake docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/RECORD.json --root .
+bytes on disk: read under .; run: W3C-I-002, W3C-I-003, W3C-I-008, W3C-I-019, W3C-I-023, W3C-I-024, W3C-I-025, W3C-I-026, W3C-I-028, W3C-I-033
+verdict: admitted, no intake rejection ground applies
+exit 0
+stdout sha256 283c25db22c5b22d4894b0a5f0a72052b33a861ece5e61df320dbfc24a8d4fa4
+
+criterion 13, the same reader on its own corpus, from its checkout:
+$ python3 -m agent_evidence_vectors.w3cintake --judge vectors-w3c-intake
+suite: w3c-intake-v2-conformance
+members: 137
+  accept: 53
+  reject: 84
+verdict: every member behaves as MANIFEST.json declares
+exit 0
+stdout sha256 dffce81055177c170433a842c1a248b79428864be2518b4cd29826dd5f097508

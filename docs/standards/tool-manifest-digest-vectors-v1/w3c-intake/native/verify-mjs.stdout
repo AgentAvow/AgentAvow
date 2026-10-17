@@ -1,0 +1,89 @@
+tool-manifest-digest-v1
+agentgraph (AgentAvow attestation layer, did:web:agentgraph.co).
+subject mcp:https://mcp.deepwiki.com/mcp
+
+per-tool digests recompute from the served definitions
+  ok    tool:ask_wiki_question
+  ok    tool:read_wiki_contents
+  ok    tool:read_wiki_structure
+  ok    served tool count equals signed tool count
+  ok    unsigned toolDigests map equals the signed scan.toolDigests
+
+key encoding
+  ok    key_encoding pair count
+  ok    "ask_wiki_question" -> tool:ask_wiki_question
+  ok    "a=b" -> tool:a%3Db
+  ok    "x%y" -> tool:x%25y
+  ok    "read file" -> tool:read%20file
+  ok    "tab\there" -> tool:tab%09here
+  ok    "héllo" -> tool:h%C3%A9llo
+  ok    "search 🙂" -> tool:search%20%F0%9F%99%82
+  ok    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" -> tool:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  ok    "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" -> tool:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc~a2efa32a90eaeb9b
+  ok    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" -> tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa~c2a908d98f5df987
+  ok    "éééééééééééééééééééééééééééééééééééééééééééééééééé" -> tool:%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9%C3%A9~2d18fe4b61f01139
+  ok    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé" -> tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%~cbaf05a1cc450848
+  ok    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaéééééééééééééééééééé" -> tool:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%C~a1a40b6757b6805f
+
+vectors
+  ok    tool-match: signature_valid
+  ok    tool-match: canonical_bytes
+  ok    tool-match: subject_binds
+  ok    tool-match: tool_binds
+  ok    tool-match: tool_digest_binds
+  ok    tool-match: fresh
+  ok    tool-match: rely
+  ok    unknown-tool: signature_valid
+  ok    unknown-tool: canonical_bytes
+  ok    unknown-tool: subject_binds
+  ok    unknown-tool: tool_binds
+  ok    unknown-tool: tool_digest_binds
+  ok    unknown-tool: fresh
+  ok    unknown-tool: rely
+  ok    tool-drift: signature_valid
+  ok    tool-drift: canonical_bytes
+  ok    tool-drift: subject_binds
+  ok    tool-drift: tool_binds
+  ok    tool-drift: tool_digest_binds
+  ok    tool-drift: fresh
+  ok    tool-drift: rely
+  ok    wrong-subject: signature_valid
+  ok    wrong-subject: canonical_bytes
+  ok    wrong-subject: subject_binds
+  ok    wrong-subject: tool_binds
+  ok    wrong-subject: tool_digest_binds
+  ok    wrong-subject: fresh
+  ok    wrong-subject: rely
+  ok    past-expiry: signature_valid
+  ok    past-expiry: canonical_bytes
+  ok    past-expiry: subject_binds
+  ok    past-expiry: tool_binds
+  ok    past-expiry: tool_digest_binds
+  ok    past-expiry: fresh
+  ok    past-expiry: rely
+  ok    tampered-payload: signature_valid
+  ok    tampered-payload: canonical_bytes
+  ok    tampered-payload: subject_binds
+  ok    tampered-payload: tool_binds
+  ok    tampered-payload: tool_digest_binds
+  ok    tampered-payload: fresh
+  ok    tampered-payload: rely
+  ok    boundary-fresh: signature_valid
+  ok    boundary-fresh: canonical_bytes
+  ok    boundary-fresh: subject_binds
+  ok    boundary-fresh: tool_binds
+  ok    boundary-fresh: tool_digest_binds
+  ok    boundary-fresh: fresh
+  ok    boundary-fresh: rely
+
+properties under test
+  ok    positive case relies
+  ok    a tool the scan never saw does not bind, and its digest is not evaluated
+  ok    a changed definition for a known tool does not bind
+  ok    a grade for one server cannot be re-attached to another
+  ok    a signed verdict does not verify forever
+  ok    canonical form is not authenticity: tampered payload is canonical yet unsigned
+  ok    a gate time inside the window by a sub-millisecond remainder is fresh and relies
+  ok    every negative fails exactly one axis
+
+all checks passed
