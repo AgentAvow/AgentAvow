@@ -4363,7 +4363,9 @@ def _compute_manifest_digest(tool_digests: dict[str, str]) -> str | None:
 
 
 _RESPONSE_SEND_RE = re.compile(
-    r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(")
+    r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(|"
+    # any receiver with an HTTP status code: minifiers rename `res` (`_.status(400).send(`)
+    r"[\w$]\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)\s*\.\s*send\s*\(")
 
 
 _QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)

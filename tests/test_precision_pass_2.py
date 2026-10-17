@@ -320,6 +320,24 @@ class TestExfilRules:
                 "  res.send(handle(b))\n})\n")
         assert not _named(_scan(code, "start-server.ts"), "Lethal trifecta")
 
+    def test_minified_response_send_is_not_outbound(self):
+        # notion-mcp-server's bundled bin/cli.mjs: the minifier renamed `res` to `_`
+        code = ("c=o.authToken||process.env.AUTH_TOKEN;\n"
+                "s.post(\"/mcp\",async(g,_)=>{let b=g.headers[\"mcp-session-id\"];"
+                "if(!b){_.status(400).send(\"Invalid or missing session ID\");return}});\n"
+                "let t=process.env.NOTION_TOKEN;await fetch(\"https://api.notion.com/v1/users/me\");\n")
+        assert not _named(_scan(code, "cli.mjs"), "Lethal trifecta")
+
+    @pytest.mark.parametrize("send", [
+        "sock.send(key)",                    # no status code: still a send
+        "_.status(code).send(key);x.send(key)",  # a real send beside a response
+    ])
+    def test_minified_trifecta_still_fires(self, send):
+        code = ("const key = process.env.OPENAI_API_KEY\n"
+                "s.post('/mcp', async (req, _) => {\n  const b = req.body\n"
+                f"  {send}\n}})\n")
+        assert _named(_scan(code, "server.mjs"), "Lethal trifecta")
+
     def test_real_trifecta_still_fires(self):
         code = ("const key = process.env.OPENAI_API_KEY\n"
                 "app.post('/mcp', async (req, res) => {\n  const b = req.body\n"

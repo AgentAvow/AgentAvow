@@ -432,13 +432,13 @@
   },
   "npm/@notionhq/notion-mcp-server": {
    "version": "2.5.2",
-   "score": 68,
-   "label": "review",
-   "reason": "one high finding in its code: lethal trifecta: private-data read + untrusted input + outbound netwo\u2026",
+   "score": 88,
+   "label": "safe",
+   "reason": "nothing found in 23 files; 1 file over 500 KB was not fully read",
    "files_scanned": 23,
    "severity": {
     "critical": 0,
-    "high": 1,
+    "high": 0,
     "medium": 0,
     "low": 1,
     "info": 0
@@ -446,7 +446,6 @@
    "capabilities": 5,
    "not_installed": 0,
    "rules": {
-    "high: Lethal trifecta: private-data read + untrusted input + outbound network": 1,
     "low: Source file too large to scan in full": 1
    }
   },
