@@ -1,0 +1,73 @@
+name: Install-check corpus
+
+# Nightly recall/precision watch over a second pinned 400-package corpus: the top 200 npm
+# + top 200 PyPI packages by AgentAvow adoption (tests/corpus/install_check/manifest.json),
+# scored through the production package path and compared with the committed
+# tests/corpus/install_check/expected.json. Fails, listing the packages, when any
+# package's three-phrase label moves.
+#
+# Not a duplicate of static-corpus.yml: that job scans a download-ranked corpus on
+# scanner PRs (path-filtered) and fails on any score/count drift; this one runs nightly
+# over whatever reached main, on a different package set (129 overlap), and fails only
+# on label moves. Downloads are sequential with a delay; archives are verified by
+# sha256 and NEVER executed or installed.
+
+on:
+  schedule:
+    - cron: "7 10 * * *"   # nightly, ~10:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-check-corpus
+  cancel-in-progress: false
+
+jobs:
+  corpus:
+    name: Install-check corpus (400 packages, label gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DEBUG: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[prod,dev]"
+
+      - name: Restore archive cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/agentavow-install-check-corpus
+          key: install-check-corpus-${{ hashFiles('tests/corpus/install_check/manifest.json') }}
+          restore-keys: |
+            install-check-corpus-
+
+      - name: Run the label gate
+        run: >-
+          python -I scripts/corpus/run_install_check_corpus.py
+          --workers 4
+          --delay 0.25
+          --report "$RUNNER_TEMP/install-check-corpus-report.md"
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/install-check-corpus-report.md" ]; then
+            head -c 900000 "$RUNNER_TEMP/install-check-corpus-report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-check-corpus-report
+          path: ${{ runner.temp }}/install-check-corpus-report.md
+          if-no-files-found: ignore

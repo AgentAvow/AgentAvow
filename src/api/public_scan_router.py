@@ -2659,6 +2659,20 @@ _HISTORY_CACHE_PREFIX = "public_scan_history:"
 _HISTORY_CACHE_TTL = 3600  # 1 hour
 
 
+def _stored_vulnerabilities_count(vulns: object) -> int:
+    """Findings in a stored ``FrameworkSecurityScan.vulnerabilities``: a scanner row is
+    a dict (``total_findings``, else its ``findings`` list); a bridge import a list."""
+    if isinstance(vulns, list):
+        return len(vulns)
+    if isinstance(vulns, dict):
+        total = vulns.get("total_findings")
+        if isinstance(total, int) and not isinstance(total, bool):
+            return total
+        found = vulns.get("findings")
+        return len(found) if isinstance(found, list) else 0
+    return 0
+
+
 async def _lookup_entity_by_repo(repo: str, db: AsyncSession):
     """Resolve an `owner/repo` slug to an Entity row, or None."""
     from src.models import Entity
@@ -2773,9 +2787,7 @@ async def public_scan_history(
             "framework": row.framework,
             "scan_result": row.scan_result,
             "scanned_at": row.scanned_at.isoformat() if row.scanned_at else "",
-            "vulnerabilities_count": (
-                len(row.vulnerabilities) if isinstance(row.vulnerabilities, list) else 0
-            ),
+            "vulnerabilities_count": _stored_vulnerabilities_count(row.vulnerabilities),
         }
         for row in scan_rows
     ]
