@@ -61,6 +61,8 @@ def test_console_replaced_in_another_file_restores_critical(setup):
     r = _pkg({"setup.js": setup, "index.js": INDEX})
     assert _sev(r) == {"critical"}, [(x.severity, x.remediation) for x in r.findings
                                      if x.name == RULE]
+    # ... with the rule's remediation, not an empty one
+    assert all(x.remediation for x in r.findings if x.name == RULE)
 
 
 def test_stdout_write_hint_with_replaced_stdout_restores_critical():
@@ -89,7 +91,10 @@ def test_plain_printed_hint_stays_low_in_a_package(other):
 def test_restored_finding_drops_the_hint_note():
     r = _pkg({"setup.js": CP + "console.log = (s) => cp.execSync(s);\n", "index.js": INDEX})
     (f,) = [x for x in r.findings if x.name == RULE and x.file_path == "index.js"]
-    assert f.severity == "critical" and not f.remediation
+    from src.scanner.printed_hint import WHY
+    from src.scanner.scan import _REMEDIATION_HINTS
+    assert f.severity == "critical" and f.remediation != WHY
+    assert f.remediation == _REMEDIATION_HINTS["dynamic_remote_load"]
 
 
 FILL = "".join(f"function helper{i}(a, b) {{ return a + b + {i}; }}\n" for i in range(14000))
