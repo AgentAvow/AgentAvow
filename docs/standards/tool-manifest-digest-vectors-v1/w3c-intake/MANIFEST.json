@@ -1,0 +1,205 @@
+{
+  "artifacts": [
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/README.md",
+      "sha256": "0b2b53c7f7ea3227268c1f728907ab27cb6eba118fdfabf881bbe67ebd39be71"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast-pin.json",
+      "sha256": "cd98f5b63132bfff170682e6f979296633f778ba032d5f40a1249f4915618002"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast_compat.py",
+      "sha256": "f2949c2f90bed75e5b4c308799421140939e1861311679993aff0c953f1ff3af"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/probity-pin.json",
+      "sha256": "a8b2f126764c92758e91522fc159c3b063979d5e7df0414573fbb86c6e17d0e9"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/probity_compat.py",
+      "sha256": "a50569bb2cd28d4f847f5d42083b3fb3ff2aa9be32f6ec6ec4f0e9a4e80b5b50"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/run-probity.sh",
+      "sha256": "2506a3a3d7655a1af1330e549b93e647f76a1d99d95664cf4f248ac3ab92d364"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/generate.mjs",
+      "sha256": "5fd6d1dbcd8138446a229cc46ed4366d275bbd09da91e919a3cfc0cd0b9f1105"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/nanosecond-window-vectors.json",
+      "sha256": "5c17415e2db93b987f1ce5d244a542f22cf7a373fe952a63d8d0f416d0604d20"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/source.json",
+      "sha256": "b140d2bbd0b382e87ea5ada36f174380b878b25bfb17888c8cd9160c088482f9"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/test-time.mjs",
+      "sha256": "7d15e5a4cedc85023466b7786f8139287bc73882ce74e12501ae8ea404ab2716"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/time-contract.md",
+      "sha256": "2ab2ce3f4c961c5c5fce1b3473897864c9f524406f5ec424e2328480370ba9f2"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+      "sha256": "39016e5f568a7404f431ab12a2680c9c30178d1bd5c97171e4ff76cf46deffcf"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py",
+      "sha256": "5ff729a8a94a8c346e39641a95b508158cbc29d186934d0cfabd83c8f81ef2d8"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+      "sha256": "0d47327bbaf5b172b8c3e30151df18920bd05ff0b9af21c08ec1153fa010eb3c"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/heldfast-profiles.json",
+      "sha256": "bf7e2345181367b267830ec025416bf9cf884a8f9388af7e3a1fdc697659ab7a"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/native-verify-mjs.json",
+      "sha256": "1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/probity-map-reader.json",
+      "sha256": "48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+      "sha256": "0add3b4d7e5a53238f36bfdbb257d6bd88674cea128d9bfd69f8c5bc2ffe4a67"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-case-tool-drift.json",
+      "sha256": "f25b6a5e56a19f03b31b3bcac6f369b22bd2ecfbb692673315181fd41bcfdb5c"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-definition-ask_wiki_question.json",
+      "sha256": "2edc74755734ad6960b4474463deaaa0ca570e08dcf59e7e9f2bdb56f90c8447"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-key-encoding-01.json",
+      "sha256": "ab3365fb6cb7e42f35457aa8b1b7d3f154a17ef0b61f99c460857cd1f52d53ac"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/not-emitted.json",
+      "sha256": "e148b9fe95f767860f7041c2e7954f0a7ad646c950a6ed782c84529f0172a7a8"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json",
+      "sha256": "31ecebedfbfbe64338dcac81b4e645b87338cbe4e4241d630143041591a40eaf"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/native-verify-mjs.json",
+      "sha256": "7032e5cc7dbdf6dd0e29dbf7d8f606d0fcc45c83aefb99bf205ff626feca577b"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json",
+      "sha256": "ddc1e64e25c49825380163263e1d622b7e87db51e09843c1d550e64a80dad611"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/run.json",
+      "sha256": "663f36605ac4a11b65251522daead7c3088bce73a8793f60562535716d933734"
+    },
+    {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/validate.py",
+      "sha256": "de1c1b3d6f1446653238d248740a8a7bf4563ff97cb0a6a4efc277d80d8498a3"
+    }
+  ],
+  "closed": true,
+  "corpusDigest": "83aef3b5c8a5ef20435d9210e31a1b19bb0a96b68717d7bc7234793ef0d83469",
+  "corpusDigestRule": "sha256-listing-v1 (SHA-256 over '<sha256>  <path>\\n' lines sorted by path, paths relative to the repository root) over the member file and every artifact; corpus_digest in docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/intake.py",
+  "format": "agentavow/tool-manifest-digest-v1-intake-manifest/v1",
+  "ids": [
+    "definition-digest/tool:ask_wiki_question",
+    "definition-digest/tool:read_wiki_contents",
+    "definition-digest/tool:read_wiki_structure",
+    "definition-count",
+    "unsigned-map-equals-signed",
+    "key-encoding-count",
+    "key-encoding/00",
+    "key-encoding/01",
+    "key-encoding/02",
+    "key-encoding/03",
+    "key-encoding/04",
+    "key-encoding/05",
+    "key-encoding/06",
+    "key-encoding/07",
+    "key-encoding/08",
+    "key-encoding/09",
+    "key-encoding/10",
+    "key-encoding/11",
+    "key-encoding/12",
+    "case/tool-match/signature_valid",
+    "case/tool-match/canonical_bytes",
+    "case/tool-match/subject_binds",
+    "case/tool-match/tool_binds",
+    "case/tool-match/tool_digest_binds",
+    "case/tool-match/fresh",
+    "case/tool-match/rely",
+    "case/unknown-tool/signature_valid",
+    "case/unknown-tool/canonical_bytes",
+    "case/unknown-tool/subject_binds",
+    "case/unknown-tool/tool_binds",
+    "case/unknown-tool/tool_digest_binds",
+    "case/unknown-tool/fresh",
+    "case/unknown-tool/rely",
+    "case/tool-drift/signature_valid",
+    "case/tool-drift/canonical_bytes",
+    "case/tool-drift/subject_binds",
+    "case/tool-drift/tool_binds",
+    "case/tool-drift/tool_digest_binds",
+    "case/tool-drift/fresh",
+    "case/tool-drift/rely",
+    "case/wrong-subject/signature_valid",
+    "case/wrong-subject/canonical_bytes",
+    "case/wrong-subject/subject_binds",
+    "case/wrong-subject/tool_binds",
+    "case/wrong-subject/tool_digest_binds",
+    "case/wrong-subject/fresh",
+    "case/wrong-subject/rely",
+    "case/past-expiry/signature_valid",
+    "case/past-expiry/canonical_bytes",
+    "case/past-expiry/subject_binds",
+    "case/past-expiry/tool_binds",
+    "case/past-expiry/tool_digest_binds",
+    "case/past-expiry/fresh",
+    "case/past-expiry/rely",
+    "case/tampered-payload/signature_valid",
+    "case/tampered-payload/canonical_bytes",
+    "case/tampered-payload/subject_binds",
+    "case/tampered-payload/tool_binds",
+    "case/tampered-payload/tool_digest_binds",
+    "case/tampered-payload/fresh",
+    "case/tampered-payload/rely",
+    "case/boundary-fresh/signature_valid",
+    "case/boundary-fresh/canonical_bytes",
+    "case/boundary-fresh/subject_binds",
+    "case/boundary-fresh/tool_binds",
+    "case/boundary-fresh/tool_digest_binds",
+    "case/boundary-fresh/fresh",
+    "case/boundary-fresh/rely",
+    "property/positive-case-relies",
+    "property/unknown-tool-does-not-bind",
+    "property/changed-definition-does-not-bind",
+    "property/wrong-subject-does-not-bind",
+    "property/expiry-applies",
+    "property/canonical-is-not-authentic",
+    "property/boundary-fresh-relies",
+    "property/negatives-fail-one-axis"
+  ],
+  "ids-rule": "declared from the vector file before the checker runs: one definition-digest/<key> per signed toolDigests key, definition-count, unsigned-map-equals-signed, key-encoding-count, key-encoding/NN per key_encoding pair, case/<name>/<axis> per expected axis of each vector, and the property checks verify.mjs states for this set",
+  "member-file": {
+    "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+    "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+  },
+  "package": "docs/standards/tool-manifest-digest-vectors-v1",
+  "suite": "tool-manifest-digest-v1"
+}

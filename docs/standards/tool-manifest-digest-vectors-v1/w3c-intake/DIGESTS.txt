@@ -1,0 +1,2 @@
+# tool-manifest-digest-v1 intake anchor: the corpus digest and the manifest that declares it
+83aef3b5c8a5ef20435d9210e31a1b19bb0a96b68717d7bc7234793ef0d83469  docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json
