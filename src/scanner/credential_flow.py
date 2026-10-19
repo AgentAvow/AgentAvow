@@ -34,7 +34,7 @@ import functools
 import re
 from dataclasses import dataclass, field
 
-from src.scanner.skill_key_flow import host_matches_key, strip_comments
+from src.scanner.skill_key_flow import host_matches_key, is_local_host, strip_comments
 
 _NAME = r"([A-Z][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD))"
 # A named key pulled OUT of a .env (`line.startswith("OPENROUTER_API_KEY=")`,
@@ -235,6 +235,76 @@ def _lex(src: str, python: bool) -> _Lexed:
             continue
         i += 1
     return _Lexed("".join(out), lits)
+
+
+# ---------------------------------------------------------------------------
+# The whole environment (``env_dump_exfil_hits``)
+# ---------------------------------------------------------------------------
+
+_ENV_DUMP = "envdump"
+# The whole environment serialized or copied, on code with string bodies blanked. A
+# single variable (`JSON.stringify(process.env.FOO)`, `os.environ["X"]`) is not a
+# dump, and neither is an alias (`const env = process.env`: `env.API_URL` is one var).
+_ENV_TAIL = r"(?!\s*(?:\.|\[|\?\.))"
+_JS_ENV_DUMP_RE = re.compile(
+    r"JSON\.stringify\(\s*process\.env" + _ENV_TAIL + r"|\.\.\.\s*process\.env" + _ENV_TAIL
+    + r"|Object\.(?:entries|values|assign)\([^()]*?process\.env" + _ENV_TAIL)
+_PY_ENV_DUMP_RE = re.compile(
+    r"\bdict\(\s*(?:\*\*\s*)?os\.environ\s*\)|\bos\.environ\.copy\(\s*\)"
+    r"|\b(?:json\.dumps|str|repr)\(\s*(?:dict\(\s*)?os\.environ" + _ENV_TAIL
+    + r"|\{\s*\*\*\s*os\.environ" + _ENV_TAIL)
+# `Object.entries(process.env).filter(…)`: a chosen subset (a prefix), not a dump.
+_FILTERED_RE = re.compile(r"\s*\)?\s*\.\s*filter\s*\(")
+# The bare mapping as a whole argument / body of a send (`axios.post(url, process.env)`).
+_BARE_ENV_ARG_RE = re.compile(
+    r"(?:^\(|,|\b(?:body|json|data)\s*[:=])\s*(?:process\.env|os\.environ)\s*[,)}]")
+# Child-process launches: the environment handed to them is not sent anywhere.
+_JS_CHILD_CALL_RE = re.compile(
+    r"(?<![\w$])(?:spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|execa|execaSync"
+    r"|execaCommand|execaCommandSync|execaNode)\s*\(|\bnew\s+Worker\s*\(")
+_PY_CHILD_CALL_RE = re.compile(
+    r"\bsubprocess\.\w+\s*\(|(?<![\w.])(?:Popen|check_output|check_call|run|call)\s*\("
+    r"|\bos\.(?:exec\w*|spawn\w*|system|popen|posix_spawnp?)\s*\("
+    r"|\basyncio\.create_subprocess_\w+\s*\(|\bpexpect\.\w+\s*\(")
+# `res.status(200).send(…)`: the HTTP response to the caller, not an outbound send.
+_RESPONSE_SEND_RE = re.compile(
+    r"(?<![\w$.])(?:res|resp|response|reply)\s*\.\s*status\s*\(\s*\d+\s*\)\s*\.\s*send\s*\($")
+# A file that can reach the network at all (checked on the raw text: module names are
+# string literals).
+_JS_OUTBOUND_RE = re.compile(
+    r"""(?:require\s*\(\s*|from\s+|import\s*\(\s*)['"](?:node:)?(?:https?|net|tls|dgram|http2|"""
+    r"""ws|axios|node-fetch|got|undici|needle|superagent|socket\.io-client|request)['"]"""
+    r"""|(?<![\w.$])fetch\s*\(|\bnew\s+WebSocket\s*\(|\baxios\b|\bsendBeacon\s*\(""")
+_PY_OUTBOUND_RE = re.compile(
+    r"^\s*(?:import\s+(?:[\w.]+\s*,\s*)*|from\s+)(?:requests|httpx|urllib3?|socket|"
+    r"aiohttp|websockets?|websocket|smtplib|ftplib|http\.client|pycurl)\b|\burlopen\s*\(",
+    re.MULTILINE)
+
+
+def _blank_child_calls(code: str, python: bool) -> str:
+    rx = _PY_CHILD_CALL_RE if python else _JS_CHILD_CALL_RE
+    if not rx.search(code):
+        return code
+    out = list(code)
+    for m in rx.finditer(code):
+        a = m.end() - 1
+        for k in range(a, _arg_span(code, a)):
+            out[k] = " "
+    return "".join(out)
+
+
+def _dump_in(code: str, python: bool) -> bool:
+    """The whole environment serialized / copied in ``code`` (outside a child-process
+    call's arguments, and not narrowed by a ``.filter``)."""
+    rx = _PY_ENV_DUMP_RE if python else _JS_ENV_DUMP_RE
+    if not rx.search(code):
+        return False
+    code = _blank_child_calls(code, python)
+    return any(python or not _FILTERED_RE.match(code, m.end()) for m in rx.finditer(code))
+
+
+def _is_response_send(code: str, end: int) -> bool:
+    return _RESPONSE_SEND_RE.search(code[max(0, end - 80):end]) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -471,9 +541,12 @@ class _Sink:
 
 
 class _Analyzer:
-    def __init__(self, src: str, python: bool) -> None:
+    def __init__(self, src: str, python: bool, dump: bool = False) -> None:
         self.src = src
         self.python = python
+        # Environment-dump mode (``env_dump_exfil_hits``): the source is the whole
+        # environment serialized or copied, not a credential file.
+        self.dump = dump
         self.lx = _lex(src, python)
         self.stmts = _statements(src, self.lx, python)
         self.read_re = _PY_READ_RE if python else _JS_READ_RE
@@ -485,7 +558,12 @@ class _Analyzer:
         # Function headers: index -> offset (in the statement) where the header ends,
         # so a method NAMED `fetch` / `post` is not read as a call of one.
         self.header_end: dict[int, int] = {}
-        self.lit_kinds = [self._lit_kind(st) for st in self.stmts]
+        self.lit_kinds = ([None] * len(self.stmts) if dump
+                          else [self._lit_kind(st) for st in self.stmts])
+        self.dump_kinds = [(_ENV_DUMP if dump and _dump_in(st.code, python) else None)
+                           for st in self.stmts]
+        # The bare mapping as a send's argument: checked in the call, never carried.
+        self.bare_env = [dump and bool(_BARE_ENV_ARG_RE.search(st.code)) for st in self.stmts]
         code = strip_comments(src, "x.py" if python else "x.js")
         self.file_keys = {n for m in _EXTRACT_RE.finditer(code) for n in m.groups() if n}
 
@@ -550,8 +628,13 @@ class _Analyzer:
             has_read = bool(self.read_re.search(code))
             src_kind = next((k for nm, k in self.sources.items()
                              if _call_re(nm).search(code)), None)
-            ref_kind = next((k for nm, k in vis_t.items() if _ref_re(nm).search(code)), None)
-            value_kind = (path_kind if (path_kind and has_read) else None) or src_kind
+            # A value handed to a child process (`spawn(cmd, {env: {...process.env}})`,
+            # `subprocess.run(cmd, env=env)`) is not carried by what the call returns.
+            ref_code = _blank_child_calls(code, self.python) if self.dump else code
+            ref_kind = next((k for nm, k in vis_t.items() if _ref_re(nm).search(ref_code)),
+                            None)
+            value_kind = ((path_kind if (path_kind and has_read) else None) or src_kind
+                          or self.dump_kinds[idx])
             carried = value_kind or ref_kind
 
             targets = self._targets(code)
@@ -587,11 +670,14 @@ class _Analyzer:
             if carried and _RETURN_RE.search(code):
                 returns = returns or carried
 
-            if not (vis_t or vis_p or lit_kind or self.sources):
+            if not (vis_t or vis_p or lit_kind or self.sources or self.dump_kinds[idx]
+                    or self.bare_env[idx]):
                 continue                           # nothing here can carry a credential
             skip_to = self.header_end.get(idx, 0)
             for send_re in self.send_res:
                 for m in send_re.finditer(code, skip_to):
+                    if self.dump and _is_response_send(code, m.end()):
+                        continue                   # an HTTP response to the caller
                     a = m.end() - 1
                     b = _arg_span(code, a)
                     self._check_call(st, a, b, vis_t, vis_p, hits, param_hits)
@@ -628,6 +714,9 @@ class _Analyzer:
         if self.read_re.search(span):
             kind = self._lit_kind(st, st.start + a, st.start + b) or next(
                 (k for nm, k in vis_p.items() if _ref_re(nm).search(span)), None)
+        if not kind and self.dump and (_dump_in(span, self.python)
+                                       or _BARE_ENV_ARG_RE.search(span)):
+            kind = _ENV_DUMP
         if not kind:
             for nm, k in self.sources.items():
                 if _call_re(nm).search(span):
@@ -662,6 +751,10 @@ class _Analyzer:
             hits.append(_Hit(abs_a, kind))
 
     def _excused(self, kind: str, hosts: list[str], auth_only: bool) -> bool:
+        if kind == _ENV_DUMP:
+            # The whole environment is never authentication; only a loopback
+            # destination (a local daemon the tool talks to) is not a network sink.
+            return bool(hosts) and all(is_local_host(h) for h in hosts)
         if hosts:
             if all(_official(kind, h) for h in hosts):
                 return True
@@ -713,7 +806,7 @@ class _Analyzer:
                 if ph:
                     self.sinks[name] = _Sink(ph)
             if name not in self.sources and (
-                    any(self.lit_kinds[j] for j in idxs)
+                    any(self.lit_kinds[j] or self.dump_kinds[j] for j in idxs)
                     or any(_call_re(s).search(self.stmts[j].code)
                            for s in self.sources for j in idxs)):
                 _h, _ph, ret = self.run(idxs)
@@ -768,3 +861,32 @@ def credential_exfil_hits(content: str, lang: str | None, *,
             seen.add(line)
             out.append((line, h.kind))
     return out
+
+
+def env_dump_exfil_hits(content: str, lang: str | None, *, lf=None) -> list[int]:
+    """Line numbers of sends that carry the whole environment (``JSON.stringify(
+    process.env)``, ``{...process.env}``, ``Object.entries(process.env)``,
+    ``dict(os.environ)``, ``os.environ.copy()``, ``json.dumps(dict(os.environ))``) in
+    ``content`` (python / javascript / typescript), followed through the same flow as a
+    credential file's contents. A copy handed to a child process
+    (``spawn(cmd, {env: {...process.env}})``) is not a send; nor is a send to a
+    loopback host or an HTTP response (``res.status(200).send(…)``)."""
+    if lang not in ("python", "javascript", "typescript"):
+        return []
+    python = lang == "python"
+    hint_re = _PY_ENV_DUMP_RE if python else _JS_ENV_DUMP_RE
+    bare = re.compile(r"process\.env|os\.environ")
+    if not (lf.search(bare) if lf is not None else bare.search(content)):
+        return []
+    if not (_PY_OUTBOUND_RE if python else _JS_OUTBOUND_RE).search(content):
+        return []
+    if not hint_re.search(content) and not _BARE_ENV_ARG_RE.search(content):
+        return []
+    an = _Analyzer(content, python, dump=True)
+    if not any(an.dump_kinds) and not any(an.bare_env):
+        return []
+    fns = an.functions()
+    an.summarize(fns)
+    an.summarize(fns)
+    hits, _ph, _r = an.run(list(range(len(an.stmts))))
+    return sorted({content.count("\n", 0, h.pos) + 1 for h in hits})

@@ -2274,6 +2274,30 @@ def _is_blocking_exempt_path(path: str) -> bool:
     return False
 
 
+def _regrade_misnamed_tests(findings: list[Finding], texts: dict[str, str],
+                            allowlist: set[tuple[str, str]] | None) -> list[Finding]:
+    """Repository / local-tree scans: a file exempt for being a test (``test_*.py``,
+    ``*_test.py``, under ``tests/``) keeps the exemption only when it is test code
+    that nothing running imports or executes (``src.scanner.test_files``). Any other
+    such file is scanned again without the test downgrade and its defects are graded
+    as shipped code (``Finding.payload``: they block wherever the file sits).
+    Returns the new findings list."""
+    from src.scanner.test_files import not_really_tests
+
+    bad = not_really_tests(texts, runs_for_consumer=lambda q: not (
+        _is_blocking_exempt_path(q) or _is_infra_file(q)))
+    if not bad:
+        return findings
+    out = [f for f in findings if f.file_path not in bad]
+    for path in sorted(bad):
+        fresh, _p, _s = _scan_content(texts[path], path, allowlist, not_test=True)
+        for f in fresh:
+            if f.kind == "defect":
+                f.payload = True
+        out.extend(fresh)
+    return out
+
+
 def _blocking_crit_count(result: object) -> int:
     """Blocking-critical count, tolerant of lightweight fakes (fall back to raw)."""
     v = getattr(result, "shipped_critical_count", None)
@@ -3168,8 +3192,13 @@ def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
     *, metadata_text: bool = False, payloads_full_severity: bool = False,
+    not_test: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Scan file content for security issues and positive signals.
+
+    ``not_test`` (repository scans): the file is named / placed like a test but is not
+    test code, or code that runs uses it (``_regrade_misnamed_tests``): no test
+    downgrade.
 
     ``payloads_full_severity`` (artifact scans): in a downgraded file, payload-shaped
     defects keep their severity and are marked ``Finding.payload`` (see above).
@@ -3182,7 +3211,7 @@ def _scan_content(
     if allowlist is None:
         allowlist = set()
 
-    file_test_or_doc = _is_test_or_doc_file(file_path)
+    file_test_or_doc = _is_test_or_doc_file(file_path) and not not_test
     # CI/infra files (#3) are graded like tests/docs so a Dockerfile / workflow recipe
     # can't dominate the grade with a critical.
     is_infra = _is_infra_file(file_path)
@@ -3249,6 +3278,15 @@ def _scan_content(
                 _FILE_EXEC_SINK_RE.search(ln) for i, ln in enumerate(lines)
                 if i not in prose and not ln.lstrip().startswith(("#", "//", "*"))))
         return sink_memo[0]
+
+    out_memo: list[bool] = []
+
+    def _npx_output_replaced() -> bool:
+        """This file replaces / aliases console, stdout or print (memoized)."""
+        if not out_memo:
+            from src.scanner.printed_hint import output_replaced
+            out_memo.append(output_replaced({file_path: content}))
+        return out_memo[0]
 
     # Untrusted-input lines (request body / fetched content) for the "dynamic argv or
     # eval NEXT TO untrusted input" rules.
@@ -3918,6 +3956,7 @@ def _scan_content(
                         and _in_string_literal_at(line, dm.start())
                         and not _file_has_exec_sink()):
                     effective_severity, remote_payload = "medium", False
+                npx_pre = None
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
                         "`" if idx in _string_state()[1] else None, lines, idx,
@@ -3925,7 +3964,15 @@ def _scan_content(
                     # Help text a CLI prints (`'  npx browserslist\n'`) or a maintainer
                     # package.json script (`"release": "npx npmpub"`) never runs on a
                     # consumer's machine (precision PR 2).
-                    effective_severity = "low"
+                    from src.scanner import printed_hint
+                    if printed_hint.is_supported(file_path):
+                        # Printed help text: only while the output it is printed to is
+                        # the real one. The caller re-checks with every file in view.
+                        if not _npx_output_replaced():
+                            npx_pre = (effective_severity, remote_payload, None)
+                            effective_severity = "low"
+                    else:
+                        effective_severity = "low"
                 if name.startswith("Unpinned npx") and effective_severity == "medium":
                     # npx policy (2026-10-19): an npx/uvx that is only documented or
                     # printed is reported low; one that runs keeps medium.
@@ -4032,6 +4079,11 @@ def _scan_content(
                     remediation=(pipe_shell.WHY_OFFICIAL
                                  if pipe_class == pipe_shell.OFFICIAL else ""),
                 )
+                if npx_pre is not None:
+                    # What it would have been (not a dataclass field): repository,
+                    # local and package scans restore it when another file replaces
+                    # the output (`package_context.recheck_printed_hints`).
+                    finding.pre_hint = npx_pre  # type: ignore[attr-defined]
                 if (name == "curl/wget piped to shell"
                         and Path(file_path).name.lower() == "package.json"):
                     # A maintainer-only package.json script (`test:e2e:docker`) that no
@@ -4286,6 +4338,9 @@ def _scan_content(
                                         lf=lf))
     findings.extend(_credential_exfil_findings(
         content, file_path, lines, file_lang, allowlist,
+        payload=payload_mode and file_downgraded, lf=lf))
+    findings.extend(_env_dump_exfil_findings(
+        content, file_path, lines, file_lang, allowlist, findings,
         payload=payload_mode and file_downgraded, lf=lf))
     findings.extend(_browser_credential_findings(
         content, file_path, lines, file_lang, allowlist, findings,
@@ -4848,6 +4903,47 @@ def _credential_exfil_findings(
                 f"This code reads {what} from the user's machine and sends the contents "
                 "over the network. A tool has no reason to ship a local credential file "
                 "anywhere; remove the read or the send."
+            ),
+            payload=payload,
+        ))
+    return out
+
+
+_ENV_DUMP_EXFIL_NAME = "Whole environment sent outbound"
+
+
+def _env_dump_exfil_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], found: list[Finding], *, payload: bool,
+    lf: LineFilter | None = None,
+) -> list[Finding]:
+    """The whole environment (``JSON.stringify(process.env)``, ``{...process.env}``,
+    ``dict(os.environ)``, ``os.environ.copy()`` …) reaching an outbound send in the
+    same file (``credential_flow.env_dump_exfil_hits``). Critical and never
+    downgraded, like a credential file sent out. A line the per-line
+    "Environment variable exfil" rule already reported is not reported twice."""
+    from src.scanner.credential_flow import env_dump_exfil_hits
+
+    if _is_allowlisted(file_path, _ENV_DUMP_EXFIL_NAME, allowlist):
+        return []
+    seen = {f.line_number for f in found
+            if f.file_path == file_path and f.name == "Environment variable exfil"}
+    out = []
+    for line_no in env_dump_exfil_hits(content, file_lang, lf=lf):
+        if line_no in seen:
+            continue
+        out.append(Finding(
+            category="exfiltration",
+            name=_ENV_DUMP_EXFIL_NAME,
+            severity="critical",
+            file_path=file_path,
+            line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            remediation=(
+                "This code serializes or copies the whole process environment (every "
+                "API key, token and password in it) and sends it over the network. A "
+                "tool has no reason to ship its environment anywhere; send only the "
+                "values the request needs."
             ),
             payload=payload,
         ))
@@ -7100,6 +7196,12 @@ async def scan_repo(
         if fetch_failed:
             gaps["fetch_failed"] = fetch_failed
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
+        # A test-named file that is not test code (or that running code uses) is graded
+        # as shipped code.
+        result.findings = _regrade_misnamed_tests(result.findings, repo_texts, allowlist)
+        # A printed install hint lowered per file holds only with the whole repo in view.
+        from src.scanner.package_context import recheck_printed_hints
+        recheck_printed_hints(result.findings, repo_texts)
 
         # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
         oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)

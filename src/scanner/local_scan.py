@@ -42,6 +42,7 @@ from src.scanner.scan import (
     _finding_is_blocking,
     _load_allowlist,
     _oversized_scan_files,
+    _regrade_misnamed_tests,
     _scan_content,
     _scan_dependencies,
     _scan_oversized_text,
@@ -289,6 +290,12 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
             result.tool_digests[it["path"]] = digest
     from src.scanner.npm_scripts import restore_externally_invoked
     restore_externally_invoked(result.findings, local_texts)
+    # A test-named file that is not test code (or that running code uses) is graded as
+    # shipped code (same rule as scan_repo).
+    result.findings = _regrade_misnamed_tests(result.findings, local_texts, allowlist)
+    # A printed install hint lowered per file holds only with the whole tree in view.
+    from src.scanner.package_context import recheck_printed_hints
+    recheck_printed_hints(result.findings, local_texts)
 
     # --- oversized source files: head + tail, disclosed (as scan_repo does) ---
     oversized = _oversized_scan_files(tree, user_excludes)
