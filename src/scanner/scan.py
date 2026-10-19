@@ -2182,7 +2182,7 @@ def _is_test_or_doc_file(file_path: str) -> bool:
     if any(p in ("tests", "test", "spec", "__tests__", "testing") for p in parts):
         return True
     name = Path(file_path).stem.lower()
-    if name.startswith("test_") or name.endswith("_test") or name.endswith("_spec"):
+    if name.startswith(("test_", "test-")) or name.endswith("_test") or name.endswith("_spec"):
         return True
     if name == "conftest":
         return True
@@ -2269,7 +2269,8 @@ def _is_blocking_exempt_path(path: str) -> bool:
     stem = Path(path).stem.lower()
     if ".test." in fname or ".spec." in fname:
         return True
-    if stem.startswith("test_") or stem.endswith(("_test", "_spec")) or stem == "conftest":
+    if stem.startswith(("test_", "test-")) or stem.endswith(("_test", "_spec")) \
+            or stem == "conftest":
         return True
     return False
 
@@ -2524,6 +2525,9 @@ def _is_build_tooling_file(file_path: str) -> bool:
 # source (.py/.js/.rs …) under `infra/` to dodge the floor.
 _CI_CONFIG_DIRS = frozenset({".github", ".gitlab", ".circleci", ".buildkite"})
 _INFRA_DIRS = frozenset({"infra", "ci", ".ci"})
+# (Not .devcontainer/: its postCreateCommand runs automatically when the repo is
+# opened in a dev container, an autorun on the clone-and-open path.)
+_DEV_TOP_DIRS = frozenset({"dev", "hack"})
 _SCRIPT_CONFIG_EXTS = frozenset({
     ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd",
     ".yml", ".yaml", ".tf", ".tfvars", ".hcl", ".toml", ".json", ".cfg", ".conf", ".ini",
@@ -2539,6 +2543,46 @@ def _is_script_or_config(file_path: str) -> bool:
     return Path(file_path).suffix.lower() in _SCRIPT_CONFIG_EXTS
 
 
+def _is_dev_tooling_script(file_path: str) -> bool:
+    """A local-development helper script / config (vllm semantic-router's
+    ``tools/dev/local-up-router.sh``): under a top-level ``dev/`` or ``hack/``, or a
+    ``dev/`` directly under ``tools/`` or ``scripts/``. Script / config files only, so
+    importable source parked there keeps the floor. A repo / local / package scan
+    restores its findings when an install-reachable npm script or spawning code names
+    it (``npm_scripts.restore_externally_invoked``)."""
+    if not _is_script_or_config(file_path):
+        return False
+    parts = [p.lower() for p in Path(file_path).parts[:-1]]
+    return bool(parts) and (parts[0] in _DEV_TOP_DIRS or (
+        len(parts) > 1 and parts[0] in ("tools", "scripts", "script")
+        and parts[1] == "dev"))
+
+
+# Dataset files (round-2 DNC sample: an attack-prompt corpus under data/eval/): data
+# text under a dataset directory. Agent instruction files (SKILL.md, AGENTS.md,
+# anything under skills/ / prompts/ / .claude/ …, MCP / plugin manifests) are never
+# datasets, nor are package manifests or requirement lists.
+_DATASET_DIRS = frozenset({"data", "dataset", "datasets", "corpus", "corpora",
+                           "benchmark", "benchmarks", "eval", "evals"})
+_DATASET_EXTS = frozenset({".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".txt"})
+_NOT_DATASET_NAMES = frozenset({
+    "package.json", "package-lock.json", "composer.json", "deno.json", "tsconfig.json",
+    "jsconfig.json", "bower.json", "app.json", "now.json", "vercel.json",
+})
+
+
+def _is_dataset_file(file_path: str) -> bool:
+    from src.scanner.package_context import is_agent_instruction_file
+    p = Path(file_path)
+    name = p.name.lower()
+    if p.suffix.lower() not in _DATASET_EXTS or name in _NOT_DATASET_NAMES \
+            or name.startswith(("requirements", "constraints")):
+        return False
+    if is_agent_instruction_file(file_path):
+        return False
+    return any(x.lower() in _DATASET_DIRS for x in p.parts[:-1])
+
+
 def _is_infra_script(file_path: str) -> bool:
     """True for a CI/release-infrastructure script or config file (see above)."""
     if not _is_script_or_config(file_path):
@@ -2546,6 +2590,8 @@ def _is_infra_script(file_path: str) -> bool:
     parts = [p.lower() for p in Path(file_path).parts[:-1]]
     if any(p in _CI_CONFIG_DIRS or p in _INFRA_DIRS or p.endswith(("-runner", "_runner"))
            for p in parts):
+        return True
+    if _is_dev_tooling_script(file_path):
         return True
     # A docs-build script at the root or in scripts/ (pydantic's build-docs.sh installs
     # rustup + uv to build the site): maintainer tooling, never in the package.
@@ -3210,13 +3256,16 @@ def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
     *, metadata_text: bool = False, payloads_full_severity: bool = False,
-    not_test: bool = False,
+    not_test: bool = False, dev_tooling_runs: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Scan file content for security issues and positive signals.
 
     ``not_test`` (repository scans): the file is named / placed like a test but is not
     test code, or code that runs uses it (``_regrade_misnamed_tests``): no test
     downgrade.
+
+    ``dev_tooling_runs``: a dev-tooling script (``_is_dev_tooling_script``) that an
+    install-reachable script or spawning code runs: no infra downgrade.
 
     ``payloads_full_severity`` (artifact scans): in a downgraded file, payload-shaped
     defects keep their severity and are marked ``Finding.payload`` (see above).
@@ -3232,7 +3281,8 @@ def _scan_content(
     file_test_or_doc = _is_test_or_doc_file(file_path) and not not_test
     # CI/infra files (#3) are graded like tests/docs so a Dockerfile / workflow recipe
     # can't dominate the grade with a critical.
-    is_infra = _is_infra_file(file_path)
+    is_infra = _is_infra_file(file_path) and not (
+        dev_tooling_runs and _is_dev_tooling_script(file_path))
     # Findings in tests/docs/infra are downgraded (never suppressed).
     file_downgraded = file_test_or_doc or is_infra
     is_test_or_doc, is_downgraded = file_test_or_doc, file_downgraded
@@ -4365,6 +4415,19 @@ def _scan_content(
         downgraded=file_downgraded, payload=payload_mode and file_downgraded,
         prose_lines=(lambda: _string_state()[0]) if file_lang == "python" else None))
 
+    # A dataset of attack prompts (Tencent AI-Infra-Guard's data/eval/*.json): text the
+    # code reads, never runs. Prompt-injection and pipe-to-shell text there is capped
+    # at high until the tree check (npm_scripts.restore_externally_invoked) finds code
+    # that names the file and can execute something.
+    if _is_dataset_file(file_path):
+        for f in findings:
+            if (f.kind == "defect" and f.severity == "critical"
+                    and (f.category == "prompt_injection"
+                         or f.name == pipe_shell.PIPE_TO_SHELL)):
+                f.severity = "high"
+                f.remediation = npm_scripts.DATASET_WHY
+                f._dataset_restore = "critical"  # type: ignore[attr-defined]
+
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.
     for f in findings:
@@ -4483,8 +4546,117 @@ def _scan_manifest_exec(content: str, file_path: str) -> list[Finding]:
 
 
 _NODE_EVAL_SEGMENT_RE = re.compile(
-    r"""\bnode\s+(?:-e|--eval)\s+(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE,
+    r"""\bnode\s+(?:-e|--eval|-p|--print|-pe|-ep)\s+(?:"([^"]*)"|'([^']*)')""",
+    re.IGNORECASE,
 )
+
+
+# An inert install guard (a package-manager or engine check, round-2 DNC sample:
+# metabase's "use Bun", casdoor's "use yarn"): a short body that only reads
+# process.env / process.version(s) / process.platform / process.arch, tests strings
+# with constant regexes or string methods, logs, throws an Error or exits. Checked token
+# by token against an allowlist, so anything else (require / import(), eval, Function,
+# fetch, Buffer, global / globalThis / this, bracket access other than a numeric
+# index, assignment, arrow functions, templates, comments, `$`, a backslash escape in a
+# string, an unlisted property such as .constructor / .mainModule / .binding) leaves
+# the snippet critical.
+_GUARD_MAX_LEN = 500
+_GUARD_TOKEN_RE = re.compile(
+    r"""(?P<ws>\s+)|(?P<str>'[^'\\\n$`]*'|"[^"\\\n$`]*")|(?P<num>\d+(?:\.\d+)?)|"""
+    r"""(?P<idx>\[\s*\d+\s*\])|(?P<id>[A-Za-z_]\w*)|"""
+    r"""(?P<op>===|!==|==|!=|<=|>=|&&|\|\||[-+<>!?:;,(){}.])""")
+# A regex literal: plain characters, character classes and escapes other than the
+# code-point ones (\x, \u, \c, octal digits).
+_GUARD_REGEX_RE = re.compile(
+    r"""/(?:[^/\\\n\[$`]|\\[^xuc0-9\n$`]|\[(?:[^\]\\\n$`]|\\[^xuc0-9\n$`])*\])+/[gimsuy]*""")
+_GUARD_BARE = frozenset({
+    "process", "console", "Error", "TypeError", "RangeError", "parseInt", "parseFloat",
+    "Number", "if", "else", "throw", "new", "typeof", "true", "false", "null", "undefined",
+})
+_GUARD_PROCESS = frozenset({"env", "version", "versions", "platform", "arch", "exit"})
+_GUARD_CONSOLE = frozenset({"log", "warn", "error", "info"})
+_GUARD_METHODS = frozenset({
+    "test", "indexOf", "includes", "startsWith", "endsWith", "match", "split", "slice",
+    "substring", "trim", "toLowerCase", "toUpperCase", "length",
+})
+_GUARD_ERRORS = frozenset({"Error", "TypeError", "RangeError"})
+# Environment variables a guard reads: npm's own (`npm_execpath`,
+# `npm_config_user_agent`), CI / NODE_ENV and skip switches. Never one that names a
+# credential (a guard could print it into a public CI log).
+_GUARD_ENV_RE = re.compile(
+    r"^(?:npm_\w+|CI|NODE_ENV|CONTINUOUS_INTEGRATION|HUSKY|\w*(?:SKIP|DISABLE)\w*)$")
+_GUARD_SECRET_ENV_RE = re.compile(r"token|auth|secret|passw|key|cred", re.IGNORECASE)
+# Never a property name, even as an environment variable (`process.env.constructor`).
+_GUARD_BAD_PROPS = frozenset({
+    "constructor", "prototype", "__proto__", "__defineGetter__", "__defineSetter__",
+    "__lookupGetter__", "__lookupSetter__", "valueOf", "toString", "hasOwnProperty",
+})
+
+
+def _is_inert_guard_snippet(code: str) -> bool:
+    """True for an inline ``node -e`` body built only from the guard vocabulary above."""
+    if not code.strip() or len(code) > _GUARD_MAX_LEN:
+        return False
+    toks: list[tuple[str, str]] = []
+    pos = 0
+    while pos < len(code):
+        prev = toks[-1] if toks else None
+        if code[pos] == "/" and (prev is None or (prev[0] == "op" and prev[1] not in ")}")):
+            m = _GUARD_REGEX_RE.match(code, pos)
+            if not m:
+                return False
+            toks.append(("re", m.group()))
+            pos = m.end()
+            continue
+        m = _GUARD_TOKEN_RE.match(code, pos)
+        if not m:
+            return False
+        pos = m.end()
+        if m.lastgroup != "ws":
+            toks.append((m.lastgroup, m.group()))
+    chain: list[str] = []
+    for i, (kind, val) in enumerate(toks):
+        prev = toks[i - 1] if i else None
+        after_dot = prev == ("op", ".")
+        if kind == "op" and val == ".":
+            # Member access only on a name chain or a value (a call, a literal, an index).
+            if prev is None or not (prev[0] in ("id", "str", "re", "num", "idx")
+                                    or prev == ("op", ")")):
+                return False
+            if prev[0] != "id":
+                chain = ["<value>"]
+            continue
+        if kind != "id":
+            if not after_dot and kind == "idx" and prev is not None and prev[0] == "op" \
+                    and prev[1] not in ")":
+                return False          # an array literal, not an index
+            continue
+        if not after_dot:
+            if val not in _GUARD_BARE:
+                return False
+            if val == "new" and (i + 1 >= len(toks) or toks[i + 1][1] not in _GUARD_ERRORS):
+                return False
+            chain = [val]
+            continue
+        if val in _GUARD_BAD_PROPS:
+            return False
+        chain.append(val)
+        base, depth = chain[0], len(chain)
+        if base == "process" and depth == 2:
+            # `process.env` only as `process.env.NAME` (never the whole environment).
+            ok = val in _GUARD_PROCESS and not (
+                val == "env" and toks[i + 1:i + 2] != [("op", ".")])
+        elif base == "process" and depth == 3 and chain[1] == "env":
+            ok = bool(_GUARD_ENV_RE.match(val)) and not _GUARD_SECRET_ENV_RE.search(val)
+        elif base == "process" and depth == 3 and chain[1] == "versions":
+            ok = True
+        elif base == "console":
+            ok = depth == 2 and val in _GUARD_CONSOLE
+        else:
+            ok = val in _GUARD_METHODS
+        if not ok:
+            return False
+    return True
 
 
 # The only inline snippets treated as inert: an exit code or a constant log line.
@@ -4524,13 +4696,15 @@ def _is_inert_local_require(code: str) -> bool:
 
 def _strip_inert_node_eval(cmd: str) -> str:
     """Remove ``node -e "<snippet>"`` segments whose snippet is a known no-op
-    (``process.exit(0)`` as an ``||`` fallback, a constant ``console.log``) or only
-    requires a local file inside the package (optionally in an empty try/catch) before
-    the danger check. Anything else (other ``require(…)``, fetch, eval, shell expansion)
+    (``process.exit(0)`` as an ``||`` fallback, a constant ``console.log``), only
+    requires a local file inside the package (optionally in an empty try/catch), or is
+    an inert package-manager / engine guard (``_is_inert_guard_snippet``) before the
+    danger check. Anything else (other ``require(…)``, fetch, eval, shell expansion)
     stays."""
     def _inert(m: re.Match) -> str:
         code = m.group(1) if m.group(1) is not None else m.group(2)
-        if _INERT_NODE_SNIPPET_RE.match(code) or _is_inert_local_require(code):
+        if (_INERT_NODE_SNIPPET_RE.match(code) or _is_inert_local_require(code)
+                or _is_inert_guard_snippet(code)):
             return "node <inert-inline>"
         return m.group(0)
     return _NODE_EVAL_SEGMENT_RE.sub(_inert, cmd)

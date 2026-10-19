@@ -605,6 +605,33 @@ ALLOWLIST_WHY = (
     "here sends data there.")
 
 
+DATASET_WHY = (
+    "Text in a dataset file (an attack-prompt or evaluation corpus): data the code "
+    "reads, not an instruction file and not run by the code found. An agent that reads "
+    "the file still sees it, so it is reported as high.")
+
+
+def _restore_datasets(findings: list, texts: dict[str, str]) -> None:
+    """A dataset finding capped at high (``scan._is_dataset_file``) gets its severity
+    back when code that can execute something (``_SPAWN_RE``) names the file by path or
+    file name, or when the file is not in ``texts`` (unseen)."""
+    from src.scanner.scan import _is_dataset_file
+
+    marked = [f for f in findings if getattr(f, "_dataset_restore", None)
+              and f.severity == "high" and f.remediation == DATASET_WHY]
+    if not marked:
+        return
+    spawners = [t for p, t in texts.items()
+                if t and _is_code_file(p) and not _is_dataset_file(p) and _SPAWN_RE.search(t)]
+    for f in marked:
+        path = f.file_path
+        rx = re.compile(r"(?<![\w.\-])" + re.escape(path.rsplit("/", 1)[-1])
+                        + r"(?![\w\-])")
+        if path not in texts or any(path in t or rx.search(t) for t in spawners):
+            f.severity, f.remediation = f._dataset_restore, ""
+            f._dataset_restore = None
+
+
 def mark_allowlist(finding: object, severity: str, keys: set[str]) -> None:
     """A webhook/tunnel-host match that is an allowlist element (scan.py
     ``_host_allowlist_entry``), reported low until the rest of the tree is checked."""
@@ -639,6 +666,44 @@ def _restore_allowlist_hosts(findings: list, texts: dict[str, str]) -> None:
             f._allowlist_restore = None
 
 
+def _restore_dev_tooling(findings: list, texts: dict[str, str],
+                         roots: frozenset[str]) -> None:
+    """A dev-tooling script (``scan._is_dev_tooling_script``: ``tools/dev/``,
+    ``dev/``, ``hack/`` …) is graded like CI tooling only while nothing a consumer runs
+    starts it: an install-reachable package.json script that runs the file, or code
+    that spawns processes and names it (its path, or its file name as a word), puts it
+    back on the shipped surface. Its findings are then scanned again without the
+    downgrade and graded as shipped code (``Finding.payload``)."""
+    from src.scanner.scan import _is_dev_tooling_script, _scan_content
+
+    dev = sorted({f.file_path for f in findings
+                  if f.file_path and _is_dev_tooling_script(f.file_path)})
+    if not dev:
+        return
+    run: set[str] = set()
+    for p, t in texts.items():
+        if t and p.rsplit("/", 1)[-1].lower() == "package.json":
+            info = parse_scripts(t)
+            if info is not None:
+                run |= _named_files(info, p, roots, texts)[0]
+    spawners = [t for p, t in texts.items()
+                if t and p.rsplit("/", 1)[-1].lower() != "package.json"
+                and not _is_dev_tooling_script(p) and _is_code_file(p)
+                and _SPAWN_RE.search(t)]
+    for path in dev:
+        if path not in texts:
+            continue
+        name = re.compile(r"(?<![\w.\-])" + re.escape(path.rsplit("/", 1)[-1])
+                          + r"(?![\w\-])")
+        if path not in run and not any(path in t or name.search(t) for t in spawners):
+            continue
+        fresh, _p, _s = _scan_content(texts[path], path, dev_tooling_runs=True)
+        for f in fresh:
+            if f.kind == "defect":
+                f.payload = True
+        findings[:] = [f for f in findings if f.file_path != path] + fresh
+
+
 def restore_externally_invoked(findings: list, texts: dict[str, str], *,
                                registry_artifact: bool = False) -> None:
     """Undo the maintainer-script downgrade of a pipe-to-shell finding when the
@@ -652,6 +717,9 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     install trio; elsewhere (a repo / local tree) the git-dependency roots count too.
     Every caller of ``_scan_content`` that can see a package.json must call this."""
     _restore_allowlist_hosts(findings, texts)
+    _restore_datasets(findings, texts)
+    _restore_dev_tooling(findings, texts,
+                         REGISTRY_ROOTS if registry_artifact else CONSUMER_ROOTS)
     # (A finding a later pass already capped further, e.g. to info in an uninstalled
     # or test-dir file, keeps that cap.)
     marked = [f for f in findings if getattr(f, "_maintainer_restore", None)
