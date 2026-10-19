@@ -113,7 +113,8 @@ async def test_check_signed_payload_carries_the_answer(client):
 
 @pytest.mark.asyncio
 async def test_re_verify_denies_a_do_not_connect_cached_scan(client):
-    crit = {"severity": "critical", "category": "secret", "name": "AWS key",
+    # (a hardcoded credential alone caps at review; use a code-execution critical)
+    crit = {"severity": "critical", "category": "unsafe_exec", "name": "eval of input",
             "shipped": True, "kind": "defect"}
     with patch("src.api.public_scan_router._get_cached",
                new=AsyncMock(return_value=_cached(60, "standard", [crit]))):
