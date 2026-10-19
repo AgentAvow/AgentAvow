@@ -4764,12 +4764,14 @@ _ROUTE_HANDLER_WINDOW = 4000     # chars of handler text searched per registrati
 _ROUTE_HANDLER_MAX = 200          # registrations examined per file (bounded cost)
 
 
-def _handler_request_input(content: str) -> bool:
-    """True when a route handler reads its request's body / query / params under any
-    parameter name (`q.body` in a minified bundle). Scoped to the text right after the
-    registration, because minified one-letter names are reused all over a bundle."""
+def _handler_request_input(content: str) -> list[int]:
+    """Lines (1-based) where a route handler reads its request's body / query / params
+    under any parameter name (`q.body` in a minified bundle). Scoped to the text right
+    after the registration, because minified one-letter names are reused all over a
+    bundle. Empty when the file registers no route."""
     if not _REQUEST_FIELD_RE.search(content):
-        return False
+        return []
+    offsets: set[int] = set()
     for k, m in enumerate(_ROUTE_HANDLER_RE.finditer(content)):
         if k >= _ROUTE_HANDLER_MAX:
             break
@@ -4777,9 +4779,15 @@ def _handler_request_input(content: str) -> bool:
         if name in ("async", "function"):
             continue
         rx = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\s*\.\s*(?:body|query|params)\b")
-        if rx.search(content, m.end(), m.end() + _ROUTE_HANDLER_WINDOW):
-            return True
-    return False
+        hit = rx.search(content, m.end(), m.end() + _ROUTE_HANDLER_WINDOW)
+        if hit:
+            offsets.add(hit.start())
+    lines, line, pos = [], 1, 0
+    for off in sorted(offsets):          # one forward pass: O(len(content)) in total
+        line += content.count("\n", pos, off)
+        pos = off
+        lines.append(line)
+    return sorted(set(lines))
 
 
 def _near_read(reads: list[int], sends: list[int], near) -> int | None:
@@ -4823,15 +4831,10 @@ def _composite_findings(
     ):
         return []
     # A route handler reading its renamed request (`q.body` in a minified bundle) is the
-    # same untrusted input as `req.body`; only checked when the named forms are absent.
-    handler_input: list[bool] = []
-
-    def _handler_input() -> bool:
-        if not handler_input:
-            handler_input.append(_handler_request_input(content))
-        return handler_input[0]
-
-    if not (_found(UNTRUSTED_INPUT_RE) or _handler_input()):
+    # same untrusted input as `req.body`. Checked whenever the file registers a route, so
+    # a bundle with one `(req, res) =>` handler and a minified `(q, r) =>` one gets both.
+    handler_lines = _handler_request_input(content)
+    if not (_found(UNTRUSTED_INPUT_RE) or handler_lines):
         return []
 
     def _hits(rx: re.Pattern[str]) -> list[int]:
@@ -4850,8 +4853,7 @@ def _composite_findings(
     # or object), not as a quoted string (`"webhook" in self.alerting`, a config value).
     untrusted = [n for n in _hits(UNTRUSTED_INPUT_RE)
                  if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
-    if not untrusted and _handler_input():
-        untrusted = [0]   # presence only: this leg has no proximity test
+    untrusted = sorted(set(untrusted) | set(handler_lines))
     # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
     # request; it is not an outbound send to a third party (precision PR 2).
     def _strip_literal(m: re.Match[str]) -> str:
