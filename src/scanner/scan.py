@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from src.scanner import npm_scripts
+from src.scanner import npm_scripts, pipe_shell
 from src.scanner.patterns import (
     AGENT_METADATA_FILES,
     AUTH_POSITIVE_PATTERNS,
@@ -538,6 +538,7 @@ async def _fetch_repo_tree(
         if meta_out is not None:
             meta_out["description"] = _repo_json.get("description")
             meta_out["stars"] = _repo_json.get("stargazers_count")
+            meta_out["homepage"] = _repo_json.get("homepage")
 
         tree_url = (
             f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}"
@@ -2405,6 +2406,11 @@ _SCRIPT_CONFIG_EXTS = frozenset({
 })
 
 
+_DOCS_BUILD_STEM_RE = re.compile(
+    r"^(?:(?:build|deploy|gen(?:erate)?|make|publish|serve)[-_]docs?|"
+    r"docs?[-_](?:build|deploy|gen(?:erate)?|publish|serve))$")
+
+
 def _is_script_or_config(file_path: str) -> bool:
     return Path(file_path).suffix.lower() in _SCRIPT_CONFIG_EXTS
 
@@ -2416,6 +2422,11 @@ def _is_infra_script(file_path: str) -> bool:
     parts = [p.lower() for p in Path(file_path).parts[:-1]]
     if any(p in _CI_CONFIG_DIRS or p in _INFRA_DIRS or p.endswith(("-runner", "_runner"))
            for p in parts):
+        return True
+    # A docs-build script at the root or in scripts/ (pydantic's build-docs.sh installs
+    # rustup + uv to build the site): maintainer tooling, never in the package.
+    if parts in ([], ["scripts"], ["script"]) and _DOCS_BUILD_STEM_RE.match(
+            Path(file_path).stem.lower()):
         return True
     # scripts/release.sh, scripts/release-mac.sh, scripts/release/notarize.sh
     for i, p in enumerate(parts):
@@ -3623,6 +3634,18 @@ def _scan_content(
                 if (name.startswith("Unpinned remote resource")
                         and not _has_loader_context(lines, idx, dm.start())):
                     effective_severity = "low"
+                # Pipe-to-shell precision (src/scanner/pipe_shell.py): a placeholder,
+                # a regex or a prohibition is not a command; an official HTTPS
+                # installer is high; a clean HTTPS URL on an unlisted host keeps its
+                # critical until the caller knows the project's own domain.
+                pipe_class, pipe_urls = None, []
+                if name == pipe_shell.PIPE_TO_SHELL:
+                    pipe_class, pipe_urls = pipe_shell.classify_line(
+                        line, pattern, file_path)
+                    if pipe_class == pipe_shell.DROP:
+                        continue
+                    if pipe_class == pipe_shell.OFFICIAL:
+                        effective_severity = "high"
                 # Downgrade in test/doc/infra files like other groups
                 effective_severity, remote_payload = _graded(
                     "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
@@ -3713,7 +3736,13 @@ def _scan_content(
                     line_number=line_num,
                     snippet=stripped[:120],
                     payload=remote_payload,
+                    remediation=(pipe_shell.WHY_OFFICIAL
+                                 if pipe_class == pipe_shell.OFFICIAL else ""),
                 )
+                if pipe_urls:
+                    # Not a dataclass field (never serialized): pipe_shell.lower_own_domain
+                    # lowers it to high when every URL is the project's own.
+                    finding.pipe_urls = pipe_urls
                 if (name == "curl/wget piped to shell"
                         and Path(file_path).name.lower() == "package.json"):
                     # A maintainer-only package.json script (`test:e2e:docker`) that no
@@ -6239,6 +6268,7 @@ async def _grade_skill_at(
                 files[p] = txt
 
         skill = analyze_skill(files, skill_md_path=skill_md_path)
+        pipe_shell.lower_own_domain(skill.findings, files, owner=owner)
 
         # Env vars the skill's scripts read: the behavioral sandbox fills each
         # secret-named one with a canary when it runs the hooks and scripts.
@@ -6763,6 +6793,8 @@ async def scan_repo(
         if fetch_failed:
             gaps["fetch_failed"] = fetch_failed
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
+        pipe_shell.lower_own_domain(result.findings, repo_texts, owner=owner,
+                                    homepage=_repo_meta.get("homepage"))
 
         # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
         oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)

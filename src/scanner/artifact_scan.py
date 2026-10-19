@@ -755,9 +755,10 @@ def scan_artifact_files(
     # A pipe-to-shell in a maintainer-only package.json script was downgraded by the
     # line engine; restore it when another file here can run that script.
     from src.scanner.npm_scripts import restore_externally_invoked
-    restore_externally_invoked(
-        findings, {p: af.text for p, af in fetched.files.items() if af.text},
-        registry_artifact=is_npm_tarball)
+    from src.scanner.pipe_shell import lower_own_domain
+    texts = {p: af.text for p, af in fetched.files.items() if af.text}
+    restore_externally_invoked(findings, texts, registry_artifact=is_npm_tarball)
+    lower_own_domain(findings, texts)
 
     return findings, files_scanned, has_install_hook
 

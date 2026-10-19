@@ -251,6 +251,9 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
     result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
     from src.scanner.npm_scripts import restore_externally_invoked
     restore_externally_invoked(result.findings, local_texts)
+    from src.scanner.pipe_shell import lower_own_domain
+    lower_own_domain(result.findings, local_texts,
+                     owner=name.split("/")[0] if name and "/" in name else None)
 
     # --- dependency findings (offline regex over manifests/lockfiles) ---
     dep_names = {f.lower() for f in _DEP_FILES}
