@@ -207,6 +207,33 @@ const asObj = (v: unknown): Obj => (isObj(v) ? v : {})
 const asList = (v: unknown): Obj[] => (Array.isArray(v) ? v.filter(isObj) : [])
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v)
 
+// A loose sort key for release strings ("1.10.0" > "1.9.2"), as verdict.py _version_key.
+function versionKey(v: string): [number, string][] {
+  return v.replace(/^v+/, '').split('.').map((p) => {
+    const num = p.replace(/\D/g, '')
+    return [num ? parseInt(num, 10) : 0, p] as [number, string]
+  })
+}
+
+function compareKeys(a: [number, string][], b: [number, string][]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i][0] !== b[i][0]) return a[i][0] - b[i][0]
+    if (a[i][1] !== b[i][1]) return a[i][1] < b[i][1] ? -1 : 1
+  }
+  return a.length - b.length
+}
+
+// The release that fixes ALL the listed advisories = the highest fixed_in (first wins a tie).
+function highestFix(advisories: Obj[]): string | null {
+  let best: string | null = null
+  for (const a of advisories) {
+    if (!a.fixed_in) continue
+    const f = String(a.fixed_in)
+    if (best === null || compareKeys(versionKey(f), versionKey(best)) > 0) best = f
+  }
+  return best
+}
+
 function toInt(v: unknown): number {
   if (typeof v === 'boolean') return v ? 1 : 0
   if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : 0
@@ -468,7 +495,8 @@ export function decide(input: unknown): Decision {
   const advItem = items.find(isAdvisory)
   if (advisories.length || advItem) {
     const aid = String((advisories.length ? advisories[0].id : '') || '')
-    return done('review', 'a published advisory affects this version' + (aid ? ` (${aid})` : ''))
+    const fix = highestFix(advisories)
+    return done('review', 'a published advisory affects this version' + (aid ? ` (${aid})` : '') + (fix ? `; fixed in ${fix}` : ''))
   }
   const dep = data.deprecation
   if (typeof dep === 'string' && dep.trim()) return done('review', 'the maintainer has deprecated this package')

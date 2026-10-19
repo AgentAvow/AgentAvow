@@ -59,6 +59,22 @@ def sandbox_alarm(data: dict) -> bool:
                for f in (b.get("findings") or []) if isinstance(f, dict))
 
 
+def _version_key(v: str) -> tuple:
+    """A loose sort key for release strings ("1.10.0" > "1.9.2"); never raises."""
+    parts = []
+    for p in str(v).lstrip("v").split("."):
+        num = "".join(ch for ch in p if ch.isdigit())
+        parts.append((int(num) if num else 0, p))
+    return tuple(parts)
+
+
+def _highest_fix(advisories: list[dict]) -> str | None:
+    """The release that fixes ALL the listed advisories = the highest ``fixed_in``
+    (Kenne, 2026-10-19: an own advisory reads Review and names the fixed version)."""
+    fixes = [str(a.get("fixed_in")) for a in advisories if a.get("fixed_in")]
+    return max(fixes, key=_version_key) if fixes else None
+
+
 def is_advisory_block(b: dict) -> bool:
     """True for a ``behavioral`` block that is advisory only — the opt-in live probe of a
     remote MCP server (``plan == "live-probe"``). Its findings are reported, never a
@@ -593,8 +609,9 @@ def decide(data: dict) -> Decision:
     adv_item = _first(items, is_advisory)
     if advisories or adv_item is not None:
         aid = str((advisories[0].get("id") if advisories else "") or "")
+        fix = _highest_fix(advisories)
         return done(DECISION_REVIEW, "a published advisory affects this version"
-                    + (f" ({aid})" if aid else ""))
+                    + (f" ({aid})" if aid else "") + (f"; fixed in {fix}" if fix else ""))
     dep = data.get("deprecation")
     if isinstance(dep, str) and dep.strip():
         return done(DECISION_REVIEW, "the maintainer has deprecated this package")

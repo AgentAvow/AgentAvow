@@ -139,6 +139,18 @@ CASES = [
     ("advisory_affects_version", _scan(88, 200, advisories=[
         {"id": "GHSA-abcd", "affects_scanned_version": True}]),
      "review", True, "a published advisory affects this version (GHSA-abcd)"),
+    ("advisory_names_the_fixed_version", _scan(88, 200, advisories=[
+        {"id": "GHSA-abcd", "affects_scanned_version": True, "fixed_in": "2.31.0"}]),
+     "review", True, "a published advisory affects this version (GHSA-abcd); fixed in 2.31.0"),
+    ("advisory_names_the_highest_fix", _scan(88, 200, advisories=[
+        {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "1.9.2"},
+        {"id": "GHSA-b", "affects_scanned_version": True, "fixed_in": "1.10.0"},
+        {"id": "GHSA-c", "affects_scanned_version": True}]),
+     "review", True, "a published advisory affects this version (GHSA-a); fixed in 1.10.0"),
+    ("advisory_fix_ignores_unaffecting_entries", _scan(88, 200, advisories=[
+        {"id": "GHSA-a", "affects_scanned_version": True, "fixed_in": "3.0.1"},
+        {"id": "GHSA-old", "affects_scanned_version": False, "fixed_in": "9.9.9"}]),
+     "review", True, "a published advisory affects this version (GHSA-a); fixed in 3.0.1"),
     ("advisory_in_incident_history", _scan(88, 200, incident_history={"advisories": [
         {"id": "PYSEC-1", "affects_scanned_version": True}]}),
      "review", True, "a published advisory affects this version (PYSEC-1)"),
