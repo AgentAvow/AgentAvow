@@ -4310,6 +4310,9 @@ def _scan_content(
     findings.extend(_credential_exfil_findings(
         content, file_path, lines, file_lang, allowlist,
         payload=payload_mode and file_downgraded, lf=lf))
+    findings.extend(_env_dump_exfil_findings(
+        content, file_path, lines, file_lang, allowlist, findings,
+        payload=payload_mode and file_downgraded, lf=lf))
     findings.extend(_browser_credential_findings(
         content, file_path, lines, file_lang, allowlist, findings,
         downgraded=file_downgraded, payload=payload_mode and file_downgraded,
@@ -4871,6 +4874,47 @@ def _credential_exfil_findings(
                 f"This code reads {what} from the user's machine and sends the contents "
                 "over the network. A tool has no reason to ship a local credential file "
                 "anywhere; remove the read or the send."
+            ),
+            payload=payload,
+        ))
+    return out
+
+
+_ENV_DUMP_EXFIL_NAME = "Whole environment sent outbound"
+
+
+def _env_dump_exfil_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], found: list[Finding], *, payload: bool,
+    lf: LineFilter | None = None,
+) -> list[Finding]:
+    """The whole environment (``JSON.stringify(process.env)``, ``{...process.env}``,
+    ``dict(os.environ)``, ``os.environ.copy()`` …) reaching an outbound send in the
+    same file (``credential_flow.env_dump_exfil_hits``). Critical and never
+    downgraded, like a credential file sent out. A line the per-line
+    "Environment variable exfil" rule already reported is not reported twice."""
+    from src.scanner.credential_flow import env_dump_exfil_hits
+
+    if _is_allowlisted(file_path, _ENV_DUMP_EXFIL_NAME, allowlist):
+        return []
+    seen = {f.line_number for f in found
+            if f.file_path == file_path and f.name == "Environment variable exfil"}
+    out = []
+    for line_no in env_dump_exfil_hits(content, file_lang, lf=lf):
+        if line_no in seen:
+            continue
+        out.append(Finding(
+            category="exfiltration",
+            name=_ENV_DUMP_EXFIL_NAME,
+            severity="critical",
+            file_path=file_path,
+            line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            remediation=(
+                "This code serializes or copies the whole process environment (every "
+                "API key, token and password in it) and sends it over the network. A "
+                "tool has no reason to ship its environment anywhere; send only the "
+                "values the request needs."
             ),
             payload=payload,
         ))
