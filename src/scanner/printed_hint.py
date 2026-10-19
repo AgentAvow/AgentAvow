@@ -299,6 +299,7 @@ _CONSOLE_METHODS = frozenset({"log", "error", "warn", "info", "debug", "trace"})
 _OUTPUT_METHODS = frozenset({
     "log", "error", "warn", "warning", "info", "debug", "trace", "print", "printOut",
     "printError", "fatal", "note", "success", "notice", "verbose", "say", "hint",
+    "always",  # neurolink's `logger.always(…)`: console.log past the level filter
 })
 _STYLE_NAMES = frozenset({
     "default", "bold", "dim", "italic", "underline", "inverse", "strikethrough", "reset",
@@ -1341,6 +1342,21 @@ class _JsFlow:
         if def_file is None:
             return
         method = names[-1]
+        if must_exist:
+            # Another file may replace the method after import (`logger.always =
+            # s => execSync(s)`, `Object.assign(logger, {…})`): a rebinding of it
+            # anywhere in view that runs a command keeps the finding.
+            r, mth = re.escape(names[-2]), re.escape(method)
+            rebind = re.compile(
+                r"(?<![\w$])" + r + r"\s*(?:\.|\?\.)\s*" + mth + r"\s*=(?![=>])|"
+                r"(?<![\w$])" + r + r"\s*\[\s*['\"`]" + mth + r"['\"`]\s*\]\s*=(?![=>])|"
+                r"Object\s*\.\s*(?:assign|defineProperty|defineProperties|setPrototypeOf)"
+                r"\s*\(\s*" + r + r"\b")
+            for t in self.files.values():
+                for m in rebind.finditer(t or ""):
+                    rhs = t[m.end(): m.end() + 400]
+                    if _JS_SINK_RE.search(rhs) or self.aliased_to_sink(t, method):
+                        raise _UnclassifiedError(f"{'.'.join(names)} is reassigned")
         text = self.files[def_file]
         bodies = _def_bodies(text, method)
         if must_exist and not bodies:
@@ -1666,7 +1682,8 @@ class _PyFlow:
             if isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
                 raise _UnclassifiedError("global / nonlocal")
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and \
-                    node.func.id in ("locals", "globals", "vars", "eval", "exec"):
+                    node.func.id in ("locals", "globals", "vars", "eval", "exec") and \
+                    not self.class_vars(tr, node, path):
                 raise _UnclassifiedError("dynamic namespace access")
             if isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load):
                 self.value(path, node)
@@ -1674,6 +1691,39 @@ class _PyFlow:
             self.module_level(path, name)
         if self.uses == used_before:
             raise _UnclassifiedError("never read: nothing shows it to a person")
+
+    @staticmethod
+    def class_names(tree: ast.AST, stem: str) -> set[str]:
+        """Names bound in ``tree`` only by a ``class`` statement or a
+        ``from <module> import <Name>`` (never a module named ``stem``, never a plain
+        ``import``, an assignment, a def or a parameter): ``vars(<one of them>)``
+        reads that object's attributes, not a module namespace (browser-use's
+        ``vars(_PythonAgent).items()``)."""
+        ok: set[str] = set()
+        bad: set[str] = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ClassDef):
+                ok.add(n.name)
+            elif isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    bound = a.asname or a.name
+                    (bad if a.name == stem or a.name == "*" else ok).add(bound)
+            elif isinstance(n, ast.Import):
+                bad.update((a.asname or a.name).split(".")[0] for a in n.names)
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                bad.add(n.name)
+            elif isinstance(n, ast.arg):
+                bad.add(n.arg)
+            elif isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+                bad.add(n.id)
+        return ok - bad
+
+    def class_vars(self, tree: ast.AST, call: ast.Call, path: str) -> bool:
+        """``vars(X)`` where ``X`` is one of :meth:`class_names`."""
+        if call.func.id != "vars" or len(call.args) != 1 or call.keywords or \
+                not isinstance(call.args[0], ast.Name):
+            return False
+        return call.args[0].id in self.class_names(tree, Path(path).stem)
 
     def module_level(self, path: str, name: str) -> None:
         """A module-level name can be imported from anywhere in the package."""
@@ -1702,6 +1752,12 @@ class _PyFlow:
                     raise _UnclassifiedError("imported under another name")
         for fp in self.py_paths:
             text = self.files[fp]
+            if stem in text and "vars" in text:
+                # `vars(OwnClass)` reads that class, not a module (``class_vars``).
+                tr = self.tree(fp)[0]
+                own = self.class_names(tr, stem)
+                text = re.sub(r"\bvars\s*\(\s*([A-Za-z_]\w*)\s*\)",
+                              lambda m: "" if m.group(1) in own else m.group(0), text)
             if stem in text and re.search(
                     r"\b(?:vars|getattr|dir|inspect\.getmembers)\s*\(|__dict__|import\s+\*",
                     text):

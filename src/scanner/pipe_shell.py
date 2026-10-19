@@ -53,6 +53,13 @@ VENDOR_INSTALLERS: tuple[tuple[str, str], ...] = (
     ("pyenv.run", "/"),                                   # pyenv
     ("get.pnpm.io", "/install.sh"),                       # pnpm
     ("ollama.com", "/install.sh"),                        # Ollama
+    # Round 2 (2026-10-19), each checked against the vendor's own install docs:
+    ("ollama.ai", "/install.sh"),                         # Ollama (older domain)
+    ("foundry.paradigm.xyz", "/"),                        # Foundry (foundryup)
+    ("raw.githubusercontent.com", "/leanprover/elan/master/elan-init.sh"),  # elan
+    ("elan.lean-lang.org", "/elan-init.sh"),              # elan (current docs)
+    ("aider.chat", "/install.sh"),                        # aider
+    ("func-e.io", "/install.sh"),                         # func-e (Tetrate)
 )
 
 _TOOL_RE = re.compile(r"\b(?:curl|wget)\b")

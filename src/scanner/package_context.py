@@ -620,6 +620,8 @@ def calibrate_package_findings(findings: list, fetched) -> list:
     data_ok: dict[str, bool] = {}
     hints = Hints(pkg.texts, package=True)  # lazy: tokenizes only when asked
     replaced: list[bool] = []
+    # JSON data fields no code runs (the JS / Python hint is the branch below).
+    _lower_shown_in_tree(findings, pkg.texts, hints, replaced, code_hints=False)
 
     for f in findings:
         if getattr(f, "kind", "defect") == "capability":
@@ -711,7 +713,9 @@ def recheck_printed_hints(findings: list, texts: dict[str, str]) -> list:
     ``texts`` is every file the scan read (path -> text). Findings in files outside
     ``texts`` (an oversized file's head / tail window) keep the per-file answer.
     Mutates and returns ``findings``."""
-    if not any(getattr(f, "pre_hint", None) is not None for f in findings):
+    if not any(getattr(f, "pre_hint", None) is not None
+               or (f.name == _PIPE_TO_SHELL and f.severity in ("critical", "high"))
+               for f in findings):
         return findings
     hints = Hints(texts, package=True)
     replaced: list[bool] = []
@@ -721,7 +725,53 @@ def recheck_printed_hints(findings: list, texts: dict[str, str]) -> list:
         if (getattr(f, "file_path", "") or "") not in texts:
             continue
         _recheck_hint(f, hints, texts, replaced)
+    _lower_shown_in_tree(findings, texts, hints, replaced, code_hints=True)
     return findings
+
+
+def _lower_shown_in_tree(findings: list, texts: dict[str, str], hints: Hints,
+                         replaced: list[bool], *, code_hints: bool) -> None:
+    """Round 2 (2026-10-19): with every scanned file in view, lower a critical / high
+    pipe-to-shell that is only shown:
+
+    * a JSON data field (``"install": "curl … | bash"`` in an agent catalog, an attack
+      prompt in an eval dataset) whose key no code hands to an exec sink
+      (``src.scanner.shown_text``);
+    * ``code_hints``: a JS / TS / Python string the per-file walk could not finish
+      because its value leaves the file (a ``logger`` module, a module constant read in
+      error messages) and that, followed through the whole tree, only reaches
+      print / log / error-message output (``src.scanner.printed_hint``). Never while
+      any file replaces the output (``output_replaced``)."""
+    from src.scanner.shown_text import WHY_SHOWN, json_data_key, json_key_executed
+    pat = None
+    for f in findings:
+        if (f.name != _PIPE_TO_SHELL or getattr(f, "kind", "defect") == "capability"
+                or f.severity not in ("critical", "high")
+                or getattr(f, "pre_hint", None) is not None
+                or not getattr(f, "installed", True)):
+            continue
+        path = getattr(f, "file_path", "") or ""
+        text = texts.get(path)
+        if not text or f.line_number <= 0:
+            continue
+        lines = text.split("\n")
+        if f.line_number > len(lines):
+            continue
+        if pat is None:
+            pat = _hint_re(_PIPE_TO_SHELL)
+        line = lines[f.line_number - 1]
+        key = json_data_key(path, line, [(m.start(), m.end()) for m in pat.finditer(line)])
+        if key is not None:
+            if not json_key_executed(key, path, texts):
+                _lower(f, WHY_SHOWN)
+            continue
+        if not code_hints or not is_supported(path):
+            continue
+        if not replaced:
+            from src.scanner.printed_hint import output_replaced
+            replaced.append(output_replaced(texts))
+        if not replaced[0] and hints.why_not(path, f.line_number, pat) is None:
+            _lower(f, WHY_HINT)
 
 
 def _hint_re(name: str):
