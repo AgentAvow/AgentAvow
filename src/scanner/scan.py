@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from src.scanner import npm_scripts
+from src.scanner import npm_scripts, pipe_shell
 from src.scanner.patterns import (
     AGENT_METADATA_FILES,
     AUTH_POSITIVE_PATTERNS,
@@ -2458,6 +2458,11 @@ _SCRIPT_CONFIG_EXTS = frozenset({
 })
 
 
+_DOCS_BUILD_STEM_RE = re.compile(
+    r"^(?:(?:build|deploy|gen(?:erate)?|make|publish|serve)[-_]docs?|"
+    r"docs?[-_](?:build|deploy|gen(?:erate)?|publish|serve))$")
+
+
 def _is_script_or_config(file_path: str) -> bool:
     return Path(file_path).suffix.lower() in _SCRIPT_CONFIG_EXTS
 
@@ -2469,6 +2474,11 @@ def _is_infra_script(file_path: str) -> bool:
     parts = [p.lower() for p in Path(file_path).parts[:-1]]
     if any(p in _CI_CONFIG_DIRS or p in _INFRA_DIRS or p.endswith(("-runner", "_runner"))
            for p in parts):
+        return True
+    # A docs-build script at the root or in scripts/ (pydantic's build-docs.sh installs
+    # rustup + uv to build the site): maintainer tooling, never in the package.
+    if parts in ([], ["scripts"], ["script"]) and _DOCS_BUILD_STEM_RE.match(
+            Path(file_path).stem.lower()):
         return True
     # scripts/release.sh, scripts/release-mac.sh, scripts/release/notarize.sh
     for i, p in enumerate(parts):
@@ -3820,6 +3830,16 @@ def _scan_content(
                 if (name.startswith("Unpinned remote resource")
                         and not _has_loader_context(lines, idx, dm.start())):
                     effective_severity = "low"
+                # Pipe-to-shell precision (src/scanner/pipe_shell.py): a placeholder,
+                # a regex or a prose prohibition is not a command; a plain official
+                # HTTPS installer is high; everything else keeps its critical.
+                pipe_class = None
+                if name == pipe_shell.PIPE_TO_SHELL:
+                    pipe_class = pipe_shell.classify_line(line, pattern, file_path)
+                    if pipe_class == pipe_shell.DROP:
+                        continue
+                    if pipe_class == pipe_shell.OFFICIAL:
+                        effective_severity = "high"
                 # Downgrade in test/doc/infra files like other groups
                 effective_severity, remote_payload = _graded(
                     "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
@@ -3910,6 +3930,8 @@ def _scan_content(
                     line_number=line_num,
                     snippet=stripped[:120],
                     payload=remote_payload,
+                    remediation=(pipe_shell.WHY_OFFICIAL
+                                 if pipe_class == pipe_shell.OFFICIAL else ""),
                 )
                 if (name == "curl/wget piped to shell"
                         and Path(file_path).name.lower() == "package.json"):
