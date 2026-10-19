@@ -74,7 +74,11 @@ _PY_IMPORT_RE = re.compile(
 _PY_FROM_RE = re.compile(
     r"^[ \t]*from[ \t]+(\.*)([\w.]*)[ \t]+import[ \t]+(?:\(([^)]*)\)|([^\n]+))",
     re.MULTILINE)
-_PY_DYN_RE = re.compile(r"""(?:import_module|__import__)\s*\(\s*['"]([\w.]+)['"]""")
+# A module loaded by a literal name at run time: importlib.import_module("pkg.tests.x"),
+# __import__("..."), sys.modules["..."] (each a whole-module import).
+_PY_DYN_RE = re.compile(
+    r"""(?:import_module|__import__)\s*\(\s*['"]([\w.]+)['"]"""
+    r"""|\bsys\.modules\s*(?:\[\s*|\.get\s*\(\s*)['"]([\w.]+)['"]""")
 _JS_SPEC_RE = re.compile(
     r"""(?:\brequire\s*\(\s*|\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"\n]+)['"]""",
     re.MULTILINE)
@@ -180,7 +184,7 @@ def _py_import_records(path: str, text: str) -> list[tuple[str, str, set[str] | 
         elif mod:
             out.append(("abs", mod, _ALL if star else set(subs)))
             out.extend(("abs", f"{mod}.{x}", _ALL) for x in subs)
-    out.extend(("abs", m.group(1), _ALL) for m in _PY_DYN_RE.finditer(text))
+    out.extend(("abs", m.group(1) or m.group(2), _ALL) for m in _PY_DYN_RE.finditer(text))
     return out
 
 
@@ -212,11 +216,45 @@ def is_test_runner(path: str, text: str) -> bool:
     return bool(_CALLS_TESTS_RE.search(text))
 
 
+# Decorators that only wrap or describe a definition. Any other decorator runs at
+# import time and may register the definition (`@app.route`, `@registry.register(...)`,
+# `@atexit.register`), so a decorated definition counts as reached.
+_PURE_DECORATORS = frozenset({
+    "staticmethod", "classmethod", "property", "wraps", "functools.wraps", "lru_cache",
+    "functools.lru_cache", "cache", "functools.cache", "dataclass", "dataclasses.dataclass",
+    "abstractmethod", "abc.abstractmethod", "overload", "typing.overload", "fixture",
+    "pytest.fixture",
+})
+
+
+def _dotted(node) -> str:
+    import ast
+    if isinstance(node, ast.Call):
+        node = node.func
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _pure_decorator(node) -> bool:
+    name = _dotted(node)
+    return name in _PURE_DECORATORS or name.startswith("pytest.mark.")
+
+
 def unreached_lines(text: str, names: set[str]) -> set[int]:
     """Lines of the top-level functions / classes of a Python module that an import
     of only ``names`` (``from tests.support import captured_stdout``) never runs:
     definitions neither imported nor referenced by an imported one or by module-level
-    code (followed to a fixed point). Empty when the module does not parse."""
+    code (followed to a fixed point). Counted as reached as well: a definition with a
+    decorator that is not purely descriptive (``_PURE_DECORATORS``), a name in a
+    literal ``getattr(x, "name")``, and every definition when the module looks names
+    up by string (``getattr`` with a computed name, ``globals()`` / ``vars()`` /
+    ``locals()`` / ``__dict__`` / ``operator.attrgetter``, a module ``__getattr__``).
+    Empty when the module does not parse."""
     import ast
     try:
         tree = ast.parse(text)
@@ -224,18 +262,63 @@ def unreached_lines(text: str, names: set[str]) -> set[int]:
         return set()
     defs = {n.name: n for n in tree.body
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    if "__getattr__" in defs:
+        return set()                      # PEP 562: any name can be served
+
+    def module_object(node) -> bool:
+        """``sys.modules[...]`` / ``importlib.import_module(...)`` / ``__import__``:
+        an expression that can be this module (and so serve its definitions by name)."""
+        if isinstance(node, ast.Subscript):
+            return _dotted(node.value) == "sys.modules"
+        if isinstance(node, ast.Call):
+            return _dotted(node.func) in ("import_module", "importlib.import_module",
+                                          "__import__", "sys.modules.get")
+        return False
+
+    # Names bound to the module object (`me = sys.modules[__name__]`).
+    module_names = {t.id for x in ast.walk(tree) if isinstance(x, ast.Assign)
+                    and module_object(x.value) for t in x.targets if isinstance(t, ast.Name)}
+
+    def may_be_module(node) -> bool:
+        return module_object(node) or (isinstance(node, ast.Name) and node.id in module_names)
+
+    for x in ast.walk(tree):
+        if isinstance(x, ast.Call):
+            fn = _dotted(x.func)
+            if fn in ("globals", "vars", "locals", "attrgetter", "operator.attrgetter"):
+                return set()
+            # A computed getattr reaches a definition only on the module object: on
+            # `sys` / `config` / an argument it reads that object's attributes.
+            if fn == "getattr" and len(x.args) >= 2 and may_be_module(x.args[0]) and not (
+                    isinstance(x.args[1], ast.Constant) and isinstance(x.args[1].value, str)):
+                return set()
+        elif isinstance(x, ast.Attribute) and x.attr == "__dict__" and (
+                may_be_module(x.value) or isinstance(x.value, ast.Name)
+                and x.value.id in defs):
+            return set()
 
     def refs(node) -> set[str]:
-        return {x.id for x in ast.walk(node) if isinstance(x, ast.Name)} | {
-            x.attr for x in ast.walk(node) if isinstance(x, ast.Attribute)}
+        out = set()
+        for x in ast.walk(node):
+            if isinstance(x, ast.Name):
+                out.add(x.id)
+            elif isinstance(x, ast.Attribute):
+                out.add(x.attr)
+            elif (isinstance(x, ast.Call) and _dotted(x.func) == "getattr" and len(x.args) >= 2
+                  and isinstance(x.args[1], ast.Constant) and isinstance(x.args[1].value, str)):
+                out.add(x.args[1].value)
+        return out
 
     reached = set(names) & set(defs)
     for n in tree.body:
         if n not in defs.values():
             reached |= refs(n) & set(defs)      # module-level code runs on import
-        else:
-            reached |= {d.id for d in getattr(n, "decorator_list", [])
-                        if isinstance(d, ast.Name)} & set(defs)
+            continue
+        decos = getattr(n, "decorator_list", [])
+        if any(not _pure_decorator(d) for d in decos):
+            reached.add(n.name)                 # a registering decorator runs on import
+        for d in decos:
+            reached |= refs(d) & set(defs)
     todo = list(reached)
     while todo:
         for r in refs(defs[todo.pop()]) & set(defs):

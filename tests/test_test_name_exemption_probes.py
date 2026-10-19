@@ -397,3 +397,90 @@ def test_runner_modules_are_test_code():
     assert is_test_runner("pkg/run.py", "import unittest\nunittest.main(module='pkg.tests')\n")
     assert not is_test_runner("pkg/core.py", "import unittest\nX = 1\n")
     assert not is_test_runner("pkg/cli.py", "from pkg.tests.support import load\n")
+
+
+# ---------------------------------------------------------------- partial-import reach
+# What an import of one helper reaches (review of 96ed7aa1). Each rule only widens.
+
+RISKY = "def risky(s):\n    return yaml.load(s)\n"
+HELPER = "import yaml\n\n\ndef helper():\n    return 1\n\n\n"
+
+
+def _risky_reached(text: str) -> bool:
+    from src.scanner.test_files import unreached_lines
+    line = text.split("\n").index("    return yaml.load(s)") + 1
+    return line not in unreached_lines(text, {"helper"})
+
+
+def test_unreached_baseline():
+    assert not _risky_reached(HELPER + RISKY)
+
+
+@pytest.mark.parametrize("deco,reached", [
+    ("@app.route('/x')", True),
+    ("@registry.register('x')", True),
+    ("@atexit.register", True),
+    ("@some_decorator", True),
+    ("@functools.lru_cache(maxsize=None)", False),
+    ("@lru_cache", False),
+    ("@staticmethod", False),
+    ("@dataclass", False),
+    ("@typing.overload", False),
+    ("@abc.abstractmethod", False),
+    ("@pytest.fixture", False),
+    ("@pytest.mark.skip(reason='x')", False),
+])
+def test_decorator_reach(deco, reached):
+    assert _risky_reached(HELPER + deco + "\n" + RISKY) is reached
+
+
+@pytest.mark.parametrize("extra,reached", [
+    ("def helper2(n):\n    return globals()[n]\n", True),
+    ("def helper2(n):\n    return vars()[n]\n", True),
+    ("def helper2(n):\n    return locals()\n", True),
+    ("import operator\nF = operator.attrgetter('x')\n", True),
+    ("import sys\ndef helper2(n):\n    return getattr(sys.modules[__name__], n)\n", True),
+    ("import sys\nME = sys.modules[__name__]\ndef helper2(n):\n    return getattr(ME, n)\n",
+     True),
+    ("import sys\nprint(sys.modules[__name__].__dict__)\n", True),
+    ("def __getattr__(name):\n    return None\n", True),
+    # a literal getattr names the definition it reads
+    ("import sys\ndef helper2():\n    return getattr(sys.modules[__name__], 'risky')\n",
+     True),
+    ("def helper3():\n    return getattr(object(), 'risky')\n", True),
+    # computed getattr on another object (numba's getattr(sys, stream_name))
+    ("import sys\ndef helper2(n):\n    return getattr(sys, n)\n", False),
+    ("def helper2(o, n):\n    return getattr(o, n)\n", False),
+])
+def test_string_keyed_reach(extra, reached):
+    text = HELPER + extra + "\n\n" + RISKY
+    # helper2 / helper3 are imported alongside `helper`
+    from src.scanner.test_files import unreached_lines
+    line = text.split("\n").index("    return yaml.load(s)") + 1
+    got = line not in unreached_lines(text, {"helper", "helper2", "helper3"})
+    assert got is reached
+
+
+@pytest.mark.parametrize("importer", [
+    "import importlib\nm = importlib.import_module('pkg.tests.support')\n",
+    "m = __import__('pkg.tests.support')\n",
+    "import sys\nm = sys.modules['pkg.tests.support']\n",
+    "import sys\nm = sys.modules.get('pkg.tests.support')\n",
+])
+def test_dynamic_import_is_whole_module(tmp_path, importer):
+    files = {"pkg/__init__.py": "", "pkg/tests/__init__.py": "",
+             "pkg/tests/support.py": HELPER + RISKY, "pkg/core.py": importer,
+             "pkg/cli.py": "from pkg.tests.support import helper\n"}
+    _tree(tmp_path, files)
+    r = scan_local(tmp_path)
+    assert _full(r, "pkg/tests/support.py", PY_RULE)
+    r = _pkg("pypi", files, "wheel")
+    assert _full(r, "pkg/tests/support.py", PY_RULE)
+
+
+def test_named_import_alone_stays_exempt(tmp_path):
+    files = {"pkg/__init__.py": "", "pkg/tests/__init__.py": "",
+             "pkg/tests/support.py": HELPER + RISKY,
+             "pkg/cli.py": "from pkg.tests.support import helper\n"}
+    _tree(tmp_path, files)
+    assert _exempt(scan_local(tmp_path), "pkg/tests/support.py", PY_RULE)
