@@ -15,6 +15,7 @@ Design (see docs/internal/claude-directory-listing-plan.md):
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextvars
 import json
 import logging
@@ -25,9 +26,11 @@ from urllib.parse import quote
 import httpx
 import jsonschema
 import mcp.types as types
+from mcp.server.context import ServerRequestContext
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 
 from src.bridges.mcp_app_view import trust_card_html
 from src.scanner.verdict import DECISION_VALUES as _DECISION_VALUES
@@ -209,10 +212,17 @@ server: Server = Server(
 # The stateless transport builds InitializeResult per request from
 # create_initialization_options(); pick the instructions for the calling surface there
 # (the surface contextvar is set in mcp_asgi_app before the request is handled).
+# 2026-07-28 clients never send initialize: they read the same instructions from
+# server/discover (_discover below).
 _base_create_initialization_options = server.create_initialization_options
 
 
 def _create_initialization_options(*args, **kwargs):
+    # SDK 1.x always advertised `"experimental": {}`; 2.x omits it unless asked. Keep it
+    # so the handshake-era initialize result stays byte-identical to what clients (and
+    # the ChatGPT app review) already have on file.
+    if len(args) < 2:
+        kwargs.setdefault("experimental_capabilities", {})
     opts = _base_create_initialization_options(*args, **kwargs)
     try:
         opts.instructions = _instructions_for(_SURFACE.get())
@@ -1869,7 +1879,7 @@ for _t in _TOOLS:
         _t.meta = {**_CARD_META, "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
                    "openai/toolInvocation/invoked": "AgentAvow scan complete"}
         # The scan tools return structuredContent; describe it (see _SCAN_OUTPUT_SCHEMA).
-        _t.outputSchema = _SCAN_OUTPUT_SCHEMA
+        _t.output_schema = _SCAN_OUTPUT_SCHEMA
 
 # Defensive length bounds on string inputs (hygiene — these are interpolated into API
 # paths; also what our own scanner flags on unconstrained params). Generous so no real
@@ -1877,17 +1887,55 @@ for _t in _TOOLS:
 _MAXLEN = {"repo": 214, "owner": 214, "name": 214, "endpoint_url": 512,
            "entity_id": 64, "target_entity_id": 64}
 for _t in _TOOLS:
-    for _k, _p in ((_t.inputSchema or {}).get("properties") or {}).items():
+    for _k, _p in ((_t.input_schema or {}).get("properties") or {}).items():
         if _p.get("type") == "string" and "maxLength" not in _p and _k in _MAXLEN:
             _p["maxLength"] = _MAXLEN[_k]
 
 
-@server.list_tools()
+_TOOLS_BY_NAME: dict[str, types.Tool] = {_t.name: _t for _t in _TOOLS}
+
+
+# --------------------------------------------------------------------------- #
+# MCP request handlers. SDK 2.x registers `(ctx, params) -> Result` handlers by method
+# (no decorators). The bodies stay plain functions with their 1.x signatures
+# (_list_tools, _read_resource, _get_prompt, _call_tool — the tests call them
+# directly); the _on_* adapters below shape their returns into the protocol results
+# the 1.x decorators used to build, so the wire output is unchanged.
+# --------------------------------------------------------------------------- #
+# Per-request slot where an _on_* adapter leaves the wire dump of the result it built,
+# in its own key order, for _legacy_key_order (below) to restore after the SDK's
+# per-version shaping.
+_WIRE_REF: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "agentavow_mcp_wire_ref", default=None
+)
+
+
+def _keeps_wire_order(fn):
+    async def wrapper(ctx, params):
+        result = await fn(ctx, params)
+        holder = _WIRE_REF.get()
+        if holder is not None:
+            try:
+                holder["ref"] = result.model_dump(by_alias=True, mode="json", exclude_none=True)
+            except Exception:  # noqa: BLE001 — ordering is cosmetic
+                pass
+        return result
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    wrapper.__wrapped__ = fn
+    return wrapper
+
+
 async def _list_tools() -> list[types.Tool]:
     return _TOOLS
 
 
-@server.list_resources()
+async def _on_list_tools(
+    ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+) -> types.ListToolsResult:
+    return types.ListToolsResult(tools=await _list_tools())
+
+
 async def _list_resources() -> list[types.Resource]:
     _r = types.Resource(
         uri=_CARD_URI,
@@ -1924,12 +1972,35 @@ _CARD_CONTENTS_META = {
 }
 
 
-@server.read_resource()
+async def _on_list_resources(
+    ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+) -> types.ListResourcesResult:
+    return types.ListResourcesResult(resources=await _list_resources())
+
+
 async def _read_resource(uri: object) -> list[ReadResourceContents]:
     if str(uri).rstrip("/") == _CARD_URI.rstrip("/"):
         return [ReadResourceContents(content=trust_card_html(HEADLINE_FOLLOWS_DECISION),
                                      mime_type=_CARD_MIME, meta=_CARD_CONTENTS_META)]
     return []
+
+
+async def _on_read_resource(
+    ctx: ServerRequestContext, params: types.ReadResourceRequestParams
+) -> types.ReadResourceResult:
+    # Same shape SDK 1.x built from ReadResourceContents (an unknown URI is an empty
+    # contents list, as before).
+    contents: list[types.TextResourceContents | types.BlobResourceContents] = []
+    for c in await _read_resource(params.uri):
+        if isinstance(c.content, bytes):
+            contents.append(types.BlobResourceContents(
+                uri=params.uri, blob=base64.b64encode(c.content).decode(),
+                mime_type=c.mime_type or "application/octet-stream", meta=c.meta))
+        else:
+            contents.append(types.TextResourceContents(
+                uri=params.uri, text=c.content, mime_type=c.mime_type or "text/plain",
+                meta=c.meta))
+    return types.ReadResourceResult(contents=contents)
 
 
 # A discoverable "intro" the user can invoke from the client's prompt picker — the
@@ -1967,7 +2038,6 @@ _CHECK_MY_CONNECTIONS = (
 )
 
 
-@server.list_prompts()
 async def _list_prompts() -> list[types.Prompt]:
     return [
         types.Prompt(
@@ -1984,7 +2054,18 @@ async def _list_prompts() -> list[types.Prompt]:
     ]
 
 
-@server.get_prompt()
+async def _on_list_prompts(
+    ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+) -> types.ListPromptsResult:
+    return types.ListPromptsResult(prompts=await _list_prompts())
+
+
+async def _on_get_prompt(
+    ctx: ServerRequestContext, params: types.GetPromptRequestParams
+) -> types.GetPromptResult:
+    return await _get_prompt(params.name, params.arguments)
+
+
 async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResult:
     if name == "agentavow_check_my_connections":
         return types.GetPromptResult(
@@ -2007,7 +2088,6 @@ async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResul
     )
 
 
-@server.call_tool()
 async def _call_tool(
     name: str, arguments: dict
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict] | types.CallToolResult:
@@ -2030,6 +2110,139 @@ async def _call_tool(
                      name, e.message)
         return types.CallToolResult(content=content, structuredContent=struct)
     return out
+
+
+def _tool_error(text: str) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)],
+                                is_error=True)
+
+
+def _tool_input_schema(name: str) -> dict | None:
+    """inputSchema by tool name (the SDK's Mcp-Param-* header check on 2026-07-28)."""
+    t = _TOOLS_BY_NAME.get(name)
+    return t.input_schema if t is not None else None
+
+
+async def _on_call_tool(
+    ctx: ServerRequestContext | None, params: types.CallToolRequestParams
+) -> types.CallToolResult:
+    """tools/call, with the checks SDK 1.x's @call_tool decorator ran and 2.x does not:
+    arguments validated against the tool's inputSchema (the maxLength bounds included),
+    the (content, structuredContent) pair validated against its outputSchema, and an
+    unexpected exception returned as a tool error (2.x would answer a JSON-RPC error).
+    Error texts match 1.x's."""
+    name = params.name
+    arguments = params.arguments or {}
+    tool = _TOOLS_BY_NAME.get(name)
+    try:
+        if tool is not None:
+            try:
+                jsonschema.validate(instance=arguments, schema=tool.input_schema)
+            except jsonschema.ValidationError as e:
+                return _tool_error(f"Input validation error: {e.message}")
+        results = await _call_tool(name, arguments)
+        if isinstance(results, types.CallToolResult):
+            return results
+        if isinstance(results, tuple) and len(results) == 2:
+            content, struct = results
+        else:
+            content, struct = results, None
+        if tool is not None and tool.output_schema is not None:
+            if struct is None:
+                return _tool_error("Output validation error: outputSchema defined but no "
+                                   "structured output returned")
+            try:
+                jsonschema.validate(instance=struct, schema=tool.output_schema)
+            except jsonschema.ValidationError as e:
+                return _tool_error(f"Output validation error: {e.message}")
+        return types.CallToolResult(content=list(content), structured_content=struct,
+                                    is_error=False)
+    except Exception as e:  # noqa: BLE001 — 1.x parity: a tool error, never a stack trace
+        return _tool_error(str(e))
+
+
+async def _discover(
+    ctx: ServerRequestContext, params: types.RequestParams | None
+) -> types.DiscoverResult:
+    """server/discover (2026-07-28): the SDK default, with the per-surface instructions
+    the handshake-era initialize result carries."""
+    return types.DiscoverResult(
+        supported_versions=list(MODERN_PROTOCOL_VERSIONS),
+        capabilities=server.get_capabilities(protocol_version=ctx.protocol_version),
+        instructions=_instructions_for(_SURFACE.get()),
+    )
+
+
+for _method, _params_type, _handler in (
+    ("tools/list", types.PaginatedRequestParams, _on_list_tools),
+    ("tools/call", types.CallToolRequestParams, _on_call_tool),
+    ("resources/list", types.PaginatedRequestParams, _on_list_resources),
+    ("resources/read", types.ReadResourceRequestParams, _on_read_resource),
+    ("prompts/list", types.PaginatedRequestParams, _on_list_prompts),
+    ("prompts/get", types.GetPromptRequestParams, _on_get_prompt),
+    ("server/discover", types.RequestParams, _discover),
+):
+    server.add_request_handler(_method, _params_type, _keeps_wire_order(_handler))
+server.get_tool_input_schema = _tool_input_schema
+
+
+# Handshake-era wire order. SDK 2.x shapes every result through per-version "surface"
+# models generated from the spec's JSON schema, whose fields are alphabetical, so a
+# 2025-11-25 prompts/list would come out `{"description":…,"name":…,"title":…}` instead
+# of the `{"name":…,"title":…,"description":…}` order SDK 1.x wrote (and an inputSchema
+# as `{"properties":…,"required":…,"type":…}`). JSON objects are unordered, but the
+# ChatGPT app review pins these exact bytes, so for handshake-era versions the keys are
+# put back in the order our handler built them (the 1.x wire order); for initialize,
+# which the SDK builds itself, in the order of its own InitializeResult model. Order
+# only: the values (and the set of keys) are the SDK's, untouched; a 2026-07-28 result
+# is left exactly as the SDK shaped it.
+_ORDER_MODELS: dict[str, type] = {
+    "initialize": types.InitializeResult,
+    "tools/list": types.ListToolsResult,
+    "tools/call": types.CallToolResult,
+    "resources/list": types.ListResourcesResult,
+    "resources/read": types.ReadResourceResult,
+    "prompts/list": types.ListPromptsResult,
+    "prompts/get": types.GetPromptResult,
+}
+
+
+def _reorder_like(value, ref):
+    """`value` with its object keys in `ref`'s order (keys `ref` lacks keep their place
+    after them), recursively. Never adds, drops or changes a value."""
+    if isinstance(value, dict) and isinstance(ref, dict):
+        out = {k: _reorder_like(value[k], ref[k]) for k in ref if k in value}
+        for k, v in value.items():
+            if k not in out:
+                out[k] = v
+        return out
+    if isinstance(value, list) and isinstance(ref, list) and len(value) == len(ref):
+        return [_reorder_like(v, r) for v, r in zip(value, ref)]
+    return value
+
+
+async def _legacy_key_order(ctx, call_next):
+    holder: dict = {}
+    token = _WIRE_REF.set(holder)
+    try:
+        result = await call_next(ctx)
+    finally:
+        _WIRE_REF.reset(token)
+    model = _ORDER_MODELS.get(ctx.method)
+    if (model is None or not isinstance(result, dict)
+            or ctx.protocol_version in MODERN_PROTOCOL_VERSIONS):
+        return result
+    try:
+        ref = holder.get("ref")
+        if ref is None:
+            ref = model.model_validate(result).model_dump(by_alias=True, mode="json",
+                                                          exclude_none=True)
+        return _reorder_like(result, ref)
+    except Exception:  # noqa: BLE001 — ordering is cosmetic; never fail a request over it
+        return result
+
+
+server.middleware.append(_legacy_key_order)
 
 
 async def _run_tool(

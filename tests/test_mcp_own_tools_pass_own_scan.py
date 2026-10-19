@@ -15,6 +15,6 @@ from src.scanner.mcp_scan import _classify_tool
 
 @pytest.mark.parametrize("tool", _TOOLS, ids=lambda t: t.name)
 def test_no_read_only_tool_reads_like_it_executes_or_writes(tool):
-    assert tool.annotations.readOnlyHint is True
+    assert tool.annotations.read_only_hint is True
     caps = _classify_tool(tool.name, tool.description)
     assert not caps & {"exec", "fs_write", "db_write"}, (tool.name, sorted(caps))

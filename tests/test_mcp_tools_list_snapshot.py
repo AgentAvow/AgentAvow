@@ -10,15 +10,33 @@ import json
 import pathlib
 
 from src.bridges import mcp_streamable as m
+from tests import mcp_wire as wire
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "mcp_tools_list_snapshot.json"
+
+
+def _initialize_doc() -> dict:
+    """The initialize result's identity, capabilities and instructions, keyed as the
+    fixture has them (the 1.x InitializationOptions field names). Read off the wire
+    result a 2025-11-25 client gets (the default, non-directive surface), not the SDK's
+    internal options model, so an SDK upgrade cannot shift it unnoticed."""
+    resp = asyncio.run(wire.post("initialize", wire.initialize_params(), ua="probe/1.0",
+                                 protocol_version=None))
+    result = resp.json()["result"]
+    info = result["serverInfo"]
+    return {
+        "capabilities": result["capabilities"],
+        "instructions": result["instructions"],
+        "server_name": info["name"],
+        "server_version": info["version"],
+        "website_url": info["websiteUrl"],
+    }
 
 
 def _current() -> str:
     tools = asyncio.run(m._list_tools())
     doc = {
-        "initialize": m.server.create_initialization_options().model_dump(
-            mode="json", exclude_none=True),
+        "initialize": _initialize_doc(),
         "tools": [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in tools],
     }
     return json.dumps(doc, sort_keys=True, ensure_ascii=False, indent=1) + "\n"
