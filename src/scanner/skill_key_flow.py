@@ -133,6 +133,20 @@ _HIGH_VALUE_TOKENS = frozenset({
 # Messaging APIs double as exfil channels (a bot that posts to the author's chat).
 _MESSAGING_DOMAINS = frozenset({"telegram.org", "discord.com", "discordapp.com",
                                 "slack.com"})
+# Well-known APIs that are also write channels an attacker can read back (a gist, a
+# repo file, a Hugging Face upload, a storage bucket). A key that isn't that vendor's
+# going there is high (Review), like a messaging API, not excused.
+_WRITEBACK_DOMAINS = frozenset({"github.com", "githubusercontent.com", "gitlab.com",
+                                "huggingface.co", "hf.co", "notion.com", "notion.so",
+                                "supabase.co", "supabase.com"})
+_WRITEBACK_HOST_RE = re.compile(
+    r"(?:^|\.)(?:s3[.-][\w.-]*amazonaws\.com|s3\.amazonaws\.com|storage\.googleapis\.com"
+    r"|storage\.cloud\.google\.com|blob\.core\.windows\.net|r2\.cloudflarestorage\.com"
+    r"|uploads?\.[\w.-]+)$")
+
+
+def _is_writeback_host(host: str, reg: str) -> bool:
+    return reg in _WRITEBACK_DOMAINS or bool(_WRITEBACK_HOST_RE.search(host.lower()))
 for _name, (_v, _doms) in VENDOR_KEYS.items():
     _TOKEN_DOMAINS.setdefault(_name.split("_")[0].lower(), _doms)
 
@@ -504,7 +518,7 @@ def classify(hosts: list[str], env_name: str | None, file_keys: set[str],
             continue
         elif klass in ("vendor", "dump"):
             crit.append(h)
-        elif reg in _MESSAGING_DOMAINS:
+        elif reg in _MESSAGING_DOMAINS or _is_writeback_host(h, reg):
             high.append(h)
         elif reg in _KNOWN_API_DOMAINS:
             continue
