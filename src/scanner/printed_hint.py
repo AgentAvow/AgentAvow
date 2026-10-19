@@ -1807,6 +1807,33 @@ class Hints:
             return f"walk error: {type(exc).__name__}"
 
 
+_PY_OUTPUT_REBOUND_RE = re.compile(
+    r"\bsys\s*\.\s*std(?:out|err)\s*=(?!=)|setattr\s*\(\s*(?:sys|builtins)\b|"
+    r"redirect_std(?:out|err)|\bbuiltins\s*\.\s*print\s*=(?!=)|"
+    r"^\s*print\s*=(?!=)|^\s*def\s+print\s*\(", re.MULTILINE)
+
+
+# ``_CONSOLE_SHADOW_RE`` for a whole-tree check: ``return console.log(…)`` (a minified
+# bundle's logger) is a call, not ``console`` handed out as a value to write through.
+_OUTPUT_SHADOW_RE = re.compile(_CONSOLE_SHADOW_RE.pattern.replace(
+    r"\breturn\s+console\b", r"\breturn\s+console\b(?!\s*(?:\.|\?\.|\[))"))
+
+
+def output_replaced(files: dict[str, str]) -> bool:
+    """Does any code file in ``files`` replace, wrap or alias the human-facing output a
+    printed hint relies on (JS ``console`` / ``process.stdout.write``, Python
+    ``sys.stdout`` / ``print``)? Then a string "only printed" may be run."""
+    for p, text in files.items():
+        if not text or not is_supported(p):
+            continue
+        if Path(p.lower()).suffix in PY_EXTS:
+            if _PY_OUTPUT_REBOUND_RE.search(text):
+                return True
+        elif _OUTPUT_SHADOW_RE.search(text):
+            return True
+    return False
+
+
 def hint_only(files: dict[str, str], path: str, line_no: int, pattern: re.Pattern,
               *, package: bool) -> bool:
     """True when EVERY pipe-to-shell match of ``pattern`` on 1-based ``line_no`` of

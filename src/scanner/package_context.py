@@ -63,7 +63,10 @@ only human-facing output in every file of the package that reads it (a printed i
 hint: ``src.scanner.printed_hint``); so is an unpinned ``npx foo`` shown the same way.
 
 Applied to npm and PyPI artifacts only; repository, MCP-server, skill, image and model
-scans are unchanged.
+scans are unchanged, except that repository and local-tree scans run the printed-hint
+recheck (``recheck_printed_hints``) over every file they read: a ``curl … | sh`` or
+``npx …`` hint the per-file pass lowered gets its severity back when another file
+replaces the output it is printed to.
 """
 from __future__ import annotations
 
@@ -616,21 +619,12 @@ def calibrate_package_findings(findings: list, fetched) -> list:
     pkg = _Package(fetched)
     data_ok: dict[str, bool] = {}
     hints = Hints(pkg.texts, package=True)  # lazy: tokenizes only when asked
+    replaced: list[bool] = []
 
     for f in findings:
         if getattr(f, "kind", "defect") == "capability":
             continue
-        pre = getattr(f, "pre_hint", None)
-        if pre is not None and f.name in _HINT_RULES and f.remediation == WHY_HINT \
-                and f.severity == "low" and getattr(f, "installed", True):
-            # Lowered by the per-file pass, which sees one file. With the whole package
-            # in view (`console.log = s => execSync(s)` in another file, a name read
-            # elsewhere) it must hold again, or the finding gets back what it had.
-            path = getattr(f, "file_path", "") or ""
-            if not (is_supported(path) and _printed_hint(hints, pkg.text(path), f)):
-                f.severity, f.remediation = pre[0], pre[2]
-                if hasattr(f, "payload"):
-                    f.payload = pre[1]
+        if _recheck_hint(f, hints, pkg.texts, replaced):
             continue
         if f.severity not in ("critical", "high", "medium"):
             continue
@@ -674,6 +668,60 @@ _PIPE_TO_SHELL = "curl/wget piped to shell"
 _UNPINNED_NPX = "Unpinned npx/uvx package (no @version pin)"
 # Rules whose match may be a printed hint (``src.scanner.printed_hint``).
 _HINT_RULES = frozenset({_PIPE_TO_SHELL, _UNPINNED_NPX})
+
+
+def _restore(f, pre) -> None:
+    f.severity = pre[0]
+    if pre[2] is not None:
+        f.remediation = pre[2]
+    if hasattr(f, "payload"):
+        f.payload = pre[1]
+
+
+def _recheck_hint(f, hints: Hints, texts: dict[str, str], replaced: list[bool]) -> bool:
+    """Re-check a printed hint the per-file pass lowered (it carries ``pre_hint``) with
+    every file in ``texts`` in view; restore what it had when the check fails. True
+    when ``f`` is such a hint (handled), False otherwise.
+
+    * ``curl … | sh`` / ``npx …`` lowered by the printed-hint walk: the walk must hold
+      again (``console.log = s => execSync(s)`` in another file, a name read elsewhere).
+    * ``npx …`` help text lowered by ``scan._npx_not_a_load``: restored when any file
+      replaces or aliases the output it is printed to (``printed_hint.output_replaced``).
+    ``replaced`` memoizes the second check across findings."""
+    pre = getattr(f, "pre_hint", None)
+    if pre is None or f.severity != "low" or not getattr(f, "installed", True):
+        return False
+    path = getattr(f, "file_path", "") or ""
+    if f.name in _HINT_RULES and f.remediation == WHY_HINT:
+        if not (is_supported(path) and _printed_hint(hints, texts.get(path), f)):
+            _restore(f, pre)
+        return True
+    if f.name == _UNPINNED_NPX:
+        if not replaced:
+            from src.scanner.printed_hint import output_replaced
+            replaced.append(output_replaced(texts))
+        if replaced[0]:
+            _restore(f, pre)
+        return True
+    return False
+
+
+def recheck_printed_hints(findings: list, texts: dict[str, str]) -> list:
+    """The whole-set printed-hint recheck alone, for a repository or local-tree scan:
+    ``texts`` is every file the scan read (path -> text). Findings in files outside
+    ``texts`` (an oversized file's head / tail window) keep the per-file answer.
+    Mutates and returns ``findings``."""
+    if not any(getattr(f, "pre_hint", None) is not None for f in findings):
+        return findings
+    hints = Hints(texts, package=True)
+    replaced: list[bool] = []
+    for f in findings:
+        if getattr(f, "kind", "defect") == "capability":
+            continue
+        if (getattr(f, "file_path", "") or "") not in texts:
+            continue
+        _recheck_hint(f, hints, texts, replaced)
+    return findings
 
 
 def _hint_re(name: str):

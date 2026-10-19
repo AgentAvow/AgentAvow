@@ -3250,6 +3250,15 @@ def _scan_content(
                 if i not in prose and not ln.lstrip().startswith(("#", "//", "*"))))
         return sink_memo[0]
 
+    out_memo: list[bool] = []
+
+    def _npx_output_replaced() -> bool:
+        """This file replaces / aliases console, stdout or print (memoized)."""
+        if not out_memo:
+            from src.scanner.printed_hint import output_replaced
+            out_memo.append(output_replaced({file_path: content}))
+        return out_memo[0]
+
     # Untrusted-input lines (request body / fetched content) for the "dynamic argv or
     # eval NEXT TO untrusted input" rules.
     untrusted = _untrusted_lines(lines, lf.lines(UNTRUSTED_INPUT_RE))
@@ -3918,6 +3927,7 @@ def _scan_content(
                         and _in_string_literal_at(line, dm.start())
                         and not _file_has_exec_sink()):
                     effective_severity, remote_payload = "medium", False
+                npx_pre = None
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
                         "`" if idx in _string_state()[1] else None, lines, idx,
@@ -3925,7 +3935,15 @@ def _scan_content(
                     # Help text a CLI prints (`'  npx browserslist\n'`) or a maintainer
                     # package.json script (`"release": "npx npmpub"`) never runs on a
                     # consumer's machine (precision PR 2).
-                    effective_severity = "low"
+                    from src.scanner import printed_hint
+                    if printed_hint.is_supported(file_path):
+                        # Printed help text: only while the output it is printed to is
+                        # the real one. The caller re-checks with every file in view.
+                        if not _npx_output_replaced():
+                            npx_pre = (effective_severity, remote_payload, None)
+                            effective_severity = "low"
+                    else:
+                        effective_severity = "low"
                 if name.startswith("Unpinned npx") and effective_severity == "medium":
                     # npx policy (2026-10-19): an npx/uvx that is only documented or
                     # printed is reported low; one that runs keeps medium.
@@ -4032,6 +4050,11 @@ def _scan_content(
                     remediation=(pipe_shell.WHY_OFFICIAL
                                  if pipe_class == pipe_shell.OFFICIAL else ""),
                 )
+                if npx_pre is not None:
+                    # What it would have been (not a dataclass field): repository,
+                    # local and package scans restore it when another file replaces
+                    # the output (`package_context.recheck_printed_hints`).
+                    finding.pre_hint = npx_pre  # type: ignore[attr-defined]
                 if (name == "curl/wget piped to shell"
                         and Path(file_path).name.lower() == "package.json"):
                     # A maintainer-only package.json script (`test:e2e:docker`) that no
@@ -7100,6 +7123,9 @@ async def scan_repo(
         if fetch_failed:
             gaps["fetch_failed"] = fetch_failed
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
+        # A printed install hint lowered per file holds only with the whole repo in view.
+        from src.scanner.package_context import recheck_printed_hints
+        recheck_printed_hints(result.findings, repo_texts)
 
         # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
         oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)
