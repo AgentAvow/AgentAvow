@@ -29,6 +29,8 @@ from pathlib import Path
 
 from src.scanner.scan import (
     _DEP_FILES,
+    _MAX_FILES_PER_REPO,
+    _OVERSIZED_WINDOW,
     ScanResult,
     _calculate_category_scores,
     _calculate_trust_score,
@@ -39,13 +41,15 @@ from src.scanner.scan import (
     _detect_language,
     _finding_is_blocking,
     _load_allowlist,
+    _oversized_scan_files,
     _scan_content,
     _scan_dependencies,
+    _scan_oversized_text,
     _select_scan_files,
     _should_skip_path,
     finding_is_shipped,
 )
-from src.scanner.verdict import Decision, certified_mark, decide
+from src.scanner.verdict import Decision, certified_mark, coverage_gap_notes, decide
 from src.trust_tiers import trust_word, verdict_phrase
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -56,8 +60,10 @@ def _is_shipped(f) -> bool:
     output leads with the shipped surface an agent actually runs."""
     return finding_is_shipped(f)
 
-# Skip files larger than ~1MB — matches the practical hosted fetch cap and keeps
-# a huge generated/vendored file from dominating the scan.
+# Whole-file read cap for the non-source reads (manifests, dependency files, config).
+# Source files follow the hosted per-file cap instead: ``_select_scan_files`` leaves out
+# anything over ``scan._MAX_FILE_SIZE`` and ``_oversized_scan_files`` reads its head
+# and tail, disclosed as a coverage gap.
 _MAX_FILE_BYTES = 1_000_000
 
 # Directory names pruned at walk time (never scanned, never counted). Mirrors what
@@ -76,6 +82,28 @@ def _read_text(p: Path) -> str | None:
         return p.read_text(encoding="utf-8", errors="ignore")
     except (OSError, ValueError):
         return None
+
+
+def _read_window(p: Path, *, tail: bool) -> str | None:
+    """The first (``tail=False``) or last ``_OVERSIZED_WINDOW`` bytes of a file, decoded
+    as the hosted scan decodes its HTTP Range windows (``scan._fetch_file_window``).
+    None when unreadable; ``_scan_oversized_text`` then discloses the file as not read."""
+    try:
+        with p.open("rb") as fh:
+            if tail:
+                size = fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, size - _OVERSIZED_WINDOW))
+            data = fh.read(_OVERSIZED_WINDOW)
+    except (OSError, ValueError):
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def _file_size(p: Path) -> int:
+    try:
+        return p.stat().st_size if p.is_file() else 0
+    except (OSError, ValueError):
+        return 0
 
 
 def _git_tracked_files(root: Path) -> list[str] | None:
@@ -110,14 +138,15 @@ def _walk_tree(root: Path) -> list[dict]:
     """
     tracked = _git_tracked_files(root)
     if tracked is not None:
-        return [{"path": p, "type": "blob"} for p in tracked]
+        return [{"path": p, "type": "blob", "size": _file_size(root / p)} for p in tracked]
     out: list[dict] = []
     for dirpath, dirnames, filenames in os.walk(root):
         # prune in-place so os.walk doesn't descend into them
         dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
         for fn in filenames:
-            rel = (Path(dirpath) / fn).relative_to(root).as_posix()
-            out.append({"path": rel, "type": "blob"})
+            full = Path(dirpath) / fn
+            rel = full.relative_to(root).as_posix()
+            out.append({"path": rel, "type": "blob", "size": _file_size(full)})
     return out
 
 
@@ -228,9 +257,19 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
             pass
 
     # --- select scannable files (shared with the hosted path — can't drift) ---
+    # Each tree item carries its on-disk ``size``, so the hosted per-file cap
+    # (``_MAX_FILE_SIZE``) leaves the same files out here as there.
     scan_files, result.total_scannable_files, result.sampled = _select_scan_files(
         tree, user_excludes,
     )
+    # Coverage gaps, counted as ``scan_repo`` counts them (disclosure only).
+    gaps: dict = {}
+    n_oversized = len(_oversized_scan_files(tree, user_excludes, limit=0))
+    if n_oversized:
+        gaps["oversized_files"] = n_oversized
+    if result.total_scannable_files > len(scan_files):
+        gaps["over_file_cap"] = result.total_scannable_files - len(scan_files)
+        gaps["file_cap"] = _MAX_FILES_PER_REPO
 
     # --- per-file static analysis (the 12 categories) ---
     allowlist = _load_allowlist()
@@ -248,9 +287,21 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
         digest = _canonical_tool_digest(content, it["path"])
         if digest:
             result.tool_digests[it["path"]] = digest
-    result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
     from src.scanner.npm_scripts import restore_externally_invoked
     restore_externally_invoked(result.findings, local_texts)
+
+    # --- oversized source files: head + tail, disclosed (as scan_repo does) ---
+    oversized = _oversized_scan_files(tree, user_excludes)
+    if oversized:
+        result.sampled = True  # the middle of each file is not read
+        for it in oversized:
+            p = root / it["path"]
+            result.findings.extend(_scan_oversized_text(
+                _read_window(p, tail=False), _read_window(p, tail=True), it["path"],
+                int(it.get("size", 0)), allowlist,
+            ))
+    result.coverage_gaps = {k: gaps[k] for k in sorted(gaps)}
+    result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
 
     # --- dependency findings (offline regex over manifests/lockfiles) ---
     dep_names = {f.lower() for f in _DEP_FILES}
@@ -299,6 +350,7 @@ def decision_for_result(result: ScanResult) -> Decision:
         "deprecation": getattr(result, "deprecation", None),
         "incident_history": getattr(result, "incident_history", None) or {},
         "supply_chain": getattr(result, "supply_chain", None) or {},
+        "coverage_gaps": result.coverage_gaps or {},
     })
 
 
@@ -335,6 +387,10 @@ def result_to_dict(result: ScanResult) -> dict:
         "files_scanned": result.files_scanned,
         "total_scannable_files": result.total_scannable_files,
         "sampled": result.sampled,
+        # What the scan selected but could not read in full (same keys and wording as
+        # the hosted API's ``coverage_gaps`` / ``not_checked``; disclosure only).
+        "coverage_gaps": result.coverage_gaps or {},
+        "not_checked": coverage_gap_notes({"coverage_gaps": result.coverage_gaps or {}}),
         "primary_language": result.primary_language,
         "is_mcp_server": result.is_mcp_server,
         "declared_scope": result.declared_scope or {},
@@ -515,6 +571,8 @@ def result_to_markdown(result: ScanResult, gate_failure: str | None = None,
         f"{c['low']} low |",
         f"| Gate | {_md_cell(gate)} |",
     ]
+    if d["not_checked"]:
+        lines.append(f"| Not checked | {_md_cell('; '.join(d['not_checked']))} |")
     top = [f for f in d["findings"] if f["severity"] in ("critical", "high")][:10]
     if top:
         lines += ["", "**Top findings**", ""]
@@ -596,6 +654,8 @@ def _print_human(result: ScanResult, stream=sys.stderr) -> None:
           file=stream)
     print(f"  Findings    : {c['critical']} critical · {c['high']} high · "
           f"{c['medium']} medium · {c['low']} low", file=stream)
+    for note in d["not_checked"]:
+        print(f"  Not checked : {note}", file=stream)
     if result.is_mcp_server:
         print("  Context     : MCP server (fs_access/unsafe_exec discounted)", file=stream)
     top = sorted(
