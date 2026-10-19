@@ -82,6 +82,9 @@ _EXFIL_PATH_RE = re.compile(
     r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|(?<![\w\\])\.env\b"
     r"|169\.254\.169\.254|metadata\.google)"
 )
+# dotenv loaders that return the project's .env contents without naming `.env`.
+_DOTENV_PARSE_RE = re.compile(
+    r"\bdotenv_values\s*\(|\bdotenv\.parse\s*\(|\bconfig\([^)]*\)\.parsed\b")
 # The same paths minus ``.env``: always critical, wherever they are read from.
 _CRED_PATH_RE = re.compile(
     r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|169\.254\.169\.254|metadata\.google)"
@@ -325,7 +328,9 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
         if not text or not path.lower().endswith(_SCRIPT_EXT):
             continue
         result.script_count += 1
-        result.findings.extend(_credential_findings(path, text, extern))
+        others = [t for p, t in files.items()
+                  if p != path and t and p.lower().endswith(_SCRIPT_EXT)]
+        result.findings.extend(_credential_findings(path, text, extern, others))
         if _CAP_NETWORK_RE.search(text):
             net_scripts.append(path)
         if _CAP_EXEC_RE.search(text):
@@ -420,7 +425,8 @@ def _credential_path_read(code: str, path: str) -> bool:
     return _listed_paths_read_and_sent(code, both, path)
 
 
-def _credential_findings(path: str, text: str, extern: dict[str, str] | None = None) -> list:
+def _credential_findings(path: str, text: str, extern: dict[str, str] | None = None,
+                         others: list[str] | None = None) -> list:
     """Credential reads in one bundled script (DNC sample precision, 2026-10-19).
 
     * Commented-out lines are not code.
@@ -450,14 +456,22 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
     uses = _analyze_key_flow(text, path, extern)
     file_keys = _file_secret_names(code, path)
     env_reads = _env_file_reads(code, path) if _EXFIL_PATH_RE.search(code) else "none"
+    if env_reads == "none" and _DOTENV_PARSE_RE.search(code):
+        env_reads = "foreign"   # dotenv_values() / dotenv.parse(): the project's .env
     env_sev, env_bad = None, []
     if env_reads != "none":
         # Keys pulled out of the .env BY NAME may excuse their own vendor's host
         # (a whole .env sent anywhere is caught by credential_flow, auth-only rule).
         from src.scanner.credential_flow import _EXTRACT_RE
         extracted = {n for m in _EXTRACT_RE.finditer(code) for n in m.groups() if n}
-        env_sev, env_bad = _classify_hosts(
-            _contents_reached(code, path=path), None, file_keys | extracted)
+        # The WHOLE contents to an unresolved / local host are critical ("dump"); one
+        # value pulled out of the .env there is high ("extracted").
+        keys = file_keys | extracted
+        whole = _classify_hosts(
+            _contents_reached(code, path=path, whole=True, others=others), None, keys)
+        one = _classify_hosts(_contents_reached(code, path=path), None, keys, "extracted")
+        rank = {"critical": 0, "high": 1, None: 2}
+        env_sev, env_bad = min((whole, one), key=lambda r: rank[r[0]])
 
     out: list = []
     crit = [u for u in uses if u.severity == "critical"]
@@ -473,7 +487,7 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
         return out
     high = [u for u in uses if u.severity == "high"]
     if high or env_sev == "high":
-        keys = ", ".join(u.env_name for u in high[:3]) or ".env contents"
+        keys = ", ".join(u.env_name for u in high[:3]) or "a value read from your .env"
         named = sorted({h for u in high for h in u.destinations
                         if h != "?" and not _is_local_host(h)}
                        | {h for h in env_bad if h != "?" and not _is_local_host(h)})
