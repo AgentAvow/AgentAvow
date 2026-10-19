@@ -68,7 +68,10 @@ _BASE64_RE = re.compile(r"""\bbase64\b|\batob\s*\(|\bb64decode\b""", re.IGNORECA
 _REGEX_SHAPE_RE = re.compile(r"""\.\*|\.\+|\\[sSwWdb]|\[\^|\(\?[:!=<]""")
 # A token that names a host without a scheme (`evil.com/x`, `evil\.com`): curl / wget
 # fetch it, so regex syntax elsewhere in the target never makes it a pattern.
-_HOSTISH_RE = re.compile(r"""(?<![\w\\])[A-Za-z0-9-]+(?:\\?\.[A-Za-z0-9-]+)*\\?\.[A-Za-z]{2,}""")
+_HOSTISH_RE = re.compile(
+    r"""(?<![\w\\])[A-Za-z0-9-]+(?:\\?\.[A-Za-z0-9-]+)*\\?\.[A-Za-z]{2,}"""
+    # ...or a raw IPv4 target (`1.2.3.4/x.*`, `1.2.3.4:8080/i`)
+    r"""|(?<![\w.\\])\d{1,3}(?:\\?\.\d{1,3}){3}(?::\d+)?(?=[/\s'"`]|$)""")
 # JS / TS string escapes: "\|" is a plain "|", so an escaped bar there still pipes.
 _JS_EXTS = frozenset({".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"})
 

