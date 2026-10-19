@@ -4000,6 +4000,10 @@ def _scan_content(
     findings.extend(_credential_exfil_findings(
         content, file_path, lines, file_lang, allowlist,
         payload=payload_mode and file_downgraded, lf=lf))
+    findings.extend(_browser_credential_findings(
+        content, file_path, lines, file_lang, allowlist, findings,
+        downgraded=file_downgraded, payload=payload_mode and file_downgraded,
+        prose_lines=(lambda: _string_state()[0]) if file_lang == "python" else None))
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.
@@ -4559,6 +4563,52 @@ def _credential_exfil_findings(
                 "anywhere; remove the read or the send."
             ),
             payload=payload,
+        ))
+    return out
+
+
+def _browser_credential_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], found: list[Finding], *, downgraded: bool,
+    payload: bool, prose_lines=None,
+) -> list[Finding]:
+    """Browser credential handling (``browser_credentials``): a saved-password / cookie
+    database read, session data sent to a network endpoint, and the informational
+    capabilities (reads / saves session state, runs with the real browser profile).
+
+    A store read is dropped when ``credential_flow`` already reported the same file's
+    browser store being sent out (critical). In a test / doc / infra file a defect is
+    graded medium unless the file is a payload of a published artifact."""
+    from src.scanner.browser_credentials import STORE_READ_NAME, browser_credential_hits
+
+    hits = browser_credential_hits(content, file_lang, prose_lines=prose_lines)
+    if not hits:
+        return []
+    store_sent = any(f.name == _CREDENTIAL_EXFIL_NAME and f.file_path == file_path
+                     for f in found)
+    out = []
+    for h in hits:
+        if h.name == STORE_READ_NAME and store_sent:
+            continue
+        if _is_allowlisted(file_path, h.name, allowlist):
+            continue
+        severity, is_payload = h.severity, False
+        if h.kind == "defect" and downgraded and severity in ("critical", "high"):
+            if payload:
+                is_payload = True
+            else:
+                severity = "medium"
+        out.append(Finding(
+            category="exfiltration",
+            name=h.name,
+            severity=severity,
+            file_path=file_path,
+            line_number=h.line,
+            snippet=lines[h.line - 1].strip()[:120] if h.line - 1 < len(lines) else "",
+            remediation=h.detail,
+            kind=h.kind,
+            capability=h.capability,
+            payload=is_payload,
         ))
     return out
 
