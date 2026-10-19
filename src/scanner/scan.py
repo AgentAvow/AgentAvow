@@ -3291,12 +3291,12 @@ def _scan_content(
         nothing in the file runs (``src.scanner.shown_text``)."""
         from src.scanner import shown_text
         suffix = Path(file_path).suffix.lower()
+        spans = [(m.start(), m.end()) for m in pattern.finditer(line)]
         if suffix in shown_text.HTML_EXTS:
-            return shown_text.html_shown(content, lines, idx, shown_memo)
+            return shown_text.html_shown(content, lines, idx, spans, shown_memo)
         if suffix not in shown_text.SHELL_EXTS and not (
                 suffix == "" and re.match(r"#!\S*(?:/|\s)(?:ba|z|k|da)?sh\b", content)):
             return False
-        spans = [(m.start(), m.end()) for m in pattern.finditer(line)]
         return shown_text.shell_shown(lines, idx, spans, shown_memo)
     # package.json only: the parsed ``scripts`` table, memoized ([None] = unparseable).
     pkg_scripts: list[npm_scripts.ScriptsInfo | None] = []
@@ -3981,10 +3981,21 @@ def _scan_content(
                         # Shown, never run (round 2): help / error text of a shell
                         # script, or a web page's display text. Reported, not dropped.
                         from src.scanner.shown_text import WHY_SHOWN
-                        findings.append(Finding(
+                        shown = Finding(
                             category="dynamic_remote_load", name=name, severity="low",
                             file_path=file_path, line_number=line_num,
-                            snippet=stripped[:120], remediation=WHY_SHOWN))
+                            snippet=stripped[:120], remediation=WHY_SHOWN)
+                        # What it would have been (not a dataclass field): a tree pass
+                        # restores it when another file runs this script's output
+                        # (`package_context.restore_shown_scripts`).
+                        pre_sev, pre_payload = _graded(
+                            "defect", effective_severity,
+                            name in _PAYLOAD_REMOTE_LOAD_NAMES)
+                        shown.shown_pre = (  # type: ignore[attr-defined]
+                            pre_sev, pre_payload,
+                            pipe_shell.WHY_OFFICIAL
+                            if pipe_class == pipe_shell.OFFICIAL else "")
+                        findings.append(shown)
                         break
                 # Downgrade in test/doc/infra files like other groups
                 effective_severity, remote_payload = _graded(

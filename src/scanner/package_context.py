@@ -620,7 +620,9 @@ def calibrate_package_findings(findings: list, fetched) -> list:
     data_ok: dict[str, bool] = {}
     hints = Hints(pkg.texts, package=True)  # lazy: tokenizes only when asked
     replaced: list[bool] = []
-    # JSON data fields no code runs (the JS / Python hint is the branch below).
+    # A shell script's shown text whose output another file runs; JSON data fields no
+    # code runs (the JS / Python hint is the branch below).
+    restore_shown_scripts(findings, pkg.texts)
     _lower_shown_in_tree(findings, pkg.texts, hints, replaced, code_hints=False)
 
     for f in findings:
@@ -713,6 +715,7 @@ def recheck_printed_hints(findings: list, texts: dict[str, str]) -> list:
     ``texts`` is every file the scan read (path -> text). Findings in files outside
     ``texts`` (an oversized file's head / tail window) keep the per-file answer.
     Mutates and returns ``findings``."""
+    restore_shown_scripts(findings, texts)
     if not any(getattr(f, "pre_hint", None) is not None
                or (f.name == _PIPE_TO_SHELL and f.severity in ("critical", "high"))
                for f in findings):
@@ -726,6 +729,30 @@ def recheck_printed_hints(findings: list, texts: dict[str, str]) -> list:
             continue
         _recheck_hint(f, hints, texts, replaced)
     _lower_shown_in_tree(findings, texts, hints, replaced, code_hints=True)
+    return findings
+
+
+def restore_shown_scripts(findings: list, texts: dict[str, str]) -> list:
+    """A shell script's help / error text lowered per file (``shown_pre``) is restored
+    when any file in view runs that script's OUTPUT (``sh help.sh | sh`` in a
+    package.json script, ``eval "$(./help.sh)"`` in another script, a Makefile or
+    Dockerfile …). Mutates and returns ``findings``."""
+    from src.scanner.shown_text import HTML_EXTS, WHY_SHOWN, script_output_run
+    memo: dict[str, bool] = {}
+    for f in findings:
+        pre = getattr(f, "shown_pre", None)
+        if pre is None or f.severity != "low" or f.remediation != WHY_SHOWN:
+            continue
+        path = getattr(f, "file_path", "") or ""
+        if Path(path).suffix.lower() in HTML_EXTS:
+            continue  # a page's text: nothing runs a page's output
+        if path not in memo:
+            memo[path] = script_output_run(path, texts) is not None
+        if memo[path]:
+            f.severity = pre[0]
+            f.remediation = pre[2]
+            if hasattr(f, "payload"):
+                f.payload = pre[1]
     return findings
 
 

@@ -449,7 +449,7 @@ _SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)(?:</script\s*>|\Z)", re.I | re.
 _TYPE_ATTR_RE = re.compile(r"""\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
 # <script type> values a browser does not run (data blocks, templates).
 _DATA_SCRIPT_TYPES = frozenset({
-    "application/json", "application/ld+json", "importmap", "speculationrules",
+    "application/json", "application/ld+json", "speculationrules",
     "text/template", "text/x-template", "text/plain", "text/markdown",
     "text/x-handlebars-template", "text/html",
 })
@@ -470,12 +470,36 @@ def _html_code_lines(content: str) -> set[int]:
     return out
 
 
-def html_shown(content: str, lines: list[str], idx: int, memo: dict) -> bool:
-    """Line ``idx`` of an HTML page is display text: no script a browser runs."""
-    code = memo.get("html")
-    if code is None:
-        code = memo["html"] = _html_code_lines(content)
-    return idx not in code and not _HTML_CODE_ATTR_RE.search(lines[idx])
+_START_TAG_RE = re.compile(r"<[A-Za-z][\w:-]*\b[^>]*>", re.S)
+
+
+def html_shown(content: str, lines: list[str], idx: int,
+               spans: list[tuple[int, int]], memo: dict) -> bool:
+    """Every match (``spans`` on line ``idx``) is display text of an HTML page: not in
+    a script a browser runs, and no ``on…=`` handler / ``javascript:`` URL /
+    ``srcdoc`` on the line or anywhere in the start tag of the element that holds it
+    (an attribute value, or the element whose text it is), even across lines."""
+    if "html" not in memo:
+        memo["html"] = _html_code_lines(content)
+        tags = [(m.start(), m.end(), bool(_HTML_CODE_ATTR_RE.search(m.group(0))))
+                for m in _START_TAG_RE.finditer(content)]
+        memo["tags"] = tags
+        memo["tag_starts"] = [t[0] for t in tags]
+        offs, o = [], 0
+        for ln in lines:
+            offs.append(o)
+            o += len(ln) + 1
+        memo["offs"] = offs
+    if idx in memo["html"] or _HTML_CODE_ATTR_RE.search(lines[idx]) or not spans:
+        return False
+    from bisect import bisect_right
+    tags, starts = memo["tags"], memo["tag_starts"]
+    for s, _e in spans:
+        pos = memo["offs"][idx] + s
+        k = bisect_right(starts, pos) - 1
+        if k >= 0 and tags[k][2]:
+            return False  # the tag it sits in, or the nearest element before it, runs JS
+    return True
 
 
 # ---------------------------------------------------------------------------------
@@ -561,7 +585,65 @@ def json_key_executed(key: str, json_path: str, texts: dict[str, str]) -> bool:
 
 def json_key_exec_site(key: str, json_path: str,
                        texts: dict[str, str]) -> tuple[str, int] | None:
-    """Where :func:`json_key_executed` saw ``key`` reach a sink: (path, 1-based line)."""
+    """Where :func:`json_key_executed` saw ``key`` reach a sink: (path, 1-based line).
+    A computed read into a sink (``exec(cfg[k])``, ``spawn("sh", ["-c", item[f]])``,
+    ``Object.values(e).forEach(run)``) counts for EVERY key of the JSON: checked in
+    each file that loads it, or in every file when none names it (a glob loader)."""
+    site = _computed_exec_site(json_path, texts)
+    if site is not None:
+        return site
+    return _literal_key_exec_site(key, json_path, texts)
+
+
+# A sink call whose arguments (within the window) index with a computed key.
+_SINK_CALL_RE = re.compile(
+    r"\b(?:exec\w*|spawn\w*|fork|system|popen|Popen|call|check_call|check_output|"
+    r"getoutput|getstatusoutput|run\w*|shell_exec|passthru|proc_open|eval|Function|"
+    r"execa\w*|shell)\s*\(|\$\s*`")
+_COMPUTED_INDEX_RE = re.compile(
+    r"[\w$\])]\s*\[\s*(?![\d'\"`\]-])[^\]\n]{1,60}\]|\[\s*['\"`][^'\"`]*['\"`]\s*\+|"
+    r"\$\{[^}]*\[[^\]]*\]|\bgetattr\s*\([^,()]+,\s*(?!['\"])\w|\.get\s*\(\s*(?!['\"])\w")
+# Iterating the values / entries near a sink.
+_ITER_VALUES_RE = re.compile(
+    r"\bObject\s*\.\s*(?:values|entries)\s*\(|\.(?:values|items)\s*\(\s*\)|"
+    r"\bto_entries\b|\.\[\]")
+_PASS_RUNNER_RE = re.compile(
+    r"\.(?:forEach|map|flatMap|each|filter|some|every)\s*\(\s*(?:[\w$]+\.)?"
+    r"(?:exec\w*|spawn\w*|run\w*|system|eval|sh|shell)\s*\)")
+
+
+def _computed_exec_site(json_path: str, texts: dict[str, str]) -> tuple[str, int] | None:
+    base = Path(json_path).name
+    stem = Path(json_path).stem
+    load_rx = re.compile(
+        r"(?<![\w.-])" + re.escape(base) + r"(?![\w-])|"
+        r"['\"`][^'\"`\n]*/" + re.escape(stem) + r"(?:\.json\w*)?['\"`]|"
+        # a loader that globs the JSON's directory (`readdirSync('…/profiles')`)
+        + (r"['\"`/]" + re.escape(Path(json_path).parent.name) + r"['\"`/]"
+           if Path(json_path).parent.name else r"(?!)"))
+    code = {fp: t for fp, t in texts.items() if t and fp != json_path
+            and not fp.lower().endswith(_NOT_CODE_SUFFIXES)}
+    loaders = {fp: t for fp, t in code.items() if load_rx.search(t)}
+    for fp, text in (loaders or code).items():
+        lines = text.split("\n")
+        for i, ln in enumerate(lines):
+            if ln.lstrip().startswith(("#", "//", "*", "/*")):
+                continue
+            if _PASS_RUNNER_RE.search(ln):
+                return fp, i + 1
+            for m in _SINK_CALL_RE.finditer(ln):
+                if _COMPUTED_INDEX_RE.search(ln[m.end(): m.end() + 200]):
+                    return fp, i + 1
+            for m in _ITER_VALUES_RE.finditer(ln):
+                # the values handed to a sink in the same expression / pipeline
+                if _ANY_SINK_RE.search(ln[max(0, m.start() - _NEAR_CHARS):
+                                          m.end() + _NEAR_CHARS]):
+                    return fp, i + 1
+    return None
+
+
+def _literal_key_exec_site(key: str, json_path: str,
+                           texts: dict[str, str]) -> tuple[str, int] | None:
     k = re.escape(key)
     # A read of the field: `a.install` / jq `.install` (not a method call
     # `x.install(`), `a["install"]`, `.get("install")`, `getattr(a, "install")`.
@@ -605,5 +687,54 @@ def json_key_exec_site(key: str, json_path: str,
                 if sink_lines is None:
                     sink_lines = [x for x in lines if sink(x)]
                 if any(var.search(x) for x in sink_lines):
+                    return fp, i + 1
+    return None
+
+
+# ---------------------------------------------------------------------------------
+# Cross-file: another file runs a shell script's output
+# ---------------------------------------------------------------------------------
+
+# After the script's name on a line: its output piped into something that runs it.
+_PIPED_TO_RUNNER_RE = re.compile(
+    r"\|(?!\|)\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?(?:\S*/)?"
+    r"(?:ba|z|da|k|fi)?sh\b|"
+    r"\|(?!\|)\s*(?:sudo\s+)?(?:eval|source|xargs|python3?|perl|node|ruby|iex|"
+    r"Invoke-Expression)\b")
+_PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".txt", ".rst", ".html", ".htm", ".adoc")
+_EVAL_BEFORE_RE = re.compile(r"\b(?:eval|source|Invoke-Expression|iex)\b|(?:^|[;&|]\s*)\.\s")
+
+
+def script_output_run(path: str, texts: dict[str, str]) -> tuple[str, int] | None:
+    """Where some file of ``texts`` (another script, package.json, a Makefile, a
+    Dockerfile …) runs the OUTPUT of the shell script ``path``: its name followed by a
+    pipe into a shell / eval / an interpreter, or inside ``$(…)``, backticks, a
+    process substitution or an ``eval`` / ``source``. ``(file, 1-based line)``."""
+    base = Path(path).name
+    if not base:
+        return None
+    rx = re.compile(r"(?<![\w.-])" + re.escape(base) + r"(?![\w.-])")
+    for fp, text in texts.items():
+        if not text or base not in text or fp.lower().endswith(_PROSE_SUFFIXES):
+            continue
+        for i, line in enumerate(text.split("\n")):
+            if base not in line:
+                continue
+            for m in rx.finditer(line):
+                before, after = line[:m.start()], line[m.end():]
+                token = re.split(r"[\s'\"`(=]", before)[-1]
+                if "://" in token or token.startswith(("...", "…", "<")) or \
+                        re.match(r"[\w-]+(?:\.[\w-]+)+/", token) or \
+                        re.search(r"\b(?:curl|wget|iwr|irm|Invoke-WebRequest)\b", before):
+                    continue  # a remote copy (`curl https://x/help.sh | sh`,
+                    # `bash <(curl x.com/help.sh)`) or a placeholder: not this output
+                if line.lstrip().startswith(("#", "//")):
+                    continue  # a comment that mentions it
+                if _PIPED_TO_RUNNER_RE.search(after):
+                    return fp, i + 1
+                if before.rfind("$(") > before.rfind(")") or before.count("`") % 2 or \
+                        before.rfind("<(") > before.rfind(")"):
+                    return fp, i + 1
+                if _EVAL_BEFORE_RE.search(before):
                     return fp, i + 1
     return None

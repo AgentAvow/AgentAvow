@@ -1365,6 +1365,40 @@ class _JsFlow:
             raise _UnclassifiedError(f"{method} is bound to a command runner")
         self.check_bodies(def_file, bodies, 3, set())
 
+    def check_member_calls(self, body: str, depth: int, seen: set) -> None:
+        """``this.transport.write(s)`` / ``sink.log(s)`` in a print method: the method
+        may live on an object from another file (a custom winston / pino transport),
+        so every definition of that method name anywhere in view must run nothing.
+        Only ``console.*`` and ``process.stdout|stderr.write`` are taken as given."""
+        for mm in re.finditer(r"([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*\(", body):
+            recv, meth = mm.groups()
+            if recv in ("console", "Math", "JSON", "Object", "Array", "String", "Number",
+                        "Date", "Promise", "Symbol", "util", "path") or \
+                    (recv in ("stdout", "stderr") and meth == "write") or \
+                    meth in _SAFE_METHODS or meth in _STYLE_NAMES or \
+                    meth in ("push", "unshift", "map", "filter", "forEach", "reduce",
+                             "replace", "toFixed", "toISOString", "stringify",
+                             "hasOwnProperty", "keys", "values", "entries", "has",
+                             "get", "set", "test", "match") or \
+                    _COLOR_LIB_RE.search(recv):
+                continue
+            key = "." + meth
+            if key in seen:
+                continue
+            seen.add(key)
+            if len(seen) > 60:
+                raise _UnclassifiedError("a print method calls too much to follow")
+            for fp2, t2 in self.files.items():
+                if not t2 or meth not in t2 or Path(fp2.lower()).suffix not in JS_EXTS:
+                    continue
+                if self.aliased_to_sink(t2, meth):
+                    raise _UnclassifiedError(f"{meth} is bound to a command runner")
+                bodies = _def_bodies(t2, meth)
+                if any(_JS_SINK_RE.search(b) for b in bodies):
+                    raise _UnclassifiedError(f"{recv}.{meth}() runs a command")
+                if bodies and depth > 0:
+                    self.check_bodies(fp2, bodies, depth - 1, seen)
+
     def check_bodies(self, fp: str, bodies: list[str], depth: int, seen: set) -> None:
         text = self.files[fp]
         for body in bodies:
@@ -1373,6 +1407,7 @@ class _JsFlow:
             if re.search(r"\.\s*write\s*\(", body) and re.search(r"\bstd(?:in|io)\b", text):
                 raise _UnclassifiedError("a print method writes to a stream in a file "
                                          "that touches a child's stdin")
+            self.check_member_calls(body, depth, seen)
             for m in re.finditer(r"([A-Za-z_$][\w$]*)\s*\(", body):
                 n = m.group(1)
                 if n in _KEYWORDS or n in _STYLE_NAMES or n in seen or n in (
