@@ -538,7 +538,6 @@ async def _fetch_repo_tree(
         if meta_out is not None:
             meta_out["description"] = _repo_json.get("description")
             meta_out["stars"] = _repo_json.get("stargazers_count")
-            meta_out["homepage"] = _repo_json.get("homepage")
 
         tree_url = (
             f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}"
@@ -3635,13 +3634,11 @@ def _scan_content(
                         and not _has_loader_context(lines, idx, dm.start())):
                     effective_severity = "low"
                 # Pipe-to-shell precision (src/scanner/pipe_shell.py): a placeholder,
-                # a regex or a prohibition is not a command; an official HTTPS
-                # installer is high; a clean HTTPS URL on an unlisted host keeps its
-                # critical until the caller knows the project's own domain.
-                pipe_class, pipe_urls = None, []
+                # a regex or a prose prohibition is not a command; a plain official
+                # HTTPS installer is high; everything else keeps its critical.
+                pipe_class = None
                 if name == pipe_shell.PIPE_TO_SHELL:
-                    pipe_class, pipe_urls = pipe_shell.classify_line(
-                        line, pattern, file_path)
+                    pipe_class = pipe_shell.classify_line(line, pattern, file_path)
                     if pipe_class == pipe_shell.DROP:
                         continue
                     if pipe_class == pipe_shell.OFFICIAL:
@@ -3739,10 +3736,6 @@ def _scan_content(
                     remediation=(pipe_shell.WHY_OFFICIAL
                                  if pipe_class == pipe_shell.OFFICIAL else ""),
                 )
-                if pipe_urls:
-                    # Not a dataclass field (never serialized): pipe_shell.lower_own_domain
-                    # lowers it to high when every URL is the project's own.
-                    finding.pipe_urls = pipe_urls
                 if (name == "curl/wget piped to shell"
                         and Path(file_path).name.lower() == "package.json"):
                     # A maintainer-only package.json script (`test:e2e:docker`) that no
@@ -6268,7 +6261,6 @@ async def _grade_skill_at(
                 files[p] = txt
 
         skill = analyze_skill(files, skill_md_path=skill_md_path)
-        pipe_shell.lower_own_domain(skill.findings, files, owner=owner)
 
         # Env vars the skill's scripts read: the behavioral sandbox fills each
         # secret-named one with a canary when it runs the hooks and scripts.
@@ -6793,8 +6785,6 @@ async def scan_repo(
         if fetch_failed:
             gaps["fetch_failed"] = fetch_failed
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
-        pipe_shell.lower_own_domain(result.findings, repo_texts, owner=owner,
-                                    homepage=_repo_meta.get("homepage"))
 
         # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
         oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)

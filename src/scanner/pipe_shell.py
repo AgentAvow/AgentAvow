@@ -1,23 +1,24 @@
 """Precision for the critical "curl/wget piped to shell" rule (DNC sample, 2026-10-19).
 
 The rule was the top finding on 44 of 57 Do-not-connect repos, and a false alarm or too
-harsh in every sampled case. :func:`classify` looks at each match on a line and says
-what it is:
+harsh in every sampled case. :func:`classify_line` looks at each match on a line and
+says what it is:
 
 * ``DROP``: not a command. No target at all or only a placeholder (``curl ... | sh``,
-  ``curl <url> | bash``); a regex in a detection table
-  (``curl.*\\| *sh``); or, in Markdown / agent-instruction / JSON text, a sentence that
-  forbids it ("Refuse `curl ... | bash`", "`curl … | sh` in a bug report is an
-  attack"). A negation must GOVERN the command: "Don't worry, just run curl … | sh"
-  is an instruction and stays.
-* ``OFFICIAL``: an HTTPS installer from a host on :data:`VENDOR_INSTALLERS` (uv from
-  astral.sh, rustup, Docker, Claude Code …). Reported **high** (Review), not critical.
-* ``OWN_CANDIDATE``: a clean HTTPS URL on an unlisted host. Critical from the per-file
-  pass; :func:`lower_own_domain` lowers it to high when the host is the project's own
-  (homepage / repository host, or the scanned repo's GitHub owner).
-* ``CRITICAL``: everything else, kept as it was: ``http://``, ``--insecure``, raw IP
-  hosts, paste / file-drop hosts and URL shorteners, a URL or target built from
-  variables, base64 on the line, and unknown hosts.
+  ``curl <url> | bash``); a regex in a detection table (an escaped ``\\|``, or regex
+  syntax with no URL); or, in a PROSE file (Markdown / text / reST, never JSON or a
+  script), a sentence that forbids it: "never / do not / don't / refuse to (run | pipe
+  | execute | use) <the command>", where the negation governs that verb, or "<the
+  command> is an attack / is malicious / is forbidden / is unsafe / must be rejected".
+  "Don't worry, just run curl … | sh" is an instruction and stays critical.
+* ``OFFICIAL``: exactly one HTTPS URL on :data:`VENDOR_INSTALLERS` (uv from astral.sh,
+  rustup, Docker, Claude Code …), no other argument, and no curl / wget flag that reads
+  a config, adds a URL or proxy, or writes a file. Reported **high** (Review). Never in
+  an install-lifecycle file (package.json scripts, setup.py): those stay critical.
+* ``CRITICAL``: everything else, as before: ``http://``, ``--insecure``, raw IP hosts,
+  paste hosts, shorteners, a target built from variables, base64 on the line, any
+  other host (including the project's own: an author-declared homepage proves nothing
+  for a package that is malicious from day one), extra arguments, a second URL.
 
 A dev / CI script (``.github/``, ``build-docs.sh``) is handled by the existing
 ``shipped: false`` path in ``src.scanner.scan`` (``_is_unshipped_script``), not here.
@@ -25,7 +26,6 @@ A dev / CI script (``.github/``, ``build-docs.sh``) is handled by the existing
 from __future__ import annotations
 
 import ipaddress
-import json
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -34,9 +34,8 @@ PIPE_TO_SHELL = "curl/wget piped to shell"
 
 DROP = "drop"
 OFFICIAL = "official"
-OWN_CANDIDATE = "own_candidate"
 CRITICAL = "critical"
-_RANK = {DROP: 0, OFFICIAL: 1, OWN_CANDIDATE: 2, CRITICAL: 3}
+_RANK = {DROP: 0, OFFICIAL: 1, CRITICAL: 2}
 
 # Reviewed allowlist of well-known official installers, as (host, path prefix). Only
 # HTTPS URLs qualify, and the path prefix pins the installer itself where the host also
@@ -56,34 +55,6 @@ VENDOR_INSTALLERS: tuple[tuple[str, str], ...] = (
     ("ollama.com", "/install.sh"),                        # Ollama
 )
 
-# Never a project's "own" domain (shared platforms, paste / file-drop hosts, shorteners).
-_PLATFORM_HOSTS = frozenset({
-    "github.com", "githubusercontent.com", "gitlab.com", "bitbucket.org", "codeberg.org",
-    "sourceforge.net", "npmjs.com", "npmjs.org", "pypi.org", "crates.io", "docs.rs",
-    "huggingface.co", "readthedocs.org", "google.com", "googleusercontent.com",
-    "x.com", "twitter.com", "discord.gg", "discord.com", "discordapp.com",
-    "linkedin.com", "medium.com", "notion.site", "youtube.com",
-    # paste / file-drop hosts
-    "pastebin.com", "paste.ee", "hastebin.com", "ghostbin.com", "transfer.sh", "file.io",
-    "0x0.st", "termbin.com", "ix.io", "sprunge.us", "dpaste.com", "dpaste.org",
-    "rentry.co", "paste.rs", "catbox.moe",
-    # URL shorteners
-    "bit.ly", "tinyurl.com", "t.co", "goo.gl", "is.gd", "rb.gy", "cutt.ly", "ow.ly",
-    "shorturl.at", "tiny.cc", "git.io",
-})
-# Shared hosting suffixes: the project's own domain is the full subdomain.
-_SHARED_SUFFIXES = (
-    "github.io", "gitlab.io", "readthedocs.io", "vercel.app", "netlify.app", "pages.dev",
-    "herokuapp.com", "web.app", "firebaseapp.com", "workers.dev", "fly.dev",
-    "onrender.com", "azurewebsites.net", "cloudfront.net", "amazonaws.com", "appspot.com",
-)
-_SLD_SUFFIXES = frozenset({"co", "com", "net", "org", "ac", "gov", "edu"})
-# RFC 2606 / documentation hosts: never a project's own domain. (A pipe-to-shell of
-# one is NOT dropped: tests and attack write-ups use them for real payload shapes.)
-_PLACEHOLDER_HOST_RE = re.compile(
-    r"^(?:[\w-]+\.)*example\.(?:com|org|net)$|^(?:[\w-]+\.)+(?:example|invalid|test)$"
-    r"|^<.*>$")
-
 _TOOL_RE = re.compile(r"\b(?:curl|wget)\b")
 _URL_RE = re.compile(r"""(?:https?|ftp)://[^\s'"`)|>\]]+""", re.IGNORECASE)
 # A target the shell expands: $VAR, ${VAR}, $(cmd), `cmd`, %VAR%, {{ template }}.
@@ -96,61 +67,33 @@ _BASE64_RE = re.compile(r"""\bbase64\b|\batob\s*\(|\bb64decode\b""", re.IGNORECA
 # the pipe itself is escaped (`\|` is a literal bar, never a pipe).
 _REGEX_SHAPE_RE = re.compile(r"""\.\*|\.\+|\\[sSwWdb]|\[\^|\(\?[:!=<]""")
 
-_PROSE_EXTS = frozenset({".md", ".mdx", ".mdc", ".markdown", ".txt", ".rst",
-                         ".json", ".jsonc"})
+# Prose only: in JSON (package.json scripts, MCP "command" / "args") and in scripts the
+# "negation" would sit inside the command string itself.
+_PROSE_EXTS = frozenset({".md", ".mdx", ".mdc", ".markdown", ".txt", ".rst"})
+# Install-lifecycle files: a pipe-to-shell there runs on install, never lowered.
+_INSTALL_HOOK_NAMES = frozenset({"package.json", "setup.py"})
 # A sentence break: . ! ? followed by whitespace, not part of an ellipsis.
 _SENTENCE_END_RE = re.compile(r"""(?<![.\s])[.!?](?!\.)(?=\s|$)""")
 # Words allowed between a negation and its verb ("never blindly run", "do not ever pipe").
-_FILLER = (r"(?:ever|blindly|directly|simply|just|automatically|anything|any|commands?|"
-           r"scripts?|code|like|such|as|this|that|these|the|a|an|remote|untrusted|"
-           r"unknown|unverified|installers?|via|it|them|yourself)")
-_ACTION = (r"(?:run|running|pipe|piping|execute|executing|exec|use|using|install|"
-           r"installing|copy|paste|follow|trust|accept|allow|suggest|recommend|emit|"
-           r"generate|output|do|curl|wget|fetch)")
+_FILLER = (r"(?:ever|blindly|directly|simply|automatically|any|remote|untrusted|unknown|"
+           r"unverified)")
 _NEG_CUE_RE = re.compile(
-    r"\b(?:(?:never|do\s+not|don['’]?t|must\s+not|mustn['’]?t|should\s+not|"
-    r"shouldn['’]?t|cannot|can['’]?t|won['’]?t|will\s+not|may\s+not|refuse\s+to)"
-    rf"(?:\s+{_FILLER})*\s+{_ACTION}\b"
-    r"|(?:refuse[sd]?|reject(?:s|ed)?|block(?:s|ed)?|den(?:y|ies|ied)|forbid(?:s|den)?|"
-    r"prohibit(?:s|ed)?|disallow(?:s|ed)?|avoid(?:s|ed)?|warn(?:s|ed)?\s+against|"
-    r"flag(?:s|ged)?)\b)",
+    r"\b(?:never|do\s+not|don['’]?t|refuse\s+to)"
+    rf"(?:\s+{_FILLER})*\s+(?:run|pipe|execute|use)\b",
     re.IGNORECASE)
-# Between the cue and the command: a clause break means the cue governs something else
-# ("Don't worry, just run …", "Never use sudo; run …").
-_CLAUSE_BREAK_RE = re.compile(
-    r";|\b(?:but|just|instead|then|however|rather|otherwise|unless|except|now)\b|"
-    r",\s*(?:and\s+)?(?:run|use|execute|type|paste|do|try|install)\b",
-    re.IGNORECASE)
-# After the command, a short prepositional phrase then a verdict on it.
+# Between the verb and the command: only quoting / markup and a short object phrase. A
+# clause break means the cue governs something else ("Never use sudo; run …").
+_GAP_OK_RE = re.compile(r"""^[\s`'"*(:]*$""")
+# After the command: an optional short location phrase, then a verdict on it.
 _POST_CUE_RE = re.compile(
-    r"""^[\s`'"*)\]]*(?:[-—–:]\s*)?(?:(?:in|from|inside|within|on|via|of|or)\b[^,;:]{0,40}?)?"""
-    r"""\s*(?:must\s+(?:(?:always|never)\s+)?be\s+(?:rejected|refused|blocked|denied|"""
-    r"""flagged)|must\s+never|(?:is|are)\s+(?:always\s+)?(?:an?\s+)?(?:attacks?|red\s+flags?|"""
-    r"""anti-?patterns?|forbidden|prohibited|banned|blocked|not\s+allowed|never\s+allowed|"""
-    r"""malicious|dangerous|unsafe)\b|should\s+(?:never|not)\s+be\b|(?:is|are)\s+never\b)""",
+    r"""^[\s`'"*)\]]*(?:(?:in|from|inside|within)\s+[\w\s-]{0,40}?)?"""
+    r"""\s*(?:is\s+(?:an?\s+)?(?:attack|malicious|forbidden|unsafe)\b|"""
+    r"""must\s+be\s+rejected\b)""",
     re.IGNORECASE)
-_ANTI_PATTERN_RE = re.compile(r"(?<!not an )(?<!not a )\banti-?pattern\b", re.IGNORECASE)
 
 WHY_OFFICIAL = ("Pipes a well-known vendor's official installer (HTTPS) to a shell. It "
                 "runs whatever that host serves at install time, so review it, or pin a "
                 "version / checksum.")
-WHY_OWN = ("Pipes the project's own installer (HTTPS, from its homepage / repository "
-           "host) to a shell. It runs whatever that host serves at install time, so "
-           "review it, or pin a version / checksum.")
-
-
-def _registrable(host: str) -> str:
-    h = host.lower().rstrip(".")
-    for suf in _SHARED_SUFFIXES:
-        if h.endswith("." + suf):
-            labels = h.split(".")
-            return ".".join(labels[-(suf.count(".") + 2):])
-    labels = [x for x in h.split(".") if x]
-    if len(labels) < 2:
-        return h
-    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _SLD_SUFFIXES:
-        return ".".join(labels[-3:])
-    return ".".join(labels[-2:])
 
 
 def _is_ip(host: str) -> bool:
@@ -174,15 +117,10 @@ def _sentence(line: str, start: int, end: int) -> tuple[str, str]:
 def _prohibited(line: str, start: int, end: int) -> bool:
     """The match at [start, end) sits in a sentence that forbids it."""
     before, after = _sentence(line, start, end)
-    if _ANTI_PATTERN_RE.search(before + " " + after):
-        return True
     if _POST_CUE_RE.match(after):
         return True
     cues = list(_NEG_CUE_RE.finditer(before))
-    if not cues:
-        return False
-    gap = before[cues[-1].end():]
-    return len(gap) <= 100 and not _CLAUSE_BREAK_RE.search(gap)
+    return bool(cues) and bool(_GAP_OK_RE.match(before[cues[-1].end():]))
 
 
 def _target(line: str, start: int, end: int) -> str:
@@ -199,155 +137,115 @@ def _target(line: str, start: int, end: int) -> str:
     return rest if close < 0 else rest[:close]
 
 
-def _url_class(url: str) -> tuple[str, str]:
-    """(class, host) for one URL in a target."""
+# curl / wget flags that take a value as the next token (or the rest of a short
+# cluster). An unknown flag is assumed to take none, so its value counts as an extra
+# argument (critical): the conservative direction.
+_SHORT_WITH_VALUE = frozenset("oOHAmwuXdTUEbcrtPY")
+_LONG_WITH_VALUE = frozenset({
+    "--proto", "--proto-redir", "--header", "--user-agent", "--referer", "--retry",
+    "--retry-delay", "--retry-max-time", "--max-time", "--connect-timeout", "--write-out",
+    "--user", "--request", "--cacert", "--capath", "--limit-rate", "--max-redirs",
+    "--tries", "--timeout", "--wait", "--output", "--output-document",
+})
+# Flags that read a config, add a URL / proxy / resolver, or name a URL list: the
+# fetched script may not come from the URL on the line.
+_SHORT_DANGEROUS = frozenset("Kx:iek")
+_LONG_DANGEROUS = frozenset({
+    "--config", "--next", "--url", "--proxy", "--preproxy", "--resolve", "--connect-to",
+    "--doh-url", "--input-file", "--execute", "--socks4", "--socks4a", "--socks5",
+    "--socks5-hostname", "--insecure", "--no-check-certificate", "--location-trusted",
+})
+_OUTPUT_FLAGS = frozenset({"-o", "-O", "--output", "--output-document"})
+# Harmless stderr redirections.
+_REDIRECT_OK_RE = re.compile(r"^(?:\d?>&\d|2>/dev/null)$")
+
+
+def _args_clean(target: str) -> bool:
+    """The target is flags plus exactly one URL, with no dangerous flag and no output
+    to a file (`-o f`, `-O f`: a later `sh f` runs what was saved, not stdout)."""
+    toks = [t.strip("'\"`") for t in target.split()]
+    i, urls = 0, 0
+    while i < len(toks):
+        t = toks[i]
+        i += 1
+        if not t or _REDIRECT_OK_RE.match(t):
+            continue
+        if t.startswith("--"):
+            name, eq, val = t.partition("=")
+            if name in _LONG_DANGEROUS:
+                return False
+            if name in _LONG_WITH_VALUE:
+                if not eq:
+                    val = toks[i] if i < len(toks) else ""
+                    i += 1
+                if name in _OUTPUT_FLAGS and val.strip("'\"") != "-":
+                    return False
+            continue
+        if t.startswith("-") and len(t) > 1:
+            cluster = t[1:]
+            for j, ch in enumerate(cluster):
+                if ch in _SHORT_DANGEROUS:
+                    return False
+                if ch in _SHORT_WITH_VALUE:
+                    val = cluster[j + 1:]
+                    if not val:
+                        val = toks[i] if i < len(toks) else ""
+                        i += 1
+                    if ch in "oO" and val.strip("'\"") != "-":
+                        return False
+                    break
+            continue
+        if _URL_RE.fullmatch(t):
+            urls += 1
+            continue
+        return False  # a scheme-less host, a file, a shell word: not a plain fetch
+    return urls == 1
+
+
+def _is_official(url: str) -> bool:
     try:
         parts = urlsplit(url)
         host = (parts.hostname or "").lower()
     except ValueError:
-        return CRITICAL, ""
+        return False
     if parts.scheme.lower() != "https" or not host or _is_ip(host):
-        return CRITICAL, host
-    if _registrable(host) in _PLATFORM_HOSTS and host != "raw.githubusercontent.com" \
-            and host != "github.com":
-        return CRITICAL, host
+        return False
     path = (parts.path or "/").lower()
-    for vhost, prefix in VENDOR_INSTALLERS:
-        if host == vhost and path.startswith(prefix):
-            return OFFICIAL, host
-    return OWN_CANDIDATE, host
+    return any(host == vhost and path.startswith(prefix)
+               for vhost, prefix in VENDOR_INSTALLERS)
 
 
-def classify_match(line: str, start: int, end: int, file_path: str) -> tuple[str, list[str]]:
-    """Classify one pipe-to-shell match. Returns ``(class, urls)``; ``urls`` lists the
-    candidate URLs for :func:`lower_own_domain` when the class is OWN_CANDIDATE."""
+def classify_match(line: str, start: int, end: int, file_path: str) -> str:
+    """Classify one pipe-to-shell match: DROP, OFFICIAL or CRITICAL."""
     target = _target(line, start, end)
     matched = line[start:end]
     urls = _URL_RE.findall(target)
     pipe = matched.rfind("|")
     if (pipe > 0 and matched[pipe - 1] == "\\") or (
             not urls and _REGEX_SHAPE_RE.search(target)):
-        return DROP, []
+        return DROP
     has_var = bool(_VAR_RE.search(target))
     if not urls and not has_var:
         args = [a.strip("'\"`*") for a in target.split()]
         real = [a for a in args if a and not a.startswith("-")]
         if not real or all(_PLACEHOLDER_ARG_RE.match(a) for a in real):
-            return DROP, []
+            return DROP
+    name = Path(file_path).name.lower()
     if Path(file_path).suffix.lower() in _PROSE_EXTS and _prohibited(line, start, end):
-        return DROP, []
-    if has_var or not urls or _INSECURE_FLAG_RE.search(target) or _BASE64_RE.search(line):
-        return CRITICAL, []
-    worst, cands = OFFICIAL, []
-    for u in urls:
-        cls, _host = _url_class(u)
-        if _RANK[cls] > _RANK[worst]:
-            worst = cls
-        if cls == OWN_CANDIDATE:
-            cands.append(u)
-    return worst, (cands if worst == OWN_CANDIDATE else [])
+        return DROP
+    if (has_var or len(urls) != 1 or name in _INSTALL_HOOK_NAMES
+            or _BASE64_RE.search(line) or _INSECURE_FLAG_RE.search(target)
+            or not _args_clean(target)
+            or not _is_official(urls[0])):
+        return CRITICAL
+    return OFFICIAL
 
 
-def classify_line(line: str, pattern: re.Pattern[str], file_path: str
-                  ) -> tuple[str, list[str]]:
+def classify_line(line: str, pattern: re.Pattern[str], file_path: str) -> str:
     """The worst class over every pipe-to-shell match on ``line``."""
-    worst, cands = DROP, []
+    worst = DROP
     for m in pattern.finditer(line):
-        cls, urls = classify_match(line, m.start(), m.end(), file_path)
+        cls = classify_match(line, m.start(), m.end(), file_path)
         if _RANK[cls] > _RANK[worst]:
             worst = cls
-        cands.extend(urls)
-    return worst, (cands if worst == OWN_CANDIDATE else [])
-
-
-# --------------------------------------------------------------------------- #
-# Own domain: lowers an OWN_CANDIDATE critical to high once the project is known.
-
-_MANIFEST_URL_RE = re.compile(
-    r"""^\s*["']?(?:homepage|home[-_]page|url|website|documentation|repository|source|"""
-    r"""download[-_]url)["']?\s*[:=]\s*["']?(?:git\+)?(https://[^\s"'<>,]+)""",
-    re.IGNORECASE | re.MULTILINE)
-_MANIFEST_NAMES = frozenset({"package.json", "pyproject.toml", "setup.cfg", "setup.py",
-                             "cargo.toml"})
-
-
-def own_identity(texts: dict[str, str] | None = None, owner: str | None = None,
-                 homepage: str | None = None) -> tuple[set[str], set[str]]:
-    """``(own registrable domains, own GitHub owners)`` from the shallowest manifests in
-    ``texts``, the repository's GitHub owner and its GitHub homepage."""
-    domains: set[str] = set()
-    owners: set[str] = {owner.lower()} if owner else set()
-    urls: list[str] = [homepage] if homepage else []
-    manifests = [p for p in (texts or {}) if Path(p).name.lower() in _MANIFEST_NAMES]
-    if manifests:
-        depth = min(p.count("/") for p in manifests)
-        for p in manifests:
-            if p.count("/") != depth:
-                continue
-            text = texts[p] or ""
-            urls.extend(_MANIFEST_URL_RE.findall(text))
-            if p.lower().endswith("package.json"):
-                urls.extend(_package_json_urls(text))
-    for u in urls:
-        try:
-            parts = urlsplit(u.strip())
-        except ValueError:
-            continue
-        host = (parts.hostname or "").lower()
-        if parts.scheme.lower() != "https" or not host or _is_ip(host):
-            continue
-        if host == "github.com":
-            seg = [s for s in parts.path.split("/") if s]
-            if seg:
-                owners.add(seg[0].lower())
-            continue
-        reg = _registrable(host)
-        if reg in _PLATFORM_HOSTS or _PLACEHOLDER_HOST_RE.match(host):
-            continue
-        domains.add(reg)
-    return domains, owners
-
-
-def _package_json_urls(text: str) -> list[str]:
-    try:
-        data = json.loads(text)
-    except (ValueError, TypeError):
-        return []
-    if not isinstance(data, dict):
-        return []
-    out = []
-    for key in ("homepage", "repository", "bugs"):
-        v = data.get(key)
-        if isinstance(v, dict):
-            v = v.get("url")
-        if isinstance(v, str):
-            out.append(v.removeprefix("git+"))
-    return out
-
-
-def _is_own(url: str, domains: set[str], owners: set[str]) -> bool:
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower()
-    seg = [s.lower() for s in parts.path.split("/") if s]
-    if host in ("raw.githubusercontent.com", "github.com"):
-        return bool(seg) and seg[0] in owners
-    if host.endswith(".github.io") and host[:-len(".github.io")] in owners:
-        return True
-    return _registrable(host) in domains
-
-
-def lower_own_domain(findings: list, texts: dict[str, str] | None = None,
-                     owner: str | None = None, homepage: str | None = None) -> None:
-    """Lower each OWN_CANDIDATE pipe-to-shell critical whose every URL is the project's
-    own to high (Review). Mutates ``findings``."""
-    pending = [f for f in findings if getattr(f, "pipe_urls", None)
-               and f.severity == "critical" and f.name == PIPE_TO_SHELL]
-    if not pending:
-        return
-    domains, owners = own_identity(texts, owner, homepage)
-    if not domains and not owners:
-        return
-    for f in pending:
-        if all(_is_own(u, domains, owners) for u in f.pipe_urls):
-            f.severity = "high"
-            f.remediation = WHY_OWN
+    return worst
