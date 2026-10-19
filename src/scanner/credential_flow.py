@@ -34,6 +34,19 @@ import functools
 import re
 from dataclasses import dataclass, field
 
+from src.scanner.skill_key_flow import host_matches_key, strip_comments
+
+_NAME = r"([A-Z][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD))"
+# A named key pulled OUT of a .env (`line.startswith("OPENROUTER_API_KEY=")`,
+# `env.match(/X_TOKEN=(.*)/)`, `values["SLACK_BOT_TOKEN"]`, `.get("FOO_KEY")`): the
+# only names that may excuse a .env read; a bare mention (comment, help text) never.
+_EXTRACT_RE = re.compile(
+    r"(?<![\w.])(?!(?:print|echo|log|warn|info|debug|error|Error|TypeError|format|"
+    r"console|exit|die|raise|throw|f)\b)(?:[\w$]+\.)*[\w$]+"
+    r"\s*\(\s*[rbf]?[\"'/`]\^?\s*" + _NAME + r"\b"
+    r"|\[\s*[\"']" + _NAME + r"[\"']\s*\]"
+    r"|/\^?" + _NAME + r"=")
+
 # ---------------------------------------------------------------------------
 # Credential paths
 # ---------------------------------------------------------------------------
@@ -413,11 +426,19 @@ def _call_re(name: str) -> re.Pattern[str]:
     return re.compile(r"(?<![\w$])(?<!def )(?<!function )" + re.escape(name) + r"\s*\(")
 
 
+# Python string prefixes: ``f"…"`` is a literal, not a use of a variable ``f`` (the
+# lexer keeps the prefix and the quotes as code). ``with open(".env") as f`` then an
+# f-string URL in a request read as the .env contents being sent (browser-act, DNC
+# sample 2026-10-19).
+_STR_PREFIXES = frozenset({"f", "b", "r", "u", "rb", "br", "fr", "rf"})
+
+
 @functools.lru_cache(maxsize=4096)
 def _ref_re(name: str) -> re.Pattern[str]:
     # A use of the name: not an attribute of something else, not a kwarg / object key.
+    tail = r"(?![\"'])" if name.lower() in _STR_PREFIXES else ""
     return re.compile(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])(?!\s*=(?![=]))"
-                      r"(?!\s*:(?!:))")
+                      r"(?!\s*:(?!:))" + tail)
 
 
 def _arg_span(code: str, open_paren: int) -> int:
@@ -465,6 +486,8 @@ class _Analyzer:
         # so a method NAMED `fetch` / `post` is not read as a call of one.
         self.header_end: dict[int, int] = {}
         self.lit_kinds = [self._lit_kind(st) for st in self.stmts]
+        code = strip_comments(src, "x.py" if python else "x.js")
+        self.file_keys = {n for m in _EXTRACT_RE.finditer(code) for n in m.groups() if n}
 
     # -- per-statement facts ------------------------------------------------
     def _lit_kind(self, st: _Stmt, a: int = -1, b: int = -1) -> str | None:
@@ -630,17 +653,24 @@ class _Analyzer:
                 hits.append(_Hit(abs_a, kind))
             return
         hosts = self._hosts(st, abs_a, abs_b)
-        auth = self._auth_only(abs_a, abs_b, refs)
+        # A read inside the call itself sends the file's contents, never one key.
+        auth = self._auth_only(abs_a, abs_b, refs) and not self.read_re.search(span)
         if kind == "param":
             param_hits.append((hosts, auth))
             return
         if not self._excused(kind, hosts, auth):
             hits.append(_Hit(abs_a, kind))
 
-    @staticmethod
-    def _excused(kind: str, hosts: list[str], auth_only: bool) -> bool:
+    def _excused(self, kind: str, hosts: list[str], auth_only: bool) -> bool:
         if hosts:
-            return all(_official(kind, h) for h in hosts)
+            if all(_official(kind, h) for h in hosts):
+                return True
+            # A key pulled out of a .env BY NAME and used as the Authorization of a
+            # request to the vendor that key is named for (OPENROUTER_API_KEY ->
+            # openrouter.ai) is the tool authenticating (DNC sample 2026-10-19). The
+            # whole contents (not auth-only) or an unrelated name keep the finding.
+            return kind == "env" and auth_only and all(
+                any(host_matches_key(h, k) for k in self.file_keys) for h in hosts)
         return auth_only
 
     # -- one function hop ---------------------------------------------------
