@@ -106,8 +106,14 @@ async def _surfaces(client, entity_id) -> dict[str, str | None]:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("findings,score,expected", [
     # A shipped critical and a shipped high: Do not connect.
-    ([_finding("critical", "src/server.py", "Hardcoded API key", "secret"),
+    ([_finding("critical", "src/server.py", "eval of user input", "unsafe_exec"),
       _finding("high", "src/tool.py", "Shell command from user input")], 40,
+     "do_not_connect"),
+    # A hardcoded credential alone exposes the vendor, not the user: Review.
+    ([_finding("critical", "src/server.py", "Hardcoded API key", "secret")], 45, "review"),
+    # A hardcoded credential beside another shipped critical: still Do not connect.
+    ([_finding("critical", "src/server.py", "Hardcoded API key", "secret"),
+      _finding("critical", "src/tool.py", "eval of user input", "unsafe_exec")], 30,
      "do_not_connect"),
     # A shipped high only: Review.
     ([_finding("high", "src/tool.py", "Shell command from user input")], 70, "review"),
@@ -140,7 +146,7 @@ async def test_pre_tag_dict_row_still_blocks(client, db):
             "trust_score": 42, "files_scanned": 30, "critical_count": 1,
             "high_count": 1, "total_findings": 3,
             "findings": [
-                {"category": "secret", "name": "Hardcoded API key", "severity": "critical",
+                {"category": "unsafe_exec", "name": "eval of input", "severity": "critical",
                  "file_path": "src/server.py", "line_number": 3},
                 {"category": "unsafe_exec", "name": "Shell from input", "severity": "high",
                  "file_path": "src/tool.py", "line_number": 9},

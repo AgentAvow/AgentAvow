@@ -186,6 +186,14 @@ export const THIN_REASON_NO_CODE = 'nothing found; no code to inspect'
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
 
+// A hardcoded credential shipped in a tool (category `secret`) exposes the vendor whose
+// key leaked, not the person installing it: on its own it caps at Review, never Do not
+// connect (Kenne, 2026-10-19). Twin of SECRET_* in src/scanner/verdict.py.
+export const SECRET_CATEGORY = 'secret'
+const secretReason = (n: number, where: string): string => (n === 1
+  ? `a hardcoded credential${where} (it exposes the vendor's key, not yours)`
+  : `${n} hardcoded credentials${where} (they expose the vendor's keys, not yours)`)
+
 const BEHAVIORAL_LABELS: Record<string, string> = {
   behavioral_undeclared_egress: 'undeclared network call',
   ssrf_internal_fetch: 'fetched an internal network address',
@@ -408,19 +416,25 @@ export function decide(input: unknown): Decision {
   }
 
   const isAdvisory = (i: Obj) => i.category === 'known_vulnerability' && i.kind !== 'capability'
+  const isSecret = (i: Obj) => i.category === SECRET_CATEGORY && i.kind !== 'capability'
+    && !isMaliciousItem(i)
+  // Blocking critical hardcoded credentials: reviewed below, never Do not connect.
+  const secrets = items.filter((i) => sev(i) === 'critical' && isBlockingItem(i) && isSecret(i))
   const defect = (severity: string): [number, Obj | undefined] => {
-    let hits = items.filter((i) => sev(i) === severity && isBlockingItem(i) && !isAdvisory(i))
+    const crit = severity === 'critical'
+    let hits = items.filter((i) => sev(i) === severity && isBlockingItem(i) && !isAdvisory(i)
+      && !(crit && isSecret(i)))
     const headline = findings[severity]
     let n: number
     if (isInt(headline)) {
       const adv = items.filter((i) => sev(i) === severity && isAdvisory(i)).length
-      n = Math.max(headline - adv, 0)
+      n = Math.max(headline - adv - (crit ? secrets.length : 0), 0)
     } else {
       n = hits.length
     }
     if (n && !hits.length) {
       hits = items.filter((i) => sev(i) === severity && i.kind !== 'capability'
-        && i.installed !== false && !isAdvisory(i))
+        && i.installed !== false && !isAdvisory(i) && !(crit && isSecret(i)))
     }
     return [n, hits[0]]
   }
@@ -438,6 +452,7 @@ export function decide(input: unknown): Decision {
   }
 
   // review
+  if (secrets.length) return done('review', secretReason(secrets.length, findingWhere(secrets[0])) + plusDeps)
   const [nHigh, high] = defect('high')
   if (nHigh) return done('review', countPhrase(nHigh, 'high', high ? findingLabel(high.name) : null, where(high)) + plusDeps)
   const bHigh = bFindings.filter((f) => sev(f) === 'high')

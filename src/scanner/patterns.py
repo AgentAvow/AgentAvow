@@ -651,6 +651,11 @@ INVISIBLE_UNICODE_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "medium",
     ),
 ]
+# In prose (a code comment, a shipped README) one stray ZWSP is copy-paste debris; a RUN
+# of zero-width characters is the hidden-text shape (each character one bit of an
+# encoded message). Comments and markdown use this bar instead of the per-character rule.
+ZERO_WIDTH_RUN_RE = re.compile("[\u200b\u200c\u200d\u2060\u180e\ufeff]{4,}")
+ZERO_WIDTH_RUN_NAME = "Zero-width character run (hidden text)"
 
 # --- Prompt injection / tool-description poisoning ---
 # category="prompt_injection". Imperative-override or hidden-instruction phrases in tool

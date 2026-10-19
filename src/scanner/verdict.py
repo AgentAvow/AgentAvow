@@ -110,12 +110,15 @@ def verdict_label(safe: bool) -> str:
 # ── The three-phrase decision ─────────────────────────────────────────────────────
 # ONE rule for what every surface leads with (enterprise plan, LOCKED 2026-10-07):
 #
-#   do_not_connect  "Do not connect"            a blocking critical defect (static), a
+#   do_not_connect  "Do not connect"            a blocking critical defect (static) other
+#                                               than a hardcoded credential, a
 #                                               planted credential leaving the sandbox or
 #                                               any other critical sandbox finding, a
 #                                               known-malicious dependency / OpenSSF MAL
 #                                               advisory on this version
-#   review          "Review before you connect" a blocking high defect (static or
+#   review          "Review before you connect" a blocking critical hardcoded
+#                                               credential (category ``secret``) alone, a
+#                                               blocking high defect (static or
 #                                               sandbox), a published advisory affecting
 #                                               the scanned version, deprecation, a score
 #                                               under 51
@@ -153,6 +156,17 @@ THIN_REASON = "nothing found; little code to inspect"
 THIN_REASON_NO_CODE = "nothing found; no code to inspect"
 # A live MCP server scan reads the served tool definitions only (files = tools).
 THIN_REASON_REMOTE_MCP = "tool definitions clean; server code not inspected"
+
+# A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
+# yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
+# the tool, so on its own it caps at Review, never Do not connect (Kenne, 2026-10-19).
+# A secret alongside any other blocking critical is still Do not connect.
+# Category ``secret`` is ONLY for a hardcoded credential value. A rule that reads or
+# sends the user's credentials (exfiltration) must never use it, or it would inherit
+# this cap; tests/test_secret_category_guard.py pins every emitter.
+SECRET_CATEGORY = "secret"
+SECRET_REASON_ONE = "a hardcoded credential{where} (it exposes the vendor's key, not yours)"
+SECRET_REASON_MANY = "{n} hardcoded credentials{where} (they expose the vendor's keys, not yours)"
 
 # Human names for the sandbox rules a reason can cite.
 _BEHAVIORAL_LABELS = {
@@ -506,20 +520,31 @@ def decide(data: dict) -> Decision:
     def is_advisory(i: dict) -> bool:
         return i.get("category") == "known_vulnerability" and i.get("kind") != "capability"
 
+    def is_secret(i: dict) -> bool:
+        return (i.get("category") == SECRET_CATEGORY and i.get("kind") != "capability"
+                and not _is_malicious_item(i))
+
+    # Blocking critical hardcoded credentials: reviewed below, never Do not connect.
+    secrets = [i for i in items if sev(i) == "critical" and _is_blocking_item(i)
+               and is_secret(i)]
+
     def defect(severity: str):
         """(count, first item) of blocking static defects at ``severity``; an own
-        advisory is not a defect here (it reads as review below)."""
+        advisory is not a defect here (it reads as review below), and neither is a
+        critical hardcoded credential (``secrets``, also reviewed below)."""
+        crit = severity == "critical"
         hits = [i for i in items if sev(i) == severity and _is_blocking_item(i)
-                and not is_advisory(i)]
+                and not is_advisory(i) and not (crit and is_secret(i))]
         headline = findings.get(severity)
         if isinstance(headline, int) and not isinstance(headline, bool):
             adv = sum(1 for i in items if sev(i) == severity and is_advisory(i))
-            n = max(headline - adv, 0)
+            n = max(headline - adv - (len(secrets) if crit else 0), 0)
         else:
             n = len(hits)
         if n and not hits:
             hits = [i for i in items if sev(i) == severity and i.get("kind") != "capability"
-                    and i.get("installed") is not False and not is_advisory(i)]
+                    and i.get("installed") is not False and not is_advisory(i)
+                    and not (crit and is_secret(i))]
         return n, (hits[0] if hits else None)
 
     def where(item: dict | None) -> str:
@@ -540,6 +565,11 @@ def decide(data: dict) -> Decision:
                     f"the sandbox caught a critical behavior: {label}" + plus_deps)
 
     # ── review ────────────────────────────────────────────────────────────────────
+    if secrets:
+        w = finding_where(secrets[0])
+        reason = (SECRET_REASON_ONE.format(where=w) if len(secrets) == 1
+                  else SECRET_REASON_MANY.format(n=len(secrets), where=w))
+        return done(DECISION_REVIEW, reason + plus_deps)
     n_high, high = defect("high")
     if n_high:
         return done(DECISION_REVIEW, _count_phrase(

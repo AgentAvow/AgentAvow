@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from src.scanner import exec_alias, npm_scripts
+from src.scanner import exec_alias, npm_scripts, pipe_shell
 from src.scanner.patterns import (
     AGENT_METADATA_FILES,
     AUTH_POSITIVE_PATTERNS,
@@ -51,6 +51,8 @@ from src.scanner.patterns import (
     SSRF_URL_INPUT_RE,
     UNSAFE_EXEC_PATTERNS,
     UNTRUSTED_INPUT_RE,
+    ZERO_WIDTH_RUN_NAME,
+    ZERO_WIDTH_RUN_RE,
 )
 from src.scanner.prefilter import AnyOf, LineFilter
 
@@ -358,18 +360,42 @@ def _finding_grade_weight(f) -> float:
     test conventions (foo_test.go, foo.test.ts, foo.spec.js) that live next to
     source — those are the tool's tests, not the surface an agent connects to.
     """
-    return 1.0 if finding_is_shipped(f) else _NONSHIPPED_FINDING_WEIGHT
+    return _NONSHIPPED_FINDING_WEIGHT if _finding_is_discounted(f) else 1.0
+
+
+def _finding_is_discounted(f) -> bool:
+    """Whether a finding's SCORE weight is discounted (``_NONSHIPPED_FINDING_WEIGHT``):
+    the broad non-shipped taxonomy (test/doc/example/benchmark/scripts/tooling dirs,
+    demo/sample filenames, infra/installer scripts, inline test modules). Weight only:
+    whether a finding is shipped (and can block) is ``finding_is_shipped``."""
+    if getattr(f, "payload", False):
+        return False
+    path = getattr(f, "file_path", "") or ""
+    return bool(_is_nonshipped_path(path) or _is_test_or_doc_file(path)
+                or _is_unshipped_script(path) or getattr(f, "test_code", False))
 
 
 def finding_is_shipped(f) -> bool:
-    """Whether a finding sits in the shipped surface (the public ``shipped`` tag):
-    not a test/doc/example/benchmark path, not an infra/installer script, and not an
-    inline test module inside a shipped file."""
+    """Whether a finding sits in the shipped surface (the public ``shipped`` tag).
+
+    The SAME location rule ``_finding_is_blocking`` uses, so a finding the page tags
+    ``shipped: false`` never decides the answer and one that decides is never tagged
+    not-shipped (they used to disagree: ``scripts/``, ``tooling/``, ``demo_*.py`` were
+    tagged not-shipped yet blocked). False only when the location is honestly not
+    what a consumer runs: a file absent from the published artifact (``installed``,
+    computed from the artifact's file list), an inline test module, a test / fixture /
+    docs / example / benchmark dir or a co-located test file, a CI/release-infra or
+    one-time installer script. Author-controlled names an entry point can hide behind
+    (``scripts/``, ``tooling/``, ``sandbox/``, ``demo_*``) stay shipped. A
+    payload-shaped defect is shipped wherever it sits in an artifact."""
     if getattr(f, "payload", False):
         return True
-    path = f.file_path
-    return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path)
-                or _is_unshipped_script(path) or getattr(f, "test_code", False))
+    if not getattr(f, "installed", True) or getattr(f, "test_code", False):
+        return False
+    path = getattr(f, "file_path", None)
+    if not path:
+        return True
+    return not (_is_blocking_exempt_path(path) or _is_unshipped_script(path))
 
 
 def _is_source_file(path: str) -> bool:
@@ -1129,18 +1155,50 @@ def _npx_doc_prose_file(file_path: str) -> bool:
     return not any(part in AGENT_INSTRUCTION_DIRS for part in p.parts[:-1])
 
 
+# One PEM body line once its quoting is peeled off: optional leading ``+``/``,``/``(``
+# (a key assembled from parts), an optional string prefix and quote, the base64 run, an
+# optional ``\n`` escape, closing quote and trailing ``,;+)]\``. The WHOLE line must be
+# that, so an identifier inside code (``elasticsearchConnectivityCheckPathPlaceholder:
+# "…"`` in an i18n table) never counts as key material.
+_PEM_BODY_LINE_RE = re.compile(
+    r"""^[\s+,(\[]*(?:[bBrRuU]{0,2}["'`])?([A-Za-z0-9+/]{40,}={0,2})"""
+    r"""(?:\\[rn])*["'`]?[\s,;+)\]\\]*$""")
+
+
+def _pem_body_token(token: str) -> bool:
+    """A base64 run shaped like a key line: >= 2 digits. A real 64-char key line holds
+    ~10 digits (no digit at all is ~2e-5 likely); a camelCase identifier holds none."""
+    return sum(ch.isdigit() for ch in token) >= 2
+
+
+def _pem_body_line(text: str) -> bool:
+    m = _PEM_BODY_LINE_RE.match(text)
+    return bool(m and _pem_body_token(m.group(1)))
+
+
+def _pem_tail_has_body(tail: str) -> bool:
+    """A body on the marker's own line, after ``\n`` escapes (a one-line JSON / string
+    literal key): any escape-separated segment is a whole base64 key line."""
+    for seg in re.split(r"\\[rn]|\s+", tail):
+        seg = seg.strip("\"'`,;+)]")
+        if PEM_BODY_RE.fullmatch(seg) and _pem_body_token(seg):
+            return True
+    return False
+
+
 def _pem_has_body(lines: list[str], idx: int, marker_end: int) -> bool:
-    """True when a real key body follows the PEM header at ``lines[idx]``: a base64 run
-    of key-line length on the same line (after a ``\\n`` escape), within the next 2
-    lines, or >= 3 such lines anywhere near a marker (a key assembled from parts)."""
-    tail = lines[idx][marker_end:]
-    if PEM_BODY_RE.search(tail):
+    """True when a real key body follows the PEM header at ``lines[idx]``: a base64 key
+    line on the same line (after a ``\n`` escape), within the next 2 lines, or >= 3 such
+    lines anywhere near a marker (a key assembled from parts). A body line is the whole
+    line (quotes/commas peeled off) in the base64 charset with digits, so prose and
+    identifiers near a bare marker (a UI placeholder string) never count."""
+    if _pem_tail_has_body(lines[idx][marker_end:]):
         return True
     for n in range(idx + 1, min(len(lines), idx + 3)):
-        if PEM_BODY_RE.search(lines[n]):
+        if _pem_body_line(lines[n]):
             return True
     lo, hi = max(0, idx - 30), min(len(lines), idx + 60)
-    body_lines = sum(1 for n in range(lo, hi) if PEM_BODY_RE.search(lines[n]))
+    body_lines = sum(1 for n in range(lo, hi) if _pem_body_line(lines[n]))
     return body_lines >= 3
 
 
@@ -2177,20 +2235,15 @@ def _finding_is_blocking(f: object) -> bool:
     if getattr(f, "category", "") in _DEP_CATEGORIES:
         return False
     # A payload-shaped defect blocks wherever it sits in the artifact (see Finding.payload).
-    if getattr(f, "payload", False):
-        return True
-    if getattr(f, "test_code", False):
-        return False
-    path = getattr(f, "file_path", None)
-    if not path:
-        return True
     # Blocking uses a TIGHTER exemption than the finding-weight discount: a real
     # critical in a runtime-plausible dir an author could rename into (scripts/,
     # tooling/, sandbox/, playground/, site/, a `demo_server.py` at root) still
     # floors the score. Only genuinely-non-runtime code (tests/fixtures/docs/
     # examples/benchmarks, co-located test files) is exempt from the floor — that
     # noise is still weight-discounted elsewhere, it just can't hide a real critical.
-    return not (_is_blocking_exempt_path(path) or _is_unshipped_script(path))
+    # The location rule IS the public ``shipped`` tag (one definition, so the page and
+    # the answer agree).
+    return finding_is_shipped(f)
 
 
 # Dirs that are truly never the runtime surface an agent connects to. STRICTER than
@@ -2435,6 +2488,11 @@ _SCRIPT_CONFIG_EXTS = frozenset({
 })
 
 
+_DOCS_BUILD_STEM_RE = re.compile(
+    r"^(?:(?:build|deploy|gen(?:erate)?|make|publish|serve)[-_]docs?|"
+    r"docs?[-_](?:build|deploy|gen(?:erate)?|publish|serve))$")
+
+
 def _is_script_or_config(file_path: str) -> bool:
     return Path(file_path).suffix.lower() in _SCRIPT_CONFIG_EXTS
 
@@ -2446,6 +2504,11 @@ def _is_infra_script(file_path: str) -> bool:
     parts = [p.lower() for p in Path(file_path).parts[:-1]]
     if any(p in _CI_CONFIG_DIRS or p in _INFRA_DIRS or p.endswith(("-runner", "_runner"))
            for p in parts):
+        return True
+    # A docs-build script at the root or in scripts/ (pydantic's build-docs.sh installs
+    # rustup + uv to build the site): maintainer tooling, never in the package.
+    if parts in ([], ["scripts"], ["script"]) and _DOCS_BUILD_STEM_RE.match(
+            Path(file_path).stem.lower()):
         return True
     # scripts/release.sh, scripts/release-mac.sh, scripts/release/notarize.sh
     for i, p in enumerate(parts):
@@ -2691,6 +2754,51 @@ _SECRET_PLACEHOLDER_CORES = (
     "yoursecret", "yourtoken", "yourkey", "yourpassword", "dummy", "redacted",
     "notasecret", "insertkey", "insertyour", "todo", "fixme", "xxxx", "foobar",
 )
+
+
+# Fake-key words. In a TEST config / fixture file (``_is_test_fixture_file``) a secret
+# whose VALUE carries one of these is a fixture (dify's pytest.ini ``env =`` line:
+# ``sk-ant-api11-IamNotARealKeyJustForMockTestKawaii…``), not a credential. Matched on
+# the separator/case-normalized value like ``_SECRET_PLACEHOLDER_CORES``. Scoped to test
+# files only: ``test`` / ``mock`` / ``fake`` inside a value elsewhere is not evidence,
+# and a real-looking key in a test file (no marker) still fires.
+_FAKE_SECRET_MARKERS = (
+    "fake", "mock", "dummy", "test", "example", "notareal", "notreal", "xxxx",
+    "placeholder", "sample", "invalid",
+)
+_TEST_CONFIG_NAMES = frozenset({
+    "pytest.ini", "tox.ini", "setup.cfg", "conftest.py", "noxfile.py",
+    ".env.test", ".env.testing", ".env.ci", "phpunit.xml", "phpunit.xml.dist",
+})
+_TEST_CONFIG_PREFIXES = (
+    "jest.config.", "jest.setup.", "vitest.config.", "vitest.setup.", "karma.conf.",
+    "playwright.config.", "cypress.config.",
+)
+_TEST_FIXTURE_DIRS = frozenset({
+    "tests", "test", "__tests__", "spec", "testing", "e2e",
+    "fixtures", "fixture", "__fixtures__", "__mocks__", "mocks", "testdata", "test_data",
+})
+
+
+def _is_test_fixture_file(file_path: str) -> bool:
+    """A test runner's config (pytest.ini, tox.ini, setup.cfg, conftest.py, jest /
+    vitest config, .env.test), a file under a test / fixture dir, or a test-named file:
+    where a made-up key is a fixture."""
+    p = Path(file_path)
+    name = p.name.lower()
+    if name in _TEST_CONFIG_NAMES or name.startswith(_TEST_CONFIG_PREFIXES):
+        return True
+    if any(x.lower() in _TEST_FIXTURE_DIRS for x in p.parts[:-1]):
+        return True
+    stem = p.stem.lower()
+    return (".test." in name or ".spec." in name or stem.startswith("test_")
+            or stem.endswith(("_test", "_spec")))
+
+
+def _is_fake_fixture_secret(val_norm: str, file_path: str) -> bool:
+    """A secret VALUE marked fake (``_FAKE_SECRET_MARKERS``) in a test fixture file."""
+    return (any(tok in val_norm for tok in _FAKE_SECRET_MARKERS)
+            and _is_test_fixture_file(file_path))
 
 
 def _is_counting_placeholder(val: str) -> bool:
@@ -3176,7 +3284,6 @@ def _scan_content(
     # the per-line `shell=True` rule must not double-report inside that call.
     consumed_until = -1
     suppressed_lines: set[int] = set()
-    declares_tools: bool | None = None  # lazily: does this file declare agent tools?
 
     # Inline Rust unit tests (`#[cfg(test)] mod tests { … }`) compile only for
     # `cargo test`: lines inside them are graded like a file under tests/.
@@ -3235,6 +3342,95 @@ def _scan_content(
     ]
     (secret_plan, exec_plan, deser_plan, fs_plan, exfil_plan, remote_plan, unicode_plan,
      injection_plan, obfuscation_plan) = ((p.table.get, p.default) for p in plans)
+    # Text an agent reads as prose (SKILL.md, AGENTS.md, a served tool description):
+    # `#` / `*` lines there are headings and bullets, not comments.
+    markdown_like = (is_metadata or metadata_text
+                     or Path(file_path).suffix.lower() in (".md", ".mdx", ".markdown"))
+
+    def _check_unicode(line: str, idx: int, stripped: str, *, in_comment: bool) -> None:
+        """Invisible / smuggled Unicode on one line (one finding per line)."""
+        for name, pattern, severity in unicode_plan[0](idx, unicode_plan[1]):
+            if in_comment and name.startswith("Zero-width"):
+                # A stray ZWSP pasted into a comment (`≥ 3.12.<ZWSP>`) changes no code
+                # and hides nothing; a RUN of zero-width characters is the hidden-text
+                # (steganography) shape, the same bar as shipped markdown.
+                if ZERO_WIDTH_RUN_RE.search(line) and not _is_allowlisted(
+                        file_path, ZERO_WIDTH_RUN_NAME, allowlist):
+                    findings.append(Finding(
+                        category="hidden_unicode", name=ZERO_WIDTH_RUN_NAME, severity="medium",
+                        file_path=file_path, line_number=idx + 1, snippet=stripped[:120]))
+                    break
+                continue
+            if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
+                if _is_allowlisted(file_path, name, allowlist):
+                    continue
+                effective_severity = severity
+                if name.startswith("Bidirectional") and _bidi_cannot_reorder_code(
+                        line, in_comment or idx in _string_state()[0], file_lang):
+                    # Trojan Source deceives a human reading CODE: the reordering is per
+                    # line. A line wholly inside a docstring / template / comment has no
+                    # code to reorder (bandit documents the attack in one); a minified
+                    # bundle line is not read by a reviewer (precision PR 2). A comment
+                    # line that opens or closes a block comment keeps its severity: the
+                    # "commenting-out" variant (`/*<RLO> } <LRI>if (admin)<PDI> */`).
+                    effective_severity = "low"
+                findings.append(Finding(
+                    category="hidden_unicode",
+                    name=name,
+                    severity=effective_severity,
+                    file_path=file_path,
+                    line_number=idx + 1,
+                    snippet=stripped[:120],
+                ))
+                break
+
+    declares_tools_memo: list[bool] = []
+
+    def _declares_tools() -> bool:
+        if not declares_tools_memo:
+            declares_tools_memo.append(_found(SSRF_TOOL_SURFACE_RE))
+        return declares_tools_memo[0]
+
+    def _check_injection(line: str, idx: int, stripped: str) -> None:
+        """Prompt injection / tool poisoning on one line (one finding per line)."""
+        # Check prompt injection / tool-description poisoning (metadata files also get the
+        # wider tool-poisoning shapes that would be noisy on code lines).
+        for name, pattern, severity in injection_plan[0](idx, injection_plan[1]):
+            if pattern.search(line):
+                if _is_allowlisted(file_path, name, allowlist):
+                    continue
+                # Downgrade in test/doc/infra files — EXCEPT manifest/skill metadata,
+                # which is the actual attack surface (a poisoned description is not a doc).
+                effective_severity = severity
+                if is_downgraded and not is_metadata and severity in ("critical", "high"):
+                    effective_severity = "medium"
+                # Precision PR 2: a bare `<instructions>` / `</system>` tag in a library's
+                # OWN prompt template (langchain's summarization prompt) structures text
+                # it sends to its own model call. It is a high only where an agent reads
+                # it as a tool definition: metadata files and files that declare tools.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and all(_INJECTION_TAG_ONLY_RE.fullmatch(mm.group(0))
+                                for mm in pattern.finditer(line))):
+                    if not _declares_tools():
+                        effective_severity = "medium"
+                # A "System prompt:" LABEL whose only content is a format placeholder
+                # (`"failed to prepend system prompt: %s"`, `f"System prompt:\n{sp}"`)
+                # carries no instruction itself: medium, never blocking.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and _system_prompt_label_only(line, pattern)):
+                    effective_severity = "medium"
+                findings.append(Finding(
+                    category="prompt_injection",
+                    name=name,
+                    severity=effective_severity,
+                    file_path=file_path,
+                    line_number=idx + 1,
+                    snippet=stripped[:120],
+                ))
+                return
+
     # A line no rule can match does nothing in the loop below unless it carries the
     # suppression marker (counted even when nothing matches), so only these lines run.
     if any(p.always_active for p in plans):
@@ -3257,9 +3453,19 @@ def _scan_content(
             in_test = idx in test_lines
             is_test_or_doc = file_test_or_doc or in_test
             is_downgraded = file_downgraded or in_test
-        # Skip comments (basic heuristic)
+        # Comment lines (basic heuristic) skip every rule group but hidden Unicode: an
+        # invisible / bidi character in a comment is still Trojan Source and still
+        # smuggles text past a reviewer to whoever (or whatever agent) reads the file.
+        # Prompt-injection rules stay off in code comments (no agent reads a comment as
+        # an instruction to it; a security library documents the phrases there). In
+        # markdown-like agent text (SKILL.md / AGENTS.md / a tool description) `#` and
+        # `*` open headings and bullets, which ARE the text an agent reads: no skip.
+        # (Code rule groups stay off on those lines, as before.)
         stripped = line.strip()
         if stripped.startswith(("#", "//", "*", "/*")):
+            _check_unicode(line, idx, stripped, in_comment=not markdown_like)
+            if markdown_like:
+                _check_injection(line, idx, stripped)
             continue
         # Only the code groups read is_prose, and a line none of their regexes matches
         # gives no finding either way: those lines skip the groups (and the
@@ -3304,7 +3510,8 @@ def _scan_content(
                 # "your-api-key" all reduce to a comparable core before matching.
                 val_norm = re.sub(r"[^a-z0-9]", "", val.lower())
                 if (any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES)
-                        or _is_counting_placeholder(val)):
+                        or _is_counting_placeholder(val)
+                        or _is_fake_fixture_secret(val_norm, file_path)):
                     continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
@@ -3690,6 +3897,16 @@ def _scan_content(
                 if (name.startswith("Unpinned remote resource")
                         and not _has_loader_context(lines, idx, dm.start())):
                     effective_severity = "low"
+                # Pipe-to-shell precision (src/scanner/pipe_shell.py): a placeholder,
+                # a regex or a prose prohibition is not a command; a plain official
+                # HTTPS installer is high; everything else keeps its critical.
+                pipe_class = None
+                if name == pipe_shell.PIPE_TO_SHELL:
+                    pipe_class = pipe_shell.classify_line(line, pattern, file_path)
+                    if pipe_class == pipe_shell.DROP:
+                        continue
+                    if pipe_class == pipe_shell.OFFICIAL:
+                        effective_severity = "high"
                 # Downgrade in test/doc/infra files like other groups
                 effective_severity, remote_payload = _graded(
                     "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
@@ -3812,6 +4029,8 @@ def _scan_content(
                     line_number=line_num,
                     snippet=stripped[:120],
                     payload=remote_payload,
+                    remediation=(pipe_shell.WHY_OFFICIAL
+                                 if pipe_class == pipe_shell.OFFICIAL else ""),
                 )
                 if (name == "curl/wget piped to shell"
                         and Path(file_path).name.lower() == "package.json"):
@@ -3827,67 +4046,9 @@ def _scan_content(
                 break
 
         # Check invisible / smuggled Unicode (dangerous anywhere — no downgrade)
-        for name, pattern, severity in unicode_plan[0](idx, unicode_plan[1]):
-            if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
-                if _is_allowlisted(file_path, name, allowlist):
-                    continue
-                effective_severity = severity
-                if name.startswith("Bidirectional") and _bidi_cannot_reorder_code(
-                        line, idx in _string_state()[0], file_lang):
-                    # Trojan Source deceives a human reading CODE: the reordering is per
-                    # line. A line wholly inside a docstring / template / block comment
-                    # has no code to reorder (bandit documents the attack in one); a
-                    # minified bundle line is not read by a reviewer (precision PR 2).
-                    effective_severity = "low"
-                findings.append(Finding(
-                    category="hidden_unicode",
-                    name=name,
-                    severity=effective_severity,
-                    file_path=file_path,
-                    line_number=line_num,
-                    snippet=stripped[:120],
-                ))
-                break
+        _check_unicode(line, idx, stripped, in_comment=False)
 
-        # Check prompt injection / tool-description poisoning (metadata files also get the
-        # wider tool-poisoning shapes that would be noisy on code lines).
-        for name, pattern, severity in injection_plan[0](idx, injection_plan[1]):
-            if pattern.search(line):
-                if _is_allowlisted(file_path, name, allowlist):
-                    continue
-                # Downgrade in test/doc/infra files — EXCEPT manifest/skill metadata,
-                # which is the actual attack surface (a poisoned description is not a doc).
-                effective_severity = severity
-                if is_downgraded and not is_metadata and severity in ("critical", "high"):
-                    effective_severity = "medium"
-                # Precision PR 2: a bare `<instructions>` / `</system>` tag in a library's
-                # OWN prompt template (langchain's summarization prompt) structures text
-                # it sends to its own model call. It is a high only where an agent reads
-                # it as a tool definition: metadata files and files that declare tools.
-                if (name == "Injected system/role directive" and effective_severity == "high"
-                        and not (is_metadata or metadata_text)
-                        and all(_INJECTION_TAG_ONLY_RE.fullmatch(mm.group(0))
-                                for mm in pattern.finditer(line))):
-                    if declares_tools is None:
-                        declares_tools = _found(SSRF_TOOL_SURFACE_RE)
-                    if not declares_tools:
-                        effective_severity = "medium"
-                # A "System prompt:" LABEL whose only content is a format placeholder
-                # (`"failed to prepend system prompt: %s"`, `f"System prompt:\n{sp}"`)
-                # carries no instruction itself: medium, never blocking.
-                if (name == "Injected system/role directive" and effective_severity == "high"
-                        and not (is_metadata or metadata_text)
-                        and _system_prompt_label_only(line, pattern)):
-                    effective_severity = "medium"
-                findings.append(Finding(
-                    category="prompt_injection",
-                    name=name,
-                    severity=effective_severity,
-                    file_path=file_path,
-                    line_number=line_num,
-                    snippet=stripped[:120],
-                ))
-                break
+        _check_injection(line, idx, stripped)
 
         # Check code obfuscation
         for name, pattern, severity in obfuscation_rules:
@@ -3941,6 +4102,33 @@ def _scan_content(
                                       is not None))),
                 ))
                 break
+
+    # Tool descriptions written in source (a FastMCP `@mcp.tool` docstring, a TS
+    # `server.tool("x", "<description>", …)`): read with the metadata scan's tool-poisoning
+    # shapes, on the description text only (src/scanner/tool_descriptions.py).
+    if file_lang in ("python", "javascript", "typescript") and not is_metadata \
+            and not metadata_text and not is_declaration:
+        from src.scanner.tool_descriptions import tool_description_hits
+        for hit in tool_description_hits(content, file_lang):
+            if _is_allowlisted(file_path, hit.name, allowlist):
+                continue
+            sev = hit.severity
+            if (file_downgraded or hit.line_number - 1 in test_lines) \
+                    and sev in ("critical", "high"):
+                sev = "medium"
+            # The description reading replaces the line engine's on that line.
+            findings = [f for f in findings if not (
+                f.category == "prompt_injection" and f.line_number == hit.line_number)]
+            findings.append(Finding(
+                category="prompt_injection",
+                name=hit.name,
+                severity=sev,
+                file_path=file_path,
+                line_number=hit.line_number,
+                snippet=hit.snippet,
+                remediation=_why("text in an agent tool's description (read by the model "
+                                 "that calls the tool)", "prompt_injection", "defect"),
+            ))
 
     # A suppressed line that fell through (it matched a critical/high PATTERN) but
     # classified as a capability or a low/medium is what the suppression was for.
@@ -4099,6 +4287,10 @@ def _scan_content(
     findings.extend(_credential_exfil_findings(
         content, file_path, lines, file_lang, allowlist,
         payload=payload_mode and file_downgraded, lf=lf))
+    findings.extend(_browser_credential_findings(
+        content, file_path, lines, file_lang, allowlist, findings,
+        downgraded=file_downgraded, payload=payload_mode and file_downgraded,
+        prose_lines=(lambda: _string_state()[0]) if file_lang == "python" else None))
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.
@@ -4658,6 +4850,52 @@ def _credential_exfil_findings(
                 "anywhere; remove the read or the send."
             ),
             payload=payload,
+        ))
+    return out
+
+
+def _browser_credential_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], found: list[Finding], *, downgraded: bool,
+    payload: bool, prose_lines=None,
+) -> list[Finding]:
+    """Browser credential handling (``browser_credentials``): a saved-password / cookie
+    database read, session data sent to a network endpoint, and the informational
+    capabilities (reads / saves session state, runs with the real browser profile).
+
+    A store read is dropped when ``credential_flow`` already reported the same file's
+    browser store being sent out (critical). In a test / doc / infra file a defect is
+    graded medium unless the file is a payload of a published artifact."""
+    from src.scanner.browser_credentials import STORE_READ_NAME, browser_credential_hits
+
+    hits = browser_credential_hits(content, file_lang, prose_lines=prose_lines)
+    if not hits:
+        return []
+    store_sent = any(f.name == _CREDENTIAL_EXFIL_NAME and f.file_path == file_path
+                     for f in found)
+    out = []
+    for h in hits:
+        if h.name == STORE_READ_NAME and store_sent:
+            continue
+        if _is_allowlisted(file_path, h.name, allowlist):
+            continue
+        severity, is_payload = h.severity, False
+        if h.kind == "defect" and downgraded and severity in ("critical", "high"):
+            if payload:
+                is_payload = True
+            else:
+                severity = "medium"
+        out.append(Finding(
+            category="exfiltration",
+            name=h.name,
+            severity=severity,
+            file_path=file_path,
+            line_number=h.line,
+            snippet=lines[h.line - 1].strip()[:120] if h.line - 1 < len(lines) else "",
+            remediation=h.detail,
+            kind=h.kind,
+            capability=h.capability,
+            payload=is_payload,
         ))
     return out
 
