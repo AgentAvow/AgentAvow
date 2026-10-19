@@ -358,18 +358,42 @@ def _finding_grade_weight(f) -> float:
     test conventions (foo_test.go, foo.test.ts, foo.spec.js) that live next to
     source — those are the tool's tests, not the surface an agent connects to.
     """
-    return 1.0 if finding_is_shipped(f) else _NONSHIPPED_FINDING_WEIGHT
+    return _NONSHIPPED_FINDING_WEIGHT if _finding_is_discounted(f) else 1.0
+
+
+def _finding_is_discounted(f) -> bool:
+    """Whether a finding's SCORE weight is discounted (``_NONSHIPPED_FINDING_WEIGHT``):
+    the broad non-shipped taxonomy (test/doc/example/benchmark/scripts/tooling dirs,
+    demo/sample filenames, infra/installer scripts, inline test modules). Weight only:
+    whether a finding is shipped (and can block) is ``finding_is_shipped``."""
+    if getattr(f, "payload", False):
+        return False
+    path = getattr(f, "file_path", "") or ""
+    return bool(_is_nonshipped_path(path) or _is_test_or_doc_file(path)
+                or _is_unshipped_script(path) or getattr(f, "test_code", False))
 
 
 def finding_is_shipped(f) -> bool:
-    """Whether a finding sits in the shipped surface (the public ``shipped`` tag):
-    not a test/doc/example/benchmark path, not an infra/installer script, and not an
-    inline test module inside a shipped file."""
+    """Whether a finding sits in the shipped surface (the public ``shipped`` tag).
+
+    The SAME location rule ``_finding_is_blocking`` uses, so a finding the page tags
+    ``shipped: false`` never decides the answer and one that decides is never tagged
+    not-shipped (they used to disagree: ``scripts/``, ``tooling/``, ``demo_*.py`` were
+    tagged not-shipped yet blocked). False only when the location is honestly not
+    what a consumer runs: a file absent from the published artifact (``installed``,
+    computed from the artifact's file list), an inline test module, a test / fixture /
+    docs / example / benchmark dir or a co-located test file, a CI/release-infra or
+    one-time installer script. Author-controlled names an entry point can hide behind
+    (``scripts/``, ``tooling/``, ``sandbox/``, ``demo_*``) stay shipped. A
+    payload-shaped defect is shipped wherever it sits in an artifact."""
     if getattr(f, "payload", False):
         return True
-    path = f.file_path
-    return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path)
-                or _is_unshipped_script(path) or getattr(f, "test_code", False))
+    if not getattr(f, "installed", True) or getattr(f, "test_code", False):
+        return False
+    path = getattr(f, "file_path", None)
+    if not path:
+        return True
+    return not (_is_blocking_exempt_path(path) or _is_unshipped_script(path))
 
 
 def _is_source_file(path: str) -> bool:
@@ -1103,18 +1127,50 @@ def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = 
     return "\\n" in tail or bool(_HELP_PRINT_RE.search(line))
 
 
+# One PEM body line once its quoting is peeled off: optional leading ``+``/``,``/``(``
+# (a key assembled from parts), an optional string prefix and quote, the base64 run, an
+# optional ``\n`` escape, closing quote and trailing ``,;+)]\``. The WHOLE line must be
+# that, so an identifier inside code (``elasticsearchConnectivityCheckPathPlaceholder:
+# "…"`` in an i18n table) never counts as key material.
+_PEM_BODY_LINE_RE = re.compile(
+    r"""^[\s+,(\[]*(?:[bBrRuU]{0,2}["'`])?([A-Za-z0-9+/]{40,}={0,2})"""
+    r"""(?:\\[rn])*["'`]?[\s,;+)\]\\]*$""")
+
+
+def _pem_body_token(token: str) -> bool:
+    """A base64 run shaped like a key line: >= 2 digits. A real 64-char key line holds
+    ~10 digits (no digit at all is ~2e-5 likely); a camelCase identifier holds none."""
+    return sum(ch.isdigit() for ch in token) >= 2
+
+
+def _pem_body_line(text: str) -> bool:
+    m = _PEM_BODY_LINE_RE.match(text)
+    return bool(m and _pem_body_token(m.group(1)))
+
+
+def _pem_tail_has_body(tail: str) -> bool:
+    """A body on the marker's own line, after ``\n`` escapes (a one-line JSON / string
+    literal key): any escape-separated segment is a whole base64 key line."""
+    for seg in re.split(r"\\[rn]|\s+", tail):
+        seg = seg.strip("\"'`,;+)]")
+        if PEM_BODY_RE.fullmatch(seg) and _pem_body_token(seg):
+            return True
+    return False
+
+
 def _pem_has_body(lines: list[str], idx: int, marker_end: int) -> bool:
-    """True when a real key body follows the PEM header at ``lines[idx]``: a base64 run
-    of key-line length on the same line (after a ``\\n`` escape), within the next 2
-    lines, or >= 3 such lines anywhere near a marker (a key assembled from parts)."""
-    tail = lines[idx][marker_end:]
-    if PEM_BODY_RE.search(tail):
+    """True when a real key body follows the PEM header at ``lines[idx]``: a base64 key
+    line on the same line (after a ``\n`` escape), within the next 2 lines, or >= 3 such
+    lines anywhere near a marker (a key assembled from parts). A body line is the whole
+    line (quotes/commas peeled off) in the base64 charset with digits, so prose and
+    identifiers near a bare marker (a UI placeholder string) never count."""
+    if _pem_tail_has_body(lines[idx][marker_end:]):
         return True
     for n in range(idx + 1, min(len(lines), idx + 3)):
-        if PEM_BODY_RE.search(lines[n]):
+        if _pem_body_line(lines[n]):
             return True
     lo, hi = max(0, idx - 30), min(len(lines), idx + 60)
-    body_lines = sum(1 for n in range(lo, hi) if PEM_BODY_RE.search(lines[n]))
+    body_lines = sum(1 for n in range(lo, hi) if _pem_body_line(lines[n]))
     return body_lines >= 3
 
 
@@ -2147,20 +2203,15 @@ def _finding_is_blocking(f: object) -> bool:
     if getattr(f, "category", "") in _DEP_CATEGORIES:
         return False
     # A payload-shaped defect blocks wherever it sits in the artifact (see Finding.payload).
-    if getattr(f, "payload", False):
-        return True
-    if getattr(f, "test_code", False):
-        return False
-    path = getattr(f, "file_path", None)
-    if not path:
-        return True
     # Blocking uses a TIGHTER exemption than the finding-weight discount: a real
     # critical in a runtime-plausible dir an author could rename into (scripts/,
     # tooling/, sandbox/, playground/, site/, a `demo_server.py` at root) still
     # floors the score. Only genuinely-non-runtime code (tests/fixtures/docs/
     # examples/benchmarks, co-located test files) is exempt from the floor — that
     # noise is still weight-discounted elsewhere, it just can't hide a real critical.
-    return not (_is_blocking_exempt_path(path) or _is_unshipped_script(path))
+    # The location rule IS the public ``shipped`` tag (one definition, so the page and
+    # the answer agree).
+    return finding_is_shipped(f)
 
 
 # Dirs that are truly never the runtime surface an agent connects to. STRICTER than
@@ -2661,6 +2712,51 @@ _SECRET_PLACEHOLDER_CORES = (
     "yoursecret", "yourtoken", "yourkey", "yourpassword", "dummy", "redacted",
     "notasecret", "insertkey", "insertyour", "todo", "fixme", "xxxx", "foobar",
 )
+
+
+# Fake-key words. In a TEST config / fixture file (``_is_test_fixture_file``) a secret
+# whose VALUE carries one of these is a fixture (dify's pytest.ini ``env =`` line:
+# ``sk-ant-api11-IamNotARealKeyJustForMockTestKawaii…``), not a credential. Matched on
+# the separator/case-normalized value like ``_SECRET_PLACEHOLDER_CORES``. Scoped to test
+# files only: ``test`` / ``mock`` / ``fake`` inside a value elsewhere is not evidence,
+# and a real-looking key in a test file (no marker) still fires.
+_FAKE_SECRET_MARKERS = (
+    "fake", "mock", "dummy", "test", "example", "notareal", "notreal", "xxxx",
+    "placeholder", "sample", "invalid",
+)
+_TEST_CONFIG_NAMES = frozenset({
+    "pytest.ini", "tox.ini", "setup.cfg", "conftest.py", "noxfile.py",
+    ".env.test", ".env.testing", ".env.ci", "phpunit.xml", "phpunit.xml.dist",
+})
+_TEST_CONFIG_PREFIXES = (
+    "jest.config.", "jest.setup.", "vitest.config.", "vitest.setup.", "karma.conf.",
+    "playwright.config.", "cypress.config.",
+)
+_TEST_FIXTURE_DIRS = frozenset({
+    "tests", "test", "__tests__", "spec", "testing", "e2e",
+    "fixtures", "fixture", "__fixtures__", "__mocks__", "mocks", "testdata", "test_data",
+})
+
+
+def _is_test_fixture_file(file_path: str) -> bool:
+    """A test runner's config (pytest.ini, tox.ini, setup.cfg, conftest.py, jest /
+    vitest config, .env.test), a file under a test / fixture dir, or a test-named file:
+    where a made-up key is a fixture."""
+    p = Path(file_path)
+    name = p.name.lower()
+    if name in _TEST_CONFIG_NAMES or name.startswith(_TEST_CONFIG_PREFIXES):
+        return True
+    if any(x.lower() in _TEST_FIXTURE_DIRS for x in p.parts[:-1]):
+        return True
+    stem = p.stem.lower()
+    return (".test." in name or ".spec." in name or stem.startswith("test_")
+            or stem.endswith(("_test", "_spec")))
+
+
+def _is_fake_fixture_secret(val_norm: str, file_path: str) -> bool:
+    """A secret VALUE marked fake (``_FAKE_SECRET_MARKERS``) in a test fixture file."""
+    return (any(tok in val_norm for tok in _FAKE_SECRET_MARKERS)
+            and _is_test_fixture_file(file_path))
 
 
 def _is_counting_placeholder(val: str) -> bool:
@@ -3252,7 +3348,8 @@ def _scan_content(
                 # "your-api-key" all reduce to a comparable core before matching.
                 val_norm = re.sub(r"[^a-z0-9]", "", val.lower())
                 if (any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES)
-                        or _is_counting_placeholder(val)):
+                        or _is_counting_placeholder(val)
+                        or _is_fake_fixture_secret(val_norm, file_path)):
                     continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):

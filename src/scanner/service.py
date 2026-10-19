@@ -229,17 +229,26 @@ def stored_scan_decision_input(
 
     from types import SimpleNamespace
 
-    from src.scanner.scan import finding_is_shipped
+    from src.scanner.scan import _finding_is_discounted, finding_is_shipped
 
     items = []
     for raw in vulnerabilities.get("findings") or []:
         if not isinstance(raw, dict):
             continue
         item = dict(raw)
+        by_path = SimpleNamespace(
+            file_path=str(item.get("file_path") or ""), payload=False, test_code=False,
+            installed=item.get("installed") is not False)
         if "shipped" not in item:
-            item["shipped"] = finding_is_shipped(SimpleNamespace(
-                file_path=str(item.get("file_path") or ""), payload=False,
-                test_code=False))
+            item["shipped"] = finding_is_shipped(by_path)
+        elif (item["shipped"] is False and _finding_is_discounted(by_path)
+              and finding_is_shipped(by_path)):
+            # A row written before the tag and the blocking rule agreed: the old tag
+            # said not-shipped for a path that blocks (scripts/, tooling/, demo_*).
+            # The path alone made it False (an inline test module's False came from
+            # ``test_code``, on a path the old rule called shipped), so re-tag it with
+            # today's rule and the badge reads the row the way the report does.
+            item["shipped"] = True
         items.append(item)
 
     findings: dict = {"items": items}

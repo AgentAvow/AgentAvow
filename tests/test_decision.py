@@ -152,9 +152,17 @@ CASES = [
      "trust score 50/100 is under 51"),
     ("headline_high_without_item", _scan(70, 200, [], high=1), "review", True,
      "one high finding"),
+    # scripts/ is author-controlled (an entry point can live there), so the scanner tags
+    # it shipped and it blocks; the tag and the headline count agree.
     ("high_in_scripts_still_blocks", _scan(70, 200, [_f(
-        "high", "Eval of input", shipped=False, file_path="scripts/run.py")], high=1),
+        "high", "Eval of input", file_path="scripts/run.py")], high=1),
      "review", True, "one high finding in its code: eval of input"),
+    # A finding tagged not-shipped (CI script, file absent from the artifact) never
+    # decides, even on a shape with no headline counts (stored rows, old caches).
+    ("unshipped_critical_items_only", {"trust_score": 70, "findings": {"items": [_f(
+        "critical", "curl/wget piped to shell", shipped=False, file_path="ci/build.sh")]},
+        "metadata": {"files_scanned": 200}},
+     "safe", True, "no critical or high findings in 200 files"),
     ("items_only_shape", {"trust_score": 70, "findings": {"items": [_f("high", "X")]}},
      "review", True, "one high finding in its code: X"),
     # ── do_not_connect ────────────────────────────────────────────────────────────
