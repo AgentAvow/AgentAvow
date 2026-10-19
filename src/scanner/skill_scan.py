@@ -328,7 +328,9 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
         if not text or not path.lower().endswith(_SCRIPT_EXT):
             continue
         result.script_count += 1
-        result.findings.extend(_credential_findings(path, text, extern))
+        others = [t for p, t in files.items()
+                  if p != path and t and p.lower().endswith(_SCRIPT_EXT)]
+        result.findings.extend(_credential_findings(path, text, extern, others))
         if _CAP_NETWORK_RE.search(text):
             net_scripts.append(path)
         if _CAP_EXEC_RE.search(text):
@@ -423,7 +425,8 @@ def _credential_path_read(code: str, path: str) -> bool:
     return _listed_paths_read_and_sent(code, both, path)
 
 
-def _credential_findings(path: str, text: str, extern: dict[str, str] | None = None) -> list:
+def _credential_findings(path: str, text: str, extern: dict[str, str] | None = None,
+                         others: list[str] | None = None) -> list:
     """Credential reads in one bundled script (DNC sample precision, 2026-10-19).
 
     * Commented-out lines are not code.
@@ -464,7 +467,8 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
         # The WHOLE contents to an unresolved / local host are critical ("dump"); one
         # value pulled out of the .env there is high ("extracted").
         keys = file_keys | extracted
-        whole = _classify_hosts(_contents_reached(code, path=path, whole=True), None, keys)
+        whole = _classify_hosts(
+            _contents_reached(code, path=path, whole=True, others=others), None, keys)
         one = _classify_hosts(_contents_reached(code, path=path), None, keys, "extracted")
         rank = {"critical": 0, "high": 1, None: 2}
         env_sev, env_bad = min((whole, one), key=lambda r: rank[r[0]])

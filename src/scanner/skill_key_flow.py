@@ -873,7 +873,8 @@ def _visible_names(flow: _Flow, tainted: Taint, line: int) -> set[str]:
 
 
 def _taint(flow: _Flow, seeds: Taint, funcs0: set[str] | None = None,
-           barrier: Callable[[str], bool] | None = None) -> tuple[Taint, set[str]]:
+           barrier: Callable[[_Assign], bool] | None = None,
+           ) -> tuple[Taint, set[str]]:
     """(tainted names with their scopes, functions whose return value is tainted).
 
     Scoped: a local assigned in one function does not taint a same-named local in
@@ -896,7 +897,7 @@ def _taint(flow: _Flow, seeds: Taint, funcs0: set[str] | None = None,
     for _ in range(6):
         grew = False
         for a in flow.assigns:
-            if _RHS_IS_REQUEST_RE.match(a.rhs) or (barrier and barrier(a.rhs)) \
+            if _RHS_IS_REQUEST_RE.match(a.rhs) or (barrier and barrier(a)) \
                     or not hit(a.rhs, a.line):
                 continue
             base = a.target.split(".")[0]
@@ -1280,22 +1281,89 @@ _LITERAL_LOOKUP_RE = re.compile(
     r"\.get\s*\(\s*[\"'][\w.-]+[\"']|\[\s*[\"'][\w.-]+[\"']\s*\]")
 _REGEX_LOOKUP_RE = re.compile(
     r"\.(?:match|exec)\s*\(|\bre\.(?:search|match|fullmatch)\s*\(")
-_KEY_ANCHOR_RE = re.compile(
-    r"(?:\^|\\n|\b)\s*(?:[A-Z][A-Z0-9_]{2,}|\$\{\w+\}|\{\w+\})\s*=")
+_LITERAL_ANCHOR_RE = re.compile(r"(?:\^|\\n|\b)\s*[A-Z][A-Z0-9_]{2,}\s*=")
+_VAR_ANCHOR_RE = re.compile(r"(?:\$\{|(?<![\w$])\{)\s*([A-Za-z_$][\w$]*)\s*\}\s*=")
 _DOTALL_RE = re.compile(
     r"\[\\s\\S\]|\[\\S\\s\]|\[\^\]|\bre\.(?:S|DOTALL)\b|\(\?s\)"
     r"|/[gimuy]*s[gimuy]*\s*[),]|,\s*[\"'][gimuy]*s[gimuy]*[\"']")
 _BULK_RE = re.compile(
     r"\bfindall\b|\bmatchAll\b|\bfromEntries\b|\bdict\s*\("
     r"|\.join\s*\(|\.items\s*\(|\.entries\s*\(")
+_STR_LITERAL_ARG_RE = re.compile(r"""^\s*(["'`])[\w.-]+\1\s*$""")
 
 
-def _single_named_extraction(rhs: str) -> bool:
+def _header_params(header: str) -> list[str]:
+    p = header.find("(")
+    q = header.find(")", p + 1)
+    if p < 0 or q < 0:
+        return []
+    out = []
+    for part in header[p + 1:q].split(","):
+        m = re.match(r"\s*\*{0,2}([A-Za-z_$][\w$]*)", part)
+        if m and m.group(1) not in ("self", "cls"):
+            out.append(m.group(1))
+    return out
+
+
+def _param_of(flow: _Flow, line: int, var: str) -> tuple[str, int] | None:
+    """(function name, parameter index) when ``var`` on ``line`` is, or is derived in
+    one step from, a parameter of the innermost enclosing function."""
+    enclosing = flow.scope_at[line] if line < len(flow.scope_at) else ()
+    if not enclosing:
+        return None
+    fname, f0, f1 = flow.functions[enclosing[-1]]
+    params = _header_params(flow.lines[f0])
+    if var in params:
+        return fname, params.index(var)
+    for a in flow.assigns:     # `const safeKey = key.replace(...)`
+        if a.target == var and f0 <= a.line <= f1:
+            hit = [p for p in params if _mentions(a.rhs, {p})]
+            if len(hit) == 1:
+                return fname, params.index(hit[0])
+    return None
+
+
+def _all_calls_pass_literals(fname: str, idx: int, texts: list[str]) -> bool:
+    """Every call of ``fname`` (outside its own definition) passes a string literal
+    as argument ``idx``; at least one call exists."""
+    call_re = re.compile(r"(?<![\w$])(?<!function )(?<!def )(?:this\.|self\.)?"
+                         + re.escape(fname) + r"\s*\(")
+    seen = 0
+    for text in texts:
+        for m in call_re.finditer(text):
+            before = text[max(0, m.start() - 12):m.start()]
+            if re.search(r"(?:function|def|async)\s*$", before):
+                continue
+            chunk = _call_text(text, m.start())
+            # a method / arrow header (`envOrDotEnv(key: string): T {`) is no call
+            after = text[m.start() + len(chunk):m.start() + len(chunk) + 40]
+            if re.match(r"\s*(?::[^{;\n]*)?\{", after) or re.match(r"\s*=>", after):
+                continue
+            args = _top_level_args(chunk)
+            if idx >= len(args) or not _STR_LITERAL_ARG_RE.match(args[idx]):
+                return False
+            seen += 1
+    return seen > 0
+
+
+def _single_named_extraction(flow: _Flow, a: _Assign, texts: list[str]) -> bool:
+    """One NAMED value pulled out of a file's contents (see above). ``texts``: the
+    code to look for the helper's call sites in (this file + bundled helper files)."""
+    rhs = a.rhs
     if _BULK_RE.search(rhs) or _DOTALL_RE.search(rhs):
         return False
     if _LITERAL_LOOKUP_RE.search(rhs):
         return True
-    return bool(_REGEX_LOOKUP_RE.search(rhs) and _KEY_ANCHOR_RE.search(rhs))
+    if not _REGEX_LOOKUP_RE.search(rhs):
+        return False
+    if _LITERAL_ANCHOR_RE.search(rhs):
+        return True
+    # `^${key}=`: one named key only when every caller passes a literal key name.
+    m = _VAR_ANCHOR_RE.search(rhs)
+    if not m:
+        return False
+    owner = _param_of(flow, a.line, m.group(1))
+    return bool(owner) and _all_calls_pass_literals(owner[0], owner[1], texts)
 
 
 # Reads that hand back a .env's parsed contents without naming `.env`.
@@ -1305,16 +1373,23 @@ _ENV_CONTENTS_RE = re.compile(
 
 
 def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
-                     path: str | None = None, whole: bool = False) -> list[str]:
+                     path: str | None = None, whole: bool = False,
+                     others: list[str] | None = None) -> list[str]:
     """Hosts the CONTENTS of a file whose path matches ``path_re`` reach ("?" =
     unresolved). A dotenv loader only writes os.environ; values read back from it are
     judged by the key-flow rule, so os.environ / load_dotenv calls are not a send.
-    ``whole``: only flows of the whole contents (stop at a single-value extraction)."""
+    ``whole``: only flows of the whole contents (stop at a single-value extraction).
+    ``others``: bundled files whose calls of a helper here also count."""
     flow = _flow(text, path)
+    texts = [flow.joined, *(others or [])]
+
+    def single(a: _Assign) -> bool:
+        return _single_named_extraction(flow, a, texts)
+
     seeds: Taint = {}
     for a in flow.assigns:
         if path_re.search(_strip_comment(a.rhs)) and not (
-                whole and _single_named_extraction(a.rhs)):
+                whole and single(a)):
             seeds.setdefault(a.target, set()).add(flow.scope_of(a.line, a.declared))
     for i, ln in enumerate(flow.lines):
         if _COMMENT_RE.match(ln):
@@ -1328,7 +1403,7 @@ def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
             hosts.extend(_dest_hosts(flow, chunk, line))
     if not seeds:
         return hosts
-    tainted, funcs = _taint(flow, seeds, barrier=_single_named_extraction if whole else None)
+    tainted, funcs = _taint(flow, seeds, barrier=single if whole else None)
     return hosts + _reached(flow, tainted, funcs, include_base=False)
 
 
