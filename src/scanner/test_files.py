@@ -240,12 +240,86 @@ def _dotted(node) -> str:
     return ".".join(reversed(parts))
 
 
+# Calls that turn a module NAME into the module object.
+_HANDLE_CALLS = frozenset({"import_module", "importlib.import_module", "__import__",
+                           "sys.modules.get", "inspect.getmodule", "getmodule"})
+
+
+def _self_handle(tree, own: frozenset[str] = frozenset()) -> bool:
+    """Can this module get hold of its own module object? Markers:
+
+    * ``__name__`` (or a variable it is bound to: ``me = __name__``, a parameter
+      default ``def f(n=__name__)``) used as the key of ``sys.modules[...]`` /
+      ``sys.modules.get(...)`` or the argument of ``import_module`` / ``__import__``,
+      directly or through one call into a function of this module whose parameter is
+      used that way (``reset(__name__)`` with ``def reset(m): sys.modules[m]``);
+    * the module's own dotted name as a literal in the same positions
+      (``importlib.import_module("pkg.tests.support")``);
+    * ``inspect.getmodule(...)``.
+
+    Other uses of ``__name__`` (``if __name__ == "__main__"``,
+    ``logging.getLogger(__name__)``, a cache-directory prefix) are not.
+    ``f_globals`` widens on its own, before this check."""
+    import ast
+
+    # Variables bound to __name__.
+    aliases = {"__name__"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name) \
+                and node.value.id in aliases:
+            aliases |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = node.args.args + node.args.kwonlyargs
+            defaults = ([None] * (len(node.args.args) - len(node.args.defaults))
+                        + list(node.args.defaults) + list(node.args.kw_defaults))
+            for arg, d in zip(args, defaults):
+                if isinstance(d, ast.Name) and d.id == "__name__":
+                    aliases.add(arg.arg)
+
+    def handle_keys(node) -> list:
+        """The expressions this node turns into a module object."""
+        if isinstance(node, ast.Subscript) and _dotted(node.value) == "sys.modules":
+            return [node.slice]
+        if isinstance(node, ast.Call):
+            fn = _dotted(node.func)
+            if fn in ("inspect.getmodule", "getmodule"):
+                return [ast.Constant(value=None)]       # any object's module
+            if fn in _HANDLE_CALLS and node.args:
+                return [node.args[0]]
+        return []
+
+    def is_self(key) -> bool:
+        if isinstance(key, ast.Constant):
+            return key.value is None or key.value in own
+        return isinstance(key, ast.Name) and key.id in aliases
+
+    # Functions whose parameter is used as a handle key: index of that parameter.
+    key_params: dict[str, set[int]] = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        params = [x.arg for x in fn.args.args]
+        for node in ast.walk(fn):
+            for key in handle_keys(node):
+                if isinstance(key, ast.Name) and key.id in params:
+                    key_params.setdefault(fn.name, set()).add(params.index(key.id))
+
+    for node in ast.walk(tree):
+        if any(is_self(k) for k in handle_keys(node)):
+            return True
+        if isinstance(node, ast.Call) and _dotted(node.func) in key_params:
+            for i in key_params[_dotted(node.func)]:
+                if i < len(node.args) and is_self(node.args[i]):
+                    return True
+    return False
+
+
 def _pure_decorator(node) -> bool:
     name = _dotted(node)
     return name in _PURE_DECORATORS or name.startswith("pytest.mark.")
 
 
-def unreached_lines(text: str, names: set[str]) -> set[int]:
+def unreached_lines(text: str, names: set[str], path: str = "") -> set[int]:
     """Lines of the top-level functions / classes of a Python module that an import
     of only ``names`` (``from tests.support import captured_stdout``) never runs:
     definitions neither imported nor referenced by an imported one or by module-level
@@ -282,11 +356,28 @@ def unreached_lines(text: str, names: set[str]) -> set[int]:
     def may_be_module(node) -> bool:
         return module_object(node) or (isinstance(node, ast.Name) and node.id in module_names)
 
+    computed_lookup = False
     for x in ast.walk(tree):
+        if isinstance(x, ast.Attribute) and x.attr == "f_globals":
+            return set()                  # sys._getframe().f_globals / currentframe()
         if isinstance(x, ast.Call):
             fn = _dotted(x.func)
             if fn in ("globals", "vars", "locals", "attrgetter", "operator.attrgetter"):
                 return set()
+            if fn in ("inspect.getmembers", "getmembers", "dir") or (
+                    fn == "getattr" and len(x.args) >= 2 and not (
+                        isinstance(x.args[1], ast.Constant)
+                        and isinstance(x.args[1].value, str))):
+                computed_lookup = True
+    # Fallback: the module can get hold of its own module object AND looks names up
+    # by computation anywhere: assume it can reach any definition (a parameter that
+    # receives `sys.modules[__name__]`, `dir(m)` walked with getattr).
+    own = frozenset(n for n in _module_names(path) if "." in n) if path else frozenset()
+    if computed_lookup and _self_handle(tree, own):
+        return set()
+    for x in ast.walk(tree):
+        if isinstance(x, ast.Call):
+            fn = _dotted(x.func)
             # A computed getattr reaches a definition only on the module object: on
             # `sys` / `config` / an argument it reads that object's attributes.
             if fn == "getattr" and len(x.args) >= 2 and may_be_module(x.args[0]) and not (

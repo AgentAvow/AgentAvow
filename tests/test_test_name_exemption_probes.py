@@ -484,3 +484,60 @@ def test_named_import_alone_stays_exempt(tmp_path):
              "pkg/cli.py": "from pkg.tests.support import helper\n"}
     _tree(tmp_path, files)
     assert _exempt(scan_local(tmp_path), "pkg/tests/support.py", PY_RULE)
+
+
+@pytest.mark.parametrize("extra", [
+    # a parameter that receives the module object
+    "import sys\n\n\ndef look(mod, n):\n    return getattr(mod, n)\n\n\n"
+    "def helper2(x):\n    return look(sys.modules[__name__], x)\n",
+    # f_globals, unconditionally
+    "import sys\n\n\ndef helper2(n):\n    return sys._getframe().f_globals[n]\n",
+    "import inspect\n\n\ndef helper2(n):\n    return inspect.currentframe().f_globals[n]\n",
+    # inspect.getmembers(module)
+    "import inspect\nimport sys\n\n\ndef helper2():\n"
+    "    return inspect.getmembers(sys.modules[__name__])\n",
+    # dir(m) iterated with getattr
+    "import importlib\n\n\ndef helper2():\n    m = importlib.import_module('pkg.tests.support')\n"
+    "    return [getattr(m, n) for n in dir(m)]\n",
+    "import importlib\n\n\ndef helper2():\n    m = importlib.import_module(__name__)\n"
+    "    return [getattr(m, n) for n in dir(m)]\n",
+    # __name__ reaching a handle through a local variable
+    "import sys\n\n\ndef helper2(x):\n    me = __name__\n    return getattr(sys.modules[me], x)\n",
+    "import importlib\n\n\ndef helper2(x):\n    n = __name__\n"
+    "    return getattr(importlib.import_module(n), x)\n",
+    # inspect.getmodule
+    "import inspect\n\n\ndef helper2(x):\n    return getattr(inspect.getmodule(helper), x)\n",
+    # one call into a function of this module that turns its parameter into a module
+    "import sys\n\n\ndef mod_of(name):\n    return sys.modules[name]\n\n\n"
+    "def helper2(x):\n    return getattr(mod_of(__name__), x)\n",
+    # a parameter default bound to __name__
+    "import sys\n\n\ndef helper2(x, me=__name__):\n    return getattr(sys.modules[me], x)\n",
+])
+def test_self_handle_fallback_reaches_everything(extra):
+    from src.scanner.test_files import unreached_lines
+    text = HELPER + extra + "\n\n" + RISKY
+    line = text.split("\n").index("    return yaml.load(s)") + 1
+    assert line not in unreached_lines(text, {"helper"}, "pkg/tests/support.py")
+
+
+@pytest.mark.parametrize("extra", [
+    # numba 0.68.0's support.py: other modules by name, getattr on other objects
+    "import sys\n\n\ndef reset(module):\n    if isinstance(module, str):\n"
+    "        module = sys.modules[module]\n    return module\n\n\n"
+    "def load_module(modname):\n    __import__(modname)\n    return sys.modules[modname]\n\n\n"
+    "def swap(stream_name):\n    return getattr(sys, stream_name)\n",
+    # logging / __main__ uses of __name__
+    "import logging\nimport sys\nlog = logging.getLogger(__name__)\n\n\n"
+    "def swap(stream_name):\n    return getattr(sys, stream_name)\n\n\n"
+    "if __name__ == '__main__':\n    swap('stdout')\n",
+    # numba 0.68.0: __name__ as a cache-directory prefix default
+    "import sys\n\n\ndef temp_directory(prefix):\n    return prefix\n\n\n"
+    "def run_caching(func, cache_dir_prefix=__name__):\n"
+    "    return temp_directory(cache_dir_prefix)\n\n\n"
+    "def swap(stream_name):\n    return getattr(sys, stream_name)\n",
+])
+def test_self_handle_fallback_needs_a_self_handle(extra):
+    from src.scanner.test_files import unreached_lines
+    text = HELPER + extra + "\n\n" + RISKY
+    line = text.split("\n").index("    return yaml.load(s)") + 1
+    assert line in unreached_lines(text, {"helper"}, "pkg/tests/support.py")

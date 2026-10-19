@@ -2297,19 +2297,19 @@ def _regrade_misnamed_tests(findings: list[Finding], texts: dict[str, str],
             if f.kind == "defect":
                 f.payload = True
         old = [f for f in findings if f.file_path == path]
-        out.extend(split_by_reach(fresh, old, texts[path], partial.get(path)))
+        out.extend(split_by_reach(fresh, old, texts[path], partial.get(path), path))
     return out
 
 
 def split_by_reach(fresh: list[Finding], old: list[Finding], text: str,
-                   names: set[str] | None) -> list[Finding]:
+                   names: set[str] | None, path: str = "") -> list[Finding]:
     """A test file that runtime code reaches only through some of its names: findings
     in the definitions those names never reach keep the test grading (``old``), the
     rest are graded as shipped (``fresh``). ``names`` None: the whole module."""
     if names is None:
         return fresh
     from src.scanner.test_files import unreached_lines
-    gone = unreached_lines(text, names)
+    gone = unreached_lines(text, names, path)
     if not gone:
         return fresh
     return ([f for f in fresh if f.line_number not in gone]

@@ -763,7 +763,7 @@ def scan_artifact_files(
                         if (item.kind == "defect" and not item.payload
                                 and item.severity != "info"):
                             item.severity = "info"
-                    f = split_by_reach(f, old, af.text, partial[path])
+                    f = split_by_reach(f, old, af.text, partial[path], path)
             if not _installed(path):
                 # Not on a consumer's disk: keep the finding visible, never let it
                 # score or block (severity capped at info).
