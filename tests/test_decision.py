@@ -366,6 +366,62 @@ CASES = [
      "safe", True, "nothing found in 120 files"),
     ("gap_garbage_shape", _scan(92, 120, coverage_gaps=["x"]), "safe", True,
      "nothing found in 120 files"),
+    # ── a hardcoded credential alone caps at Review (Kenne, 2026-10-19) ──────────
+    # It exposes the vendor whose key leaked (yt-dlp 2026.8.19: an AWS key in
+    # yt_dlp/extractor/shahid.py), not the person installing the tool.
+    ("secret_only_is_review", _scan(45, 900, [_f(
+        "critical", "AWS Access Key", category="secret",
+        file_path="yt_dlp/extractor/shahid.py")], crit=1),
+     "review", True,
+     "a hardcoded credential in its code (it exposes the vendor's key, not yours)"),
+    ("secret_items_only_is_review", {"trust_score": 45, "findings": {"items": [
+        _f("critical", "AWS Access Key", category="secret")]}},
+     "review", True,
+     "a hardcoded credential in its code (it exposes the vendor's key, not yours)"),
+    ("two_secrets_is_review", _scan(40, 200, [_f("critical", "AWS Access Key",
+                                                 category="secret")] * 2, crit=2),
+     "review", True,
+     "2 hardcoded credentials in its code (they expose the vendor's keys, not yours)"),
+    ("secret_plus_unsafe_exec_critical_stays_dnc", _scan(30, 200, [
+        _f("critical", "AWS Access Key", category="secret"),
+        _f("critical", "Shell command with user input", category="unsafe_exec")], crit=2),
+     "do_not_connect", True, "one critical finding in its code: shell command with user input"),
+    ("secret_plus_headline_only_critical_stays_dnc", _scan(30, 200, [
+        _f("critical", "AWS Access Key", category="secret")], crit=2),
+     "do_not_connect", True, "one critical finding"),
+    ("secret_plus_sandbox_critical_stays_dnc", _scan(30, 200, [
+        _f("critical", "AWS Access Key", category="secret")], crit=1, behavioral=_bev(
+        [{"rule": "some_new_rule", "severity": "critical", "name": "Wiped the disk"}])),
+     "do_not_connect", True, "the sandbox caught a critical behavior: wiped the disk"),
+    ("secret_plus_malicious_dep_stays_dnc", _scan(30, 200, [
+        _f("critical", "AWS Access Key", category="secret"),
+        _f("critical", "Known-malicious package: evil@1.0.0 (MAL-2025-1)",
+           category="dependency", file_path="package-lock.json")], crit=2),
+     "do_not_connect", True, "a known-malicious dependency: evil@1.0.0 (MAL-2025-1)"),
+    ("secret_leads_over_high", _scan(40, 200, [
+        _f("critical", "AWS Access Key", category="secret"),
+        _f("high", "Eval of input")], crit=1, high=1),
+     "review", True,
+     "a hardcoded credential in its code (it exposes the vendor's key, not yours)"),
+    ("secret_in_data_file", _scan(45, 200, [_f("critical", "API key", category="secret",
+                                               file_path="pkg/config/keys.json")], crit=1),
+     "review", True,
+     "a hardcoded credential in a data file it ships (it exposes the vendor's key, not yours)"),
+    ("secret_with_deps", _scan(45, 200, [_f("critical", "AWS Access Key", category="secret"),
+                                         _dep("high", "a@1 (GHSA-1)")], crit=1),
+     "review", True, "a hardcoded credential in its code (it exposes the vendor's key, "
+     "not yours); plus 1 high in dependencies"),
+    ("secret_pending", _scan(45, 200, [_f("critical", "AWS Access Key", category="secret")],
+                             crit=1, behavioral={"ran": False, "pending": True}),
+     "review", False, "a hardcoded credential in its code (it exposes the vendor's key, "
+     "not yours); sandbox still running"),
+    ("secret_in_tests_not_blocking", _scan(80, 30, [_f(
+        "critical", "AWS Access Key", category="secret", shipped=False,
+        file_path="tests/t.py")], crit=0),
+     "safe", True, "no critical or high findings in 30 files"),
+    ("secret_high_keeps_high_reason", _scan(70, 200, [_f("high", "Generic token",
+                                                         category="secret")], high=1),
+     "review", True, "one high finding in its code: generic token"),
     # ── odd shapes never raise ────────────────────────────────────────────────────
     ("empty", {}, "review", True, "trust score 0/100 is under 51"),
     ("garbage", {"trust_score": "x", "findings": "nope", "metadata": None,
