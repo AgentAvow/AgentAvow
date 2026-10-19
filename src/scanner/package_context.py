@@ -60,7 +60,7 @@ read as code and are never treated as browser bundles.
 
 A ``curl … | bash`` string in JS / TS / Python code is lowered when its value reaches
 only human-facing output in every file of the package that reads it (a printed install
-hint: ``src.scanner.printed_hint``).
+hint: ``src.scanner.printed_hint``); so is an unpinned ``npx foo`` shown the same way.
 
 Applied to npm and PyPI artifacts only; repository, MCP-server, skill, image and model
 scans are unchanged.
@@ -621,7 +621,7 @@ def calibrate_package_findings(findings: list, fetched) -> list:
         if getattr(f, "kind", "defect") == "capability":
             continue
         pre = getattr(f, "pre_hint", None)
-        if pre is not None and f.name == _PIPE_TO_SHELL and f.remediation == WHY_HINT \
+        if pre is not None and f.name in _HINT_RULES and f.remediation == WHY_HINT \
                 and f.severity == "low" and getattr(f, "installed", True):
             # Lowered by the per-file pass, which sees one file. With the whole package
             # in view (`console.log = s => execSync(s)` in another file, a name read
@@ -648,10 +648,13 @@ def calibrate_package_findings(findings: list, fetched) -> list:
                    or (cat == "hidden_unicode" and f.name in _BUNDLE_UNICODE_NAMES))
               and pkg.is_bundle(path)):
             _lower(f, WHY_BUNDLE)
-        elif (f.name == _PIPE_TO_SHELL and is_supported(path)
-              and hints.why_not(path, f.line_number, _pipe_to_shell_re()) is None):
+        elif (f.name in _HINT_RULES and is_supported(path)
+              and (f.name == _PIPE_TO_SHELL or f.severity == "medium")
+              and hints.why_not(path, f.line_number, _hint_re(f.name)) is None):
             # Printed install hint: the string reaches only print / log / error-message
-            # output in every file that reads it (``src.scanner.printed_hint``).
+            # output in every file that reads it (``src.scanner.printed_hint``). An
+            # unpinned `npx foo` shown the same way is reported low too (npx policy,
+            # 2026-10-19).
             _lower(f, WHY_HINT)
         elif (cat == "prompt_injection" and Path(path).suffix.lower() in _CODE_EXTS
               and not pkg.declares_tools and f.name == _ROLE_DIRECTIVE
@@ -668,18 +671,22 @@ def calibrate_package_findings(findings: list, fetched) -> list:
 
 
 _PIPE_TO_SHELL = "curl/wget piped to shell"
+_UNPINNED_NPX = "Unpinned npx/uvx package (no @version pin)"
+# Rules whose match may be a printed hint (``src.scanner.printed_hint``).
+_HINT_RULES = frozenset({_PIPE_TO_SHELL, _UNPINNED_NPX})
 
 
-def _pipe_to_shell_re():
+def _hint_re(name: str):
     from src.scanner.patterns import DYNAMIC_REMOTE_LOAD_PATTERNS
-    return next(p for n, p, _s in DYNAMIC_REMOTE_LOAD_PATTERNS if n == _PIPE_TO_SHELL)
+    return next(p for n, p, _s in DYNAMIC_REMOTE_LOAD_PATTERNS if n == name)
+
 
 
 _MAX_HINT_CANDIDATES = 8
 
 
 def _printed_hint(hints: Hints, text: str | None, f) -> bool:
-    """Is the pipe-to-shell finding ``f`` a printed hint, with the whole package in
+    """Is the pipe-to-shell / unpinned-npx finding ``f`` a printed hint, with the whole package in
     view (``src.scanner.printed_hint``)?
 
     A finding from the tail window of an oversized file carries line 0 (the windowed
@@ -687,7 +694,7 @@ def _printed_hint(hints: Hints, text: str | None, f) -> bool:
     it is located by its snippet: EVERY line whose stripped text starts with the
     snippet and matches the rule must be a printed hint, and there must be at least
     one (and at most a few) such lines."""
-    pat = _pipe_to_shell_re()
+    pat = _hint_re(f.name)
     if f.line_number > 0:
         return hints.why_not(f.file_path, f.line_number, pat) is None
     snippet = getattr(f, "snippet", "") or ""
