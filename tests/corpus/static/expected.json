@@ -3903,8 +3903,8 @@
    "version": "1.20.0",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 64 files",
-   "files_scanned": 64,
+   "reason": "nothing found in 57 files",
+   "files_scanned": 57,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6830,8 +6830,8 @@
    "version": "2.1.4",
    "score": 82,
    "label": "safe",
-   "reason": "no critical or high findings in 231 files",
-   "files_scanned": 231,
+   "reason": "no critical or high findings in 218 files",
+   "files_scanned": 218,
    "severity": {
     "critical": 0,
     "high": 0,

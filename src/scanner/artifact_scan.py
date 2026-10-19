@@ -659,11 +659,12 @@ def scan_artifact_files(
     # an import name: graded as shipped code (``src.scanner.test_files``).
     from src.scanner.scan import _is_blocking_exempt_path, _is_infra_file
     from src.scanner.test_files import not_really_tests
+    partial: dict[str, set[str]] = {}
     not_tests = set() if is_image else not_really_tests(
         {p: af.text for p, af in fetched.files.items() if af.text},
         runs_for_consumer=lambda q: _installed(q) and not (
             _is_blocking_exempt_path(q) or _is_infra_file(q)),
-        wheel=is_wheel, paths=set(fetched.files))
+        wheel=is_wheel, paths=set(fetched.files), partial=partial)
 
     for path, af in fetched.files.items():
         # Dependency manifests (package.json / setup.py / requirements.txt ...) →
@@ -751,6 +752,18 @@ def scan_artifact_files(
                 for item in f:
                     if item.kind == "defect":
                         item.payload = True
+                if path in partial and not oversized:
+                    # Runtime code takes only some names from it: the definitions they
+                    # never reach keep the test grading (informational unless payload).
+                    from src.scanner.scan import split_by_reach
+                    old, _p2, _s2 = _scan_content(af.text, path, allowlist,
+                                                  payloads_full_severity=True)
+                    old = [item for item in old if item.kind != "capability"]
+                    for item in old:
+                        if (item.kind == "defect" and not item.payload
+                                and item.severity != "info"):
+                            item.severity = "info"
+                    f = split_by_reach(f, old, af.text, partial[path])
             if not _installed(path):
                 # Not on a consumer's disk: keep the finding visible, never let it
                 # score or block (severity capped at info).

@@ -151,31 +151,103 @@ def _module_names(path: str) -> list[str]:
     return [".".join(parts[i:]) for i in range(len(parts)) if parts[i:]]
 
 
-def _py_imports(path: str, text: str) -> tuple[set[str], set[str]]:
-    """(absolute dotted names, repo-relative module paths of relative imports)."""
-    names: set[str] = set()
-    rel: set[str] = set()
+_ALL = None  # an import that loads the whole module (every top-level definition runs)
+
+
+def _py_import_records(path: str, text: str) -> list[tuple[str, str, set[str] | None]]:
+    """Each import as ``(kind, key, items)``: ``kind`` "abs" (dotted ``key``) or "rel"
+    (tree path ``key``); ``items`` the names taken from it (``from m import a, b``) or
+    None when the module itself is used (``import m``, ``from p import m``, ``*``,
+    ``importlib.import_module``)."""
+    out: list[tuple[str, str, set[str] | None]] = []
     for m in _PY_IMPORT_RE.finditer(text):
         for part in m.group(1).split(","):
-            names.add(part.split(" as ")[0].strip())
+            out.append(("abs", part.split(" as ")[0].strip(), _ALL))
     for m in _PY_FROM_RE.finditer(text):
         dots, mod, items = m.group(1), m.group(2), m.group(3) or m.group(4) or ""
         items = items.split("#")[0] if m.group(4) else items
-        subs = [s.split(" as ")[0].strip() for s in items.replace("\n", " ").split(",")]
-        subs = [s for s in subs if re.fullmatch(r"\w+", s or "")]
+        raw = [x.split(" as ")[0].strip() for x in items.replace("\n", " ").split(",")]
+        star = "*" in raw
+        subs = {x for x in raw if re.fullmatch(r"\w+", x or "")}
         if dots:
             base = PurePosixPath(path).parent
             for _ in range(len(dots) - 1):
                 base = base.parent
-            target = posixpath.normpath(posixpath.join(str(base), *mod.split("."))) \
+            key = posixpath.normpath(posixpath.join(str(base), *mod.split("."))) \
                 if mod else posixpath.normpath(str(base))
-            rel.add(target)
-            rel.update(posixpath.normpath(posixpath.join(target, s)) for s in subs)
+            out.append(("rel", key, _ALL if star else set(subs)))
+            out.extend(("rel", posixpath.normpath(posixpath.join(key, x)), _ALL) for x in subs)
         elif mod:
-            names.add(mod)
-            names.update(f"{mod}.{s}" for s in subs)
-    names.update(m.group(1) for m in _PY_DYN_RE.finditer(text))
-    return names, rel
+            out.append(("abs", mod, _ALL if star else set(subs)))
+            out.extend(("abs", f"{mod}.{x}", _ALL) for x in subs)
+    out.extend(("abs", m.group(1), _ALL) for m in _PY_DYN_RE.finditer(text))
+    return out
+
+
+# A module that runs the test suite is test code, not runtime (numba's runtests.py,
+# `<pkg>/testing/*`, a self-test that instantiates a TestCase and calls its tests).
+_RUNNER_STEMS = frozenset({"runtests", "_runtests", "run_tests", "runtest", "testing",
+                           "testrunner", "test_runner"})
+_RUNNER_CALL_RE = re.compile(
+    r"\bunittest\.main\s*\(|\bTestLoader\b|\bTextTestRunner\b|\.discover\s*\(|"
+    r"\bpytest\.main\s*\(")
+_IMPORTS_TEST_FRAMEWORK_RE = re.compile(
+    r"^\s*(?:import|from)\s+(?:unittest|pytest)\b", re.MULTILINE)
+_CALLS_TESTS_RE = re.compile(r"\bTestCase\s*\(\s*\)[\s\S]*?\.test_\w+\s*\(")
+
+
+def is_test_runner(path: str, text: str) -> bool:
+    """A module whose job is to run the tests: in a ``testing`` directory or named
+    like a runner (``runtests.py``, ``testing.py``); or one that imports unittest /
+    pytest and calls a test runner (``unittest.main``, ``TestLoader``, ``discover``,
+    ``pytest.main``); or one that builds a ``TestCase()`` and calls its ``test_*``
+    methods (a power-on self test)."""
+    if _suffix(path) not in _PY_EXTS:
+        return False
+    if "testing" in _parts(path) or _stem(path).lower() in _RUNNER_STEMS:
+        return True
+    text = text or ""
+    if _IMPORTS_TEST_FRAMEWORK_RE.search(text) and _RUNNER_CALL_RE.search(text):
+        return True
+    return bool(_CALLS_TESTS_RE.search(text))
+
+
+def unreached_lines(text: str, names: set[str]) -> set[int]:
+    """Lines of the top-level functions / classes of a Python module that an import
+    of only ``names`` (``from tests.support import captured_stdout``) never runs:
+    definitions neither imported nor referenced by an imported one or by module-level
+    code (followed to a fixed point). Empty when the module does not parse."""
+    import ast
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return set()
+    defs = {n.name: n for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+
+    def refs(node) -> set[str]:
+        return {x.id for x in ast.walk(node) if isinstance(x, ast.Name)} | {
+            x.attr for x in ast.walk(node) if isinstance(x, ast.Attribute)}
+
+    reached = set(names) & set(defs)
+    for n in tree.body:
+        if n not in defs.values():
+            reached |= refs(n) & set(defs)      # module-level code runs on import
+        else:
+            reached |= {d.id for d in getattr(n, "decorator_list", [])
+                        if isinstance(d, ast.Name)} & set(defs)
+    todo = list(reached)
+    while todo:
+        for r in refs(defs[todo.pop()]) & set(defs):
+            if r not in reached:
+                reached.add(r)
+                todo.append(r)
+    out: set[int] = set()
+    for name, n in defs.items():
+        if name not in reached:
+            start = min([n.lineno] + [d.lineno for d in getattr(n, "decorator_list", [])])
+            out.update(range(start, (n.end_lineno or n.lineno) + 1))
+    return out
 
 
 def _named_re(path: str) -> re.Pattern[str]:
@@ -205,7 +277,7 @@ def runs_test_tooling(path: str) -> bool:
 # A file path as a whole string literal in code (`'tests/run.py'`, `"./test_x.js"`):
 # what the code names to run. Prose and URLs in docstrings are not.
 _FILE_TOKEN_RE = re.compile(
-    r"""['"`](?:\./)?((?:\.\./)*[\w\-][\w.\-/]*\.(?:py|[cm]?[jt]sx?))['"`]""")
+    r"""(['"`])(?:\./)?((?:\.\./)*[\w\-][\w.\-/]*\.(?:py|[cm]?[jt]sx?))\1""")
 
 
 def _package_json_strings(text: str) -> list[str] | None:
@@ -262,25 +334,41 @@ def _entry_lines(name: str, text: str) -> list[str]:
     return out
 
 
+def _merge(table: dict, key: str, items: set[str] | None) -> None:
+    """Union of names taken from ``key``; None (the whole module) wins."""
+    if key in table and table[key] is None:
+        return
+    if items is None:
+        table[key] = None
+    else:
+        table[key] = (table.get(key) or set()) | items
+
+
 class _Index:
     """What the runtime code and manifests of one tree import, run and name, read once
     (a large package has thousands of test files and hundreds of runtime modules)."""
 
     def __init__(self, texts: dict[str, str], users: dict[str, str]) -> None:
-        self.py_names: set[str] = set()
-        self.py_bare_by_dir: dict[str, set[str]] = {}
-        self.py_rel: set[str] = set()
+        # key -> names taken from it (None: the whole module)
+        self.py_abs: dict[str, set[str] | None] = {}
+        self.py_rel: dict[str, set[str] | None] = {}
+        self.py_bare_by_dir: dict[str, dict[str, set[str] | None]] = {}
         self.js_targets: set[str] = set()
         self.tokens: set[str] = set()
         for q, text in users.items():
+            py = _suffix(q) in _PY_EXTS
             for m in _FILE_TOKEN_RE.finditer(text):
-                self.tokens.add(m.group(1))
-            if _suffix(q) in _PY_EXTS:
-                names, rel = _py_imports(q, text)
-                self.py_names |= names
-                self.py_rel |= rel
-                self.py_bare_by_dir.setdefault(posixpath.dirname(q), set()).update(
-                    n for n in names if "." not in n)
+                if py and m.group(1) == "`":
+                    continue              # reST / Markdown in a docstring, not a string
+                self.tokens.add(m.group(2))
+            if py:
+                for kind, key, items in _py_import_records(q, text):
+                    tables = [self.py_rel] if kind == "rel" else [self.py_abs]
+                    if kind == "abs" and "." not in key:
+                        tables.append(self.py_bare_by_dir.setdefault(
+                            posixpath.dirname(q), {}))
+                    for table in tables:
+                        _merge(table, key, items)
             else:
                 for m in _JS_SPEC_RE.finditer(text):
                     spec = m.group(1)
@@ -315,25 +403,34 @@ class _Index:
         self.packaging_text = "\n".join(self.packaging)
 
     def imported(self, path: str) -> bool:
+        return self.imported_names(path) != "no"
+
+    def imported_names(self, path: str):
+        """"no" when runtime code does not import the file; None when it imports the
+        module itself; else the set of names it takes from it."""
         if _suffix(path) in _PY_EXTS:
             mods = _module_names(path)
             own = posixpath.normpath(str(PurePosixPath(path).with_suffix("")))
             if PurePosixPath(path).stem == "__init__":
                 own = posixpath.normpath(str(PurePosixPath(path).parent))
-            if own in self.py_rel or any(m in self.py_names for m in mods[:-1]):
-                return True
             stem = mods[-1] if mods else ""
             d = posixpath.dirname(path)
+            found: dict[str, set[str] | None] = {}
+            hits = [(self.py_rel, own)] + [(self.py_abs, m) for m in mods[:-1]]
             # a sibling / top-level module imported by bare name
-            if stem in self.py_bare_by_dir.get(d, ()):
-                return True
-            return not d and stem in self.py_names
+            hits.append((self.py_bare_by_dir.get(d, {}), stem))
+            if not d:
+                hits.append((self.py_abs, stem))
+            for table, key in hits:
+                if key in table:
+                    _merge(found, "k", table[key])
+            return found["k"] if found else "no"
         own = posixpath.normpath(path)
         no_ext = posixpath.splitext(own)[0]
         cands = {own, no_ext}
         if PurePosixPath(no_ext).name == "index":
             cands.add(posixpath.dirname(no_ext))   # `require('./tests')` -> tests/index
-        return bool(cands & self.js_targets)
+        return None if cands & self.js_targets else "no"
 
     def code_names(self, path: str) -> bool:
         """Runtime code names the file as one to run (``runpy.run_path('test_x.py')``,
@@ -392,12 +489,13 @@ def _find_all(args: str) -> bool:
 
 def import_name_test_dirs(texts: dict[str, str], *, wheel: bool = False,
                           paths: set[str] | None = None) -> set[str]:
-    """Top-level ``tests`` / ``test`` packages (with ``__init__.py``) that are import
+    """Top-level ``tests`` / ``test`` / ``testing`` packages (with ``__init__.py``,
+    at the distribution root, never ``<pkg>/tests``) that are import
     names: a wheel's top-level directory, or one the root packaging lists
     (``packages=[...]``, ``find_packages()`` / ``packages = find:`` with no exclude, a
     ``[tool.setuptools.packages.find]`` with no exclude, the project's own name)."""
     out: set[str] = set()
-    for d in ("tests", "test"):
+    for d in ("tests", "test", "testing"):
         if f"{d}/__init__.py" not in (paths if paths is not None else texts):
             continue
         if wheel:
@@ -431,18 +529,23 @@ def _conftest_shipped(path: str, paths: set[str], wheel: bool) -> bool:
 
 
 def not_really_tests(texts: dict[str, str], *, runs_for_consumer: Callable[[str], bool],
-                     wheel: bool = False, paths: Iterable[str] | None = None
-                     ) -> set[str]:
+                     wheel: bool = False, paths: Iterable[str] | None = None,
+                     partial: dict[str, set[str]] | None = None) -> set[str]:
     """Paths of judged (test-exempt) files that are not test code, or that non-test
     code imports or runs. ``runs_for_consumer(path)``: the scanner's own rule for a
     file that is shipped code (not test / doc / example / CI / build tooling).
     ``wheel``: the tree is a PyPI wheel (installed as is). ``paths``: every path in
-    the tree, empty files included (an empty ``__init__.py`` has no text)."""
+    the tree, empty files included (an empty ``__init__.py`` has no text).
+    ``partial`` (out): for a returned Python file that runtime code reaches only by
+    importing some of its names (``from pkg.tests.support import captured_stdout``),
+    those names; its other top-level definitions keep the test grading
+    (``unreached_lines``)."""
     judged_paths = [p for p in texts if judged(p)]
     if not judged_paths:
         return set()
     users = {q: t for q, t in texts.items()
-             if _suffix(q) in _CODE_EXTS and not judged(q) and runs_for_consumer(q)}
+             if _suffix(q) in _CODE_EXTS and not judged(q) and runs_for_consumer(q)
+             and not is_test_runner(q, t)}
     existing = set(texts) | set(paths or ())
     import_dirs = import_name_test_dirs(texts, wheel=wheel, paths=existing)
     index: _Index | None = None
@@ -462,6 +565,13 @@ def not_really_tests(texts: dict[str, str], *, runs_for_consumer: Callable[[str]
             continue
         if index is None:
             index = _Index(texts, users)
-        if index.imported(p) or index.code_names(p) or index.manifests_name(p):
+        if index.code_names(p) or index.manifests_name(p):
             out.add(p)
+            continue
+        names = index.imported_names(p)
+        if names == "no":
+            continue
+        out.add(p)
+        if names is not None and partial is not None and _suffix(p) in _PY_EXTS:
+            partial[p] = names
     return out
