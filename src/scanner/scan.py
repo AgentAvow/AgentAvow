@@ -2274,6 +2274,30 @@ def _is_blocking_exempt_path(path: str) -> bool:
     return False
 
 
+def _regrade_misnamed_tests(findings: list[Finding], texts: dict[str, str],
+                            allowlist: set[tuple[str, str]] | None) -> list[Finding]:
+    """Repository / local-tree scans: a file exempt for being a test (``test_*.py``,
+    ``*_test.py``, under ``tests/``) keeps the exemption only when it is test code
+    that nothing running imports or executes (``src.scanner.test_files``). Any other
+    such file is scanned again without the test downgrade and its defects are graded
+    as shipped code (``Finding.payload``: they block wherever the file sits).
+    Returns the new findings list."""
+    from src.scanner.test_files import not_really_tests
+
+    bad = not_really_tests(texts, runs_for_consumer=lambda q: not (
+        _is_blocking_exempt_path(q) or _is_infra_file(q)))
+    if not bad:
+        return findings
+    out = [f for f in findings if f.file_path not in bad]
+    for path in sorted(bad):
+        fresh, _p, _s = _scan_content(texts[path], path, allowlist, not_test=True)
+        for f in fresh:
+            if f.kind == "defect":
+                f.payload = True
+        out.extend(fresh)
+    return out
+
+
 def _blocking_crit_count(result: object) -> int:
     """Blocking-critical count, tolerant of lightweight fakes (fall back to raw)."""
     v = getattr(result, "shipped_critical_count", None)
@@ -3168,8 +3192,13 @@ def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
     *, metadata_text: bool = False, payloads_full_severity: bool = False,
+    not_test: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Scan file content for security issues and positive signals.
+
+    ``not_test`` (repository scans): the file is named / placed like a test but is not
+    test code, or code that runs uses it (``_regrade_misnamed_tests``): no test
+    downgrade.
 
     ``payloads_full_severity`` (artifact scans): in a downgraded file, payload-shaped
     defects keep their severity and are marked ``Finding.payload`` (see above).
@@ -3182,7 +3211,7 @@ def _scan_content(
     if allowlist is None:
         allowlist = set()
 
-    file_test_or_doc = _is_test_or_doc_file(file_path)
+    file_test_or_doc = _is_test_or_doc_file(file_path) and not not_test
     # CI/infra files (#3) are graded like tests/docs so a Dockerfile / workflow recipe
     # can't dominate the grade with a critical.
     is_infra = _is_infra_file(file_path)
@@ -7167,6 +7196,9 @@ async def scan_repo(
         if fetch_failed:
             gaps["fetch_failed"] = fetch_failed
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
+        # A test-named file that is not test code (or that running code uses) is graded
+        # as shipped code.
+        result.findings = _regrade_misnamed_tests(result.findings, repo_texts, allowlist)
         # A printed install hint lowered per file holds only with the whole repo in view.
         from src.scanner.package_context import recheck_printed_hints
         recheck_printed_hints(result.findings, repo_texts)
