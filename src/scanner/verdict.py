@@ -161,6 +161,9 @@ THIN_REASON_REMOTE_MCP = "tool definitions clean; server code not inspected"
 # yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
 # the tool, so on its own it caps at Review, never Do not connect (Kenne, 2026-10-19).
 # A secret alongside any other blocking critical is still Do not connect.
+# Category ``secret`` is ONLY for a hardcoded credential value. A rule that reads or
+# sends the user's credentials (exfiltration) must never use it, or it would inherit
+# this cap; tests/test_secret_category_guard.py pins every emitter.
 SECRET_CATEGORY = "secret"
 SECRET_REASON_ONE = "a hardcoded credential{where} (it exposes the vendor's key, not yours)"
 SECRET_REASON_MANY = "{n} hardcoded credentials{where} (they expose the vendor's keys, not yours)"
