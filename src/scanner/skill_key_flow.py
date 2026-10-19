@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 # Known vendor key names → (vendor display name, API domains the key belongs to).
@@ -872,7 +873,7 @@ def _visible_names(flow: _Flow, tainted: Taint, line: int) -> set[str]:
 
 
 def _taint(flow: _Flow, seeds: Taint, funcs0: set[str] | None = None,
-           barrier: re.Pattern[str] | None = None) -> tuple[Taint, set[str]]:
+           barrier: Callable[[str], bool] | None = None) -> tuple[Taint, set[str]]:
     """(tainted names with their scopes, functions whose return value is tainted).
 
     Scoped: a local assigned in one function does not taint a same-named local in
@@ -895,7 +896,7 @@ def _taint(flow: _Flow, seeds: Taint, funcs0: set[str] | None = None,
     for _ in range(6):
         grew = False
         for a in flow.assigns:
-            if _RHS_IS_REQUEST_RE.match(a.rhs) or (barrier and barrier.search(a.rhs)) \
+            if _RHS_IS_REQUEST_RE.match(a.rhs) or (barrier and barrier(a.rhs)) \
                     or not hit(a.rhs, a.line):
                 continue
             base = a.target.split(".")[0]
@@ -1268,15 +1269,42 @@ def env_file_reads(text: str, path: str | None = None) -> str:
     return "own" if seen else "none"
 
 
-# Pulling ONE value out of a file's contents (`raw.match(re)`, `re.search(…, raw)`,
-# `values.get(k)`, `dotenv_values(p)[k]`): what flows on is a single key, not the
-# whole file.
-_EXTRACT_ONE_RE = re.compile(
-    r"\.(?:match|exec|matchAll|get|getenv)\s*\(|\bre\.(?:search|match|fullmatch|findall)\s*\("
-    r"|\bdotenv_values\([^)]*\)\s*\[|\]\s*\[\s*[\"'][A-Z]")
+# Pulling ONE NAMED value out of a file's contents: what flows on is that single key,
+# not the whole file. It has to name the key: a literal (`values.get("FOO_KEY")`,
+# `env["FOO_KEY"]`, `raw.match(/^FOO_KEY=(.*)/)`) or a key-anchored pattern built
+# from one name (`new RegExp(`^${key}=…`)`, `rf"^{key}=(.*)"`). A capture with no
+# key name, a dot-all one, `findall` / `matchAll` over every pair, `.get(k)` with a
+# variable, `dict(dotenv_values())`, `Object.fromEntries(…)` or a split joined back
+# keep the whole contents ("dump").
+_LITERAL_LOOKUP_RE = re.compile(
+    r"\.get\s*\(\s*[\"'][\w.-]+[\"']|\[\s*[\"'][\w.-]+[\"']\s*\]")
+_REGEX_LOOKUP_RE = re.compile(
+    r"\.(?:match|exec)\s*\(|\bre\.(?:search|match|fullmatch)\s*\(")
+_KEY_ANCHOR_RE = re.compile(
+    r"(?:\^|\\n|\b)\s*(?:[A-Z][A-Z0-9_]{2,}|\$\{\w+\}|\{\w+\})\s*=")
+_DOTALL_RE = re.compile(
+    r"\[\\s\\S\]|\[\\S\\s\]|\[\^\]|\bre\.(?:S|DOTALL)\b|\(\?s\)"
+    r"|/[gimuy]*s[gimuy]*\s*[),]|,\s*[\"'][gimuy]*s[gimuy]*[\"']")
+_BULK_RE = re.compile(
+    r"\bfindall\b|\bmatchAll\b|\bfromEntries\b|\bdict\s*\("
+    r"|\.join\s*\(|\.items\s*\(|\.entries\s*\(")
 
 
-def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_FILE_RE,
+def _single_named_extraction(rhs: str) -> bool:
+    if _BULK_RE.search(rhs) or _DOTALL_RE.search(rhs):
+        return False
+    if _LITERAL_LOOKUP_RE.search(rhs):
+        return True
+    return bool(_REGEX_LOOKUP_RE.search(rhs) and _KEY_ANCHOR_RE.search(rhs))
+
+
+# Reads that hand back a .env's parsed contents without naming `.env`.
+_ENV_CONTENTS_RE = re.compile(
+    _ENV_FILE_RE.pattern
+    + r"|\bdotenv_values\s*\(|\bdotenv\.parse\s*\(|\bconfig\([^)]*\)\.parsed\b")
+
+
+def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_CONTENTS_RE,
                      path: str | None = None, whole: bool = False) -> list[str]:
     """Hosts the CONTENTS of a file whose path matches ``path_re`` reach ("?" =
     unresolved). A dotenv loader only writes os.environ; values read back from it are
@@ -1285,7 +1313,8 @@ def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_FILE_RE,
     flow = _flow(text, path)
     seeds: Taint = {}
     for a in flow.assigns:
-        if path_re.search(_strip_comment(a.rhs)):
+        if path_re.search(_strip_comment(a.rhs)) and not (
+                whole and _single_named_extraction(a.rhs)):
             seeds.setdefault(a.target, set()).add(flow.scope_of(a.line, a.declared))
     for i, ln in enumerate(flow.lines):
         if _COMMENT_RE.match(ln):
@@ -1299,7 +1328,7 @@ def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_FILE_RE,
             hosts.extend(_dest_hosts(flow, chunk, line))
     if not seeds:
         return hosts
-    tainted, funcs = _taint(flow, seeds, barrier=_EXTRACT_ONE_RE if whole else None)
+    tainted, funcs = _taint(flow, seeds, barrier=_single_named_extraction if whole else None)
     return hosts + _reached(flow, tainted, funcs, include_base=False)
 
 

@@ -82,6 +82,9 @@ _EXFIL_PATH_RE = re.compile(
     r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|(?<![\w\\])\.env\b"
     r"|169\.254\.169\.254|metadata\.google)"
 )
+# dotenv loaders that return the project's .env contents without naming `.env`.
+_DOTENV_PARSE_RE = re.compile(
+    r"\bdotenv_values\s*\(|\bdotenv\.parse\s*\(|\bconfig\([^)]*\)\.parsed\b")
 # The same paths minus ``.env``: always critical, wherever they are read from.
 _CRED_PATH_RE = re.compile(
     r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|169\.254\.169\.254|metadata\.google)"
@@ -450,6 +453,8 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
     uses = _analyze_key_flow(text, path, extern)
     file_keys = _file_secret_names(code, path)
     env_reads = _env_file_reads(code, path) if _EXFIL_PATH_RE.search(code) else "none"
+    if env_reads == "none" and _DOTENV_PARSE_RE.search(code):
+        env_reads = "foreign"   # dotenv_values() / dotenv.parse(): the project's .env
     env_sev, env_bad = None, []
     if env_reads != "none":
         # Keys pulled out of the .env BY NAME may excuse their own vendor's host

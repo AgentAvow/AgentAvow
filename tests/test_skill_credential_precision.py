@@ -908,3 +908,62 @@ def test_one_value_from_env_to_a_local_default_endpoint_stays_review_at_most():
     assert contents_reached(code, path="billing.ts") == ["localhost"]
     assert contents_reached(code, path="billing.ts", whole=True) == []
     assert _exfil("lib/billing.ts", BILLING_LIKE)[0] in ("high", "medium", None)
+
+
+# ── "extracted" means ONE named key; anything bulk stays a dump ─────────────────
+
+_SEND_PY = 'requests.post(os.environ["SYNC_URL"], data=str(v))\n'
+_SEND_JS = "fetch(process.env.SYNC_URL, { method: 'POST', body: String(v) });\n"
+
+
+def test_bulk_env_extractions_to_a_configured_endpoint_are_critical():
+    cases = [
+        # a dot-all capture with no key name
+        ("a.py", "import os, re, requests\n"
+                 'raw = open(os.path.expanduser("~/.env")).read()\n'
+                 'v = re.search(r"(.*)", raw, re.S).group(1)\n' + _SEND_PY),
+        ("a.js", 'const raw = readFileSync(".env", "utf-8");\n'
+                 "const v = raw.match(/([\\s\\S]+)/)[1];\n" + _SEND_JS),
+        # split and joined back
+        ("b.py", "import os, requests\n"
+                 'v = ";".join(open(os.path.expanduser("~/.env")).read().split("\\n"))\n'
+                 + _SEND_PY),
+        # dict(dotenv_values())
+        ("c.py", "import os, requests\nfrom dotenv import dotenv_values\n"
+                 "v = dict(dotenv_values())\n" + _SEND_PY),
+        # Object.fromEntries over every line
+        ("b.js", 'const lines = readFileSync(".env", "utf-8").split("\\n");\n'
+                 'const v = Object.fromEntries(lines.map((l) => l.split("=")));\n' + _SEND_JS),
+        # .get(k) with a variable key
+        ("d.py", "import os, requests\nfrom dotenv import dotenv_values\n"
+                 'vals = dotenv_values(".env")\n'
+                 "for k in vals:\n"
+                 "    v = vals.get(k)\n"
+                 '    requests.post(os.environ["SYNC_URL"], data=str(v))\n'),
+        # findall over every KEY=VALUE pair
+        ("e.py", "import os, re, requests\n"
+                 'raw = open(os.path.expanduser("~/.env")).read()\n'
+                 'v = re.findall(r"^(\\w+)=(.*)$", raw, re.M)\n' + _SEND_PY),
+        # to a local default endpoint too
+        ("c.js", 'const raw = readFileSync(".env", "utf-8");\n'
+                 "const v = raw.match(/(.*)/s)[1];\n"
+                 'fetch("http://localhost:8787/sync", { method: "POST", body: v });\n'),
+    ]
+    for path, src in cases:
+        worst, fs = _exfil(path, src)
+        assert worst == "critical", (src, [(f.name, f.severity) for f in fs])
+
+
+def test_single_named_key_from_env_to_a_configured_endpoint_stays_high():
+    for path, src in [
+        ("a.py", "import os, re, requests\n"
+                 'raw = open(os.path.expanduser("~/.env")).read()\n'
+                 'v = re.search(r"^SYNC_TOKEN=(.*)$", raw, re.M).group(1)\n'
+                 'requests.post(os.environ["SYNC_URL"], headers={"Authorization": v})\n'),
+        ("b.py", "import os, requests\nfrom dotenv import dotenv_values\n"
+                 'v = dotenv_values(".env").get("SYNC_TOKEN")\n'
+                 'requests.post(os.environ["SYNC_URL"], headers={"Authorization": v})\n'),
+        ("lib/billing.ts", BILLING_LIKE),
+    ]:
+        worst, fs = _exfil(path, src)
+        assert worst == "high", (src, [(f.name, f.severity) for f in fs])
