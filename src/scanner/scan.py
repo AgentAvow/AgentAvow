@@ -16,7 +16,7 @@ from pathlib import Path
 
 import httpx
 
-from src.scanner import npm_scripts
+from src.scanner import exec_alias, npm_scripts
 from src.scanner.patterns import (
     AGENT_METADATA_FILES,
     AUTH_POSITIVE_PATTERNS,
@@ -1024,13 +1024,20 @@ _RUN_CALL_RE = re.compile(
 _BOUND_NAME_RE = re.compile(r"([A-Za-z_$][\w$]*)\s*(?::\s*[\w$<>\[\]|. ]+)?=(?![=>])[^=]*$")
 
 
+def _runs_call(text: str, extra_run: tuple = ()) -> bool:
+    """A run call in ``text``: a known runner name, or a call through a name this file
+    binds to one (``src/scanner/exec_alias.py``)."""
+    return bool(_RUN_CALL_RE.search(text)) or any(r.search(text) for r in extra_run)
+
+
 def _npx_string_runs(lines: list[str], idx: int, line: str, pos: int, str_start: int,
-                     start_in: str | None) -> bool:
+                     start_in: str | None, extra_run: tuple = ()) -> bool:
     """Is the string holding this `npx …` spawned rather than printed? It is the
     argument of a run call on this line (`console.log(execSync('npx foo'))`), or it is
     bound to a name that a run call in the file uses (`const USAGE = 'npx foo'` …
-    `execSync(USAGE)`). Adversarial recall review of the help-text relaxation (#24)."""
-    if _RUN_CALL_RE.search(line[:pos]):
+    `execSync(USAGE)`). Adversarial recall review of the help-text relaxation (#24).
+    ``extra_run``: alias-call regexes for this file."""
+    if _runs_call(line[:pos], extra_run):
         return True
     name = None
     if start_in is None:
@@ -1042,14 +1049,14 @@ def _npx_string_runs(lines: list[str], idx: int, line: str, pos: int, str_start:
             tick = lines[n].find("`")
             if tick == -1:
                 continue
-            if _RUN_CALL_RE.search(lines[n][:tick + 1]):
+            if _runs_call(lines[n][:tick + 1], extra_run):
                 return True
             m = _BOUND_NAME_RE.search(lines[n][:tick])
             name = m.group(1) if m else None
             break
     if not name or name in ("const", "let", "var"):
         return False
-    return any(n != idx and _RUN_CALL_RE.search(ln) and _uses_name(ln, name)
+    return any(n != idx and _runs_call(ln, extra_run) and _uses_name(ln, name)
                for n, ln in enumerate(lines))
 
 
@@ -1068,7 +1075,8 @@ def _maintainer_script_owners(content: str, memo: list, idx: int, line: str,
 
 
 def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = None,
-                    lines: list[str] | None = None, idx: int = 0) -> bool:
+                    lines: list[str] | None = None, idx: int = 0,
+                    extra_run: tuple = ()) -> bool:
     """An `npx <pkg>` that never runs for a consumer (precision PR 2): a maintainer script
     in package.json (not an install lifecycle hook), or help text a CLI prints, i.e.
     the match sits in a string literal that is indented help (`'  npx foo\\n'`), carries
@@ -1094,13 +1102,31 @@ def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = 
     if in_str is None:
         return False
     if _npx_string_runs(lines if lines is not None else [line],
-                        idx if lines is not None else 0, line, pos, str_start, start_in):
+                        idx if lines is not None else 0, line, pos, str_start, start_in,
+                        extra_run):
         return False
     before = line[str_start:pos]
     if before.startswith("  ") and not before.strip():
         return True
     tail = line[str_start:]
     return "\\n" in tail or bool(_HELP_PRINT_RE.search(line))
+
+
+_DOC_PROSE_EXTS = frozenset({".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc"})
+_NPX_DOC_WHY = ("Command shown in documentation; nothing in this file runs it. Reported "
+                "for visibility.")
+
+
+def _npx_doc_prose_file(file_path: str) -> bool:
+    """Documentation a person reads (README, docs/*.md, CHANGELOG …), where an `npx foo`
+    is a command shown to a human. An agent instruction file (SKILL.md, AGENTS.md,
+    CLAUDE.md, llms.txt, anything under skills/ / .claude/ / prompts/ …) tells an agent
+    to RUN it, so it is not documentation here (npx policy, 2026-10-19)."""
+    from src.scanner.package_context import AGENT_INSTRUCTION_DIRS, AGENT_INSTRUCTION_NAMES
+    p = Path(file_path.lower())
+    if p.suffix not in _DOC_PROSE_EXTS or p.name in AGENT_INSTRUCTION_NAMES:
+        return False
+    return not any(part in AGENT_INSTRUCTION_DIRS for part in p.parts[:-1])
 
 
 def _pem_has_body(lines: list[str], idx: int, marker_end: int) -> bool:
@@ -1722,8 +1748,11 @@ def _js_call_is_text_or_def(line: str, pos: int, start_in: str | None = None) ->
 def _classify_exec_match(
     lines: list[str], idx: int, match: re.Match, file_lang: str | None,
     untrusted: list[int], has_cli_import: bool = False, js_cli=None,
+    func: str | None = None,
 ):
-    """Run the exec classifier for a matched subprocess/os.system/child_process call."""
+    """Run the exec classifier for a matched subprocess/os.system/child_process call.
+    ``func``: the function an aliased call stands for (``run`` bound to ``execSync``,
+    ``src/scanner/exec_alias.py``); by default the matched name."""
     from src.scanner.exec_classify import (
         classify_js_exec,
         classify_python_exec,
@@ -1745,14 +1774,15 @@ def _classify_exec_match(
         params = _remote_handler_params(lines, idx, has_cli_import)
         near = any(_uses_name(call_src, p) for p in params)
     if lang == "python":
-        func = next(g for g in match.groups() if g)
+        func = func or next(g for g in match.groups() if g)
         return classify_python_exec(
             call_src, func, untrusted_near=near, consumed=consumed,
             resolve_name=lambda nm: _resolve_py_assignment(lines, idx, nm),
             cli_origin=_cli_origin(lines, idx, has_cli_import), untrusted_flow=flow,
             payload_flow=payload,
         )
-    return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed,
+    return classify_js_exec(call_src, func or match.group(1), untrusted_near=near,
+                            consumed=consumed,
                             untrusted_flow=flow, is_cli_expr=js_cli, payload_flow=payload,
                             resolve_name=lambda nm: _resolve_js_assignment(lines, idx, nm))
 
@@ -3098,6 +3128,7 @@ def _scan_content(
         return string_state
 
     sink_memo: list[bool] = []
+    npx_hints: list = []  # printed_hint.Hints for this file, built on first use
     # package.json only: the parsed ``scripts`` table, memoized ([None] = unparseable).
     pkg_scripts: list[npm_scripts.ScriptsInfo | None] = []
 
@@ -3162,13 +3193,34 @@ def _scan_content(
     def _other_lang(rule: tuple) -> bool:
         return not _lang_ok(rule[0], file_lang)
 
-    exec_rules = UNSAFE_EXEC_PATTERNS
+    # Calls through a name the file binds to an exec function (`const { execSync: run }
+    # = require('child_process')`, `from subprocess import run as r`, `sh = os.system`):
+    # classified as the function they stand for (src/scanner/exec_alias.py).
+    alias_tab = (exec_alias.py_aliases(content) if file_lang == "python"
+                 else exec_alias.js_aliases(content) if file_lang in ("javascript",
+                                                                     "typescript")
+                 else exec_alias.Aliases(""))
+    js_alias_re = exec_alias.js_call_re(alias_tab) if alias_tab.lang == "js" else None
+    py_alias_res = ({"subprocess.run / Popen (Python)": exec_alias.py_call_re(
+                         alias_tab, "subprocess"),
+                     "os.system / os.popen (Python)": exec_alias.py_call_re(alias_tab, "os")}
+                    if alias_tab.lang == "python" and alias_tab else {})
+    # The same alias calls, for "is this npx string run?" (`_npx_string_runs`).
+    alias_run_res = tuple(r for r in (js_alias_re, *py_alias_res.values()) if r is not None)
+    # Extra regexes per rule: the rule also fires on these (line set = the union).
+    extra_exec: dict[str, list[re.Pattern[str]]] = {}
     if js_cp_call_re is not None:
         # "execSync / spawn (Node.js)" also fires on a call through a child_process
         # alias; its line set is the union of both regexes' lines.
-        exec_rules = [
-            (n, AnyOf(p, js_cp_call_re), s) if n == "execSync / spawn (Node.js)"
-            else (n, p, s) for n, p, s in UNSAFE_EXEC_PATTERNS]
+        extra_exec.setdefault("execSync / spawn (Node.js)", []).append(js_cp_call_re)
+    if js_alias_re is not None:
+        extra_exec.setdefault("execSync / spawn (Node.js)", []).append(js_alias_re)
+    for rule_name, rx in py_alias_res.items():
+        if rx is not None:
+            extra_exec.setdefault(rule_name, []).append(rx)
+    exec_rules = [
+        (n, AnyOf(p, *extra_exec[n]), s) if n in extra_exec else (n, p, s)
+        for n, p, s in UNSAFE_EXEC_PATTERNS]
     plans = [
         lf.plan(SECRET_PATTERNS),
         lf.plan(exec_rules, _other_lang),
@@ -3321,10 +3373,8 @@ def _scan_content(
         if exec_rules_here and not is_prose and not _DEF_EVAL_EXEC_RE.search(stripped):
             for name, pattern, severity in exec_rules_here:
                 pattern = getattr(pattern, "first", pattern)
-                if not pattern.search(line) and not (
-                    name == "execSync / spawn (Node.js)"
-                    and js_cp_call_re is not None and js_cp_call_re.search(line)
-                ):
+                if not pattern.search(line) and not any(
+                        rx.search(line) for rx in extra_exec.get(name, ())):
                     continue
                 # Language dispatch (#2): skip a language-specific pattern on a
                 # non-matching file (e.g. Python exec() on a .mjs file).
@@ -3385,15 +3435,29 @@ def _scan_content(
                                    "untrusted input in reach)", "")
                 elif name in ("subprocess.run / Popen (Python)", "os.system / os.popen (Python)"):
                     m = _PY_EXEC_CALL_RE.search(line)
+                    alias_func = None
+                    arx = py_alias_res.get(name)
+                    if m is None and arx is not None:
+                        # A call through an alias (`r(cmd, shell=True)`, `o.system(x)`):
+                        # the first one on the line that is code, not string text.
+                        # (`def run(self):` defines a method; it calls nothing.)
+                        am = next((a for a in arx.finditer(line)
+                                   if not _in_py_string_literal(line, a.start())
+                                   and not re.search(r"\bdef\s+$", line[:a.start()])),
+                                  None)
+                        if am is None:
+                            continue
+                        m, alias_func = am, exec_alias.py_func_of(alias_tab, am)
                     if m:
                         v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
-                                                 has_cli_import)
+                                                 has_cli_import, func=alias_func)
                         verdict = (v.kind, v.severity, v.label, v.capability)
                         payload = v.payload
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name == "execSync / spawn (Node.js)":
                     cands = list(_JS_EXEC_CALL_RE.finditer(line)) + (
-                        list(js_cp_call_re.finditer(line)) if js_cp_call_re is not None else [])
+                        list(js_cp_call_re.finditer(line)) if js_cp_call_re is not None else []
+                    ) + (list(js_alias_re.finditer(line)) if js_alias_re is not None else [])
                     tpl_in = "`" if idx in _string_state()[1] else None
                     code_hits = [c for c in cands
                                  if not _js_call_is_text_or_def(line, c.start(), tpl_in)]
@@ -3406,8 +3470,11 @@ def _scan_content(
                             and m.group(0).startswith(m.group(1))):
                         continue  # a local exec()/spawn()/fork(), not child_process
                     if m:
+                        alias = (alias_tab.funcs.get(m.group(1))
+                                 if m.group(0).startswith(m.group(1)) else None)
                         v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
-                                                 js_cli=_js_cli())
+                                                 js_cli=_js_cli(),
+                                                 func=alias[1] if alias else None)
                         verdict = (v.kind, v.severity, v.label, v.capability)
                         payload = v.payload
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
@@ -3612,7 +3679,7 @@ def _scan_content(
                 # message, a docstring line) is advice to a human, not a load.
                 if name.startswith("Unpinned") and _in_prose_string_at(
                         line, dm.start(), "`" if idx in _string_state()[1] else None) \
-                        and not _RUN_CALL_RE.search(line[:dm.start()]):
+                        and not _runs_call(line[:dm.start()], alias_run_res):
                     # (`execSync('cd x && echo hi && npx foo')` reads like words but is
                     # run: recall review of #24.)
                     continue
@@ -3636,11 +3703,43 @@ def _scan_content(
                     effective_severity, remote_payload = "medium", False
                 if name.startswith("Unpinned npx") and _npx_not_a_load(
                         file_path, line, dm.start(),
-                        "`" if idx in _string_state()[1] else None, lines, idx):
+                        "`" if idx in _string_state()[1] else None, lines, idx,
+                        alias_run_res):
                     # Help text a CLI prints (`'  npx browserslist\n'`) or a maintainer
                     # package.json script (`"release": "npx npmpub"`) never runs on a
                     # consumer's machine (precision PR 2).
                     effective_severity = "low"
+                if name.startswith("Unpinned npx") and effective_severity == "medium":
+                    # npx policy (2026-10-19): an npx/uvx that is only documented or
+                    # printed is reported low; one that runs keeps medium.
+                    npx_low = None
+                    if _npx_doc_prose_file(file_path):
+                        npx_low = _NPX_DOC_WHY
+                    elif file_lang in ("javascript", "typescript", "python") \
+                            and not is_declaration:
+                        from src.scanner import printed_hint
+                        if not npx_hints:  # one tokenization per file
+                            npx_hints.append(printed_hint.Hints({file_path: content},
+                                                                package=False))
+                        if npx_hints[0].why_not(file_path, line_num, pattern) is None:
+                            npx_low = printed_hint.WHY
+                    if npx_low is not None:
+                        low = Finding(
+                            category="dynamic_remote_load",
+                            name=name,
+                            severity="low",
+                            file_path=file_path,
+                            line_number=line_num,
+                            snippet=stripped[:120],
+                            remediation=npx_low,
+                        )
+                        if npx_low != _NPX_DOC_WHY:
+                            # Re-checked with the whole package in view, like the
+                            # pipe-to-shell hint below (`calibrate_package_findings`).
+                            low.pre_hint = (effective_severity, remote_payload,
+                                            _REMEDIATION_HINTS["dynamic_remote_load"])
+                        findings.append(low)
+                        break
                 if name.startswith("vm.runInContext"):
                     # Precision PR 2: classified like eval(). A constant script
                     # (`vm.runInContext("this", ctx)`) or code with no untrusted input in
