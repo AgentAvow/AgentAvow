@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import inspect
 import json
 import re
 import subprocess
@@ -56,7 +57,34 @@ SECTIONS = (
     ("MCP servers", ("mcp",), "Endpoint"),
 )
 
+def pick_top(items: list, decides) -> dict | None:
+    """The finding to name as a row's top finding: the highest-severity finding that
+    drove the answer (``decides`` is ``verdict.finding_decides``: a blocking, i.e.
+    shipped, critical/high, a known-malicious dependency, a sandbox finding). When none
+    qualifies (a cached result whose tags predate the shipped/blocking alignment), the
+    highest-severity finding ``decide()`` could have counted: a defect, installed, not a
+    published-advisory or dependency item, shipped first. Never just ``items[0]`` (a
+    medium named beside a critical reason). Self-contained: its source also runs in the
+    prod image (``REMOTE_SCRIPT``)."""
+    rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    items = [i for i in (items or []) if isinstance(i, dict)]
+
+    def sev(i):
+        return rank.get(str(i.get("severity") or "").lower(), 5)
+
+    deciding = [i for i in items if decides(i)]
+    if deciding:
+        return min(deciding, key=sev)  # min() keeps list order among equal severity
+    counted = [i for i in items if i.get("kind") != "capability"
+               and i.get("installed") is not False
+               and i.get("category") not in ("known_vulnerability", "dependency")]
+    if counted:
+        return min(counted, key=lambda i: (sev(i), i.get("shipped") is False))
+    return items[0] if items else None
+
+
 # Runs inside the prod backend image (has asyncpg, redis, src/). Prints one JSON line.
+# ``pick_top`` is prepended from this module (see ``remote_script``).
 REMOTE_SCRIPT = r'''
 import asyncio, json, os
 import asyncpg
@@ -106,7 +134,7 @@ async def main():
         if decision != "do_not_connect":
             continue
         items = ((data or {}).get("findings") or {}).get("items") or []
-        top = next((i for i in items if finding_decides(i)), items[0] if items else None)
+        top = pick_top(items, finding_decides)
         out.append({
             "surface": r["surface"], "full_name": r["full_name"],
             "name": r["repo"] if r["surface"] in PKG or r["surface"] == "mcp" else r["full_name"],
@@ -128,9 +156,51 @@ asyncio.run(main())
 
 # ── Pure helpers (unit-tested) ─────────────────────────────────────────────────────
 
+def remote_script() -> str:
+    """The script piped to the prod image: ``pick_top``'s source, then the query."""
+    return inspect.getsource(pick_top) + "\n" + REMOTE_SCRIPT
+
+
+_PEP503_RE = re.compile(r"[-_.]+")
+
+
+def normalize_name(surface: object, name: object) -> str:
+    """A PyPI name per PEP 503 (lowercase, runs of ``-_.`` -> ``-``), so
+    ``huggingface_hub`` and ``huggingface-hub`` are one project. Other surfaces as-is."""
+    s = str(name if name is not None else "")
+    return _PEP503_RE.sub("-", s).lower() if surface == "pypi" else s
+
+
 def row_key(row: dict) -> str:
-    """Stable identity of a target across weeks: ``surface:full_name``."""
-    return f"{row.get('surface')}:{row.get('full_name')}"
+    """Stable identity of a target across weeks: ``surface:full_name`` (PyPI names
+    PEP 503-normalized)."""
+    surface = row.get("surface")
+    return f"{surface}:{normalize_name(surface, row.get('full_name'))}"
+
+
+def _key_from_text(key: str) -> str:
+    """A previous report's key, normalized like ``row_key``."""
+    surface, sep, full = key.partition(":")
+    return f"{surface}:{normalize_name(surface, full)}" if sep else key
+
+
+def dedupe_rows(rows: list[dict]) -> list[dict]:
+    """One row per ``row_key``: ``community_scans`` can hold the same PyPI project
+    under two spellings. Keeps the most recent ``scanned_at``; normalizes the kept
+    row's ``name`` / ``full_name`` for PyPI. Order of first appearance is kept."""
+    best: dict[str, dict] = {}
+    for r in rows:
+        key = row_key(r)
+        if key not in best or str(r.get("scanned_at") or "") > str(
+                best[key].get("scanned_at") or ""):
+            best[key] = r
+    out = []
+    for r in best.values():
+        if r.get("surface") == "pypi":
+            r = {**r, "name": normalize_name("pypi", r.get("name")),
+                 "full_name": normalize_name("pypi", r.get("full_name"))}
+        out.append(r)
+    return out
 
 
 def parse_remote_output(stdout: str) -> list[dict]:
@@ -150,7 +220,14 @@ def parse_prev_keys(text: str) -> dict[str, str | None] | None:
         data = json.loads(m.group(1))
     except ValueError:
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    out: dict[str, str | None] = {}
+    for k, v in data.items():
+        nk = _key_from_text(str(k))
+        if nk not in out or (v and not out[nk]):
+            out[nk] = v
+    return out
 
 
 def find_previous_report(report_dir: Path, today: str) -> Path | None:
@@ -306,11 +383,11 @@ def fetch_rows() -> list[dict]:
     proc = subprocess.run(
         ["ssh", "-i", str(SSH_KEY), "-o", "BatchMode=yes", "-o", "ConnectTimeout=20",
          SSH_HOST, REMOTE_CMD],
-        input=REMOTE_SCRIPT, capture_output=True, text=True, timeout=600)
+        input=remote_script(), capture_output=True, text=True, timeout=600)
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr[-4000:])
         raise SystemExit(f"remote query failed (exit {proc.returncode})")
-    return parse_remote_output(proc.stdout)
+    return dedupe_rows(parse_remote_output(proc.stdout))
 
 
 def main() -> int:
