@@ -5,9 +5,13 @@
 18867889, 2026-10-11): *"would you open the field as a PR against the v0.3.4
 draft?"* No v0.3.4 file existed yet at PR time, so this diff seeds the cycle
 the way `ctef-v0.3.3-envelope-shape-diff.md` seeded v0.3.3.
-**Origin:** field proposed by @imokokok (A2A #1734 comment 18860798); adopted
-into the v0.3.4 direction with the per-signal decomposition by kenneives
-(comment 18867889).
+**Origin:** the broader distinction this field leans on — a signature does not
+establish the truth of a claim, and an evidence commitment does not establish
+that the evidence is available, relevant, or sufficient — was first articulated
+in this thread by @Jsand-187 (A2A #1734 comment 18528762, 2026-09-20). The
+field itself (a per-signal `measured`/`asserted` classification) was proposed
+by @imokokok (comment 18860798) and adopted into the v0.3.4 direction with the
+per-signal decomposition by kenneives (comment 18867889).
 **Non-goals:** `claim_type`, `wire_binding` (v0.3.3 §1) and both
 canonicalization rules are unchanged. No new error codes are minted here — any
 code lands through the unified vocabulary (hosted in
