@@ -390,6 +390,13 @@ def _run_paths(target: str) -> list[tuple[str, dict[str, str]]]:
         ("make-all", {"Makefile": f"all:\n\t./{target}\n"}),
         ("make-fragment-install", {"tools/make/x.mk": f"install:\n\t@{target}\n"}),
         ("config-command-key", {"config/app.yaml": f"hooks:\n  command: ./{target}\n"}),
+        ("yaml-command-block-list", {"config/app.yaml":
+                                     f"hooks:\n  command:\n    - ./{target}\n    - --x\n"}),
+        ("yaml-command-list-same-indent", {"config/app.yaml":
+                                           f"command:\n- ./{target}\n"}),
+        ("json-args-multiline", {"config/runner.json":
+                                 f'{{\n  "cmd": "node",\n  "args": [\n    "--x",\n'
+                                 f'    "./{target}"\n  ]\n}}\n'}),
         ("shell-script-word", {"bin/start": f"#!/bin/sh\nset -e\n./{target}\n"}),
         ("vscode-folder-open", {".vscode/tasks.json": json.dumps({"tasks": [{
             "label": "s", "command": f"sh {target}", "runOptions": {
@@ -436,6 +443,15 @@ class TestConsumerRunPaths:
         # vllm semantic-router: a path list in an agent-domain YAML, and a make
         # fragment's dev target.
         ("yaml-path-list", {"tools/agent/domains.yaml": f"paths:\n  - {DEV_TARGET}\n"}),
+        # vllm's real shape: a path list under a non-run key, after a run-key block
+        # that has ended (dedent).
+        ("yaml-path-list-after-run-block", {"tools/agent/domains.yaml":
+                                            "router:\n  command:\n    - make build\n"
+                                            "  paths:\n    - tools/dev/kind/**\n"
+                                            f"    - ./{DEV_TARGET}\n"}),
+        ("json-array-after-args-closed", {"config/x.json":
+                                          '{\n  "args": [\n    "--x"\n  ],\n'
+                                          f'  "watch": [\n    "./{DEV_TARGET}"\n  ]\n}}\n'}),
         ("make-fragment-dev", {"tools/make/dockerless.mk":
                                f"local-up: ## start\n\t@{DEV_TARGET}\n"}),
     ])

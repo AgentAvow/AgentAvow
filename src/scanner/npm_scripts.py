@@ -706,6 +706,39 @@ def _docker_run_lines(text: str) -> list[str]:
     return out
 
 
+def _run_key_lines(text: str) -> list[str]:
+    """Config lines that run something: a run-key line (``_RUN_KEY_LINE_RE``) plus,
+    when its value is a block list, the items that follow: YAML ``- item`` lines
+    (more indented, or ``-`` at the key's indent) until a dedent, or JSON array
+    elements until the closing ``]``."""
+    out: list[str] = []
+    carry: tuple[int, bool] | None = None   # (key indent, JSON array)
+    for ln in text.split("\n"):
+        ind = len(ln) - len(ln.lstrip())
+        if carry is not None:
+            key_ind, js = carry
+            if js:
+                out.append(ln)
+                if "]" in ln:
+                    carry = None
+                continue
+            if not ln.strip():
+                continue
+            if ind > key_ind or (ind == key_ind and ln.lstrip().startswith("- ")):
+                out.append(ln)
+                continue
+            carry = None
+        m = _RUN_KEY_LINE_RE.search(ln)
+        if m:
+            out.append(ln)
+            rest = ln[m.end():].strip()
+            if not rest or rest in ("|", ">", "|-", ">-"):
+                carry = (ind, False)
+            elif rest.startswith("[") and "]" not in rest:
+                carry = (ind, True)
+    return out
+
+
 def consumer_run_strings(texts: dict[str, str], *, roots: frozenset[str] | None,
                          skip: Callable[[str], bool] = lambda p: False) -> list[str]:
     """Text naming what a consumer of the tree can run, for "is this file run?":
@@ -757,7 +790,7 @@ def consumer_run_strings(texts: dict[str, str], *, roots: frozenset[str] | None,
         if ext in _SHELL_FILE_EXTS:
             out += [m.group(1) for m in _SCRIPT_WORD_RE.finditer(t)]
         else:
-            out += [m.group(1) for ln in t.split("\n") if _RUN_KEY_LINE_RE.search(ln)
+            out += [m.group(1) for ln in _run_key_lines(t)
                     for m in _SCRIPT_WORD_RE.finditer(ln)]
     return out
 
