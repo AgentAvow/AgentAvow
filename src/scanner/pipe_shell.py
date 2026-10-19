@@ -66,6 +66,11 @@ _BASE64_RE = re.compile(r"""\bbase64\b|\batob\s*\(|\bb64decode\b""", re.IGNORECA
 # with no URL in the target (a `?.*` in a real URL's query is not a regex), or when
 # the pipe itself is escaped (`\|` is a literal bar, never a pipe).
 _REGEX_SHAPE_RE = re.compile(r"""\.\*|\.\+|\\[sSwWdb]|\[\^|\(\?[:!=<]""")
+# A token that names a host without a scheme (`evil.com/x`, `evil\.com`): curl / wget
+# fetch it, so regex syntax elsewhere in the target never makes it a pattern.
+_HOSTISH_RE = re.compile(r"""(?<![\w\\])[A-Za-z0-9-]+(?:\\?\.[A-Za-z0-9-]+)*\\?\.[A-Za-z]{2,}""")
+# JS / TS string escapes: "\|" is a plain "|", so an escaped bar there still pipes.
+_JS_EXTS = frozenset({".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx"})
 
 # Prose only: in JSON (package.json scripts, MCP "command" / "args") and in scripts the
 # "negation" would sit inside the command string itself.
@@ -221,8 +226,10 @@ def classify_match(line: str, start: int, end: int, file_path: str) -> str:
     matched = line[start:end]
     urls = _URL_RE.findall(target)
     pipe = matched.rfind("|")
-    if (pipe > 0 and matched[pipe - 1] == "\\") or (
-            not urls and _REGEX_SHAPE_RE.search(target)):
+    escaped_pipe = (pipe > 0 and matched[pipe - 1] == "\\"
+                    and Path(file_path).suffix.lower() not in _JS_EXTS)
+    if escaped_pipe or (not urls and _REGEX_SHAPE_RE.search(target)
+                        and not _HOSTISH_RE.search(target)):
         return DROP
     has_var = bool(_VAR_RE.search(target))
     if not urls and not has_var:
