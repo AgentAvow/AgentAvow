@@ -4748,6 +4748,47 @@ _LITERAL_STATUS_SEND_RE = re.compile(
 
 _QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)
 
+# A JS route registration whose path is a string starting with `/` (or `*`), and the
+# name of its handler's FIRST parameter (the request): `app.post('/mcp',async(q,r)=>`,
+# `.get("/x",auth,function(q,r){`, `.put('/y',q=>`. UNTRUSTED_INPUT_RE knows the request
+# only as `req`/`request`; a minifier renames it (`q`), which dropped the trifecta's
+# untrusted-input leg on one-line bundles.
+_ROUTE_HANDLER_RE = re.compile(
+    r"""\.\s*(?:get|post|put|patch|delete|all)\s*\(\s*"""
+    r"""(?:"[/*][^"\n]{0,200}"|'[/*][^'\n]{0,200}'|`[/*][^`\n]{0,200}`)\s*,\s*"""
+    r"""(?:[\w$.]{1,60}\s*,\s*){0,3}"""                 # middleware before the handler
+    r"""(?:async\s*)?(?:function\b\s*[\w$]*\s*)?"""
+    r"""(?:\(\s*([\w$]+)\s*[,)]|([\w$]+)\s*=>)""")
+_REQUEST_FIELD_RE = re.compile(r"\.\s*(?:body|query|params)\b")
+_ROUTE_HANDLER_WINDOW = 4000     # chars of handler text searched per registration
+_ROUTE_HANDLER_MAX = 200          # registrations examined per file (bounded cost)
+
+
+def _handler_request_input(content: str) -> list[int]:
+    """Lines (1-based) where a route handler reads its request's body / query / params
+    under any parameter name (`q.body` in a minified bundle). Scoped to the text right
+    after the registration, because minified one-letter names are reused all over a
+    bundle. Empty when the file registers no route."""
+    if not _REQUEST_FIELD_RE.search(content):
+        return []
+    offsets: set[int] = set()
+    for k, m in enumerate(_ROUTE_HANDLER_RE.finditer(content)):
+        if k >= _ROUTE_HANDLER_MAX:
+            break
+        name = m.group(1) or m.group(2)
+        if name in ("async", "function"):
+            continue
+        rx = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\s*\.\s*(?:body|query|params)\b")
+        hit = rx.search(content, m.end(), m.end() + _ROUTE_HANDLER_WINDOW)
+        if hit:
+            offsets.add(hit.start())
+    lines, line, pos = [], 1, 0
+    for off in sorted(offsets):          # one forward pass: O(len(content)) in total
+        line += content.count("\n", pos, off)
+        pos = off
+        lines.append(line)
+    return sorted(set(lines))
+
 
 def _near_read(reads: list[int], sends: list[int], near) -> int | None:
     """The first read line that has a send within the window (``near`` is the
@@ -4785,10 +4826,15 @@ def _composite_findings(
 
     # Cheap pre-check on the whole blob before the per-line pass
     if not (
-        _found(UNTRUSTED_INPUT_RE)
-        and _found(OUTBOUND_SEND_RE)
+        _found(OUTBOUND_SEND_RE)
         and (_found(SENSITIVE_READ_RE) or _found(FILE_READ_RE))
     ):
+        return []
+    # A route handler reading its renamed request (`q.body` in a minified bundle) is the
+    # same untrusted input as `req.body`. Checked whenever the file registers a route, so
+    # a bundle with one `(req, res) =>` handler and a minified `(q, r) =>` one gets both.
+    handler_lines = _handler_request_input(content)
+    if not (_found(UNTRUSTED_INPUT_RE) or handler_lines):
         return []
 
     def _hits(rx: re.Pattern[str]) -> list[int]:
@@ -4807,6 +4853,7 @@ def _composite_findings(
     # or object), not as a quoted string (`"webhook" in self.alerting`, a config value).
     untrusted = [n for n in _hits(UNTRUSTED_INPUT_RE)
                  if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
+    untrusted = sorted(set(untrusted) | set(handler_lines))
     # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
     # request; it is not an outbound send to a third party (precision PR 2).
     def _strip_literal(m: re.Match[str]) -> str:
