@@ -26,6 +26,7 @@ from src.scanner.skill_key_flow import env_file_reads as _env_file_reads
 from src.scanner.skill_key_flow import file_secret_names as _file_secret_names
 from src.scanner.skill_key_flow import is_local_host as _is_local_host
 from src.scanner.skill_key_flow import listed_paths_read_and_sent as _listed_paths_read_and_sent
+from src.scanner.skill_key_flow import returning_functions as _returning_functions
 from src.scanner.skill_key_flow import strip_comments as _strip_comments
 
 # Auto-exec risk weight per pre-approved tool — a skill's `allowed-tools` runs
@@ -314,11 +315,17 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
     # collect ACTUAL capabilities for the declared-vs-actual drift check (§6).
     net_scripts: list[str] = []
     exec_scripts: list[str] = []
+    # Helpers in one bundled file that return a secret, called from another file.
+    extern: dict[str, str] = {}
+    for path, text in files.items():
+        if text and path.lower().endswith(_SCRIPT_EXT):
+            for f, key in _returning_functions(text, path).items():
+                extern.setdefault(f, key)
     for path, text in files.items():
         if not text or not path.lower().endswith(_SCRIPT_EXT):
             continue
         result.script_count += 1
-        result.findings.extend(_credential_findings(path, text))
+        result.findings.extend(_credential_findings(path, text, extern))
         if _CAP_NETWORK_RE.search(text):
             net_scripts.append(path)
         if _CAP_EXEC_RE.search(text):
@@ -413,7 +420,7 @@ def _credential_path_read(code: str, path: str) -> bool:
     return _listed_paths_read_and_sent(code, both, path)
 
 
-def _credential_findings(path: str, text: str) -> list:
+def _credential_findings(path: str, text: str, extern: dict[str, str] | None = None) -> list:
     """Credential reads in one bundled script (DNC sample precision, 2026-10-19).
 
     * Commented-out lines are not code.
@@ -440,13 +447,17 @@ def _credential_findings(path: str, text: str) -> list:
             or (_TOOL_CONFIG_RE.search(code) and _contents_reached(code, _TOOL_CONFIG_RE, path))):
         return [_finding("exfiltration", name, "critical", path, crit_remediation)]
 
-    uses = _analyze_key_flow(text, path)
-    file_keys = _file_secret_names(code)
+    uses = _analyze_key_flow(text, path, extern)
+    file_keys = _file_secret_names(code, path)
     env_reads = _env_file_reads(code, path) if _EXFIL_PATH_RE.search(code) else "none"
     env_sev, env_bad = None, []
     if env_reads != "none":
+        # Keys pulled out of the .env BY NAME may excuse their own vendor's host
+        # (a whole .env sent anywhere is caught by credential_flow, auth-only rule).
+        from src.scanner.credential_flow import _EXTRACT_RE
+        extracted = {n for m in _EXTRACT_RE.finditer(code) for n in m.groups() if n}
         env_sev, env_bad = _classify_hosts(
-            _contents_reached(code, path=path), None, file_keys)
+            _contents_reached(code, path=path), None, file_keys | extracted)
 
     out: list = []
     crit = [u for u in uses if u.severity == "critical"]

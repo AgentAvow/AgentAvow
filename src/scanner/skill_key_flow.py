@@ -422,7 +422,9 @@ def host_matches_key(host: str, env_name: str) -> bool:
     return False
 
 
-_KNOWN_API_DOMAINS = frozenset(d for doms in _TOKEN_DOMAINS.values() for d in doms)
+_KNOWN_API_DOMAINS = frozenset(
+    {d for doms in _TOKEN_DOMAINS.values() for d in doms}
+    | {d for _v, doms in VENDOR_KEYS.values() for d in doms})
 
 
 def _key_class(env_name: str) -> str:
@@ -453,7 +455,7 @@ DECODED = "(decoded URL)"
 
 
 def classify(hosts: list[str], env_name: str | None, file_keys: set[str],
-             ) -> tuple[str | None, list[str]]:
+             klass: str | None = None) -> tuple[str | None, list[str]]:
     """(severity, offending hosts) for a value that reaches ``hosts``.
 
     Per host, in order:
@@ -462,8 +464,10 @@ def classify(hosts: list[str], env_name: str | None, file_keys: set[str],
       a destination decoded at run time (``DECODED``) -> critical;
     * a request bin / paste site / tunnel, a public IP, a shared-hosting subdomain
       -> critical;
-    * the key's own vendor, or the vendor of another key the same file handles (a
-      multi-provider script) -> fine;
+    * the key's own vendor -> fine; the vendor of ANOTHER key the file READS (a
+      multi-provider script) -> fine only when that host is a well-known vendor API
+      (``file_keys`` must be names the code reads, never bare mentions: a stranger
+      host named like a key in a comment or string excuses nothing);
     * a key named for a well-known vendor or an infrastructure secret
       (``_key_class`` "vendor") going anywhere else -> critical;
     * a well-known vendor's API (not a messaging API) -> fine;
@@ -472,10 +476,15 @@ def classify(hosts: list[str], env_name: str | None, file_keys: set[str],
     * a skill-specific key (EARTH2037_TOKEN) to a host its name doesn't match ->
       high: most often the skill's own backend, worth a look.
 
+    ``klass`` overrides the key class: "dump" (the whole environment / a .env's
+    contents: strictest) or "computed" (``process.env[name]``: an unknown key; only a
+    hardcoded stranger host counts).
+
     ``None`` = no defect."""
-    names = ([env_name] if env_name else []) + sorted(file_keys - {env_name})
-    # No name: a credential FILE's contents (every secret in it): strictest class.
-    klass = _key_class(env_name) if env_name else "vendor"
+    others = sorted(file_keys - {env_name})
+    if klass is None:
+        # No name: a credential FILE's contents (every secret in it): strictest class.
+        klass = _key_class(env_name) if env_name else "dump"
     crit: list[str] = []
     high: list[str] = []
     for h in hosts:
@@ -483,20 +492,23 @@ def classify(hosts: list[str], env_name: str | None, file_keys: set[str],
             crit.append(h)
             continue
         if h == "?" or is_local_host(h):
-            high.append(h)
+            if klass != "computed":
+                high.append(h)
             continue
         reg = registrable_domain(h)
         if not reg or reg in _EXFIL_DOMAINS:
             crit.append(h)
-        elif any(host_matches_key(h, n) for n in names):
+        elif env_name and host_matches_key(h, env_name):
             continue
-        elif klass == "vendor":
+        elif reg in _KNOWN_API_DOMAINS and any(host_matches_key(h, n) for n in others):
+            continue
+        elif klass in ("vendor", "dump"):
             crit.append(h)
         elif reg in _MESSAGING_DOMAINS:
             high.append(h)
         elif reg in _KNOWN_API_DOMAINS:
             continue
-        elif klass == "generic":
+        elif klass in ("generic", "computed"):
             crit.append(h)
         else:
             high.append(h)
@@ -671,6 +683,7 @@ class _Flow:
     python: bool
     locals_of: dict[int, set[str]] = field(default_factory=dict)  # JS / shell locals
     decoded_vars: set[str] = field(default_factory=set)  # assigned from base64 / hex …
+    url_funcs: dict[str, list[str]] = field(default_factory=dict)  # return a URL literal
     url_sites: dict[str, list[tuple[list[str], int | None]]] = field(default_factory=dict)
 
     def url_hosts(self, name: str, line: int | None) -> list[str]:
@@ -727,6 +740,23 @@ def _flow(text: str, path: str | None = None) -> _Flow:
         if hosts and not _RHS_IS_REQUEST_RE.match(a.rhs):  # `res = fetch(...)` is a response
             url_vars.setdefault(a.target, []).extend(hosts)
             url_sites.setdefault(a.target, []).append((hosts, a))
+    # Functions that return a URL literal (`return os.environ.get("X") or
+    # "https://…"`): a value assigned from a call of one resolves to that default.
+    url_funcs: dict[str, list[str]] = {}
+    for fname, f0, f1 in functions:
+        for k in range(f0, min(f1, len(lines) - 1) + 1):
+            m = _RETURN_RE.search(lines[k])
+            if m:
+                hs = _URL_RE.findall(lines[k][m.end():])
+                if hs:
+                    url_funcs.setdefault(fname, []).extend(hs)
+    for a in assigns:
+        if a.target in url_vars or _RHS_IS_REQUEST_RE.match(a.rhs):
+            continue
+        fh = [h for f, hs in url_funcs.items() if _func_called(a.rhs, {f}) for h in hs]
+        if fh:
+            url_vars[a.target] = fh
+            url_sites.setdefault(a.target, []).append((fh, a))
     for _ in range(4):
         grew = False
         for a in assigns:
@@ -785,6 +815,7 @@ def _flow(text: str, path: str | None = None) -> _Flow:
     flow = _Flow(lines, joined, url_vars, base_spans, calls, assigns, functions,
                  [tuple(s) for s in scope_at], python, locals_of)
     flow.decoded_vars = {a.target for a in assigns if _DECODE_RE.search(a.rhs)}
+    flow.url_funcs = url_funcs
     flow.url_sites = {
         v: [(h, flow.scope_of(a.line, a.declared, a.target)) for h, a in sites]
         for v, sites in url_sites.items()}
@@ -819,13 +850,14 @@ def _visible_names(flow: _Flow, tainted: Taint, line: int) -> set[str]:
     return {n for n, scopes in tainted.items() if flow.visible(scopes, line)}
 
 
-def _taint(flow: _Flow, seeds: Taint) -> tuple[Taint, set[str]]:
+def _taint(flow: _Flow, seeds: Taint, funcs0: set[str] | None = None,
+           ) -> tuple[Taint, set[str]]:
     """(tainted names with their scopes, functions whose return value is tainted).
 
     Scoped: a local assigned in one function does not taint a same-named local in
     another (``body`` / ``data`` / ``text`` in a 2,700-line bot are many variables)."""
     tainted: Taint = {n: set(s) for n, s in seeds.items()}
-    funcs: set[str] = set()
+    funcs: set[str] = set(funcs0 or ())
 
     def hit(s: str, line: int) -> bool:
         names = _visible_names(flow, tainted, line)
@@ -914,6 +946,9 @@ def _hosts_in(flow: _Flow, part: str, line: int | None = None) -> list[str]:
     for v in flow.url_vars:
         if re.search(r"(?<![\w$.])\$?\{?" + re.escape(v) + r"\b(?!\s*[:=](?![:=]))", part):
             hosts.extend(flow.url_hosts(v, line))
+    for f, fh in flow.url_funcs.items():
+        if _func_called(part, {f}):
+            hosts.extend(fh)
     return hosts
 
 
@@ -972,22 +1007,161 @@ def _reached(flow: _Flow, tainted: Taint, funcs: set[str] | None = None,
     return out
 
 
-def file_secret_names(text: str) -> set[str]:
-    """Every secret-shaped name in the (comment-stripped) code."""
-    return set(_SECRET_NAME_RE.findall(text or ""))
+# In Python / JS a `$NAME` is text, not a read: only the accessors count there.
+_CODE_ENV_READ_RE = re.compile(
+    r"(?:\benviron(?:\.get)?\s*[\[(]\s*[\"']|\bgetenv\s*\(\s*[\"']"
+    r"|\bprocess\.env(?:\.|\[\s*[\"'`])|\bENV\[\s*[\"']|\bGetenv\(\s*\")"
+    r"([A-Z][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD))\b"
+)
 
 
-def analyze(text: str, path: str | None = None) -> list[KeyUse]:
-    """One KeyUse per distinct secret-named env var the script reads (comments
-    ignored; ``path`` picks the comment syntax)."""
+_SH_ASSIGN_RE = re.compile(
+    r"^\s*(?:export\s+|local\s+|readonly\s+|declare\s+(?:-\w+\s+)?)?([A-Za-z_]\w*)=", re.M)
+
+
+def read_secret_names(code: str, path: str | None = None) -> set[str]:
+    """Secret-named env vars the (comment-stripped) code actually READS through an
+    accessor. Never bare mentions: a name in a comment, a help string or a regex
+    reads nothing."""
+    p = (path or "").lower()
+    if p.endswith((".py", *_SLASH_EXT)):
+        return set(_CODE_ENV_READ_RE.findall(code or ""))
+    names = set(SECRET_ENV_READ_RE.findall(code or ""))
+    # Shell: `$API_KEY` after `API_KEY="${PARALLEL_API_KEY}"` is the script's own
+    # variable, not an env read (the env read is PARALLEL_API_KEY).
+    # `GITHUB_TOKEN="${GITHUB_TOKEN:-}"` re-reads the env var: still a read.
+    local, rereads = set(), set()
+    for m in _SH_ASSIGN_RE.finditer(code or ""):
+        nm = m.group(1)
+        head = code[m.end():m.end() + len(nm) + 4]
+        (rereads if re.match(r"[\"']?\$\{?" + re.escape(nm) + r"\b", head) else local).add(nm)
+    return names - (local - rereads)
+
+
+def file_secret_names(text: str, path: str | None = None) -> set[str]:
+    """The names the code READS (see ``read_secret_names``)."""
+    return read_secret_names(text, path)
+
+
+# An env var whose NAME is computed at run time (`process.env[name]`,
+# `os.environ[f"{p}_KEY"]`, `os.getenv(var)`, bash `${!var}`): any key at all.
+_COMPUTED_ENV_RE = re.compile(
+    r"\bprocess\.env\[(?!\s*[\"'`][\w-]+[\"'`]\s*\])"
+    r"|\benviron\[(?!\s*[\"'][\w-]+[\"']\s*\])"
+    r"|\benviron\.get\((?!\s*[\"'])|\bgetenv\((?!\s*[\"'])|\bGetenv\((?!\s*\")"
+    r"|\benviron(?:\.get)?\s*[\[(]\s*[fF][\"']|\bgetenv\(\s*[fF][\"']"
+    r"|\$\{!\w+\}"
+)
+# The whole environment serialized or copied (a bulk dump). Shell forms only in
+# shell scripts (`env|` is also regex text in a Python pattern table).
+_ENV_DUMP_RE = re.compile(
+    r"JSON\.stringify\(\s*process\.env\b|\.\.\.process\.env\b"
+    r"|Object\.(?:entries|keys|values|assign)\([^)]*process\.env\b"
+    r"|\bdict\(\s*os\.environ\s*\)|\bos\.environ\.(?:copy|items|values)\(\)"
+    r"|json\.dumps\(\s*(?:dict\()?\s*os\.environ\b"
+)
+_SH_ENV_DUMP_RE = re.compile(
+    r"\$\(\s*(?:env|printenv)\s*\)|`\s*(?:env|printenv)\s*`|(?<![\w-])(?:env|printenv)\s*\|")
+COMPUTED_ENV = "an env var chosen at run time"
+ENV_DUMP = "the whole environment"
+
+
+def _pseudo_hosts(flow: _Flow, rx: re.Pattern[str]) -> list[str]:
+    """Hosts a value read through ``rx`` (a computed env name, a dump) reaches."""
+    seeds: Taint = {}
+    for a in flow.assigns:
+        if rx.search(a.rhs):
+            seeds.setdefault(a.target, set()).add(
+                flow.scope_of(a.line, a.declared, a.target))
+    for i, ln in enumerate(flow.lines):
+        if rx.search(ln):
+            for n in _bindings(ln):
+                seeds.setdefault(n, set()).add(flow.scope_of(i, True))
+    hosts: list[str] = []
+    for chunk, line in flow.calls:
+        whole = flow.lines[line] if line < len(flow.lines) else ""
+        if rx.search(chunk) or (re.match(r"(?:curl|wget)\b", chunk) and rx.search(whole)):
+            hosts.extend(_dest_hosts(flow, chunk, line))
+    # Helpers that return such a value (`def env(n): return os.environ[n]`).
+    funcs = set()
+    for fname, f0, f1 in flow.functions:
+        if fname in _COMMON_FUNCS or len(fname) < 3:
+            continue
+        for k in range(f0, min(f1, len(flow.lines) - 1) + 1):
+            m = _RETURN_RE.search(flow.lines[k])
+            if m and rx.search(flow.lines[k][m.end():]):
+                funcs.add(fname)
+                break
+    if seeds or funcs:
+        tainted, fs = _taint(flow, seeds, funcs)
+        hosts += _reached(flow, tainted, fs, include_base=False)
+    return hosts
+
+
+def returning_functions(text: str, path: str | None = None) -> dict[str, str]:
+    """Functions in this file that return a secret env value: name -> the key. For a
+    helper defined in one bundled file and called from another."""
     code = strip_comments(text or "", path)
-    names = sorted(set(SECRET_ENV_READ_RE.findall(code)))
+    names = read_secret_names(code, path)
     if not names:
+        return {}
+    flow = _flow(code, path)
+    out: dict[str, str] = {}
+    rank = {"vendor": 0, "generic": 1, "specific": 2}
+    for name in sorted(names):
+        _t, funcs = _taint(flow, {name: {None}})
+        for f in funcs:
+            if f in _COMMON_FUNCS or len(f) < 4:
+                continue
+            if f not in out or rank[_key_class(name)] < rank[_key_class(out[f])]:
+                out[f] = name
+    return out
+
+
+def analyze(text: str, path: str | None = None,
+            extern: dict[str, str] | None = None) -> list[KeyUse]:
+    """One KeyUse per distinct secret-named env var the script reads (comments
+    ignored; ``path`` picks the comment syntax), plus one for an env var read under a
+    computed name and one for a dump of the whole environment when either reaches a
+    network call. ``extern``: functions defined in OTHER bundled files that return a
+    secret (``returning_functions``), name -> key.
+
+    Provenance is per key: each key is followed on its own (through aliases, string
+    building, helpers), so a value built from an OpenAI key is graded as the OpenAI
+    key wherever it goes, whatever else rides along with it."""
+    code = strip_comments(text or "", path)
+    names = sorted(read_secret_names(code, path))
+    computed = bool(_COMPUTED_ENV_RE.search(code))
+    dump_rx = (_ENV_DUMP_RE if (path or "").lower().endswith((".py", *_SLASH_EXT))
+               else re.compile(_ENV_DUMP_RE.pattern + "|" + _SH_ENV_DUMP_RE.pattern))
+    dump = bool(dump_rx.search(code))
+    ext = {f: k for f, k in (extern or {}).items() if _func_called(code, {f})}
+    if not (names or computed or dump or ext):
         return []
     flow = _flow(code, path)
-    file_keys = file_secret_names(code)
+    file_keys = set(names)
+    defined = {f for f, _a, _b in flow.functions}
 
     uses: list[KeyUse] = []
+    for label, rx, klass, on in ((COMPUTED_ENV, _COMPUTED_ENV_RE, "computed", computed),
+                                 (ENV_DUMP, dump_rx, "dump", dump)):
+        if not on:
+            continue
+        hosts = _pseudo_hosts(flow, rx)
+        sev, bad = classify(hosts, None, file_keys, klass) if hosts else (None, [])
+        if sev:
+            uses.append(KeyUse(label, None, leaves_vendor=sev == "critical",
+                               destinations=bad, severity=sev, sent=True))
+    for f, key in sorted(ext.items()):
+        if f in defined:
+            continue
+        tainted, funcs = _taint(flow, {}, {f})
+        hosts = _reached(flow, tainted, funcs)
+        if hosts:
+            sev, bad = classify(hosts, key, file_keys | {key})
+            uses.append(KeyUse(key, _vendor_name(key, hosts),
+                               leaves_vendor=sev == "critical",
+                               destinations=bad, severity=sev, sent=True))
     for name in names:
         tainted, funcs = _taint(flow, {name: {None}})
         hosts = _reached(flow, tainted, funcs)
