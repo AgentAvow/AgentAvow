@@ -148,7 +148,8 @@ async def test_hosted_path_agrees(tmp_path, monkeypatch):
 def test_only_test_exempt_files_are_judged():
     assert judged("test_x.py") and judged("tests/a.py") and judged("a/b_test.py")
     assert judged("__tests__/a.js")
-    for p in ("examples/test_x.py", "docs/tests/a.py", "conftest.py", "a.test.js",
+    assert judged("conftest.py") and judged("a.test.js") and judged("b_spec.py")
+    for p in ("examples/test_x.py", "docs/tests/a.py",
               "fixtures/test_x.py", "main.py", "tests/data.json"):
         assert not judged(p), p
 

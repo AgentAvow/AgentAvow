@@ -521,8 +521,8 @@
    "version": "26.6.4",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 89 files",
-   "files_scanned": 89,
+   "reason": "nothing found in 90 files",
+   "files_scanned": 90,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3869,8 +3869,8 @@
    "version": "3.14.4",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 53 files",
-   "files_scanned": 53,
+   "reason": "nothing found in 54 files",
+   "files_scanned": 54,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -3938,7 +3938,7 @@
    "score": 74,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 1,
+   "files_scanned": 2,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4534,8 +4534,8 @@
    "version": "2026.9.0",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 48 files",
-   "files_scanned": 48,
+   "reason": "nothing found in 49 files",
+   "files_scanned": 49,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -4543,7 +4543,7 @@
     "low": 0,
     "info": 2
    },
-   "capabilities": 3,
+   "capabilities": 5,
    "not_installed": 0,
    "rules": {}
   },
@@ -4557,12 +4557,13 @@
     "critical": 0,
     "high": 0,
     "medium": 0,
-    "low": 2,
-    "info": 2
+    "low": 4,
+    "info": 0
    },
    "capabilities": 2,
    "not_installed": 0,
    "rules": {
+    "low: Source file too large to scan in full": 2,
     "low: Unpinned remote resource (branch/latest/HEAD)": 2
    }
   },
@@ -5361,8 +5362,8 @@
    "version": "3.11.2",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 170 files",
-   "files_scanned": 170,
+   "reason": "nothing found in 171 files",
+   "files_scanned": 171,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5586,8 +5587,8 @@
    "version": "3.7",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 288 files",
-   "files_scanned": 288,
+   "reason": "nothing found in 290 files",
+   "files_scanned": 290,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5595,7 +5596,7 @@
     "low": 0,
     "info": 0
    },
-   "capabilities": 1,
+   "capabilities": 2,
    "not_installed": 0,
    "rules": {}
   },
@@ -5623,8 +5624,8 @@
    "version": "2.5.3",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 165 files",
-   "files_scanned": 165,
+   "reason": "nothing found in 166 files",
+   "files_scanned": 166,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5793,8 +5794,8 @@
    "version": "0.66b1",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 124 files",
-   "files_scanned": 124,
+   "reason": "nothing found in 125 files",
+   "files_scanned": 125,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -5844,8 +5845,8 @@
    "version": "3.0.6",
    "score": 82,
    "label": "safe",
-   "reason": "no critical or high findings in 285 files; 1 file over 500 KB was not fully read",
-   "files_scanned": 285,
+   "reason": "no critical or high findings in 286 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 286,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6091,8 +6092,8 @@
    "version": "25.0.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 32 files",
-   "files_scanned": 32,
+   "reason": "nothing found in 33 files",
+   "files_scanned": 33,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6365,8 +6366,8 @@
    "version": "1.6.1",
    "score": 86,
    "label": "safe",
-   "reason": "nothing found in 11 files",
-   "files_scanned": 11,
+   "reason": "nothing found in 12 files",
+   "files_scanned": 12,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6671,8 +6672,8 @@
    "version": "1.9.1",
    "score": 88,
    "label": "safe",
-   "reason": "nothing found in 345 files",
-   "files_scanned": 345,
+   "reason": "nothing found in 347 files",
+   "files_scanned": 347,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -6688,8 +6689,8 @@
    "version": "1.18.1",
    "score": 82,
    "label": "safe",
-   "reason": "no critical or high findings in 595 files",
-   "files_scanned": 595,
+   "reason": "no critical or high findings in 599 files",
+   "files_scanned": 599,
    "severity": {
     "critical": 0,
     "high": 0,
@@ -7190,8 +7191,8 @@
    "version": "21.14.5",
    "score": 82,
    "label": "safe",
-   "reason": "no critical or high findings in 83 files; 1 file over 500 KB was not fully read",
-   "files_scanned": 83,
+   "reason": "no critical or high findings in 84 files; 1 file over 500 KB was not fully read",
+   "files_scanned": 84,
    "severity": {
     "critical": 0,
     "high": 0,
