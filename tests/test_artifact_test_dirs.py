@@ -67,7 +67,9 @@ class TestPayloadInTestDirBlocks:
         assert blocking, findings
         assert all(f.file_path == "evilpkg/tests/__init__.py" for f in blocking)
         assert all(f.payload and finding_is_shipped(f) for f in blocking)
-        assert n == 1  # runtime files only: thin coverage measures runtime code
+        # runtime files only: thin coverage measures runtime code, and a tests package
+        # the runtime imports IS runtime code (src.scanner.test_files)
+        assert n == 2
 
     def test_decode_exec_in_tests_dir(self):
         findings, _ = _artifact({

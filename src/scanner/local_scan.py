@@ -292,7 +292,8 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
     restore_externally_invoked(result.findings, local_texts)
     # A test-named file that is not test code (or that running code uses) is graded as
     # shipped code (same rule as scan_repo).
-    result.findings = _regrade_misnamed_tests(result.findings, local_texts, allowlist)
+    result.findings = _regrade_misnamed_tests(result.findings, local_texts, allowlist,
+                                              paths=[it["path"] for it in tree])
     # A printed install hint lowered per file holds only with the whole tree in view.
     from src.scanner.package_context import recheck_printed_hints
     recheck_printed_hints(result.findings, local_texts)

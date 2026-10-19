@@ -2275,7 +2275,8 @@ def _is_blocking_exempt_path(path: str) -> bool:
 
 
 def _regrade_misnamed_tests(findings: list[Finding], texts: dict[str, str],
-                            allowlist: set[tuple[str, str]] | None) -> list[Finding]:
+                            allowlist: set[tuple[str, str]] | None,
+                            paths: list[str] | None = None) -> list[Finding]:
     """Repository / local-tree scans: a file exempt for being a test (``test_*.py``,
     ``*_test.py``, under ``tests/``) keeps the exemption only when it is test code
     that nothing running imports or executes (``src.scanner.test_files``). Any other
@@ -2285,7 +2286,7 @@ def _regrade_misnamed_tests(findings: list[Finding], texts: dict[str, str],
     from src.scanner.test_files import not_really_tests
 
     bad = not_really_tests(texts, runs_for_consumer=lambda q: not (
-        _is_blocking_exempt_path(q) or _is_infra_file(q)))
+        _is_blocking_exempt_path(q) or _is_infra_file(q)), paths=paths)
     if not bad:
         return findings
     out = [f for f in findings if f.file_path not in bad]
@@ -7198,7 +7199,9 @@ async def scan_repo(
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
         # A test-named file that is not test code (or that running code uses) is graded
         # as shipped code.
-        result.findings = _regrade_misnamed_tests(result.findings, repo_texts, allowlist)
+        result.findings = _regrade_misnamed_tests(
+            result.findings, repo_texts, allowlist,
+            paths=[it["path"] for it in tree if isinstance(it, dict) and it.get("path")])
         # A printed install hint lowered per file holds only with the whole repo in view.
         from src.scanner.package_context import recheck_printed_hints
         recheck_printed_hints(result.findings, repo_texts)

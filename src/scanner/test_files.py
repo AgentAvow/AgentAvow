@@ -15,17 +15,35 @@ when the file is test code by content or location AND nothing that runs uses it:
   entry point or non-test script, ``setup.py`` / ``setup.cfg`` / ``pyproject.toml``
   entry, ``Procfile`` line or ``Dockerfile`` ``CMD`` / ``ENTRYPOINT`` names it.
 
-Only files exempt for being tests are judged (not docs / examples / fixtures /
-benchmarks, co-located ``.test.`` / ``.spec.`` files or ``conftest.py``). Package
-scans are unchanged: there the installed-file check decides. Pure text analysis over
-the texts the scan already read; bounded by the number of files.
+Also named: a wheel's ``*.dist-info/entry_points.txt`` (``pytest11``,
+``console_scripts`` ...), ``package.json`` ``files``, and an MCP / server config's
+``command`` / ``args`` (any JSON / YAML / TOML config with those keys that is not
+CI or test-runner configuration).
+
+Two location rules on top (review of #199):
+
+* ``conftest.py`` is pytest's own: exempt in a test directory or at the top of a
+  repository, never inside an importable package directory (one with
+  ``__init__.py``) or anywhere else in a published package, where it runs in the
+  consumer's pytest.
+* a top-level ``tests/`` / ``test/`` package (with ``__init__.py``) that is itself
+  an import name is shipped code: a wheel's top-level directory, a name in
+  ``packages=[...]``, ``find_packages()`` / ``packages = find:`` with no ``exclude``,
+  a ``[tool.setuptools.packages.find]`` with no ``exclude``, or the project's name.
+
+Judged: files exempt for being tests (test directories, ``test_*`` / ``*_test`` /
+``*_spec`` names, co-located ``.test.`` / ``.spec.`` files, ``conftest.py``), not docs
+/ examples / fixtures / benchmarks. Applied to repository, local-tree and package
+scans (``scan_artifact_files``; there an uninstalled file stays informational).
+Pure text analysis over the texts the scan already read; bounded by the number of
+files.
 """
 from __future__ import annotations
 
 import json
 import posixpath
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import PurePosixPath
 
 _TEST_DIRS = frozenset({"test", "tests", "__tests__"})
@@ -43,10 +61,12 @@ _PY_TEST_RE = re.compile(
     r"^\s*(?:import\s+(?:pytest|unittest)\b|from\s+(?:pytest|unittest)\b)"
     r"|^\s*(?:async\s+)?def\s+test(?:_\w*)?\s*\(|^\s*class\s+\w+\s*\([^)]*TestCase\b",
     re.MULTILINE)
+# Calls of a test runner's globals, also compiled (`(0, vitest_1.describe)(...`).
 _JS_TEST_RE = re.compile(
-    r"^\s*(?:describe|it|test)(?:\.(?:each|only|skip)\b[^(]*)?\s*\("
+    r"(?<![\w$])(?:describe|it|test|suite|beforeEach|beforeAll|afterEach|afterAll)"
+    r"(?:\.(?:each|only|skip|todo|concurrent)\b[^(]*)?\s*\)?\s*\("
     r"|(?:require\s*\(\s*|from\s+)['\"](?:node:test|vitest|mocha|ava|tap|@jest/globals|"
-    r"chai|uvu)['\"]", re.MULTILINE)
+    r"chai|uvu|jest|sinon|supertest|@testing-library/[\w-]+)['\"]", re.MULTILINE)
 
 _PY_IMPORT_RE = re.compile(
     r"^[ \t]*import[ \t]+([\w.]+(?:[ \t]+as[ \t]+\w+)?(?:[ \t]*,[ \t]*[\w.]+"
@@ -59,12 +79,33 @@ _JS_SPEC_RE = re.compile(
     r"""(?:\brequire\s*\(\s*|\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"\n]+)['"]""",
     re.MULTILINE)
 
-# Lines of a Python packaging file that configure the test run, not an entry point.
+# Lines of a Python packaging file that configure the test run, not an entry point
+# (a `pytest11` entry point is NOT one: it loads the module into every pytest run).
 _TEST_CONFIG_LINE_RE = re.compile(
-    r"test_suite|tests_require|testpaths|pytest|python_files|addopts|norecursedirs|"
-    r"\[tool\.(?:coverage|tox|nox)|tox|coverage", re.IGNORECASE)
-_NPM_TEST_SCRIPT_RE = re.compile(r"^(?:pre|post)?(?:test|lint|coverage|ci|check|e2e)\b")
-_PY_PACKAGING = frozenset({"setup.py", "setup.cfg", "pyproject.toml"})
+    r"testpaths|python_files|addopts|norecursedirs|\[tool[.:](?:pytest|coverage|tox|nox)|"
+    r"\btox\b|\bcoverage\b", re.IGNORECASE)
+# `test_suite='tests'` / `tests_require=[...]` inside an otherwise meaningful line.
+_TEST_CONFIG_KV_RE = re.compile(
+    r"""\b(?:test_suite|tests_require)\s*[=:]\s*(?:\[[^\]]*\]|['"][^'"]*['"])""")
+_NPM_TEST_SCRIPT_RE = re.compile(
+    r"^(?:pre|post)?(?:tests?|lint|coverage|cover|ci|check|e2e|unit|integration|bench\w*|"
+    r"typecheck|tsd)\b|[:_-](?:tests?|unit|e2e|integration|coverage)\b")
+# A script that runs a test runner (`tape test/*.js`, `nyc mocha`) runs the test suite.
+_TEST_RUNNER_RE = re.compile(
+    r"\b(?:tape|jest|mocha|vitest|ava|nyc|c8|tap|tsd|karma|jasmine|uvu|playwright|cypress|"
+    r"borp|lab|pytest|tox|nox)\b|\bnode\s+--test\b")
+# Scripts that run for whoever installs or starts the package.
+_NPM_RUN_SCRIPTS = frozenset({"preinstall", "install", "postinstall", "prepare", "start"})
+# Packaging sections that name what is installed or run (not tool configuration such as
+# `[tool.ruff.per-file-ignores]`, which names test files to lint them).
+_ENTRY_SECTION_RE = re.compile(
+    r"^(?:project\.(?:scripts|gui-scripts|entry-points(?:\..+)?)|tool\.poetry\."
+    r"(?:scripts|plugins(?:\..+)?|packages)|tool\.setuptools(?:\..+)?|options(?:\..+)?|"
+    r"entry_points|metadata)$")
+_PY_PACKAGING = frozenset({"setup.py", "setup.cfg", "pyproject.toml", "entry_points.txt"})
+_CONFIG_EXTS = frozenset({".json", ".yaml", ".yml", ".toml"})
+_CMD_KEY_RE = re.compile(r"""['"]?\b(?:command|args|cmd|entrypoint)\b['"]?\s*[:=]""",
+                         re.IGNORECASE)
 
 
 def _parts(path: str) -> list[str]:
@@ -91,9 +132,8 @@ def judged(path: str) -> bool:
     stem = _stem(path).lower()
     if any(p in _OTHER_EXEMPT_DIRS for p in _parts(path)):
         return False
-    if ".test." in name or ".spec." in name or stem.endswith("_spec") or stem == "conftest":
-        return False
-    return _in_test_dir(path) or stem.startswith("test_") or stem.endswith("_test")
+    return (_in_test_dir(path) or stem.startswith("test_") or stem.endswith(("_test", "_spec"))
+            or stem == "conftest" or ".test." in name or ".spec." in name)
 
 
 def is_test_code(path: str, text: str) -> bool:
@@ -138,43 +178,6 @@ def _py_imports(path: str, text: str) -> tuple[set[str], set[str]]:
     return names, rel
 
 
-def _py_imported(path: str, users: dict[str, str]) -> bool:
-    mods = _module_names(path)
-    own = posixpath.normpath(str(PurePosixPath(path).with_suffix("")))
-    if PurePosixPath(path).stem == "__init__":
-        own = posixpath.normpath(str(PurePosixPath(path).parent))
-    stem = mods[-1] if mods else ""
-    for q, text in users.items():
-        if _suffix(q) not in _PY_EXTS:
-            continue
-        names, rel = _py_imports(q, text)
-        if own in rel:
-            return True
-        for n in names:
-            if n in mods[:-1]:            # a dotted path of two or more parts
-                return True
-            if n == stem and (posixpath.dirname(q) == posixpath.dirname(path)
-                              or not posixpath.dirname(path)):
-                return True               # a sibling / top-level module by bare name
-    return False
-
-
-def _js_imported(path: str, users: dict[str, str]) -> bool:
-    own = posixpath.normpath(path)
-    no_ext = posixpath.splitext(own)[0]
-    for q, text in users.items():
-        if _suffix(q) not in _JS_EXTS:
-            continue
-        for m in _JS_SPEC_RE.finditer(text):
-            spec = m.group(1)
-            if not spec.startswith("."):
-                continue
-            t = posixpath.normpath(posixpath.join(posixpath.dirname(q), spec))
-            if t in (own, no_ext) or posixpath.join(t, "index") == no_ext:
-                return True
-    return False
-
-
 def _named_re(path: str) -> re.Pattern[str]:
     """How a file to run is named: by its tree path (``tests/run.py``) when it sits in
     a test directory (a generic basename there names nothing in particular), else by
@@ -186,47 +189,34 @@ def _named_re(path: str) -> re.Pattern[str]:
     return re.compile(r"(?<![\w.\-])" + target + r"(?![\w\-])")
 
 
-def _manifest_names(path: str, texts: dict[str, str]) -> bool:
-    named = _named_re(path)
-    stem = _stem(path)
-    mods = [n for n in _module_names(path) if "." in n] + (
-        [] if _in_test_dir(path) else [stem])
-    mod_re = re.compile(r"(?<![\w.])(?:" + "|".join(re.escape(m) for m in mods) + r")(?![\w])") \
-        if mods else None
-    for q, text in texts.items():
-        name = PurePosixPath(q).name
-        low = name.lower()
-        if low == "package.json":
-            if _package_json_names(path, q, text):
-                return True
-        elif low in _PY_PACKAGING:
-            for ln in text.split("\n"):
-                if _TEST_CONFIG_LINE_RE.search(ln):
-                    continue
-                if named.search(ln) or (mod_re is not None and mod_re.search(ln)):
-                    return True
-        elif name == "Procfile":
-            if named.search(text):
-                return True
-        elif name == "Dockerfile" or name.startswith("Dockerfile.") \
-                or low.endswith(".dockerfile"):
-            for ln in text.split("\n"):
-                if re.match(r"\s*(?:CMD|ENTRYPOINT)\b", ln) and named.search(ln):
-                    return True
-    return False
+def runs_test_tooling(path: str) -> bool:
+    """CI and test-runner configs: what they run is the maintainer's test suite."""
+    parts = [p.lower() for p in PurePosixPath(path).parts]
+    name = parts[-1] if parts else ""
+    return (any(p in (".github", ".gitlab", ".circleci", ".buildkite", "workflows")
+                for p in parts)
+            or name in (".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml",
+                        "codecov.yml", ".codecov.yml", "package.json",
+                        ".pre-commit-config.yaml", "docker-compose.test.yml")
+            or name.startswith(("jest.", "vitest.", ".mocharc", "karma.", "cypress.",
+                                "playwright.", "tsconfig.", "tox.", "pytest.")))
 
 
-def _package_json_names(path: str, manifest: str, text: str) -> bool:
+# A file path as a whole string literal in code (`'tests/run.py'`, `"./test_x.js"`):
+# what the code names to run. Prose and URLs in docstrings are not.
+_FILE_TOKEN_RE = re.compile(
+    r"""['"`](?:\./)?((?:\.\./)*[\w\-][\w.\-/]*\.(?:py|[cm]?[jt]sx?))['"`]""")
+
+
+def _package_json_strings(text: str) -> list[str] | None:
+    """Strings of a package.json that name what runs or ships: main / module / bin /
+    exports / browser / files and every script that is not a test / lint script."""
     try:
         data = json.loads(text)
     except ValueError:
-        return False
+        return None
     if not isinstance(data, dict):
-        return False
-    root = posixpath.dirname(manifest)
-    rel = posixpath.relpath(path, root) if root else path
-    if rel.startswith(".."):
-        return False
+        return None
     strings: list[str] = []
 
     def walk(v) -> None:
@@ -239,42 +229,239 @@ def _package_json_names(path: str, manifest: str, text: str) -> bool:
             for x in v:
                 walk(x)
 
-    for key in ("main", "module", "bin", "exports", "browser"):
+    for key in ("main", "module", "bin", "exports", "browser", "files"):
         walk(data.get(key))
     scripts = data.get("scripts")
     if isinstance(scripts, dict):
         for k, v in scripts.items():
-            if isinstance(k, str) and not _NPM_TEST_SCRIPT_RE.match(k):
+            if not isinstance(k, str) or not isinstance(v, str):
+                continue
+            if k in _NPM_RUN_SCRIPTS or not (
+                    _NPM_TEST_SCRIPT_RE.search(k) or _TEST_RUNNER_RE.search(v)):
                 walk(v)
-    rel_no_ext = posixpath.splitext(rel)[0]
-    named = _named_re(rel)
-    for s in strings:
-        n = posixpath.normpath(s.split("?")[0]) if s.startswith(".") else s
-        if n in (rel, rel_no_ext) or named.search(s):
+    return strings
+
+
+def _entry_lines(name: str, text: str) -> list[str]:
+    """The lines of a Python packaging file that can name a module to install or run:
+    all of ``setup.py`` and ``entry_points.txt``; only entry-point / package sections
+    of ``setup.cfg`` and ``pyproject.toml``. Test-run configuration is dropped."""
+    out: list[str] = []
+    keep = name in ("setup.py", "entry_points.txt")
+    for ln in text.split("\n"):
+        if name not in ("setup.py", "entry_points.txt"):
+            m = re.match(r"\s*\[+\s*([^\]]+?)\s*\]+\s*$", ln)
+            if m:
+                keep = bool(_ENTRY_SECTION_RE.match(m.group(1).strip().strip('"')))
+                continue
+        if not keep:
+            continue
+        ln = _TEST_CONFIG_KV_RE.sub(" ", ln)
+        if ln.strip() and not _TEST_CONFIG_LINE_RE.search(ln):
+            out.append(ln)
+    return out
+
+
+class _Index:
+    """What the runtime code and manifests of one tree import, run and name, read once
+    (a large package has thousands of test files and hundreds of runtime modules)."""
+
+    def __init__(self, texts: dict[str, str], users: dict[str, str]) -> None:
+        self.py_names: set[str] = set()
+        self.py_bare_by_dir: dict[str, set[str]] = {}
+        self.py_rel: set[str] = set()
+        self.js_targets: set[str] = set()
+        self.tokens: set[str] = set()
+        for q, text in users.items():
+            for m in _FILE_TOKEN_RE.finditer(text):
+                self.tokens.add(m.group(1))
+            if _suffix(q) in _PY_EXTS:
+                names, rel = _py_imports(q, text)
+                self.py_names |= names
+                self.py_rel |= rel
+                self.py_bare_by_dir.setdefault(posixpath.dirname(q), set()).update(
+                    n for n in names if "." not in n)
+            else:
+                for m in _JS_SPEC_RE.finditer(text):
+                    spec = m.group(1)
+                    if spec.startswith("."):
+                        self.js_targets.add(
+                            posixpath.normpath(posixpath.join(posixpath.dirname(q), spec)))
+        # Manifests: (kind, path, payload) read once.
+        self.pkg_json: list[tuple[str, list[str]]] = []
+        self.packaging: list[str] = []            # meaningful lines, test config removed
+        self.texts_named: list[str] = []          # configs / Procfiles: whole text
+        self.docker_lines: list[str] = []
+        for q, text in texts.items():
+            if any(d in _TEST_DIRS or d in _OTHER_EXEMPT_DIRS for d in _parts(q)):
+                continue                  # a fixture package's manifest, not this one's
+            name = PurePosixPath(q).name
+            low = name.lower()
+            if low == "package.json":
+                strings = _package_json_strings(text)
+                if strings:
+                    self.pkg_json.append((q, strings))
+            elif low in _PY_PACKAGING:
+                self.packaging += _entry_lines(low, text)
+            elif (_suffix(q) in _CONFIG_EXTS and not runs_test_tooling(q)
+                  and _CMD_KEY_RE.search(text)):
+                self.texts_named.append(text)      # an MCP / server config
+            elif name == "Procfile":
+                self.texts_named.append(text)
+            elif name == "Dockerfile" or name.startswith("Dockerfile.") \
+                    or low.endswith(".dockerfile"):
+                self.docker_lines += [ln for ln in text.split("\n")
+                                      if re.match(r"\s*(?:CMD|ENTRYPOINT)\b", ln)]
+        self.packaging_text = "\n".join(self.packaging)
+
+    def imported(self, path: str) -> bool:
+        if _suffix(path) in _PY_EXTS:
+            mods = _module_names(path)
+            own = posixpath.normpath(str(PurePosixPath(path).with_suffix("")))
+            if PurePosixPath(path).stem == "__init__":
+                own = posixpath.normpath(str(PurePosixPath(path).parent))
+            if own in self.py_rel or any(m in self.py_names for m in mods[:-1]):
+                return True
+            stem = mods[-1] if mods else ""
+            d = posixpath.dirname(path)
+            # a sibling / top-level module imported by bare name
+            if stem in self.py_bare_by_dir.get(d, ()):
+                return True
+            return not d and stem in self.py_names
+        own = posixpath.normpath(path)
+        no_ext = posixpath.splitext(own)[0]
+        cands = {own, no_ext}
+        if PurePosixPath(no_ext).name == "index":
+            cands.add(posixpath.dirname(no_ext))   # `require('./tests')` -> tests/index
+        return bool(cands & self.js_targets)
+
+    def code_names(self, path: str) -> bool:
+        """Runtime code names the file as one to run (``runpy.run_path('test_x.py')``,
+        ``spawn('node', ['tests/run.js'])``)."""
+        target = path if _in_test_dir(path) else PurePosixPath(path).name
+        return any(t == target or t.endswith("/" + target) for t in self.tokens)
+
+    def manifests_name(self, path: str) -> bool:
+        named = _named_re(path)
+        stem = _stem(path)
+        mods = [n for n in _module_names(path) if "." in n] + (
+            [] if _in_test_dir(path) else [stem])
+        if self.packaging_text:
+            if named.search(self.packaging_text):
+                return True
+            if mods and re.search(r"(?<![\w.])(?:" + "|".join(re.escape(m) for m in mods)
+                                  + r")(?![\w])", self.packaging_text):
+                return True
+        if any(named.search(t) for t in self.texts_named):
             return True
-    return False
+        if any(named.search(ln) for ln in self.docker_lines):
+            return True
+        for manifest, strings in self.pkg_json:
+            root = posixpath.dirname(manifest)
+            rel = posixpath.relpath(path, root) if root else path
+            if rel.startswith(".."):
+                continue
+            rel_no_ext = posixpath.splitext(rel)[0]
+            rel_named = _named_re(rel)
+            for sv in strings:
+                n = posixpath.normpath(sv.split("?")[0]) if sv.startswith(".") else sv
+                if n in (rel, rel_no_ext) or rel_named.search(sv):
+                    return True
+        return False
 
 
-def not_really_tests(texts: dict[str, str], *, runs_for_consumer: Callable[[str], bool]
+_FIND_PKGS_RE = re.compile(r"\bfind_(?:namespace_)?packages\s*\(([^)]*)\)")
+_CFG_FIND_RE = re.compile(r"^\s*packages\s*=\s*find(?:_namespace)?:", re.MULTILINE)
+_CFG_FIND_SECTION_RE = re.compile(r"^\s*\[options\.packages\.find\]([^\[]*)", re.MULTILINE)
+_TOML_FIND_RE = re.compile(r"^\s*\[tool\.setuptools\.packages\.find\]([^\[]*)",
+                           re.MULTILINE)
+_NARROWS_RE = re.compile(r"^\s*(?:exclude|where|include)\s*=", re.MULTILINE)
+_NAME_RE = re.compile(r"""\bname\s*=\s*['"]?([\w.-]+)""")
+
+
+def _find_all(args: str) -> bool:
+    """A ``find_packages(...)`` call that lists the root's top-level packages with no
+    exclude: no arguments, or only ``where='.'`` / ``'.'``."""
+    a = args.strip()
+    if not a:
+        return True
+    if "exclude" in a or "include" in a:
+        return False
+    return bool(re.fullmatch(r"""(?:where\s*=\s*)?['"]\.?/?['"]""", a))
+
+
+def import_name_test_dirs(texts: dict[str, str], *, wheel: bool = False,
+                          paths: set[str] | None = None) -> set[str]:
+    """Top-level ``tests`` / ``test`` packages (with ``__init__.py``) that are import
+    names: a wheel's top-level directory, or one the root packaging lists
+    (``packages=[...]``, ``find_packages()`` / ``packages = find:`` with no exclude, a
+    ``[tool.setuptools.packages.find]`` with no exclude, the project's own name)."""
+    out: set[str] = set()
+    for d in ("tests", "test"):
+        if f"{d}/__init__.py" not in (paths if paths is not None else texts):
+            continue
+        if wheel:
+            out.add(d)
+            continue
+        setup_py = texts.get("setup.py", "")
+        cfg = texts.get("setup.cfg", "")
+        toml = texts.get("pyproject.toml", "")
+        listed = re.compile(r"""\bpackages\s*=\s*\[[^\]]*['"]""" + d + r"""['"]""")
+        names = {m.group(1) for t in (setup_py, cfg, toml) for m in _NAME_RE.finditer(t)}
+        cfg_find = _CFG_FIND_RE.search(cfg) and not any(
+            _NARROWS_RE.search(m.group(1)) for m in _CFG_FIND_SECTION_RE.finditer(cfg))
+        if (listed.search(setup_py) or listed.search(toml) or cfg_find
+                or any(_find_all(m.group(1)) for m in _FIND_PKGS_RE.finditer(setup_py))
+                or any(not _NARROWS_RE.search(m.group(1))
+                       for m in _TOML_FIND_RE.finditer(toml))
+                or d in names):
+            out.add(d)
+    return out
+
+
+def _conftest_shipped(path: str, paths: set[str], wheel: bool) -> bool:
+    """A ``conftest.py`` outside a test directory inside an importable package (its
+    directory has ``__init__.py``), or anywhere in a wheel (installed as is)."""
+    if _in_test_dir(path):
+        return False
+    if wheel:
+        return True
+    parent = posixpath.dirname(path)
+    return bool(parent) and posixpath.join(parent, "__init__.py") in paths
+
+
+def not_really_tests(texts: dict[str, str], *, runs_for_consumer: Callable[[str], bool],
+                     wheel: bool = False, paths: Iterable[str] | None = None
                      ) -> set[str]:
     """Paths of judged (test-exempt) files that are not test code, or that non-test
     code imports or runs. ``runs_for_consumer(path)``: the scanner's own rule for a
-    file that is shipped code (not test / doc / example / CI / build tooling)."""
+    file that is shipped code (not test / doc / example / CI / build tooling).
+    ``wheel``: the tree is a PyPI wheel (installed as is). ``paths``: every path in
+    the tree, empty files included (an empty ``__init__.py`` has no text)."""
     judged_paths = [p for p in texts if judged(p)]
     if not judged_paths:
         return set()
     users = {q: t for q, t in texts.items()
              if _suffix(q) in _CODE_EXTS and not judged(q) and runs_for_consumer(q)}
+    existing = set(texts) | set(paths or ())
+    import_dirs = import_name_test_dirs(texts, wheel=wheel, paths=existing)
+    index: _Index | None = None
     out: set[str] = set()
     for p in judged_paths:
         text = texts.get(p) or ""
+        parts = PurePosixPath(p).parts
+        if len(parts) > 1 and parts[0] in import_dirs:
+            out.add(p)                    # the tests package is an import name
+            continue
+        if _stem(p) == "conftest":
+            if _conftest_shipped(p, existing, wheel):
+                out.add(p)
+            continue                      # pytest loads it; nothing else imports it
         if not is_test_code(p, text):
             out.add(p)
             continue
-        others = {q: t for q, t in users.items() if q != p}
-        used = (_py_imported(p, others) if _suffix(p) in _PY_EXTS
-                else _js_imported(p, others))
-        if used or any(_named_re(p).search(t) for t in others.values()) \
-                or _manifest_names(p, texts):
+        if index is None:
+            index = _Index(texts, users)
+        if index.imported(p) or index.code_names(p) or index.manifests_name(p):
             out.add(p)
     return out
