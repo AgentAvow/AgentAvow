@@ -51,6 +51,8 @@ from src.scanner.patterns import (
     SSRF_URL_INPUT_RE,
     UNSAFE_EXEC_PATTERNS,
     UNTRUSTED_INPUT_RE,
+    ZERO_WIDTH_RUN_NAME,
+    ZERO_WIDTH_RUN_RE,
 )
 from src.scanner.prefilter import AnyOf, LineFilter
 
@@ -3145,7 +3147,6 @@ def _scan_content(
     # the per-line `shell=True` rule must not double-report inside that call.
     consumed_until = -1
     suppressed_lines: set[int] = set()
-    declares_tools: bool | None = None  # lazily: does this file declare agent tools?
 
     # Inline Rust unit tests (`#[cfg(test)] mod tests { … }`) compile only for
     # `cargo test`: lines inside them are graded like a file under tests/.
@@ -3183,6 +3184,95 @@ def _scan_content(
     ]
     (secret_plan, exec_plan, deser_plan, fs_plan, exfil_plan, remote_plan, unicode_plan,
      injection_plan, obfuscation_plan) = ((p.table.get, p.default) for p in plans)
+    # Text an agent reads as prose (SKILL.md, AGENTS.md, a served tool description):
+    # `#` / `*` lines there are headings and bullets, not comments.
+    markdown_like = (is_metadata or metadata_text
+                     or Path(file_path).suffix.lower() in (".md", ".mdx", ".markdown"))
+
+    def _check_unicode(line: str, idx: int, stripped: str, *, in_comment: bool) -> None:
+        """Invisible / smuggled Unicode on one line (one finding per line)."""
+        for name, pattern, severity in unicode_plan[0](idx, unicode_plan[1]):
+            if in_comment and name.startswith("Zero-width"):
+                # A stray ZWSP pasted into a comment (`≥ 3.12.<ZWSP>`) changes no code
+                # and hides nothing; a RUN of zero-width characters is the hidden-text
+                # (steganography) shape, the same bar as shipped markdown.
+                if ZERO_WIDTH_RUN_RE.search(line) and not _is_allowlisted(
+                        file_path, ZERO_WIDTH_RUN_NAME, allowlist):
+                    findings.append(Finding(
+                        category="hidden_unicode", name=ZERO_WIDTH_RUN_NAME, severity="medium",
+                        file_path=file_path, line_number=idx + 1, snippet=stripped[:120]))
+                    break
+                continue
+            if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
+                if _is_allowlisted(file_path, name, allowlist):
+                    continue
+                effective_severity = severity
+                if name.startswith("Bidirectional") and _bidi_cannot_reorder_code(
+                        line, in_comment or idx in _string_state()[0], file_lang):
+                    # Trojan Source deceives a human reading CODE: the reordering is per
+                    # line. A line wholly inside a docstring / template / comment has no
+                    # code to reorder (bandit documents the attack in one); a minified
+                    # bundle line is not read by a reviewer (precision PR 2). A comment
+                    # line that opens or closes a block comment keeps its severity: the
+                    # "commenting-out" variant (`/*<RLO> } <LRI>if (admin)<PDI> */`).
+                    effective_severity = "low"
+                findings.append(Finding(
+                    category="hidden_unicode",
+                    name=name,
+                    severity=effective_severity,
+                    file_path=file_path,
+                    line_number=idx + 1,
+                    snippet=stripped[:120],
+                ))
+                break
+
+    declares_tools_memo: list[bool] = []
+
+    def _declares_tools() -> bool:
+        if not declares_tools_memo:
+            declares_tools_memo.append(_found(SSRF_TOOL_SURFACE_RE))
+        return declares_tools_memo[0]
+
+    def _check_injection(line: str, idx: int, stripped: str) -> None:
+        """Prompt injection / tool poisoning on one line (one finding per line)."""
+        # Check prompt injection / tool-description poisoning (metadata files also get the
+        # wider tool-poisoning shapes that would be noisy on code lines).
+        for name, pattern, severity in injection_plan[0](idx, injection_plan[1]):
+            if pattern.search(line):
+                if _is_allowlisted(file_path, name, allowlist):
+                    continue
+                # Downgrade in test/doc/infra files — EXCEPT manifest/skill metadata,
+                # which is the actual attack surface (a poisoned description is not a doc).
+                effective_severity = severity
+                if is_downgraded and not is_metadata and severity in ("critical", "high"):
+                    effective_severity = "medium"
+                # Precision PR 2: a bare `<instructions>` / `</system>` tag in a library's
+                # OWN prompt template (langchain's summarization prompt) structures text
+                # it sends to its own model call. It is a high only where an agent reads
+                # it as a tool definition: metadata files and files that declare tools.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and all(_INJECTION_TAG_ONLY_RE.fullmatch(mm.group(0))
+                                for mm in pattern.finditer(line))):
+                    if not _declares_tools():
+                        effective_severity = "medium"
+                # A "System prompt:" LABEL whose only content is a format placeholder
+                # (`"failed to prepend system prompt: %s"`, `f"System prompt:\n{sp}"`)
+                # carries no instruction itself: medium, never blocking.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and _system_prompt_label_only(line, pattern)):
+                    effective_severity = "medium"
+                findings.append(Finding(
+                    category="prompt_injection",
+                    name=name,
+                    severity=effective_severity,
+                    file_path=file_path,
+                    line_number=idx + 1,
+                    snippet=stripped[:120],
+                ))
+                return
+
     # A line no rule can match does nothing in the loop below unless it carries the
     # suppression marker (counted even when nothing matches), so only these lines run.
     if any(p.always_active for p in plans):
@@ -3205,9 +3295,19 @@ def _scan_content(
             in_test = idx in test_lines
             is_test_or_doc = file_test_or_doc or in_test
             is_downgraded = file_downgraded or in_test
-        # Skip comments (basic heuristic)
+        # Comment lines (basic heuristic) skip every rule group but hidden Unicode: an
+        # invisible / bidi character in a comment is still Trojan Source and still
+        # smuggles text past a reviewer to whoever (or whatever agent) reads the file.
+        # Prompt-injection rules stay off in code comments (no agent reads a comment as
+        # an instruction to it; a security library documents the phrases there). In
+        # markdown-like agent text (SKILL.md / AGENTS.md / a tool description) `#` and
+        # `*` open headings and bullets, which ARE the text an agent reads: no skip.
+        # (Code rule groups stay off on those lines, as before.)
         stripped = line.strip()
         if stripped.startswith(("#", "//", "*", "/*")):
+            _check_unicode(line, idx, stripped, in_comment=not markdown_like)
+            if markdown_like:
+                _check_injection(line, idx, stripped)
             continue
         # Only the code groups read is_prose, and a line none of their regexes matches
         # gives no finding either way: those lines skip the groups (and the
@@ -3728,67 +3828,9 @@ def _scan_content(
                 break
 
         # Check invisible / smuggled Unicode (dangerous anywhere — no downgrade)
-        for name, pattern, severity in unicode_plan[0](idx, unicode_plan[1]):
-            if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
-                if _is_allowlisted(file_path, name, allowlist):
-                    continue
-                effective_severity = severity
-                if name.startswith("Bidirectional") and _bidi_cannot_reorder_code(
-                        line, idx in _string_state()[0], file_lang):
-                    # Trojan Source deceives a human reading CODE: the reordering is per
-                    # line. A line wholly inside a docstring / template / block comment
-                    # has no code to reorder (bandit documents the attack in one); a
-                    # minified bundle line is not read by a reviewer (precision PR 2).
-                    effective_severity = "low"
-                findings.append(Finding(
-                    category="hidden_unicode",
-                    name=name,
-                    severity=effective_severity,
-                    file_path=file_path,
-                    line_number=line_num,
-                    snippet=stripped[:120],
-                ))
-                break
+        _check_unicode(line, idx, stripped, in_comment=False)
 
-        # Check prompt injection / tool-description poisoning (metadata files also get the
-        # wider tool-poisoning shapes that would be noisy on code lines).
-        for name, pattern, severity in injection_plan[0](idx, injection_plan[1]):
-            if pattern.search(line):
-                if _is_allowlisted(file_path, name, allowlist):
-                    continue
-                # Downgrade in test/doc/infra files — EXCEPT manifest/skill metadata,
-                # which is the actual attack surface (a poisoned description is not a doc).
-                effective_severity = severity
-                if is_downgraded and not is_metadata and severity in ("critical", "high"):
-                    effective_severity = "medium"
-                # Precision PR 2: a bare `<instructions>` / `</system>` tag in a library's
-                # OWN prompt template (langchain's summarization prompt) structures text
-                # it sends to its own model call. It is a high only where an agent reads
-                # it as a tool definition: metadata files and files that declare tools.
-                if (name == "Injected system/role directive" and effective_severity == "high"
-                        and not (is_metadata or metadata_text)
-                        and all(_INJECTION_TAG_ONLY_RE.fullmatch(mm.group(0))
-                                for mm in pattern.finditer(line))):
-                    if declares_tools is None:
-                        declares_tools = _found(SSRF_TOOL_SURFACE_RE)
-                    if not declares_tools:
-                        effective_severity = "medium"
-                # A "System prompt:" LABEL whose only content is a format placeholder
-                # (`"failed to prepend system prompt: %s"`, `f"System prompt:\n{sp}"`)
-                # carries no instruction itself: medium, never blocking.
-                if (name == "Injected system/role directive" and effective_severity == "high"
-                        and not (is_metadata or metadata_text)
-                        and _system_prompt_label_only(line, pattern)):
-                    effective_severity = "medium"
-                findings.append(Finding(
-                    category="prompt_injection",
-                    name=name,
-                    severity=effective_severity,
-                    file_path=file_path,
-                    line_number=line_num,
-                    snippet=stripped[:120],
-                ))
-                break
+        _check_injection(line, idx, stripped)
 
         # Check code obfuscation
         for name, pattern, severity in obfuscation_rules:
@@ -3842,6 +3884,33 @@ def _scan_content(
                                       is not None))),
                 ))
                 break
+
+    # Tool descriptions written in source (a FastMCP `@mcp.tool` docstring, a TS
+    # `server.tool("x", "<description>", …)`): read with the metadata scan's tool-poisoning
+    # shapes, on the description text only (src/scanner/tool_descriptions.py).
+    if file_lang in ("python", "javascript", "typescript") and not is_metadata \
+            and not metadata_text and not is_declaration:
+        from src.scanner.tool_descriptions import tool_description_hits
+        for hit in tool_description_hits(content, file_lang):
+            if _is_allowlisted(file_path, hit.name, allowlist):
+                continue
+            sev = hit.severity
+            if (file_downgraded or hit.line_number - 1 in test_lines) \
+                    and sev in ("critical", "high"):
+                sev = "medium"
+            # The description reading replaces the line engine's on that line.
+            findings = [f for f in findings if not (
+                f.category == "prompt_injection" and f.line_number == hit.line_number)]
+            findings.append(Finding(
+                category="prompt_injection",
+                name=hit.name,
+                severity=sev,
+                file_path=file_path,
+                line_number=hit.line_number,
+                snippet=hit.snippet,
+                remediation=_why("text in an agent tool's description (read by the model "
+                                 "that calls the tool)", "prompt_injection", "defect"),
+            ))
 
     # A suppressed line that fell through (it matched a critical/high PATTERN) but
     # classified as a capability or a low/medium is what the suppression was for.

@@ -590,6 +590,8 @@ def scan_artifact_files(
     from src.scanner.scan import (
         _MAX_FILE_SIZE,
         _OVERSIZED_WINDOW,
+        Finding,
+        _is_allowlisted,
         _is_build_tooling_file,
         _is_git_config_file,
         _is_git_hook_file,
@@ -602,6 +604,7 @@ def scan_artifact_files(
         _scan_oversized_text,
         _should_skip_path,
     )
+    from src.scanner.tool_descriptions import is_shipped_markdown, markdown_unicode_hits
 
     findings: list = []
     files_scanned = 0
@@ -677,6 +680,22 @@ def scan_artifact_files(
                     findings.extend(ast_findings)
                     if any(f.category == "install_hook" for f in ast_findings):
                         has_install_hook = True
+            continue
+
+        # README / markdown the package ships is the text a registry page, a tool picker
+        # and a coding agent read: hidden Unicode there (tag characters, bidi controls,
+        # zero-width runs) smuggles instructions past the human reviewing it. Agent
+        # metadata files (SKILL.md, AGENTS.md) already go through the full engine below.
+        # (A container image's /usr/share/doc is the base OS's, not the tool's text.)
+        if (not is_image and af.text and is_shipped_markdown(path)
+                and not _is_source_file(path) and not _skip(path)):
+            for hit in markdown_unicode_hits(af.text[:_MAX_FILE_SIZE]):
+                if _is_allowlisted(path, hit.name, allowlist):
+                    continue
+                findings.append(Finding(
+                    category="hidden_unicode", name=hit.name, severity=hit.severity,
+                    file_path=path, line_number=hit.line_number, snippet=hit.snippet,
+                ))
             continue
 
         # The 12-category static engine over every scannable source file, test / doc /
