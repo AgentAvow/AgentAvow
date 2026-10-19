@@ -456,8 +456,13 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
         # (a whole .env sent anywhere is caught by credential_flow, auth-only rule).
         from src.scanner.credential_flow import _EXTRACT_RE
         extracted = {n for m in _EXTRACT_RE.finditer(code) for n in m.groups() if n}
-        env_sev, env_bad = _classify_hosts(
-            _contents_reached(code, path=path), None, file_keys | extracted)
+        # The WHOLE contents to an unresolved / local host are critical ("dump"); one
+        # value pulled out of the .env there is high ("extracted").
+        keys = file_keys | extracted
+        whole = _classify_hosts(_contents_reached(code, path=path, whole=True), None, keys)
+        one = _classify_hosts(_contents_reached(code, path=path), None, keys, "extracted")
+        rank = {"critical": 0, "high": 1, None: 2}
+        env_sev, env_bad = min((whole, one), key=lambda r: rank[r[0]])
 
     out: list = []
     crit = [u for u in uses if u.severity == "critical"]
@@ -473,7 +478,7 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
         return out
     high = [u for u in uses if u.severity == "high"]
     if high or env_sev == "high":
-        keys = ", ".join(u.env_name for u in high[:3]) or ".env contents"
+        keys = ", ".join(u.env_name for u in high[:3]) or "a value read from your .env"
         named = sorted({h for u in high for h in u.destinations
                         if h != "?" and not _is_local_host(h)}
                        | {h for h in env_bad if h != "?" and not _is_local_host(h)})

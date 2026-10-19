@@ -491,8 +491,10 @@ def classify(hosts: list[str], env_name: str | None, file_keys: set[str],
       high: most often the skill's own backend, worth a look.
 
     ``klass`` overrides the key class: "dump" (the whole environment / a .env's
-    contents: strictest) or "computed" (``process.env[name]``: an unknown key; only a
-    hardcoded stranger host counts).
+    contents: strictest, critical even to an unresolved or local host), "extracted"
+    (one value pulled out of a .env: strict on hardcoded hosts, high on unresolved
+    ones) or "computed" (``process.env[name]``: an unknown key; only a hardcoded
+    stranger host counts).
 
     ``None`` = no defect."""
     others = sorted(file_keys - {env_name})
@@ -506,7 +508,12 @@ def classify(hosts: list[str], env_name: str | None, file_keys: set[str],
             crit.append(h)
             continue
         if h == "?" or is_local_host(h):
-            if klass != "computed":
+            # Configuring an endpoint is not agreeing to send it every secret you
+            # have: a whole .env / environment to an unresolved or local host is
+            # critical. One named key there is high.
+            if klass == "dump":
+                crit.append(h)
+            elif klass != "computed":
                 high.append(h)
             continue
         reg = registrable_domain(h)
@@ -516,7 +523,7 @@ def classify(hosts: list[str], env_name: str | None, file_keys: set[str],
             continue
         elif reg in _KNOWN_API_DOMAINS and any(host_matches_key(h, n) for n in others):
             continue
-        elif klass in ("vendor", "dump"):
+        elif klass in ("vendor", "dump", "extracted"):
             crit.append(h)
         elif reg in _MESSAGING_DOMAINS or _is_writeback_host(h, reg):
             high.append(h)
@@ -865,7 +872,7 @@ def _visible_names(flow: _Flow, tainted: Taint, line: int) -> set[str]:
 
 
 def _taint(flow: _Flow, seeds: Taint, funcs0: set[str] | None = None,
-           ) -> tuple[Taint, set[str]]:
+           barrier: re.Pattern[str] | None = None) -> tuple[Taint, set[str]]:
     """(tainted names with their scopes, functions whose return value is tainted).
 
     Scoped: a local assigned in one function does not taint a same-named local in
@@ -888,7 +895,8 @@ def _taint(flow: _Flow, seeds: Taint, funcs0: set[str] | None = None,
     for _ in range(6):
         grew = False
         for a in flow.assigns:
-            if _RHS_IS_REQUEST_RE.match(a.rhs) or not hit(a.rhs, a.line):
+            if _RHS_IS_REQUEST_RE.match(a.rhs) or (barrier and barrier.search(a.rhs)) \
+                    or not hit(a.rhs, a.line):
                 continue
             base = a.target.split(".")[0]
             if a.item or "." in a.target:
@@ -1260,11 +1268,20 @@ def env_file_reads(text: str, path: str | None = None) -> str:
     return "own" if seen else "none"
 
 
+# Pulling ONE value out of a file's contents (`raw.match(re)`, `re.search(…, raw)`,
+# `values.get(k)`, `dotenv_values(p)[k]`): what flows on is a single key, not the
+# whole file.
+_EXTRACT_ONE_RE = re.compile(
+    r"\.(?:match|exec|matchAll|get|getenv)\s*\(|\bre\.(?:search|match|fullmatch|findall)\s*\("
+    r"|\bdotenv_values\([^)]*\)\s*\[|\]\s*\[\s*[\"'][A-Z]")
+
+
 def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_FILE_RE,
-                     path: str | None = None) -> list[str]:
+                     path: str | None = None, whole: bool = False) -> list[str]:
     """Hosts the CONTENTS of a file whose path matches ``path_re`` reach ("?" =
     unresolved). A dotenv loader only writes os.environ; values read back from it are
-    judged by the key-flow rule, so os.environ / load_dotenv calls are not a send."""
+    judged by the key-flow rule, so os.environ / load_dotenv calls are not a send.
+    ``whole``: only flows of the whole contents (stop at a single-value extraction)."""
     flow = _flow(text, path)
     seeds: Taint = {}
     for a in flow.assigns:
@@ -1282,7 +1299,7 @@ def contents_reached(text: str, path_re: re.Pattern[str] = _ENV_FILE_RE,
             hosts.extend(_dest_hosts(flow, chunk, line))
     if not seeds:
         return hosts
-    tainted, funcs = _taint(flow, seeds)
+    tainted, funcs = _taint(flow, seeds, barrier=_EXTRACT_ONE_RE if whole else None)
     return hosts + _reached(flow, tainted, funcs, include_base=False)
 
 
