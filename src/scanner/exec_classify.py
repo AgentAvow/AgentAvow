@@ -50,6 +50,11 @@ CAPABILITY_LABELS: dict[str, str] = {
     CAP_PEM: "Handles PEM private-key markers (no key body present)",
     CAP_HEX: "Embeds long hex-escaped byte literals",
     CAP_INSTALLER: "Ships a one-time installer script that downloads and runs a remote script",
+    # Browser credential handling (src/scanner/browser_credentials.py)
+    "browser:session_read": "Reads cookies / storage state from the browser it drives",
+    "browser:session_persist": "Saves browser session state (cookies / storage) to disk",
+    "browser:real_profile": "Can run the browser with your real browser profile (your "
+                            "logged-in sessions)",
 }
 
 _URL_RE = re.compile(r"https?://", re.IGNORECASE)
