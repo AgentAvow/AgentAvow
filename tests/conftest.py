@@ -497,6 +497,11 @@ async def _clean_db_once():
             "  last_checked_at TIMESTAMPTZ"
             ")"
         ))
+        # tool_watches fingerprints (migrations t23, t25)
+        for _col in ("last_behavioral_digest", "last_icon_digest"):
+            await conn.execute(text(
+                f"ALTER TABLE tool_watches ADD COLUMN IF NOT EXISTS {_col} VARCHAR(128)"
+            ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_webhooks_active "
             "ON webhook_subscriptions (is_active)"

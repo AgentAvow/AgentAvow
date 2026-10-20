@@ -1133,6 +1133,63 @@ async def _watcher_hook(db, watcher_id):
     )).scalar_one_or_none()
 
 
+def _icon_alert_payload(w, new_score, old_fp, ws, decision: dict) -> dict:
+    """What the icon_change webhook carries: the old and new icon fingerprints and the
+    icon findings of the new scan (its current state, not a diff)."""
+    return {
+        "type": "agentavow.alert.icon_change",
+        "event": "icon_change",
+        "owner": w.owner,
+        "repo": w.repo,
+        "surface": getattr(w, "surface", "github") or "github",
+        "score": new_score,
+        "reason": "icon changed",
+        "old_icon_fingerprint": old_fp,
+        "new_icon_fingerprint": getattr(ws, "icon_digest", None),
+        "icon_findings": list(getattr(ws, "icon_findings", None) or []),
+        **decision,
+    }
+
+
+async def _icon_change_alert(db, w, new_score, old_fp, ws, decision: dict) -> None:
+    """Notify the watcher that a watched MCP server serves different icons: an in-app
+    watch_alert plus the signed webhook. Distinct from the definition-drift alert:
+    icons are outside the signed tool digest, so the grade and attestation are not
+    what changed."""
+    from datetime import datetime, timezone
+
+    from src.api.notification_router import create_notification
+
+    found = list(getattr(ws, "icon_findings", None) or [])
+    worst = next((f for sev in ("high", "medium", "low") for f in found
+                  if f.get("severity") == sev), None)
+    title = f"{w.owner}/{w.repo} — icon changed"
+    body = (
+        "A tool you're watching now shows different icons than at the last check. Icons"
+        " are not part of the signed tool definition, so the grade did not change for"
+        " this; check the new icon before you trust it."
+        + (f" New icon finding: {worst.get('name')}." if worst else "")
+        + f" Now: {w_decision_phrase(decision)}."
+    )
+    try:
+        await create_notification(
+            db, w.watcher_id, "watch_alert", title, body,
+            reference_id=f"{w.owner}/{w.repo}",
+        )
+    except Exception:
+        logger.exception("icon watch notification failed for %s/%s", w.owner, w.repo)
+    try:
+        hook = await _watcher_hook(db, w.watcher_id)
+        if hook is not None:
+            from src.api.account_webhook_router import deliver_to_hook
+
+            hook.last_status = await deliver_to_hook(
+                hook, _icon_alert_payload(w, new_score, old_fp, ws, decision))
+            hook.last_delivery_at = datetime.now(timezone.utc)
+    except Exception:
+        logger.debug("icon webhook delivery failed for %s/%s", w.owner, w.repo)
+
+
 async def _run_watch_rescan(limit: int = 200) -> None:
     from datetime import datetime, timezone
 
@@ -1187,6 +1244,11 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 w.last_score is not None and new_score is not None and new_score < w.last_score - 5
             )
             drift, baseline_digest = _watch_digest_state(w.last_manifest_digest, new_digest)
+            # Icons (live MCP): not in the signed digest, so a separate unsigned
+            # fingerprint. Same rules as the digest: no fingerprint this cycle is no
+            # change and keeps the baseline; a first observation sets it silently.
+            icon_changed, icon_baseline = _watch_digest_state(
+                getattr(w, "last_icon_digest", None), getattr(ws, "icon_digest", None))
             improved = (
                 w.last_score is not None and new_score is not None
                 and new_score > w.last_score + 5
@@ -1297,7 +1359,10 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 except Exception:
                     logger.debug(
                         "behavioral webhook delivery failed for %s/%s", w.owner, w.repo)
-            elif b_change == "improved":
+            if icon_changed:
+                await _icon_change_alert(
+                    db, w, new_score, getattr(w, "last_icon_digest", None), ws, w_decision)
+            if b_change == "improved":
                 # Findings went away — a lighter, positive note, not an alert.
                 try:
                     await create_notification(
@@ -1315,6 +1380,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 fresh.last_score = new_score
                 fresh.last_manifest_digest = baseline_digest
                 fresh.last_behavioral_digest = b_baseline
+                fresh.last_icon_digest = icon_baseline
                 fresh.last_checked_at = datetime.now(timezone.utc)
                 await db.commit()
     if held:

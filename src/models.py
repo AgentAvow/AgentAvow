@@ -2394,6 +2394,11 @@ class ToolWatch(Base):
     # Format: see src/jobs/scheduler.py:_behavioral_fingerprint. NULL until a block
     # has been observed (watches on surfaces with no sandbox tier stay NULL).
     last_behavioral_digest = Column(String(128), nullable=True)
+    # Live MCP watches: the unsigned fingerprint of the icons the server last served
+    # (src/scanner/mcp_icons.compute_icon_fingerprint). Icons are not in the signed
+    # tool-definition digest, so the re-scan loop compares this to alert "icon changed".
+    # NULL until observed (non-MCP watches stay NULL).
+    last_icon_digest = Column(String(128), nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_checked_at = Column(DateTime(timezone=True), nullable=True)
