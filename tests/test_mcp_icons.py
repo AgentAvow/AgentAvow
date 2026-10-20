@@ -585,3 +585,25 @@ def test_icon_payload_shape():
         "old_icon_fingerprint": FP_A, "new_icon_fingerprint": FP_B, "icon_findings": [],
         "decision": "safe",
     }
+
+
+# ── event handlers the old bounded tag regex missed (agentgraph-72 gate, #207) ─
+@pytest.mark.parametrize("svg", [
+    # a 10 KB attribute value before the handler (the old pattern stopped at 8,000 chars)
+    b'<svg xmlns="http://www.w3.org/2000/svg" data-x="' + b"a" * 10_000 + b'" onload="alert(1)"/>',
+    # a ">" inside a quoted value ended the old tag match early
+    b'<svg xmlns="http://www.w3.org/2000/svg" x="1>2" onload="alert(1)"/>',
+    b"<svg xmlns='http://www.w3.org/2000/svg' title='a<b>c' onerror='alert(1)'/>",
+    # a child element carrying the handler after a long, quote-heavy attribute
+    b'<svg><g style="' + b"x:y;" * 3_000 + b'"><rect width="1" onclick="x()"/></g></svg>',
+], ids=["10kb-attr", "gt-in-dquote", "lt-gt-in-squote", "long-style-child"])
+def test_handler_hidden_by_long_or_quoted_attribute_is_found(svg):
+    f = _found([_tool("t", _svg_uri(svg))])
+    assert any(x.severity == "high" and x.name.startswith("Icon carries active content")
+               for x in f), _sev(f)
+
+
+def test_handler_text_inside_a_quoted_value_is_not_a_handler():
+    # " onload=" appears only inside an attribute VALUE of a plain icon: still benign.
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" aria-label="no onload= here"><rect/></svg>'
+    assert _found([_tool("t", _svg_uri(svg))]) == []

@@ -68,7 +68,39 @@ _MAX_LOCATIONS_SHOWN = 5
 # Active content in an SVG/HTML icon.
 _SCRIPT_TAG = re.compile(r"<\s*script\b", re.I)
 _FRAME_TAG = re.compile(r"<\s*(?:iframe|embed|object|frame|frameset)\b", re.I)
-_TAG = re.compile(r"<[^<>]{1,8000}>")
+
+
+# A quoted attribute value; blanked before the handler check so "onload=" written inside
+# a value (aria-label="no onload= here") is not mistaken for an attribute.
+_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+
+
+def _start_tags(text: str):
+    """Each start tag in ``text``, from its ``<name`` to the ``>`` that really closes it:
+    quoted attribute values are skipped (a ``>`` inside ``x="1>2"`` does not end the
+    tag) and there is no length bound (a long attribute value cannot push a handler
+    out of view). Linear in ``text``; an unclosed tag runs to the end of the text."""
+    i, n = 0, len(text)
+    while True:
+        j = text.find("<", i)
+        if j < 0 or j + 1 >= n:
+            return
+        if not text[j + 1].isalpha():
+            i = j + 1
+            continue
+        k, quote = j + 1, ""
+        while k < n:
+            c = text[k]
+            if quote:
+                if c == quote:
+                    quote = ""
+            elif c in "\"'":
+                quote = c
+            elif c == ">":
+                break
+            k += 1
+        yield text[j:k + 1]
+        i = k + 1
 _EVENT_ATTR = re.compile(r"[\s\"'/]on[a-z]{3,}\s*=", re.I)
 _SCRIPT_URL = re.compile(r"(?:java|vb)script\s*:", re.I)
 # Outside content an SVG pulls in.
@@ -159,7 +191,7 @@ def active_content(text: str) -> tuple[list[str], list[str]]:
     outside: list[str] = []
     if _SCRIPT_TAG.search(text):
         active.append("<script>")
-    if any(_EVENT_ATTR.search(m.group()) for m in _TAG.finditer(text)):
+    if any(_EVENT_ATTR.search(_QUOTED.sub('""', tag)) for tag in _start_tags(text)):
         active.append("an on* event handler")
     if _SCRIPT_URL.search(_URL_JUNK.sub("", text)):
         active.append("a javascript: link")
