@@ -1290,6 +1290,12 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
     _bev = result_data.get("behavioral_evidence")
     if _bev:
         scan_block["behavioralEvidence"] = _bev
+    # Live MCP scans: the observation of the tools/list read (endpoint, TLS facts of the
+    # connection that served each page, every page, capture interval), bound to the
+    # same toolManifestDigest. Additive; omitted for every other surface.
+    _obs = result_data.get("mcp_observation")
+    if _obs:
+        scan_block["observation"] = _obs
     payload = {
         "@context": "https://schema.agentgraph.co/attestation/security/v1",
         "type": "SecurityPostureAttestation",
@@ -1444,6 +1450,8 @@ def _scan_result_to_dict(result: object) -> dict:
         "tool_digests": getattr(result, "tool_digests", {}) or {},
         "tool_manifest_digest": getattr(result, "tool_manifest_digest", None),
         "tool_list": list(getattr(result, "tool_list", []) or []),
+        # Live MCP scans: how tools/list was read (signed as scan.observation).
+        "mcp_observation": getattr(result, "mcp_observation", None),
         # Phase 0/1: recompute-discipline coverage block (surface, scan_depth,
         # db_snapshots, evidence_anchors) + the OSV/deps.dev supply-chain summary.
         "coverage": getattr(result, "coverage", {}) or {},

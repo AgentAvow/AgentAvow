@@ -837,10 +837,14 @@ class ResponseTooLargeError(Exception):
 class _CappedResponse:
     """The parts of an httpx response the session reads, from a capped streamed body."""
 
-    def __init__(self, status_code: int, headers, body: bytes, encoding: str | None) -> None:
+    def __init__(self, status_code: int, headers, body: bytes, encoding: str | None,
+                 tls: dict | None = None) -> None:
         self.status_code = status_code
         self.headers = headers
+        self.body = body
         self.text = body.decode(encoding or "utf-8", "replace")
+        # TLS facts of the connection this response arrived on (mcp_observation).
+        self.tls = tls
 
 
 async def _post_capped(client, url: str, *, limit: int | None = None, **kw):
@@ -854,12 +858,22 @@ async def _post_capped(client, url: str, *, limit: int | None = None, **kw):
         declared = resp.headers.get("content-length")
         if declared and declared.isdigit() and int(declared) > limit:
             raise ResponseTooLargeError(declared)
+        from src.scanner.mcp_observation import tls_facts
+        tls = tls_facts((getattr(resp, "extensions", None) or {}).get("network_stream"))
         buf = bytearray()
         async for chunk in resp.aiter_bytes():
             buf += chunk
             if len(buf) > limit:
                 raise ResponseTooLargeError(len(buf))
-        return _CappedResponse(resp.status_code, resp.headers, bytes(buf), resp.encoding)
+        return _CappedResponse(resp.status_code, resp.headers, bytes(buf), resp.encoding, tls)
+
+
+class _ListPageError(Exception):
+    """A ``*/list`` page came back as an HTTP error or without a JSON-RPC result."""
+
+
+# Pages of one list method read per session before the read is called partial.
+_MCP_MAX_PAGES = 20
 
 
 class McpSession:
@@ -917,35 +931,69 @@ class McpSession:
         return init.status_code
 
     async def list(self, method: str, key: str) -> list:
-        """The first page of ``method``'s ``key`` list ([] on any failure). Records the
-        methods that failed outright (``list_failed``: HTTP error, transport error, no
-        JSON-RPC result) and the ones whose answer said more pages exist
-        (``list_more_pages``: a ``nextCursor``), so a partial read is disclosed rather
-        than graded as the whole tool set."""
+        """Every page of ``method``'s ``key`` list, following ``nextCursor`` ([] when
+        the first page fails). Records the methods that failed outright (``list_failed``:
+        HTTP error, transport error, no JSON-RPC result), the ones read only in part
+        (``list_more_pages``: a later page failed, a cursor repeated, or the
+        ``_MCP_MAX_PAGES`` cap was reached), and per method the pages read
+        (``pages[method]``: request id, cursor hashes, item count, response hash, TLS
+        facts), so the whole paged list binds to one observation and a partial read is
+        disclosed rather than graded as the whole tool set."""
+        from src.scanner.mcp_observation import sha256_hex
         failed = self.__dict__.setdefault("list_failed", set())
         more = self.__dict__.setdefault("list_more_pages", set())
         too_large = self.__dict__.setdefault("list_too_large", set())
-        try:
-            resp = await _post_capped(
-                self._client, self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
-            if resp.status_code >= 400:
-                failed.add(method)
-                return []
-            doc = _parse_jsonrpc_body(resp.text)
-            result = (doc or {}).get("result") if isinstance(doc, dict) else None
-            if not isinstance(result, dict):
-                failed.add(method)
-                return []
-            if result.get("nextCursor"):
+        pages = self.__dict__.setdefault("pages", {}).setdefault(method, [])
+        items: list = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        for _ in range(_MCP_MAX_PAGES):
+            rid = self._next_id()
+            try:
+                resp = await _post_capped(
+                    self._client, self._url, headers=self._headers,
+                    json=_rpc(method, {"cursor": cursor} if cursor else {}, rid=rid))
+                if resp.status_code >= 400:
+                    raise _ListPageError
+                doc = _parse_jsonrpc_body(resp.text)
+                result = (doc or {}).get("result") if isinstance(doc, dict) else None
+                if not isinstance(result, dict):
+                    raise _ListPageError
+            except ResponseTooLargeError:
+                too_large.add(method)
+                (failed if not pages else more).add(method)
+                return items
+            except Exception:
+                (failed if not pages else more).add(method)
+                return items
+            page_items = result.get(key) or []
+            if not isinstance(page_items, list):
+                page_items = []
+            items.extend(page_items)
+            nxt = result.get("nextCursor")
+            nxt = nxt if isinstance(nxt, str) and nxt else None
+            body = getattr(resp, "body", None)
+            if body is None:
+                body = (getattr(resp, "text", "") or "").encode("utf-8")
+            if getattr(self, "retain_raw", False):  # packet generation only, never stored
+                self.__dict__.setdefault("raw_pages", {}).setdefault(method, []).append(body)
+            pages.append({
+                "requestId": rid,
+                "cursorSha256": sha256_hex(cursor) if cursor else None,
+                "nextCursorSha256": sha256_hex(nxt) if nxt else None,
+                "itemCount": len(page_items),
+                "responseSha256": sha256_hex(body),
+                "tls": getattr(resp, "tls", None),
+            })
+            if nxt is None:
+                return items
+            if nxt in seen:  # a cursor loop: stop, disclose the partial read
                 more.add(method)
-            return result.get(key) or []
-        except ResponseTooLargeError:
-            failed.add(method)
-            too_large.add(method)
-            return []
-        except Exception:
-            failed.add(method)
-            return []
+                return items
+            seen.add(nxt)
+            cursor = nxt
+        more.add(method)  # page cap reached
+        return items
 
     async def call_tool(self, name: str, arguments: dict, *, timeout: float) -> dict:
         """One ``tools/call``. Returns ``{ok, is_error, result, error, status}`` — ``ok``
@@ -1033,12 +1081,15 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
         # connect-time DNS lookup are otherwise two separate resolutions — a rebinding
         # host can pass the check then connect to an internal IP. The pinned transport
         # connects to the exact validated IP. (This endpoint is USER-supplied.)
+        from src.scanner.mcp_observation import build_observation, now_ms
         from src.ssrf import ssrf_safe_async_client
         async with ssrf_safe_async_client(timeout=_MCP_TIMEOUT, follow_redirects=False) as client:
             session = McpSession(client, url)
             if await session.initialize() >= 400 or session.init_status == 0:
                 return None
+            started = now_ms()
             tools = await session.list("tools/list", "tools")
+            finished = now_ms()
             resources = await session.list("resources/list", "resources")
             prompts = await session.list("prompts/list", "prompts")
             too_large = set(getattr(session, "list_too_large", set()))
@@ -1062,6 +1113,12 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
                 out["tools_more_pages"] = True
             if too_large:
                 out["lists_too_large"] = sorted(too_large)
+            tool_pages = (getattr(session, "pages", {}) or {}).get("tools/list") or []
+            if tool_pages:
+                out["observation"] = build_observation(
+                    url, tool_pages, started=started, finished=finished,
+                    complete=not ({"tools/list"} & (getattr(session, "list_more_pages", set())
+                                                    | getattr(session, "list_failed", set()))))
             return out
     except Exception:
         return None
