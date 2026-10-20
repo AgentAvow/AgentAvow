@@ -32,6 +32,7 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 
+from src.bridges import mcp_response_counter as _counter
 from src.bridges.mcp_app_view import trust_card_html
 from src.scanner.verdict import DECISION_VALUES as _DECISION_VALUES
 from src.scanner.verdict import SAFE_BAR as _SHARED_SAFE_BAR
@@ -360,7 +361,10 @@ def _name_not_resolved(name: str, candidates: list[dict]) -> str:
 
 async def _bump(metric: str) -> None:
     """Increment a Directory-connector usage counter. Best-effort — never raises,
-    so instrumentation can never break a tool call."""
+    so instrumentation can never break a tool call. A health-probe request (see
+    src/jobs/mcp_health) is not usage and bumps nothing."""
+    if _HEALTH_PROBE.get():
+        return
     try:
         from src.api.metrics_dashboard_router import bump_metric
         await bump_metric(f"mcp:{metric}")
@@ -383,6 +387,11 @@ _CLIENT_IP: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 _CLIENT_UA: contextvars.ContextVar[str] = contextvars.ContextVar(
     "agentavow_mcp_client_ua", default=""
+)
+# True for our own health probe (src/jobs/mcp_health), proven by an HMAC header:
+# its requests bump no usage counter and are not counted as client traffic.
+_HEALTH_PROBE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "agentavow_mcp_health_probe", default=False
 )
 
 # Order matters: "claude-code" must be tested before "claude" (it contains it).
@@ -428,6 +437,8 @@ async def _record_caller() -> None:
     """Add this tool call's machine to today's distinct-callers HLL, overall and per
     surface, so the dashboard can say how many machines invoked the connector rather
     than how many calls arrived. Best-effort — never raises."""
+    if _HEALTH_PROBE.get():
+        return
     try:
         from src.api.metrics_dashboard_router import record_unique
 
@@ -2448,21 +2459,50 @@ async def _run_tool(
 # Streamable HTTP transport — stateless JSON responses (nginx-friendly)
 # --------------------------------------------------------------------------- #
 session_manager = StreamableHTTPSessionManager(app=server, json_response=True, stateless=True)
+_PROBE_HEADER_B = _counter.PROBE_HEADER.encode()
 
 
 async def mcp_asgi_app(scope, receive, send) -> None:
     # Capture the request's User-Agent → distribution surface for per-surface
     # metrics. Fail-open: any hiccup leaves the contextvar at its "other" default.
+    probe, version = False, None
     try:
         ua = ""
         for k, v in scope.get("headers") or []:
             if k == b"user-agent":
                 ua = v.decode("latin-1", "replace")
-                break
+            elif k == b"mcp-protocol-version":
+                version = v.decode("latin-1", "replace")
+            elif k == _PROBE_HEADER_B:
+                probe = _counter.is_probe_marker(v)
         _SURFACE.set(_surface_from_ua(ua))
         _CLIENT_UA.set(ua)
         client = scope.get("client")
         _CLIENT_IP.set(str(client[0]) if client else "")
+        _HEALTH_PROBE.set(probe)
     except Exception:
         pass
-    await session_manager.handle_request(scope, receive, send)
+    if (probe or scope.get("type") != "http" or scope.get("method") != "POST"
+            or not _counter.counting_enabled()):
+        await session_manager.handle_request(scope, receive, send)
+        return
+    # Count what this POST was answered with (src/bridges/mcp_response_counter) for the
+    # passive reject-rate alert. Observes the response only; never alters or delays it.
+    seen: dict = {"status": 0, "body": bytearray()}
+
+    async def _observe(message) -> None:
+        try:
+            if message["type"] == "http.response.start":
+                seen["status"] = int(message.get("status") or 0)
+            elif (message["type"] == "http.response.body" and seen["status"] >= 400
+                  and len(seen["body"]) < _counter.BODY_CAP):
+                seen["body"] += (message.get("body") or b"")[:_counter.BODY_CAP]
+        except Exception:
+            pass
+        await send(message)
+
+    try:
+        await session_manager.handle_request(scope, receive, _observe)
+    finally:
+        _counter.record_response(seen["status"] or 500, bytes(seen["body"]),
+                                 header_version=version, surface=_SURFACE.get())

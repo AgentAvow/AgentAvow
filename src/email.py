@@ -363,3 +363,19 @@ async def send_moderation_appeal_decision_email(
     return await send_email(
         to, "AgentAvow: Appeal decision", html,
     )
+
+
+async def send_ops_alert_email(subject: str, html_body: str, *, to: str | None = None) -> bool:
+    """An operations alert to the admin (``to``, else ``settings.admin_email``) over the
+    app's normal transport (``send_email``: Resend when RESEND_API_KEY is set, else SMTP).
+    Returns whether it was sent (or queued); never raises. Callers keep secrets out of
+    ``subject`` and ``html_body``."""
+    recipient = (to or settings.admin_email or "").strip()
+    if not recipient:
+        logger.warning("ops alert not emailed (no recipient configured): %s", subject)
+        return False
+    try:
+        return bool(await send_email(recipient, subject, html_body))
+    except Exception:
+        logger.warning("ops alert email failed: %s", subject, exc_info=True)
+        return False
