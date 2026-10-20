@@ -72,3 +72,58 @@ async def test_post_capped_raises_past_the_limit():
 def test_default_cap_is_generous_for_real_servers():
     # A large real tools/list is a few hundred KB; the cap must sit well above that.
     assert ms.MCP_MAX_RESPONSE_BYTES >= 2 * 1024 * 1024
+
+
+# ── a refused tools/list must never read Safe (agentgraph-72's #208 gate) ────────────
+def _server(tools_body: bytes, *, with_resources: bool = False):
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = json.loads(request.content or b"{}").get("method")
+        if method == "initialize":
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "serverInfo": {"name": "padded", "version": "1"}}})
+        if method == "tools/list":
+            return httpx.Response(200, stream=httpx.ByteStream(tools_body))
+        if method == "resources/list" and with_resources:
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": 2, "result": {
+                "resources": [{"uri": "x://a", "name": "a"}]}})
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 2, "result": {}})
+    return handler
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_resources", [False, True], ids=["tools-only", "with-resources"])
+async def test_padded_tool_list_is_flagged_not_dropped(monkeypatch, with_resources):
+    monkeypatch.setattr(ms, "MCP_MAX_RESPONSE_BYTES", 10_000)
+    handler = _server(_tools_doc(50, pad=1_000), with_resources=with_resources)
+    import src.ssrf as ssrf
+    monkeypatch.setattr(ssrf, "validate_url_https", lambda url, *a, **k: url)
+    monkeypatch.setattr(ssrf, "ssrf_safe_async_client",
+                        lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    data = await ms.fetch_mcp_tools(URL)
+    assert data is not None, "a server whose only list was refused must still be graded"
+    assert data["lists_too_large"] == ["tools/list"]
+    assert data.get("tools_list_failed") is True
+
+
+def test_oversize_findings_severity():
+    f = ms.oversize_findings(["tools/list", "prompts/list"])
+    sev = {x.file_path: x.severity for x in f}
+    assert sev == {"server:tools/list": "high", "server:prompts/list": "medium"}
+    assert ms.oversize_findings(None) == [] and ms.oversize_findings([]) == []
+
+
+@pytest.mark.asyncio
+async def test_scan_of_a_padded_tool_list_reads_review(monkeypatch):
+    async def fake_fetch(url):
+        return {"tools": [], "resources": [], "prompts": [],
+                "server_info": {"name": "padded"}, "tools_list_failed": True,
+                "lists_too_large": ["tools/list"]}
+    monkeypatch.setattr(ms, "fetch_mcp_tools", fake_fetch)
+    from src.scanner.local_scan import decision_for_result
+    from src.scanner.scan import scan_mcp
+    res = await scan_mcp(URL)
+    assert any(f.file_path == "server:tools/list" and f.severity == "high"
+               for f in res.findings)
+    d = decision_for_result(res)
+    assert d.decision == "review", (d.decision, d.reason)

@@ -768,6 +768,29 @@ async def _client_view(client, url: str, scanner_digests: dict[str, str]) -> dic
             "tools": agent_tools if differs else []}
 
 
+def oversize_findings(lists_too_large) -> list:
+    """Findings for lists the server sent past MCP_MAX_RESPONSE_BYTES (agentgraph-72's
+    #208 gate). A refused tools/list is HIGH: its definitions could not be inspected, yet
+    an agent client still receives and acts on them, so padding the list must never read
+    Safe. An oversized resources/ or prompts/list is MEDIUM (not tool definitions)."""
+    out = []
+    mb = MCP_MAX_RESPONSE_BYTES // (1024 * 1024)
+    for method in sorted(set(lists_too_large or ())):
+        is_tools = method == "tools/list"
+        out.append(_finding(
+            "obfuscation",
+            f"{'Tool' if is_tools else method.split('/')[0].capitalize()} list too large "
+            f"to read (over {mb} MB)",
+            "high" if is_tools else "medium",
+            f"server:{method}",
+            "The server's answer was larger than the scanner reads, so these definitions "
+            "were not inspected, while an agent that connects still receives all of them. "
+            "Review the definitions yourself before connecting; a real server's list is "
+            "a few hundred KB.",
+        ))
+    return out
+
+
 def client_view_findings(view: dict | None, scanner_tools: list | None) -> list:
     """The finding for a server that serves agents different tools than the scanner."""
     if not view or not view.get("differs"):
@@ -888,6 +911,7 @@ class McpSession:
         than graded as the whole tool set."""
         failed = self.__dict__.setdefault("list_failed", set())
         more = self.__dict__.setdefault("list_more_pages", set())
+        too_large = self.__dict__.setdefault("list_too_large", set())
         try:
             resp = await _post_capped(
                 self._client, self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
@@ -902,6 +926,10 @@ class McpSession:
             if result.get("nextCursor"):
                 more.add(method)
             return result.get(key) or []
+        except ResponseTooLargeError:
+            failed.add(method)
+            too_large.add(method)
+            return []
         except Exception:
             failed.add(method)
             return []
@@ -1000,7 +1028,8 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
             tools = await session.list("tools/list", "tools")
             resources = await session.list("resources/list", "resources")
             prompts = await session.list("prompts/list", "prompts")
-            if not tools and not resources and not prompts:
+            too_large = set(getattr(session, "list_too_large", set()))
+            if not tools and not resources and not prompts and not too_large:
                 return None
             view = None
             if tools:
@@ -1018,6 +1047,8 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
                 out["tools_list_failed"] = True
             if "tools/list" in getattr(session, "list_more_pages", set()):
                 out["tools_more_pages"] = True
+            if too_large:
+                out["lists_too_large"] = sorted(too_large)
             return out
     except Exception:
         return None
