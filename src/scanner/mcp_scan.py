@@ -787,6 +787,45 @@ def client_view_findings(view: dict | None, scanner_tools: list | None) -> list:
     )]
 
 
+# Most a remote MCP server may send in one response to the scanner. A tools/list for a
+# large real server is a few hundred KB; anything past this is refused (the read stops,
+# the call is recorded as failed) so a hostile server cannot stream an unbounded body
+# into the scanner's memory.
+MCP_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
+class ResponseTooLargeError(Exception):
+    """A remote MCP response exceeded ``MCP_MAX_RESPONSE_BYTES``."""
+
+
+class _CappedResponse:
+    """The parts of an httpx response the session reads, from a capped streamed body."""
+
+    def __init__(self, status_code: int, headers, body: bytes, encoding: str | None) -> None:
+        self.status_code = status_code
+        self.headers = headers
+        self.text = body.decode(encoding or "utf-8", "replace")
+
+
+async def _post_capped(client, url: str, *, limit: int | None = None, **kw):
+    """POST and read at most ``limit`` bytes of the body; raises ResponseTooLargeError past
+    it. A client without ``stream`` (test fakes) falls back to a plain ``post``."""
+    if limit is None:
+        limit = MCP_MAX_RESPONSE_BYTES
+    if not hasattr(client, "stream"):
+        return await client.post(url, **kw)
+    async with client.stream("POST", url, **kw) as resp:
+        declared = resp.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > limit:
+            raise ResponseTooLargeError(declared)
+        buf = bytearray()
+        async for chunk in resp.aiter_bytes():
+            buf += chunk
+            if len(buf) > limit:
+                raise ResponseTooLargeError(len(buf))
+        return _CappedResponse(resp.status_code, resp.headers, bytes(buf), resp.encoding)
+
+
 class McpSession:
     """One Streamable-HTTP MCP session over a (rebind-safe) httpx client: ``initialize``
     + ``notifications/initialized``, then ``tools/list`` / ``tools/call`` on the same
@@ -812,7 +851,7 @@ class McpSession:
         """Run the handshake; returns the HTTP status of ``initialize`` (0 on a transport
         error). ``server_info`` and ``session_id`` are set on success."""
         try:
-            init = await self._client.post(self._url, headers=self._headers, json=_rpc(
+            init = await _post_capped(self._client, self._url, headers=self._headers, json=_rpc(
                 "initialize",
                 {
                     "protocolVersion": _MCP_PROTOCOL_VERSION,
@@ -834,8 +873,8 @@ class McpSession:
             self._headers["mcp-session-id"] = session
         # notifications/initialized (no id — a notification)
         try:
-            await self._client.post(
-                self._url, headers=self._headers,
+            await _post_capped(
+                self._client, self._url, headers=self._headers,
                 json=_rpc("notifications/initialized", {}, rid=None))
         except Exception:
             pass
@@ -850,8 +889,8 @@ class McpSession:
         failed = self.__dict__.setdefault("list_failed", set())
         more = self.__dict__.setdefault("list_more_pages", set())
         try:
-            resp = await self._client.post(
-                self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
+            resp = await _post_capped(
+                self._client, self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
             if resp.status_code >= 400:
                 failed.add(method)
                 return []
@@ -877,8 +916,8 @@ class McpSession:
                      "status": None}
         try:
             resp = await asyncio.wait_for(
-                self._client.post(
-                    self._url, headers=self._headers, timeout=timeout,
+                _post_capped(
+                    self._client, self._url, headers=self._headers, timeout=timeout,
                     json=_rpc("tools/call", {"name": name, "arguments": arguments},
                               rid=self._next_id()),
                 ),
