@@ -330,7 +330,7 @@ def finding_where(i: dict) -> str:
     if cat == "dependency":
         return WHERE_DEPENDENCY
     path = str(i.get("file_path") or "").replace("\\", "/").lower()
-    if path.startswith(("tool:", "prompt:", "resource:")):
+    if path.startswith(("tool:", "prompt:", "resource:", "server:")):
         return WHERE_TOOLS
     parts = [p for p in path.split("/") if p]
     name = parts[-1] if parts else ""

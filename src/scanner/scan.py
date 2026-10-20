@@ -190,6 +190,9 @@ class ScanResult:
     # path -> "sha256:..."; on the live MCP surface the key is "tool:<name>"
     tool_digests: dict[str, str] = field(default_factory=dict)
     tool_manifest_digest: str | None = None  # combined digest folded into the attestation
+    # Live MCP scans: unsigned fingerprint of the served icons (src/scanner/mcp_icons.py),
+    # compared by the watch loop. Never signed, never in tool_digests / the manifest.
+    icon_fingerprint: str | None = None
     # The served tools as a display list: name + declared annotations (+ digest where
     # we hold the full definition). Unsigned; see src/scanner/mcp_tool_list.py.
     tool_list: list[dict] = field(default_factory=list)
@@ -5531,7 +5534,11 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # single critical must always bite, however large the repo. Not applied on the
     # graduated curve, where each medium has a fixed cost.
     if not graduated and result.files_scanned > 0 and total_findings > 0:
-        affected_files = len({f.file_path for f in code_findings})
+        # A low MCP icon finding (third-party host, oversized data: URI) is not a file
+        # with an issue and deducts nothing; it must not widen the ratio either.
+        affected_files = len({f.file_path for f in code_findings
+                              if not (f.severity == "low"
+                                      and str(f.file_path or "").endswith(":icons"))})
         ratio = affected_files / result.files_scanned
         # Scale factor: 0.4 at 1% affected, 1.0 at 25%+ affected
         scale = min(1.0, 0.4 + ratio * 2.4)
@@ -6760,6 +6767,7 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         resources=data.get("resources"),
         prompts=data.get("prompts"),
         server_info=data.get("server_info"),
+        server_url=endpoint_url,
     )
     result.findings = mcp.findings
     # A server that serves agents different tools than it served the scanner: grade the
@@ -6770,7 +6778,8 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     if _view and _view.get("differs"):
         result.findings.extend(client_view_findings(_view, data.get("tools")))
         _seen = {(f.name, f.file_path) for f in result.findings}
-        for f in analyze_mcp(_view.get("tools"), server_info=data.get("server_info")).findings:
+        for f in analyze_mcp(_view.get("tools"), server_info=data.get("server_info"),
+                             server_url=endpoint_url).findings:
             if (f.name, f.file_path) not in _seen:
                 result.findings.append(f)
     # Pin the served tool definitions, one digest per tool name. A later scan whose
@@ -6778,6 +6787,13 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     # gate can bind an authorization to the named tool that was graded.
     result.tool_digests = compute_tool_digests(data.get("tools"))
     result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
+    # Icons are not in the signed digests (they stay agentavow.mcp-tool-definition.v1).
+    # Their own fingerprint is an unsigned watch signal: a changed icon alerts a watcher
+    # without touching the attestation. None when tools/list was not read.
+    from src.scanner.mcp_icons import compute_icon_fingerprint
+    result.icon_fingerprint = (
+        None if data.get("tools_list_failed")
+        else compute_icon_fingerprint(data.get("tools"), data.get("server_info")))
     from src.scanner.mcp_tool_list import build_tool_list
     result.tool_list = build_tool_list(data.get("tools"))
     result.files_scanned = mcp.tool_count

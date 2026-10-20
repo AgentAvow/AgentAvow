@@ -13,7 +13,9 @@ Detectors (all deterministic from the JSON alone):
     descriptions + resource/prompt text (reuses prompt_injection + hidden_unicode);
   * input-schema risk — freeform/dangerous params, ``additionalProperties: true``;
   * dangerous-capability taxonomy per tool + lethal-trifecta across the tool SET;
-  * annotation truthfulness — ``readOnlyHint`` that lies about a write/exec tool.
+  * annotation truthfulness — ``readOnlyHint`` that lies about a write/exec tool;
+  * icons — active or outside content, insecure / private / third-party hosts
+    (``src.scanner.mcp_icons``; never fetched, never part of a digest).
 """
 from __future__ import annotations
 
@@ -428,8 +430,12 @@ def analyze_mcp(
     resources: list[dict] | None = None,
     prompts: list[dict] | None = None,
     server_info: dict | None = None,
+    server_url: str | None = None,
 ) -> McpScanResult:
-    """Score an MCP server's advertised surface. Pure + deterministic."""
+    """Score an MCP server's advertised surface. Pure + deterministic.
+
+    ``server_url`` is the endpoint that was scanned; the icon checks use its host as
+    the server's own site (``src.scanner.mcp_icons``). Nothing is fetched."""
     tools = tools or []
     resources = resources or []
     prompts = prompts or []
@@ -557,6 +563,13 @@ def analyze_mcp(
         if isinstance(p, dict):
             result.findings.extend(_scan_text_for_injection(
                 str(p.get("description", "") or ""), f"prompt:{p.get('name', '?')}"))
+
+    # icons (MCP 2025-11-25): active content, outside content, non-https / private /
+    # third-party hosts, non-image or oversized data: URIs. Not part of any digest.
+    from src.scanner.mcp_icons import icon_findings
+    result.findings.extend(icon_findings(
+        tools, resources=resources, prompts=prompts, server_info=server_info,
+        server_url=server_url))
 
     # lethal trifecta across the whole tool SET: private-data access + external
     # comms + (implicit) untrusted input → the classic exfiltration chain.

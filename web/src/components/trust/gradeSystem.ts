@@ -301,7 +301,7 @@ export function findingWhere(i: Obj): string {
   if (i.category === 'install_hook') return ' in its install script'
   if (i.category === 'dependency') return ' in a dependency'
   const path = String(i.file_path ?? '').replace(/\\/g, '/').toLowerCase()
-  if (path.startsWith('tool:') || path.startsWith('prompt:') || path.startsWith('resource:')) {
+  if (['tool:', 'prompt:', 'resource:', 'server:'].some((p) => path.startsWith(p))) {
     return ' in its tool definitions'
   }
   const parts = path.split('/').filter((p) => p)
