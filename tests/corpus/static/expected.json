@@ -2699,7 +2699,7 @@
    "score": 82,
    "label": "safe",
    "reason": "nothing found; little code to inspect",
-   "files_scanned": 6,
+   "files_scanned": 5,
    "severity": {
     "critical": 0,
     "high": 0,

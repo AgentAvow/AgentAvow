@@ -62,11 +62,19 @@ _PY_TEST_RE = re.compile(
     r"|^\s*(?:async\s+)?def\s+test(?:_\w*)?\s*\(|^\s*class\s+\w+\s*\([^)]*TestCase\b",
     re.MULTILINE)
 # Calls of a test runner's globals, also compiled (`(0, vitest_1.describe)(...`).
-_JS_TEST_RE = re.compile(
-    r"(?<![\w$])(?:describe|it|test|suite|beforeEach|beforeAll|afterEach|afterAll)"
-    r"(?:\.(?:each|only|skip|todo|concurrent)\b[^(]*)?\s*\)?\s*\("
-    r"|(?:require\s*\(\s*|from\s+)['\"](?:node:test|vitest|mocha|ava|tap|@jest/globals|"
-    r"chai|uvu|jest|sinon|supertest|@testing-library/[\w-]+)['\"]", re.MULTILINE)
+_JS_TEST_CALL = (
+    r"(?:describe|it|test|suite|beforeEach|beforeAll|afterEach|afterAll)"
+    r"(?:\.(?:each|only|skip|todo|concurrent)\b[^(]*)?\s*\)?\s*\(")
+_JS_RUNNER_IMPORT = (
+    r"(?:require\s*\(\s*|from\s+)['\"](?:node:test|vitest|mocha|ava|tap|@jest/globals|"
+    r"chai|uvu|jest|sinon|supertest|@testing-library/[\w-]+)['\"]")
+_JS_TEST_RE = re.compile(r"(?<![\w$])" + _JS_TEST_CALL + "|" + _JS_RUNNER_IMPORT,
+                         re.MULTILINE)
+# For a `test-*` name (a looser convention, also used for library modules such as
+# yaml's dist/test-events.js): a runner global called as a bare name; a method call
+# such as `/\d$/.test(x)` is not one.
+_JS_STRICT_TEST_RE = re.compile(r"(?<![\w$.])" + _JS_TEST_CALL + "|" + _JS_RUNNER_IMPORT,
+                                re.MULTILINE)
 
 _PY_IMPORT_RE = re.compile(
     r"^[ \t]*import[ \t]+([\w.]+(?:[ \t]+as[ \t]+\w+)?(?:[ \t]*,[ \t]*[\w.]+"
@@ -136,15 +144,28 @@ def judged(path: str) -> bool:
     stem = _stem(path).lower()
     if any(p in _OTHER_EXEMPT_DIRS for p in _parts(path)):
         return False
-    return (_in_test_dir(path) or stem.startswith("test_") or stem.endswith(("_test", "_spec"))
+    return (_in_test_dir(path) or stem.startswith(("test_", "test-"))
+            or stem.endswith(("_test", "_spec"))
             or stem == "conftest" or ".test." in name or ".spec." in name)
+
+
+# A hand-rolled JS / TS harness (Network-AI's test-phase20.ts): `function testX()`
+# definitions (the JS form of Python's `def test_x`) together with assertion calls.
+_JS_HARNESS_DEF_RE = re.compile(
+    r"^[ \t]*(?:export[ \t]+)?(?:async[ \t]+)?function[ \t]*\*?[ \t]*test[A-Z0-9_]\w*"
+    r"[ \t]*\(", re.MULTILINE)
+_JS_ASSERT_RE = re.compile(r"(?<![\w$.])(?:assert\w*|expect)\s*\(")
 
 
 def is_test_code(path: str, text: str) -> bool:
     if _in_test_dir(path):
         return True
-    rx = _PY_TEST_RE if _suffix(path) in _PY_EXTS else _JS_TEST_RE
-    return bool(rx.search(text or ""))
+    text = text or ""
+    if _suffix(path) in _PY_EXTS:
+        return bool(_PY_TEST_RE.search(text))
+    rx = _JS_STRICT_TEST_RE if _stem(path).lower().startswith("test-") else _JS_TEST_RE
+    return bool(rx.search(text)
+                or (_JS_HARNESS_DEF_RE.search(text) and _JS_ASSERT_RE.search(text)))
 
 
 def _module_names(path: str) -> list[str]:
@@ -198,6 +219,17 @@ _RUNNER_CALL_RE = re.compile(
 _IMPORTS_TEST_FRAMEWORK_RE = re.compile(
     r"^\s*(?:import|from)\s+(?:unittest|pytest)\b", re.MULTILINE)
 _CALLS_TESTS_RE = re.compile(r"\bTestCase\s*\(\s*\)[\s\S]*?\.test_\w+\s*\(")
+
+
+# A JS / TS script that runs the suite (Network-AI's run-tests.ts, named only by its
+# `test:all` script). Counted as test tooling only while nothing that runs names it
+# (``not_really_tests``).
+_JS_RUNNER_STEMS = frozenset({"run-tests", "run_tests", "runtests", "test-runner",
+                              "test_runner", "testrunner", "run-test", "run_test"})
+
+
+def _is_js_runner_name(path: str) -> bool:
+    return _suffix(path) in _JS_EXTS and _stem(path).lower() in _JS_RUNNER_STEMS
 
 
 def is_test_runner(path: str, text: str) -> bool:
@@ -720,6 +752,15 @@ def not_really_tests(texts: dict[str, str], *, runs_for_consumer: Callable[[str]
     users = {q: t for q, t in texts.items()
              if _suffix(q) in _CODE_EXTS and not judged(q) and runs_for_consumer(q)
              and not is_test_runner(q, t)}
+    # A JS runner script is test tooling only while no other runtime code or manifest
+    # imports, runs or names it.
+    runners = [q for q in users if _is_js_runner_name(q)]
+    if runners:
+        rest = {q: t for q, t in users.items() if q not in runners}
+        probe = _Index(texts, rest)
+        for q in runners:
+            if not (probe.code_names(q) or probe.manifests_name(q) or probe.imported(q)):
+                del users[q]
     existing = set(texts) | set(paths or ())
     import_dirs = import_name_test_dirs(texts, wheel=wheel, paths=existing)
     index: _Index | None = None

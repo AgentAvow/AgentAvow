@@ -617,7 +617,7 @@ MANIFEST_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
 
 # Dangerous content inside an npm lifecycle install hook (#5).
 INSTALL_SCRIPT_DANGER_RE = re.compile(
-    r"""(?:curl|wget)\b|\|\s*(?:ba)?sh\b|\bnode\s+(?:-e|--eval)\b|"""
+    r"""(?:curl|wget)\b|\|\s*(?:ba)?sh\b|\bnode\s+(?:-e|--eval|-p|--print|-pe|-ep)\b|"""
     r"""\bpython3?\s+-c\b|base64\s+(?:-d|--decode|-D)\b|\beval\b|"""
     r"""https?://|\bchmod\s+\+x\b|>\s*/dev/""",
     re.IGNORECASE,
