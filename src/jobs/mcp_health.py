@@ -64,9 +64,10 @@ STATE_TTL = 7 * 24 * 3600
 RECOVERY_PASSES = 2
 WEBHOOK_TYPE = "agentavow.ops.mcp_health"
 
+_DC = "docker-compose -f docker-compose.prod.yml"
 _NEXT_PROBE = (
-    "Run the probe by hand in the backend container (<code>python -m src.jobs.mcp_health "
-    "probe</code>) and read <code>docker compose logs backend | grep 'POST /mcp'</code>. "
+    f"Run the probe by hand (<code>{_DC} exec -T backend python -m src.jobs.mcp_health "
+    f"probe</code>) and read <code>{_DC} logs --tail 300 backend</code>. "
     "If a deploy just went out, compare the running mcp SDK (<code>pip show mcp</code>) "
     "with main and roll back if it differs.")
 _NEXT_DRIFT = (
@@ -79,8 +80,8 @@ _NEXT_UPV = (
     "runs (<code>pip show mcp</code>) and whether a newer one serves that version (the "
     "10-20 fix was PR #205, SDK 2.3.0).")
 _NEXT_REJECTS = (
-    "Read <code>docker compose logs backend | grep 'POST /mcp'</code> for the failing "
-    "status and run <code>python -m src.jobs.mcp_health probe</code> in the container.")
+    f"Read <code>{_DC} logs --tail 300 backend</code> for the failing status and run "
+    f"<code>{_DC} exec -T backend python -m src.jobs.mcp_health probe</code>.")
 
 
 @dataclass
@@ -482,7 +483,7 @@ def render_email(items: list[tuple[Check, dict]], *, recovered: bool,
     """(subject, html) for one alert or recovery email covering ``items``."""
     parts = []
     for c, state in items:
-        since = html.escape(str(state.get("since", "")))
+        since = html.escape(str(state.get("since", "")).replace("T", " ").replace("+00:00", ""))
         if recovered:
             parts.append(
                 f"<h3>{html.escape(c.label)}: passing again</h3>"
