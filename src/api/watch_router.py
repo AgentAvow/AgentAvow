@@ -49,6 +49,10 @@ class WatchScan:
     score: int | None
     digest: str | None
     data: dict = field(default_factory=dict)
+    # Live MCP only: the unsigned icon fingerprint (src/scanner/mcp_icons.py) and the
+    # icon findings of this scan, for the "icon changed" alert. None/[] elsewhere.
+    icon_digest: str | None = None
+    icon_findings: list = field(default_factory=list)
 
 
 def _package_scan_data(surface: str, name: str, r) -> dict:
@@ -80,6 +84,12 @@ async def scan_watch_target_detail(
             return WatchScan(
                 (None if r.error else r.trust_score),
                 (getattr(r, "tool_manifest_digest", None) or None),
+                icon_digest=None if r.error else (getattr(r, "icon_fingerprint", None) or None),
+                icon_findings=[] if r.error else [
+                    {"severity": f.severity, "name": f.name, "where": f.file_path}
+                    for f in (getattr(r, "findings", None) or [])
+                    if str(getattr(f, "file_path", "") or "").endswith(":icons")
+                ],
             )
         if surface == "openclaw":
             from src.scanner.scan import scan_skill
@@ -154,7 +164,8 @@ async def add_watch(
         return _serialize(existing)
 
     # Best-effort baseline scan so the first change is measured against a known score.
-    last_score, last_digest = await scan_watch_target(surface, owner, repo, db)
+    baseline = await scan_watch_target_detail(surface, owner, repo, db)
+    last_score, last_digest = baseline.score, baseline.digest
 
     watch = ToolWatch(
         watcher_id=watcher_id,
@@ -163,6 +174,7 @@ async def add_watch(
         repo=repo,
         last_score=last_score,
         last_manifest_digest=last_digest,
+        last_icon_digest=baseline.icon_digest,
     )
     db.add(watch)
     await db.commit()
