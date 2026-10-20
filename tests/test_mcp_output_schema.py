@@ -58,13 +58,11 @@ def _struct(data: dict, target_type: str = "npm", adoption=(583_000_000, "downlo
 
 
 async def _call(name: str, arguments: dict) -> types.CallToolResult:
-    """Run a call through the SDK's own handler, exactly as a client request would."""
-    handler = mod.server.request_handlers[types.CallToolRequest]
-    req = types.CallToolRequest(
-        method="tools/call",
-        params=types.CallToolRequestParams(name=name, arguments=arguments),
-    )
-    return (await handler(req)).root
+    """Run a call through the server's registered tools/call handler, exactly as a client
+    request would (input + output validation included)."""
+    entry = mod.server.get_request_handler("tools/call")
+    params = entry.params_type.model_validate({"name": name, "arguments": arguments})
+    return await entry.handler(None, params)
 
 
 @pytest.fixture
@@ -86,7 +84,7 @@ def test_schema_is_a_valid_json_schema():
 
 def test_only_the_scan_tools_declare_an_output_schema():
     # The other five return text only; an outputSchema there would make every call fail.
-    declared = {t.name for t in mod._TOOLS if t.outputSchema is not None}
+    declared = {t.name for t in mod._TOOLS if t.output_schema is not None}
     assert declared == {"scan_repo", "scan_package", "scan_mcp_server"}
 
 
@@ -117,9 +115,9 @@ async def test_successful_scan_passes_sdk_output_validation(monkeypatch, _quiet)
 
     monkeypatch.setattr(mod, "_get", _scan)
     res = await _call("scan_package", {"registry": "npm", "name": "chalk"})
-    assert res.isError is False
-    assert res.structuredContent["verdict"] == "safe"
-    assert res.structuredContent["trust_score"] == 88
+    assert res.is_error is False
+    assert res.structured_content["verdict"] == "safe"
+    assert res.structured_content["trust_score"] == 88
     assert "chalk" in res.content[0].text
 
 
@@ -131,8 +129,8 @@ async def test_successful_scan_passes_sdk_output_validation(monkeypatch, _quiet)
 ])
 async def test_unusable_input_is_a_tool_error_with_the_guidance(_quiet, tool, args, expect):
     res = await _call(tool, args)
-    assert res.isError is True
-    assert res.structuredContent is None
+    assert res.is_error is True
+    assert res.structured_content is None
     text = res.content[0].text
     assert expect in text
     assert "Output validation error" not in text  # our guidance, not the SDK's complaint
@@ -148,8 +146,8 @@ async def test_failed_scan_is_a_tool_error_with_the_guidance(monkeypatch, _quiet
 
     monkeypatch.setattr(mod, "_get", _fail)
     res = await _call("scan_mcp_server", {"endpoint_url": "https://example.com/mcp"})
-    assert res.isError is True
-    assert res.structuredContent is None
+    assert res.is_error is True
+    assert res.structured_content is None
     assert expect in res.content[0].text
 
 
@@ -160,7 +158,7 @@ async def test_scan_timeout_is_a_tool_error(monkeypatch, _quiet):
 
     monkeypatch.setattr(mod, "_get", _slow)
     res = await _call("scan_repo", {"repo": "vercel/next.js"})
-    assert res.isError is True
+    assert res.is_error is True
     assert "longer than usual" in res.content[0].text
 
 
@@ -175,16 +173,16 @@ async def test_schema_drift_does_not_fail_a_good_scan(monkeypatch, _quiet, caplo
     monkeypatch.setattr(mod, "_scan_struct", lambda *a, **k: drifted)
     with caplog.at_level(logging.ERROR, logger=mod.logger.name):
         res = await _call("scan_package", {"registry": "npm", "name": "chalk"})
-    assert res.isError is False
-    assert res.structuredContent["trust_score"] == "eighty-eight"
+    assert res.is_error is False
+    assert res.structured_content["trust_score"] == "eighty-eight"
     assert "outputSchema" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_text_only_tools_are_unaffected(_quiet):
     res = await _call("about_agentavow", {})
-    assert res.isError is False
-    assert res.structuredContent is None
+    assert res.is_error is False
+    assert res.structured_content is None
     assert "AgentAvow" in res.content[0].text
 
 

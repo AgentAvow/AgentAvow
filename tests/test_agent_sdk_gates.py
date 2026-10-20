@@ -239,7 +239,10 @@ def _text(result) -> str:
 
 
 def _is_error(result) -> bool:
-    return result["isError"] if isinstance(result, dict) else result.isError
+    if isinstance(result, dict):
+        return result["isError"]
+    # mcp 2.x models use snake_case attributes (is_error); 1.x used isError.
+    return result.is_error if hasattr(result, "is_error") else result.isError
 
 
 def test_openai_safe_server_connects_lists_and_calls():
