@@ -177,8 +177,10 @@ class _Client:
 @pytest.mark.parametrize("resp,failed,paged,n", [
     (_Resp(200, {"jsonrpc": "2.0", "id": 2, "result": {"tools": [{"name": "a"}]}}),
      False, False, 1),
+    # The same nextCursor on every page is a cursor loop: two pages read, then the
+    # read stops and is disclosed as partial.
     (_Resp(200, {"jsonrpc": "2.0", "id": 2,
-                 "result": {"tools": [{"name": "a"}], "nextCursor": "p2"}}), False, True, 1),
+                 "result": {"tools": [{"name": "a"}], "nextCursor": "p2"}}), False, True, 2),
     (_Resp(500, None), True, False, 0),
     (_Resp(200, {"jsonrpc": "2.0", "id": 2, "error": {"code": -32601}}), True, False, 0),
     (RuntimeError("down"), True, False, 0),

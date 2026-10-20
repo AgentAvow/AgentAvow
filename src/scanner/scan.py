@@ -193,6 +193,9 @@ class ScanResult:
     # Live MCP scans: unsigned fingerprint of the served icons (src/scanner/mcp_icons.py),
     # compared by the watch loop. Never signed, never in tool_digests / the manifest.
     icon_fingerprint: str | None = None
+    # Live MCP scans: how the tools/list was read (endpoint asked for, TLS facts of the
+    # connection, every page). Signed as scan.observation; see mcp_observation.py.
+    mcp_observation: dict | None = None
     # The served tools as a display list: name + declared annotations (+ digest where
     # we hold the full definition). Unsigned; see src/scanner/mcp_tool_list.py.
     tool_list: list[dict] = field(default_factory=list)
@@ -6787,6 +6790,10 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     # gate can bind an authorization to the named tool that was graded.
     result.tool_digests = compute_tool_digests(data.get("tools"))
     result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
+    # The observation of that read binds to the same catalog digest (TRACE #443).
+    _obs = data.get("observation")
+    if isinstance(_obs, dict):
+        result.mcp_observation = {**_obs, "toolManifestDigest": result.tool_manifest_digest}
     # Icons are not in the signed digests (they stay agentavow.mcp-tool-definition.v1).
     # Their own fingerprint is an unsigned watch signal: a changed icon alerts a watcher
     # without touching the attestation. None when tools/list was not read.
