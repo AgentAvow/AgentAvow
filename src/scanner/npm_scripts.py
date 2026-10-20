@@ -44,6 +44,7 @@ import fnmatch
 import json
 import re
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 # The scripts npm (or yarn / pnpm) can run for someone who installs the package: as a
@@ -605,6 +606,234 @@ ALLOWLIST_WHY = (
     "here sends data there.")
 
 
+# ── Files a consumer can run (shared by the dev-tooling and dataset restores) ──
+# A shell running a file: `sh x`, `bash -e x`, `zsh x`, `source x`, `. x`, `exec x`.
+_SHELL_RUN_RE = re.compile(
+    r"""(?:^|[\s;&|(`'"\[,@])(?:(?:ba|z|da|k)?sh|source|exec|\.)\s+(?:-[\w-]+\s+)*"""
+    r"""['"]?([^\s;&|)'"`\],]+)""",
+    re.MULTILINE)
+# A path to a shell script used as a command word. In a shell script every such word
+# counts; in a config only on a line that runs something (`command:`, `run:`, `exec`
+# …), so a YAML list of paths (vllm's tools/agent/domains.yaml) is not a run.
+_SCRIPT_WORD_RE = re.compile(
+    r"""(?:^|[\s;&|(`'"\[,@])((?:\.{0,2}/)?[\w.\-/]+\.(?:sh|bash|zsh|ps1)(?![\w.\-/])"""
+    r"""|\.{1,2}/[\w.\-/]+)""",
+    re.MULTILINE)
+_RUN_KEY_LINE_RE = re.compile(
+    r"""(?:command|cmd|entrypoint|run|exec|script|start\w*|args)['"]?\s*[:=]""",
+    re.IGNORECASE)
+_SHELL_FILE_EXTS = frozenset({"", ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd"})
+_NON_RUNTIME_DIRS = frozenset({
+    "test", "tests", "__tests__", "spec", "docs", "doc", "example", "examples",
+    "fixture", "fixtures",
+})
+_MCP_CONFIG_NAMES = frozenset({"mcp.json", ".mcp.json", "server.json", "smithery.yaml",
+                               "smithery.yml"})
+_MAKEFILES = frozenset({"makefile", "gnumakefile"})
+_MAKE_TARGET_RE = re.compile(r"^([\w.\-]+(?:\s+[\w.\-]+)*)\s*::?(?!=)(.*)$")
+_DOCKER_RUN_RE = re.compile(r"^\s*(?:RUN|CMD|ENTRYPOINT)\b", re.IGNORECASE)
+_COMPOSE_NAME_RE = re.compile(r"(?:docker-)?compose[\w.\-]*\.ya?ml$")
+
+
+def _pkg_run_strings(text: str, path: str, texts: dict[str, str],
+                     roots: frozenset[str] | None) -> list[str]:
+    """package.json: the scripts that run (``roots`` None: every script) and the
+    bin / main / module / exports / browser entry points."""
+    try:
+        data = json.loads(text.lstrip("﻿"))
+    except ValueError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    out: list[str] = []
+    scripts = data.get("scripts")
+    if isinstance(scripts, dict):
+        table = {k: v for k, v in scripts.items() if isinstance(v, str)}
+        names = set(table) if roots is None else reachable_scripts(table, roots)
+        out += [table[n] for n in sorted(names) if n in table]
+    info = parse_scripts(text) if roots is not None else None
+    if info is not None:
+        out += sorted(f for f in _named_files(info, path, roots, texts)[0]
+                      if f != RUNS_PACKAGE_CODE)
+
+    def walk(v: object) -> None:
+        if isinstance(v, str):
+            out.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+    for key in ("bin", "main", "module", "exports", "browser"):
+        walk(data.get(key))
+    return out
+
+
+def _make_recipes(text: str, targets: frozenset[str]) -> list[str]:
+    """The target lines and recipe lines of the named Makefile targets."""
+    out: list[str] = []
+    take = False
+    for ln in text.split("\n"):
+        if ln.startswith("\t"):
+            if take:
+                out.append(ln)
+            continue
+        m = _MAKE_TARGET_RE.match(ln)
+        if m:
+            take = bool(set(m.group(1).split()) & targets)
+            if take:
+                out.append(ln)
+        elif ln.strip() and not ln.lstrip().startswith("#"):
+            take = False
+    return out
+
+
+def _docker_run_lines(text: str) -> list[str]:
+    """RUN / CMD / ENTRYPOINT instructions, continuation lines joined."""
+    out: list[str] = []
+    cur: list[str] | None = None
+    for ln in text.split("\n"):
+        if cur is not None:
+            cur.append(ln)
+        elif _DOCKER_RUN_RE.match(ln):
+            cur = [ln]
+        if cur is not None and not ln.rstrip().endswith("\\"):
+            out.append(" ".join(cur))
+            cur = None
+    if cur:
+        out.append(" ".join(cur))
+    return out
+
+
+def _run_key_lines(text: str) -> list[str]:
+    """Config lines that run something: a run-key line (``_RUN_KEY_LINE_RE``) plus,
+    when its value is a block list, the items that follow: YAML ``- item`` lines
+    (more indented, or ``-`` at the key's indent) until a dedent, or JSON array
+    elements until the closing ``]``."""
+    out: list[str] = []
+    carry: tuple[int, bool] | None = None   # (key indent, JSON array)
+    for ln in text.split("\n"):
+        ind = len(ln) - len(ln.lstrip())
+        if carry is not None:
+            key_ind, js = carry
+            if js:
+                out.append(ln)
+                if "]" in ln:
+                    carry = None
+                continue
+            if not ln.strip():
+                continue
+            if ind > key_ind or (ind == key_ind and ln.lstrip().startswith("- ")):
+                out.append(ln)
+                continue
+            carry = None
+        m = _RUN_KEY_LINE_RE.search(ln)
+        if m:
+            out.append(ln)
+            rest = ln[m.end():].strip()
+            if not rest or rest in ("|", ">", "|-", ">-"):
+                carry = (ind, False)
+            elif rest.startswith("[") and "]" not in rest:
+                carry = (ind, True)
+    return out
+
+
+def consumer_run_strings(texts: dict[str, str], *, roots: frozenset[str] | None,
+                         skip: Callable[[str], bool] = lambda p: False) -> list[str]:
+    """Text naming what a consumer of the tree can run, for "is this file run?":
+    package.json scripts (``roots``: those reachable from these roots; None: every
+    script) and bin / main / exports; a shell running a file in any script or config
+    (``sh x``, ``bash x``, ``source x``, ``. x``, ``exec x``, ``./x.sh``); Dockerfile /
+    Containerfile RUN / CMD / ENTRYPOINT and compose files; MCP / smithery configs
+    (``command`` + ``args``, ``startCommand``); Procfile; the ``install`` / ``all``
+    targets of a Makefile; a VS Code task that runs on folder open. Not docs, CI
+    recipes, test / example dirs, or files ``skip`` names (the candidates themselves).
+    Callers check ``_SPAWN_RE`` code that names a file separately."""
+    out: list[str] = []
+    for p, t in texts.items():
+        if not t or skip(p):
+            continue
+        parts = p.lower().split("/")
+        low = parts[-1]
+        if any(x in _NON_RUNTIME_DIRS or x in _CI_PARTS for x in parts[:-1]) \
+                or low in _CI_NAMES:
+            continue
+        if low == "package.json":
+            out += _pkg_run_strings(t, p, texts, roots)
+            continue
+        if low in _MAKEFILES:
+            out += _make_recipes(t, frozenset({"install", "all"}))
+            continue
+        if low == "tasks.json" and ".vscode" in parts[:-1]:
+            if "folderOpen" in t:
+                out.append(t)
+            continue
+        if low.startswith(("dockerfile", "containerfile")) or low.endswith(
+                (".dockerfile", ".containerfile")):
+            out += _docker_run_lines(t)
+            continue
+        if (low in _MCP_CONFIG_NAMES or low.startswith("claude_desktop_config")
+                or _COMPOSE_NAME_RE.match(low) or low == "procfile"):
+            out.append(t)
+            continue
+        dot = low.rfind(".")
+        ext = low[dot:] if dot > 0 else ""
+        if ext in _DOC_EXTS:
+            continue
+        if ext == ".mk":
+            # An included make fragment: its targets are maintainer targets unless
+            # they are install / all.
+            out += _make_recipes(t, frozenset({"install", "all"}))
+            continue
+        out += [m.group(1) for m in _SHELL_RUN_RE.finditer(t)]
+        if ext in _SHELL_FILE_EXTS:
+            out += [m.group(1) for m in _SCRIPT_WORD_RE.finditer(t)]
+        else:
+            out += [m.group(1) for ln in _run_key_lines(t)
+                    for m in _SCRIPT_WORD_RE.finditer(ln)]
+    return out
+
+
+def _names_file(path: str, strings: list[str]) -> bool:
+    """A string names the file: its tree path, or its file name as a word."""
+    rx = re.compile(r"(?<![\w.\-])" + re.escape(path.rsplit("/", 1)[-1]) + r"(?![\w\-])")
+    return any(path in t or rx.search(t) for t in strings)
+
+
+DATASET_WHY = (
+    "Text in a dataset file (an attack-prompt or evaluation corpus): data the code "
+    "reads, not an instruction file and not run by the code found. An agent that reads "
+    "the file still sees it, so it is reported as high.")
+
+
+def _restore_datasets(findings: list, texts: dict[str, str]) -> None:
+    """A dataset finding capped at high (``scan._is_dataset_file``) gets its severity
+    back when code that can execute something (``_SPAWN_RE``) names the file by path or
+    file name, when anything a consumer can run names it (``consumer_run_strings``,
+    every package.json script included), or when the file is not in ``texts``
+    (unseen).
+
+    Policy (accepted 2026-10-19): an MCP tool or agent that READS a dataset file and
+    returns its text to the model is an injection path this check does not follow.
+    Such a file stays capped at high (Review), never Safe; it is not restored to
+    critical."""
+    from src.scanner.scan import _is_dataset_file
+
+    marked = [f for f in findings if getattr(f, "_dataset_restore", None)
+              and f.severity == "high" and f.remediation == DATASET_WHY]
+    if not marked:
+        return
+    spawners = [t for p, t in texts.items()
+                if t and _is_code_file(p) and not _is_dataset_file(p) and _SPAWN_RE.search(t)]
+    runs = consumer_run_strings(texts, roots=None, skip=_is_dataset_file)
+    for f in marked:
+        path = f.file_path
+        if path not in texts or _names_file(path, spawners) or _names_file(path, runs):
+            f.severity, f.remediation = f._dataset_restore, ""
+            f._dataset_restore = None
+
+
 def mark_allowlist(finding: object, severity: str, keys: set[str]) -> None:
     """A webhook/tunnel-host match that is an allowlist element (scan.py
     ``_host_allowlist_entry``), reported low until the rest of the tree is checked."""
@@ -639,6 +868,39 @@ def _restore_allowlist_hosts(findings: list, texts: dict[str, str]) -> None:
             f._allowlist_restore = None
 
 
+def _restore_dev_tooling(findings: list, texts: dict[str, str],
+                         roots: frozenset[str]) -> None:
+    """A dev-tooling script (``scan._is_dev_tooling_script``: ``tools/dev/``,
+    ``dev/``, ``hack/`` …) is graded like CI tooling only while nothing a consumer runs
+    starts it: anything a consumer can run that names the file
+    (``consumer_run_strings``: install-reachable npm scripts, bin / main / exports,
+    shell lines, Dockerfile / compose, MCP / smithery configs, Procfile, Makefile
+    install / all, VS Code folder-open tasks), or code that spawns processes and names
+    it, puts it back on the shipped surface. Its findings are then scanned again without the
+    downgrade and graded as shipped code (``Finding.payload``)."""
+    from src.scanner.scan import _is_dev_tooling_script, _scan_content
+
+    dev = sorted({f.file_path for f in findings
+                  if f.file_path and _is_dev_tooling_script(f.file_path)})
+    if not dev:
+        return
+    runs = consumer_run_strings(texts, roots=roots, skip=_is_dev_tooling_script)
+    spawners = [t for p, t in texts.items()
+                if t and p.rsplit("/", 1)[-1].lower() != "package.json"
+                and not _is_dev_tooling_script(p) and _is_code_file(p)
+                and _SPAWN_RE.search(t)]
+    for path in dev:
+        if path not in texts:
+            continue
+        if not (_names_file(path, runs) or _names_file(path, spawners)):
+            continue
+        fresh, _p, _s = _scan_content(texts[path], path, dev_tooling_runs=True)
+        for f in fresh:
+            if f.kind == "defect":
+                f.payload = True
+        findings[:] = [f for f in findings if f.file_path != path] + fresh
+
+
 def restore_externally_invoked(findings: list, texts: dict[str, str], *,
                                registry_artifact: bool = False) -> None:
     """Undo the maintainer-script downgrade of a pipe-to-shell finding when the
@@ -652,6 +914,9 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     install trio; elsewhere (a repo / local tree) the git-dependency roots count too.
     Every caller of ``_scan_content`` that can see a package.json must call this."""
     _restore_allowlist_hosts(findings, texts)
+    _restore_datasets(findings, texts)
+    _restore_dev_tooling(findings, texts,
+                         REGISTRY_ROOTS if registry_artifact else CONSUMER_ROOTS)
     # (A finding a later pass already capped further, e.g. to info in an uninstalled
     # or test-dir file, keeps that cap.)
     marked = [f for f in findings if getattr(f, "_maintainer_restore", None)

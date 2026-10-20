@@ -45,6 +45,8 @@ _security_scan_task: asyncio.Task | None = None
 _api_health_task: asyncio.Task | None = None
 _github_budget_task: asyncio.Task | None = None
 _lock_refresh_task: asyncio.Task | None = None
+_mcp_probe_task: asyncio.Task | None = None
+_mcp_reject_task: asyncio.Task | None = None
 
 # Redis distributed lock — prevents multiple workers from running the scheduler
 SCHEDULER_LOCK_KEY = "ag:scheduler:lock"
@@ -1788,6 +1790,7 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     global _reply_poster_task
     global _starter_pack_task, _auto_follow_task, _security_scan_task
     global _api_health_task, _github_budget_task, _lock_refresh_task
+    global _mcp_probe_task, _mcp_reject_task
 
     if _scheduler_task is not None and not _scheduler_task.done():
         logger.debug("Scheduler already running, skipping start")
@@ -1961,6 +1964,21 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
             name="behavioral-eval",
         )
 
+    # MCP connector health: probe /mcp in both protocol eras (10 min) and watch the
+    # client reject rate (15 min); emails the admin when /mcp breaks. On by default
+    # when DEBUG is false (MCP_HEALTH_ENABLED overrides). Lock holder only.
+    from src.jobs import mcp_health as _mcp_health
+
+    if _mcp_health.enabled():
+        if _mcp_probe_task is None or _mcp_probe_task.done():
+            _mcp_probe_task = asyncio.create_task(
+                _mcp_health.probe_loop(), name="mcp-health-probe",
+            )
+        if _mcp_reject_task is None or _mcp_reject_task.done():
+            _mcp_reject_task = asyncio.create_task(
+                _mcp_health.reject_loop(), name="mcp-health-rejects",
+            )
+
     return _scheduler_task
 
 
@@ -1970,6 +1988,7 @@ def stop_scheduler() -> None:
     global _reply_poster_task
     global _starter_pack_task, _auto_follow_task, _security_scan_task
     global _api_health_task, _github_budget_task, _lock_refresh_task
+    global _mcp_probe_task, _mcp_reject_task
 
     # Cancel the lock refresh first — its CancelledError handler releases the Redis key
     if _lock_refresh_task is not None and not _lock_refresh_task.done():
@@ -2021,3 +2040,8 @@ def stop_scheduler() -> None:
         _github_budget_task.cancel()
         logger.info("GitHub budget probe task cancelled")
     _github_budget_task = None
+
+    for _t in (_mcp_probe_task, _mcp_reject_task):
+        if _t is not None and not _t.done():
+            _t.cancel()
+    _mcp_probe_task = _mcp_reject_task = None
