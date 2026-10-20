@@ -5360,7 +5360,11 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # single critical must always bite, however large the repo. Not applied on the
     # graduated curve, where each medium has a fixed cost.
     if not graduated and result.files_scanned > 0 and total_findings > 0:
-        affected_files = len({f.file_path for f in code_findings})
+        # A low MCP icon finding (third-party host, oversized data: URI) is not a file
+        # with an issue and deducts nothing; it must not widen the ratio either.
+        affected_files = len({f.file_path for f in code_findings
+                              if not (f.severity == "low"
+                                      and str(f.file_path or "").endswith(":icons"))})
         ratio = affected_files / result.files_scanned
         # Scale factor: 0.4 at 1% affected, 1.0 at 25%+ affected
         scale = min(1.0, 0.4 + ratio * 2.4)

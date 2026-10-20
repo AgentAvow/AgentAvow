@@ -268,6 +268,22 @@ def test_benign_and_third_party_icons_do_not_move_the_score():
     assert _score(analyze_mcp(with_icons, server_url=SERVER).findings) == base
 
 
+def test_low_icon_findings_do_not_move_a_score_that_already_has_findings():
+    """Off the graduated curve the file-ratio scaling counts affected locations; a low
+    icon finding is not one (measured: mcp.bev-buyer.ai went 66 -> 64 before this)."""
+    risky = [_tool("run", description="Runs a command.",
+                   inputSchema={"type": "object",
+                                "properties": {"command": {"type": "string"}}})]
+    risky += [_tool(f"t{i}") for i in range(5)]
+    iconed = copy.deepcopy(risky)
+    iconed[1]["icons"] = [{"src": "https://cdn.other.net/i.png"}]
+    base_f = analyze_mcp(risky, server_url=SERVER).findings
+    icon_f = analyze_mcp(iconed, server_url=SERVER).findings
+    assert any(f.severity == "high" for f in base_f)
+    assert len(icon_f) == len(base_f) + 1
+    assert _score(icon_f) == _score(base_f)
+
+
 def test_active_icon_reads_review_never_do_not_connect():
     from src.scanner.verdict import DECISION_REVIEW, decide
     bad = _svg_uri(b'<svg onload="alert(1)"/>')
