@@ -283,14 +283,19 @@ def test_mcp_text_lists_not_checked_and_silent_sandbox():
 
 
 def test_notes_never_change_the_decision():
+    """Every gap but an unread MCP tool list is disclosure only (that one reads Review,
+    Kenne 2026-10-20; tests/test_decision.py pins it)."""
     base = {"trust_score": 92, "findings": {"items": []}, "metadata": {"files_scanned": 120}}
     gaps = {"oversized_files": 9, "fetch_failed": 3, "over_file_cap": 50,
             "tree_truncated": True, "package_skipped": 2, "dependency_files_unread": 1,
             "advisory_lookup": "failed", "tool_list_unread": True, "tool_list_paged": True}
+    disclosure_only = {k: v for k, v in gaps.items() if k != "tool_list_unread"}
     for score in (20, 55, 92):
         a = decide({**base, "trust_score": score})
-        b = decide({**base, "trust_score": score, "coverage_gaps": gaps})
+        b = decide({**base, "trust_score": score, "coverage_gaps": disclosure_only})
         assert (a.decision, a.final) == (b.decision, b.final)
+        c = decide({**base, "trust_score": score, "coverage_gaps": gaps})
+        assert c.decision == "review"
     assert len(coverage_gap_notes({"coverage_gaps": gaps})) == 9
     assert coverage_gap_suffix({"coverage_gaps": gaps}).endswith("; and 7 more coverage gaps")
 

@@ -183,6 +183,8 @@ export const QUEUED_SUFFIX = '; waiting for a sandbox slot'
 export const THIN_REASON = 'nothing found; little code to inspect'
 /** Thin coverage at zero files: the package was read and held no code to scan. */
 export const THIN_REASON_NO_CODE = 'nothing found; no code to inspect'
+// An unread MCP tool list reads Review (Kenne, 10-20); twin of TOOL_LIST_UNREAD_REASON.
+export const TOOL_LIST_UNREAD_REASON = "the server's tool list could not be read"
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
 
@@ -501,6 +503,11 @@ export function decide(input: unknown): Decision {
   const dep = data.deprecation
   if (typeof dep === 'string' && dep.trim()) return done('review', 'the maintainer has deprecated this package')
   if (score < REVIEW_SCORE_FLOOR) return done('review', `trust score ${score}/100 is under ${REVIEW_SCORE_FLOOR}`)
+  const gap = data.coverage_gaps
+  if (gap && typeof gap === 'object' && !Array.isArray(gap)
+    && (gap as Record<string, unknown>).tool_list_unread === true) {
+    return done('review', TOOL_LIST_UNREAD_REASON)
+  }
 
   const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
     && i.kind !== 'capability' && i.installed !== false)

@@ -365,8 +365,14 @@ CASES = [
      "database lookup failed"),
     ("gap_remote_mcp_tool_list", _scan(80, 0, coverage={"surface": "mcp"},
                                        coverage_gaps={"tool_list_unread": True}),
-     "safe", True, "tool definitions clean; server code not inspected; the server's tool "
-     "list could not be read"),
+     "review", True, "the server's tool list could not be read"),
+    ("gap_tool_list_unread_files", _scan(92, 12, coverage={"surface": "mcp"},
+                                         coverage_gaps={"tool_list_unread": True}),
+     "review", True, "the server's tool list could not be read"),
+    ("gap_tool_list_unread_high_wins", _scan(70, 12, [_f("high", "X")], high=1,
+                                             coverage={"surface": "mcp"},
+                                             coverage_gaps={"tool_list_unread": True}),
+     "review", True, "one high finding in its code: X"),
     ("gap_mcp_paged", _scan(88, 12, coverage={"surface": "mcp"},
                             coverage_gaps={"tool_list_paged": True}),
      "safe", True, "nothing found in 12 files; only the first page of the server's tool "
