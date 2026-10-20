@@ -781,6 +781,29 @@ async def _client_view(client, url: str, scanner_digests: dict[str, str]) -> dic
             "tools": agent_tools if differs else []}
 
 
+def oversize_findings(lists_too_large) -> list:
+    """Findings for lists the server sent past MCP_MAX_RESPONSE_BYTES (agentgraph-72's
+    #208 gate). A refused tools/list is HIGH: its definitions could not be inspected, yet
+    an agent client still receives and acts on them, so padding the list must never read
+    Safe. An oversized resources/ or prompts/list is MEDIUM (not tool definitions)."""
+    out = []
+    mb = MCP_MAX_RESPONSE_BYTES // (1024 * 1024)
+    for method in sorted(set(lists_too_large or ())):
+        is_tools = method == "tools/list"
+        out.append(_finding(
+            "obfuscation",
+            f"{'Tool' if is_tools else method.split('/')[0].capitalize()} list too large "
+            f"to read (over {mb} MB)",
+            "high" if is_tools else "medium",
+            f"server:{method}",
+            "The server's answer was larger than the scanner reads, so these definitions "
+            "were not inspected, while an agent that connects still receives all of them. "
+            "Review the definitions yourself before connecting; a real server's list is "
+            "a few hundred KB.",
+        ))
+    return out
+
+
 def client_view_findings(view: dict | None, scanner_tools: list | None) -> list:
     """The finding for a server that serves agents different tools than the scanner."""
     if not view or not view.get("differs"):
@@ -798,6 +821,45 @@ def client_view_findings(view: dict | None, scanner_tools: list | None) -> list:
         "scanner-evasion pattern. Do not connect; the definitions an agent receives were "
         "not the ones reviewed.",
     )]
+
+
+# Most a remote MCP server may send in one response to the scanner. A tools/list for a
+# large real server is a few hundred KB; anything past this is refused (the read stops,
+# the call is recorded as failed) so a hostile server cannot stream an unbounded body
+# into the scanner's memory.
+MCP_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
+class ResponseTooLargeError(Exception):
+    """A remote MCP response exceeded ``MCP_MAX_RESPONSE_BYTES``."""
+
+
+class _CappedResponse:
+    """The parts of an httpx response the session reads, from a capped streamed body."""
+
+    def __init__(self, status_code: int, headers, body: bytes, encoding: str | None) -> None:
+        self.status_code = status_code
+        self.headers = headers
+        self.text = body.decode(encoding or "utf-8", "replace")
+
+
+async def _post_capped(client, url: str, *, limit: int | None = None, **kw):
+    """POST and read at most ``limit`` bytes of the body; raises ResponseTooLargeError past
+    it. A client without ``stream`` (test fakes) falls back to a plain ``post``."""
+    if limit is None:
+        limit = MCP_MAX_RESPONSE_BYTES
+    if not hasattr(client, "stream"):
+        return await client.post(url, **kw)
+    async with client.stream("POST", url, **kw) as resp:
+        declared = resp.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > limit:
+            raise ResponseTooLargeError(declared)
+        buf = bytearray()
+        async for chunk in resp.aiter_bytes():
+            buf += chunk
+            if len(buf) > limit:
+                raise ResponseTooLargeError(len(buf))
+        return _CappedResponse(resp.status_code, resp.headers, bytes(buf), resp.encoding)
 
 
 class McpSession:
@@ -825,7 +887,7 @@ class McpSession:
         """Run the handshake; returns the HTTP status of ``initialize`` (0 on a transport
         error). ``server_info`` and ``session_id`` are set on success."""
         try:
-            init = await self._client.post(self._url, headers=self._headers, json=_rpc(
+            init = await _post_capped(self._client, self._url, headers=self._headers, json=_rpc(
                 "initialize",
                 {
                     "protocolVersion": _MCP_PROTOCOL_VERSION,
@@ -847,8 +909,8 @@ class McpSession:
             self._headers["mcp-session-id"] = session
         # notifications/initialized (no id — a notification)
         try:
-            await self._client.post(
-                self._url, headers=self._headers,
+            await _post_capped(
+                self._client, self._url, headers=self._headers,
                 json=_rpc("notifications/initialized", {}, rid=None))
         except Exception:
             pass
@@ -862,9 +924,10 @@ class McpSession:
         than graded as the whole tool set."""
         failed = self.__dict__.setdefault("list_failed", set())
         more = self.__dict__.setdefault("list_more_pages", set())
+        too_large = self.__dict__.setdefault("list_too_large", set())
         try:
-            resp = await self._client.post(
-                self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
+            resp = await _post_capped(
+                self._client, self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
             if resp.status_code >= 400:
                 failed.add(method)
                 return []
@@ -876,6 +939,10 @@ class McpSession:
             if result.get("nextCursor"):
                 more.add(method)
             return result.get(key) or []
+        except ResponseTooLargeError:
+            failed.add(method)
+            too_large.add(method)
+            return []
         except Exception:
             failed.add(method)
             return []
@@ -890,8 +957,8 @@ class McpSession:
                      "status": None}
         try:
             resp = await asyncio.wait_for(
-                self._client.post(
-                    self._url, headers=self._headers, timeout=timeout,
+                _post_capped(
+                    self._client, self._url, headers=self._headers, timeout=timeout,
                     json=_rpc("tools/call", {"name": name, "arguments": arguments},
                               rid=self._next_id()),
                 ),
@@ -974,7 +1041,8 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
             tools = await session.list("tools/list", "tools")
             resources = await session.list("resources/list", "resources")
             prompts = await session.list("prompts/list", "prompts")
-            if not tools and not resources and not prompts:
+            too_large = set(getattr(session, "list_too_large", set()))
+            if not tools and not resources and not prompts and not too_large:
                 return None
             view = None
             if tools:
@@ -992,6 +1060,8 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
                 out["tools_list_failed"] = True
             if "tools/list" in getattr(session, "list_more_pages", set()):
                 out["tools_more_pages"] = True
+            if too_large:
+                out["lists_too_large"] = sorted(too_large)
             return out
     except Exception:
         return None

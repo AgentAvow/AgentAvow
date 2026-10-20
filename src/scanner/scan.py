@@ -6772,7 +6772,8 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     result.findings = mcp.findings
     # A server that serves agents different tools than it served the scanner: grade the
     # agent's view too (its poisoning is what reaches an agent) and report the switch.
-    from src.scanner.mcp_scan import client_view_findings
+    from src.scanner.mcp_scan import client_view_findings, oversize_findings
+    result.findings.extend(oversize_findings(data.get("lists_too_large")))
     _view = data.get("client_view")
     if _view and _view.get("differs"):
         result.findings.extend(client_view_findings(_view, data.get("tools")))
