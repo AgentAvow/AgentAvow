@@ -172,6 +172,9 @@ THIN_REASON = "nothing found; little code to inspect"
 THIN_REASON_NO_CODE = "nothing found; no code to inspect"
 # A live MCP server scan reads the served tool definitions only (files = tools).
 THIN_REASON_REMOTE_MCP = "tool definitions clean; server code not inspected"
+# A remote MCP server whose tools/list could not be read (error, timeout, transport
+# failure) reads Review: the tool definitions are what we exist to read (Kenne, 10-20).
+TOOL_LIST_UNREAD_REASON = "the server's tool list could not be read"
 
 # A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
 # yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
@@ -617,6 +620,9 @@ def decide(data: dict) -> Decision:
         return done(DECISION_REVIEW, "the maintainer has deprecated this package")
     if score < REVIEW_SCORE_FLOOR:
         return done(DECISION_REVIEW, f"trust score {score}/100 is under {REVIEW_SCORE_FLOOR}")
+    gap = data.get("coverage_gaps")
+    if isinstance(gap, dict) and gap.get("tool_list_unread") is True:
+        return done(DECISION_REVIEW, TOOL_LIST_UNREAD_REASON)
 
     found = any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 and i.get("installed") is not False for i in items)
