@@ -84,7 +84,7 @@ export interface PublicScanResponse {
   // The Certified MARK every surface displays: eligible AND Safe to connect AND final AND
   // score >= 81 AND not thin. Reason names why an eligible result shows no mark.
   certified_mark?: boolean
-  certified_mark_reason?: '' | 'not_safe' | 'sandbox_pending' | 'score_below_81' | 'thin_coverage'
+  certified_mark_reason?: '' | 'not_safe' | 'sandbox_pending' | 'score_below_81' | 'thin_coverage' | 'coverage_gaps'
   // Package scans: the exact published version that was scanned (latest, or the
   // `?version=` pin the request asked for).
   package_version?: string | null

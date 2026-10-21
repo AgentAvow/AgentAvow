@@ -42,7 +42,7 @@ def _arc(cx: float, cy: float, r: float, a0: float, a1: float) -> str:
 def render_card_svg(
     *, coordinate: str, score: int | None, adoption_display: str | None,
     adoption_pct: int, adoption_tier: str | None,
-    decision: str | None = None, certified: bool = False,
+    decision: str | None = None, certified: bool = False, partial: bool = False,
 ) -> str:
     """Compose the condensed dual-mark card SVG (≈360×178). `score` None → 'not scanned'.
 
@@ -60,7 +60,10 @@ def render_card_svg(
     tword = trust_word(s) if has_score else "—"
     if has_score:
         _d = decision_for(decision if decision else s)
-        phrase, pcol = _d.phrase + (" · Certified" if certified else ""), _d.color
+        # " · partial scan": a visible marker that the scan disclosed coverage gaps.
+        phrase = (_d.phrase + (" · Certified" if certified else "")
+                  + (" · partial scan" if partial else ""))
+        pcol = _d.color
     else:
         phrase, pcol = "Not scanned yet", c["faint"]
 

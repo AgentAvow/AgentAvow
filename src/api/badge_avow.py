@@ -179,6 +179,11 @@ class _Facts:
         self.adoption_word = (adoption_level(self.adoption_pct) if self.has_adoption
                               else "no signal yet")
         self.coordinate = coordinate
+        # A visible "partial scan" marker whenever the scan disclosed coverage gaps
+        # (not only in the accessible title), in the Review colour.
+        self.partial = self.scored and self.not_checked > 0
+        rd = decision_for("review")
+        self.partial_color = rd.color_light if light else rd.color
 
     def title(self) -> str:
         who = f"{self.coordinate} — " if self.coordinate else ""
@@ -354,8 +359,7 @@ def _card_stacked(f: _Facts, p: _Paint, brand: str) -> str:
                          anchor="middle"))
         out.append(_text(acx, anum_y + 16, "no signal yet", paint=p.fill("muted"),
                          size=10.5, bold=True, anchor="middle"))
-    foot = "signed ✔ Ed25519 · verify offline" if f.scored else "scan it free at agentavow.com"
-    out.append(_text(18, h - 14, foot, paint=p.fill("muted"), size=10.5, width=_w(foot, 10.5)))
+    out.extend(_foot(f, p, h))
     if f.scored:
         out.append(_text(w - 18, h - 14, "agentavow.com", paint=p.fill("muted"), size=10.5,
                          anchor="end", width=_w("agentavow.com", 10.5)))
@@ -366,6 +370,26 @@ def _card_stacked(f: _Facts, p: _Paint, brand: str) -> str:
             + _grad("gN", tcx - tw / 2, 0, tcx + tw / 2, 0)
             + _grad("gW", acx - ww / 2, 0, acx + ww / 2, 0))
     return _svg(w, h, f"<defs>{defs}</defs>" + "".join(out), f.title(), p.css())
+
+
+PARTIAL_WORD = "partial scan"
+
+
+def _foot(f: _Facts, p: _Paint, h: int) -> list[str]:
+    """The card footer: "signed ✔ Ed25519 · verify offline", led by a visible
+    "partial scan" in the Review colour when the scan disclosed coverage gaps."""
+    if not f.scored:
+        foot = "scan it free at agentavow.com"
+        return [_text(18, h - 14, foot, paint=p.fill("muted"), size=10.5, width=_w(foot, 10.5))]
+    if not f.partial:
+        foot = "signed ✔ Ed25519 · verify offline"
+        return [_text(18, h - 14, foot, paint=p.fill("muted"), size=10.5, width=_w(foot, 10.5))]
+    pw = _w(PARTIAL_WORD, 10.5, True)
+    rest = " · signed ✔ Ed25519"
+    return [_text(18, h - 14, PARTIAL_WORD, paint=_hex(f.partial_color), size=10.5, bold=True,
+                  width=pw),
+            _text(18 + pw, h - 14, rest, paint=p.fill("muted"), size=10.5,
+                  width=_w(rest, 10.5))]
 
 
 def _card_head(f: _Facts, p: _Paint, brand: str, w: int, h: int) -> list[str]:
@@ -498,8 +522,7 @@ def _card(f: _Facts, p: _Paint, brand: str) -> str:
         out.append(_text(ax, py + _WORD_Y, "no signal yet", paint=p.fill("muted"), size=10,
                          bold=True))
         ww = 80.0
-    foot = "signed ✔ Ed25519 · verify offline" if f.scored else "scan it free at agentavow.com"
-    out.append(_text(18, h - 14, foot, paint=p.fill("muted"), size=10.5, width=_w(foot, 10.5)))
+    out.extend(_foot(f, p, h))
     if f.scored:
         out.append(_text(w - 18, h - 14, "agentavow.com", paint=p.fill("muted"), size=10.5,
                          anchor="end", width=_w("agentavow.com", 10.5)))
@@ -560,6 +583,12 @@ def _compact_badge(f: _Facts, p: _Paint, brand: str) -> str:
         nw = _w(num, 11, True)
         out.append(_text(x, 14.2, num, paint=p.fill("fg"), size=11, bold=True, width=nw))
         x += nw + 8
+        if f.partial:
+            # A visible marker that part of the tool was not read (coverage gaps).
+            pw = _w("partial", 9, True)
+            out.append(_text(x - 3, 13.8, "partial", paint=_hex(f.partial_color), size=9,
+                             bold=True, width=pw))
+            x += pw + 5
         dividers.append(x)
         x += 7
         # adoption — a small needle gauge (the card's gauge, scaled down) + the count
@@ -606,7 +635,8 @@ def render_avow_badge(
 
     ``not_checked`` is how many coverage gaps the scan disclosed (things it selected
     but could not read); when non-zero the accessible title / hover text says the scan
-    was partial. The drawn badge is unchanged.
+    was partial, and the drawn badge shows a visible "partial" marker (the compact
+    badge after the score, the cards in the footer).
 
     ``certified`` only takes effect on a Safe answer with a score. ``adoption`` is the
     headline count; ``adoption_pct`` is the 0-100 adoption score that sets the gauge

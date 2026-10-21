@@ -233,3 +233,24 @@ def test_decision_input_shapes():
     assert stored["findings"]["critical"] == 0 and stored["findings"]["high"] == 2
     # A stored ``shipped`` tag wins; an untagged one is inferred from the path.
     assert stored["findings"]["items"][0]["shipped"] is False
+
+
+@pytest.mark.asyncio
+async def test_entity_badges_show_partial_for_stored_coverage_gaps(db, client, monkeypatch):
+    """A stored scan that disclosed coverage gaps shows a visible "partial" on the
+    trust badge and the embed badge, and the embed JSON lists what was not checked."""
+    entity = await _make_entity(db)
+    result = _result([], 92)
+    result.coverage_gaps = {"fetch_failed": 2}
+    await _store_via_writer(db, monkeypatch, entity, result)
+    svg = await client.get(f"/api/v1/badges/trust/{entity.id}.svg")
+    assert svg.status_code == 200 and "Safe · partial" in svg.text
+    embed = await client.get(f"/api/v1/badges/embed/{entity.id}")
+    assert embed.status_code == 200 and "· partial" in embed.text
+    js = await client.get(f"/api/v1/badges/embed/{entity.id}?format=json")
+    assert js.json()["not_checked"] == ["2 files could not be fetched"]
+
+    clean = await _make_entity(db)
+    await _store_via_writer(db, monkeypatch, clean, _result([], 92))
+    svg = await client.get(f"/api/v1/badges/trust/{clean.id}.svg")
+    assert "partial" not in svg.text
