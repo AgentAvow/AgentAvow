@@ -97,7 +97,7 @@ async def test_scan_skill_builds_graded_result(monkeypatch):
     async def fake_token():
         return "tok"
 
-    async def fake_tree(owner, repo, token):
+    async def fake_tree(owner, repo, token, meta_out=None):
         tree = [
             {"path": "SKILL.md", "type": "blob"},
             {"path": "scripts/go.sh", "type": "blob"},
@@ -133,7 +133,7 @@ async def test_scan_skill_no_skill_md_errors(monkeypatch):
     async def fake_token():
         return "tok"
 
-    async def fake_tree(owner, repo, token):
+    async def fake_tree(owner, repo, token, meta_out=None):
         return [{"path": "README.md", "type": "blob"}], False, True, "main"
 
     monkeypatch.setattr(scan_mod, "get_github_token", fake_token, raising=False)

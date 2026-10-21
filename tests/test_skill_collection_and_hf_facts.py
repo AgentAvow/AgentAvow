@@ -112,7 +112,7 @@ async def test_scan_skill_collection_end_to_end(monkeypatch):
     async def fake_token():
         return "tok"
 
-    async def fake_tree(owner, repo, token):
+    async def fake_tree(owner, repo, token, meta_out=None):
         return [{"path": p, "type": "blob"} for p in (
             "skills/clean/SKILL.md", "skills/risky/SKILL.md", "skills/risky/run.sh",
             "template/SKILL.md")], False, True, "main"
@@ -157,7 +157,7 @@ async def test_single_skill_repo_unchanged(monkeypatch):
     async def fake_token():
         return "tok"
 
-    async def fake_tree(owner, repo, token):
+    async def fake_tree(owner, repo, token, meta_out=None):
         return [{"path": "SKILL.md", "type": "blob"}], False, True, "main"
 
     async def fake_content(owner, repo, path, token, ref=None):

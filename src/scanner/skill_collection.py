@@ -130,4 +130,28 @@ def build_collection_result(repo_id: str, graded: list[tuple[str, object]], tota
         "tree_digest": combined,
     }
     result.per_skill = {skill_dir(md): r for md, r in graded}
+    result.coverage_gaps = merge_skill_gaps(
+        [getattr(r, "coverage_gaps", None) for _md, r in graded], total - len(graded))
     return result
+
+
+def merge_skill_gaps(per_skill: list, ungraded: int) -> dict:
+    """The repo-level coverage gaps of a skill collection: every graded skill's gaps
+    summed (a flag is set when any skill set it; ``file_cap`` is the per-skill cap), plus
+    ``skills_ungraded`` for the skills past the cap or the deadline, or that errored."""
+    out: dict = {}
+    for g in per_skill:
+        if not isinstance(g, dict):
+            continue
+        for k, v in g.items():
+            if k == "file_cap":
+                out[k] = v
+            elif isinstance(v, bool):
+                out[k] = bool(out.get(k)) or v
+            elif isinstance(v, int):
+                out[k] = int(out.get(k) or 0) + v
+            else:
+                out.setdefault(k, v)
+    if ungraded > 0:
+        out["skills_ungraded"] = ungraded
+    return {k: out[k] for k in sorted(out)}
