@@ -522,8 +522,10 @@ def test_mcp_text_lists_not_checked_and_silent_sandbox():
 
 
 def test_notes_never_change_the_decision():
-    """Every gap but an unread MCP tool list is disclosure only (that one reads Review,
-    Kenne 2026-10-20; tests/test_decision.py pins it)."""
+    """Every gap is disclosure only except the ones that mean we could not read what we
+    exist to read (an unread MCP tool list, an agent-instruction file over the cap, a
+    file a skill links, a model's custom code, no code read at all): those read Review
+    (Kenne 2026-10-20; tests/test_decision.py pins each reason)."""
     base = {"trust_score": 92, "findings": {"items": []}, "metadata": {"files_scanned": 120}}
     gaps = {"oversized_files": 9, "fetch_failed": 3, "over_file_cap": 50,
             "tree_truncated": True, "package_skipped": 2, "dependency_files_unread": 1,
@@ -531,7 +533,9 @@ def test_notes_never_change_the_decision():
             "oversized_agent_files": 1, "skill_refs_unread": 2, "custom_code_unread": 1,
             "scan_errors": 1, "tree_unavailable": True, "image_layers_unread": 2,
             "image_layers_reason": "unsupported compression", "skills_ungraded": 4}
-    disclosure_only = {k: v for k, v in gaps.items() if k != "tool_list_unread"}
+    review_keys = {"tool_list_unread", "oversized_agent_files", "skill_refs_unread",
+                   "custom_code_unread"}
+    disclosure_only = {k: v for k, v in gaps.items() if k not in review_keys}
     for score in (20, 55, 92):
         a = decide({**base, "trust_score": score})
         b = decide({**base, "trust_score": score, "coverage_gaps": disclosure_only})
@@ -589,3 +593,26 @@ def test_ts_coverage_gap_notes_twin():
     assert proc.returncode == 0, proc.stderr
     want = [[coverage_gap_notes(c), coverage_gap_suffix(c)] for c in cases]
     assert json.loads(proc.stdout) == want
+
+
+def test_skill_collection_reads_review_when_a_skill_link_was_not_read():
+    from src.api.public_scan_router import _scan_result_to_dict
+    from src.scanner.skill_collection import build_collection_result
+
+    def skill(gaps):
+        r = scanmod.ScanResult(repo="skill:o/r", stars=0, description="", framework="",
+                               files_scanned=12, total_scannable_files=12)
+        r.trust_score = 90
+        r.coverage_gaps = gaps
+        return r
+
+    res = build_collection_result("skill:o/r", [
+        ("skills/a/SKILL.md", skill({})),
+        ("skills/b/SKILL.md", skill({"oversized_files": 1, "skill_refs_unread": 1}))], 3)
+    by_path = {s["path"]: s["decision"] for s in res.artifact_scan["skills"]}
+    assert by_path == {"skills/a": "safe", "skills/b": "review"}
+    assert res.coverage_gaps == {"oversized_files": 1, "skill_refs_unread": 1,
+                                 "skills_ungraded": 1}
+    d = decide(_scan_result_to_dict(res))
+    assert (d.decision, d.reason) == ("review",
+                                      "a file the skill's instructions use could not be read")
