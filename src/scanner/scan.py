@@ -2413,25 +2413,40 @@ def _is_oversized_code_file(path: str) -> bool:
 
 
 # Text files in an agent-instruction directory (``skills/x/reference.md``) that an agent
-# is handed to read; data and code there are counted by the other rules.
+# may be handed to read; data and code there are counted by the other rules.
 _AGENT_TEXT_EXTS = (".md", ".mdc", ".markdown", ".txt")
+# Files whose NAME makes them agent instructions or tool definitions, wherever they sit.
+# Over the read cap they are not read at all, and they are exactly what the scanner
+# exists to read: the only oversized files that are a decision input (Review).
+AGENT_INSTRUCTION_FILE_NAMES = frozenset({
+    "skill.md", "agents.md", "claude.md", "mcp.json", ".mcp.json", "server.json",
+    "tools.json",
+})
 
 
 def is_oversized_agent_file(path: str) -> bool:
-    """A file an agent is handed as instructions or tool definitions (SKILL.md, AGENTS.md,
-    CLAUDE.md, mcp.json, server.json, a .md under ``skills/``): over the read cap it is
-    not read at all, and it is exactly what the scanner exists to read. Narrower than
-    ``package_context.is_agent_instruction_file``: a README, an OpenAPI spec and files
-    under ``.github/`` are left out (big ones are ordinary, and are counted as plain
-    oversized files)."""
+    """A file NAMED as agent instructions or tool definitions (SKILL.md, AGENTS.md,
+    CLAUDE.md, mcp.json, server.json, tools.json) anywhere in the tree. Over the read
+    cap it is counted in ``oversized_agent_files``, which reads Review. A file a SKILL.md
+    links is handled by the skill scan (``skill_refs_unread``)."""
+    parts = [p for p in str(path).replace("\\", "/").lower().split("/") if p]
+    return bool(parts) and parts[-1] in AGENT_INSTRUCTION_FILE_NAMES
+
+
+def is_oversized_display_file(path: str) -> bool:
+    """A non-source file whose size gap is still worth disclosing (display only, in
+    ``oversized_files``): an agent-instruction text file by directory (an unreferenced
+    ``skills/x/notes.md``), a ``.mdc`` rule, any other agent-instruction name, and an
+    OpenAPI spec (a tool-definition surface). A README and files under ``.github/`` are
+    left out."""
     from src.scanner.package_context import AGENT_INSTRUCTION_DIRS, AGENT_INSTRUCTION_NAMES
     parts = [p for p in str(path).replace("\\", "/").lower().split("/") if p]
     if not parts:
         return False
     name = parts[-1]
-    if name.startswith(("readme", "openapi.")):
+    if name.startswith("readme"):
         return False
-    if name in AGENT_INSTRUCTION_NAMES or name.endswith(".mdc"):
+    if name in AGENT_INSTRUCTION_NAMES or name.endswith(".mdc") or name.startswith("openapi."):
         return True
     dirs = [p for p in parts[:-1] if p != ".github"]
     return name.endswith(_AGENT_TEXT_EXTS) and any(p in AGENT_INSTRUCTION_DIRS for p in dirs)
@@ -2441,8 +2456,9 @@ def _oversized_gap_counts(
     tree: list[dict], user_excludes: set[str] | None = None,
 ) -> tuple[int, int]:
     """(oversized, of which agent-instruction files) for the coverage gaps: every blob
-    over the read cap the scan would have read (a source file of any extension, or an
-    agent-instruction file), not only the code files whose head and tail are read."""
+    over the read cap the scan would have read (a source file of any extension, an
+    agent-instruction file, an OpenAPI spec), not only the code files whose head and
+    tail are read. Only the second count (by file name) is a decision input."""
     excl = {e.lower() for e in (user_excludes or set())}
     n = agent = 0
     for it in tree:
@@ -2451,7 +2467,7 @@ def _oversized_gap_counts(
                 or _should_skip_path(path) or any(e in path.lower() for e in excl)):
             continue
         is_agent = is_oversized_agent_file(path)
-        if is_agent or _is_source_file(path):
+        if is_agent or _is_source_file(path) or is_oversized_display_file(path):
             n += 1
             agent += int(is_agent)
     return n, agent
@@ -6748,17 +6764,21 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     if skipped is not None and int(getattr(skipped, "scannable", 0) or 0) > 0:
         gaps["package_skipped"] = int(skipped.scannable)
     if eco != "docker":
-        # Agent-instruction files over the read cap (SKILL.md, AGENTS.md, CLAUDE.md,
-        # mcp.json) are not read at all. A container image's files are the base OS's.
-        agent_over = [p for p, af in (fetched.files or {}).items()
-                      if getattr(af, "text", None) and len(af.text) > _MAX_FILE_SIZE
-                      and is_oversized_agent_file(p) and not _should_skip_path(p)]
+        # Files named as agent instructions over the read cap (SKILL.md, AGENTS.md,
+        # CLAUDE.md, mcp.json) are not read at all: ``oversized_agent_files`` (Review).
+        # Other agent text and OpenAPI specs over the cap are disclosed only. A container
+        # image's files are the base OS's.
+        big = [p for p, af in (fetched.files or {}).items()
+               if getattr(af, "text", None) and len(af.text) > _MAX_FILE_SIZE
+               and not _should_skip_path(p)]
+        agent_over = [p for p in big if is_oversized_agent_file(p)]
         if agent_over:
             gaps["oversized_agent_files"] = len(agent_over)
-            # CLAUDE.md is not a source file, so it is not in ``oversized`` yet.
-            extra = len(set(agent_over) - set(oversized))
-            if extra:
-                gaps["oversized_files"] = int(gaps.get("oversized_files") or 0) + extra
+        # Not source files, so not in ``oversized`` yet (CLAUDE.md, skills/x/notes.md).
+        extra = len({p for p in big if is_oversized_agent_file(p)
+                     or is_oversized_display_file(p)} - set(oversized))
+        if extra:
+            gaps["oversized_files"] = int(gaps.get("oversized_files") or 0) + extra
     _fold_fetch_gaps(gaps, eco, fetched)
     result.coverage_gaps = gaps
     # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
@@ -7090,13 +7110,19 @@ async def _grade_skill_at(
         info = tree_info or {}
         big = [p for p in (info.get("oversized") or []) if isinstance(p, str)]
         big_refs = _extract_skill_refs(skill_md_text, skill_dir, big)
+        # A file NAMED as agent instructions (AGENTS.md, mcp.json, ...) in the skill's
+        # tree is a decision input wherever it sits; an unreferenced .md is display only.
+        agent_big = [p for p in big if is_oversized_agent_file(p)
+                     and (not skill_dir or p.startswith(skill_dir + "/"))]
         big_in_skill = list(dict.fromkeys(
-            big_refs + [p for p in big if p != skill_md_path and _in_skill(p)]))
+            big_refs + agent_big + [p for p in big if p != skill_md_path and _in_skill(p)]))
         past_cap = wanted[_SKILL_MAX_FILES:]
         unread = set(failed) | set(past_cap)
         sgaps: dict = {}
         if big_in_skill:
             sgaps["oversized_files"] = len(big_in_skill)
+        if agent_big:
+            sgaps["oversized_agent_files"] = len(agent_big)
         if failed:
             sgaps["fetch_failed"] = len(failed)
         if past_cap:
