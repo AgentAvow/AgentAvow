@@ -347,11 +347,52 @@ def test_never_graded_gets_one_fresh_scan_then_silence(hook, monkeypatch, capsys
     assert calls == [("new-a", True), ("new-a", False), ("new-b", True)]
 
 
-def test_unscannable_and_errors_are_silent(hook, monkeypatch, capsys):
+def test_unscannable_says_not_checked_and_offline_stays_silent(hook, monkeypatch, capsys):
     mod, pc = hook
-    out, _ = _run_pkgs(mod, pc, monkeypatch, capsys, "npm i nope boom",
-                       {"nope": pc._UnscannableError("404"), "boom": TimeoutError("slow")})
-    assert out == {}
+    out, _ = _run_pkgs(mod, pc, monkeypatch, capsys, "npm i nope weird boom",
+                       {"nope": pc._UnscannableError("404"),
+                        "weird": pc._UnscannableError("archive is over the 50 MB limit"),
+                        "boom": TimeoutError("slow")})
+    msg = out["systemMessage"]
+    # The API's answer about the target is said once; a bare status code is not shown.
+    assert "❔ npm package 'nope': not checked — AgentAvow couldn't grade it. " in msg
+    assert ("❔ npm package 'weird': not checked — AgentAvow couldn't grade it "
+            "(archive is over the 50 MB limit)") in msg
+    assert "boom" not in msg                                # offline / timeout: silent
+    assert "permissionDecision" not in out["hookSpecificOutput"]  # never a prompt
+    meta = json.loads(pc.CACHE.read_text()).get(pc.META_KEY, {})
+    assert meta.get("install_checks", {}).get("flagged", 0) == 0    # nothing graded or flagged
+
+
+def test_busy_api_says_not_checked(hook, monkeypatch, capsys):
+    import urllib.error
+    mod, pc = hook
+    busy = urllib.error.HTTPError("https://x", 503, "busy", {}, None)
+    out, _ = _run_pkgs(mod, pc, monkeypatch, capsys, "pip install httpx", {"httpx": busy})
+    assert "❔ pypi package 'httpx': not checked (AgentAvow is busy right now)" in out[
+        "systemMessage"]
+
+
+@pytest.mark.parametrize("gaps,shown", [
+    (["oversized_files"], True),      # a file padded past the read cap
+    (["package_skipped"], True),      # payload past the unpack budget
+    (["tree_truncated"], False),      # not attacker-cheap for a package: stays silent
+    ([], False),
+])
+def test_safe_with_an_unread_part_says_so_quietly(hook, monkeypatch, capsys, gaps, shown):
+    mod, pc = hook
+    out, _ = _run_pkgs(mod, pc, monkeypatch, capsys, "npm i big",
+                       {"big": _pkg("safe", "nothing found; 1 file over 500 KB was not "
+                                    "fully read", gaps=gaps)})
+    if not shown:
+        assert out == {}
+        return
+    msg = out["systemMessage"]
+    assert "ℹ️ npm package 'big': Safe to connect" in msg
+    assert "Part of the package could not be read" in msg and "The install goes ahead" in msg
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+    meta = json.loads(pc.CACHE.read_text())[pc.META_KEY]
+    assert meta["install_checks"]["flagged"] == 0          # a note, not a flag
 
 
 def test_cached_grade_is_reused_without_a_request(hook, monkeypatch, capsys):
