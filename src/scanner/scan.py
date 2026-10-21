@@ -2412,6 +2412,51 @@ def _is_oversized_code_file(path: str) -> bool:
     return Path(path).suffix.lower() in _PAYLOAD_CODE_EXTS and _is_source_file(path)
 
 
+# Text files in an agent-instruction directory (``skills/x/reference.md``) that an agent
+# is handed to read; data and code there are counted by the other rules.
+_AGENT_TEXT_EXTS = (".md", ".mdc", ".markdown", ".txt")
+
+
+def is_oversized_agent_file(path: str) -> bool:
+    """A file an agent is handed as instructions or tool definitions (SKILL.md, AGENTS.md,
+    CLAUDE.md, mcp.json, server.json, a .md under ``skills/``): over the read cap it is
+    not read at all, and it is exactly what the scanner exists to read. Narrower than
+    ``package_context.is_agent_instruction_file``: a README, an OpenAPI spec and files
+    under ``.github/`` are left out (big ones are ordinary, and are counted as plain
+    oversized files)."""
+    from src.scanner.package_context import AGENT_INSTRUCTION_DIRS, AGENT_INSTRUCTION_NAMES
+    parts = [p for p in str(path).replace("\\", "/").lower().split("/") if p]
+    if not parts:
+        return False
+    name = parts[-1]
+    if name.startswith(("readme", "openapi.")):
+        return False
+    if name in AGENT_INSTRUCTION_NAMES or name.endswith(".mdc"):
+        return True
+    dirs = [p for p in parts[:-1] if p != ".github"]
+    return name.endswith(_AGENT_TEXT_EXTS) and any(p in AGENT_INSTRUCTION_DIRS for p in dirs)
+
+
+def _oversized_gap_counts(
+    tree: list[dict], user_excludes: set[str] | None = None,
+) -> tuple[int, int]:
+    """(oversized, of which agent-instruction files) for the coverage gaps: every blob
+    over the read cap the scan would have read (a source file of any extension, or an
+    agent-instruction file), not only the code files whose head and tail are read."""
+    excl = {e.lower() for e in (user_excludes or set())}
+    n = agent = 0
+    for it in tree:
+        path = str(it.get("path") or "")
+        if (not path or int(it.get("size", 0) or 0) <= _MAX_FILE_SIZE
+                or _should_skip_path(path) or any(e in path.lower() for e in excl)):
+            continue
+        is_agent = is_oversized_agent_file(path)
+        if is_agent or _is_source_file(path):
+            n += 1
+            agent += int(is_agent)
+    return n, agent
+
+
 def _looks_padded(head: str, file_path: str) -> bool:
     """Whether the head of an oversized file is filler: one long line repeated over a
     third of the rows, or (in Python) almost all docstring / multi-line string."""
@@ -6611,6 +6656,46 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     return result
 
 
+def _fold_fetch_gaps(gaps: dict, eco: str, fetched) -> None:
+    """Coverage gaps a fetcher reports beside its files (disclosure only):
+
+    - Hugging Face (``packaged_manifest["hf"]["coverage"]``): text files past the
+      40-file cap or the byte budget (``package_skipped``), text over 512 KB
+      (``oversized_files``), per-file download failures (``fetch_failed``), a tree
+      listing that failed (``tree_unavailable``), and the custom ``.py`` code among
+      them (``custom_code_unread``).
+    - Docker (``image["layers"]["layers_skipped"]``): layers the walk did not read
+      (``image_layers_unread`` + the most common reason).
+    """
+    try:
+        if eco == "huggingface":
+            hf = ((getattr(fetched, "packaged_manifest", None) or {}).get("hf") or {})
+            cov = hf.get("coverage") if isinstance(hf.get("coverage"), dict) else {}
+            for src, key in (("over_cap", "package_skipped"),
+                             ("oversized", "oversized_files"),
+                             ("fetch_failed", "fetch_failed"),
+                             ("custom_code_unread", "custom_code_unread")):
+                n = int(cov.get(src) or 0)
+                if n > 0:
+                    gaps[key] = int(gaps.get(key) or 0) + n
+            if cov.get("tree_unavailable") is True:
+                gaps["tree_unavailable"] = True
+        elif eco == "docker":
+            image = getattr(fetched, "image", None)
+            layers = (image or {}).get("layers") if isinstance(image, dict) else None
+            skipped = (layers or {}).get("layers_skipped") if isinstance(layers, dict) else None
+            rows = [r for r in (skipped or []) if isinstance(r, dict)
+                    and int(r.get("count") or 0) > 0]
+            n = sum(int(r["count"]) for r in rows)
+            if n > 0:
+                gaps["image_layers_unread"] = n
+                top = max(rows, key=lambda r: int(r["count"]))
+                if isinstance(top.get("reason"), str) and top["reason"].strip():
+                    gaps["image_layers_reason"] = top["reason"].strip()[:60]
+    except Exception:  # noqa: BLE001 — disclosure must never break a scan
+        logger.warning("coverage gap fold failed for %s", eco, exc_info=True)
+
+
 def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     """The offline part of :func:`scan_package`: run the static engine over an unpacked
     artifact and fill ``result`` (findings, coverage, artifact metadata). Pure — no
@@ -6662,6 +6747,19 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         gaps["oversized_files"] = n_over
     if skipped is not None and int(getattr(skipped, "scannable", 0) or 0) > 0:
         gaps["package_skipped"] = int(skipped.scannable)
+    if eco != "docker":
+        # Agent-instruction files over the read cap (SKILL.md, AGENTS.md, CLAUDE.md,
+        # mcp.json) are not read at all. A container image's files are the base OS's.
+        agent_over = [p for p, af in (fetched.files or {}).items()
+                      if getattr(af, "text", None) and len(af.text) > _MAX_FILE_SIZE
+                      and is_oversized_agent_file(p) and not _should_skip_path(p)]
+        if agent_over:
+            gaps["oversized_agent_files"] = len(agent_over)
+            # CLAUDE.md is not a source file, so it is not in ``oversized`` yet.
+            extra = len(set(agent_over) - set(oversized))
+            if extra:
+                gaps["oversized_files"] = int(gaps.get("oversized_files") or 0) + extra
+    _fold_fetch_gaps(gaps, eco, fetched)
     result.coverage_gaps = gaps
     # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
     # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
@@ -6900,11 +6998,17 @@ async def scan_skill(owner: str, repo: str, skill: str | None = None) -> ScanRes
     result = ScanResult(repo=f"skill:{owner}/{repo}", stars=0, description="", framework="")
     try:
         token = await get_github_token()
-        tree, _trunc, repo_ok, ref = await _fetch_repo_tree(owner, repo, token)
+        tree_meta: dict = {}
+        tree, trunc, repo_ok, ref = await _fetch_repo_tree(owner, repo, token, tree_meta)
         if not repo_ok:
             result.error = "Repository not found or unreadable"
             return result
         blobs = [it["path"] for it in tree if it.get("type") == "blob"]
+        # Blobs over the read cap never enter ``blobs``; a skill that links one (or keeps
+        # one in its directory) is disclosed as not read (coverage gaps).
+        big = [str(it.get("path")) for it in (tree_meta.get("oversized") or [])
+               if isinstance(it, dict) and it.get("path")]
+        tree_info = {"oversized": big, "truncated": bool(trunc)}
         skill_mds = [p for p in blobs if p.lower().endswith("skill.md")]
         if not skill_mds:
             result.error = "No SKILL.md found — this repo isn't a recognizable Agent Skill."
@@ -6915,7 +7019,7 @@ async def scan_skill(owner: str, repo: str, skill: str | None = None) -> ScanRes
             if md is None:
                 result.error = f"Skill not found in this repo: {skill}"
                 return result
-            one = await _grade_skill_at(owner, repo, token, ref, blobs, md)
+            one = await _grade_skill_at(owner, repo, token, ref, blobs, md, tree_info)
             sub = md.rsplit("/", 1)[0] if "/" in md else ""
             if not one.error and sub:
                 one.repo = f"skill:{owner}/{repo}/{sub}"
@@ -6925,10 +7029,10 @@ async def scan_skill(owner: str, repo: str, skill: str | None = None) -> ScanRes
         if len(real) <= 1:
             # One skill (or only template skeletons): grade the primary, as before.
             primary = min(real or skill_mds, key=lambda p: (p.count("/"), p.lower()))
-            return await _grade_skill_at(owner, repo, token, ref, blobs, primary)
+            return await _grade_skill_at(owner, repo, token, ref, blobs, primary, tree_info)
 
         graded, total = await grade_skills(
-            real, lambda md: _grade_skill_at(owner, repo, token, ref, blobs, md))
+            real, lambda md: _grade_skill_at(owner, repo, token, ref, blobs, md, tree_info))
         if not graded:
             result.error = "Could not grade any of this repo's skills."
             return result
@@ -6939,12 +7043,20 @@ async def scan_skill(owner: str, repo: str, skill: str | None = None) -> ScanRes
     return result
 
 
+# A skill's SKILL.md plus at most this many referenced / in-directory files are read.
+_SKILL_MAX_FILES = 39
+
+
 async def _grade_skill_at(
     owner: str, repo: str, token: str | None, ref: str | None, blobs: list[str],
-    skill_md_path: str,
+    skill_md_path: str, tree_info: dict | None = None,
 ) -> ScanResult:
     """Grade ONE skill: the SKILL.md at ``skill_md_path`` plus the scripts, hooks and
-    referenced files in its own directory. Fail-open (``.error`` on failure)."""
+    referenced files in its own directory. Fail-open (``.error`` on failure).
+
+    ``tree_info`` (``{"oversized": [paths over the read cap], "truncated": bool}``)
+    feeds the coverage gaps: files the skill links or keeps that were too large, past
+    the file cap or not fetched, and a partial tree, are disclosed, never silent."""
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
     from src.scanner.skill_scan import analyze_skill
 
@@ -6972,13 +7084,41 @@ async def _grade_skill_at(
         # is always scanned.
         referenced = _extract_skill_refs(skill_md_text, skill_dir, blobs)
         in_dir = [p for p in blobs if p != skill_md_path and _in_skill(p)]
-        ordered = list(dict.fromkeys(referenced + in_dir))[:39]  # dedup, referenced first
+        wanted = list(dict.fromkeys(referenced + in_dir))  # dedup, referenced first
+        ordered = wanted[:_SKILL_MAX_FILES]
 
         files: dict[str, str] = {skill_md_path: skill_md_text}
+        failed: list[str] = []
         for p in ordered:
             txt = await _fetch_file_content(owner, repo, p, token, ref)
             if txt is not None:
                 files[p] = txt
+            else:
+                failed.append(p)
+
+        # Coverage gaps (disclosure only): what the skill links or keeps that was not
+        # read. A linked file is what the agent is told to read, so it is also counted
+        # on its own (``skill_refs_unread``).
+        info = tree_info or {}
+        big = [p for p in (info.get("oversized") or []) if isinstance(p, str)]
+        big_refs = _extract_skill_refs(skill_md_text, skill_dir, big)
+        big_in_skill = list(dict.fromkeys(
+            big_refs + [p for p in big if p != skill_md_path and _in_skill(p)]))
+        past_cap = wanted[_SKILL_MAX_FILES:]
+        unread = set(failed) | set(past_cap)
+        sgaps: dict = {}
+        if big_in_skill:
+            sgaps["oversized_files"] = len(big_in_skill)
+        if failed:
+            sgaps["fetch_failed"] = len(failed)
+        if past_cap:
+            sgaps["over_file_cap"] = len(past_cap)
+            sgaps["file_cap"] = _SKILL_MAX_FILES + 1  # SKILL.md + 39 files
+        n_refs = len([p for p in referenced if p in unread]) + len(big_refs)
+        if n_refs:
+            sgaps["skill_refs_unread"] = n_refs
+        if info.get("truncated") is True:
+            sgaps["tree_truncated"] = True
 
         skill = analyze_skill(files, skill_md_path=skill_md_path)
 
@@ -7004,6 +7144,7 @@ async def _grade_skill_at(
         if skill.script_count == 0 and not skill.has_lifecycle_hooks and result.critical_count == 0:
             result.positive_signals.append("No bundled scripts or lifecycle hooks")
         result.coverage = build_coverage(surface="openclaw", scan_depth=SCAN_DEPTH_ARTIFACT)
+        result.coverage_gaps = {k: sgaps[k] for k in sorted(sgaps)}
         result.trust_score = _calculate_trust_score(result)
         result.category_scores = _calculate_category_scores(result)
         result.certified = _certified_status(result)
@@ -7404,11 +7545,15 @@ async def scan_repo(
         # and Certified are untouched). Oversized blobs are counted only when the scan
         # would have read them (same selection rule as the files it did read).
         gaps: dict = {}
-        n_oversized = len(_oversized_scan_files(
-            _repo_meta.get("oversized") or [], user_excludes, limit=0,
-        ))
+        # Every source or agent-instruction blob over the read cap (not only the code
+        # files whose head and tail are read): an AGENTS.md or mcp.json padded past it
+        # is skipped whole, and that is the file an agent reads.
+        n_oversized, n_agent_over = _oversized_gap_counts(
+            _repo_meta.get("oversized") or [], user_excludes)
         if n_oversized:
             gaps["oversized_files"] = n_oversized
+        if n_agent_over:
+            gaps["oversized_agent_files"] = n_agent_over
         if result.total_scannable_files > len(scan_files):
             gaps["over_file_cap"] = result.total_scannable_files - len(scan_files)
             gaps["file_cap"] = _MAX_FILES_PER_REPO
@@ -7447,6 +7592,8 @@ async def scan_repo(
             Phase-2 drift comparison, or None. A seventh element, ``failed``, is True
             when the fetch errored, timed out or returned nothing (not an empty file):
             the file was selected but never read, which the coverage gaps disclose.
+            ``failed`` is the string ``"scan"`` when the file was read but the static
+            engine raised on it (``scan_errors``, not a fetch failure).
             """
             path = item["path"]
             try:
@@ -7457,7 +7604,12 @@ async def scan_repo(
                     )
                 if not content:
                     return [], [], 0, None, None, False, content is None
-                f, p, s = _scan_content(content, path, allowlist)
+                try:
+                    f, p, s = _scan_content(content, path, allowlist)
+                except Exception:  # noqa: BLE001 — read, but the engine raised on it
+                    logger.warning("scan_repo: static engine raised on %s/%s:%s",
+                                   owner, repo, path, exc_info=True)
+                    return [], [], 0, None, None, False, "scan"
                 repo_texts[path] = content
                 text_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 return (
@@ -7486,14 +7638,16 @@ async def scan_repo(
                 )
             scan_results = [t.result() for t in tasks if t in done and not t.cancelled()]
 
-        fetch_failed = 0
+        fetch_failed = scan_errors = 0
         for (findings_list, positives_list, suppressed, digest, text_hash, scanned,
              failed) in scan_results:
             # Only count files that were actually scanned (#7) — signed filesScanned
             # must reflect real coverage, not attempted fetches.
             if scanned:
                 result.files_scanned += 1
-            if failed:
+            if failed == "scan":
+                scan_errors += 1
+            elif failed:
                 fetch_failed += 1
             result.findings.extend(findings_list)
             result.positive_signals.extend(positives_list)
@@ -7504,6 +7658,8 @@ async def scan_repo(
                 repo_text_hashes[text_hash[0]] = text_hash[1]
         if fetch_failed:
             gaps["fetch_failed"] = fetch_failed
+        if scan_errors:
+            gaps["scan_errors"] = scan_errors
         npm_scripts.restore_externally_invoked(result.findings, repo_texts)
         # A test-named file that is not test code (or that running code uses) is graded
         # as shipped code.

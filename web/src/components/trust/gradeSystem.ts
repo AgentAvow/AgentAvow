@@ -374,10 +374,19 @@ const was = (n: number) => (n === 1 ? 'was' : 'were')
 export function coverageGapNotes(input: unknown): string[] {
   const g = asObj(asObj(input).coverage_gaps)
   const notes: string[] = []
-  let n = toInt(g.oversized_files)
+  // What an agent is handed to read comes first: the cheap ways to hide an instruction.
+  let n = toInt(g.oversized_agent_files)
+  if (n > 0) notes.push(`${filesPhrase(n, 'agent instruction file')} over 500 KB ${was(n)} not read`)
+  n = toInt(g.skill_refs_unread)
+  if (n > 0) notes.push(`${filesPhrase(n)} the skill's instructions link to ${was(n)} not read`)
+  n = toInt(g.custom_code_unread)
+  if (n > 0) notes.push(`${filesPhrase(n, 'custom code file')} in the model ${was(n)} not read`)
+  n = toInt(g.oversized_files)
   if (n > 0) notes.push(`${filesPhrase(n)} over 500 KB ${was(n)} not fully read`)
   n = toInt(g.fetch_failed)
   if (n > 0) notes.push(`${filesPhrase(n)} could not be fetched`)
+  n = toInt(g.scan_errors)
+  if (n > 0) notes.push(`${filesPhrase(n)} could not be scanned`)
   n = toInt(g.time_limit_unread)
   if (n > 0) notes.push(`${filesPhrase(n)} ${was(n)} not read before the time limit`)
   n = toInt(g.over_file_cap)
@@ -386,6 +395,7 @@ export function coverageGapNotes(input: unknown): string[] {
     notes.push(`${filesPhrase(n)} past the ${fmtInt(cap)}-file limit ${was(n)} not read`)
   }
   if (g.tree_truncated === true) notes.push('GitHub returned only part of the file tree')
+  if (g.tree_unavailable === true) notes.push('the file list could not be read')
   n = toInt(g.package_skipped)
   if (n > 0) notes.push(`${filesPhrase(n)} in the package ${was(n)} skipped for size`)
   n = toInt(g.dependency_files_unread)
@@ -402,6 +412,13 @@ export function coverageGapNotes(input: unknown): string[] {
     if (g[`${kind}_list_too_large`] === true) notes.push(`the server's ${kind} list was too large to read`)
     else if (g[`${kind}_list_unread`] === true) notes.push(`the server's ${kind} list could not be read`)
   }
+  n = toInt(g.image_layers_unread)
+  if (n > 0) {
+    const why = typeof g.image_layers_reason === 'string' && g.image_layers_reason ? ` (${g.image_layers_reason})` : ''
+    notes.push(`${filesPhrase(n, 'image layer')} ${was(n)} not read${why}`)
+  }
+  n = toInt(g.skills_ungraded)
+  if (n > 0) notes.push(`${filesPhrase(n, 'skill')} in the repo ${was(n)} not graded`)
   return notes
 }
 
@@ -587,7 +604,31 @@ export function verdictPhrase(scanOrDecision: unknown): string {
 // score of 81 or above, and never on thin coverage. Byte-identical twin of
 // `certified_mark_status()` in src/scanner/verdict.py (tests/test_decision.py).
 export const CERTIFIED_MARK_MIN_SCORE = 81
-export type CertifiedMarkWhyNot = '' | 'not_safe' | 'sandbox_pending' | 'score_below_81' | 'thin_coverage'
+export type CertifiedMarkWhyNot = '' | 'not_safe' | 'sandbox_pending' | 'score_below_81' | 'thin_coverage' | 'coverage_gaps'
+
+// The disclosure finding the scanner emits when an oversized file's head is filler.
+const PADDED_FINDING = 'Oversized source file padded with filler'
+const surfaceIs = (data: Obj, surface: string) =>
+  asObj(data.coverage).surface === surface || asObj(data.surface_detail).surface === surface
+
+/** Whether `coverage_gaps` holds a gap that is cheap for an attacker to cause (twin of
+ * `cheap_coverage_gap` in src/scanner/verdict.py). A plain big bundle is not one. */
+export function cheapCoverageGap(input: unknown): boolean {
+  const data = asObj(input)
+  if (!isObj(data.coverage_gaps)) return false
+  const g = data.coverage_gaps
+  if (toInt(g.fetch_failed) > 0) return true
+  if (g.tool_list_unread === true || g.tool_list_paged === true) return true
+  if (toInt(g.oversized_agent_files) > 0 || toInt(g.skill_refs_unread) > 0) return true
+  if (toInt(g.skills_ungraded) > 0) return true
+  if (surfaceIs(data, 'openclaw') && (toInt(g.oversized_files) > 0 || toInt(g.over_file_cap) > 0
+    || g.tree_truncated === true)) return true
+  if (toInt(g.oversized_files) > 0) {
+    const items = asObj(data.findings).items
+    if (Array.isArray(items) && items.some((i) => isObj(i) && i.name === PADDED_FINDING)) return true
+  }
+  return false
+}
 
 /** [mark, whyNot]. `whyNot` is '' when the mark shows or the tool is not eligible at
  * all; otherwise the one condition that suppressed an earned eligibility. */
@@ -600,6 +641,7 @@ export function certifiedMarkStatus(input: unknown, decision?: Decision): [boole
   if (toInt(data.trust_score) < CERTIFIED_MARK_MIN_SCORE) return [false, 'score_below_81']
   const files = asObj(data.metadata).files_scanned
   if ((isInt(files) ? files : 0) < THIN_COVERAGE_FILES) return [false, 'thin_coverage']
+  if (cheapCoverageGap(data)) return [false, 'coverage_gaps']
   return [true, '']
 }
 
@@ -624,6 +666,7 @@ export function certifiedMarkNote(scan: unknown): string {
     sandbox_pending: 'the mark shows after the sandbox finishes.',
     score_below_81: 'the mark shows at a trust score of 81 or above.',
     thin_coverage: 'the mark needs more code to inspect (8 or more files).',
+    coverage_gaps: 'the mark needs the files an agent reads to have been read in full.',
   }
   return tail[why] ? `Certified checks pass; ${tail[why]}` : ''
 }

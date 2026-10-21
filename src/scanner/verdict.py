@@ -285,6 +285,14 @@ def _is_blocking_item(i: dict) -> bool:
     return i.get("shipped") is not False
 
 
+def _surface_is(data: dict, surface: str) -> bool:
+    for key in ("coverage", "surface_detail"):
+        block = data.get(key)
+        if isinstance(block, dict) and block.get("surface") == surface:
+            return True
+    return False
+
+
 def _is_remote_mcp(data: dict) -> bool:
     """A live MCP server scan (``scan_mcp``): only the served tool definitions were
     read, no server code. Marked ``coverage.surface == "mcp"`` (or the same in
@@ -438,12 +446,27 @@ def coverage_gap_notes(data: dict) -> list[str]:
     if not isinstance(g, dict):
         return []
     notes: list[str] = []
+    # What an agent is handed to read comes first: these are the cheap ways to hide
+    # an instruction from the scan.
+    n = _int(g.get("oversized_agent_files"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'agent instruction file')} over 500 KB {_was(n)} "
+                     "not read")
+    n = _int(g.get("skill_refs_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} the skill's instructions link to {_was(n)} not read")
+    n = _int(g.get("custom_code_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'custom code file')} in the model {_was(n)} not read")
     n = _int(g.get("oversized_files"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} over 500 KB {_was(n)} not fully read")
     n = _int(g.get("fetch_failed"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} could not be fetched")
+    n = _int(g.get("scan_errors"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} could not be scanned")
     n = _int(g.get("time_limit_unread"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} {_was(n)} not read before the time limit")
@@ -453,6 +476,8 @@ def coverage_gap_notes(data: dict) -> list[str]:
         notes.append(f"{_files_phrase(n)} past the {cap:,}-file limit {_was(n)} not read")
     if g.get("tree_truncated") is True:
         notes.append("GitHub returned only part of the file tree")
+    if g.get("tree_unavailable") is True:
+        notes.append("the file list could not be read")
     n = _int(g.get("package_skipped"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} in the package {_was(n)} skipped for size")
@@ -476,6 +501,14 @@ def coverage_gap_notes(data: dict) -> list[str]:
             notes.append(f"the server's {kind} list was too large to read")
         elif g.get(f"{kind}_list_unread") is True:
             notes.append(f"the server's {kind} list could not be read")
+    n = _int(g.get("image_layers_unread"))
+    if n > 0:
+        why = g.get("image_layers_reason")
+        why = f" ({why})" if isinstance(why, str) and why else ""
+        notes.append(f"{_files_phrase(n, 'image layer')} {_was(n)} not read{why}")
+    n = _int(g.get("skills_ungraded"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'skill')} in the repo {_was(n)} not graded")
     return notes
 
 
@@ -687,7 +720,9 @@ def decide(data: dict) -> Decision:
 # ``certified.eligible`` is the signed six-check provenance gate (safety model §8) and
 # never changes here. The MARK ("✓ Certified <score>") is a display rule on top of it
 # (§10, Kenne 2026-10-08): it sits only beside Safe to connect, once the sandbox result
-# is final, at a score of 81 or above, and never on thin coverage. Every surface reads
+# is final, at a score of 81 or above, never on thin coverage, and never beside a
+# coverage gap that is cheap for an attacker to cause (``cheap_coverage_gap``; a plain
+# oversized bundle keeps it). Every surface reads
 # this one function (or the API's ``certified_mark`` field); fail closed on anything
 # missing. TS twin: ``certifiedMarkStatus()`` in gradeSystem.ts (byte-identical; the
 # equivalence table is in tests/test_decision.py).
@@ -698,6 +733,42 @@ MARK_NOT_SAFE = "not_safe"
 MARK_PENDING = "sandbox_pending"
 MARK_SCORE = "score_below_81"
 MARK_THIN = "thin_coverage"
+MARK_GAPS = "coverage_gaps"
+
+# The disclosure finding ``scan._scan_oversized_text`` emits when an oversized file's
+# head is filler (the published padding evasion).
+PADDED_FINDING = "Oversized source file padded with filler"
+
+
+def cheap_coverage_gap(data: dict) -> bool:
+    """Whether ``coverage_gaps`` holds a gap that is cheap for an attacker to cause: a
+    fetch that failed, an MCP tool list unread or only partly read, a skill file not
+    read (any gap on a skill scan, or a collection skill not graded), an
+    agent-instruction file over the read cap, or an oversized file the padding rule
+    fired on. A plain big file (a bundled ``.js``) is not one: its head and tail were
+    read and nothing says it was padded. Display rule only (the Certified mark)."""
+    data = data if isinstance(data, dict) else {}
+    g = data.get("coverage_gaps")
+    if not isinstance(g, dict):
+        return False
+    if _int(g.get("fetch_failed")) > 0:
+        return True
+    if g.get("tool_list_unread") is True or g.get("tool_list_paged") is True:
+        return True
+    if _int(g.get("oversized_agent_files")) > 0 or _int(g.get("skill_refs_unread")) > 0:
+        return True
+    if _int(g.get("skills_ungraded")) > 0:
+        return True
+    if _surface_is(data, "openclaw") and (
+            _int(g.get("oversized_files")) > 0 or _int(g.get("over_file_cap")) > 0
+            or g.get("tree_truncated") is True):
+        return True
+    if _int(g.get("oversized_files")) > 0:
+        findings = data.get("findings") if isinstance(data.get("findings"), dict) else {}
+        items = findings.get("items") if isinstance(findings.get("items"), list) else []
+        if any(isinstance(i, dict) and i.get("name") == PADDED_FINDING for i in items):
+            return True
+    return False
 
 
 def certified_mark_status(data: dict, decision: Decision | None = None) -> tuple[bool, str]:
@@ -721,6 +792,8 @@ def certified_mark_status(data: dict, decision: Decision | None = None) -> tuple
     files = files if isinstance(files, int) and not isinstance(files, bool) else 0
     if files < THIN_COVERAGE_FILES:
         return False, MARK_THIN
+    if cheap_coverage_gap(data):
+        return False, MARK_GAPS
     return True, ""
 
 

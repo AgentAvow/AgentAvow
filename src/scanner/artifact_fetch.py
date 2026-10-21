@@ -1181,15 +1181,18 @@ async def fetch_huggingface_artifact(
         })
     try:
         meta = await _get_json(HF_META.format(name=name), client)
+        tree_unavailable = False
         try:
             tree = await _get_json_list(HF_TREE.format(name=name), client)
         except ArtifactFetchError:
             tree = []
+            tree_unavailable = True
 
         safe_weights: list[str] = []
         unsafe_weights: list[str] = []
         custom_code: list[str] = []
         text_targets: list[tuple[str, int]] = []
+        oversized_text: list[str] = []
         for entry in tree:
             if not isinstance(entry, dict) or entry.get("type") != "file":
                 continue
@@ -1206,6 +1209,8 @@ async def fetch_huggingface_artifact(
                 custom_code.append(path)
             if ext in _HF_TEXT_EXT and size <= _HF_MAX_TEXT_BYTES:
                 text_targets.append((path, size))
+            elif ext in _HF_TEXT_EXT:
+                oversized_text.append(path)
 
         # ``.bin`` is ambiguous (PyTorch pickle vs OpenVINO raw tensors): classify
         # each by its first bytes so raw weights aren't flagged as executable.
@@ -1220,16 +1225,35 @@ async def fetch_huggingface_artifact(
         text_targets.sort(key=lambda t: (t[0].count("/"), t[0]))
         files: dict[str, ArtifactFile] = {}
         total = 0
+        failed: list[str] = []
+        attempted: set[str] = set()
         for path, _size in text_targets[:_HF_MAX_TEXT_FILES]:
+            attempted.add(path)
             raw = await _download_hf_text(
                 HF_RESOLVE.format(name=name, path=path), client,
             )
             if raw is None:
+                failed.append(path)
                 continue
             total += len(raw)
             if total > MAX_UNPACKED_BYTES:
+                attempted.discard(path)  # past the byte budget: skipped, not failed
                 break
             files[path] = _make_file(path, raw)
+        # What was selected but not read (disclosure only; folded into coverage_gaps by
+        # scan.apply_artifact_scan): text past the file cap or the byte budget, text over
+        # the size cap, failed downloads, an unlisted tree, and the custom code among them.
+        over_cap = [p for p, _s in text_targets if p not in attempted]
+        unread_code = [p for p in custom_code
+                       if p not in files and (p in failed or p in over_cap
+                                              or p in oversized_text)]
+        hf_coverage = {k: v for k, v in (
+            ("tree_unavailable", tree_unavailable),
+            ("over_cap", len(over_cap)),
+            ("oversized", len(oversized_text)),
+            ("fetch_failed", len(failed)),
+            ("custom_code_unread", len(unread_code)),
+        ) if v}
 
         sha = meta.get("sha")
         # HF's `sha` is a 40-hex git commit id (sha1), not a content sha256. Derive a
@@ -1267,6 +1291,7 @@ async def fetch_huggingface_artifact(
                 "raw_weights": raw_weights[:50],
                 "custom_code": custom_code[:50],
                 "license": license_from_meta(meta),
+                "coverage": hf_coverage,
             }},
             description=_hf_description(
                 meta.get("pipeline_tag"), meta.get("library_name"),

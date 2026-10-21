@@ -598,6 +598,53 @@ MARK_CASES = [
     ("garbage", {"trust_score": "x", "certified": 3, "metadata": None}, False, ""),
     ("dependency_advisory_only", _scan(84, 340, [_dep("critical")], certified=CERTIFIED),
      True, ""),
+    # ── coverage gaps: only the attacker-cheap kinds take the mark off ────────────────
+    ("gap_plain_oversized_bundle_keeps_mark", _scan(
+        92, 340, [_f("low", "Source file too large to scan in full", category="obfuscation")],
+        certified=CERTIFIED, coverage_gaps={"oversized_files": 2}), True, ""),
+    ("gap_over_file_cap_keeps_mark", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
+        "over_file_cap": 40, "file_cap": 200, "tree_truncated": True}), True, ""),
+    ("gap_package_skipped_keeps_mark", _scan(92, 340, certified=CERTIFIED,
+                                             coverage_gaps={"package_skipped": 5}), True, ""),
+    ("gap_advisory_lookup_keeps_mark", _scan(92, 340, certified=CERTIFIED,
+                                             coverage_gaps={"advisory_lookup": "failed"}),
+     True, ""),
+    ("gap_fetch_failed", _scan(92, 340, certified=CERTIFIED,
+                               coverage_gaps={"fetch_failed": 1}), False, "coverage_gaps"),
+    ("gap_fetch_failed_string", _scan(92, 340, certified=CERTIFIED,
+                                      coverage_gaps={"fetch_failed": "3"}),
+     False, "coverage_gaps"),
+    ("gap_padded_oversized", _scan(
+        92, 340, [_f("medium", "Oversized source file padded with filler",
+                     category="obfuscation")],
+        certified=CERTIFIED, coverage_gaps={"oversized_files": 1}), False, "coverage_gaps"),
+    ("gap_padded_without_gap_key", _scan(
+        92, 340, [_f("medium", "Oversized source file padded with filler",
+                     category="obfuscation")], certified=CERTIFIED), True, ""),
+    ("gap_agent_file_oversized", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
+        "oversized_files": 1, "oversized_agent_files": 1}), False, "coverage_gaps"),
+    # A partly read tool list now reads Review (#216), so the mark is off as not_safe.
+    ("gap_tool_list_paged", _scan(92, 340, certified=CERTIFIED,
+                                  coverage_gaps={"tool_list_paged": True}),
+     False, "not_safe"),
+    ("gap_skill_ref_unread", _scan(92, 340, certified=CERTIFIED,
+                                   coverage_gaps={"skill_refs_unread": 1}),
+     False, "coverage_gaps"),
+    ("gap_skills_ungraded", _scan(92, 340, certified=CERTIFIED,
+                                  coverage_gaps={"skills_ungraded": 3}),
+     False, "coverage_gaps"),
+    ("gap_skill_surface_over_cap", _scan(92, 340, certified=CERTIFIED,
+                                         coverage={"surface": "openclaw"},
+                                         coverage_gaps={"over_file_cap": 2, "file_cap": 40}),
+     False, "coverage_gaps"),
+    ("gap_skill_detail_oversized", _scan(92, 340, certified=CERTIFIED,
+                                         surface_detail={"surface": "openclaw"},
+                                         coverage_gaps={"oversized_files": 1}),
+     False, "coverage_gaps"),
+    ("gap_thin_wins", _scan(92, 3, certified=CERTIFIED, coverage_gaps={"fetch_failed": 1}),
+     False, "thin_coverage"),
+    ("gap_garbage", _scan(92, 340, certified=CERTIFIED, coverage_gaps=["fetch_failed"]),
+     True, ""),
 ]
 
 

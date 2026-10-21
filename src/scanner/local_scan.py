@@ -41,6 +41,7 @@ from src.scanner.scan import (
     _detect_language,
     _finding_is_blocking,
     _load_allowlist,
+    _oversized_gap_counts,
     _oversized_scan_files,
     _regrade_misnamed_tests,
     _scan_content,
@@ -265,9 +266,11 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
     )
     # Coverage gaps, counted as ``scan_repo`` counts them (disclosure only).
     gaps: dict = {}
-    n_oversized = len(_oversized_scan_files(tree, user_excludes, limit=0))
+    n_oversized, n_agent_over = _oversized_gap_counts(tree, user_excludes)
     if n_oversized:
         gaps["oversized_files"] = n_oversized
+    if n_agent_over:
+        gaps["oversized_agent_files"] = n_agent_over
     if result.total_scannable_files > len(scan_files):
         gaps["over_file_cap"] = result.total_scannable_files - len(scan_files)
         gaps["file_cap"] = _MAX_FILES_PER_REPO

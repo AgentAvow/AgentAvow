@@ -223,6 +223,193 @@ def test_artifact_scan_records_oversized_kept_files():
     assert r.sampled is False
 
 
+@pytest.mark.parametrize("path,agent", [
+    ("SKILL.md", True), ("pkg/AGENTS.md", True), ("CLAUDE.md", True), (".mcp.json", True),
+    ("server.json", True), ("tools.json", True), ("skills/pdf/reference.md", True),
+    ("x/.cursor/rules/a.mdc", True), ("README.md", False), ("docs/readme.json", False),
+    ("openapi.json", False), (".github/workflows/ci.md", False),
+    ("skills/pdf/run.py", False), ("prompts/data.json", False), ("src/app.js", False),
+])
+def test_is_oversized_agent_file(path, agent):
+    assert scanmod.is_oversized_agent_file(path) is agent
+
+
+def test_oversized_gap_counts_include_non_code_and_agent_files():
+    big = scanmod._MAX_FILE_SIZE + 1
+    tree = [{"path": p, "type": "blob", "size": big} for p in (
+        "payload.js", "AGENTS.md", "CLAUDE.md", "config/huge.yaml", "logo.png",
+        "node_modules/x/index.js", "data/table.json")]
+    tree.append({"path": "small.md", "type": "blob", "size": 10})
+    # payload.js, AGENTS.md, CLAUDE.md, huge.yaml, table.json; 2 of them agent files
+    assert scanmod._oversized_gap_counts(tree) == (5, 2)
+    assert scanmod._oversized_gap_counts(tree, {"config/"}) == (4, 2)
+
+
+@pytest.mark.asyncio
+async def test_scan_repo_counts_oversized_agent_files_and_scan_errors(monkeypatch):
+    big = scanmod._MAX_FILE_SIZE + 1
+    oversized = [{"path": "AGENTS.md", "type": "blob", "size": big},
+                 {"path": "tools.json", "type": "blob", "size": big}]
+    _patch_repo(monkeypatch, oversized=oversized, fail=set())
+    real = scanmod._scan_content
+
+    def flaky(content, path, *a, **k):
+        if path == "util.py":
+            raise RuntimeError("engine bug")
+        return real(content, path, *a, **k)
+
+    monkeypatch.setattr(scanmod, "_scan_content", flaky)
+    r = await scanmod.scan_repo("owner/repo", token="x")
+    assert r.error is None
+    assert r.coverage_gaps == {"oversized_files": 2, "oversized_agent_files": 2,
+                               "scan_errors": 1}
+
+
+def test_fold_fetch_gaps_hf_and_docker():
+    from types import SimpleNamespace
+
+    gaps: dict = {"oversized_files": 1}
+    hf = SimpleNamespace(packaged_manifest={"hf": {"coverage": {
+        "tree_unavailable": True, "over_cap": 3, "oversized": 2, "fetch_failed": 1,
+        "custom_code_unread": 2}}})
+    scanmod._fold_fetch_gaps(gaps, "huggingface", hf)
+    assert gaps == {"oversized_files": 3, "package_skipped": 3, "fetch_failed": 1,
+                    "custom_code_unread": 2, "tree_unavailable": True}
+    gaps = {}
+    img = SimpleNamespace(image={"layers": {"layers_skipped": [
+        {"reason": "unsupported compression", "count": 2},
+        {"reason": "time budget reached", "count": 1}]}})
+    scanmod._fold_fetch_gaps(gaps, "docker", img)
+    assert gaps == {"image_layers_unread": 3, "image_layers_reason": "unsupported compression"}
+    gaps = {}
+    scanmod._fold_fetch_gaps(gaps, "docker", SimpleNamespace(image={"layers": {}}))
+    scanmod._fold_fetch_gaps(gaps, "huggingface", SimpleNamespace(packaged_manifest=None))
+    scanmod._fold_fetch_gaps(gaps, "npm", SimpleNamespace())
+    assert gaps == {}
+
+
+@pytest.mark.asyncio
+async def test_hf_fetch_reports_what_it_did_not_read(monkeypatch):
+    from src.scanner import artifact_fetch as af
+    from src.scanner import hf_facts
+
+    big = af._HF_MAX_TEXT_BYTES + 1
+    tree = [{"type": "file", "path": "config.json", "size": 10},
+            {"type": "file", "path": "modeling_x.py", "size": big},
+            {"type": "file", "path": "broken.py", "size": 10}]
+    tree += [{"type": "file", "path": f"deep/a/cfg{i:02d}.json", "size": 10}
+             for i in range(af._HF_MAX_TEXT_FILES + 2)]
+
+    async def fake_json(url, client, *a, **k):
+        return {"sha": "0" * 40}
+
+    async def fake_list(url, client):
+        return tree
+
+    async def fake_text(url, client):
+        return None if url.endswith("broken.py") else b"{}"
+
+    async def fake_classify(*a, **k):
+        return {}
+
+    monkeypatch.setattr(af, "_get_json", fake_json)
+    monkeypatch.setattr(af, "_get_json_list", fake_list)
+    monkeypatch.setattr(af, "_download_hf_text", fake_text)
+    monkeypatch.setattr(hf_facts, "classify_weights", fake_classify)
+    res = await af.fetch_huggingface_artifact("org/model", client=object())
+    cov = res.packaged_manifest["hf"]["coverage"]
+    # 44 text targets (modeling_x.py is too large to be one), 40 attempted: 4 past the
+    # cap, broken.py failed; both .py files are custom code that was not read
+    assert cov == {"over_cap": 4, "oversized": 1, "fetch_failed": 1,
+                   "custom_code_unread": 2}
+
+    async def no_tree(url, client):
+        raise af.ArtifactFetchError("down")
+
+    monkeypatch.setattr(af, "_get_json_list", no_tree)
+    res = await af.fetch_huggingface_artifact("org/model", client=object())
+    assert res.packaged_manifest["hf"]["coverage"] == {"tree_unavailable": True}
+    assert res.files == {}
+
+
+def test_artifact_scan_counts_oversized_agent_files():
+    from src.scanner.artifact_fetch import ArtifactFetchResult, ArtifactFile
+
+    big = "# rules\n" * (scanmod._MAX_FILE_SIZE // 8 + 10)
+    fetched = ArtifactFetchResult(ecosystem="npm", name="demo", version="1.0.0",
+                                  kind="tarball", ok=True, digest="sha256:00")
+    for path, text in (("index.js", "module.exports = 1\n"), ("CLAUDE.md", big),
+                       ("SKILL.md", big), ("README.md", big)):
+        fetched.files[path] = ArtifactFile(path=path, size=len(text), sha256="0", text=text)
+    r = scanmod.ScanResult(repo="npm:demo", stars=0, description="", framework="")
+    scanmod.apply_artifact_scan(r, "npm", fetched)
+    assert r.coverage_gaps == {"oversized_files": 2, "oversized_agent_files": 2}
+
+
+def _patch_skill(monkeypatch, files: dict, oversized: list[str], fail: set[str],
+                 truncated: bool = False):
+    big = scanmod._MAX_FILE_SIZE + 1
+
+    async def fake_tree(owner, repo, token, meta_out=None):
+        if meta_out is not None:
+            meta_out["oversized"] = [{"path": p, "type": "blob", "size": big}
+                                     for p in oversized]
+        return ([{"path": p, "type": "blob", "size": len(t)} for p, t in files.items()],
+                truncated, True, "main")
+
+    async def fake_content(owner, repo, path, token=None, ref=None, *a, **k):
+        if path in fail:
+            return None
+        return files.get(path)
+
+    async def fake_token():
+        return None
+
+    import src.github_auth as gh
+    monkeypatch.setattr(scanmod, "_fetch_repo_tree", fake_tree)
+    monkeypatch.setattr(scanmod, "_fetch_file_content", fake_content)
+    monkeypatch.setattr(gh, "get_github_token", fake_token)
+
+
+SKILL_MD = ("---\nname: demo\ndescription: A demo skill.\n---\n"
+            "Read [the guide](reference.md) and [notes](notes.md) first.\n")
+
+
+@pytest.mark.asyncio
+async def test_skill_scan_records_unread_files(monkeypatch):
+    files = {"SKILL.md": SKILL_MD, "notes.md": "notes\n", "helper.sh": "echo hi\n"}
+    files.update({f"docs/d{i:02d}.md": "doc\n" for i in range(40)})
+    _patch_skill(monkeypatch, files, oversized=["reference.md"], fail={"notes.md"},
+                 truncated=True)
+    r = await scanmod.scan_skill("o", "r")
+    assert r.error is None
+    # notes.md (linked) failed; reference.md (linked) is over the cap; 42 candidates
+    # past SKILL.md, 39 read: 3 past the cap
+    assert r.coverage_gaps == {"fetch_failed": 1, "file_cap": 40, "over_file_cap": 3,
+                               "oversized_files": 1, "skill_refs_unread": 2,
+                               "tree_truncated": True}
+
+
+@pytest.mark.asyncio
+async def test_skill_scan_clean_read_has_no_gaps(monkeypatch):
+    files = {"SKILL.md": SKILL_MD.replace("(reference.md)", "(notes.md)"),
+             "notes.md": "notes\n"}
+    # a root skill reads the repo's .md files; a big image is not one of them
+    _patch_skill(monkeypatch, files, oversized=["assets/big.png"], fail=set())
+    r = await scanmod.scan_skill("o", "r")
+    assert r.error is None and r.coverage_gaps == {}
+
+
+def test_merge_skill_gaps():
+    from src.scanner.skill_collection import merge_skill_gaps
+
+    assert merge_skill_gaps([{"fetch_failed": 1, "file_cap": 40},
+                             {"fetch_failed": 2, "tree_truncated": True},
+                             None, {}], 3) == {
+        "fetch_failed": 3, "file_cap": 40, "skills_ungraded": 3, "tree_truncated": True}
+    assert merge_skill_gaps([{}, {}], 0) == {}
+
+
 # ── every surface states it ────────────────────────────────────────────────────────
 
 def _result_with_gaps():
@@ -255,16 +442,68 @@ def test_api_dict_signed_payload_and_response_carry_gaps():
     assert "coverageGaps" not in _build_scan_payload("o/r", data2)["scan"]
 
 
-def test_badge_title_says_partial_scan_only_when_gaps():
+@pytest.mark.parametrize("style,word", [("card", ">partial scan<"),
+                                        ("card-stacked", ">partial scan<"),
+                                        ("compact", ">partial<")])
+def test_avow_badges_show_a_visible_partial_marker(style, word):
     from src.api.badge_avow import render_avow_badge
 
-    base = dict(style="card", decision="safe", score=92)
+    base = dict(style=style, decision="safe", score=92)
     plain = render_avow_badge(**base)
     gappy = render_avow_badge(**base, not_checked=2)
-    assert "partial scan" not in plain
-    assert "partial scan: 2 coverage gaps, see report" in gappy
-    # the drawn badge is the same apart from the accessible title
-    assert plain.split("</title>", 1)[1] == gappy.split("</title>", 1)[1]
+    assert "partial" not in plain
+    assert "partial scan: 2 coverage gaps, see report" in gappy  # the accessible title
+    body = gappy.split("</title>", 1)[1]
+    assert word in body  # and the drawn pixels, not only the title
+    # an unscanned badge has nothing to call partial
+    assert "partial" not in render_avow_badge(style=style, decision=None, score=None,
+                                              not_checked=2).split("</title>", 1)[1]
+
+
+def test_classic_certified_and_combined_badges_show_partial():
+    from src.api.public_scan_router import (
+        PARTIAL_SUFFIX,
+        _certified_badge_response,
+        _combined_badge_response,
+    )
+
+    cert = _certified_badge_response(92, "safe", partial=PARTIAL_SUFFIX).body.decode()
+    assert "✓ Certified 92 · partial" in cert
+    assert "partial" not in _certified_badge_response(92, "safe").body.decode()
+    comb = _combined_badge_response(92, 10, decision="safe", partial=PARTIAL_SUFFIX)
+    assert "92/100 · partial" in comb.body.decode()
+    comb_cert = _combined_badge_response(92, 10, certified=True, decision="safe",
+                                         partial=PARTIAL_SUFFIX)
+    assert "✓ Certified 92 · partial" in comb_cert.body.decode()
+
+
+def test_classic_card_shows_partial():
+    from src.api.card_svg import render_card_svg
+
+    kw = dict(coordinate="o/r", score=92, adoption_display=None, adoption_pct=0,
+              adoption_tier=None, decision="safe")
+    assert "Safe to connect · partial scan" in render_card_svg(**kw, partial=True)
+    assert "partial" not in render_card_svg(**kw)
+
+
+@pytest.mark.parametrize("style", ["compact", "detailed", "minimal", "flat-square"])
+def test_entity_badges_show_partial(style):
+    from src.api.badge_router import _render_badge_svg
+
+    kw = dict(score=0.9, has_operator=True, style=style, entity_name="demo",
+              scan_status="safe")
+    assert "Safe · partial" in _render_badge_svg(**kw, partial=True)
+    assert "partial" not in _render_badge_svg(**kw)
+    # a legacy scan word or no scan never gains the marker
+    assert "partial" not in _render_badge_svg(**{**kw, "scan_status": None}, partial=True)
+
+
+def test_embed_badge_shows_partial():
+    from src.api.badge_embed_router import _render_embed_badge_svg
+
+    assert "· partial" in _render_embed_badge_svg("demo", 0.9, True, decision="safe",
+                                                  partial=True)
+    assert "partial" not in _render_embed_badge_svg("demo", 0.9, True, decision="safe")
 
 
 def test_mcp_text_lists_not_checked_and_silent_sandbox():
@@ -289,7 +528,10 @@ def test_notes_never_change_the_decision():
     base = {"trust_score": 92, "findings": {"items": []}, "metadata": {"files_scanned": 120}}
     gaps = {"oversized_files": 9, "fetch_failed": 3, "over_file_cap": 50,
             "tree_truncated": True, "package_skipped": 2, "dependency_files_unread": 1,
-            "advisory_lookup": "failed", "tool_list_unread": True, "tool_list_paged": True}
+            "advisory_lookup": "failed", "tool_list_unread": True, "tool_list_paged": True,
+            "oversized_agent_files": 1, "skill_refs_unread": 2, "custom_code_unread": 1,
+            "scan_errors": 1, "tree_unavailable": True, "image_layers_unread": 2,
+            "image_layers_reason": "unsupported compression", "skills_ungraded": 4}
     review_kinds = {"tool_list_unread", "tool_list_paged"}
     disclosure_only = {k: v for k, v in gaps.items() if k not in review_kinds}
     for score in (20, 55, 92):
@@ -298,8 +540,24 @@ def test_notes_never_change_the_decision():
         assert (a.decision, a.final) == (b.decision, b.final)
         c = decide({**base, "trust_score": score, "coverage_gaps": gaps})
         assert c.decision == "review"
-    assert len(coverage_gap_notes({"coverage_gaps": gaps})) == 9
-    assert coverage_gap_suffix({"coverage_gaps": gaps}).endswith("; and 7 more coverage gaps")
+    assert len(coverage_gap_notes({"coverage_gaps": gaps})) == 16
+    assert coverage_gap_suffix({"coverage_gaps": gaps}).endswith("; and 14 more coverage gaps")
+
+
+def test_new_gap_notes_read_plainly():
+    notes = coverage_gap_notes({"coverage_gaps": {
+        "oversized_agent_files": 1, "skill_refs_unread": 2, "custom_code_unread": 1,
+        "scan_errors": 3, "tree_unavailable": True, "image_layers_unread": 2,
+        "image_layers_reason": "unsupported compression", "skills_ungraded": 1}})
+    assert notes == [
+        "1 agent instruction file over 500 KB was not read",
+        "2 files the skill's instructions link to were not read",
+        "1 custom code file in the model was not read",
+        "3 files could not be scanned",
+        "the file list could not be read",
+        "2 image layers were not read (unsupported compression)",
+        "1 skill in the repo was not graded",
+    ]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
@@ -318,6 +576,12 @@ def test_ts_coverage_gap_notes_twin():
         {"resource_list_unread": True, "resource_list_too_large": True,
          "prompt_list_unread": "yes"},
         {"tree_truncated": "yes", "advisory_lookup": "ok"},
+        {"oversized_agent_files": 1, "skill_refs_unread": "2", "custom_code_unread": 3,
+         "scan_errors": 1, "tree_unavailable": True, "image_layers_unread": 1,
+         "image_layers_reason": "layer too large", "skills_ungraded": 2},
+        {"image_layers_unread": 3, "image_layers_reason": ""},
+        {"image_layers_unread": 1, "image_layers_reason": 5, "tree_unavailable": "yes"},
+        {"oversized_files": 2, "oversized_agent_files": 2, "fetch_failed": 1},
     )] + [{"coverage_gaps": ["x"]}, {}]
     script = (
         "const m = await import(process.argv[1]);"

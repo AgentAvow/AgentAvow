@@ -83,6 +83,8 @@ export function summarize(s: ScanLike, repo: string): PlainSummary {
     paragraph = `We scanned ${short} across 12 safety categories and found nothing blocking in what we read. Not everything was read (${gaps.join('; ')}), so this covers the files we checked, not the whole tool.`
   } else if (verdict === 'safe' && total === 0) {
     paragraph = `We scanned ${short} across 12 safety categories and found nothing blocking. It carries a signed, verifiable score — safe to connect to your agent.`
+  } else if (verdict === 'safe' && gaps.length) {
+    paragraph = `${short} has no critical or high findings in what we read. We noted ${total} minor thing${total === 1 ? '' : 's'}, listed below for context. Not everything was read (${gaps.join('; ')}), so this covers the files we checked, not the whole tool.`
   } else if (verdict === 'safe') {
     paragraph = `${short} has no critical or high findings. We noted ${total} minor thing${total === 1 ? '' : 's'}, listed below for context — safe to connect.`
   } else if (verdict === 'review') {

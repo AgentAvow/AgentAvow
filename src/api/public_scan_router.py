@@ -194,7 +194,7 @@ class PublicScanResponse(BaseModel):
     # §10 display rule; ``verdict.certified_mark``). ``certified.eligible`` above is the
     # signed provenance gate and can be true beside Review; the mark never is.
     # ``certified_mark_reason`` names why an earned eligibility shows no mark
-    # (not_safe | sandbox_pending | score_below_81 | thin_coverage), else "".
+    # (not_safe | sandbox_pending | score_below_81 | thin_coverage | coverage_gaps), else "".
     certified_mark: bool = False
     certified_mark_reason: str = ""
     coverage: dict = {}  # scan_depth / provenance_binding / db_snapshots (recompute discipline)
@@ -3121,11 +3121,14 @@ async def scan_badge(
     if composite or score is None:
         certified = False
 
+    not_checked = len(_coverage_gap_notes(scan_data or {}))
     if style != "classic":
         return await _avow_badge_response(
             owner, repo, style=style, theme=theme, score=score, certified=certified,
             decision=decision if score is not None else None, db=db,
-            not_checked=len(_coverage_gap_notes(scan_data or {})))
+            not_checked=not_checked)
+    # A visible "partial" marker when the scan disclosed coverage gaps (every style).
+    partial = PARTIAL_SUFFIX if (not_checked and score is not None) else ""
 
     # Combined = trust + adoption in one badge (adoption never travels alone)
     if metric == "combined":
@@ -3134,18 +3137,18 @@ async def scan_badge(
         ) else "github"
         _as, a_count, _au = await surface_adoption_summary(a_surface, owner, repo)
         return _combined_badge_response(
-            score, a_count, certified=certified, decision=decision)
+            score, a_count, certified=certified, decision=decision, partial=partial)
 
     # Build badge — the three-phrase short label leads, the 0-100 number is the
     # evidence ("Safe · 92/100"). A Certified tool keeps the distinct earned-tier
     # treatment (the CertifiedMark gradient), with the phrase in front of the mark.
     _ = score_type  # composite vs scan: both read as the tool's decision + number
     if score is not None and certified:
-        return _certified_badge_response(int(score), decision)
+        return _certified_badge_response(int(score), decision, partial=partial)
     if score is not None:
         _d = _decision_for(decision)
         color = _d.color
-        label = f"{_d.label} · {score}/100"
+        label = f"{_d.label} · {score}/100{partial}"
     else:
         color = "#6b7280"
         label = "not scanned"
@@ -3204,6 +3207,7 @@ async def scan_card(
 
     decision, mark = await _badge_view(scan_data, score, (owner, repo))
     cert = bool(mark and not composite and score is not None)
+    not_checked = len(_coverage_gap_notes(scan_data or {}))
 
     if style in ("card", "card-stacked"):
         # The same renderer, adoption source and cache headers as badge?style=card.
@@ -3211,7 +3215,7 @@ async def scan_card(
             owner, repo, style=style, theme=theme, score=score, certified=cert,
             decision=decision if score is not None else None, db=db,
             cache_control="public, max-age=300, s-maxage=3600",
-            not_checked=len(_coverage_gap_notes(scan_data or {})))
+            not_checked=not_checked)
 
     a_surface, a_score100, a_count, a_unit = await _card_adoption(owner, repo, db)
     coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
@@ -3228,6 +3232,7 @@ async def scan_card(
         adoption_tier=None,
         decision=decision if score is not None else None,
         certified=cert,
+        partial=bool(not_checked and score is not None),
     )
     return Response(
         content=svg,
@@ -3363,9 +3368,12 @@ def _compact_int(n: int | None) -> str:
     return str(n)
 
 
+PARTIAL_SUFFIX = " · partial"
+
+
 def _combined_badge_response(
     score: int | None, count: int | None, certified: bool = False,
-    decision: str | None = None,
+    decision: str | None = None, partial: str = "",
 ) -> Response:
     """Three-segment [AgentAvow | trust | ★count] badge — trust + adoption in one.
     The trust segment leads with the three-phrase short label ("Safe · 92/100"). The
@@ -3382,11 +3390,11 @@ def _combined_badge_response(
     cert = certified and score is not None
     _d = _decision_for(decision or score) if score is not None else None
     if cert:
-        trust_label = f"{_d.label} · ✓ Certified {score}"
+        trust_label = f"{_d.label} · ✓ Certified {score}{partial}"
         trust_fill = "url(#agcert)"
         trust_text = "#06231f"
     else:
-        trust_label = f"{_d.label} · {score}/100" if _d is not None else "not scanned"
+        trust_label = f"{_d.label} · {score}/100{partial}" if _d is not None else "not scanned"
         trust_fill = _d.color if _d is not None else "#6b7280"
         trust_text = "#fff"
     adopt_label = f"★ {_compact_int(count)}" if count else "New"
@@ -3418,7 +3426,9 @@ def _combined_badge_response(
     )
 
 
-def _certified_badge_response(score: int, decision: str | None = None) -> Response:
+def _certified_badge_response(
+    score: int, decision: str | None = None, partial: str = "",
+) -> Response:
     """The earned-tier badge: [AgentAvow | Safe · ✓ Certified NN] with the CertifiedMark
     teal→magenta gradient (matches the on-site mark). The phrase's short label leads;
     Certified stays. Only rendered for a tool that currently clears the conjunctive
@@ -3426,7 +3436,7 @@ def _certified_badge_response(score: int, decision: str | None = None) -> Respon
     import math
 
     from src.api.badge_style import BADGE_FONT, CERT_GRADIENT, cert_gradient_def, verdana_width
-    label = f"{_decision_for(decision or score).label} · ✓ Certified {score}"
+    label = f"{_decision_for(decision or score).label} · ✓ Certified {score}{partial}"
     label_width = math.ceil(verdana_width(label) * 1.1 + 16)  # bold: ~10% wider
     total_width = 80 + label_width
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
