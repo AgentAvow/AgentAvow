@@ -507,7 +507,9 @@ def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_pa
 
 @pytest.mark.parametrize("behavioral, expected", [
     (None, ""),
-    ({"ran": False, "reason": "off"}, ""),
+    # A run that did not happen says so (as the MCP output does), never silence.
+    ({"ran": False, "reason": "off"}, "sandbox: did not run (off), static analysis only"),
+    ({"ran": False}, "sandbox: did not run, static analysis only"),
     ({"ran": False, "pending": True}, "sandbox: running now, results in about a minute"),
     ({"ran": False, "pending": True, "state": "queued", "queue_position": 3},
      "sandbox: waiting for a free slot (position 3 in the queue)"),
@@ -605,3 +607,25 @@ def test_plugin_manifest_carries_every_directory_listing_field():
     for field in ("documentationUrl", "supportUrl", "privacyPolicyUrl", "termsOfServiceUrl"):
         assert urllib.parse.urlsplit(plugin[field]).scheme == "https", field
     assert (PLUGIN_DIR / plugin["icon"]).is_file()
+
+
+def test_verdict_records_what_the_scan_could_not_read():
+    mod = _load(PLUGIN_COPY)
+    v = mod._verdict({"trust_score": 90, "findings": {"items": []}, "decision": "safe",
+                      "coverage_gaps": {"oversized_files": 2, "package_skipped": 0,
+                                        "fetch_failed": 1}})
+    assert v["gaps"] == ["fetch_failed", "oversized_files"]   # zero / false kinds dropped
+    assert mod._verdict({"trust_score": 90, "findings": {"items": []}})["gaps"] == []
+
+
+@pytest.mark.parametrize("gap,reason", [
+    ("tool_list_unread", "the server's tool list could not be read"),
+    ("tool_list_paged", "only part of the server's tool list could be read"),
+])
+def test_fallback_decision_reads_review_when_the_tool_list_was_not_fully_read(gap, reason):
+    # A response without the API's own decision (older API) is decided by the same rule.
+    mod = _load(PLUGIN_COPY)
+    v = mod._verdict({"trust_score": 92, "findings": {"items": []},
+                      "metadata": {"files_scanned": 3},
+                      "coverage": {"surface": "mcp"}, "coverage_gaps": {gap: True}})
+    assert (v["decision"], v["decision_reason"]) == ("review", reason)
