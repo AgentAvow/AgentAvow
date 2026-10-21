@@ -889,6 +889,9 @@ class McpSession:
         self._client_info = dict(client_info or SCANNER_CLIENT_INFO)
         self._headers = dict(_MCP_HEADERS)
         self.server_info: dict = {}
+        # What ``initialize`` advertised (``result.capabilities``): a resources/ or
+        # prompts/list that fails counts as unread only when the server said it has one.
+        self.capabilities: dict = {}
         self.session_id: str | None = None
         self.init_status: int | None = None
         self._rid = 1
@@ -899,7 +902,8 @@ class McpSession:
 
     async def initialize(self) -> int:
         """Run the handshake; returns the HTTP status of ``initialize`` (0 on a transport
-        error). ``server_info`` and ``session_id`` are set on success."""
+        error). ``server_info``, ``capabilities`` and ``session_id`` are set on
+        success."""
         try:
             init = await _post_capped(self._client, self._url, headers=self._headers, json=_rpc(
                 "initialize",
@@ -917,7 +921,11 @@ class McpSession:
             return init.status_code
         session = init.headers.get("mcp-session-id") or init.headers.get("Mcp-Session-Id")
         init_doc = _parse_jsonrpc_body(init.text)
-        self.server_info = ((init_doc or {}).get("result") or {}).get("serverInfo") or {}
+        init_result = (init_doc or {}).get("result") if isinstance(init_doc, dict) else None
+        init_result = init_result if isinstance(init_result, dict) else {}
+        self.server_info = init_result.get("serverInfo") or {}
+        caps = init_result.get("capabilities")
+        self.capabilities = caps if isinstance(caps, dict) else {}
         if session:
             self.session_id = session
             self._headers["mcp-session-id"] = session
@@ -1106,14 +1114,29 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
                 "server_info": session.server_info, "client_view": view,
             }
             # Coverage disclosure: tools/list failed (graded on resources/prompts
-            # only), or the server paged its tool list and only page one was read.
-            if "tools/list" in getattr(session, "list_failed", set()):
+            # only), or the server paged its tool list and only part of it was read (a
+            # later page failed or was too large, a cursor repeated, or the page cap was
+            # reached); ``tools_pages_read`` says how many pages were read.
+            failed = getattr(session, "list_failed", set())
+            partial = getattr(session, "list_more_pages", set())
+            tool_pages = (getattr(session, "pages", {}) or {}).get("tools/list") or []
+            if "tools/list" in failed:
                 out["tools_list_failed"] = True
-            if "tools/list" in getattr(session, "list_more_pages", set()):
+            if "tools/list" in partial:
                 out["tools_more_pages"] = True
+                out["tools_pages_read"] = len(tool_pages)
             if too_large:
                 out["lists_too_large"] = sorted(too_large)
-            tool_pages = (getattr(session, "pages", {}) or {}).get("tools/list") or []
+            # A resources/ or prompts/list that failed (or was read only in part) is
+            # unread only when initialize advertised that capability: most servers have
+            # no prompts, and their "method not found" is not a gap.
+            caps = session.capabilities if isinstance(session.capabilities, dict) else {}
+            unread = sorted(m for m, cap in (("resources/list", "resources"),
+                                             ("prompts/list", "prompts"))
+                            if m in (failed | partial) and m not in too_large
+                            and caps.get(cap) is not None)
+            if unread:
+                out["lists_unread"] = unread
             if tool_pages:
                 out["observation"] = build_observation(
                     url, tool_pages, started=started, finished=finished,

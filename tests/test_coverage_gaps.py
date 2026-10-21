@@ -283,13 +283,15 @@ def test_mcp_text_lists_not_checked_and_silent_sandbox():
 
 
 def test_notes_never_change_the_decision():
-    """Every gap but an unread MCP tool list is disclosure only (that one reads Review,
-    Kenne 2026-10-20; tests/test_decision.py pins it)."""
+    """Every gap but the MCP list gaps is disclosure only (an unread or partly read tool
+    list, and an unread or oversized resources/prompts list, read Review, Kenne
+    2026-10-20; tests/test_decision.py pins them)."""
     base = {"trust_score": 92, "findings": {"items": []}, "metadata": {"files_scanned": 120}}
     gaps = {"oversized_files": 9, "fetch_failed": 3, "over_file_cap": 50,
             "tree_truncated": True, "package_skipped": 2, "dependency_files_unread": 1,
             "advisory_lookup": "failed", "tool_list_unread": True, "tool_list_paged": True}
-    disclosure_only = {k: v for k, v in gaps.items() if k != "tool_list_unread"}
+    review_kinds = {"tool_list_unread", "tool_list_paged"}
+    disclosure_only = {k: v for k, v in gaps.items() if k not in review_kinds}
     for score in (20, 55, 92):
         a = decide({**base, "trust_score": score})
         b = decide({**base, "trust_score": score, "coverage_gaps": disclosure_only})
@@ -307,6 +309,14 @@ def test_ts_coverage_gap_notes_twin():
         {"over_file_cap": 1, "file_cap": 0}, {"tree_truncated": True, "package_skipped": 1},
         {"dependency_files_unread": 3, "advisory_lookup": "failed", "tool_list_unread": True,
          "tool_list_paged": True, "time_limit_unread": 1},
+        {"tool_list_paged": True, "pages_read": 1},
+        {"tool_list_paged": True, "pages_read": 20},
+        {"tool_list_paged": True, "pages_read": "1234"},
+        {"tool_list_paged": True, "pages_read": 0},
+        {"pages_read": 5},
+        {"resource_list_unread": True, "prompt_list_too_large": True},
+        {"resource_list_unread": True, "resource_list_too_large": True,
+         "prompt_list_unread": "yes"},
         {"tree_truncated": "yes", "advisory_lookup": "ok"},
     )] + [{"coverage_gaps": ["x"]}, {}]
     script = (
