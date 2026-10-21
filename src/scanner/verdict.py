@@ -180,6 +180,14 @@ THIN_REASON_REMOTE_MCP = "tool definitions clean; server code not inspected"
 # A remote MCP server whose tools/list could not be read (error, timeout, transport
 # failure) reads Review: the tool definitions are what we exist to read (Kenne, 10-20).
 TOOL_LIST_UNREAD_REASON = "the server's tool list could not be read"
+# The same rule for a tool list read only in part: a later page failed or was too
+# large, a cursor repeated, or the page cap was reached (``tool_list_paged``).
+TOOL_LIST_PAGED_REASON = "only part of the server's tool list could be read"
+# An advertised resources/ or prompts/list that could not be read, or was too large to
+# read: prompt and resource text is injection surface an agent reads (Kenne, 10-20).
+RESOURCE_LIST_UNREAD_REASON = "the server's resource list could not be read"
+PROMPT_LIST_UNREAD_REASON = "the server's prompt list could not be read"
+RESOURCE_PROMPT_LISTS_UNREAD_REASON = "the server's resource and prompt lists could not be read"
 # The same principle for the other things we exist to read (partial-coverage audit,
 # 2026-10-20). Each reads Review with its own reason; disclosure-only gaps stay Safe.
 # No file read because the tree or every fetch failed (an outage, not an empty
@@ -433,7 +441,8 @@ def _dependency_phrase(crit: int, high: int) -> str:
 # signed as ``scan.coverageGaps``) counts what the scan selected but could not read;
 # every surface states it next to the answer, and a Safe reason ends with it, so a
 # result with unread files never reads as a clean bill for the whole tool. Disclosure
-# only: nothing here changes the decision or the score. TS twin: ``coverageGapNotes``
+# only: nothing here changes the decision or the score (the MCP list gaps that read
+# Review are decided in decide(), not here). TS twin: ``coverageGapNotes``
 # in gradeSystem.ts (byte-identical; tests/test_decision.py runs both).
 COVERAGE_GAP_REASON_MAX = 2  # notes named in a Safe reason; the rest are counted
 DEFAULT_FILE_CAP = 200
@@ -498,7 +507,18 @@ def coverage_gap_notes(data: dict) -> list[str]:
     if g.get("tool_list_unread") is True:
         notes.append("the server's tool list could not be read")
     if g.get("tool_list_paged") is True:
-        notes.append("only the first page of the server's tool list was read")
+        n = _int(g.get("pages_read"))
+        if n > 1:
+            notes.append(f"only the first {n:,} pages of the server's tool list were read")
+        elif n == 1:
+            notes.append("only the first page of the server's tool list was read")
+        else:
+            notes.append("only part of the server's tool list was read")
+    for kind in ("resource", "prompt"):
+        if g.get(f"{kind}_list_too_large") is True:
+            notes.append(f"the server's {kind} list was too large to read")
+        elif g.get(f"{kind}_list_unread") is True:
+            notes.append(f"the server's {kind} list could not be read")
     n = _int(g.get("image_layers_unread"))
     if n > 0:
         why = g.get("image_layers_reason")
@@ -672,20 +692,27 @@ def decide(data: dict) -> Decision:
     if score < REVIEW_SCORE_FLOOR:
         return done(DECISION_REVIEW, f"trust score {score}/100 is under {REVIEW_SCORE_FLOOR}")
     gap = data.get("coverage_gaps")
-    if isinstance(gap, dict) and gap.get("tool_list_unread") is True:
+    gap = gap if isinstance(gap, dict) else {}
+    if gap.get("tool_list_unread") is True:
         return done(DECISION_REVIEW, TOOL_LIST_UNREAD_REASON)
-    if isinstance(gap, dict):
-        if files_known and files == 0 and (
-                gap.get("tree_truncated") is True or gap.get("tree_unavailable") is True
-                or _int(gap.get("fetch_failed")) > 0
-                or _int(gap.get("time_limit_unread")) > 0):
-            return done(DECISION_REVIEW, CODE_UNREAD_REASON)
-        if _int(gap.get("oversized_agent_files")) > 0:
-            return done(DECISION_REVIEW, AGENT_FILE_UNREAD_REASON)
-        if _int(gap.get("skill_refs_unread")) > 0:
-            return done(DECISION_REVIEW, SKILL_REF_UNREAD_REASON)
-        if _int(gap.get("custom_code_unread")) > 0:
-            return done(DECISION_REVIEW, CUSTOM_CODE_UNREAD_REASON)
+    if gap.get("tool_list_paged") is True:
+        return done(DECISION_REVIEW, TOOL_LIST_PAGED_REASON)
+    res_gap = gap.get("resource_list_unread") is True or gap.get("resource_list_too_large") is True
+    pr_gap = gap.get("prompt_list_unread") is True or gap.get("prompt_list_too_large") is True
+    if res_gap or pr_gap:
+        return done(DECISION_REVIEW, RESOURCE_PROMPT_LISTS_UNREAD_REASON if res_gap and pr_gap
+                    else RESOURCE_LIST_UNREAD_REASON if res_gap else PROMPT_LIST_UNREAD_REASON)
+    if files_known and files == 0 and (
+            gap.get("tree_truncated") is True or gap.get("tree_unavailable") is True
+            or _int(gap.get("fetch_failed")) > 0
+            or _int(gap.get("time_limit_unread")) > 0):
+        return done(DECISION_REVIEW, CODE_UNREAD_REASON)
+    if _int(gap.get("oversized_agent_files")) > 0:
+        return done(DECISION_REVIEW, AGENT_FILE_UNREAD_REASON)
+    if _int(gap.get("skill_refs_unread")) > 0:
+        return done(DECISION_REVIEW, SKILL_REF_UNREAD_REASON)
+    if _int(gap.get("custom_code_unread")) > 0:
+        return done(DECISION_REVIEW, CUSTOM_CODE_UNREAD_REASON)
 
     found = any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 and i.get("installed") is not False for i in items)

@@ -6942,13 +6942,25 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     result.coverage = build_coverage(
         surface="mcp", scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=True,
     )
-    # Coverage gaps (disclosure only): a tools/list that failed, or a paged tool list
-    # read only to its first page, is not the whole tool set.
+    # Coverage gaps: a tools/list that failed, or a paged tool list read only in part
+    # (``pages_read`` pages), is not the whole tool set; an advertised resources/ or
+    # prompts/list that could not be read (or was too large) leaves agent-facing text
+    # unread. Each of these reads Review (verdict.decide; Kenne 2026-10-20).
     _gaps: dict = {}
     if data.get("tools_list_failed"):
         _gaps["tool_list_unread"] = True
     if data.get("tools_more_pages"):
         _gaps["tool_list_paged"] = True
+        _pages = data.get("tools_pages_read")
+        if isinstance(_pages, int) and not isinstance(_pages, bool) and _pages > 0:
+            _gaps["pages_read"] = _pages
+    _lists = {"resources/list": "resource", "prompts/list": "prompt"}
+    for _m in data.get("lists_unread") or ():
+        if _m in _lists:
+            _gaps[f"{_lists[_m]}_list_unread"] = True
+    for _m in data.get("lists_too_large") or ():
+        if _m in _lists:
+            _gaps[f"{_lists[_m]}_list_too_large"] = True
     result.coverage_gaps = _gaps
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
