@@ -616,6 +616,15 @@ def test_verdict_records_what_the_scan_could_not_read():
                                         "fetch_failed": 1}})
     assert v["gaps"] == ["fetch_failed", "oversized_files"]   # zero / false kinds dropped
     assert mod._verdict({"trust_score": 90, "findings": {"items": []}})["gaps"] == []
+    # Metadata that describes a gap is not a gap kind; counts and "failed" strings are.
+    v = mod._verdict({"trust_score": 90, "findings": {"items": []}, "decision": "safe",
+                      "coverage_gaps": {"tool_list_paged": True, "pages_read": 20,
+                                        "over_file_cap": 12, "file_cap": 200,
+                                        "image_layers_unread": 1,
+                                        "image_layers_reason": "unsupported compression",
+                                        "advisory_lookup": "failed"}})
+    assert v["gaps"] == ["advisory_lookup", "image_layers_unread", "over_file_cap",
+                         "tool_list_paged"]
 
 
 @pytest.mark.parametrize("gap,reason", [
