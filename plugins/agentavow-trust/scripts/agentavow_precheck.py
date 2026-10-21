@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.32"
+__version__ = "0.1.33"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -861,9 +861,16 @@ def _verdict(data: dict) -> dict:
         # What the scan could not read (``coverage_gaps`` kinds: oversized_files,
         # package_skipped, fetch_failed, tool_list_unread …), so a Safe answer that left
         # part of the target unread can say so at install time.
-        "gaps": sorted(k for k, v in (data.get("coverage_gaps") or {}).items() if v)
+        "gaps": sorted(k for k, v in (data.get("coverage_gaps") or {}).items()
+                       if v and k not in _GAP_METADATA)
         if isinstance(data.get("coverage_gaps"), dict) else [],
     }
+
+
+# Keys in ``coverage_gaps`` that describe a gap rather than being one (the file cap that
+# applied, how many tool-list pages were read, why image layers went unread). Gap kinds
+# themselves are counts, booleans or a "failed" string, so they are kept by truthiness.
+_GAP_METADATA = frozenset({"file_cap", "pages_read", "image_layers_reason"})
 
 
 # Package-registry hosts an install always reaches; left out of the one-line network
@@ -968,7 +975,7 @@ def _sandbox_summary(b: object) -> str:
 # older GRADE_EPOCH (bump the epoch whenever server-side scoring changes materially).
 # A re-check whose decision (Safe / Review / Do not connect) is unchanged is silent;
 # a changed decision is reported, naming the old answer.
-GRADE_EPOCH = "2026-10-20"
+GRADE_EPOCH = "2026-10-21"
 GRADE_MAX_AGE = 7 * 24 * 3600
 
 
