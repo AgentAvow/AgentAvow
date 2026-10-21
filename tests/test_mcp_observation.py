@@ -236,3 +236,17 @@ def test_example_packet_verifies():
                          timeout=60)
     assert out.returncode == 0, out.stdout[-2000:]
     assert "all checks passed" in out.stdout
+
+
+def test_example_packet_signs_rfc8785_bytes_like_production():
+    import base64
+    from pathlib import Path
+
+    import rfc8785
+
+    pkt = json.loads((Path(__file__).resolve().parents[1] /
+                      "docs/standards/mcp-catalog-observation-v0/"
+                      "mcp-catalog-observation-v0-packet.json").read_text())
+    payload_b64 = pkt["reference"]["jws"].split(".")[1]
+    raw = base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
+    assert rfc8785.dumps(json.loads(raw)) == raw

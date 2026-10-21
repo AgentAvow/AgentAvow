@@ -26,7 +26,8 @@ sys.path.insert(0, str(ROOT))
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat  # noqa: E402
 
-from src.signing import canonicalize  # noqa: E402
+# Production scan attestations sign RFC 8785 bytes (public_scan_router aliases this).
+from src.signing import canonicalize_jcs_strict as canonicalize  # noqa: E402
 
 URL = "https://mcp.deepwiki.com/mcp"
 OUT = Path(__file__).with_name("mcp-catalog-observation-v0-packet.json")
