@@ -48,10 +48,10 @@ Profile `agentavow.mcp-catalog-observation.v0`, inside the signed scan, next to
 
 `certificatePathValidated` and `identityMatched` come from the live TLS context: with
 `CERT_REQUIRED` and hostname checking, a completed handshake means both checks passed.
-An SNI value and an SPKI hash alone would not establish that. Missing or null fields are
-omitted from the signed bytes. The payload is AgentAvow's legacy canonical form: sorted
-keys, nulls dropped, ASCII escapes. The verifier checks the signature over the bytes as
-given and never re-canonicalizes.
+An SNI value and an SPKI hash alone would not establish that. The payload is the RFC 8785 (JCS)
+canonical form production signs, null fields kept (`transport: null` when no TLS facts
+were recorded). The verifier checks the signature over the bytes as given and never
+re-canonicalizes.
 
 ## The consumer's inputs
 
