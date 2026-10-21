@@ -223,26 +223,37 @@ def test_artifact_scan_records_oversized_kept_files():
     assert r.sampled is False
 
 
-@pytest.mark.parametrize("path,agent", [
-    ("SKILL.md", True), ("pkg/AGENTS.md", True), ("CLAUDE.md", True), (".mcp.json", True),
-    ("server.json", True), ("tools.json", True), ("skills/pdf/reference.md", True),
-    ("x/.cursor/rules/a.mdc", True), ("README.md", False), ("docs/readme.json", False),
-    ("openapi.json", False), (".github/workflows/ci.md", False),
-    ("skills/pdf/run.py", False), ("prompts/data.json", False), ("src/app.js", False),
+@pytest.mark.parametrize("path,agent,display", [
+    ("SKILL.md", True, True), ("pkg/AGENTS.md", True, True), ("CLAUDE.md", True, False),
+    (".mcp.json", True, True), ("server.json", True, True), ("tools.json", True, True),
+    ("deep/dir/mcp.json", True, True),
+    # display only: agent text by directory, rules, other names, OpenAPI specs
+    ("skills/pdf/reference.md", False, True), ("x/.cursor/rules/a.mdc", False, True),
+    ("plugin.json", False, True), ("openapi.json", False, True),
+    ("api/openapi.yaml", False, True),
+    # neither
+    ("README.md", False, False), ("docs/readme.json", False, False),
+    (".github/workflows/ci.md", False, False), ("docs/CHANGELOG.md", False, False),
+    ("skills/pdf/run.py", False, False), ("prompts/data.json", False, False),
+    ("src/app.js", False, False),
 ])
-def test_is_oversized_agent_file(path, agent):
+def test_oversized_agent_and_display_files(path, agent, display):
     assert scanmod.is_oversized_agent_file(path) is agent
+    if not agent:
+        assert scanmod.is_oversized_display_file(path) is display
 
 
 def test_oversized_gap_counts_include_non_code_and_agent_files():
     big = scanmod._MAX_FILE_SIZE + 1
     tree = [{"path": p, "type": "blob", "size": big} for p in (
         "payload.js", "AGENTS.md", "CLAUDE.md", "config/huge.yaml", "logo.png",
-        "node_modules/x/index.js", "data/table.json")]
+        "node_modules/x/index.js", "data/table.json", "openapi.yaml",
+        "skills/x/notes.md", "docs/CHANGELOG.md")]
     tree.append({"path": "small.md", "type": "blob", "size": 10})
-    # payload.js, AGENTS.md, CLAUDE.md, huge.yaml, table.json; 2 of them agent files
-    assert scanmod._oversized_gap_counts(tree) == (5, 2)
-    assert scanmod._oversized_gap_counts(tree, {"config/"}) == (4, 2)
+    # payload.js, AGENTS.md, CLAUDE.md, huge.yaml, table.json, openapi.yaml, notes.md;
+    # only AGENTS.md and CLAUDE.md are agent files by name (a decision input)
+    assert scanmod._oversized_gap_counts(tree) == (7, 2)
+    assert scanmod._oversized_gap_counts(tree, {"config/"}) == (6, 2)
 
 
 @pytest.mark.asyncio
@@ -344,6 +355,20 @@ def test_artifact_scan_counts_oversized_agent_files():
     r = scanmod.ScanResult(repo="npm:demo", stars=0, description="", framework="")
     scanmod.apply_artifact_scan(r, "npm", fetched)
     assert r.coverage_gaps == {"oversized_files": 2, "oversized_agent_files": 2}
+
+
+def test_artifact_scan_unreferenced_agent_text_is_display_only():
+    from src.scanner.artifact_fetch import ArtifactFetchResult, ArtifactFile
+
+    big = "# notes\n" * (scanmod._MAX_FILE_SIZE // 8 + 10)
+    fetched = ArtifactFetchResult(ecosystem="npm", name="demo", version="1.0.0",
+                                  kind="tarball", ok=True, digest="sha256:00")
+    for path, text in (("index.js", "module.exports = 1\n"),
+                       ("skills/x/notes.md", big), ("openapi.yaml", "a: 1\n" * 110000)):
+        fetched.files[path] = ArtifactFile(path=path, size=len(text), sha256="0", text=text)
+    r = scanmod.ScanResult(repo="npm:demo", stars=0, description="", framework="")
+    scanmod.apply_artifact_scan(r, "npm", fetched)
+    assert r.coverage_gaps == {"oversized_files": 2}
 
 
 def _patch_skill(monkeypatch, files: dict, oversized: list[str], fail: set[str],
@@ -522,9 +547,10 @@ def test_mcp_text_lists_not_checked_and_silent_sandbox():
 
 
 def test_notes_never_change_the_decision():
-    """Every gap but the MCP list gaps is disclosure only (an unread or partly read tool
-    list, and an unread or oversized resources/prompts list, read Review, Kenne
-    2026-10-20; tests/test_decision.py pins them)."""
+    """Every gap is disclosure only except the ones that mean we could not read what we
+    exist to read (an unread or partly read MCP tool list, an agent-instruction file
+    over the cap, a file a skill links, a model's custom code, no code read at all):
+    those read Review (Kenne 2026-10-20; tests/test_decision.py pins each reason)."""
     base = {"trust_score": 92, "findings": {"items": []}, "metadata": {"files_scanned": 120}}
     gaps = {"oversized_files": 9, "fetch_failed": 3, "over_file_cap": 50,
             "tree_truncated": True, "package_skipped": 2, "dependency_files_unread": 1,
@@ -532,8 +558,9 @@ def test_notes_never_change_the_decision():
             "oversized_agent_files": 1, "skill_refs_unread": 2, "custom_code_unread": 1,
             "scan_errors": 1, "tree_unavailable": True, "image_layers_unread": 2,
             "image_layers_reason": "unsupported compression", "skills_ungraded": 4}
-    review_kinds = {"tool_list_unread", "tool_list_paged"}
-    disclosure_only = {k: v for k, v in gaps.items() if k not in review_kinds}
+    review_keys = {"tool_list_unread", "tool_list_paged", "oversized_agent_files",
+                   "skill_refs_unread", "custom_code_unread"}
+    disclosure_only = {k: v for k, v in gaps.items() if k not in review_keys}
     for score in (20, 55, 92):
         a = decide({**base, "trust_score": score})
         b = decide({**base, "trust_score": score, "coverage_gaps": disclosure_only})
@@ -599,3 +626,95 @@ def test_ts_coverage_gap_notes_twin():
     assert proc.returncode == 0, proc.stderr
     want = [[coverage_gap_notes(c), coverage_gap_suffix(c)] for c in cases]
     assert json.loads(proc.stdout) == want
+
+
+def test_skill_collection_reads_review_when_a_skill_link_was_not_read():
+    from src.api.public_scan_router import _scan_result_to_dict
+    from src.scanner.skill_collection import build_collection_result
+
+    def skill(gaps):
+        r = scanmod.ScanResult(repo="skill:o/r", stars=0, description="", framework="",
+                               files_scanned=12, total_scannable_files=12)
+        r.trust_score = 90
+        r.coverage_gaps = gaps
+        return r
+
+    res = build_collection_result("skill:o/r", [
+        ("skills/a/SKILL.md", skill({})),
+        ("skills/b/SKILL.md", skill({"oversized_files": 1, "skill_refs_unread": 1}))], 3)
+    by_path = {s["path"]: s["decision"] for s in res.artifact_scan["skills"]}
+    assert by_path == {"skills/a": "safe", "skills/b": "review"}
+    assert res.coverage_gaps == {"oversized_files": 1, "skill_refs_unread": 1,
+                                 "skills_ungraded": 1}
+    d = decide(_scan_result_to_dict(res))
+    assert (d.decision, d.reason) == ("review",
+                                      "a file the skill's instructions use could not be read")
+
+
+# ── Review only for what we exist to read (agentgraph-72 design review) ──────────────
+
+def _decided(r):
+    from src.api.public_scan_router import _scan_result_to_dict
+    d = decide(_scan_result_to_dict(r))
+    return d.decision, d.reason
+
+
+@pytest.mark.asyncio
+async def test_root_skill_big_changelog_is_safe_with_note(monkeypatch):
+    files = {"SKILL.md": SKILL_MD.replace("(reference.md)", "(notes.md)"),
+             "notes.md": "notes\n"}
+    files.update({f"src/m{i}.py": "x = 1\n" for i in range(8)})
+    _patch_skill(monkeypatch, files, oversized=["docs/CHANGELOG.md"], fail=set())
+    r = await scanmod.scan_skill("o", "r")
+    assert r.error is None
+    assert r.coverage_gaps == {"oversized_files": 1}
+    decision, reason = _decided(r)
+    assert decision == "safe"
+    assert reason.endswith("; 1 file over 500 KB was not fully read")
+
+
+@pytest.mark.asyncio
+async def test_skill_big_referenced_guide_reads_review(monkeypatch):
+    files = {"SKILL.md": SKILL_MD.replace("(reference.md)", "(guide.md)"),
+             "notes.md": "notes\n"}
+    _patch_skill(monkeypatch, files, oversized=["guide.md"], fail=set())
+    r = await scanmod.scan_skill("o", "r")
+    assert r.coverage_gaps == {"oversized_files": 1, "skill_refs_unread": 1}
+    assert _decided(r) == ("review", "a file the skill's instructions use could not be read")
+
+
+@pytest.mark.asyncio
+async def test_skill_unreferenced_big_md_under_skills_is_display_only(monkeypatch):
+    files = {"skills/pdf/SKILL.md": SKILL_MD.replace("(reference.md)", "(notes.md)"),
+             "skills/pdf/notes.md": "notes\n"}
+    files.update({f"skills/pdf/s{i}.py": "x = 1\n" for i in range(8)})
+    _patch_skill(monkeypatch, files, oversized=["skills/pdf/extra.md"], fail=set())
+    r = await scanmod.scan_skill("o", "r")
+    assert r.coverage_gaps == {"oversized_files": 1}
+    assert _decided(r)[0] == "safe"
+
+
+@pytest.mark.asyncio
+async def test_skill_big_agents_md_reads_review(monkeypatch):
+    files = {"SKILL.md": SKILL_MD.replace("(reference.md)", "(notes.md)"),
+             "notes.md": "notes\n"}
+    _patch_skill(monkeypatch, files, oversized=["sub/AGENTS.md"], fail=set())
+    r = await scanmod.scan_skill("o", "r")
+    assert r.coverage_gaps == {"oversized_agent_files": 1, "oversized_files": 1}
+    assert _decided(r) == ("review", "an agent instruction file was too large to read")
+
+
+@pytest.mark.asyncio
+async def test_repo_big_agents_md_reads_review_and_openapi_is_display_only(monkeypatch):
+    big = scanmod._MAX_FILE_SIZE + 1
+    _patch_repo(monkeypatch, oversized=[{"path": "AGENTS.md", "type": "blob", "size": big}],
+                fail=set())
+    r = await scanmod.scan_repo("owner/repo", token="x")
+    assert r.coverage_gaps == {"oversized_files": 1, "oversized_agent_files": 1}
+    assert _decided(r)[1] == "an agent instruction file was too large to read"
+    _patch_repo(monkeypatch, oversized=[
+        {"path": "openapi.yaml", "type": "blob", "size": big},
+        {"path": "skills/x/notes.md", "type": "blob", "size": big}], fail=set())
+    r = await scanmod.scan_repo("owner/repo", token="x")
+    assert r.coverage_gaps == {"oversized_files": 2}
+    assert _decided(r)[0] == "safe"

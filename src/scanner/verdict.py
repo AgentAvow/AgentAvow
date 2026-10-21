@@ -137,7 +137,12 @@ def verdict_label(safe: bool) -> str:
 #                                               blocking high defect (static or
 #                                               sandbox), a published advisory affecting
 #                                               the scanned version, deprecation, a score
-#                                               under 51
+#                                               under 51, or a scan that could not read
+#                                               what it exists to read (an MCP tool list,
+#                                               no code at all after a tree / fetch
+#                                               failure, an agent-instruction file over
+#                                               the cap, a file a skill links, a model's
+#                                               custom code)
 #   safe            "Safe to connect"           otherwise, including thin static
 #                                               coverage with nothing found (the reason
 #                                               says so; decided 2026-10-08, #19)
@@ -183,6 +188,19 @@ TOOL_LIST_PAGED_REASON = "only part of the server's tool list could be read"
 RESOURCE_LIST_UNREAD_REASON = "the server's resource list could not be read"
 PROMPT_LIST_UNREAD_REASON = "the server's prompt list could not be read"
 RESOURCE_PROMPT_LISTS_UNREAD_REASON = "the server's resource and prompt lists could not be read"
+# The same principle for the other things we exist to read (partial-coverage audit,
+# 2026-10-20). Each reads Review with its own reason; disclosure-only gaps stay Safe.
+# No file read because the tree or every fetch failed (an outage, not an empty
+# metapackage: THIN_REASON_NO_CODE stays Safe for one).
+CODE_UNREAD_REASON = "the scan could not read the code"
+# An agent-instruction file (SKILL.md, AGENTS.md, CLAUDE.md, mcp.json, server.json) over
+# the 500 KB read cap: padding it is the published evasion, and it is what agents read.
+AGENT_FILE_UNREAD_REASON = "an agent instruction file was too large to read"
+# A file SKILL.md links (too large, past the file cap, or not fetched).
+SKILL_REF_UNREAD_REASON = "a file the skill's instructions use could not be read"
+# A Hugging Face model's custom .py (too large, past the file cap, or not fetched):
+# custom code runs on load with trust_remote_code.
+CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
 
 # A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
 # yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
@@ -684,6 +702,17 @@ def decide(data: dict) -> Decision:
     if res_gap or pr_gap:
         return done(DECISION_REVIEW, RESOURCE_PROMPT_LISTS_UNREAD_REASON if res_gap and pr_gap
                     else RESOURCE_LIST_UNREAD_REASON if res_gap else PROMPT_LIST_UNREAD_REASON)
+    if files_known and files == 0 and (
+            gap.get("tree_truncated") is True or gap.get("tree_unavailable") is True
+            or _int(gap.get("fetch_failed")) > 0
+            or _int(gap.get("time_limit_unread")) > 0):
+        return done(DECISION_REVIEW, CODE_UNREAD_REASON)
+    if _int(gap.get("oversized_agent_files")) > 0:
+        return done(DECISION_REVIEW, AGENT_FILE_UNREAD_REASON)
+    if _int(gap.get("skill_refs_unread")) > 0:
+        return done(DECISION_REVIEW, SKILL_REF_UNREAD_REASON)
+    if _int(gap.get("custom_code_unread")) > 0:
+        return done(DECISION_REVIEW, CUSTOM_CODE_UNREAD_REASON)
 
     found = any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 and i.get("installed") is not False for i in items)

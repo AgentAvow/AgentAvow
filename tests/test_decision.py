@@ -422,6 +422,51 @@ CASES = [
                                        coverage_gaps={"resource_list_unread": True},
                                        behavioral={"pending": True}),
      "review", False, "the server's resource list could not be read; sandbox still running"),
+    # ── could not read what we exist to read: Review (partial-coverage audit) ─────
+    ("v1_repo_no_tree", _scan(80, 0, coverage_gaps={"tree_truncated": True}),
+     "review", True, "the scan could not read the code"),
+    ("v1_every_fetch_failed", _scan(80, 0, coverage_gaps={"fetch_failed": 12}),
+     "review", True, "the scan could not read the code"),
+    ("v1_time_limit", _scan(80, 0, coverage_gaps={"time_limit_unread": 30}),
+     "review", True, "the scan could not read the code"),
+    ("v1_hf_tree_unavailable", _scan(80, 0, coverage_gaps={"tree_unavailable": True}),
+     "review", True, "the scan could not read the code"),
+    ("v1_pending", _scan(80, 0, coverage_gaps={"fetch_failed": 1},
+                         behavioral={"pending": True}),
+     "review", False, "the scan could not read the code; sandbox still running"),
+    ("v1_metapackage_stays_safe", _scan(80, 0), "safe", True,
+     "nothing found; no code to inspect"),
+    ("v1_zero_files_plain_gap_stays_safe", _scan(80, 0, coverage_gaps={"package_skipped": 2}),
+     "safe", True, "nothing found; no code to inspect; 2 files in the package were skipped "
+     "for size"),
+    ("v1_some_files_read_stays_safe", _scan(92, 40, coverage_gaps={"fetch_failed": 2}),
+     "safe", True, "nothing found in 40 files; 2 files could not be fetched"),
+    ("v1_unknown_files_stays_safe", {"trust_score": 92, "findings": {"items": []},
+                                     "coverage_gaps": {"fetch_failed": 2}},
+     "safe", True, "nothing found; 2 files could not be fetched"),
+    ("v5_agent_file_oversized", _scan(92, 120, coverage_gaps={
+        "oversized_files": 1, "oversized_agent_files": 1}),
+     "review", True, "an agent instruction file was too large to read"),
+    ("v3_skill_ref_unread", _scan(88, 12, coverage={"surface": "openclaw"}, coverage_gaps={
+        "oversized_files": 1, "skill_refs_unread": 1}),
+     "review", True, "a file the skill's instructions use could not be read"),
+    ("v3_skill_in_dir_past_cap_stays_safe", _scan(88, 40, coverage={"surface": "openclaw"},
+                                                  coverage_gaps={"over_file_cap": 2,
+                                                                 "file_cap": 40}),
+     "safe", True, "nothing found in 40 files; 2 files past the 40-file limit were not read"),
+    ("v7_hf_custom_code_unread", _scan(85, 20, coverage_gaps={
+        "package_skipped": 3, "custom_code_unread": 1}),
+     "review", True, "the model's custom code could not be read"),
+    ("v_order_no_code_first", _scan(80, 0, coverage_gaps={
+        "fetch_failed": 1, "oversized_agent_files": 1, "skill_refs_unread": 1}),
+     "review", True, "the scan could not read the code"),
+    ("v_high_finding_wins", _scan(70, 120, [_f("high", "X")], high=1, coverage_gaps={
+        "oversized_agent_files": 1}),
+     "review", True, "one high finding in its code: X"),
+    ("v_string_counts", _scan(92, 120, coverage_gaps={"custom_code_unread": "2"}),
+     "review", True, "the model's custom code could not be read"),
+    ("v_garbage_gaps", _scan(92, 0, coverage_gaps=["fetch_failed"]),
+     "safe", True, "nothing found; no code to inspect"),
     ("gap_pending_suffix_last", _scan(92, 120, coverage_gaps={"oversized_files": 2},
                                       behavioral={"pending": True}),
      "safe", False, "nothing found in 120 files; 2 files over 500 KB were not fully read; "
@@ -621,15 +666,16 @@ MARK_CASES = [
     ("gap_padded_without_gap_key", _scan(
         92, 340, [_f("medium", "Oversized source file padded with filler",
                      category="obfuscation")], certified=CERTIFIED), True, ""),
+    # these two read Review now (the decision), so the mark is off as not_safe
     ("gap_agent_file_oversized", _scan(92, 340, certified=CERTIFIED, coverage_gaps={
-        "oversized_files": 1, "oversized_agent_files": 1}), False, "coverage_gaps"),
+        "oversized_files": 1, "oversized_agent_files": 1}), False, "not_safe"),
     # A partly read tool list now reads Review (#216), so the mark is off as not_safe.
     ("gap_tool_list_paged", _scan(92, 340, certified=CERTIFIED,
                                   coverage_gaps={"tool_list_paged": True}),
      False, "not_safe"),
     ("gap_skill_ref_unread", _scan(92, 340, certified=CERTIFIED,
                                    coverage_gaps={"skill_refs_unread": 1}),
-     False, "coverage_gaps"),
+     False, "not_safe"),
     ("gap_skills_ungraded", _scan(92, 340, certified=CERTIFIED,
                                   coverage_gaps={"skills_ungraded": 3}),
      False, "coverage_gaps"),

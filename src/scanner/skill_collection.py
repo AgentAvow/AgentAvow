@@ -101,6 +101,8 @@ def build_collection_result(repo_id: str, graded: list[tuple[str, object]], tota
                                    else dict(f) for f in (r.findings or [])]},
             "deprecation": getattr(r, "deprecation", None),
             "metadata": {"files_scanned": r.files_scanned},
+            # A skill whose linked file could not be read reads Review (verdict.py).
+            "coverage_gaps": getattr(r, "coverage_gaps", None) or {},
         })
         skills.append({
             "path": skill_dir(md),
