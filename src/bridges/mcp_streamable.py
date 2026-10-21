@@ -1477,6 +1477,13 @@ def _scan_struct(
     # Machine-readable "why": distinguishes a real risk review from a coverage cap.
     # Shared with the public API so the two surfaces never disagree.
     verdict_reason = _shared_verdict_reason(data, safe)
+    # What the scan could not check (the API's coverage_gaps / not_checked, uncapped).
+    # A "clean" verdict over a partial read says so, so a CI consumer that reads only
+    # verdict_reason never takes it for a clean bill of the whole tool.
+    gaps = data.get("coverage_gaps") if isinstance(data.get("coverage_gaps"), dict) else {}
+    not_checked = _coverage_gap_notes(data)
+    if verdict_reason == "clean" and not_checked:
+        verdict_reason = "clean_partial"
     sandbox = _sandbox_struct(data)
     # Behavioral high/critical findings are findings: a consumer that only reads
     # findings_total / top_findings must see them (a model summarising structuredContent
@@ -1498,6 +1505,11 @@ def _scan_struct(
         "tier": data.get("trust_tier"),
         "verdict": "safe" if safe else "needs_review",
         "verdict_reason": verdict_reason,
+        # What the scan selected but could not read: the plain-English notes (every one)
+        # and the machine keys. Additive, outside the advertised outputSchema's described
+        # properties until that schema can change (it allows extra keys).
+        "not_checked": not_checked,
+        "coverage_gaps": gaps,
         # The three-phrase decision (unsigned; rides beside the binary verdict above,
         # which keeps its meaning): safe | review | do_not_connect, whether it is final
         # (False while the sandbox is still running) and the one-line reason.

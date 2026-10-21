@@ -185,6 +185,13 @@ export const THIN_REASON = 'nothing found; little code to inspect'
 export const THIN_REASON_NO_CODE = 'nothing found; no code to inspect'
 // An unread MCP tool list reads Review (Kenne, 10-20); twin of TOOL_LIST_UNREAD_REASON.
 export const TOOL_LIST_UNREAD_REASON = "the server's tool list could not be read"
+// A tool list read only in part reads Review too; twin of TOOL_LIST_PAGED_REASON.
+export const TOOL_LIST_PAGED_REASON = "only part of the server's tool list could be read"
+// An advertised resources/ or prompts/list that could not be read (or was too large)
+// reads Review; twins of the verdict.py constants of the same names.
+export const RESOURCE_LIST_UNREAD_REASON = "the server's resource list could not be read"
+export const PROMPT_LIST_UNREAD_REASON = "the server's prompt list could not be read"
+export const RESOURCE_PROMPT_LISTS_UNREAD_REASON = "the server's resource and prompt lists could not be read"
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
 
@@ -395,7 +402,16 @@ export function coverageGapNotes(input: unknown): string[] {
   if (n > 0) notes.push(`${filesPhrase(n, 'dependency file')} could not be read`)
   if (g.advisory_lookup === 'failed') notes.push('the vulnerability database lookup failed')
   if (g.tool_list_unread === true) notes.push("the server's tool list could not be read")
-  if (g.tool_list_paged === true) notes.push("only the first page of the server's tool list was read")
+  if (g.tool_list_paged === true) {
+    n = toInt(g.pages_read)
+    if (n > 1) notes.push(`only the first ${fmtInt(n)} pages of the server's tool list were read`)
+    else if (n === 1) notes.push("only the first page of the server's tool list was read")
+    else notes.push("only part of the server's tool list was read")
+  }
+  for (const kind of ['resource', 'prompt']) {
+    if (g[`${kind}_list_too_large`] === true) notes.push(`the server's ${kind} list was too large to read`)
+    else if (g[`${kind}_list_unread`] === true) notes.push(`the server's ${kind} list could not be read`)
+  }
   n = toInt(g.image_layers_unread)
   if (n > 0) {
     const why = typeof g.image_layers_reason === 'string' && g.image_layers_reason ? ` (${g.image_layers_reason})` : ''
@@ -520,10 +536,14 @@ export function decide(input: unknown): Decision {
   const dep = data.deprecation
   if (typeof dep === 'string' && dep.trim()) return done('review', 'the maintainer has deprecated this package')
   if (score < REVIEW_SCORE_FLOOR) return done('review', `trust score ${score}/100 is under ${REVIEW_SCORE_FLOOR}`)
-  const gap = data.coverage_gaps
-  if (gap && typeof gap === 'object' && !Array.isArray(gap)
-    && (gap as Record<string, unknown>).tool_list_unread === true) {
-    return done('review', TOOL_LIST_UNREAD_REASON)
+  const gap = asObj(data.coverage_gaps)
+  if (gap.tool_list_unread === true) return done('review', TOOL_LIST_UNREAD_REASON)
+  if (gap.tool_list_paged === true) return done('review', TOOL_LIST_PAGED_REASON)
+  const resGap = gap.resource_list_unread === true || gap.resource_list_too_large === true
+  const prGap = gap.prompt_list_unread === true || gap.prompt_list_too_large === true
+  if (resGap || prGap) {
+    return done('review', resGap && prGap ? RESOURCE_PROMPT_LISTS_UNREAD_REASON
+      : resGap ? RESOURCE_LIST_UNREAD_REASON : PROMPT_LIST_UNREAD_REASON)
   }
 
   const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
