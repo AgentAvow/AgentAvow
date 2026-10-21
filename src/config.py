@@ -132,7 +132,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str | None = None
     smtp_password: str | None = None
-    from_email: str = "noreply@agentgraph.co"
+    from_email: str = "noreply@agentavow.com"
 
     # Perspective API (Google text toxicity scoring)
     perspective_api_key: str | None = None
