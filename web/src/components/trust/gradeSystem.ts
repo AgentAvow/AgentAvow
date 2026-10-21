@@ -192,6 +192,12 @@ export const TOOL_LIST_PAGED_REASON = "only part of the server's tool list could
 export const RESOURCE_LIST_UNREAD_REASON = "the server's resource list could not be read"
 export const PROMPT_LIST_UNREAD_REASON = "the server's prompt list could not be read"
 export const RESOURCE_PROMPT_LISTS_UNREAD_REASON = "the server's resource and prompt lists could not be read"
+// The other things we exist to read (partial-coverage audit, 10-20); twins of the
+// *_UNREAD_REASON constants in src/scanner/verdict.py.
+export const CODE_UNREAD_REASON = 'the scan could not read the code'
+export const AGENT_FILE_UNREAD_REASON = 'an agent instruction file was too large to read'
+export const SKILL_REF_UNREAD_REASON = "a file the skill's instructions use could not be read"
+export const CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
 
@@ -544,6 +550,15 @@ export function decide(input: unknown): Decision {
   if (resGap || prGap) {
     return done('review', resGap && prGap ? RESOURCE_PROMPT_LISTS_UNREAD_REASON
       : resGap ? RESOURCE_LIST_UNREAD_REASON : PROMPT_LIST_UNREAD_REASON)
+  }
+  if (isObj(gap)) {
+    if (filesKnown && files === 0 && (gap.tree_truncated === true || gap.tree_unavailable === true
+      || toInt(gap.fetch_failed) > 0 || toInt(gap.time_limit_unread) > 0)) {
+      return done('review', CODE_UNREAD_REASON)
+    }
+    if (toInt(gap.oversized_agent_files) > 0) return done('review', AGENT_FILE_UNREAD_REASON)
+    if (toInt(gap.skill_refs_unread) > 0) return done('review', SKILL_REF_UNREAD_REASON)
+    if (toInt(gap.custom_code_unread) > 0) return done('review', CUSTOM_CODE_UNREAD_REASON)
   }
 
   const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
