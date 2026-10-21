@@ -34,6 +34,7 @@ instruction files or any other format: those are unchanged.
 from __future__ import annotations
 
 import ast
+import copy
 import re
 from bisect import bisect_right
 from pathlib import Path
@@ -1483,6 +1484,277 @@ _PY_SINK_RE = re.compile(
     r"\bPopen\b|\bpty\.spawn|\bcompile\s*\(|\brunpy\b|\bcommands\.|\bsh\.|\bplumbum\b")
 
 
+_PY_IMPORT_BY_NAME_RE = re.compile(
+    r"import_module|__import__|\bmodules\b|pkgutil|runpy|SourceFileLoader|"
+    r"spec_from_file_location|find_spec|load_module|find_module|\bexec\b|\beval\b")
+_PY_IMPORT_BY_NAME = ("import_module", "__import__", "SourceFileLoader",
+                      "spec_from_file_location", "run_module", "run_path", "find_spec",
+                      "load_module", "find_module")
+
+
+_PY_OWN_NAMESPACE_RE = re.compile(
+    r"\bf_globals\b|\b_getframe\b|\bcurrentframe\b|\bgetmodule\b|"
+    r"\bglobals\b|\bvars\s*\(\s*\)|\b__name__\s*\]")
+
+
+def _const_strings(expr: ast.AST, tr: ast.AST, parents: dict, depth: int
+                   ) -> set[str] | None:
+    """Every string ``expr`` can hold, when the file spells them all out: a literal, or
+    a name bound only from literals or from a lookup in a module-level dict / tuple of
+    literals (the lazy-import table ``module_path, attr = _LAZY_IMPORTS[name]``).
+    None when anything else could flow in."""
+    if depth > 4:
+        return None
+    if isinstance(expr, ast.Constant):
+        return {expr.value} if isinstance(expr.value, str) else set()
+    if isinstance(expr, (ast.Tuple, ast.List)):
+        out: set[str] = set()
+        for el in expr.elts:
+            sub = _const_strings(el, tr, parents, depth + 1)
+            if sub is None:
+                return None
+            out |= sub
+        return out
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Div, ast.Add)):
+        # `ROOT / "skills" / "x.py"`, `".".join`-free `"pkg." + "x"`: a path or name
+        # whose unknown part is a prefix still ends in the literal tail it spells.
+        right = _const_strings(expr.right, tr, parents, depth + 1)
+        if right is None:
+            return None
+        left = _const_strings(expr.left, tr, parents, depth + 1)
+        if isinstance(expr.op, ast.Div):
+            heads = left if left is not None else {""}
+            out = {h + "/" + r for h in heads for r in right}
+        else:
+            if left is None:
+                # Only a tail that starts at a separator says where the name ends.
+                if not all(r[:1] in (".", "/") for r in right):
+                    return None
+                left = {""}
+            out = {h + r for h in left for r in right}
+        return out if len(out) <= 64 else None
+    if isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Name):
+        table = _module_literal(expr.value.id, tr)
+        if isinstance(table, ast.Dict):
+            return _const_strings(ast.Tuple(elts=list(table.values), ctx=ast.Load()),
+                                  tr, parents, depth + 1)
+        if isinstance(table, (ast.Tuple, ast.List)):
+            return _const_strings(table, tr, parents, depth + 1)
+        return None
+    if not isinstance(expr, ast.Name):
+        return None
+    name = expr.id
+    out = set()
+    found = False
+    for node in ast.walk(tr):
+        if isinstance(node, ast.arg) and node.arg == name:
+            return None
+        if isinstance(node, ast.Name) and node.id == name and isinstance(
+                node.ctx, (ast.Store, ast.Del)):
+            par = parents.get(node)
+            if isinstance(par, ast.Assign) and node in par.targets:
+                sub = _const_strings(par.value, tr, parents, depth + 1)
+            elif isinstance(par, ast.Tuple) and isinstance(parents.get(par), ast.Assign) \
+                    and par in parents[par].targets:
+                # `a, b = TABLE[k]`: each slot holds one of the table's literals.
+                sub = _const_strings(parents[par].value, tr, parents, depth + 1)
+            else:
+                return None
+            if sub is None:
+                return None
+            out |= sub
+            found = True
+        elif isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+                (a.asname or a.name).split(".")[0] == name for a in node.names):
+            return None
+        elif isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+            return None
+    return out if found else None
+
+
+def _module_literal(name: str, tr: ast.AST) -> ast.AST | None:
+    """The literal a module-level name is bound to, when it is bound exactly once at
+    module level, nowhere else, and never mutated (``TABLE[k] = …``, ``.update``)."""
+    if not isinstance(tr, ast.Module):
+        return None
+    value = None
+    for stmt in tr.body:
+        tgt = None
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            tgt, val = stmt.targets[0], stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            tgt, val = stmt.target, stmt.value
+        if isinstance(tgt, ast.Name) and tgt.id == name:
+            if value is not None:
+                return None
+            value = val
+    if not isinstance(value, (ast.Dict, ast.Tuple, ast.List)):
+        return None
+    stores = 0
+    for node in ast.walk(tr):
+        if isinstance(node, ast.Name) and node.id == name and not isinstance(
+                node.ctx, ast.Load):
+            stores += 1
+        elif isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and \
+                node.value.id == name and not isinstance(node.ctx, ast.Load):
+            return None
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and \
+                node.value.id == name:
+            return None  # TABLE.update(…) / .append(…) / .setdefault(…)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+            return None
+    return value if stores == 1 else None
+
+
+def _imports_by_name(tr: ast.AST, parents: dict, suffix: list[str], name: str,
+                     *, code_strings: bool = True) -> bool:
+    """Could the tree load the module by a name (``importlib.import_module(n)``,
+    ``__import__("pkg.svc")``, ``sys.modules[key]``, ``runpy`` / ``pkgutil``, ``exec`` /
+    ``eval`` of a computed string) and read ``name`` from it other than statically?
+    ``suffix`` is the module's ``[parent, stem]`` (or ``[stem]``); a literal module name
+    that ends in neither names another module. ``import_module(n)`` whose result is
+    only read for other attributes (a lazy-import table: ``getattr(module, attr)``
+    with ``attr`` one of the table's literals) does not read ``name``.
+    ``code_strings``: also count ``exec`` / ``eval`` of a computed string (the caller
+    passes False for a file that never names the module: code it execs from outside,
+    an MCP tool's ``exec(code)``, would have to spell the module out to reach it, and
+    a literal spelling it is refused by ``check_strings``)."""
+    stem = suffix[-1]
+    stem_rx = re.compile(r"(?<![\w])" + re.escape(stem) + r"(?![\w])")
+    def names_it(arg: ast.AST) -> bool:
+        cands = _const_strings(arg, tr, parents, 0)
+        if cands is None:
+            return True  # a computed name could be this module
+        for c in cands:
+            # "pkg.beta.svc", ".svc", "svc", "pkg/beta/svc.py": names this module.
+            segs = [x for x in re.sub(r"\.py$", "", c.strip()).replace("\\", "/")
+                    .replace("/", ".").split(".") if x]
+            if segs and (segs[-len(suffix):] == suffix or segs == [stem]):
+                return True
+        return False
+
+    for node in ast.walk(tr):
+        if isinstance(node, ast.ImportFrom) and node.module in ("sys", "importlib",
+                                                                "importlib.util"):
+            if any(a.name == "modules" or (a.asname and a.asname != a.name)
+                   or a.name == "*" for a in node.names):
+                return True  # `from sys import modules`, `import_module as im`
+        if isinstance(node, ast.Call):
+            fn = ast.unparse(node.func)
+            if fn.startswith(("pkgutil.", "runpy.")):
+                return True
+            if fn in ("exec", "eval"):
+                if code_strings and any(
+                        not (isinstance(a, ast.Constant) and isinstance(a.value, str)
+                             and not stem_rx.search(a.value)) for a in node.args):
+                    return True
+            elif fn.endswith(_PY_IMPORT_BY_NAME):
+                if any(names_it(a) for a in node.args) or any(
+                        names_it(k.value) for k in node.keywords):
+                    if fn.endswith("import_module") and _module_value_inert(
+                            node, tr, parents, name):
+                        continue
+                    return True
+        elif isinstance(node, ast.Attribute) and node.attr == "modules" and \
+                ast.unparse(node.value) == "sys":
+            par = parents.get(node)
+            if isinstance(par, ast.Subscript) and par.value is node and \
+                    not names_it(par.slice):
+                continue  # sys.modules["other"]
+            if isinstance(par, ast.Compare) and node in par.comparators and \
+                    not names_it(par.left):
+                continue  # "other" in sys.modules
+            if isinstance(par, ast.Call) and len(par.args) >= 2 and par.args[0] is node \
+                    and ast.unparse(par.func).endswith(("setitem", "delitem")) \
+                    and not names_it(par.args[1]):
+                continue  # monkeypatch.setitem(sys.modules, "other", stub)
+            return True
+    return False
+
+
+def _module_value_inert(expr: ast.AST, tr: ast.AST, parents: dict, name: str,
+                        depth: int = 0) -> bool:
+    """A module object (``expr``) that cannot hand out ``name`` other than by a static
+    ``module.name`` read (which ``_PyFlow.module_level`` follows): only written to or
+    tested (``monkeypatch.setattr(mod, …)``, ``hasattr``, ``mod is x``), read for a
+    different static attribute, or ``getattr(mod, a)`` with ``a`` one of a set of
+    literals that excludes ``name``; through at most one plain local alias."""
+    par = parents.get(expr)
+    if isinstance(par, (ast.Compare, ast.Expr)):
+        return True
+    if isinstance(par, ast.Attribute) and par.value is expr:
+        return par.attr != "__dict__"
+    if isinstance(par, ast.Call) and par.args and par.args[0] is expr:
+        fn = ast.unparse(par.func)
+        if fn == "hasattr" or fn.endswith(("setattr", "delattr", "patch.object")):
+            return True
+        if fn == "getattr" and len(par.args) >= 2:
+            cands = _const_strings(par.args[1], tr, parents, 0)
+            return cands is not None and name not in cands and "__dict__" not in cands
+        return False
+    if isinstance(par, ast.Assign) and par.value is expr and len(par.targets) == 1 and \
+            isinstance(par.targets[0], ast.Name) and depth < 2:
+        alias = par.targets[0].id
+        scope = parents.get(par)
+        while scope is not None and not isinstance(
+                scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            scope = parents.get(scope)
+        for node in ast.walk(scope if scope is not None else tr):
+            if isinstance(node, (ast.Global, ast.Nonlocal)) and alias in node.names:
+                return False
+            if isinstance(node, ast.Name) and node.id == alias and isinstance(
+                    node.ctx, ast.Load) and not _module_value_inert(
+                        node, tr, parents, name, depth + 1):
+                return False
+        return True
+    return False
+
+
+# Stream constructors that only hold or forward text (the replacement's arguments are
+# checked too: ``TextIOWrapper(proc.stdin)`` is a process's input).
+_SAFE_STREAM_CTORS = frozenset({
+    "StringIO", "BytesIO", "TextIOWrapper", "BufferedWriter", "open", "fdopen",
+    "getwriter", "TemporaryFile", "NamedTemporaryFile", "SpooledTemporaryFile",
+    "redirect_stdout", "redirect_stderr", "nullcontext", "Path", "str", "getattr",
+})
+_SAFE_STREAM_MODULES = frozenset({"sys", "os", "io", "codecs", "tempfile", "contextlib",
+                                  "pathlib"})
+
+
+def _stream_targets(tr: ast.AST) -> list[ast.AST | None]:
+    """What ``tr`` puts in place of ``sys.stdout`` / ``sys.stderr``."""
+    out: list[ast.AST | None] = []
+    for node in ast.walk(tr):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                for el in (t.elts if isinstance(t, ast.Tuple) else [t]):
+                    if isinstance(el, ast.Attribute) and re.fullmatch(
+                            r"sys\.(?:__)?std(?:out|err)(?:__)?", ast.unparse(el)):
+                        out.append(None if isinstance(t, ast.Tuple) else node.value)
+        elif isinstance(node, ast.Call):
+            fn = ast.unparse(node.func)
+            if fn.endswith(("redirect_stdout", "redirect_stderr")):
+                out.append(node.args[0] if node.args else None)
+            elif fn == "setattr" and node.args and ast.unparse(node.args[0]) == "sys":
+                out.append(node.args[2] if len(node.args) > 2 else None)
+    return out
+
+
+class _BlankStrings(ast.NodeTransformer):
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if isinstance(node.value, (str, bytes)):
+            return ast.copy_location(ast.Constant(value=type(node.value)()), node)
+        return node
+
+
+def _code_only(node: ast.AST) -> str:
+    """``node`` unparsed with every string literal (and every literal part of an
+    f-string) emptied: the names and calls it holds, not the words its messages use.
+    The expressions inside an f-string's ``{…}`` are kept."""
+    return ast.unparse(_BlankStrings().visit(copy.deepcopy(node)))
+
+
 class _PyFlow:
     def __init__(self, files: dict[str, str], package: bool) -> None:
         self.files = files
@@ -1619,11 +1891,101 @@ class _PyFlow:
         return False
 
     def streams_rebound(self) -> bool:
+        """Does any file replace ``sys.stdout`` / ``sys.stderr`` / ``print`` (at least
+        what the tree-wide ``output_replaced`` tests)? Then nothing printed or logged
+        is a hint (Kenne, 2026-10-19)."""
         if not hasattr(self, "_streams"):
             self._streams = any(re.search(
                 r"\bsys\s*\.\s*std(?:out|err)\s*=(?!=)|setattr\s*\(\s*sys\b|"
-                r"redirect_std(?:out|err)", self.files[p]) for p in self.py_paths)
+                r"redirect_std(?:out|err)", self.files[p])
+                or _PY_OUTPUT_REBOUND_RE.search(self.files[p]) for p in self.py_paths)
         return self._streams
+
+    def stream_replacement_runs(self) -> bool:
+        """Could a replaced ``sys.stdout`` / ``sys.stderr`` hand what is written to it
+        to a command? A raised message that nothing catches is written to stderr.
+        False only when every replacement (``sys.stderr = X``, ``setattr(sys, …, X)``,
+        ``redirect_stderr(X)``) is built from ``io`` buffers, files, the original
+        streams, or a class the package defines (whose ``write`` is checked by
+        :meth:`redefined`), with no ``subprocess`` / ``.stdin`` anywhere in it."""
+        if hasattr(self, "_stream_runs"):
+            return self._stream_runs
+        found = False
+        for p in self.py_paths:
+            text = self.files[p]
+            if not re.search(r"\bstd(?:out|err)\b|redirect_std", text):
+                continue
+            try:
+                tr, parents = self.tree(p)
+            except _UnclassifiedError:
+                found = True
+                break
+            for target in _stream_targets(tr):
+                if self._stream_value_runs(target, tr, parents, 0):
+                    found = True
+                    break
+            if found:
+                break
+        self._stream_runs = found
+        return found
+
+    def _stream_value_runs(self, expr: ast.AST | None, tr: ast.AST, parents: dict,
+                           depth: int) -> bool:
+        if expr is None or depth > 6:
+            return True
+        code = _code_only(expr)
+        if _PY_SINK_RE.search(code) or re.search(r"\bstdin\b|\bpipe\b|\bsocket\b",
+                                                 code, re.I):
+            return True
+        if isinstance(expr, ast.Constant):
+            return False
+        if isinstance(expr, ast.Attribute):
+            return self._stream_value_runs(expr.value, tr, parents, depth + 1)
+        if isinstance(expr, ast.Call):
+            fn = expr.func
+            leaf = fn.attr if isinstance(fn, ast.Attribute) else (
+                fn.id if isinstance(fn, ast.Name) else "")
+            if leaf not in _SAFE_STREAM_CTORS and not self.package_class(leaf):
+                return True
+            if isinstance(fn, ast.Attribute) and self._stream_value_runs(
+                    fn.value, tr, parents, depth + 1):
+                return True
+            args = list(expr.args) + [k.value for k in expr.keywords]
+            return any(self._stream_value_runs(a, tr, parents, depth + 1) for a in args)
+        if isinstance(expr, ast.Name):
+            bound = False
+            for node in ast.walk(tr):
+                if isinstance(node, ast.alias) and (node.asname or node.name).split(
+                        ".")[0] == expr.id:
+                    if node.name.split(".")[0] not in _SAFE_STREAM_MODULES and \
+                            node.name not in _SAFE_STREAM_CTORS:
+                        return True
+                    bound = True
+                elif isinstance(node, ast.arg) and node.arg == expr.id:
+                    return True
+                elif isinstance(node, ast.Name) and node.id == expr.id and isinstance(
+                        node.ctx, ast.Store):
+                    par = parents.get(node)
+                    if isinstance(par, ast.Assign) and node in par.targets:
+                        if self._stream_value_runs(par.value, tr, parents, depth + 1):
+                            return True
+                        bound = True
+                    elif isinstance(par, ast.withitem) and par.optional_vars is node:
+                        if self._stream_value_runs(par.context_expr, tr, parents,
+                                                   depth + 1):
+                            return True
+                        bound = True
+                    else:
+                        return True
+            return not bound
+        return True
+
+    def package_class(self, name: str) -> bool:
+        """A class the package defines (its ``write`` is checked by ``redefined``)."""
+        if not name:
+            return False
+        rx = re.compile(r"^[ \t]*class\s+" + re.escape(name) + r"\b", re.M)
+        return any(rx.search(self.files[p]) for p in self.py_paths)
 
     def is_exception(self, path: str, f: ast.AST, gp) -> bool:
         name = f.id if isinstance(f, ast.Name) else (
@@ -1631,6 +1993,12 @@ class _PyFlow:
         if not re.search(r"(?:Error|Exception|Warning|Exit|Abort)$", name or ""):
             return False
         if not isinstance(gp, ast.Raise):
+            return False
+        if self.streams_rebound() and (self.redefined("write")
+                                       or self.stream_replacement_runs()):
+            # An uncaught message is written to ``sys.stderr``; a replacement stream
+            # that feeds a command (its ``write`` runs one, or it is a process's stdin)
+            # would run it. A buffer that only captures text runs nothing.
             return False
         return not (self.redefined(name) or self.except_runs())
 
@@ -1655,7 +2023,9 @@ class _PyFlow:
             for node in ast.walk(tr):
                 if isinstance(node, ast.ExceptHandler) and node.name:
                     # Whole handler: `c = str(e)` then `os.system(c)` is two statements.
-                    src = "\n".join(ast.unparse(sub) for sub in node.body)
+                    # Read as code only: a message that merely mentions the word
+                    # (``f'Failed to start subprocess: {e}'``) runs nothing.
+                    src = "\n".join(_code_only(sub) for sub in node.body)
                     if _PY_SINK_RE.search(src) and re.search(
                             r"(?<![\w])" + re.escape(node.name) + r"(?![\w])", src):
                         found = True
@@ -1764,7 +2134,6 @@ class _PyFlow:
         """A module-level name can be imported from anywhere in the package."""
         if not self.package:
             raise _UnclassifiedError("module-level name leaves the file")
-        stem = Path(path).stem
         rx = re.compile(r"(?<![\w])" + re.escape(name) + r"(?![\w])")
         for fp, text in self.files.items():
             if fp == path or not text or name not in text or not rx.search(text):
@@ -1787,16 +2156,95 @@ class _PyFlow:
                     raise _UnclassifiedError("imported under another name")
         for fp in self.py_paths:
             text = self.files[fp]
-            if stem in text and "vars" in text:
-                # `vars(OwnClass)` reads that class, not a module (``class_vars``).
-                tr = self.tree(fp)[0]
-                own = self.class_names(tr, stem)
-                text = re.sub(r"\bvars\s*\(\s*([A-Za-z_]\w*)\s*\)",
-                              lambda m: "" if m.group(1) in own else m.group(0), text)
-            if stem in text and re.search(
-                    r"\b(?:vars|getattr|dir|inspect\.getmembers)\s*\(|__dict__|import\s+\*",
-                    text):
+            if fp != path:
+                # Another file reads this module's names dynamically only through the
+                # module object (browser-use: a test that imports
+                # ``browser_use.agent.service`` and calls ``vars(action)`` does not read
+                # ``browser_use/beta/service.py``; ``monkeypatch.setattr(beta_service,
+                # …)`` writes to it).
+                if self.module_read_dynamically(fp, path, name):
+                    raise _UnclassifiedError(f"{fp} may read {path} dynamically")
+                continue
+            # The defining file: ``globals()`` / ``vars()`` / ``eval`` / ``exec`` are
+            # refused by ``follow_name``; what is left is reaching its own namespace
+            # through a frame, ``sys.modules[__name__]`` or a self-import.
+            if _PY_OWN_NAMESPACE_RE.search(text) or self.module_read_dynamically(
+                    fp, path, name):
                 raise _UnclassifiedError(f"{fp} may read {path} dynamically")
+
+    def module_read_dynamically(self, fp: str, path: str, name: str) -> bool:
+        """Could ``fp`` read the names of the module at ``path`` other than by a static
+        ``module.NAME`` (``vars(mod)``, ``getattr(mod, n)``, ``from mod import *``,
+        the module handed to a function or bound to another name, an ``importlib`` /
+        ``__import__`` / ``sys.modules`` lookup)? Conservative: True whenever a
+        reference to the module is used in a way this does not classify."""
+        text = self.files[fp]
+        parts = Path(path).with_suffix("").parts
+        if parts and parts[-1] == "__init__" and len(parts) > 1:
+            parts = parts[:-1]
+        if not parts:
+            return True
+        stem = parts[-1]
+        mentioned = re.search(r"(?<![\w])" + re.escape(stem) + r"(?![\w])", text)
+        by_name = _PY_IMPORT_BY_NAME_RE.search(text)
+        if not (mentioned or by_name):
+            return False
+        try:
+            tr, parents = self.tree(fp)
+        except _UnclassifiedError:
+            return True
+        suffix = list(parts[-2:])
+        if by_name and _imports_by_name(tr, parents, suffix, name,
+                                        code_strings=bool(mentioned)):
+            return True  # a computed module name needs no mention of the stem
+        if not mentioned:
+            return False
+        chains: list[list[str]] = []  # attribute chains that name the module object
+        for node in ast.walk(tr):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    segs = a.name.split(".")
+                    if segs[-len(suffix):] == suffix or segs == [stem]:
+                        chains.append([a.asname] if a.asname else segs)
+            elif isinstance(node, ast.ImportFrom):
+                msegs = (node.module or "").split(".") if node.module else []
+                for a in node.names:
+                    if a.name == "*":
+                        if msegs and msegs[-1] == stem:
+                            return True
+                        continue
+                    if a.name != stem:
+                        continue
+                    if len(suffix) == 1 or (msegs and msegs[-1] == suffix[0]) or (
+                            node.level and not msegs):
+                        chains.append([a.asname or a.name])
+        if not chains:
+            return False
+        roots = {c[0] for c in chains}
+        for node in ast.walk(tr):
+            if not (isinstance(node, ast.Name) and node.id in roots
+                    and isinstance(node.ctx, ast.Load)):
+                continue
+            names = [node.id]
+            top: ast.AST = node
+            while True:
+                par = parents.get(top)
+                if isinstance(par, ast.Attribute) and par.value is top:
+                    names.append(par.attr)
+                    top = par
+                    continue
+                break
+            for chain in chains:
+                n = len(chain)
+                if names[:n] == chain and len(names) > n:
+                    if names[n] == "__dict__":
+                        return True
+                    continue  # a static `module.NAME` (followed by ``module_level``)
+                if names == chain[:len(names)]:
+                    # The module object itself (or a package above it) as a value.
+                    if not _module_value_inert(top, tr, parents, name):
+                        return True
+        return False
 
     def check_strings(self, path: str, name: str, root: ast.AST) -> None:
         rx = re.compile(r"(?<![\w])" + re.escape(name) + r"(?![\w])")

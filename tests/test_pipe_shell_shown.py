@@ -346,13 +346,29 @@ def test_python_vars_of_a_module_keeps_critical(tmp_path, swap):
     assert got.get(("browser_use/beta/service.py", 2)) == "critical", got
 
 
-def test_python_hint_restored_when_the_tree_redirects_stdout(tmp_path):
-    # Kenne's rule: any file that replaces stdout / print keeps the critical.
+BROWSER_USE_PRINTED = BROWSER_USE.replace(
+    "def methods():\n", "def hint():\n    print(TERMINAL_INSTALL_COMMAND)\n\n\ndef methods():\n")
+
+
+def test_python_printed_hint_restored_when_the_tree_redirects_stdout(tmp_path):
+    # Kenne's rule: any file that replaces stdout / print keeps a PRINTED hint critical.
+    cli = ("import io, sys\nfrom contextlib import redirect_stdout\n"
+           "with redirect_stdout(io.StringIO()):\n    pass\n")
+    got = _tree_pipe(tmp_path, {"browser_use/beta/service.py": BROWSER_USE_PRINTED,
+                                "browser_use/cli.py": cli})
+    assert got.get(("browser_use/beta/service.py", 1)) == "critical", got
+
+
+def test_python_raised_hint_stays_low_when_stdout_is_captured_to_a_buffer(tmp_path):
+    # browser-use (2026-10-21): cli.py captures output into StringIO buffers and wraps
+    # sys.stderr in a pass-through class. A message that is only raised never reaches
+    # print, and a buffer runs nothing. Replacement streams that DO feed a command are
+    # in tests/test_shown_not_run_install_cmd.py.
     cli = ("import io, sys\nfrom contextlib import redirect_stdout\n"
            "with redirect_stdout(io.StringIO()):\n    pass\n")
     got = _tree_pipe(tmp_path, {"browser_use/beta/service.py": BROWSER_USE,
                                 "browser_use/cli.py": cli})
-    assert got.get(("browser_use/beta/service.py", 1)) == "critical", got
+    assert got.get(("browser_use/beta/service.py", 1)) == "low", got
 
 
 def test_python_vars_of_module_still_blocks():
