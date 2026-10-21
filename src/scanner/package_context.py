@@ -794,10 +794,17 @@ def _lower_shown_in_tree(findings: list, texts: dict[str, str], hints: Hints,
             continue
         if not code_hints or not is_supported(path):
             continue
-        if not replaced:
-            from src.scanner.printed_hint import output_replaced
-            replaced.append(output_replaced(texts))
-        if not replaced[0] and hints.why_not(path, f.line_number, pat) is None:
+        # A Python walk checks the output it ends in itself: a print only while no file
+        # rebinds sys.stdout / print, a raised message only while no except block runs
+        # it and no replacement stream's write() runs a command. The tree-wide
+        # ``output_replaced`` gate (any ``redirect_stdout`` anywhere) is for JS / TS.
+        if Path(path).suffix.lower() != ".py":
+            if not replaced:
+                from src.scanner.printed_hint import output_replaced
+                replaced.append(output_replaced(texts))
+            if replaced[0]:
+                continue
+        if hints.why_not(path, f.line_number, pat) is None:
             _lower(f, WHY_HINT)
 
 
