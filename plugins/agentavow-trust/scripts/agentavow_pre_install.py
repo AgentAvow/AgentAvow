@@ -35,8 +35,9 @@ import re
 import shlex
 import sys
 import time
+import urllib.error
 
-__version__ = "0.1.31"
+__version__ = "0.1.32"
 
 TIMEOUT = 12  # seconds per scan: an install is rare, so a slower fresh scan is fine
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -248,12 +249,22 @@ def _is_deprecation_only(r: dict) -> bool:
             and "deprecat" in str(r.get("decision_reason") or "").lower())
 
 
+# Coverage gaps a package author can cause on purpose (pad a file past the read cap, ship
+# thousands of files so the payload falls past the unpack budget): a Safe answer with one
+# of these says, in one quiet line, that part of the package was not read.
+_CHEAP_GAPS = frozenset({"oversized_files", "package_skipped"})
+
+
 def _package_line(t: dict, r: dict, pc) -> str | None:
-    """The one line for a package install, or None when there is nothing to say (Safe)."""
+    """The one line for a package install, or None when there is nothing to say (Safe,
+    with everything read)."""
     coord = f"{t['registry']} package '{t['pkg']}'"
     url = f"{pc.WEB}/check/pkg/{t['registry']}/{t['pkg']}"
     d = pc._dval(r)
     if d == "safe":
+        if _CHEAP_GAPS & set(r.get("gaps") or []):
+            return (f"ℹ️ {coord}: {pc._answer(r)}. Part of the package could not be read, "
+                    f"so that part is unchecked. The install goes ahead. Report: {url}")
         return None
     if _is_deprecation_only(r):
         return (f"📦 {coord}: deprecated by its maintainer — not a security finding, but "
@@ -261,6 +272,18 @@ def _package_line(t: dict, r: dict, pc) -> str | None:
     if d == "review":
         return f"⚠️ {coord}: {pc._answer(r)}. The install goes ahead. Report: {url}"
     return f"⛔ {coord}: {pc._answer(r)}. Report: {url}"
+
+
+def _not_graded_line(t: dict, reason: str, pc, busy: bool = False) -> str:
+    """A package AgentAvow could not grade: said once, so silence never reads as clean."""
+    coord = f"{t['registry']} package '{t['pkg']}'"
+    if busy:
+        return (f"❔ {coord}: not checked (AgentAvow is busy right now). "
+                "The install goes ahead.")
+    why = " ".join(reason.split())[:120]
+    why = "" if why.isdigit() else why
+    return (f"❔ {coord}: not checked — AgentAvow couldn't grade it"
+            f"{f' ({why})' if why else ''}. The install goes ahead.")
 
 
 def _check_packages(command: str, pc, cache: dict, now: float
@@ -302,8 +325,17 @@ def _check_packages(command: str, pc, cache: dict, now: float
                     r = pc._scan(t)
                 except Exception:
                     continue
+            except pc._UnscannableError as e:
+                # The API's answer about the target (not found, not scannable): say it was
+                # not checked rather than stay silent beside an install that goes ahead.
+                lines.append(_not_graded_line(t, str(e), pc))
+                continue
+            except urllib.error.HTTPError as e:
+                if e.code == 429 or e.code >= 500:
+                    lines.append(_not_graded_line(t, "", pc, busy=True))
+                continue
             except Exception:
-                continue  # unscannable / not found / transient: nothing to say
+                continue  # offline / timeout: nothing to say
             rec = pc._record(t, r, now)
             rec["spec"] = spec
             cache[t["name"]] = rec
@@ -436,7 +468,9 @@ def main() -> None:
     if command:
         pkg_lines, pkg_needs, checked = _check_packages(command, pc, cache, now)
         needs_decision = needs_decision or pkg_needs
-        _bump_stats(cache, pc, checked, len(pkg_lines), now)
+        # A partial-read note (ℹ️) or a "not checked" line (❔) is not a flagged package.
+        _bump_stats(cache, pc, checked,
+                    sum(1 for ln in pkg_lines if not ln.startswith(("ℹ️", "❔"))), now)
         if checked:
             pc._save_cache(cache)
     if not lines and not pkg_lines:
