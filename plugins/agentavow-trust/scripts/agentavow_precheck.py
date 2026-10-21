@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.31"
+__version__ = "0.1.32"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -729,6 +729,13 @@ def _decision(data: dict, advisories: int, incident: bool) -> tuple[str, str, bo
         return out("review", "the maintainer has deprecated this package")
     if score < 51:
         return out("review", f"trust score {score}/100 is under 51")
+    # A remote MCP server whose tool list could not be read, or was read only in part,
+    # reads Review: the tool definitions are what AgentAvow exists to read (Kenne, 10-20).
+    gaps = data.get("coverage_gaps") if isinstance(data.get("coverage_gaps"), dict) else {}
+    if gaps.get("tool_list_unread") is True:
+        return out("review", "the server's tool list could not be read")
+    if gaps.get("tool_list_paged") is True:
+        return out("review", "only part of the server's tool list could be read")
     files = (data.get("metadata") or {}).get("files_scanned")
     found = any(_sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 for i in items)
@@ -851,6 +858,11 @@ def _verdict(data: dict) -> dict:
         "tool_manifest_digest": data.get("tool_manifest_digest") or None,
         "sandbox": _sandbox_summary(data.get("behavioral")),
         "deprecated": bool(data.get("deprecation")),
+        # What the scan could not read (``coverage_gaps`` kinds: oversized_files,
+        # package_skipped, fetch_failed, tool_list_unread …), so a Safe answer that left
+        # part of the target unread can say so at install time.
+        "gaps": sorted(k for k, v in (data.get("coverage_gaps") or {}).items() if v)
+        if isinstance(data.get("coverage_gaps"), dict) else [],
     }
 
 
@@ -910,7 +922,9 @@ def _sandbox_summary(b: object) -> str:
     if not b.get("ran") and b.get("state") == "unavailable":
         return "sandbox: unavailable, static analysis only"
     if not b.get("ran"):
-        return ""
+        # A run that did not happen is not a clean run: say so (as the MCP output does).
+        why = " ".join(str(b.get("reason") or b.get("error") or "").split())[:120]
+        return f"sandbox: did not run{f' ({why})' if why else ''}, static analysis only"
     findings = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
     if b.get("canary_exfil") and not any(
             f.get("rule") == "credential_canary_exfiltrated" for f in findings):
@@ -954,7 +968,7 @@ def _sandbox_summary(b: object) -> str:
 # older GRADE_EPOCH (bump the epoch whenever server-side scoring changes materially).
 # A re-check whose decision (Safe / Review / Do not connect) is unchanged is silent;
 # a changed decision is reported, naming the old answer.
-GRADE_EPOCH = "2026-10-09"
+GRADE_EPOCH = "2026-10-20"
 GRADE_MAX_AGE = 7 * 24 * 3600
 
 
