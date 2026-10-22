@@ -2268,6 +2268,60 @@ async def _legacy_key_order(ctx, call_next):
 server.middleware.append(_legacy_key_order)
 
 
+# Session starts, per surface (agentgraph-72, 2026-10-21). The snapshot's cc_sessions
+# used to count the protocol-version 400 that every new Claude Code session hit; SDK 2.x
+# (PR #205) removed that reject, so a real start signal is needed. A session starts with
+# `initialize` (2024-11-05 … 2025-11-25) or `server/discover` (2026-07-28 clients never
+# send initialize). Each successful one bumps `session_start` plus its own method key and
+# adds the caller to today's distinct-starters HLL; `tools_list` is counted too, so a dip
+# can be told from a failure. Counted inline after the handler, never on error,
+# never for the health probe (_bump / _record_starter return early for it).
+_SESSION_START_METHODS = {"initialize": "initialize", "server/discover": "discover"}
+
+
+async def _record_starter() -> None:
+    """Add this session-starting machine to today's distinct-starters HLL, overall and
+    per surface (keys ``ag:metrics:uniq:mcp:initializers[:<surface>]:<day>``)."""
+    if _HEALTH_PROBE.get():
+        return
+    try:
+        from src.api.metrics_dashboard_router import record_unique
+
+        ip, ua = _CLIENT_IP.get(), _CLIENT_UA.get()
+        await record_unique("mcp:initializers", ip, ua)
+        await record_unique(f"mcp:initializers:{_SURFACE.get()}", ip, ua)
+    except Exception:
+        pass
+
+
+async def _count_session_activity(method: str) -> None:
+    try:
+        kind = _SESSION_START_METHODS.get(method)
+        if kind is not None:
+            await _bump_s("session_start")
+            await _bump_s(kind)
+            await _record_starter()
+        elif method == "tools/list":
+            await _bump_s("tools_list")
+    except Exception:  # noqa: BLE001 — instrumentation never breaks a request
+        pass
+
+
+async def _session_counter(ctx, call_next):
+    result = await call_next(ctx)  # an exception or error result propagates uncounted
+    method = getattr(ctx, "method", None)
+    if (method in _SESSION_START_METHODS or method == "tools/list") \
+            and not (isinstance(result, dict) and "error" in result):
+        # Inline, like the tool-call counters: a few local-Redis ms on these three
+        # methods. A fire-and-forget task outlived its request (and, in tests, its event
+        # loop) while holding a pooled Redis connection's lock (main CI red on 24acd935).
+        await _count_session_activity(method)
+    return result
+
+
+server.middleware.append(_session_counter)
+
+
 async def _run_tool(
     name: str, arguments: dict
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
