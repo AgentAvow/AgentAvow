@@ -1052,21 +1052,21 @@ _TRAFFIC_NOTES = [
     "protocol-version rejection (HTTP 400) every new session hit before retrying (mcp 1.x); "
     "the MCP SDK 2.3 upgrade (2026-10-20) removed that rejection, so the old count fell to "
     "zero while use did not. Days from 2026-10-20 show no value until the snapshot reads "
-    "the server's own initialize counter (rows marked cc_sessions_source = initialize). "
+    "the server's own session-start counter (rows marked cc_sessions_source = session_start). "
     "Series break at 2026-10-20: the two counts are not spliced together.",
 ]
 
 # First UTC day whose nginx-derived cc_sessions (a count of protocol-version 400s) no
 # longer counts session starts (the MCP SDK 2.3 upgrade, 2026-10-20 00:16Z). From here a
-# row's cc_sessions is shown only when it came from the initialize counter.
+# row's cc_sessions is shown only when it came from the session-start counter.
 _CC_SESSIONS_PROXY_END = "2026-10-20"
 
 
 def _drop_dead_cc_sessions(row: dict) -> dict:
     """Blank cc_sessions / owner_cc_sessions on a row past the proxy's end unless the
-    snapshot wrote it from the initialize counter (``cc_sessions_source``)."""
+    snapshot wrote it from the session-start counter (``cc_sessions_source``)."""
     if (row.get("day", "") >= _CC_SESSIONS_PROXY_END
-            and row.get("cc_sessions_source") != "initialize"):
+            and row.get("cc_sessions_source") != "session_start"):
         row["cc_sessions"] = None
         if "owner_cc_sessions" in row:
             row["owner_cc_sessions"] = None

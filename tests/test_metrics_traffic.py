@@ -74,7 +74,7 @@ async def test_series_is_per_day_with_gaps_left_empty(redis):
     ("2026-10-19", None, True),            # the protocol-reject proxy, valid through 10-19
     ("2026-10-20", None, False),           # proxy gone after the SDK upgrade: blanked
     ("2026-10-21", "nginx_400", False),
-    ("2026-10-25", "initialize", True),    # from the server's initialize counter
+    ("2026-10-25", "session_start", True),  # from the server's session-start counter
 ])
 def test_cc_sessions_series_break(day, source, shown):
     row = {"day": day, "cc_sessions": 1400, "owner_cc_sessions": 3}
