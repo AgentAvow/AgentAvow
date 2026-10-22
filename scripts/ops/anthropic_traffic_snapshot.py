@@ -65,12 +65,19 @@ COLUMNS = [
 ]
 
 
-def _cc_sessions_fields(rc: dict) -> dict:
-    """cc_sessions from the server's session-start counter when it exists for the day,
-    else the nginx 400 proxy, tagged so the dashboard can tell them apart. The counter
-    cannot be split by owner IP, so owner_cc_sessions is left empty in that case."""
+# The session-start counter went live mid-day on 2026-10-21 (prod 24acd935); its first
+# full UTC day is 2026-10-22. An earlier day's count is partial, so it is not used.
+SESSION_COUNTER_FIRST_DAY = "2026-10-22"
+
+
+def _cc_sessions_fields(rc: dict, day: str = SESSION_COUNTER_FIRST_DAY) -> dict:
+    """cc_sessions from the server's session-start counter when it exists for the day
+    (from its first full day), else the nginx 400 proxy, tagged so the dashboard can tell
+    them apart. The counter cannot be split by owner IP, so owner_cc_sessions is left
+    empty in that case."""
     starts = rc.get("session_start_cc")
-    if isinstance(starts, int) and not isinstance(starts, bool):
+    if (isinstance(starts, int) and not isinstance(starts, bool)
+            and day >= SESSION_COUNTER_FIRST_DAY):
         starters = rc.get("session_starters_cc")
         return {"cc_sessions": starts, "cc_sessions_source": "session_start",
                 "cc_session_starters": starters if isinstance(starters, int) else "",
@@ -271,7 +278,7 @@ def snapshot(day: str, since_hours: int) -> dict:
     rc = _redis_counts(day)
     row.update({k.replace("-", "_"): v for k, v in rc.items()
                 if k.replace("-", "_") in COLUMNS})
-    row.update(_cc_sessions_fields(rc))
+    row.update(_cc_sessions_fields(rc, day))
     for c in COLUMNS:
         row.setdefault(c, "")
     return row

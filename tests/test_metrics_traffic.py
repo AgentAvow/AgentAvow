@@ -123,6 +123,11 @@ def test_snapshot_reads_cc_sessions_from_the_session_start_counter():
     # Before the counter exists (key missing): the nginx 400 proxy, tagged as such.
     assert snap._cc_sessions_fields({"session_start_cc": None}) == {
         "cc_sessions_source": "nginx_400"}
+    # The deploy day's count is partial: not used before the first full day.
+    assert snap._cc_sessions_fields({"session_start_cc": 4}, "2026-10-21") == {
+        "cc_sessions_source": "nginx_400"}
+    assert snap._cc_sessions_fields({"session_start_cc": 4}, "2026-10-22")[
+        "cc_sessions_source"] == "session_start"
     assert {"cc_sessions_source", "cc_session_starters"} <= set(snap.COLUMNS)
 
 
