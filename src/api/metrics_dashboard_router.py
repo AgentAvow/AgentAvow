@@ -1026,6 +1026,7 @@ _TRAFFIC_INT_COLUMNS = (
     "owner_cc_reqs", "owner_cc_sessions", "owner_hook_reqs", "owner_scans_200",
     "cc_machines_excl_owner", "hook_machines_excl_owner", "log_complete",
     "checked_machines", "checked_machines_excl_owner", "preinstall_reqs",
+    "cc_session_starters",
 )
 _TRAFFIC_NOTES = [
     "checked_machines = distinct machines where the plugin checked something on its own "

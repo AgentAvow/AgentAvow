@@ -58,7 +58,24 @@ COLUMNS = [
     # own (session-start hook OR install-time hook), owner excluded. Added 2026-10-14;
     # install-time checks carry their own User-Agent from plugin 0.1.28.
     "checked_machines", "checked_machines_excl_owner", "preinstall_reqs",
+    # Where cc_sessions came from: "nginx_400" (the protocol-version rejection each new
+    # session hit under mcp 1.x; a session-start proxy only through 2026-10-19) or
+    # "session_start" (the server's own counter, PR #221). Series break at 2026-10-20.
+    "cc_sessions_source", "cc_session_starters",
 ]
+
+
+def _cc_sessions_fields(rc: dict) -> dict:
+    """cc_sessions from the server's session-start counter when it exists for the day,
+    else the nginx 400 proxy, tagged so the dashboard can tell them apart. The counter
+    cannot be split by owner IP, so owner_cc_sessions is left empty in that case."""
+    starts = rc.get("session_start_cc")
+    if isinstance(starts, int) and not isinstance(starts, bool):
+        starters = rc.get("session_starters_cc")
+        return {"cc_sessions": starts, "cc_sessions_source": "session_start",
+                "cc_session_starters": starters if isinstance(starters, int) else "",
+                "owner_cc_sessions": ""}
+    return {"cc_sessions_source": "nginx_400"}
 
 REDIS_PROGRAM = r"""
 import asyncio, json, sys
@@ -81,6 +98,15 @@ async def main():
         out["hook_machines_hll"] = await r.pfcount(f"ag:metrics:uniq:hook:machines:{day}")
     except Exception:
         out["hook_machines_hll"] = 0
+    # Claude Code session starts from the server's own counter (a successful initialize or
+    # server/discover, PR #221); None when the key does not exist (before that deploy).
+    v = await r.get(f"ag:metrics:mcp:session_start:claude-code:{day}")
+    out["session_start_cc"] = int(v) if v is not None else None
+    try:
+        out["session_starters_cc"] = await r.pfcount(
+            f"ag:metrics:uniq:mcp:initializers:claude-code:{day}")
+    except Exception:
+        out["session_starters_cc"] = None
     print(json.dumps(out))
 asyncio.run(main())
 """
@@ -242,8 +268,10 @@ def snapshot(day: str, since_hours: int) -> dict:
         "log_complete": int(bool(hours_seen) and min(hours_seen) == 0 and max(hours_seen) == 23),
     }
     # Redis names the surface "claude-code"; the CSV column is calls_claude_code.
-    row.update({k.replace("-", "_"): v for k, v in _redis_counts(day).items()
+    rc = _redis_counts(day)
+    row.update({k.replace("-", "_"): v for k, v in rc.items()
                 if k.replace("-", "_") in COLUMNS})
+    row.update(_cc_sessions_fields(rc))
     for c in COLUMNS:
         row.setdefault(c, "")
     return row
