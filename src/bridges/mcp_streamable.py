@@ -2274,10 +2274,9 @@ server.middleware.append(_legacy_key_order)
 # `initialize` (2024-11-05 … 2025-11-25) or `server/discover` (2026-07-28 clients never
 # send initialize). Each successful one bumps `session_start` plus its own method key and
 # adds the caller to today's distinct-starters HLL; `tools_list` is counted too, so a dip
-# can be told from a failure. Counted off the request path (a task), never on error,
+# can be told from a failure. Counted inline after the handler, never on error,
 # never for the health probe (_bump / _record_starter return early for it).
 _SESSION_START_METHODS = {"initialize": "initialize", "server/discover": "discover"}
-_COUNTER_TASKS: set = set()
 
 
 async def _record_starter() -> None:
@@ -2313,12 +2312,10 @@ async def _session_counter(ctx, call_next):
     method = getattr(ctx, "method", None)
     if (method in _SESSION_START_METHODS or method == "tools/list") \
             and not (isinstance(result, dict) and "error" in result):
-        try:
-            task = asyncio.get_running_loop().create_task(_count_session_activity(method))
-            _COUNTER_TASKS.add(task)
-            task.add_done_callback(_COUNTER_TASKS.discard)
-        except Exception:
-            pass
+        # Inline, like the tool-call counters: a few local-Redis ms on these three
+        # methods. A fire-and-forget task outlived its request (and, in tests, its event
+        # loop) while holding a pooled Redis connection's lock (main CI red on 24acd935).
+        await _count_session_activity(method)
     return result
 
 

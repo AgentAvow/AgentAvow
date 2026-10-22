@@ -10,7 +10,6 @@ import asyncio
 
 import pytest
 
-from src.bridges import mcp_streamable as m
 from tests import mcp_wire as wire
 
 
@@ -32,10 +31,8 @@ def captured(monkeypatch):
 
 
 async def _drain():
-    for _ in range(5):
-        if m._COUNTER_TASKS:
-            await asyncio.gather(*list(m._COUNTER_TASKS), return_exceptions=True)
-        await asyncio.sleep(0)
+    # Counting is inline (no background task), so nothing is left to wait for.
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
