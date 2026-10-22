@@ -70,6 +70,22 @@ async def test_series_is_per_day_with_gaps_left_empty(redis):
     assert any("nginx-origin" in n for n in body["notes"])
 
 
+@pytest.mark.parametrize("day,source,shown", [
+    ("2026-10-19", None, True),            # the protocol-reject proxy, valid through 10-19
+    ("2026-10-20", None, False),           # proxy gone after the SDK upgrade: blanked
+    ("2026-10-21", "nginx_400", False),
+    ("2026-10-25", "session_start", True),  # from the server's session-start counter
+])
+def test_cc_sessions_series_break(day, source, shown):
+    row = {"day": day, "cc_sessions": 1400, "owner_cc_sessions": 3}
+    if source:
+        row["cc_sessions_source"] = source
+    out = md._drop_dead_cc_sessions(dict(row))
+    assert (out["cc_sessions"] == 1400) is shown
+    assert (out["owner_cc_sessions"] == 3) is shown
+    assert any("Series break at 2026-10-20" in n for n in md._TRAFFIC_NOTES)
+
+
 async def test_non_admin_is_refused(redis):
     async with AsyncClient(transport=ASGITransport(app=_app(admin=False)), base_url="http://t") as c:
         res = await c.get("/api/v1/admin/metrics/traffic")

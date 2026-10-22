@@ -1048,7 +1048,29 @@ _TRAFFIC_NOTES = [
     "data/owner-ips.txt on the host (Kenne's test machines).",
     "log_complete = 0 means the nginx log did not cover all 24 hours of that day (partial "
     "day or a log rotation gap); treat that row as a lower bound.",
+    "cc_sessions = Claude Code session starts. Through 2026-10-19 it counted the one "
+    "protocol-version rejection (HTTP 400) every new session hit before retrying (mcp 1.x); "
+    "the MCP SDK 2.3 upgrade (2026-10-20) removed that rejection, so the old count fell to "
+    "zero while use did not. Days from 2026-10-20 show no value until the snapshot reads "
+    "the server's own session-start counter (rows marked cc_sessions_source = session_start). "
+    "Series break at 2026-10-20: the two counts are not spliced together.",
 ]
+
+# First UTC day whose nginx-derived cc_sessions (a count of protocol-version 400s) no
+# longer counts session starts (the MCP SDK 2.3 upgrade, 2026-10-20 00:16Z). From here a
+# row's cc_sessions is shown only when it came from the session-start counter.
+_CC_SESSIONS_PROXY_END = "2026-10-20"
+
+
+def _drop_dead_cc_sessions(row: dict) -> dict:
+    """Blank cc_sessions / owner_cc_sessions on a row past the proxy's end unless the
+    snapshot wrote it from the session-start counter (``cc_sessions_source``)."""
+    if (row.get("day", "") >= _CC_SESSIONS_PROXY_END
+            and row.get("cc_sessions_source") != "session_start"):
+        row["cc_sessions"] = None
+        if "owner_cc_sessions" in row:
+            row["owner_cc_sessions"] = None
+    return row
 
 
 async def _traffic_rows(n_days: int) -> tuple[list[str], list[dict]]:
@@ -1075,7 +1097,7 @@ async def _traffic_rows(n_days: int) -> tuple[list[str], list[dict]]:
                         row[key] = None
                 elif key != "day":
                     row[key] = val
-            rows.append(row)
+            rows.append(_drop_dead_cc_sessions(row))
     except Exception:
         logging.getLogger(__name__).exception("traffic rows unavailable")
         return [], []
