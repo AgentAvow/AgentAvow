@@ -262,16 +262,18 @@ who performs it.
   Probity), and independently operated runs of these verifiers for v0 and the one-axis property.
 - **Probity Observer** consumes this set as a gate input before a local file effect
   ([`TOOL-MANIFEST-EFFECT`](https://github.com/probityai/agent-evidence-observer/blob/00e92b0a3fcf53376ebafc6cc9b4abde7e9fdc8c/docs/reference/TOOL-MANIFEST-EFFECT.md)
-  at `probityai/agent-evidence-observer@00e92b0`, fixture vendored unchanged). Two recorded runs, both
+  at `probityai/agent-evidence-observer@00e92b0`, fixture vendored unchanged). Three recorded runs, all
   with the same six-case axes and `--verify` exit 0:
   - [author-operated](https://github.com/probityai/agent-evidence/issues/24#issuecomment-6275394206)
     by AgentAvow, macOS arm64, Python 3.12.13;
   - [reproduced](https://github.com/probityai/agent-evidence/issues/50) by a non-author operator
     (Pico, @piiiico) on Linux aarch64. Its output files are byte-identical to the author's once the
-    run clock (`runEvaluationTime`) is set to the same value.
+    run clock (`runEvaluationTime`) is set to the same value;
+  - [replayed](https://github.com/probityai/agent-evidence/issues/50#issuecomment-6375111046) by the
+    reader's author (Probity, @astrogilda) on Linux x86_64, with the same byte-identical result.
 
-  Both ran the same reader code, so the second is a reproduction on another platform by another
-  operator, not an independent implementation.
+  All three ran the same reader code, so the second and third are reproductions on other platforms,
+  not independent implementations.
 
 ## See also
 
