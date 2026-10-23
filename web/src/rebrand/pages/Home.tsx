@@ -34,6 +34,9 @@ const EXAMPLES = [
   'vercel/next.js',                  // ~90 · A
 ]
 
+const CHATGPT_LISTING = 'https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344'
+const CLAUDE_LISTING = 'https://claude.ai/directory/connectors/agentavow'
+
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
 }
@@ -262,6 +265,46 @@ export default function RebrandHome() {
         </Reveal>
       </section>
 
+      {/* ②b WORKS WHERE YOUR AGENT DOES — the assistant listings + how the check runs in each */}
+      <section id="assistants" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal>
+          <div className="text-center max-w-[60ch] mx-auto">
+            <Eyebrow>Works where your agent does</Eyebrow>
+            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">Check a tool before your agent connects it, from the assistant you already use.</h2>
+            <p className="mt-3 text-text-muted">AgentAvow is in the ChatGPT and Claude directories. Ask about a repo, a package or an MCP server and get the answer before anything is installed.</p>
+          </div>
+          <div className="flex gap-2.5 flex-wrap justify-center mt-6">
+            <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent('guest_cta_click', '/rebrand', 'add_chatgpt')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to ChatGPT ↗</a>
+            <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent('guest_cta_click', '/rebrand', 'add_claude')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to Claude ↗</a>
+            <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claude Code plugin →</Link>
+            <Link to={rp('/rebrand/for-developers')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Cursor · VS Code · any MCP client →</Link>
+          </div>
+          <div className="grid md:grid-cols-3 rounded-2xl overflow-hidden border border-border/60 mt-8 glass">
+            {[
+              ['01', 'You ask', '"Add the Notion MCP server", "Is this package safe to install?", or "Check this repo before I use it."'],
+              ['02', 'AgentAvow checks it first', 'Its code, dependencies and published advisories, the tool definitions a server serves, and where it applies a sandbox run that watches what it actually does.'],
+              ['03', 'You get the answer', 'Safe to connect, Review before you connect, or Do not connect, with the reason, a signed trust score and an adoption score. Then you decide.'],
+            ].map(([n, h, p], i) => (
+              <div key={n} className={`p-6 ${i < 2 ? 'md:border-r border-border/60' : ''}`}>
+                <div className="font-mono text-[12px] text-primary-light tracking-wide">{n}</div>
+                <h3 className="mt-2.5 text-[17px] font-semibold">{h}</h3>
+                <p className="mt-2 text-text-muted text-[14px]">{p}</p>
+              </div>
+            ))}
+          </div>
+          <div className="grid md:grid-cols-2 gap-4 mt-4">
+            <div className="glass rounded-2xl p-6">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">ChatGPT and Claude chat</div>
+              <p className="mt-2 text-text-muted text-[14px]">The check runs when you ask, and the bundled skill steps in when you're about to add a tool. You see the answer and a trust card before you run any install command.</p>
+            </div>
+            <div className="glass rounded-2xl p-6">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">Claude Code</div>
+              <p className="mt-2 text-text-muted text-[14px]">The plugin checks automatically: each new MCP server when a session starts, and the answer on file before each tool call. A server that reads Do not connect is stopped; a tool whose definition changed asks you first.</p>
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
       {/* ④→② SIGNED RESULT EXAMPLE — moved up, right below the scan count */}
       <section id="proof" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
         <Reveal>
@@ -386,7 +429,7 @@ export default function RebrandHome() {
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Check before it connects</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Add AgentAvow's MCP to your agent (Claude Code, Cursor, or your own runtime). It pulls a tool's signed answer and score before your agent connects, so an unsafe tool is stopped in the loop, not found after the fact.</p>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Add AgentAvow to your agent (ChatGPT, Claude, Claude Code, Cursor, or your own runtime). It pulls a tool's signed answer and score before your agent connects, so an unsafe tool is stopped in the loop, not found after the fact.</p>
               <Link to={rp("/rebrand/how-it-works") + "#mcp-check"} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Set it up →</Link>
             </div>
             <div className="glass rounded-2xl p-7 flex flex-col">
@@ -429,7 +472,7 @@ export default function RebrandHome() {
             <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-1 rounded bg-primary/15 text-primary-light shrink-0">New</span>
             <div className="min-w-0 flex-1">
               <div className="text-[15px] font-semibold">Running an agent? Give it a built-in safety check.</div>
-              <div className="text-[13.5px] text-text-muted mt-0.5">Add AgentAvow's MCP server to Claude Code or Cursor, and your agent asks "is this safe?" before it connects anything.</div>
+              <div className="text-[13.5px] text-text-muted mt-0.5">Add AgentAvow to ChatGPT, Claude, Claude Code or Cursor, and your agent asks "is this safe?" before it connects anything.</div>
             </div>
             <span className="text-[14px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform shrink-0">Add it →</span>
           </Link>
