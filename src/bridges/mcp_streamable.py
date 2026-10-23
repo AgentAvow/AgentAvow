@@ -31,6 +31,7 @@ from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types.version import MODERN_PROTOCOL_VERSIONS
+from starlette.requests import ClientDisconnect
 
 from src.bridges import mcp_response_counter as _counter
 from src.bridges.mcp_app_view import trust_card_html
@@ -2548,19 +2549,19 @@ async def mcp_asgi_app(scope, receive, send) -> None:
         _HEALTH_PROBE.set(probe)
     except Exception:
         pass
-    if (probe or scope.get("type") != "http" or scope.get("method") != "POST"
-            or not _counter.counting_enabled()):
+    if scope.get("type") != "http":
         await session_manager.handle_request(scope, receive, send)
         return
     # Count what this POST was answered with (src/bridges/mcp_response_counter) for the
     # passive reject-rate alert. Observes the response only; never alters or delays it.
+    count = (not probe and scope.get("method") == "POST" and _counter.counting_enabled())
     seen: dict = {"status": 0, "body": bytearray()}
 
     async def _observe(message) -> None:
         try:
             if message["type"] == "http.response.start":
                 seen["status"] = int(message.get("status") or 0)
-            elif (message["type"] == "http.response.body" and seen["status"] >= 400
+            elif (count and message["type"] == "http.response.body" and seen["status"] >= 400
                   and len(seen["body"]) < _counter.BODY_CAP):
                 seen["body"] += (message.get("body") or b"")[:_counter.BODY_CAP]
         except Exception:
@@ -2569,6 +2570,34 @@ async def mcp_asgi_app(scope, receive, send) -> None:
 
     try:
         await session_manager.handle_request(scope, receive, _observe)
-    finally:
-        _counter.record_response(seen["status"] or 500, bytes(seen["body"]),
+    except ClientDisconnect:
+        # The client hung up while we were reading its request (Sentry
+        # AGENTGRAPH-BACKEND-2C, 2026-10-23): nobody is left to answer and nothing
+        # failed on our side, so it is not an error. Fall through to the 499 below.
+        pass
+    except Exception:
+        if count:
+            _counter.record_response(500, b"", header_version=version,
+                                     surface=_SURFACE.get())
+        raise
+    if seen["status"] == 0:
+        # No response was started (a client disconnect, or the SDK returned without
+        # answering). Answer 499 "client closed request" so the middleware above us
+        # does not raise "No response returned." (seen once on 2026-10-22). Not
+        # counted as a reject: the client left, the server did not refuse it.
+        await _answer_client_closed(send)
+        return
+    if count:
+        _counter.record_response(seen["status"], bytes(seen["body"]),
                                  header_version=version, surface=_SURFACE.get())
+
+
+async def _answer_client_closed(send) -> None:
+    """A bodiless 499 for a request whose client is already gone. Never raises: the
+    connection may be closed already."""
+    try:
+        await send({"type": "http.response.start", "status": 499,
+                    "headers": [(b"content-length", b"0")]})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+    except Exception:
+        pass
