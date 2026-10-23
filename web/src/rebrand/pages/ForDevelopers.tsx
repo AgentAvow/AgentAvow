@@ -218,13 +218,14 @@ export default function RebrandForDevelopers() {
           <Eyebrow>For anyone running an agent</Eyebrow>
           <h2 className="mt-2 text-xl md:text-2xl font-bold">Give your agent a safety check before it connects anything.</h2>
           <p className="mt-2 text-text-muted text-[14.5px] max-w-[64ch] leading-relaxed">
-            Add AgentAvow's own MCP server to Claude Code, Cursor, or any MCP client. Now your agent can ask
+            Add AgentAvow's own MCP server to Claude, ChatGPT, Cursor, or any MCP client. Now your agent can ask
             <strong className="text-text"> "is this tool safe to install?"</strong> and get a signed 0–100 score + findings
             back — <em>before</em> it connects an unknown server or runs a package. Free, no account, read-only.
           </p>
           <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-2">One click →</div>
           <div className="flex gap-2.5 flex-wrap">
             <a href="https://claude.ai/directory/connectors/agentavow" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 font-semibold text-[13.5px] px-4 py-2 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Add to Claude ↗</a>
+            <a href="https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to ChatGPT ↗</a>
             <a href={cursorStdio(AA_MCP)} className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to Cursor →</a>
             <a href={vscodeStdio(AA_MCP)} className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to VS Code →</a>
             <a href="https://pypi.org/project/agentavow-trust/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">PyPI ↗</a>

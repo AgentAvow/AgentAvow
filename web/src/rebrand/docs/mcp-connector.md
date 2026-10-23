@@ -1,6 +1,6 @@
 # AgentAvow MCP connector
 
-AgentAvow's remote MCP server lets Claude (and any MCP client) check whether a tool is
+AgentAvow's remote MCP server lets Claude, ChatGPT (and any MCP client) check whether a tool is
 safe **before** an agent connects to it. This page is for users and IT admins evaluating
 the connector.
 
@@ -54,6 +54,8 @@ JWKS — you don't have to trust AgentAvow. See [Verify an attestation](/docs/ve
   [connector directory](https://claude.ai/directory/connectors/agentavow), or go to
   Settings → Connectors → Add custom connector → `https://agentavow.com/mcp`
   (no authentication).
+- **ChatGPT:** add AgentAvow from the
+  [ChatGPT plugin directory](https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344). No sign-in.
 - **Claude Code:** `claude mcp add --transport http agentavow https://agentavow.com/mcp`,
   or install the AgentAvow Trust plugin, which adds a `/scan` command and scans each
   new MCP server at session start. See
