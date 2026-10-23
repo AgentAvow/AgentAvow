@@ -10,7 +10,7 @@ AgentAvow answers "is this tool safe for my agent to connect?" for any tool, MCP
 
 ## MCP Server — Trust & Security for AI Agents
 
-Check the security posture of any agent or tool directly from Claude Code:
+Check whether a tool is safe before your agent connects to it, from Claude, ChatGPT, Cursor, VS Code or any MCP client. For a local install:
 
 ```bash
 pip install agentavow-trust
@@ -34,6 +34,10 @@ Then try `/scan npm chalk`. The hook skips servers on localhost or a private net
 ```
 claude mcp add --transport http agentavow https://agentavow.com/mcp
 ```
+
+### Connect from ChatGPT
+
+AgentAvow is in the **ChatGPT plugin directory**: [add it here](https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344). It brings the same eight read-only tools and the trust card, plus a scan-before-connect skill. No sign-in.
 
 ### Connect from your editor
 

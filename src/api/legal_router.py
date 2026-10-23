@@ -18,30 +18,81 @@ from fastapi.responses import HTMLResponse
 router = APIRouter(prefix="/legal", tags=["legal"])
 
 _PRIVACY_CLAUSES: list[tuple[str, str]] = [
-    ("1. Overview",
-     "This Policy describes what AgentAvow collects and how we use it. Checking a "
-     "tool is anonymous — no account or tracking is required to get a result."),
-    ("2. What We Collect",
-     "<ul><li><strong>Account data</strong> (if you register): email, display name.</li>"
-     "<li><strong>Watch/alert data:</strong> the tools you watch and any webhook URL "
-     "you configure.</li><li><strong>Usage data:</strong> aggregate, privacy-preserving "
-     "analytics about how the Service is used.</li></ul>"),
-    ("3. How We Use It",
-     "<ul><li>To provide scans, alerts, and the features you request.</li>"
-     "<li>To send the change-alerts you subscribe to.</li>"
-     "<li>To secure and improve the Service.</li></ul>"),
-    ("4. Public Information",
-     "Scan results about public tools and repositories are public. Do not submit "
-     "anything you consider confidential when scanning."),
-    ("5. Sharing",
-     "We do not sell your data. We share it only with service providers who help us "
-     "run the Service, or when required by law."),
-    ("6. Retention & Your Rights",
-     "We keep account data while your account is active. You may request access to or "
-     'deletion of your personal data at <a href="mailto:privacy@agentavow.com">'
-     "privacy@agentavow.com</a>."),
-    ("7. Contact",
-     'Privacy questions: <a href="mailto:privacy@agentavow.com">privacy@agentavow.com</a>.'),
+    ('1. Overview',
+     'Effective October 23, 2026. AgentAvow checks whether a software tool is safe'
+     ' for an AI agent to connect to: a GitHub repository, a published package, or'
+     ' a live MCP server. This policy explains what we receive when you use '
+     'agentavow.com, our public API, or our connector for AI assistants, what we '
+     'do with it, and how long we keep it. Checking a tool does not require an '
+     'account.'),
+    ('2. Using the connector in an AI assistant (MCP)',
+     '<p>When an AI assistant calls one of our tools on your behalf, we '
+     "receive:</p><ul><li><strong>The tool's inputs:</strong> the repository, "
+     'package name and optional version, MCP server URL, or agent identifier you '
+     'asked about, and whether to re-scan.</li><li><strong>Standard request '
+     'data:</strong> the IP address and User-Agent of the request.</li></ul><p>Our'
+     ' tools accept only those inputs. We do not ask for your conversation, chat '
+     'history, memories, files, name, email address, or account with the '
+     'assistant, and we do not store anything beyond the inputs listed above. Your'
+     ' assistant decides what to put in those inputs; they are short identifiers '
+     'such as a package name or URL. Some assistants attach optional hints to a '
+     'request (for example a coarse location or an anonymous identifier); we do '
+     'not read or store them. The connector has no sign-in.</p><p>We use the '
+     'inputs only to run the check you asked for: we fetch public information '
+     'about that tool from its source (GitHub, the package registry, or the MCP '
+     'server itself), analyze it, and return the result. All eight tools are '
+     'read-only: they never change anything in your accounts or in the tool being '
+     'checked.</p>'),
+    ('3. What our results contain',
+     'Results describe the tool that was checked: an answer (Safe to connect, '
+     'Review before you connect, or Do not connect) with its reason, a trust '
+     'score, an adoption score, findings, and a signed attestation. They contain '
+     'no personal data about you. Results for public tools are public: they may be'
+     ' cached, shown on agentavow.com, and listed in our public catalog. Do not '
+     'submit anything you consider confidential.'),
+    ('4. Accounts and alerts (optional)',
+     'If you create an account: your email address, display name, and, if you sign'
+     ' in with Google, the basic profile Google shares. If you watch a tool: the '
+     'tools you watch and any webhook URL you configure (its signing secret is '
+     'stored encrypted). If you scan a private repository with a GitHub token, the'
+     ' token is used for that scan only and is not stored.'),
+    ('5. Logs, metrics and analytics',
+     '<ul><li><strong>Server logs</strong> (IP address, User-Agent, the requested '
+     'path including the tool checked, time, status) are kept to operate and '
+     'secure the service. They are rotated automatically and typically kept for '
+     'less than 30 days.</li><li><strong>Usage metrics</strong> are daily counts '
+     '(for example, calls per tool and per assistant product). To count distinct '
+     'callers we store a one-way hash of the IP address and User-Agent combined '
+     'with a salt that changes every day, not the IP address itself. Metrics are '
+     'kept for up to 90 days.</li><li><strong>Website analytics</strong> use '
+     'Cloudflare Web Analytics, which does not use cookies.</li><li><strong>Error '
+     'reports</strong> are sent to our error-tracking provider (Sentry) to fix '
+     'bugs.</li></ul>'),
+    ('6. How we use data',
+     'To run the checks and features you request, send the alerts you subscribe '
+     'to, secure the service against abuse, and understand aggregate usage. We do '
+     'not sell personal data, use it for advertising, or use it to train AI '
+     'models.'),
+    ('7. Sharing',
+     'We share data only with service providers that run parts of the service for '
+     'us (Amazon Web Services for hosting and email, Resend for email delivery, '
+     'Sentry for error tracking, Cloudflare for website analytics, and Google only'
+     ' if you choose Google sign-in), and when the law requires it. When we check '
+     "a tool, we contact that tool's public source (GitHub, a package registry, or"
+     ' the MCP server you named).'),
+    ('8. Retention and your rights',
+     'Account data is kept while your account is active and deleted on request. '
+     'Logs and metrics are kept as described in section 5. You may ask for access '
+     'to, correction of, or deletion of your personal data at <a '
+     'href="mailto:privacy@agentavow.com">privacy@agentavow.com</a>.'),
+    ('9. Children',
+     'AgentAvow is a developer tool and is not directed at children under 16. We '
+     'do not knowingly collect their personal data.'),
+    ('10. Changes',
+     'We will post changes here with a new effective date.'),
+    ('11. Contact',
+     'Privacy questions: <a '
+     'href="mailto:privacy@agentavow.com">privacy@agentavow.com</a>.'),
 ]
 
 _TERMS_CLAUSES: list[tuple[str, str]] = [
