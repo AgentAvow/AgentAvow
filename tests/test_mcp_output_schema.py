@@ -214,3 +214,20 @@ def test_card_resource_contents_carry_the_widget_metadata():
     assert meta["openai/widgetCSP"]["redirect_domains"] == ["https://agentavow.com"]
     assert meta["openai/widgetDescription"]
     assert not any(k == "ui" or k.startswith("ui.") for k in meta)  # Claude-safe: openai/* only
+
+
+@pytest.mark.asyncio
+async def test_unscannable_mcp_server_explains_sign_in_not_a_retry(monkeypatch, _quiet):
+    async def _422(path, params=None):
+        req = httpx.Request("GET", "http://internal/api" + path)
+        raise httpx.HTTPStatusError("x", request=req, response=httpx.Response(
+            422, request=req, json={"detail": "Scan error: Could not handshake the MCP server"}))
+
+    monkeypatch.setattr(mod, "_get", _422)
+    res = await _call("scan_mcp_server", {"endpoint_url": "https://mcp.notion.com/mcp"})
+    text = res.content[0].text
+    assert res.is_error is True
+    assert text.startswith("Not scanned")
+    assert "Could not handshake" in text and "sign-in" in text
+    assert "scan_package" in text and "scan_repo" in text
+    assert "Try again shortly" not in text
