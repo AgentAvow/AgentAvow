@@ -894,6 +894,9 @@ class McpSession:
         self.capabilities: dict = {}
         self.session_id: str | None = None
         self.init_status: int | None = None
+        # The ``WWW-Authenticate`` header of a refused ``initialize`` (None otherwise):
+        # how ``fetch_mcp_tools`` tells "needs sign-in" from "unreachable".
+        self.init_www_authenticate: str | None = None
         self._rid = 1
 
     def _next_id(self) -> int:
@@ -918,6 +921,7 @@ class McpSession:
             return 0
         self.init_status = init.status_code
         if init.status_code >= 400:
+            self.init_www_authenticate = init.headers.get("www-authenticate")
             return init.status_code
         session = init.headers.get("mcp-session-id") or init.headers.get("Mcp-Session-Id")
         init_doc = _parse_jsonrpc_body(init.text)
@@ -1070,11 +1074,49 @@ def mcp_result_text(result: dict | None, limit: int = 65536) -> str:
     return "\n".join(parts)[:limit]
 
 
-async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
+MCP_FAILURE_AUTH_REQUIRED = "auth_required"
+
+_BEARER_CHALLENGE = re.compile(r"(?:^|[\s,])bearer(?:\s|,|$)", re.IGNORECASE)
+
+
+class McpFetchFailure:
+    """Why ``fetch_mcp_tools`` got no tool list, when the reason is worth telling the
+    user. Falsy, so every ``if not data`` caller treats it exactly like ``None``.
+
+    Only facts already in the refused response are kept: the ``resource_metadata`` URL
+    a server names in its challenge is never fetched (following a server-supplied URL
+    would be new SSRF surface)."""
+
+    __slots__ = ("reason", "status")
+
+    def __init__(self, reason: str, status: int | None = None) -> None:
+        self.reason = reason
+        self.status = status
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return f"McpFetchFailure(reason={self.reason!r}, status={self.status!r})"
+
+
+def _auth_required(status: int | None, www_authenticate: str | None) -> bool:
+    """A refused ``initialize`` that asks for credentials: HTTP 401/403, or any error
+    status carrying a Bearer challenge (``WWW-Authenticate: Bearer ...``, the MCP
+    authorization spec's OAuth signal)."""
+    if status in (401, 403):
+        return True
+    return bool(status and status >= 400 and isinstance(www_authenticate, str)
+                and _BEARER_CHALLENGE.search(www_authenticate))
+
+
+async def fetch_mcp_tools(endpoint_url: str) -> dict | McpFetchFailure | None:
     """Handshake a Streamable-HTTP MCP server and return
     ``{"tools": [...], "resources": [...], "prompts": [...], "server_info": {...}}``.
-    Fail-open: any SSRF-guard/transport/protocol error returns None so the caller
-    can surface a clean error instead of a wrong grade. Never raises.
+    Fail-open: any SSRF-guard/transport/protocol error returns a falsy value so the
+    caller can surface a clean error instead of a wrong grade. Never raises. The falsy
+    value is ``None``, or an ``McpFetchFailure`` when the server refused ``initialize``
+    for want of sign-in (``reason == MCP_FAILURE_AUTH_REQUIRED``).
     """
 
     from src.ssrf import validate_url_https
@@ -1094,6 +1136,8 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
         async with ssrf_safe_async_client(timeout=_MCP_TIMEOUT, follow_redirects=False) as client:
             session = McpSession(client, url)
             if await session.initialize() >= 400 or session.init_status == 0:
+                if _auth_required(session.init_status, session.init_www_authenticate):
+                    return McpFetchFailure(MCP_FAILURE_AUTH_REQUIRED, session.init_status)
                 return None
             started = now_ms()
             tools = await session.list("tools/list", "tools")
