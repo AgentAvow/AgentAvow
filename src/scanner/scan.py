@@ -6861,7 +6861,8 @@ def _own_advisory_findings(name: str, version: str | None, advisories: list[dict
 
 
 # The scan error for an MCP server that refuses ``initialize`` until the caller signs
-# in (HTTP 401/403 or a ``WWW-Authenticate: Bearer`` challenge). Passed through as the
+# in (HTTP 401, or any error with a ``WWW-Authenticate: Bearer`` challenge; a bare 403
+# keeps the generic error, since a WAF block is not sign-in). Passed through as the
 # public API's error detail; carries no "not found" so routers answer it 422, not 404.
 MCP_SIGNIN_REQUIRED_ERROR = (
     "This MCP server requires sign-in (OAuth), so its tool list isn't public and "

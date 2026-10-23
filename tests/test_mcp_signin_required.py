@@ -1,6 +1,6 @@
-"""An MCP server that refuses ``initialize`` until the caller signs in (HTTP 401/403, or a
-``WWW-Authenticate: Bearer`` OAuth challenge, e.g. https://mcp.notion.com/mcp) gets a
-scan error that says so, not the generic "could not handshake" one, and the public API
+"""An MCP server that refuses ``initialize`` until the caller signs in (HTTP 401, or any
+error with a ``WWW-Authenticate: Bearer`` OAuth challenge, e.g. https://mcp.notion.com/mcp)
+gets a scan error that says so (a bare 403, which a WAF block also sends, does not), not the generic "could not handshake" one, and the public API
 passes that detail through. The ``resource_metadata`` URL in the challenge is never
 fetched."""
 
@@ -56,24 +56,27 @@ async def test_401_bearer_challenge_is_auth_required(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", [401, 403])
-async def test_401_or_403_without_header_is_auth_required(monkeypatch, status):
-    _patch_transport(monkeypatch, _refuse(status))
+async def test_401_without_header_is_auth_required(monkeypatch):
+    _patch_transport(monkeypatch, _refuse(401))
     data = await ms.fetch_mcp_tools(URL)
     assert isinstance(data, ms.McpFetchFailure) and not data
     assert data.reason == ms.MCP_FAILURE_AUTH_REQUIRED
 
 
 @pytest.mark.asyncio
-async def test_bearer_challenge_on_other_status_is_auth_required(monkeypatch):
-    _patch_transport(monkeypatch, _refuse(400, 'Bearer error="invalid_request"'))
+@pytest.mark.parametrize("status", [400, 403])
+async def test_bearer_challenge_on_other_status_is_auth_required(monkeypatch, status):
+    _patch_transport(monkeypatch, _refuse(status, 'Bearer error="insufficient_scope"'))
     data = await ms.fetch_mcp_tools(URL)
     assert isinstance(data, ms.McpFetchFailure)
     assert data.reason == ms.MCP_FAILURE_AUTH_REQUIRED
+    assert data.status == status
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status,header", [
+    (403, None),                # a WAF / bot block: not sign-in
+    (403, 'Basic realm="x"'),
     (404, None),
     (500, None),
     (405, None),
@@ -95,7 +98,8 @@ async def test_transport_error_stays_generic(monkeypatch):
 
 def test_auth_required_predicate():
     assert ms._auth_required(401, None)
-    assert ms._auth_required(403, None)
+    assert not ms._auth_required(403, None)  # bare 403: WAF blocks look the same
+    assert ms._auth_required(403, 'Bearer error="insufficient_scope"')
     assert ms._auth_required(400, "Bearer")
     assert ms._auth_required(400, 'DPoP algs="ES256", Bearer realm="x"')
     assert ms._auth_required(400, 'bearer realm="x"')

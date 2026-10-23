@@ -1101,10 +1101,11 @@ class McpFetchFailure:
 
 
 def _auth_required(status: int | None, www_authenticate: str | None) -> bool:
-    """A refused ``initialize`` that asks for credentials: HTTP 401/403, or any error
-    status carrying a Bearer challenge (``WWW-Authenticate: Bearer ...``, the MCP
-    authorization spec's OAuth signal)."""
-    if status in (401, 403):
+    """A refused ``initialize`` that asks for credentials: HTTP 401, or any error status
+    carrying a Bearer challenge (``WWW-Authenticate: Bearer ...``, the MCP authorization
+    spec's OAuth signal). A bare 403 is not enough: a WAF or bot block answers 403 too,
+    and calling that "sign-in" would mislead."""
+    if status == 401:
         return True
     return bool(status and status >= 400 and isinstance(www_authenticate, str)
                 and _BEARER_CHALLENGE.search(www_authenticate))
