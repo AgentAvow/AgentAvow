@@ -260,6 +260,18 @@ who performs it.
   (merged 2026-10-07) with per-claim records: an independent record for the key encoding, per-tool
   digests, canonical bytes, signature and case verdicts (a lab-operated run of a reader written by
   Probity), and independently operated runs of these verifiers for v0 and the one-axis property.
+- **Probity Observer** consumes this set as a gate input before a local file effect
+  ([`TOOL-MANIFEST-EFFECT`](https://github.com/probityai/agent-evidence-observer/blob/00e92b0a3fcf53376ebafc6cc9b4abde7e9fdc8c/docs/reference/TOOL-MANIFEST-EFFECT.md)
+  at `probityai/agent-evidence-observer@00e92b0`, fixture vendored unchanged). Two recorded runs, both
+  with the same six-case axes and `--verify` exit 0:
+  - [author-operated](https://github.com/probityai/agent-evidence/issues/24#issuecomment-6275394206)
+    by AgentAvow, macOS arm64, Python 3.12.13;
+  - [reproduced](https://github.com/probityai/agent-evidence/issues/50) by a non-author operator
+    (Pico, @piiiico) on Linux aarch64. Its output files are byte-identical to the author's once the
+    run clock (`runEvaluationTime`) is set to the same value.
+
+  Both ran the same reader code, so the second is a reproduction on another platform by another
+  operator, not an independent implementation.
 
 ## See also
 
