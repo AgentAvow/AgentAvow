@@ -1,7 +1,9 @@
 """Incident-history lookup — has THIS package ever been caught being malicious?
 
 Context-only threat-intel: queries OSV for the TARGET coordinate's own ``MAL-`` advisories
-(the OpenSSF ``malicious-packages`` dataset — "malicious code in X" compromise events),
+(the OpenSSF ``malicious-packages`` dataset — "malicious code in X" compromise events)
+and its malware-class GitHub advisories (a GHSA tagged CWE-506, Embedded Malicious Code:
+the 2018 event-stream / flatmap-stream compromise has only that record, no MAL- one),
 distinct from ``supply_chain`` which checks the target's DEPENDENCIES.
 
 HARD RULES:
@@ -31,6 +33,29 @@ def _is_mal(vuln: dict) -> bool:
     if vid.startswith("MAL-"):
         return True
     return any(str(a).upper().startswith("MAL-") for a in (vuln.get("aliases") or []))
+
+
+# GitHub's CWE for a malware advisory. A GHSA carrying it (``database_specific.cwe_ids``)
+# records a compromise, not a code flaw: GHSA-mh6f-8j2x-4483 (event-stream 3.3.6 /
+# flatmap-stream), GHSA-pjwm-rvh2-c87w (ua-parser-js 0.7.29 / 0.8.0 / 1.0.0).
+_MALWARE_CWES = frozenset({"CWE-506"})
+
+
+def _is_malware_ghsa(vuln: dict) -> bool:
+    """True if the advisory is a GitHub (GHSA) record classed as malware (CWE-506)."""
+    if not str(vuln.get("id", "")).upper().startswith("GHSA-"):
+        return False
+    ds = vuln.get("database_specific")
+    cwes = ds.get("cwe_ids") if isinstance(ds, dict) else None
+    if not isinstance(cwes, list):
+        return False
+    return any(str(c).strip().upper() in _MALWARE_CWES for c in cwes)
+
+
+def _is_incident(vuln: dict) -> bool:
+    """A compromise record for incident history: an OpenSSF MAL- record (or one aliased
+    to it), or a malware-class (CWE-506) GHSA."""
+    return _is_mal(vuln) or _is_malware_ghsa(vuln)
 
 
 def _norm_pkg(eco: str, name: str) -> str:
@@ -186,6 +211,11 @@ def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
     """Non-MAL advisories for the package itself, with whether the scanned version is
     affected. Deduplicated by alias (GHSA and PYSEC records describe the same flaw).
 
+    A malware-class (CWE-506) GHSA stays here even though incident history also lists
+    it: incident history is never scored and matches only explicitly listed versions,
+    while this list scores an affected version as a finding and reads ranges too
+    (flatmap-stream's ``introduced: 0``), so dropping it would lose that finding.
+
     ``fixed_in`` is the release that fixes it; when the record has no fix event,
     ``last_affected`` is the newest release it names as affected, so a reader is told
     why the scanned version is clear ("affected up to 1.40.12") instead of "fixed"."""
@@ -217,21 +247,36 @@ def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
 def summarize_incidents(vulns: list[dict], version: str | None = None,
                         eco: str | None = None, name: str | None = None) -> dict:
     """Pure reducer: OSV vulns -> the context-only incident_history dict. Network-free
-    and unit-testable in isolation."""
+    and unit-testable in isolation.
+
+    An incident is a MAL- record or a malware-class (CWE-506) GHSA. Records that alias
+    each other (debug's GHSA-4x49-vf9v-38px and MAL-2025-46974) are one incident: the
+    MAL- record is kept, and the scanned version counts as affected if either lists it."""
     incidents: list[dict] = []
     current_affected = False
-    for v in vulns:
-        if not _is_mal(v):
-            continue
+    seen: list[tuple[set, dict]] = []
+    # Records whose own id is MAL- first, so the OpenSSF record is the one kept for an
+    # aliased pair (stable sort: OSV's order otherwise).
+    for v in sorted((v for v in vulns if isinstance(v, dict) and _is_incident(v)),
+                    key=lambda v: not str(v.get("id", "")).upper().startswith("MAL-")):
         aff = _version_affected(v, version, eco, name)
         current_affected = current_affected or aff
-        incidents.append({
+        ids = {str(v.get("id", ""))} | {str(a) for a in (v.get("aliases") or [])}
+        ids.discard("")
+        dup = next((rec for known, rec in seen if known & ids), None)
+        if dup is not None:
+            dup["current_version_affected"] = dup["current_version_affected"] or aff
+            continue
+        current_affected = current_affected or aff
+        rec = {
             "id": v.get("id"),
             "summary": (v.get("summary") or "").strip()[:200],
             "published": v.get("published"),
             "aliases": [a for a in (v.get("aliases") or []) if isinstance(a, str)][:5],
             "current_version_affected": aff,
-        })
+        }
+        seen.append((ids, rec))
+        incidents.append(rec)
     incidents.sort(key=lambda i: i.get("published") or "", reverse=True)
     return {
         "checked": True,
@@ -245,7 +290,8 @@ def summarize_incidents(vulns: list[dict], version: str | None = None,
 async def fetch_incident_history(
     surface: str, name: str, version: str | None = None,
 ) -> dict:
-    """Query OSV for the package's own MAL- advisories. Fail-open; returns
+    """Query OSV for the package's own MAL- and malware-class (CWE-506) GHSA advisories
+    (incident history) and its other advisories. Fail-open; returns
     ``{"checked": False}`` on any error or unsupported ecosystem."""
     eco = _OSV_ECOSYSTEM.get((surface or "").lower())
     if not eco or not name:
