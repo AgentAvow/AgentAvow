@@ -512,6 +512,35 @@ def _no_entity_help(what: str) -> str:
     )
 
 
+def _api_error_detail(e: httpx.HTTPStatusError) -> str:
+    """The public API's own one-line reason (its ``detail``), without the generic prefix.
+    Empty when the body is not the API's JSON error shape."""
+    try:
+        detail = e.response.json().get("detail")
+    except Exception:
+        return ""
+    if not isinstance(detail, str):
+        return ""
+    return detail.removeprefix("Scan error: ").strip()[:300]
+
+
+def _not_scanned_help(tool: str, detail: str) -> str:
+    """Guidance for a target AgentAvow could not grade. Never reads as a verdict."""
+    head = "Not scanned — AgentAvow could not grade this target, so there is no answer for it."
+    why = f"\nReason: {detail}" if detail else ""
+    if tool == "scan_mcp_server":
+        nxt = (
+            "\n\nThe most common cause is a server that requires sign-in (for example OAuth): "
+            "its tool list is not public, so it cannot be read without your account. You can "
+            "still check the code behind it: scan its published package with scan_package "
+            "(e.g. registry='npm', name='@scope/its-server') or its source repository with "
+            "scan_repo ('owner/name'). Not scanned is neither safe nor unsafe."
+        )
+    else:
+        nxt = "\n\nCheck the name or coordinates. Not scanned is neither safe nor unsafe."
+    return head + why + nxt
+
+
 def _identity_matches(query: str, entity: dict) -> bool:
     """True when every word of *query* appears in the entity's name or DID."""
     haystack = f"{entity.get('display_name') or ''} {entity.get('did_web') or ''}".lower()
@@ -2515,6 +2544,11 @@ async def _run_tool(
         if code == 503:
             return _text("The scan is still running (large target). Try again shortly — "
                          "results cache once ready.")
+        if code == 422:
+            # The scanner reached the target but could not grade it (most often an MCP
+            # server that needs sign-in, so its tool list is not public). Say so plainly:
+            # "not scanned" is neither safe nor unsafe, and retrying will not help.
+            return _text(_not_scanned_help(name, _api_error_detail(e)))
         return _text(f"AgentAvow returned an error ({code}). "
                      "Try again shortly, or check the target.")
     except Exception:  # noqa: BLE001 — actionable message; never a stack trace or internal detail
