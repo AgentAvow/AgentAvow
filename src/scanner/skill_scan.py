@@ -338,8 +338,11 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
         result.findings.extend(_scan_text(text, path))
     # A host in a pattern array was relaxed with only its own file in view: another
     # bundled file that names the array or sources the file puts it back.
-    from src.scanner.npm_scripts import restore_signature_hosts
-    restore_signature_hosts(result.findings, {p: t for p, t in files.items() if t})
+    # Likewise a signed payload whose signer another bundled file redefines.
+    from src.scanner.npm_scripts import restore_signature_hosts, restore_signing_relaxed
+    tree = {p: t for p, t in files.items() if t}
+    restore_signature_hosts(result.findings, tree)
+    restore_signing_relaxed(result.findings, tree)
 
     # 6. Declared-vs-actual capability DRIFT — a bundled script exercises a capability
     # the always-loaded `allowed-tools` never declared. The user approves a narrow

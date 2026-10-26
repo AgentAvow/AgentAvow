@@ -5243,8 +5243,34 @@ def _credential_exfil_findings(
 
     if _is_allowlisted(file_path, _CREDENTIAL_EXFIL_NAME, allowlist):
         return []
+    from src.scanner import npm_scripts
     out = []
-    for line_no, kind in credential_exfil_hits(content, file_lang, lf=lf):
+    relaxed: list = []
+    vendor_uses: list = []
+    hits = credential_exfil_hits(content, file_lang, lf=lf, relaxed=relaxed,
+                                 vendor_uses=vendor_uses)
+    for line_no, kind, names in relaxed:
+        # Clean only because the key went bare into a library signing call: low
+        # until the tree pass checks that no other file of the package defines or
+        # reassigns the signer it resolved to (npm_scripts.restore_signing_relaxed).
+        f_low = Finding(
+            category="exfiltration", name=_CREDENTIAL_EXFIL_NAME, severity="low",
+            file_path=file_path, line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            payload=payload)
+        npm_scripts.mark_signing(f_low, "critical", set(names))
+        out.append(f_low)
+    for vendor in sorted({v for _ln, v in vendor_uses}):
+        out.append(Finding(
+            category="secret", name=f"Uses your {vendor} API key", severity="low",
+            file_path=file_path, line_number=next(ln for ln, v in vendor_uses if v == vendor),
+            snippet="",
+            remediation=(
+                f"The code reads your {vendor} API key from a .env file and only sends it "
+                f"to {vendor}'s API to authenticate. Expected for a {vendor} integration; "
+                "make sure you're happy to share that key."),
+            kind="capability", capability="secret:vendor_api_key"))
+    for line_no, kind in hits:
         what = _CREDENTIAL_KIND_LABELS.get(kind, "a credential file")
         out.append(Finding(
             category="exfiltration",

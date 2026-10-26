@@ -34,7 +34,12 @@ import functools
 import re
 from dataclasses import dataclass, field
 
-from src.scanner.skill_key_flow import host_is_own_vendor, is_local_host
+from src.scanner.skill_key_flow import (
+    VENDOR_KEYS,
+    host_is_own_vendor,
+    is_local_host,
+    registrable_domain,
+)
 
 _NAME = r"([A-Z][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD))"
 # A named key pulled OUT of a .env (`line.startswith("OPENROUTER_API_KEY=")`,
@@ -605,13 +610,145 @@ def _is_keyobj_ctor(code: str) -> bool:
     return _KEYOBJ_CTOR_RE.match(code) is not None
 
 
-def _mask_signing(code: str, keys: set[str]) -> str:
+# Signing libraries whose calls may excuse a key passed as an ARGUMENT (reviewer guard,
+# PR #232): the call target must resolve to one of these imports, and the class / method
+# must not be defined or reassigned in this file (another file of the package is checked
+# by the tree pass, ``npm_scripts.restore_signing_relaxed``).
+_SIGN_LIBS_PY = r"(?:solders|solana|nacl|ed25519|eth_account|ethers)"
+_SIGN_LIBS_JS = (r"(?:@solana/web3\.js|tweetnacl|ed25519|@noble/ed25519"
+                 r"|@noble/curves[\w/.-]*|ethers)")
+_PY_FROM_IMPORT_RE = re.compile(
+    r"^[ \t]*from[ \t]+" + _SIGN_LIBS_PY + r"(?:\.[\w.]+)?[ \t]+import[ \t]+\(?([^)\n#]+)",
+    re.M)
+_PY_IMPORT_RE = re.compile(
+    r"^[ \t]*import[ \t]+(" + _SIGN_LIBS_PY + r"(?:\.[\w.]+)?)(?:[ \t]+as[ \t]+(\w+))?", re.M)
+_JS_IMPORT_RE = re.compile(
+    r"(?:\b(?:const|let|var)\s+(\{[^}]*\}|[\w$]+)\s*=\s*require\s*\(\s*['\"]"
+    + _SIGN_LIBS_JS + r"['\"]\s*\)"
+    r"|\bimport\s+(?:\*\s+as\s+([\w$]+)|(\{[^}]*\})|([\w$]+)(?:\s*,\s*(\{[^}]*\}))?)\s+from\s+"
+    r"['\"]" + _SIGN_LIBS_JS + r"['\"])")
+
+
+def _sign_lib_names(src: str, python: bool) -> set[str]:
+    """Local names bound to a known signing library or one of its exports."""
+    out: set[str] = set()
+    if python:
+        for m in _PY_FROM_IMPORT_RE.finditer(src):
+            for part in m.group(1).split(","):
+                bits = part.split()
+                if bits:
+                    out.add(bits[-1] if len(bits) == 3 and bits[1] == "as" else bits[0])
+        for m in _PY_IMPORT_RE.finditer(src):
+            out.add(m.group(2) or m.group(1).split(".")[0])
+        return {n for n in out if re.fullmatch(r"\w+", n)}
+    for m in _JS_IMPORT_RE.finditer(src):
+        for g in m.groups():
+            if not g:
+                continue
+            for part in g.strip("{} ").split(","):
+                bits = part.replace(":", " as ").split()
+                if bits:
+                    out.add(bits[-1])
+    return {n for n in out if re.fullmatch(r"[\w$]+", n)}
+
+
+@functools.lru_cache(maxsize=1024)
+def _redefine_re(name: str) -> re.Pattern[str]:
+    """A definition or reassignment of ``name`` (class, function, method, attribute,
+    object-literal member, setattr / defineProperty)."""
+    n = re.escape(name)
+    return re.compile(
+        r"\bclass\s+" + n + r"\b|\bdef\s+" + n + r"\s*\(|\bfunction\s*\*?\s*" + n + r"\s*\("
+        r"|(?<![\w$.])" + n + r"\s*(?::[^=\n]{1,60})?=(?![=>])|\.\s*" + n + r"\s*=(?![=>])"
+        r"|^\s*(?:static\s+|async\s+)*" + n + r"\s*\([^)\n]*\)\s*\{"
+        r"|(?<![\w$.])['\"]?" + n + r"['\"]?\s*:\s*(?:async\s+)?(?:function\b|\(|[\w$]+\s*=>)"
+        r"|\bsetattr\s*\([^)]*['\"]" + n + r"['\"]|\bdefineProperty\s*\([^)]*['\"]" + n
+        + r"['\"]",
+        re.M)
+
+
+class _SignCtx:
+    """What a signing call's target resolves to in one file."""
+
+    def __init__(self, src: str, python: bool) -> None:
+        # The library imports themselves (`const nacl = require('tweetnacl')`) are not
+        # a redefinition.
+        self.src = src
+        for rx_imp in ((_PY_FROM_IMPORT_RE, _PY_IMPORT_RE) if python else (_JS_IMPORT_RE,)):
+            self.src = rx_imp.sub(lambda m: " " * len(m.group(0)), self.src)
+        self.libs = _sign_lib_names(src, python)
+        self._redef: dict[str, bool] = {}
+        self.relied: set[str] = set()
+        # Names assigned from a constructor / factory of a resolved library name
+        # (`tx = Transaction().add(ix)`, `const tx = new Transaction({...})`).
+        self.objs: set[str] = set()
+        rx = re.compile(r"^\s*(?:(?:const|let|var)\s+)?([\w$]+)\s*(?::[^=\n]{1,60})?=(?![=>])"
+                        r"\s*(?:await\s+)?(?:new\s+)?([\w$]+(?:\s*\.\s*[\w$]+)*)\s*\(", re.M)
+        bad: set[str] = set()
+        for m in rx.finditer(self.src):
+            chain = [c.strip() for c in m.group(2).split(".")]
+            if chain[0] in self.libs and not any(self.redefined(c) for c in chain):
+                self.objs.add(m.group(1))
+            else:
+                bad.add(m.group(1))
+        # Every assignment of the name must be such a constructor (`tx = evil` later
+        # makes `tx.sign(kp)` unresolved).
+        assign = re.compile(r"^\s*(?:(?:const|let|var)\s+)?([\w$]+)\s*(?::[^=\n]{1,60})?"
+                            r"=(?![=>])", re.M)
+        n_assign: dict[str, int] = {}
+        for m in assign.finditer(self.src):
+            n_assign[m.group(1)] = n_assign.get(m.group(1), 0) + 1
+        n_ctor: dict[str, int] = {}
+        for m in rx.finditer(self.src):
+            n_ctor[m.group(1)] = n_ctor.get(m.group(1), 0) + 1
+        self.objs = {o for o in self.objs - bad if n_assign.get(o) == n_ctor.get(o)}
+
+    def redefined(self, name: str) -> bool:
+        if name not in self._redef:
+            self._redef[name] = _redefine_re(name).search(self.src) is not None
+        return self._redef[name]
+
+    def resolves(self, code: str, sm: re.Match[str]) -> list[str] | None:
+        """The library names a signing call at ``sm`` relies on, or None when its
+        target is unresolved or defined / reassigned in this file."""
+        receiver = sm.group(0).lstrip().startswith(".")
+        # `a.b.Transaction(` (chain ends in a dot) / `a.b.sign(` (chain ends in a name).
+        head = re.search(r"((?:[\w$]+\s*\.\s*)*[\w$]+)\s*$" if receiver
+                         else r"((?:[\w$]+\s*\.\s*)*)$", code[:sm.start()])
+        call = re.sub(r"\s+", "", sm.group(0)).rstrip("(").lstrip(".")
+        chain = [c for c in re.sub(r"\s+", "", head.group(1) if head else "").split(".") if c]
+        if receiver:
+            # `<receiver>.sign(` : the receiver is a resolved library object / name.
+            if not chain or (chain[0] not in self.libs and chain[0] not in self.objs):
+                return None
+            # A library object's own name was checked where it was built.
+            parts = (chain[1:] if chain[0] in self.objs else chain) + [call]
+        else:
+            parts = chain + [c for c in call.split(".") if c]
+            if parts[0] not in self.libs:
+                return None
+        if any(self.redefined(p) for p in parts):
+            return None
+        return parts
+
+
+def _mask_signing(code: str, keys: set[str], ctx: _SignCtx | None = None,
+                  allow_args: bool = True) -> str:
     """``code`` with the harmless uses of key objects ``keys`` blanked (same length):
-    a public-key accessor (``payer.pubkey()``), and the key passed BARE to a known
-    signing call or as its receiver (``Transaction([payer], [ix], bh)``,
-    ``signer.sign(msg)``). A serializing use stays (``bytes(payer)``,
-    ``payer.secret()``, ``kp.secretKey``, ``to_bytes()``, ``to_base58_string()``,
-    ``to_json()``, a mnemonic / seed): such a value sent anywhere is the key."""
+
+    * a public-key accessor (``payer.pubkey()``);
+    * the key as the RECEIVER of a known signing method (``kp.sign(msg)``,
+      ``keypair.sign_message(m)``);
+    * the key passed BARE as an argument of a signing call whose target resolves to a
+      known library import (``ctx``: solders / solana / @solana/web3.js / tweetnacl /
+      ed25519 / ethers / eth_account) and is not defined or reassigned in the file
+      (``Transaction([payer], [ix], bh)`` from ``solders.transaction``). A package-
+      defined ``class Transaction`` or an ``uploader.sign(kp)`` keeps the key.
+
+    A serializing use stays (``bytes(payer)``, ``payer.secret()``, ``kp.secretKey``,
+    ``to_bytes()``, ``to_base58_string()``, ``to_json()``, a mnemonic / seed): such a
+    value sent anywhere is the key. The names an argument excuse relied on are added to
+    ``ctx.relied``; ``allow_args=False`` turns argument excuses off."""
     out = list(code)
 
     def blank(i: int, j: int) -> None:
@@ -625,22 +762,25 @@ def _mask_signing(code: str, keys: set[str]) -> str:
     for sm in _SIGN_CALL_RE.finditer(code):
         a = sm.end() - 1
         b = _arg_span(code, a)
-        lo = a
-        if code[sm.start():sm.start() + 1] == "." or code[sm.start()].isspace():
-            rm = re.search(r"([\w$]+)\s*$", code[:sm.start()])
+        if sm.group(0).lstrip().startswith("."):
+            rm = re.search(r"(?<![\w$.])([\w$]+)\s*$", code[:sm.start()])
             if rm and rm.group(1) in keys:
-                lo = rm.start(1)
+                blank(rm.start(1), rm.end(1))         # the receiver: `kp.sign(msg)`
+        parts = ctx.resolves(code, sm) if (ctx is not None and allow_args) else None
+        if parts is None:
+            continue                                  # unresolved: arguments stay keys
+        used = False
         for nm in keys:
-            for m in re.finditer(r"(?<![\w$.])" + re.escape(nm) + r"(?![\w$])", code[lo:b]):
-                i, j = lo + m.start(), lo + m.end()
-                if i < a and code[j:sm.end()].lstrip().startswith("."):
-                    blank(i, j)                       # the receiver: `kp.sign(msg)`
-                    continue
+            for m in re.finditer(r"(?<![\w$.])" + re.escape(nm) + r"(?![\w$])", code[a:b]):
+                i, j = a + m.start(), a + m.end()
                 if re.match(r"\s*[.\[]", code[j:b]):
                     continue                          # `kp.secret_key`, `kp[0:32]`
                 if _SERIALIZE_BEFORE_RE.search(code[max(0, i - 40):i]):
                     continue                          # `bytes(kp)` inside the call
                 blank(i, j)
+                used = True
+        if used and ctx is not None:
+            ctx.relied.update(parts)
     return "".join(out)
 
 
@@ -685,6 +825,11 @@ class _Analyzer:
                            for st in self.stmts]
         # The bare mapping as a send's argument: checked in the call, never carried.
         self.bare_env = [dump and bool(_BARE_ENV_ARG_RE.search(st.code)) for st in self.stmts]
+        # Signing calls: what their targets resolve to; argument excuses on / off.
+        self.sign_ctx = _SignCtx(src, python)
+        self.allow_sign_args = True
+        # Own-vendor key uses excused (``_excused``): (offset, vendor) for disclosure.
+        self.vendor_uses: list[tuple[int, str]] = []
 
     # -- per-statement facts ------------------------------------------------
     def _lit_kind(self, st: _Stmt, a: int = -1, b: int = -1) -> str | None:
@@ -805,7 +950,8 @@ class _Analyzer:
             # A signed payload is not the key (2026-10-26): a key object passed bare to
             # a known signing call, or read only for its public key, carries nothing.
             vis_k = set(visible(keyobjs, st.scope)) & set(vis_t)
-            code = _mask_signing(st.code, vis_k) if vis_k else st.code
+            code = (_mask_signing(st.code, vis_k, self.sign_ctx, self.allow_sign_args)
+                    if vis_k else st.code)
             vis_p = visible(pathvars, st.scope)
             lit_kind = self.lit_kinds[idx]
             path_kind = lit_kind or next(
@@ -827,6 +973,18 @@ class _Analyzer:
                     bool(path_kind == "env" and has_read))
                 if keys:
                     carried = _ENV_KEY + ",".join(sorted(keys))
+
+            # `tx.sign(kp)` with a signer that did not resolve to a library (the key
+            # was not masked above): the receiver now holds what it was given.
+            for sm in _SIGN_CALL_RE.finditer(code):
+                if not sm.group(0).lstrip().startswith("."):
+                    continue
+                rm = re.search(r"(?<![\w$.])([\w$]+)\s*$", code[:sm.start()])
+                a0 = sm.end() - 1
+                arg_kinds = [k for nm, k in vis_t.items()
+                             if _ref_re(nm).search(code[a0:_arg_span(code, a0)])]
+                if rm and arg_kinds:
+                    taint[rm.group(1)] = (_pick(arg_kinds), st.scope)
 
             targets = self._targets(code)
             if carried:
@@ -949,16 +1107,21 @@ class _Analyzer:
         abs_a, abs_b = st.start + a, st.start + b
         if sink is not None:
             # A call into a function that sends its parameter.
-            if any(not self._excused(kind, hosts, auth)
-                   for hosts, auth in self._sink_hits(sink, st, a, b, code, vis_t, kind)):
+            reached = self._sink_hits(sink, st, a, b, code, vis_t, kind)
+            if any(not self._excused(kind, hosts, auth) for hosts, auth in reached):
                 hits.append(_Hit(abs_a, kind))
+            else:
+                for hosts, auth in reached:
+                    if hosts:
+                        self._excused(kind, hosts, auth, abs_a)   # disclosure note
+                        break
             return
         hosts = self._hosts(st, abs_a, abs_b)
         # A read inside the call itself sends the file's contents, never one key. An
         # extracted key may ride a request header of any name (X-API-KEY) to its vendor.
         auth = self._auth_only(abs_a, abs_b, refs, loose=kind.startswith(_ENV_KEY)) \
             and not self.read_re.search(span)
-        if not self._excused(kind, hosts, auth):
+        if not self._excused(kind, hosts, auth, abs_a):
             hits.append(_Hit(abs_a, kind))
 
     def _sink_hits(self, sink: str, st: _Stmt, a: int, b: int, code: str,
@@ -992,7 +1155,8 @@ class _Analyzer:
             return list(self.sinks[sink].hits)
         return [([*hs, *hosts_here], auth) for p in chosen for hs, auth in per[p]]
 
-    def _excused(self, kind: str, hosts: list[str], auth_only: bool) -> bool:
+    def _excused(self, kind: str, hosts: list[str], auth_only: bool,
+                 pos: int | None = None) -> bool:
         if kind == _ENV_DUMP:
             # The whole environment is never authentication; only a loopback
             # destination (a local daemon the tool talks to) is not a network sink.
@@ -1011,8 +1175,14 @@ class _Analyzer:
             if not kind.startswith(_ENV_KEY) or not auth_only:
                 return False
             keys = [k for k in kind[len(_ENV_KEY):].split(",") if k]
-            return bool(keys) and all(
+            ok = bool(keys) and all(
                 any(host_is_own_vendor(h, k) for k in keys) for h in hosts)
+            if ok and pos is not None:
+                # Disclosed, not silent: the caller adds a capability note.
+                k = next(k for k in keys if any(host_is_own_vendor(h, k) for h in hosts))
+                vendor = VENDOR_KEYS[k][0] if k in VENDOR_KEYS else registrable_domain(hosts[0])
+                self.vendor_uses.append((pos, vendor))
+            return ok
         return auth_only
 
     # -- one function hop ---------------------------------------------------
@@ -1084,12 +1254,21 @@ _HOME_HINT_RE = re.compile(r"expanduser|homedir|Path\.home|USERPROFILE|['\"]~['\
 _LIT_CONCAT_HINT_RE = re.compile(r"""['"`]\s*\+\s*['"`]""")
 
 
-def credential_exfil_hits(content: str, lang: str | None, *,
-                          lf=None) -> list[tuple[int, str]]:
+def credential_exfil_hits(content: str, lang: str | None, *, lf=None,
+                          relaxed: list | None = None,
+                          vendor_uses: list | None = None) -> list[tuple[int, str]]:
     """``(line_number, credential_kind)`` for each send that carries a credential file's
     contents in ``content`` (``lang``: python / javascript / typescript). ``lf``: the
     caller's ``prefilter.LineFilter`` over ``content``, for a faster pre-check (same
-    answer)."""
+    answer).
+
+    ``relaxed`` (optional out-list) receives ``(line, kind, names)`` for each send that
+    is clean only because a key went bare into a library signing call (``names``: the
+    library class / method names that excuse relied on). The caller reports those low
+    and the tree pass restores them when another file of the package defines or
+    reassigns one of ``names``. ``vendor_uses`` (optional out-list) receives ``(line,
+    vendor)`` for each extracted .env key excused as its own vendor's authentication,
+    for a disclosure note."""
     if lang not in ("python", "javascript", "typescript"):
         return []
     python = lang == "python"
@@ -1101,21 +1280,44 @@ def credential_exfil_hits(content: str, lang: str | None, *,
                 and _HOME_HINT_RE.search(content))
     if not hint:
         return []
-    an = _Analyzer(content, python)
-    if not any(an.lit_kinds):
-        return []                                  # no credential path in any statement
-    fns = an.functions()
-    # Two rounds, so a helper defined after the one that calls it still resolves.
-    an.summarize(fns)
-    an.summarize(fns)
-    hits, _ph, _r = an.run(list(range(len(an.stmts))))
-    out: list[tuple[int, str]] = []
-    seen: set[int] = set()
-    for h in hits:
-        line = content.count("\n", 0, h.pos) + 1
-        if line not in seen:
-            seen.add(line)
-            out.append((line, _base_kind(h.kind)))
+
+    def analyze(allow_args: bool) -> tuple[_Analyzer, list[tuple[int, str]]] | None:
+        an = _Analyzer(content, python)
+        an.allow_sign_args = allow_args
+        if not any(an.lit_kinds):
+            return None                            # no credential path in any statement
+        fns = an.functions()
+        # Two rounds, so a helper defined after the one that calls it still resolves.
+        an.summarize(fns)
+        an.summarize(fns)
+        hits, _ph, _r = an.run(list(range(len(an.stmts))))
+        out: list[tuple[int, str]] = []
+        seen: set[int] = set()
+        for h in hits:
+            line = content.count("\n", 0, h.pos) + 1
+            if line not in seen:
+                seen.add(line)
+                out.append((line, _base_kind(h.kind)))
+        return an, out
+
+    first = analyze(True)
+    if first is None:
+        return []
+    an, out = first
+    if vendor_uses is not None:
+        seen_v: set[int] = set()
+        for pos, vendor in an.vendor_uses:
+            line = content.count("\n", 0, pos) + 1
+            if line not in seen_v:
+                seen_v.add(line)
+                vendor_uses.append((line, vendor))
+    if relaxed is not None and an.sign_ctx.relied:
+        strict = analyze(False)
+        have = {ln for ln, _k in out}
+        names = sorted(an.sign_ctx.relied)
+        for line, kind in (strict[1] if strict else []):
+            if line not in have:
+                relaxed.append((line, kind, names))
     return out
 
 

