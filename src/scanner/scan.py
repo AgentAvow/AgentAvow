@@ -5262,7 +5262,7 @@ def _credential_exfil_findings(
         out.append(f_low)
     for vendor in sorted({v for _ln, v in vendor_uses}):
         out.append(Finding(
-            category="secret", name=f"Uses your {vendor} API key", severity="low",
+            category="exfiltration", name=f"Uses your {vendor} API key", severity="low",
             file_path=file_path, line_number=next(ln for ln, v in vendor_uses if v == vendor),
             snippet="",
             remediation=(
