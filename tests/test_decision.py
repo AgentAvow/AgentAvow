@@ -201,7 +201,7 @@ CASES = [
     ("supply_chain_malicious_list", _scan(60, 200, supply_chain={"malicious": ["MAL-9"]}),
      "do_not_connect", True, "a known-malicious dependency: MAL-9"),
     ("own_mal_advisory", _scan(90, 200, incident_history={"current_version_affected": True}),
-     "do_not_connect", True, "this version is listed as malicious (OpenSSF MAL advisory)"),
+     "do_not_connect", True, "this version is a known-malicious package (malware advisory)"),
     ("critical_beats_high", _scan(40, 200, [_f("critical", "Alpha"), _f("high", "Beta")],
                                   crit=1, high=1),
      "do_not_connect", True, "one critical finding in its code: alpha"),

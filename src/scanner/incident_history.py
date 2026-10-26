@@ -84,18 +84,48 @@ def _affected_entries(vuln: dict, eco: str | None = None, name: str | None = Non
     return out
 
 
+def _own_entries(vuln: dict, eco: str, name: str) -> list:
+    """The ``affected`` entries that name THIS package in THIS ecosystem, exactly. Unlike
+    ``_affected_entries`` an entry without a package name or ecosystem does not count:
+    a range is only ever applied to the package it was written for (#166)."""
+    want = _norm_pkg(eco, name)
+    out = []
+    for a in (vuln.get("affected") or []):
+        pkg = a.get("package") if isinstance(a, dict) else None
+        if not isinstance(pkg, dict):
+            continue
+        pname, peco = pkg.get("name"), pkg.get("ecosystem")
+        if not pname or not peco or str(peco).split(":", 1)[0].lower() != eco.lower():
+            continue
+        if _norm_pkg(eco, pname) == want:
+            out.append(a)
+    return out
+
+
 def _version_affected(vuln: dict, version: str | None, eco: str | None = None,
                       name: str | None = None) -> bool:
-    """Best-effort: is ``version`` explicitly listed among the advisory's affected
-    versions? Conservative — unknown ranges resolve to False (treat as historical, not a
-    live warning), so we never over-claim that the current version is compromised."""
-    if not version:
+    """Is ``version`` affected by this malware-class advisory (an incident)?
+
+    * listed among the advisory's affected ``versions``; or
+    * (2026-10-26) inside one of its ranges, evaluated for real, for the scanned
+      package's OWN entries only (exact name + ecosystem). ``introduced: 0`` with no
+      ``fixed`` / ``last_affected`` is every version (flatmap-stream's CWE-506 GHSA, a
+      package that was malware from the start). A range closed by a fix leaves a clean
+      later release clean (ua-parser-js 0.7.29 / 0.8.0 / 1.0.0 -> latest stays clean).
+
+    A withdrawn advisory affects nothing. An unparseable version or a range type other
+    than SEMVER / ECOSYSTEM resolves to False."""
+    if not version or vuln.get("withdrawn"):
         return False
     for aff in _affected_entries(vuln, eco, name):
         for v in (aff.get("versions") or []):
             if str(v) == str(version):
                 return True
-    return False
+    if not eco or not name:
+        return False
+    return any(_range_affects(r, eco, version)
+               for aff in _own_entries(vuln, eco, name)
+               for r in (aff.get("ranges") or []) if isinstance(r, dict))
 
 
 # --- The package's OWN published vulnerabilities (non-MAL advisories) --------------
@@ -212,9 +242,9 @@ def summarize_advisories(vulns: list[dict], eco: str, version: str | None,
     affected. Deduplicated by alias (GHSA and PYSEC records describe the same flaw).
 
     A malware-class (CWE-506) GHSA stays here even though incident history also lists
-    it: incident history is never scored and matches only explicitly listed versions,
-    while this list scores an affected version as a finding and reads ranges too
-    (flatmap-stream's ``introduced: 0``), so dropping it would lose that finding.
+    it: incident history is never scored (an affected version decides Do not connect
+    instead), while this list scores an affected version as a finding, so dropping it
+    would lose that finding.
 
     ``fixed_in`` is the release that fixes it; when the record has no fix event,
     ``last_affected`` is the newest release it names as affected, so a reader is told

@@ -34,7 +34,7 @@ import functools
 import re
 from dataclasses import dataclass, field
 
-from src.scanner.skill_key_flow import host_matches_key, is_local_host, strip_comments
+from src.scanner.skill_key_flow import host_is_own_vendor, is_local_host
 
 _NAME = r"([A-Z][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD))"
 # A named key pulled OUT of a .env (`line.startswith("OPENROUTER_API_KEY=")`,
@@ -524,6 +524,126 @@ def _arg_span(code: str, open_paren: int) -> int:
     return len(code)
 
 
+def _split_args(code: str, a: int, b: int) -> list[tuple[int, str]]:
+    """(offset, text) of each top-level argument of the call whose ``(`` is at ``a``
+    and whose span ends at ``b`` (string bodies are already blanked in ``code``)."""
+    out: list[tuple[int, str]] = []
+    depth, start = 0, a + 1
+    for i in range(a, max(a, b - 1)):
+        c = code[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "," and depth == 1:
+            out.append((start, code[start:i]))
+            start = i + 1
+    tail = code[start:max(start, b - 1)]
+    if tail.strip():
+        out.append((start, tail))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# A key pulled out of a .env, and a signed payload (precision 2026-10-26)
+# ---------------------------------------------------------------------------
+
+# Taint kind of one key pulled out of a .env BY NAME: ``"env_key:" + names``. It is
+# still a .env credential (reported as "env"), but the only kind the own-vendor
+# authentication excuse applies to.
+_ENV_KEY = "env_key:"
+_KEY_NAME_RE = re.compile(r"(?<![A-Za-z0-9_])" + _NAME + r"(?![A-Za-z0-9_])")
+_REGEX_OP_RE = re.compile(
+    r"\bre\s*\.\s*(?:search|match|fullmatch|findall)\s*\(|\.(?:match|exec|search)\s*\(")
+_CAPTURE_RE = re.compile(
+    r"\.group\s*\(\s*[1-9]|\.groups\s*\(\s*\)|\)\s*\??\.?\s*\[\s*[0-9]\s*\]")
+# A KEY=VALUE line split on "=" and an element after the name taken (``[1]``,
+# ``[-1]``, ``partition("=")[2]``) or unpacked (``k, v = line.split("=")``).
+_LINE_SPLIT_RE = re.compile(
+    r"""\.(?:r?split|r?partition)\s*\(\s*[rbuf]?['"`]=['"`](?:\s*,\s*[1-9]\d*)?\s*\)"""
+    r"""\s*\[\s*(?:-?[1-9]\d*)\s*\]"""
+    r"""|^\s*[\w$]+\s*,\s*[\w$]+\s*=\s*[\w$.]+\.(?:r?split|r?partition)\s*\(\s*"""
+    r"""[rbuf]?['"`]=['"`]""")
+
+
+def _base_kind(kind: str) -> str:
+    return "env" if kind.startswith(_ENV_KEY) else kind
+
+
+def _pick(kinds: list[str]) -> str | None:
+    """The strictest of several kinds a statement or call carries: a credential's
+    contents over one extracted key over a helper's parameter."""
+    def rank(k: str) -> int:
+        return 2 if k == "param" else 1 if k.startswith(_ENV_KEY) else 0
+    return min(kinds, key=rank) if kinds else None
+
+
+# A signing key OBJECT built from key material: what a known signing call takes.
+_KEYOBJ_CTOR_RE = re.compile(
+    r"^\s*(?:(?:const|let|var)\s+)?[\w$.]+\s*(?::[^=\n]{1,60})?=\s*(?:await\s+)?(?:new\s+)?"
+    r"(?:[\w$]+\.)*(?:Keypair\s*\.\s*(?:from_bytes|from_seed|from_base58_string|from_json"
+    r"|from_secret_key|fromSecretKey|fromSeed)|Keypair|SigningKey(?:\s*\.\s*from_\w+)?"
+    r"|keyPair\s*\.\s*fromSe(?:cretKey|ed)|Ed25519PrivateKey\s*\.\s*from_private_bytes"
+    r"|[Aa]ccount\s*\.\s*from_key|Wallet(?:\s*\.\s*from(?:Mnemonic|Phrase))?)\s*\(")
+# Known signing calls: the value they return is a signature / signed transaction,
+# not the key (solders / solana-py, PyNaCl / tweetnacl, ed25519, ethers, web3).
+_SIGN_CALL_RE = re.compile(
+    r"(?<![\w$])(?:Versioned)?Transaction\s*\(|\bTransaction\s*\.\s*new_signed_with_payer\s*\("
+    r"|\bnacl\s*\.\s*sign(?:\s*\.\s*detached)?\s*\(|\bed25519\s*\.\s*sign\s*\("
+    r"|\.\s*(?:sign|partial_sign|partialSign|sign_message|signMessage|sign_transaction"
+    r"|signTransaction|sign_all_transactions|signAllTransactions)\s*\(")
+# Public-key accessors of a key object: reading one carries nothing secret.
+_PUBLIC_ACCESSOR = (r"\s*\.\s*(?:pubkey|public_key|publicKey|verify_key|verifyKey|address"
+                    r"|get_address|getAddress)\b")
+# A serializing wrapper right before a bare name: ``bytes(kp)`` is the key bytes.
+_SERIALIZE_BEFORE_RE = re.compile(
+    r"(?:\bbytes|\bbytearray|\bstr|\brepr|\blist|\bdumps|\bstringify|\bb58encode|\bb64encode"
+    r"|\bencode|\bfrom|\bString|\bArray|\bhex)\s*\(\s*$")
+
+
+def _is_keyobj_ctor(code: str) -> bool:
+    return _KEYOBJ_CTOR_RE.match(code) is not None
+
+
+def _mask_signing(code: str, keys: set[str]) -> str:
+    """``code`` with the harmless uses of key objects ``keys`` blanked (same length):
+    a public-key accessor (``payer.pubkey()``), and the key passed BARE to a known
+    signing call or as its receiver (``Transaction([payer], [ix], bh)``,
+    ``signer.sign(msg)``). A serializing use stays (``bytes(payer)``,
+    ``payer.secret()``, ``kp.secretKey``, ``to_bytes()``, ``to_base58_string()``,
+    ``to_json()``, a mnemonic / seed): such a value sent anywhere is the key."""
+    out = list(code)
+
+    def blank(i: int, j: int) -> None:
+        for k in range(i, j):
+            out[k] = " "
+
+    for nm in keys:
+        for m in re.finditer(r"(?<![\w$.])" + re.escape(nm) + r"(?=" + _PUBLIC_ACCESSOR + ")",
+                             code):
+            blank(m.start(), m.end())
+    for sm in _SIGN_CALL_RE.finditer(code):
+        a = sm.end() - 1
+        b = _arg_span(code, a)
+        lo = a
+        if code[sm.start():sm.start() + 1] == "." or code[sm.start()].isspace():
+            rm = re.search(r"([\w$]+)\s*$", code[:sm.start()])
+            if rm and rm.group(1) in keys:
+                lo = rm.start(1)
+        for nm in keys:
+            for m in re.finditer(r"(?<![\w$.])" + re.escape(nm) + r"(?![\w$])", code[lo:b]):
+                i, j = lo + m.start(), lo + m.end()
+                if i < a and code[j:sm.end()].lstrip().startswith("."):
+                    blank(i, j)                       # the receiver: `kp.sign(msg)`
+                    continue
+                if re.match(r"\s*[.\[]", code[j:b]):
+                    continue                          # `kp.secret_key`, `kp[0:32]`
+                if _SERIALIZE_BEFORE_RE.search(code[max(0, i - 40):i]):
+                    continue                          # `bytes(kp)` inside the call
+                blank(i, j)
+    return "".join(out)
+
+
 # A helper worth summarizing for the one-function hop is small.
 _MAX_HELPER_STATEMENTS = 200
 
@@ -554,6 +674,7 @@ class _Analyzer:
         if not python and _JS_NET_MODULE_RE.search(src):
             self.send_res.append(_JS_STREAM_SEND_RE)
         self.sinks: dict[str, _Sink] = {}
+        self.sink_params: dict[str, tuple[list[str], dict[str, list[tuple[list[str], bool]]]]] = {}
         self.sources: dict[str, str] = {}
         # Function headers: index -> offset (in the statement) where the header ends,
         # so a method NAMED `fetch` / `post` is not read as a call of one.
@@ -564,8 +685,6 @@ class _Analyzer:
                            for st in self.stmts]
         # The bare mapping as a send's argument: checked in the call, never carried.
         self.bare_env = [dump and bool(_BARE_ENV_ARG_RE.search(st.code)) for st in self.stmts]
-        code = strip_comments(src, "x.py" if python else "x.js")
-        self.file_keys = {n for m in _EXTRACT_RE.finditer(code) for n in m.groups() if n}
 
     # -- per-statement facts ------------------------------------------------
     def _lit_kind(self, st: _Stmt, a: int = -1, b: int = -1) -> str | None:
@@ -591,16 +710,75 @@ class _Analyzer:
                     out.append(m.group(1))
         return out
 
-    def _auth_only(self, a: int, b: int, refs: list[int]) -> bool:
+    def _auth_only(self, a: int, b: int, refs: list[int], loose: bool = False) -> bool:
         """Every use of the value at [refs] sits under an auth / headers key."""
         if not refs:
             return False
         for r in refs:
             before = self.src[a:r]
             keys = re.findall(r"""['"]?([\w-]+)['"]?\s*(?:=(?!=)|:)""", before)
-            if not keys or keys[-1].lower() not in _AUTH_KEYS:
-                return False
+            if keys and keys[-1].lower() in _AUTH_KEYS:
+                continue
+            if loose and self._in_headers(before):
+                continue
+            return False
         return True
+
+    @staticmethod
+    def _in_headers(before: str) -> bool:
+        """The text up to a value ends inside a ``headers`` object literal still open
+        there (``headers={"X-API-KEY": <value>``): a request header of any name."""
+        m = None
+        for m in re.finditer(r"""['"]?\bheaders['"]?\s*(?:=(?!=)|:)\s*\{""", before, re.I):
+            pass
+        if m is None:
+            return False
+        tail = before[m.end():]
+        return tail.count("{") - tail.count("}") >= 0 and not re.search(r"[)\]]", re.sub(
+            r"\([^()]*\)|\[[^\[\]]*\]", "", tail))
+
+    # -- a key pulled out of a .env by name (#195, 2026-10-26) --------------
+    def _key_extraction(self, st: _Stmt, code: str, env_refs: list[str],
+                        line_vars: set[str], value_read: bool) -> set[str]:
+        """The key NAMES this statement pulls out of a .env's contents, or an empty set
+        when it carries the contents (or a part of them that is not one named key).
+
+        * ``values["X_KEY"]`` / ``values.get("X_KEY")``;
+        * a regex capture for the name (``re.search(r"X_KEY=(.*)", env).group(1)``,
+          ``env.match(/X_KEY=(.*)/)[1]``) in the one statement;
+        * a LINE of the file (``for line in f``) split on ``=`` (``line.split("=",
+          1)[1]``, ``k, v = line.split("=")``) under a guard that names the key
+          (``if line.startswith("X_KEY=")`` / ``if "X_KEY" in line``) on this or the
+          three lines above.
+
+        The statement must touch exactly one tainted name (or read the file inline), so
+        ``m.group(1) + whole_env`` is not an extraction."""
+        raw = self.src[st.start:st.end]
+        n_refs = sum(len(_ref_re(nm).findall(code)) for nm in env_refs)
+        if not (n_refs == 1 or (n_refs == 0 and value_read)):
+            return set()
+        # Key names inside strings / regexes of the statement (blanked in ``code``).
+        names = {m.group(1) for m in _KEY_NAME_RE.finditer(raw)
+                 if not code[m.start():m.end()].strip()}
+        if names:
+            alt = "|".join(re.escape(n) for n in names)
+            if re.search(r"""\[\s*['"](?:""" + alt + r""")['"]\s*\]"""
+                         r"""|\.get\s*\(\s*['"](?:""" + alt + r""")['"]""", raw):
+                return names
+            if _REGEX_OP_RE.search(code) and _CAPTURE_RE.search(code):
+                return names
+        line_ref = [nm for nm in env_refs if nm in line_vars and _ref_re(nm).search(code)]
+        if len(line_ref) != 1 or not _LINE_SPLIT_RE.search(raw):
+            return set()
+        lv = re.escape(line_ref[0])
+        before = self.src[:st.start].splitlines()[-3:]
+        guarded: set[str] = set()
+        for ln in [*before, raw]:
+            if re.search(r"(?<![\w$.])" + lv + r"(?![\w$])", ln) and re.search(
+                    r"\bif\b|startswith|startsWith|includes|\bin\b", ln):
+                guarded |= {m.group(1) for m in _KEY_NAME_RE.finditer(ln)
+                            if ln[max(0, m.start() - 1):m.start()] in ("'", '"', "`", "^")}
+        return guarded
 
     # -- the flow -----------------------------------------------------------
     def run(self, idxs: list[int], init: dict[str, tuple[str, tuple[int, ...]]] | None = None,
@@ -609,6 +787,10 @@ class _Analyzer:
         a 'param' kind as (hosts, auth_only), the kind a ``return`` carries)."""
         taint: dict[str, tuple[str, tuple[int, ...]]] = dict(init or {})
         pathvars: dict[str, tuple[str, tuple[int, ...]]] = {}
+        # Names bound to a signing key OBJECT built from a credential (``Keypair.
+        # from_bytes(...)``), and names bound to one line of a .env's contents.
+        keyobjs: dict[str, tuple[str, tuple[int, ...]]] = {}
+        line_vars: dict[str, tuple[str, tuple[int, ...]]] = {}
         hits: list[_Hit] = []
         param_hits: list[tuple[list[str], bool]] = []
         returns: str | None = None
@@ -619,8 +801,11 @@ class _Analyzer:
 
         for idx in idxs:
             st = self.stmts[idx]
-            code = st.code
             vis_t = visible(taint, st.scope)
+            # A signed payload is not the key (2026-10-26): a key object passed bare to
+            # a known signing call, or read only for its public key, carries nothing.
+            vis_k = set(visible(keyobjs, st.scope)) & set(vis_t)
+            code = _mask_signing(st.code, vis_k) if vis_k else st.code
             vis_p = visible(pathvars, st.scope)
             lit_kind = self.lit_kinds[idx]
             path_kind = lit_kind or next(
@@ -631,16 +816,28 @@ class _Analyzer:
             # A value handed to a child process (`spawn(cmd, {env: {...process.env}})`,
             # `subprocess.run(cmd, env=env)`) is not carried by what the call returns.
             ref_code = _blank_child_calls(code, self.python) if self.dump else code
-            ref_kind = next((k for nm, k in vis_t.items() if _ref_re(nm).search(ref_code)),
-                            None)
+            ref_kind = _pick([k for nm, k in vis_t.items() if _ref_re(nm).search(ref_code)])
             value_kind = ((path_kind if (path_kind and has_read) else None) or src_kind
                           or self.dump_kinds[idx])
-            carried = value_kind or ref_kind
+            carried = _pick([k for k in (value_kind, ref_kind) if k])
+            if carried == "env":
+                env_refs = [nm for nm, k in vis_t.items() if k == "env"]
+                keys = self._key_extraction(
+                    st, code, env_refs, set(visible(line_vars, st.scope)),
+                    bool(path_kind == "env" and has_read))
+                if keys:
+                    carried = _ENV_KEY + ",".join(sorted(keys))
 
             targets = self._targets(code)
             if carried:
                 for nm in targets:
                     taint[nm] = (carried, st.scope)
+                if _is_keyobj_ctor(code):
+                    for nm in targets:
+                        keyobjs[nm] = (carried, st.scope)
+                else:
+                    for nm in targets:
+                        keyobjs.pop(nm, None)
                 for m in _AS_RE.finditer(code):
                     taint[m.group(1)] = (carried, st.scope)
                 if value_kind and not self.python:
@@ -662,6 +859,8 @@ class _Analyzer:
                     pathvars[m.group(1)] = (vis_p[it], st.scope)
                 elif it in vis_t:
                     taint[m.group(1)] = (vis_t[it], st.scope)
+                    if vis_t[it] == "env":
+                        line_vars[m.group(1)] = ("env", st.scope)
                 elif path_kind and not value_kind:
                     # `for p in glob.glob(expanduser('~/.ssh/*')):`
                     pathvars[m.group(1)] = (path_kind, st.scope)
@@ -680,12 +879,13 @@ class _Analyzer:
                         continue                   # an HTTP response to the caller
                     a = m.end() - 1
                     b = _arg_span(code, a)
-                    self._check_call(st, a, b, vis_t, vis_p, hits, param_hits)
+                    self._check_call(st, a, b, vis_t, vis_p, hits, param_hits, code=code)
             for nm, _sink in self.sinks.items():
                 for m in _call_re(nm).finditer(code, skip_to):
                     a = m.end() - 1
                     b = _arg_span(code, a)
-                    self._check_call(st, a, b, vis_t, vis_p, hits, param_hits, sink=nm)
+                    self._check_call(st, a, b, vis_t, vis_p, hits, param_hits, sink=nm,
+                                     code=code)
         return hits, param_hits, returns
 
     def _targets(self, code: str) -> list[str]:
@@ -706,10 +906,15 @@ class _Analyzer:
 
     def _check_call(self, st: _Stmt, a: int, b: int, vis_t: dict[str, str],
                     vis_p: dict[str, str], hits: list[_Hit],
-                    param_hits: list[tuple[list[str], bool]], sink: str | None = None) -> None:
-        span = st.code[a:b]
+                    param_hits: list[tuple[list[str], bool]], sink: str | None = None,
+                    code: str | None = None) -> None:
+        code = st.code if code is None else code
+        span = code[a:b]
         kind: str | None = None
-        refs: list[int] = []
+        # Every tainted reference in the call, by kind: the strictest kind decides, and
+        # "only as authentication" must hold for all of them (a key in the headers
+        # does not excuse a file's contents in the body).
+        refs_by_kind: dict[str, list[int]] = {}
         # An inline read of a credential path inside the call's arguments.
         if self.read_re.search(span):
             kind = self._lit_kind(st, st.start + a, st.start + b) or next(
@@ -726,29 +931,66 @@ class _Analyzer:
             for nm, k in vis_t.items():
                 found = [st.start + a + mm.start() for mm in _ref_re(nm).finditer(span)]
                 if found:
-                    kind = kind or k
-                    if k == kind:
-                        refs.extend(found)
+                    refs_by_kind.setdefault(k, []).extend(found)
+            if "param" in refs_by_kind:
+                # Inside a helper being summarized: its parameter reaches this send.
+                prefs = refs_by_kind.pop("param")
+                abs_a, abs_b = st.start + a, st.start + b
+                if sink is not None:
+                    param_hits.extend(self.sinks[sink].hits)
+                else:
+                    param_hits.append((self._hosts(st, abs_a, abs_b),
+                                       self._auth_only(abs_a, abs_b, prefs)
+                                       and not self.read_re.search(span)))
+            kind = _pick(list(refs_by_kind))
         if not kind:
             return
+        refs = [r for rs in refs_by_kind.values() for r in rs]
         abs_a, abs_b = st.start + a, st.start + b
         if sink is not None:
             # A call into a function that sends its parameter.
-            sk = self.sinks[sink]
-            if kind == "param":
-                param_hits.extend(sk.hits)
-                return
-            if any(not self._excused(kind, hosts, auth) for hosts, auth in sk.hits):
+            if any(not self._excused(kind, hosts, auth)
+                   for hosts, auth in self._sink_hits(sink, st, a, b, code, vis_t, kind)):
                 hits.append(_Hit(abs_a, kind))
             return
         hosts = self._hosts(st, abs_a, abs_b)
-        # A read inside the call itself sends the file's contents, never one key.
-        auth = self._auth_only(abs_a, abs_b, refs) and not self.read_re.search(span)
-        if kind == "param":
-            param_hits.append((hosts, auth))
-            return
+        # A read inside the call itself sends the file's contents, never one key. An
+        # extracted key may ride a request header of any name (X-API-KEY) to its vendor.
+        auth = self._auth_only(abs_a, abs_b, refs, loose=kind.startswith(_ENV_KEY)) \
+            and not self.read_re.search(span)
         if not self._excused(kind, hosts, auth):
             hits.append(_Hit(abs_a, kind))
+
+    def _sink_hits(self, sink: str, st: _Stmt, a: int, b: int, code: str,
+                   vis_t: dict[str, str], kind: str) -> list[tuple[list[str], bool]]:
+        """(hosts, auth_only) of the sends a call into helper ``sink`` reaches with the
+        tainted value. Per parameter when every tainted argument maps to one (positional
+        or ``name=``): only that parameter's sends count, with the call's own URL
+        literals added to their hosts (``post(body, "https://api.vendor.com/x",
+        headers={...})``). Otherwise every send the helper makes, as before."""
+        params, per = self.sink_params.get(sink, ([], {}))
+        hosts_here = self._hosts(st, st.start + a, st.start + b)
+        names = [nm for nm, k in vis_t.items() if k != "param"]
+        chosen: list[str] = []
+        pos = 0
+        for off, arg in _split_args(code, a, b):
+            kw = re.match(r"\s*([A-Za-z_]\w*)\s*=(?!=)", arg) if self.python else None
+            carries = (any(_ref_re(nm).search(arg) for nm in names)
+                       or any(_call_re(s).search(arg) for s in self.sources)
+                       or bool(self.read_re.search(arg)))
+            if kw:
+                p = kw.group(1)
+            else:
+                p = params[pos] if pos < len(params) else None
+                pos += 1
+            if not carries:
+                continue
+            if p is None or p not in per or arg.lstrip().startswith("*"):
+                return list(self.sinks[sink].hits)
+            chosen.append(p)
+        if not chosen:
+            return list(self.sinks[sink].hits)
+        return [([*hs, *hosts_here], auth) for p in chosen for hs, auth in per[p]]
 
     def _excused(self, kind: str, hosts: list[str], auth_only: bool) -> bool:
         if kind == _ENV_DUMP:
@@ -756,14 +998,21 @@ class _Analyzer:
             # destination (a local daemon the tool talks to) is not a network sink.
             return bool(hosts) and all(is_local_host(h) for h in hosts)
         if hosts:
-            if all(_official(kind, h) for h in hosts):
+            if all(_official(_base_kind(kind), h) for h in hosts):
                 return True
             # A key pulled out of a .env BY NAME and used as the Authorization of a
-            # request to the vendor that key is named for (OPENROUTER_API_KEY ->
-            # openrouter.ai) is the tool authenticating (DNC sample 2026-10-19). The
-            # whole contents (not auth-only) or an unrelated name keep the finding.
-            return kind == "env" and auth_only and all(
-                any(host_matches_key(h, k) for k in self.file_keys) for h in hosts)
+            # request to that key's own vendor (OPENROUTER_API_KEY -> openrouter.ai,
+            # VJ_API_KEY -> video-jungle.com) is the tool authenticating (DNC sample
+            # 2026-10-19; precision 2026-10-26). Only an extracted key counts
+            # (``_key_extraction``), matched to the vendor of a key it was extracted
+            # BY NAME on the reviewed vendor list or by the own-name rule
+            # (``host_is_own_vendor``), never by subdomain or homepage. The whole
+            # contents, a line of it, or an unrelated name keep the finding.
+            if not kind.startswith(_ENV_KEY) or not auth_only:
+                return False
+            keys = [k for k in kind[len(_ENV_KEY):].split(",") if k]
+            return bool(keys) and all(
+                any(host_is_own_vendor(h, k) for k in keys) for h in hosts)
         return auth_only
 
     # -- one function hop ---------------------------------------------------
@@ -805,6 +1054,13 @@ class _Analyzer:
                 _h, ph, _r = self.run(idxs, {p: ("param", st.scope) for p in params})
                 if ph:
                     self.sinks[name] = _Sink(ph)
+                    # Which parameter reaches which send (``_sink_hits``). Without the
+                    # helper itself as a sink: `requests.post(` inside `def post(...)`
+                    # is not a call of the helper.
+                    own = self.sinks.pop(name)
+                    self.sink_params[name] = (params, {
+                        p: self.run(idxs, {p: ("param", st.scope)})[1] for p in params})
+                    self.sinks[name] = own
             if name not in self.sources and (
                     any(self.lit_kinds[j] or self.dump_kinds[j] for j in idxs)
                     or any(_call_re(s).search(self.stmts[j].code)
@@ -859,7 +1115,7 @@ def credential_exfil_hits(content: str, lang: str | None, *,
         line = content.count("\n", 0, h.pos) + 1
         if line not in seen:
             seen.add(line)
-            out.append((line, h.kind))
+            out.append((line, _base_kind(h.kind)))
     return out
 
 

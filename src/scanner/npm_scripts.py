@@ -841,6 +841,43 @@ def mark_allowlist(finding: object, severity: str, keys: set[str]) -> None:
     finding.remediation = ALLOWLIST_WHY  # type: ignore[attr-defined]
 
 
+SIGNATURE_WHY = (
+    "A request-bin / tunnel host listed as an element of a regex / pattern array that "
+    "the file only matches against (a guard's signature list); nothing in the file "
+    "sends to it or builds a request from it.")
+
+
+def mark_signature(finding: object, severity: str, arrays: set[str]) -> None:
+    """A webhook/tunnel-host match that is an element of a pattern array no sink reads
+    (``signature_lists.signature_array_entry``), reported low until the rest of the
+    tree is checked (``restore_signature_hosts``)."""
+    finding._signature_restore = (severity, frozenset(arrays))  # type: ignore[attr-defined]
+    finding.remediation = SIGNATURE_WHY  # type: ignore[attr-defined]
+
+
+def restore_signature_hosts(findings: list, texts: dict[str, str]) -> None:
+    """Another code file of the tree that names the array, or loads this file into its
+    own process (``source`` / ``.`` / import / require / from naming it), may send the
+    array's hosts: restore the finding's severity. Running the script as a command
+    cannot read its arrays. A file not in ``texts`` restores too."""
+    marked = [f for f in findings if getattr(f, "_signature_restore", None)
+              and f.severity == "low" and f.remediation == SIGNATURE_WHY]
+    for f in marked:
+        sev, arrays = f._signature_restore
+        stem = re.escape(f.file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0])
+        alt = "|".join(re.escape(a) for a in sorted(arrays))
+        rx = re.compile(
+            r"(?<![\w$])(?:" + alt + r")(?![\w$])|"
+            r"(?:^|[;&|]\s*|\bthen\s+|\bdo\s+)(?:source|\.)\s+[^\n;]*" + stem + r"|"
+            r"(?:\bimport\b|\brequire\s*\(|\bfrom\b|\bimportlib\b|\brunpy\b)[^\n]*"
+            r"(?<![\w$])" + stem + r"(?![\w$])", re.M)
+        if f.file_path not in texts or any(
+                p != f.file_path and t and _is_code_file(p) and rx.search(t)
+                for p, t in texts.items()):
+            f.severity, f.remediation = sev, ""
+            f._signature_restore = None
+
+
 def _restore_allowlist_hosts(findings: list, texts: dict[str, str]) -> None:
     """Another file of the tree that reads the allowlist (``settings.ALLOWED_HOSTS``,
     an import of the config) may send to it: restore the finding's severity."""
@@ -914,6 +951,7 @@ def restore_externally_invoked(findings: list, texts: dict[str, str], *,
     install trio; elsewhere (a repo / local tree) the git-dependency roots count too.
     Every caller of ``_scan_content`` that can see a package.json must call this."""
     _restore_allowlist_hosts(findings, texts)
+    restore_signature_hosts(findings, texts)
     _restore_datasets(findings, texts)
     _restore_dev_tooling(findings, texts,
                          REGISTRY_ROOTS if registry_artifact else CONSUMER_ROOTS)

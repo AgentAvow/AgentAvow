@@ -2,11 +2,13 @@
 
 Hand-built npm tarballs where the payload IS reachable or used, run through the
 production package path (npm_result_from_tarball -> apply_artifact_scan -> trust score
--> verdict.decide). Three sets, each written against a relaxing PR:
+-> verdict.decide). Four sets, each written against a relaxing PR:
 
 * ``cases_npm_scripts``  - maintainer-only package.json scripts (#181)
 * ``cases_printed_hint`` - printed install hints / console + stream replacement (#185, #186)
 * ``cases_trifecta``     - the lethal-trifecta outbound leg (#187, #199, #201)
+* ``cases_exfil_precision`` - own-vendor .env key, signed payload, signature arrays
+  (2026-10-26)
 
 Every case's label is pinned in ``expected.json``. A scanner change that moves one fails
 here; regenerate with ``python -I tests/adversarial/expected_labels.py --write`` in the
@@ -25,13 +27,17 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 EXPECTED = json.loads((HERE / "expected.json").read_text())
-SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta")
+SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
     # An exfil through a `.use(` handler on a non-HTTP event bus: the untrusted-input leg
     # only knows HTTP request objects.
     ("cases_trifecta", "socket_use_handler"): "review",
+    # Found while building the 2026-10-26 set, and older than it: a Python list of
+    # string elements reads as prose to the line engine, so its webhook hosts are never
+    # flagged, even when the list is handed to an imported sender.
+    ("cases_exfil_precision", "py_signature_list_to_imported_sender"): "do_not_connect",
 }
 
 _mods: dict[str, object] = {}

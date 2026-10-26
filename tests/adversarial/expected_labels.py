@@ -14,7 +14,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 EXPECTED = HERE / "expected.json"
-SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta")
+SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision")
 
 
 def load(name: str):

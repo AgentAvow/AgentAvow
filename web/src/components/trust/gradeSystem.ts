@@ -474,7 +474,7 @@ export function decide(input: unknown): Decision {
   if (canary) return done('do_not_connect', 'a planted credential left the sandbox')
   const inc = asObj(data.incident_history)
   if (inc.current_version_affected === true) {
-    return done('do_not_connect', 'this version is listed as malicious (OpenSSF MAL advisory)')
+    return done('do_not_connect', 'this version is a known-malicious package (malware advisory)')
   }
   const mal = items.find(isMaliciousItem)
   const scMal = asObj(data.supply_chain).malicious

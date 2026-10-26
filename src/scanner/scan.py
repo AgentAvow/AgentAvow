@@ -4034,6 +4034,20 @@ def _scan_content(
                         npm_scripts.mark_allowlist(f_low, severity, keys)
                         findings.append(f_low)
                         continue
+                    # A host inside a regex / pattern string ARRAY that never reaches
+                    # a sink is a signature (a guard's list of what to look for,
+                    # 2026-10-26); low until the tree check finds another file that
+                    # reads the array or loads this file.
+                    from src.scanner.signature_lists import signature_array_entry
+                    arrays = signature_array_entry(lines, idx, pattern, file_path)
+                    if arrays:
+                        f_low = Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120])
+                        npm_scripts.mark_signature(f_low, severity, arrays)
+                        findings.append(f_low)
+                        continue
                 # OAuth2 token exchange (client_secret/grant_type → token endpoint)
                 # is the required auth flow, not a leak. Relax ONLY the generic
                 # "POST with sensitive data" rule; the stronger critical exfil
