@@ -120,13 +120,112 @@ def test_event_stream_compromised_version_is_affected():
     assert r["incidents"][0]["current_version_affected"] is True
 
 
-def test_open_range_without_listed_version_is_not_claimed():
-    # flatmap-stream's entry is ``introduced: 0`` with no versions list. Incident history
-    # stays conservative (explicit versions only); the advisory path reads the range.
+def test_open_range_without_listed_version_is_every_version():
+    # flatmap-stream's entry is ``introduced: 0`` with no ``fixed`` / ``last_affected``
+    # and no versions list: every version is malware (2026-10-26: ranges are evaluated
+    # for real, the scanned package's own entry only).
     r = summarize_incidents([_EVENT_STREAM], version="0.1.1", eco="npm",
                             name="flatmap-stream")
     assert r["has_incident"] is True
+    assert r["current_version_affected"] is True
+    # npm's security placeholder that replaced it is covered by the same open range.
+    r = summarize_incidents([_EVENT_STREAM], version="0.0.1-security", eco="npm",
+                            name="flatmap-stream")
+    assert r["current_version_affected"] is True
+
+
+def test_range_closed_by_a_fix_leaves_a_later_version_clean():
+    # event-stream: introduced 3.3.6, fixed 4.0.0. A version below or above the range
+    # is history only.
+    for v in ("3.3.5", "4.0.0", "4.0.1"):
+        r = summarize_incidents([_EVENT_STREAM], version=v, eco="npm", name="event-stream")
+        assert r["current_version_affected"] is False, v
+
+
+# Trimmed from https://api.osv.dev/v1/vulns/GHSA-pjwm-rvh2-c87w: three bad releases, each
+# its own range closed by a fix, plus the explicit versions list.
+_UA_PARSER = {
+    "id": "GHSA-pjwm-rvh2-c87w", "aliases": ["CVE-2021-4229"],
+    "summary": "Embedded malware in ua-parser-js", "published": "2021-10-22T20:38:14Z",
+    "database_specific": {"cwe_ids": ["CWE-506", "CWE-829"], "severity": "CRITICAL"},
+    "affected": [{"package": {"name": "ua-parser-js", "ecosystem": "npm"},
+                  "ranges": [{"type": "ECOSYSTEM",
+                              "events": [{"introduced": "0.7.29"}, {"fixed": "0.7.30"}]},
+                             {"type": "ECOSYSTEM",
+                              "events": [{"introduced": "0.8.0"}, {"fixed": "0.8.1"}]},
+                             {"type": "ECOSYSTEM",
+                              "events": [{"introduced": "1.0.0"}, {"fixed": "1.0.1"}]}],
+                  "versions": ["0.7.29", "0.8.0", "1.0.0"]}],
+}
+
+
+def test_explicit_version_advisory_leaves_later_versions_safe():
+    for bad in ("0.7.29", "0.8.0", "1.0.0"):
+        assert summarize_incidents([_UA_PARSER], version=bad, eco="npm",
+                                   name="ua-parser-js")["current_version_affected"] is True
+    for good in ("0.7.28", "0.7.30", "0.8.1", "1.0.1", "1.0.39", "2.0.10"):
+        assert summarize_incidents([_UA_PARSER], version=good, eco="npm",
+                                   name="ua-parser-js")["current_version_affected"] is False
+
+
+def test_last_affected_closes_the_range():
+    mal = {"id": "MAL-2026-1", "affected": [
+        {"package": {"name": "pkg-x", "ecosystem": "PyPI"},
+         "ranges": [{"type": "ECOSYSTEM",
+                     "events": [{"introduced": "0"}, {"last_affected": "1.2.0"}]}]}]}
+    assert _version_affected(mal, "1.2.0", "PyPI", "pkg-x") is True
+    assert _version_affected(mal, "1.0", "PyPI", "pkg_x") is True   # PyPI name normalized
+    assert _version_affected(mal, "1.2.1", "PyPI", "pkg-x") is False
+
+
+def test_range_of_another_package_never_applies():
+    # The flatmap-stream entry's open range is not event-stream's (#166): the scanned
+    # package's own entries only.
+    assert _version_affected(_EVENT_STREAM, "5.0.0", "npm", "event-stream") is False
+    # Same name, another ecosystem: not ours.
+    other_eco = {"id": "MAL-2026-2", "affected": [
+        {"package": {"name": "left-pad", "ecosystem": "PyPI"},
+         "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]}]}
+    assert _version_affected(other_eco, "1.3.0", "npm", "left-pad") is False
+    # An entry without a package name or ecosystem never carries a range to us.
+    nameless = {"id": "MAL-2026-3", "affected": [
+        {"ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]}
+    assert _version_affected(nameless, "1.0.0", "npm", "anything") is False
+    # Without the coordinate, ranges are not read at all.
+    assert _version_affected(_EVENT_STREAM, "0.1.1") is False
+
+
+def test_withdrawn_or_unparseable_is_not_affected():
+    withdrawn = {**_EVENT_STREAM, "withdrawn": "2019-01-01T00:00:00Z"}
+    assert _version_affected(withdrawn, "0.1.1", "npm", "flatmap-stream") is False
+    assert _version_affected(_EVENT_STREAM, "not-a-version", "npm", "flatmap-stream") is False
+    git_range = {"id": "MAL-2026-4", "affected": [
+        {"package": {"name": "g", "ecosystem": "npm"},
+         "ranges": [{"type": "GIT", "events": [{"introduced": "0"}]}]}]}
+    assert _version_affected(git_range, "1.0.0", "npm", "g") is False
+
+
+def test_non_malware_advisory_with_an_open_range_is_not_an_incident():
+    # A plain CVE GHSA (no CWE-506) never reaches incident history, open range or not.
+    cve = {"id": "GHSA-cccc-dddd-eeee", "database_specific": {"cwe_ids": ["CWE-79"]},
+           "affected": [{"package": {"name": "p", "ecosystem": "npm"},
+                         "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}]}]}]}
+    r = summarize_incidents([cve], version="1.0.0", eco="npm", name="p")
+    assert r["has_incident"] is False
     assert r["current_version_affected"] is False
+
+
+def test_decision_for_a_malware_range_reads_known_malicious():
+    from src.scanner.verdict import decide
+    hit = summarize_incidents([_EVENT_STREAM], version="0.1.1", eco="npm",
+                              name="flatmap-stream")
+    d = decide({"trust_score": 90, "findings": [], "incident_history": hit})
+    assert d.decision == "do_not_connect"
+    assert d.reason == "this version is a known-malicious package (malware advisory)"
+    latest = summarize_incidents([_UA_PARSER], version="2.0.10", eco="npm",
+                                 name="ua-parser-js")
+    assert decide({"trust_score": 90, "findings": [], "incident_history": latest,
+                   "metadata": {"files_scanned": 25}}).decision == "safe"
 
 
 def test_aliased_ghsa_and_mal_are_one_incident():

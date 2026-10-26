@@ -211,7 +211,9 @@ tier and Certified verdict above are unchanged by it; it adds no input to sectio
 Rule, first match wins:
 
 1. `do_not_connect` — a canary credential left the behavioral sandbox; the scanned version
-   is in an OpenSSF MAL advisory; a known-malicious dependency; a blocking critical defect
+   is named by a malware advisory for the package itself (an OpenSSF MAL record, or a
+   GitHub advisory for embedded malicious code, CWE-506; listed versions or a range); a
+   known-malicious dependency; a blocking critical defect
    (shipped, installed, `kind = defect`; a capability never counts); any other critical
    behavioral finding.
 2. `review` — a blocking high defect; a high behavioral finding; a published advisory

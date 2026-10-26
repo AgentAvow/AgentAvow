@@ -4034,6 +4034,20 @@ def _scan_content(
                         npm_scripts.mark_allowlist(f_low, severity, keys)
                         findings.append(f_low)
                         continue
+                    # A host inside a regex / pattern string ARRAY that never reaches
+                    # a sink is a signature (a guard's list of what to look for,
+                    # 2026-10-26); low until the tree check finds another file that
+                    # reads the array or loads this file.
+                    from src.scanner.signature_lists import signature_array_entry
+                    arrays = signature_array_entry(lines, idx, pattern, file_path)
+                    if arrays:
+                        f_low = Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120])
+                        npm_scripts.mark_signature(f_low, severity, arrays)
+                        findings.append(f_low)
+                        continue
                 # OAuth2 token exchange (client_secret/grant_type → token endpoint)
                 # is the required auth flow, not a leak. Relax ONLY the generic
                 # "POST with sensitive data" rule; the stronger critical exfil
@@ -5229,8 +5243,34 @@ def _credential_exfil_findings(
 
     if _is_allowlisted(file_path, _CREDENTIAL_EXFIL_NAME, allowlist):
         return []
+    from src.scanner import npm_scripts
     out = []
-    for line_no, kind in credential_exfil_hits(content, file_lang, lf=lf):
+    relaxed: list = []
+    vendor_uses: list = []
+    hits = credential_exfil_hits(content, file_lang, lf=lf, relaxed=relaxed,
+                                 vendor_uses=vendor_uses)
+    for line_no, kind, names in relaxed:
+        # Clean only because the key went bare into a library signing call: low
+        # until the tree pass checks that no other file of the package defines or
+        # reassigns the signer it resolved to (npm_scripts.restore_signing_relaxed).
+        f_low = Finding(
+            category="exfiltration", name=_CREDENTIAL_EXFIL_NAME, severity="low",
+            file_path=file_path, line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            payload=payload)
+        npm_scripts.mark_signing(f_low, "critical", set(names))
+        out.append(f_low)
+    for vendor in sorted({v for _ln, v in vendor_uses}):
+        out.append(Finding(
+            category="exfiltration", name=f"Uses your {vendor} API key", severity="low",
+            file_path=file_path, line_number=next(ln for ln, v in vendor_uses if v == vendor),
+            snippet="",
+            remediation=(
+                f"The code reads your {vendor} API key from a .env file and only sends it "
+                f"to {vendor}'s API to authenticate. Expected for a {vendor} integration; "
+                "make sure you're happy to share that key."),
+            kind="capability", capability="secret:vendor_api_key"))
+    for line_no, kind in hits:
         what = _CREDENTIAL_KIND_LABELS.get(kind, "a credential file")
         out.append(Finding(
             category="exfiltration",

@@ -61,6 +61,10 @@ VENDOR_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
     "EXA_API_KEY": ("Exa", ("exa.ai",)),
     "TAVILY_API_KEY": ("Tavily", ("tavily.com",)),
     "FIRECRAWL_API_KEY": ("Firecrawl", ("firecrawl.dev",)),
+    # Reviewed 2026-10-26 (burningion/video-editing-mcp): Video Jungle's own MCP server
+    # sends VJ_API_KEY as X-API-KEY to api.video-jungle.com. "vj" is too short for the
+    # own-name rule, so the vendor is listed here.
+    "VJ_API_KEY": ("Video Jungle", ("video-jungle.com",)),
 }
 
 # A vendor token in a key name → that vendor's registrable domains. A token listed
@@ -433,6 +437,29 @@ def host_matches_key(host: str, env_name: str) -> bool:
             if reg in _TOKEN_DOMAINS[tok]:
                 return True
         elif len(tok) >= 4 and (tok == label or tok in sub):
+            return True
+    return False
+
+
+def host_is_own_vendor(host: str, env_name: str) -> bool:
+    """Strict form of ``host_matches_key`` for excusing a credential FILE's key
+    (``credential_flow``, 2026-10-26): ``host``'s registrable domain is the key's
+    vendor on the reviewed list (``VENDOR_KEYS`` / ``_TOKEN_DOMAINS``), or a key-name
+    token of 4+ characters EQUALS the registrable label (#195 own-name rule). Never a
+    subdomain match (``acme.attacker.net`` is not ACME's) and never the package's
+    declared homepage (#192)."""
+    reg = registrable_domain(host)
+    if not reg or reg in _EXFIL_DOMAINS:
+        return False
+    known = VENDOR_KEYS.get(env_name)
+    if known and reg in known[1]:
+        return True
+    label = reg.split(".")[0].replace("-", "")
+    for tok in _key_tokens(env_name):
+        if tok in _TOKEN_DOMAINS:
+            if reg in _TOKEN_DOMAINS[tok]:
+                return True
+        elif len(tok) >= 4 and tok == label:
             return True
     return False
 

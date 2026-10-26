@@ -598,7 +598,7 @@ def decide(data: dict) -> Decision:
         else {}
     if inc.get("current_version_affected") is True:
         return done(DECISION_DO_NOT_CONNECT,
-                    "this version is listed as malicious (OpenSSF MAL advisory)")
+                    "this version is a known-malicious package (malware advisory)")
     mal = _first(items, _is_malicious_item)
     sc = data.get("supply_chain") if isinstance(data.get("supply_chain"), dict) else {}
     sc_mal = sc.get("malicious")
