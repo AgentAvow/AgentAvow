@@ -6900,6 +6900,16 @@ def _own_advisory_findings(name: str, version: str | None, advisories: list[dict
     return out
 
 
+# The scan error for an MCP server that refuses ``initialize`` until the caller signs
+# in (HTTP 401, or any error with a ``WWW-Authenticate: Bearer`` challenge; a bare 403
+# keeps the generic error, since a WAF block is not sign-in). Passed through as the
+# public API's error detail; carries no "not found" so routers answer it 422, not 404.
+MCP_SIGNIN_REQUIRED_ERROR = (
+    "This MCP server requires sign-in (OAuth), so its tool list isn't public and "
+    "can't be scanned. Scan its source repo or package instead."
+)
+
+
 async def scan_mcp(endpoint_url: str) -> ScanResult:
     """Grade a LIVE MCP server by its endpoint URL (roadmap §2.D). Handshakes the
     server, enumerates its advertised ``tools/list`` (+ resources/prompts), and
@@ -6911,12 +6921,20 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     anchored). Fail-open: a handshake failure returns a ScanResult with ``.error``.
     """
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT_LIVE, build_coverage
-    from src.scanner.mcp_scan import analyze_mcp, compute_tool_digests, fetch_mcp_tools
+    from src.scanner.mcp_scan import (
+        MCP_FAILURE_AUTH_REQUIRED,
+        analyze_mcp,
+        compute_tool_digests,
+        fetch_mcp_tools,
+    )
 
     result = ScanResult(repo=f"mcp:{endpoint_url}", stars=0, description="", framework="")
     result.is_mcp_server = True
     data = await fetch_mcp_tools(endpoint_url)
     if not data:
+        if getattr(data, "reason", None) == MCP_FAILURE_AUTH_REQUIRED:
+            result.error = MCP_SIGNIN_REQUIRED_ERROR
+            return result
         result.error = (
             "Could not handshake the MCP server — check it's a reachable "
             "Streamable-HTTP endpoint (stdio/SSE-only servers aren't supported yet)."
