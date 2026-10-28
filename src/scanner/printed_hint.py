@@ -348,6 +348,260 @@ _CONSOLE_SHADOW_RE = re.compile(
     # written through.
     r"""(?<![=!<>])=\s*console\s*(?:[;,)}\n]|$)|\breturn\s+console\b|:\s*console\s*[,}]""")
 
+# An MCP stdio server keeps stdout for the protocol and moves human output to stderr:
+#
+#     import { Console } from 'node:console';
+#     const err = new Console({ stdout: process.stderr, stderr: process.stderr });
+#     console.log = err.log.bind(err);
+#     process.stdout.write = (chunk, enc, cb) => { process.stderr.write(…); … };
+#
+# Each line hits ``_CONSOLE_SHADOW_RE``, and the shadow check is tree-wide, so one such
+# server anywhere in a monorepo kept every printed hint in every other package critical
+# (atomicstrata/atomicmemory, 2026-10-28). Output still goes to a std stream, so these
+# exact shapes are excused hit by hit (:func:`_stderr_routing_excused`); any other hit
+# in the same file still counts.
+_NODE_CONSOLE_IMPORT_RE = re.compile(
+    r"""\bimport\s*\{\s*Console\s*\}\s*from\s*['"](?:node:)?console['"]|"""
+    r"""\b(?:const|let|var)\s*\{\s*Console\s*\}\s*=\s*require\s*\(\s*['"](?:node:)?console['"]"""
+    r"""\s*\)""")
+# Every identifier a replacement ``process.stdout.write`` may use besides its own
+# parameters and locals: the std streams, Buffer decoding, a microtask, type words.
+_STREAM_FN_VOCAB = frozenset({
+    "process", "Buffer", "queueMicrotask", "typeof", "return", "true", "false",
+    "undefined", "null", "const", "let", "if", "else", "function", "as", "void",
+    # TypeScript type words: never called, never a member root.
+    "string", "unknown", "boolean", "number", "BufferEncoding", "Uint8Array",
+})
+# ... and these only as a member (``process.stderr.write``, ``Buffer.from(c).toString()``).
+_STREAM_FN_MEMBERS = frozenset({"stdout", "stderr", "write", "from", "toString"})
+_TS_TYPE_WORDS = frozenset({"string", "unknown", "boolean", "number", "BufferEncoding",
+                            "Uint8Array"})
+# Globals the excused shapes rely on; a file that binds one of them gets no excusal.
+_STD_GLOBALS = frozenset({"process", "Buffer", "queueMicrotask"})
+_ASSIGN_OPS = frozenset({"=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=",
+                         "&=", "|=", "^=", "&&=", "||=", "??=", "++", "--"})
+
+
+def _std_globals_bound(t: _Toks) -> bool:
+    """Does the file declare, take as a parameter, destructure into, or assign one of
+    ``_STD_GLOBALS`` (``function f(process) …``, ``globalThis.process = …``)?"""
+    for name in _STD_GLOBALS:
+        for k in t.by_val.get(name, []):
+            if t.is_id(k - 1, "var", "let", "const", "function", "class", "import", "catch"):
+                return True
+            if t.is_p(k + 1, *_ASSIGN_OPS) or t.is_p(k - 1, "++", "--"):
+                return True
+            if (t.is_p(k - 1, "(", ",", "{", "[", "...")
+                    and t.is_p(k + 1, ",", ")", "}", "]", "=>")):
+                return True  # a parameter, a destructuring target or a shorthand
+            if t.is_p(k - 1, "(", ",") and t.is_p(k + 1, ":", "?", "?:", "="):
+                return True  # a typed / optional / defaulted parameter (or a key: kept)
+    return False
+
+
+def _std_stream_at(t: _Toks, k: int) -> int | None:
+    """``process.stdout`` / ``process.stderr`` starting at token ``k``: the index after
+    it, else None."""
+    if (t.is_id(k, "process") and not t.is_p(k - 1, ".", "?.") and t.is_p(k + 1, ".")
+            and t.is_id(k + 2, "stdout", "stderr")):
+        return k + 3
+    return None
+
+
+def _console_over_std(t: _Toks, k: int) -> int | None:
+    """``new Console(process.stderr[, process.stderr])`` or ``new Console({ stdout:
+    process.stderr, stderr: process.stderr })`` with ``new`` at ``k``: the index of the
+    closing paren, else None. No other option is accepted."""
+    if not (t.is_id(k, "new") and t.is_id(k + 1, "Console") and t.is_p(k + 2, "(")):
+        return None
+    close = t.match.get(k + 2)
+    if close is None:
+        return None
+    j = k + 3
+    if t.is_p(j, "{"):
+        end = t.match.get(j)
+        if end is None or end + 1 != close:
+            return None
+        j += 1
+        seen: set[str] = set()
+        while j < end:
+            if (not t.is_id(j, "stdout", "stderr") or t.val[j] in seen
+                    or not t.is_p(j + 1, ":")):
+                return None
+            seen.add(t.val[j])
+            nxt = _std_stream_at(t, j + 2)
+            if nxt is None:
+                return None
+            j = nxt + 1 if t.is_p(nxt, ",") else nxt
+            if j > end or (j < end and not t.is_p(nxt, ",")):
+                return None
+        return close if seen else None
+    n = 0
+    while j < close:
+        nxt = _std_stream_at(t, j)
+        if nxt is None:
+            return None
+        n += 1
+        j = nxt + 1 if t.is_p(nxt, ",") else nxt
+        if j < close and not t.is_p(nxt, ","):
+            return None
+    return close if 1 <= n <= 2 else None
+
+
+def _bound_console_method(t: _Toks, k: int, name: str) -> int | None:
+    """``console.<m> = <name>.<m>.bind(<name>)`` with ``console`` at ``k`` (``m`` a
+    console method, the same on both sides, and the statement ending there): the
+    index of the closing paren, else None."""
+    if not (t.is_id(k, "console") and not t.is_p(k - 1, ".", "?.") and t.is_p(k + 1, ".")
+            and t.is_id(k + 2) and t.val[k + 2] in _CONSOLE_METHODS and t.is_p(k + 3, "=")
+            and t.is_id(k + 4, name) and t.is_p(k + 5, ".") and t.is_id(k + 6, t.val[k + 2])
+            and t.is_p(k + 7, ".") and t.is_id(k + 8, "bind") and t.is_p(k + 9, "(")
+            and t.is_id(k + 10, name) and t.is_p(k + 11, ")")):
+        return None
+    k_end = k + 11
+    if k_end + 1 < len(t) and not (t.is_p(k_end + 1, ";", "}") or t.nl[k_end + 1]):
+        return None
+    return k_end
+
+
+def _stream_write_fn_ok(t: _Toks, a: int) -> bool:
+    """The right-hand side of ``process.std(out|err).write =`` starting at token ``a``
+    is a function, optionally parenthesised and cast (``(…) as typeof …``), built only
+    from its own parameters and locals and ``_STREAM_FN_VOCAB``: no computed member, and
+    a parameter or local is only ever called with no arguments. It can write to a std
+    stream and call back; it cannot reach anything that runs a command."""
+    j = a
+    if t.is_p(j, "("):
+        if t.match.get(j) is None:
+            return False
+        j += 1
+    if t.is_id(j, "function"):
+        j += 1
+        if t.is_id(j) and not t.is_p(j, "("):
+            j += 1
+    if not t.is_p(j, "("):
+        return False
+    params_close = t.match.get(j)
+    if params_close is None:
+        return False
+    # Parameters: an identifier right after the list's `(` or a `,` (a TS type follows
+    # a `:` and is checked against the vocabulary like everything else).
+    names = {t.val[q] for q in range(j + 1, params_close)
+             if t.is_id(q) and t.is_p(q - 1, "(", ",")}
+    # End of the statement: `;`, or a newline before a token that cannot continue it.
+    end = len(t)
+    q = a
+    while q < len(t):
+        if t.typ[q] == "punct" and t.val[q] in ("(", "[", "{") and q in t.match:
+            q = t.match[q] + 1
+            continue
+        if t.is_p(q, ";", ")", "]", "}") or (
+                q > a and t.nl[q] and t.typ[q] in ("id", "str", "num")
+                and not t.is_id(q, "as")):
+            end = q
+            break
+        q += 1
+    if end <= params_close:
+        return False
+    for q in range(a, end):
+        if t.is_id(q) and t.is_id(q - 1, "const", "let"):
+            names.add(t.val[q])
+    for q in range(a, end):
+        if t.is_p(q, "[", "?.["):
+            return False
+        if t.is_p(q, *_ASSIGN_OPS) and not (
+                t.is_p(q, "=") and t.is_id(q - 1) and t.is_id(q - 2, "const", "let")):
+            return False  # only `const x = …` / `let x = …`: nothing is stored outside
+        if not t.is_id(q):
+            continue
+        v = t.val[q]
+        if t.is_p(q - 1, ".", "?."):
+            if v not in _STREAM_FN_MEMBERS:
+                return False
+            continue
+        if v in names:
+            if t.is_p(q + 1, "(") and not t.is_p(q + 2, ")"):
+                return False  # a parameter / local called with arguments
+            continue
+        if v not in _STREAM_FN_VOCAB:
+            return False
+        if v in ("process", "Buffer") and not t.is_p(q + 1, "."):
+            return False
+        if v == "queueMicrotask" and not t.is_p(q + 1, "("):
+            return False
+        if v in _TS_TYPE_WORDS and t.is_p(q + 1, "(", ".", "?."):
+            return False
+    return True
+
+
+def _stderr_routing_excused(text: str) -> set[int]:
+    """Start offsets of ``_CONSOLE_SHADOW_RE`` hits in ``text`` (one JS / TS file) that
+    only keep output on a std stream (the MCP stdio shape above):
+
+    * ``new Console(…)`` over ``process.stdout`` / ``process.stderr`` only, ``Console``
+      imported from ``node:console`` and used nowhere else in the file;
+    * ``console.<m> = X.<m>.bind(X)`` where ``const X = new Console(…)`` is such a
+      console and ``X`` is read nowhere else in the file;
+    * ``process.std(out|err).write = <function>`` whose body passes
+      :func:`_stream_write_fn_ok`."""
+    out: set[int] = set()
+    t = _Toks(text)
+    if not t.clean or _std_globals_bound(t):
+        return out
+    imp = list(_NODE_CONSOLE_IMPORT_RE.finditer(text))
+    consoles: dict[str, int] = {}  # const name -> its `new` token
+    if len(imp) == 1:
+        span = imp[0].span()
+        news: dict[int, int] = {}
+        ok = True
+        for k in t.by_val.get("Console", []):
+            if span[0] <= t.st[k] < span[1]:
+                continue
+            close = _console_over_std(t, k - 1)
+            if close is None:
+                ok = False
+                break
+            news[k - 1] = close
+        if ok:
+            for nk, close in news.items():
+                out.add(t.st[nk + 1])
+                if (t.is_p(nk - 1, "=") and t.is_id(nk - 2) and t.is_id(nk - 3, "const")
+                        and (close + 1 >= len(t) or t.is_p(close + 1, ";")
+                             or t.nl[close + 1])):
+                    consoles[t.val[nk - 2]] = nk - 2
+    for name, decl in consoles.items():
+        excused: list[int] = []
+        allowed = {decl}
+        for k in t.by_val.get("console", []):
+            if _bound_console_method(t, k, name) is not None:
+                excused.append(k)
+                allowed.update((k + 4, k + 10))
+        if excused and set(t.by_val.get(name, [])) <= allowed \
+                and len(_decl_re(name).findall(text)) == 1:
+            out.update(t.st[k] for k in excused)
+    for k in t.by_val.get("process", []):
+        nxt = _std_stream_at(t, k)
+        if (nxt is not None and t.is_p(nxt, ".") and t.is_id(nxt + 1, "write")
+                and t.is_p(nxt + 2, "=") and _stream_write_fn_ok(t, nxt + 3)):
+            out.add(t.st[k])
+    return out
+
+
+def _decl_re(name: str) -> re.Pattern:
+    return re.compile(r"\b(?:var|let|const|function|class)\s+" + re.escape(name) + r"\b")
+
+
+def _shadow_hit(rx: re.Pattern, text: str) -> bool:
+    """Does ``rx`` (``_CONSOLE_SHADOW_RE`` or its whole-tree variant) hit ``text``
+    anywhere :func:`_stderr_routing_excused` does not excuse?"""
+    excused: set[int] | None = None
+    for m in rx.finditer(text):
+        if excused is None:
+            excused = _stderr_routing_excused(text)
+        if m.start() not in excused:
+            return True
+    return False
+
 
 def _handler_body(text: str, start: int) -> str:
     """The block (or concise arrow body) of a catch / error handler starting near
@@ -616,7 +870,12 @@ class _JsFlow:
                 o = self.enclosing_open(t, a)
                 if o == -1:
                     return  # top-level sequence expression: discarded
-                self.in_open(path, t, o, a, b)
+                # An array element (`spawn('sh', ['-c', "curl … | sh"])`) or the last
+                # value of a sequence keeps climbing from the whole group, as below.
+                r = self.in_open(path, t, o, a, b)
+                if r is not None:
+                    a, b = r
+                    continue
                 return
             if t.is_p(p, "(", "[", "{"):
                 r = self.in_open(path, t, p, a, b)
@@ -1230,7 +1489,7 @@ class _JsFlow:
     def require_console_unshadowed(self) -> None:
         if self._console_ok is None:
             self._console_ok = not any(
-                _CONSOLE_SHADOW_RE.search(self.files[p]) for p in self.code_paths)
+                _shadow_hit(_CONSOLE_SHADOW_RE, self.files[p]) for p in self.code_paths)
         if not self._console_ok:
             raise _UnclassifiedError("console is reassigned or shadowed")
 
@@ -2368,7 +2627,7 @@ def output_replaced(files: dict[str, str]) -> bool:
         if Path(p.lower()).suffix in PY_EXTS:
             if _PY_OUTPUT_REBOUND_RE.search(text):
                 return True
-        elif _OUTPUT_SHADOW_RE.search(text):
+        elif _shadow_hit(_OUTPUT_SHADOW_RE, text):
             return True
     return False
 
