@@ -10,8 +10,10 @@ does.
 * ``profile_launch_line`` finds the shape (a launch plus a real profile path).
 * ``launch_only`` decides whether a file's real-profile paths are used ONLY as that
   launch argument, with nothing else in the skill reading files inside the profile,
-  reading the context's cookies / storage state, or sending page content anywhere. Only
-  then does ``skill_scan`` drop its critical credential-read finding for the file.
+  reading the context's cookies / storage state, or sending page content anywhere: not
+  over the network, and not through the browser itself (a value read from the page
+  filled / typed / uploaded / assigned into a page on another origin). Only then does
+  ``skill_scan`` drop its critical credential-read finding for the file.
 
 Everything here is conservative: a use the analysis cannot place (the path handed to a
 helper, copied, joined to a file name, opened, archived) keeps the critical.
@@ -25,6 +27,7 @@ import re
 from src.scanner.browser_credentials import (
     _AUTOMATION_RE,
     _CONTEXT_SESSION_READ_RE,
+    _INTERP_RE,
     _PAGE_DUMP_SOURCE_RE,
     _STORE_KEY_RE,
     _STORE_SCHEMA_RE,
@@ -33,13 +36,14 @@ from src.scanner.browser_credentials import (
 )
 
 PROFILE_LAUNCH_NAME = (
-    "Bundled script {path} drives your real browser profile (all logged-in sessions)")
+    "Bundled script {path} drives your real browser profile (all logged-in sessions); "
+    "the skill's instructions can have your agent act as you in those sites")
 PROFILE_LAUNCH_REMEDIATION = (
     "The script starts a browser (Playwright / Puppeteer / Selenium) with your own "
     "browser profile, so it runs logged in to every site you are: mail, chat, banking. "
-    "It does not read the cookie or password files itself, and nothing it reads from "
-    "the pages is sent off your machine, but anything that controls the script can act "
-    "as you on those sites. Prefer a dedicated automation profile."
+    "Anything that controls the script can act as you on those sites. This check reads "
+    "the bundled scripts only: the skill's instructions (SKILL.md) can still direct "
+    "your agent to use this browser as you. Prefer a dedicated automation profile."
 )
 
 _LANG_EXT = (".py", ".js", ".ts", ".mjs", ".cjs")
@@ -405,44 +409,51 @@ def page_data_sent(lines: list[str], py: bool = True) -> int | None:
             break
         sink_fns |= more
 
-    tainted: set[tuple[str, str]] = set()
-    page_fns: set[str] = set()
+    def taint(source: re.Pattern[str]):
+        """``hot(text, scope)``: whether ``text`` carries page data under ``source``
+        (taint over assignments, loops, appends and page-returning functions)."""
+        tainted: set[tuple[str, str]] = set()
+        page_fns: set[str] = set()
 
-    def hot(text: str, sc: str) -> bool:
-        if _PAGE_READ_RE.search(text) or _PAGE_SIDE_RE.search(text) or calls(page_fns, text):
-            return True
-        st = _strip_strings(text)
-        return any(s in (sc, "") and re.search(rf"(?<![\w$.]){re.escape(t)}(?![\w$])", st)
-                   for s, t in tainted)
+        def hot(text: str, sc: str, code_only: bool = False) -> bool:
+            st = _args_code(text) if code_only else text
+            if source.search(st) or calls(page_fns, st):
+                return True
+            st = st if code_only else _strip_strings(text)
+            return any(s in (sc, "") and re.search(rf"(?<![\w$.]){re.escape(t)}(?![\w$])", st)
+                       for s, t in tainted)
 
-    for _round in range(8):
-        before = len(tainted) + len(page_fns)
-        for k, (n, _r) in enumerate(defs):
-            if n not in page_fns and any(
-                    _RETURN_RE.match(lines[j]) and hot(_stmt(lines, j), scope[j])
-                    for j in body[k] if j not in interior):
-                page_fns.add(n)
-        for i, raw in enumerate(lines):
-            if i in interior or not raw.strip() or _DEF_RE.match(raw):
-                continue
-            sc = scope[i]
-            a = _ASSIGN_RE.match(raw)
-            if a:
-                rhs = a.group("rhs")
-                if rhs.count("(") > rhs.count(")"):
-                    rhs = _call_span(lines, i, a.start("rhs"))
-                if hot(rhs, sc):
-                    tainted.update((sc, n) for n in _lhs_names(a))
-                continue
-            f = _FOR_RE.match(raw)
-            if f and hot(f.group("src"), sc):
-                tainted.update((sc, n) for n in re.findall(_IDENT, f.group("v")))
-                continue
-            m = _MUTATE_RE.match(raw)
-            if m and hot(raw[m.end("n"):], sc):
-                tainted.add((sc, m.group("n")))
-        if len(tainted) + len(page_fns) == before:
-            break
+        for _round in range(8):
+            before = len(tainted) + len(page_fns)
+            for k, (n, _r) in enumerate(defs):
+                if n not in page_fns and any(
+                        _RETURN_RE.match(lines[j]) and hot(_stmt(lines, j), scope[j])
+                        for j in body[k] if j not in interior):
+                    page_fns.add(n)
+            for i, raw in enumerate(lines):
+                if i in interior or not raw.strip() or _DEF_RE.match(raw):
+                    continue
+                sc = scope[i]
+                a = _ASSIGN_RE.match(raw)
+                if a:
+                    rhs = a.group("rhs")
+                    if rhs.count("(") > rhs.count(")"):
+                        rhs = _call_span(lines, i, a.start("rhs"))
+                    if hot(rhs, sc):
+                        tainted.update((sc, n) for n in _lhs_names(a))
+                    continue
+                f = _FOR_RE.match(raw)
+                if f and hot(f.group("src"), sc):
+                    tainted.update((sc, n) for n in re.findall(_IDENT, f.group("v")))
+                    continue
+                m = _MUTATE_RE.match(raw)
+                if m and hot(raw[m.end("n"):], sc):
+                    tainted.add((sc, m.group("n")))
+            if len(tainted) + len(page_fns) == before:
+                break
+        return hot
+
+    hot = taint(re.compile(_PAGE_READ_RE.pattern + "|" + _PAGE_SIDE_RE.pattern))
 
     sink_call = re.compile(_SINK_RE.pattern + "".join(
         rf"|(?<![\w$.]){re.escape(s)}\s*\(" for s in sorted(sink_fns)))
@@ -456,7 +467,105 @@ def page_data_sent(lines: list[str], py: bool = True) -> int | None:
             nav = _NAV_RE.match(raw, m.start()) or _NAV_RE.search(m.group(0))
             if hot(span, scope[i]) or (not nav and _FILE_SEND_RE.search(span)):
                 return i + 1                 # page data, or a file's contents, sent
+
+    # Exfil through the browser itself: a page-derived VALUE typed, filled, uploaded or
+    # assigned into a page. Allowed only when every navigation in the file goes to one
+    # literal origin (the value stays on the site it came from); unresolved: fail closed.
+    value_hot = taint(_PAGE_VALUE_RE)
+    one_origin = len(_nav_origins(lines) or ()) == 1
+    for i, raw in enumerate(lines):
+        if i in interior or _DEF_RE.match(raw):
+            continue
+        for m in _INPUT_RE.finditer(raw):
+            args = _call_args(lines, i, m.end() - 1)
+            if not value_hot(args, scope[i], code_only=True):
+                continue
+            if (m.group("script") and not m.group("exec")
+                    and not _JS_ASSIGN_RE.search(args)):
+                continue                     # evaluate() reading, not writing, the page
+            if not one_origin:
+                return i + 1
     return None
+
+
+# A value read out of the page (text, markup, an evaluate() result, a capture).
+_PAGE_VALUE_RE = re.compile(
+    r"\.(?:inner_text|innerText|text_content|textContent|inner_html|innerHTML|content"
+    r"|evaluate|evaluate_handle|evaluateHandle|eval_on_selector(?:_all)?|\$eval|\$\$eval"
+    r"|screenshot|pdf|all_inner_texts|allInnerTexts|all_text_contents|allTextContents"
+    r"|input_value|inputValue|get_attribute|getAttribute|execute_script|executeScript)\s*\("
+    r"|\.page_source\b|\.(?:text|textContent|innerText|innerHTML)\b(?!\s*\()")
+# Calls that put a value into a page: typing, filling, uploading, a script with args.
+_INPUT_RE = re.compile(
+    r"\.(?:fill|type|press_sequentially|pressSequentially|set_input_files|setInputFiles"
+    r"|insert_text|insertText|send_keys|sendKeys|select_option|selectOption)\s*\("
+    r"|(?P<script>\.(?:evaluate|evaluate_handle|evaluateHandle|\$eval|\$\$eval"
+    r"|eval_on_selector(?:_all)?|(?P<exec>execute_script|executeScript|execute_async_script"
+    r"|executeAsyncScript)))\s*\(")
+_JS_ASSIGN_RE = re.compile(r"(?<![=!<>])=(?![=>])")
+_URL_LIT_RE = re.compile(r"""\s*(['"`])(https?://[^/'"`\s?#]+)[^'"`\s]*\1\s*[,)]""")
+_TRIPLE_RE = re.compile(
+    r"""(?P<f>\b[fF][rR]?|\b[rR][fF])?(?P<q>\"\"\"|\'\'\')(?P<body>[\s\S]*?)(?P=q)""")
+
+
+def _call_args(lines: list[str], i: int, col: int, max_lines: int = 300) -> str:
+    """The call whose ``(`` is at ``lines[i][col]``, to its matching ``)``, skipping
+    brackets inside strings (a page script in a triple-quoted or template string)."""
+    text = "\n".join([lines[i][col:], *lines[i + 1:i + max_lines]])
+    depth, k, n, quote = 0, 0, len(text), ""
+    while k < n:
+        if quote:
+            if text[k] == "\\":
+                k += 2
+                continue
+            if text.startswith(quote, k):
+                k += len(quote)
+                quote = ""
+                continue
+            if len(quote) == 1 and quote != "`" and text[k] == "\n":
+                quote = ""                   # an unterminated one-line string
+            k += 1
+            continue
+        c = text[k]
+        if text.startswith(('"""', "'''"), k):
+            quote = text[k:k + 3]
+            k += 3
+            continue
+        if c in "\"'`":
+            quote = c
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth <= 0:
+                return text[:k + 1]
+        k += 1
+    return text
+
+
+def _args_code(text: str) -> str:
+    """Call text with string bodies removed (multi-line ones too), f-string / template
+    interpolations kept: the code the call passes, not the script or message text."""
+    def tri(m: re.Match[str]) -> str:
+        if not m.group("f"):
+            return '""'
+        body = m.group("body").replace("{{", "").replace("}}", "")
+        return '" ' + " ".join(i.group(1) for i in _INTERP_RE.finditer(body)) + ' "'
+    return _strip_strings(_TRIPLE_RE.sub(tri, text))
+
+
+def _nav_origins(lines: list[str]) -> set[str] | None:
+    """The origins every navigation in the file goes to, when each is a literal URL;
+    ``None`` when any navigation's URL is not a literal."""
+    out: set[str] = set()
+    for i, raw in enumerate(lines):
+        for m in re.finditer(r"\.(?:goto|navigate)\s*\(|\bdriver\.get\s*\(", raw):
+            span = _call_span(lines, i, m.end() - 1)
+            u = _URL_LIT_RE.match(span, 1)
+            if not u:
+                return None
+            out.add(u.group(2).lower())
+    return out
 
 
 def launch_only(path: str, text: str, others: dict[str, str] | None = None) -> bool:

