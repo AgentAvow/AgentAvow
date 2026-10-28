@@ -102,14 +102,7 @@ def test_scan_struct_matches_the_schema(data, target_type, adoption):
 def test_schema_describes_every_key_the_struct_emits():
     # A key added to _scan_struct without a schema entry would reach clients undescribed.
     described = set(mod._SCAN_OUTPUT_SCHEMA["properties"])
-    # Two additive keys sit outside the described properties on purpose: the advertised
-    # outputSchema is frozen while the ChatGPT app is in review (its tools/list bytes are
-    # pinned by tests/test_mcp_protocol_versions.py), and it allows extra keys. Describe
-    # them in the next schema change and drop this carve-out.
-    undescribed = {"not_checked", "coverage_gaps"}
-    assert set(_struct(_RICH)) - undescribed <= described
-    assert undescribed <= set(_struct(_RICH))
-    assert not undescribed & described
+    assert set(_struct(_RICH)) <= described
     # The only schema key _scan_struct itself does not emit is the one _with_rescan_note adds.
     assert described - set(_struct(_RICH)) == {"rescan_pending"}
     assert set(mod._SCAN_OUTPUT_SCHEMA["required"]) <= set(_struct({}))

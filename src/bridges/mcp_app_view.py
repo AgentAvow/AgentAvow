@@ -250,7 +250,7 @@ _TRUST_CARD_TEMPLATE = r"""<!DOCTYPE html>
                thin_coverage:"No risks found; score capped by limited coverage, not detected risk.",
                low_signals:"No risks found; below the bar on non-finding signals, not detected risk." };
     if(lead){ whys.clean="Signed and recomputable offline."; whys.blocking_findings=(sc.critical||0)+" critical · "+(sc.high||0)+" high."; }
-    var why=whys[reason]||"";
+    var why=whys[reason]||"";__PARTIAL_WHY__
     // The Certified line already says "signed & recomputable"; don't repeat it.
     if(certified) why="Certified — artifact scanned, provenance verified, no drift, signed & recomputable."+(reason==="clean"&&lead?"":" "+why);
     document.getElementById("why").textContent = why;
@@ -337,15 +337,35 @@ def _decisions_js() -> str:
                       separators=(",", ":"), ensure_ascii=False)
 
 
-def trust_card_html(headline_follows_decision: bool = True) -> str:
+# v14 (2026-10-28): the small 'why' line says what was not read. A Safe answer over a
+# partial read (verdict_reason "clean_partial") and a Review caused only by a coverage gap
+# (decision review, no blocking findings, a not_checked note) both showed nothing or "No
+# risks found" there. textContent assignment, so the note is never parsed as HTML.
+_PARTIAL_WHY_V14 = (
+    'var nc=(sc.not_checked&&sc.not_checked.length)?String(sc.not_checked[0]):"";'
+    'if(reason==="clean_partial"){why=nc?("Not everything was read: "+nc+"."):'
+    '"Not everything was read.";}'
+    'else if(nc&&sc.decision==="review"&&!(sc.critical||sc.high)){'
+    'why="No risks found in what was read, but "+nc+".";}'
+)
+
+CARD_VERSIONS = (13, 14)
+
+
+def trust_card_html(headline_follows_decision: bool = True, card_version: int = 14) -> str:
     """The card HTML. ``headline_follows_decision`` mirrors
     ``mcp_streamable.HEADLINE_FOLLOWS_DECISION``: True leads with the decision phrase
-    always; False only where it agrees with the binary verdict."""
+    always; False only where it agrees with the binary verdict. ``card_version`` 13 is
+    byte-identical to the card the ChatGPT app was reviewed with (still served at its
+    URI); 14 adds the partial-coverage 'why' line."""
+    if card_version not in CARD_VERSIONS:
+        raise ValueError(f"unknown card version {card_version}")
     return (_TRUST_CARD_TEMPLATE
             .replace("__TRUST_TIERS_JS__", tiers_js_table())
             .replace("__DECISIONS_JS__", _decisions_js())
             .replace("__HEADLINE_FOLLOWS_DECISION__",
-                     "true" if headline_follows_decision else "false"))
+                     "true" if headline_follows_decision else "false")
+            .replace("__PARTIAL_WHY__", _PARTIAL_WHY_V14 if card_version >= 14 else ""))
 
 
 TRUST_CARD_HTML = trust_card_html(True)

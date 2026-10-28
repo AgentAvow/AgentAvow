@@ -55,7 +55,7 @@ ABOUT_TOOL = "about_agentavow"
 # SHA-256 of tests/fixtures/mcp_wire_2025_11_25/tools_list.json, the exact 2025-11-25
 # tools/list bytes (request id 1) the ChatGPT app review was done against, and its tool
 # count. tests/test_mcp_health.py keeps both in sync with the fixture.
-EXPECTED_TOOLS_LIST_SHA256 = "d673f85d019dd57a48a10bf696d3c8952b538bf4d32b440d55ae64b89e294847"
+EXPECTED_TOOLS_LIST_SHA256 = "d02a4c41fdba55d3cd0e80c6981b6ef3271e2ef179062f42bc1c518f7957d01d"
 EXPECTED_TOOL_COUNT = 8
 
 STATE_PREFIX = "ag:ops:mcp_health:state:"

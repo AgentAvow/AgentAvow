@@ -21,7 +21,7 @@
  "tools": [
   {
    "_meta": {
-    "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+    "openai/outputTemplate": "ui://agentavow/trust-card-v14.html",
     "openai/toolInvocation/invoked": "AgentAvow scan complete",
     "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
@@ -33,9 +33,9 @@
     },
     "openai/widgetDomain": "https://agentavow.com",
     "ui": {
-     "resourceUri": "ui://agentavow/trust-card-v13.html"
+     "resourceUri": "ui://agentavow/trust-card-v14.html"
     },
-    "ui/resourceUri": "ui://agentavow/trust-card-v13.html"
+    "ui/resourceUri": "ui://agentavow/trust-card-v14.html"
    },
    "annotations": {
     "destructiveHint": false,
@@ -107,6 +107,10 @@
       "description": "Certified and safe: show the Certified mark.",
       "type": "boolean"
      },
+     "coverage_gaps": {
+      "description": "Machine form of not_checked: gap kinds (e.g. tool_list_paged, oversized_files) with a flag or count. Empty when nothing was skipped.",
+      "type": "object"
+     },
      "critical": {
       "description": "Critical findings, static and sandbox.",
       "minimum": 0,
@@ -159,6 +163,13 @@
        "string",
        "null"
       ]
+     },
+     "not_checked": {
+      "description": "Plain-English notes for what the scan could not read or check (empty when it read everything). Say these alongside the answer.",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
      },
      "package_version": {
       "description": "Package version scanned.",
@@ -290,7 +301,7 @@
       "type": "string"
      },
      "verdict_reason": {
-      "description": "Machine reason for the binary verdict, e.g. clean, blocking_findings, thin_coverage.",
+      "description": "Machine reason for the binary verdict, e.g. clean, clean_partial (clean, but not everything was read), blocking_findings, thin_coverage.",
       "type": "string"
      },
      "verify_url": {
@@ -314,7 +325,7 @@
   },
   {
    "_meta": {
-    "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+    "openai/outputTemplate": "ui://agentavow/trust-card-v14.html",
     "openai/toolInvocation/invoked": "AgentAvow scan complete",
     "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
@@ -326,9 +337,9 @@
     },
     "openai/widgetDomain": "https://agentavow.com",
     "ui": {
-     "resourceUri": "ui://agentavow/trust-card-v13.html"
+     "resourceUri": "ui://agentavow/trust-card-v14.html"
     },
-    "ui/resourceUri": "ui://agentavow/trust-card-v13.html"
+    "ui/resourceUri": "ui://agentavow/trust-card-v14.html"
    },
    "annotations": {
     "destructiveHint": false,
@@ -412,6 +423,10 @@
       "description": "Certified and safe: show the Certified mark.",
       "type": "boolean"
      },
+     "coverage_gaps": {
+      "description": "Machine form of not_checked: gap kinds (e.g. tool_list_paged, oversized_files) with a flag or count. Empty when nothing was skipped.",
+      "type": "object"
+     },
      "critical": {
       "description": "Critical findings, static and sandbox.",
       "minimum": 0,
@@ -464,6 +479,13 @@
        "string",
        "null"
       ]
+     },
+     "not_checked": {
+      "description": "Plain-English notes for what the scan could not read or check (empty when it read everything). Say these alongside the answer.",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
      },
      "package_version": {
       "description": "Package version scanned.",
@@ -595,7 +617,7 @@
       "type": "string"
      },
      "verdict_reason": {
-      "description": "Machine reason for the binary verdict, e.g. clean, blocking_findings, thin_coverage.",
+      "description": "Machine reason for the binary verdict, e.g. clean, clean_partial (clean, but not everything was read), blocking_findings, thin_coverage.",
       "type": "string"
      },
      "verify_url": {
@@ -619,7 +641,7 @@
   },
   {
    "_meta": {
-    "openai/outputTemplate": "ui://agentavow/trust-card-v13.html",
+    "openai/outputTemplate": "ui://agentavow/trust-card-v14.html",
     "openai/toolInvocation/invoked": "AgentAvow scan complete",
     "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
     "openai/widgetCSP": {
@@ -631,9 +653,9 @@
     },
     "openai/widgetDomain": "https://agentavow.com",
     "ui": {
-     "resourceUri": "ui://agentavow/trust-card-v13.html"
+     "resourceUri": "ui://agentavow/trust-card-v14.html"
     },
-    "ui/resourceUri": "ui://agentavow/trust-card-v13.html"
+    "ui/resourceUri": "ui://agentavow/trust-card-v14.html"
    },
    "annotations": {
     "destructiveHint": false,
@@ -700,6 +722,10 @@
       "description": "Certified and safe: show the Certified mark.",
       "type": "boolean"
      },
+     "coverage_gaps": {
+      "description": "Machine form of not_checked: gap kinds (e.g. tool_list_paged, oversized_files) with a flag or count. Empty when nothing was skipped.",
+      "type": "object"
+     },
      "critical": {
       "description": "Critical findings, static and sandbox.",
       "minimum": 0,
@@ -752,6 +778,13 @@
        "string",
        "null"
       ]
+     },
+     "not_checked": {
+      "description": "Plain-English notes for what the scan could not read or check (empty when it read everything). Say these alongside the answer.",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
      },
      "package_version": {
       "description": "Package version scanned.",
@@ -883,7 +916,7 @@
       "type": "string"
      },
      "verdict_reason": {
-      "description": "Machine reason for the binary verdict, e.g. clean, blocking_findings, thin_coverage.",
+      "description": "Machine reason for the binary verdict, e.g. clean, clean_partial (clean, but not everything was read), blocking_findings, thin_coverage.",
       "type": "string"
      },
      "verify_url": {

@@ -142,7 +142,7 @@ def test_about_names_the_three_phrases_and_both_scores():
 # ── the card (ui://agentavow/trust-card-v13.html) ─────────────────────────────────
 
 def test_card_uri_and_meta_unchanged():
-    assert ms._CARD_URI == "ui://agentavow/trust-card-v13.html"
+    assert ms._CARD_URI == "ui://agentavow/trust-card-v14.html"
     # v1.1: the card's "Open report" link (agentavow.com) is allow-listed for ChatGPT;
     # it fetches nothing, so connect/resource stay empty.
     assert ms._CARD_META["openai/widgetCSP"] == {
