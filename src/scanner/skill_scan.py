@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import re
 
+from src.scanner import browser_profile as _browser_profile
+from src.scanner.browser_credentials import CAP_REAL_PROFILE as _CAP_REAL_PROFILE
 from src.scanner.skill_key_flow import SECRET_ENV_READ_RE as _SECRET_ENV_RE
 from src.scanner.skill_key_flow import VENDOR_KEYS as _VENDOR_KEYS
 from src.scanner.skill_key_flow import analyze as _analyze_key_flow
@@ -97,6 +99,14 @@ _STEALER_PATH_RE = re.compile(
     r"|\bkey[34]\.db\b|wallet\.dat|\.ethereum/keystore|solana/id\.json|[Ee]lectrum/wallets"
     r"|Application Support/(?:Google/Chrome|BraveSoftware|Microsoft Edge|Firefox)"
     r"|\.mozilla/firefox|\.config/(?:google-chrome|chromium|BraveSoftware)"
+)
+# The same list without the browser profile ROOTS: a profile directory handed to a
+# browser launch as its profile is judged by ``browser_profile.launch_only``; a file
+# inside a profile (Login Data, cookies.sqlite, key4.db) stays critical on sight.
+_STEALER_FILE_RE = re.compile(
+    r"\.config/gh/hosts\.yml|\.claude[\"',\s/]+\.credentials\.json|\bdump-keychain\b"
+    r"|login\.keychain|\bLogin Data\b|Cookies\.binarycookies|cookies\.sqlite|logins\.json"
+    r"|\bkey[34]\.db\b|wallet\.dat|\.ethereum/keystore|solana/id\.json|[Ee]lectrum/wallets"
 )
 # Other tools' configs (they hold those tools' API keys): critical when the contents
 # are sent anywhere. Reading or editing them alone is what installers do.
@@ -330,12 +340,23 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
         result.script_count += 1
         others = [t for p, t in files.items()
                   if p != path and t and p.lower().endswith(_SCRIPT_EXT)]
-        result.findings.extend(_credential_findings(path, text, extern, others))
+        launch = _profile_launch_findings(path, text)
+        result.findings.extend(launch)
+        result.findings.extend(_credential_findings(
+            path, text, extern, others,
+            profile_launch_only=bool(launch) and _browser_profile.launch_only(
+                path, text, {p: t for p, t in files.items()
+                             if t and p.lower().endswith(_SCRIPT_EXT)})))
         if _CAP_NETWORK_RE.search(text):
             net_scripts.append(path)
         if _CAP_EXEC_RE.search(text):
             exec_scripts.append(path)
-        result.findings.extend(_scan_text(text, path))
+        scanned = _scan_text(text, path)
+        if launch:
+            # The high above says it, louder than the engine's info chip.
+            scanned = [f for f in scanned
+                       if getattr(f, "capability", "") != _CAP_REAL_PROFILE]
+        result.findings.extend(scanned)
     # A host in a pattern array was relaxed with only its own file in view: another
     # bundled file that names the array or sources the file puts it back.
     # Likewise a signed payload whose signer another bundled file redefines.
@@ -386,6 +407,17 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
 
 _CRED_EXFIL_NAME = "Bundled script {path} reads credentials / cloud-metadata / secret-named env"
 
+
+def _profile_launch_findings(path: str, text: str) -> list:
+    """A browser automation launch pointed at the user's real browser profile: high.
+    The browser runs logged in to every site the user is; the script can act as them."""
+    if _browser_profile.profile_launch_line(text, path) is None:
+        return []
+    return [_finding(
+        "skill_capability", _browser_profile.PROFILE_LAUNCH_NAME.format(path=path), "high",
+        path, _browser_profile.PROFILE_LAUNCH_REMEDIATION)]
+
+
 # A credential path named in a regex, a pattern table or a docstring is a scanner's
 # or a guard's list of what to look for, not a read (graphify, deepsafe-scan,
 # clawdefender in the 2026-10-19 DNC set).
@@ -415,15 +447,22 @@ def _pattern_line(line: str) -> bool:
     return False
 
 
-def _credential_path_read(code: str, path: str) -> bool:
+def _credential_path_read(code: str, path: str, profile_launch_only: bool = False) -> bool:
     """A credential / stealer path used as a path (not only listed in a pattern table,
-    a regex or a docstring), or a listed one whose contents reach a network call."""
+    a regex or a docstring), or a listed one whose contents reach a network call.
+
+    ``profile_launch_only``: the file's browser profile directories only feed a browser
+    launch (``browser_profile.launch_only``), so a line naming nothing but a profile
+    root is not a read."""
     if path.lower().endswith(".py"):
         code = _PY_DOCSTRING_RE.sub(lambda m: "\n" * m.group(0).count("\n"), code)
     listed = False
     for line in code.splitlines():
         if _CRED_PATH_RE.search(line) or _STEALER_PATH_RE.search(line):
             if not _pattern_line(line):
+                if (profile_launch_only and not _CRED_PATH_RE.search(line)
+                        and not _STEALER_FILE_RE.search(line)):
+                    continue
                 return True
             listed = True
     if not listed:
@@ -433,13 +472,16 @@ def _credential_path_read(code: str, path: str) -> bool:
 
 
 def _credential_findings(path: str, text: str, extern: dict[str, str] | None = None,
-                         others: list[str] | None = None) -> list:
+                         others: list[str] | None = None,
+                         profile_launch_only: bool = False) -> list:
     """Credential reads in one bundled script (DNC sample precision, 2026-10-19).
 
     * Commented-out lines are not code.
     * ~/.ssh, ~/.aws, cloud metadata, another CLI's login, browser profiles, the
-      keychain and wallets: critical on sight. Another tool's MCP / settings file:
-      critical when its contents are sent anywhere.
+      keychain and wallets: critical on sight. Except a browser profile DIRECTORY that
+      only feeds a browser launch (``profile_launch_only``): that file gets the high
+      "drives your real browser profile" finding instead (``_profile_launch_findings``).
+      Another tool's MCP / settings file: critical when its contents are sent anywhere.
     * A secret-named env var or a ``.env`` file's contents: only when SENT
       (``skill_key_flow.classify``). To its own vendor: a capability note. To an
       endpoint the user configures, or a skill-specific key to a host its name doesn't
@@ -456,7 +498,7 @@ def _credential_findings(path: str, text: str, extern: dict[str, str] | None = N
         "vendor is a near-unambiguous exfiltration pattern. A vendor key sent only to "
         "that vendor's API is not flagged."
     )
-    if (_credential_path_read(code, path)
+    if (_credential_path_read(code, path, profile_launch_only)
             or (_TOOL_CONFIG_RE.search(code) and _contents_reached(code, _TOOL_CONFIG_RE, path))):
         return [_finding("exfiltration", name, "critical", path, crit_remediation)]
 
