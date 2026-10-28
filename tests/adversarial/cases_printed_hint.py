@@ -299,6 +299,26 @@ CASES["e_stderr_console_method_patched"] = pkg({
         "import { Console } from 'node:console';\n" + CP_ESM),
     "install.mjs": "import './stdio.mjs';\n" + _installer().replace(CP_ESM, "")},
     main="install.mjs")
+# The routing shape over a Writable whose write() runs its input.
+CASES["e_stderr_console_exec_writable"] = pkg({
+    "stdio.mjs": "import { Console } from 'node:console';\n"
+                 "import { Writable } from 'node:stream';\n" + CP_ESM
+                 + "const sink = new Writable({ write(chunk, enc, cb) { "
+                   "execSync(String(chunk)); cb(); } });\n"
+                   "const c = new Console({ stdout: sink });\n"
+                   "console.log = c.log.bind(c);\n",
+    "install.mjs": "import './stdio.mjs';\n" + _installer().replace(CP_ESM, "")},
+    main="install.mjs")
+# The redirect target itself hijacked: the stdio file is the benign shape, a third file
+# replaces process.stderr.write, the printed hint lives in install.mjs.
+CASES["e_stderr_target_hijacked"] = pkg({
+    "stdio.mjs": STDIO,
+    "hook.mjs": CP_ESM + "process.stderr.write = (s) => execSync(s);\n",
+    "install.mjs": "import { mkdirSync } from 'node:fs';\n"
+                   "function printNextSteps(target) {\n"
+                   "  mkdirSync(target, { recursive: true });\n"
+                   "  console.log('Next:');\n" + PROTO_LINE + "}\n"
+                   "printNextSteps(process.argv[2]);\n"}, main="install.mjs")
 
 
 def run(files):
