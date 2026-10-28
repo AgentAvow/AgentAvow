@@ -45,6 +45,8 @@ _security_scan_task: asyncio.Task | None = None
 _api_health_task: asyncio.Task | None = None
 _github_budget_task: asyncio.Task | None = None
 _lock_refresh_task: asyncio.Task | None = None
+_mcp_probe_task: asyncio.Task | None = None
+_mcp_reject_task: asyncio.Task | None = None
 
 # Redis distributed lock — prevents multiple workers from running the scheduler
 SCHEDULER_LOCK_KEY = "ag:scheduler:lock"
@@ -1107,8 +1109,13 @@ def _watch_decision(data: dict | None, block: dict | None) -> dict:
         applied = _apply_behavioral_score(data, block)
     except Exception:
         applied = dict(data)
-    out = decide({**applied, "behavioral": block}).as_dict()
-    out["certified"] = bool((data.get("certified") or {}).get("eligible"))
+    from src.scanner.verdict import certified_mark
+    marked = {**applied, "behavioral": block}
+    dec = decide(marked)
+    out = dec.as_dict()
+    # The Certified MARK (display rule), not raw eligibility: an alert never reads
+    # "Review before you connect · Certified".
+    out["certified"] = certified_mark(marked, dec)
     return out
 
 
@@ -1124,6 +1131,63 @@ async def _watcher_hook(db, watcher_id):
             AlertWebhook.active.is_(True),
         )
     )).scalar_one_or_none()
+
+
+def _icon_alert_payload(w, new_score, old_fp, ws, decision: dict) -> dict:
+    """What the icon_change webhook carries: the old and new icon fingerprints and the
+    icon findings of the new scan (its current state, not a diff)."""
+    return {
+        "type": "agentavow.alert.icon_change",
+        "event": "icon_change",
+        "owner": w.owner,
+        "repo": w.repo,
+        "surface": getattr(w, "surface", "github") or "github",
+        "score": new_score,
+        "reason": "icon changed",
+        "old_icon_fingerprint": old_fp,
+        "new_icon_fingerprint": getattr(ws, "icon_digest", None),
+        "icon_findings": list(getattr(ws, "icon_findings", None) or []),
+        **decision,
+    }
+
+
+async def _icon_change_alert(db, w, new_score, old_fp, ws, decision: dict) -> None:
+    """Notify the watcher that a watched MCP server serves different icons: an in-app
+    watch_alert plus the signed webhook. Distinct from the definition-drift alert:
+    icons are outside the signed tool digest, so the grade and attestation are not
+    what changed."""
+    from datetime import datetime, timezone
+
+    from src.api.notification_router import create_notification
+
+    found = list(getattr(ws, "icon_findings", None) or [])
+    worst = next((f for sev in ("high", "medium", "low") for f in found
+                  if f.get("severity") == sev), None)
+    title = f"{w.owner}/{w.repo} — icon changed"
+    body = (
+        "A tool you're watching now shows different icons than at the last check. Icons"
+        " are not part of the signed tool definition, so the grade did not change for"
+        " this; check the new icon before you trust it."
+        + (f" New icon finding: {worst.get('name')}." if worst else "")
+        + f" Now: {w_decision_phrase(decision)}."
+    )
+    try:
+        await create_notification(
+            db, w.watcher_id, "watch_alert", title, body,
+            reference_id=f"{w.owner}/{w.repo}",
+        )
+    except Exception:
+        logger.exception("icon watch notification failed for %s/%s", w.owner, w.repo)
+    try:
+        hook = await _watcher_hook(db, w.watcher_id)
+        if hook is not None:
+            from src.api.account_webhook_router import deliver_to_hook
+
+            hook.last_status = await deliver_to_hook(
+                hook, _icon_alert_payload(w, new_score, old_fp, ws, decision))
+            hook.last_delivery_at = datetime.now(timezone.utc)
+    except Exception:
+        logger.debug("icon webhook delivery failed for %s/%s", w.owner, w.repo)
 
 
 async def _run_watch_rescan(limit: int = 200) -> None:
@@ -1180,6 +1244,11 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 w.last_score is not None and new_score is not None and new_score < w.last_score - 5
             )
             drift, baseline_digest = _watch_digest_state(w.last_manifest_digest, new_digest)
+            # Icons (live MCP): not in the signed digest, so a separate unsigned
+            # fingerprint. Same rules as the digest: no fingerprint this cycle is no
+            # change and keeps the baseline; a first observation sets it silently.
+            icon_changed, icon_baseline = _watch_digest_state(
+                getattr(w, "last_icon_digest", None), getattr(ws, "icon_digest", None))
             improved = (
                 w.last_score is not None and new_score is not None
                 and new_score > w.last_score + 5
@@ -1290,7 +1359,10 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 except Exception:
                     logger.debug(
                         "behavioral webhook delivery failed for %s/%s", w.owner, w.repo)
-            elif b_change == "improved":
+            if icon_changed:
+                await _icon_change_alert(
+                    db, w, new_score, getattr(w, "last_icon_digest", None), ws, w_decision)
+            if b_change == "improved":
                 # Findings went away — a lighter, positive note, not an alert.
                 try:
                     await create_notification(
@@ -1308,6 +1380,7 @@ async def _run_watch_rescan(limit: int = 200) -> None:
                 fresh.last_score = new_score
                 fresh.last_manifest_digest = baseline_digest
                 fresh.last_behavioral_digest = b_baseline
+                fresh.last_icon_digest = icon_baseline
                 fresh.last_checked_at = datetime.now(timezone.utc)
                 await db.commit()
     if held:
@@ -1475,8 +1548,12 @@ async def _rescan_catalog_row(surface: str, owner: str, repo: str, db) -> bool:
         prev = await cached_scan_data(surface, owner, repo)
         if surface == "github":
             from src.api.public_scan_router import public_scan
-            # public_scan re-scans and captures into community_scans itself.
-            await public_scan(owner=owner, repo=repo, force=True, db=db)
+            from src.scanner.behavioral.slots import low_priority
+            # public_scan re-scans and captures into community_scans itself. Any
+            # sandbox run it starts is background re-score work: LOW priority.
+            with low_priority():
+                await public_scan(owner=owner, repo=repo, force=True, behavioral=False,
+                                  db=db)
             await _store_catalog_adoption(surface, owner, repo, db)
             # Version / tool-digest moved → drop the cached sandbox block, re-run.
             fresh = await cached_scan_data(surface, owner, repo, stale=False)
@@ -1566,11 +1643,23 @@ async def _run_catalog_rescan() -> None:
     # (a) Freshness — re-scan the stalest community_scans rows (surface-aware) so
     # on-demand catalog grades stay current instead of frozen at first-scan time.
     fresh_n = getattr(settings, "catalog_rescan_fresh_limit", 60)
+    from src.api.scan_catalog_router import CERTIFIED_MARK_SINCE
     async with async_session() as db:
-        rows = (await db.execute(
+        # A stored A+ written before the Certified display rule only keeps its mark
+        # through a 7-day cached copy of its scan; re-scan those FIRST so the fresh
+        # grade (written under the rule) is stored and the mark can't lapse silently.
+        pre_rule = (await db.execute(
+            select(CommunityScan.surface, CommunityScan.owner, CommunityScan.repo)
+            .where(CommunityScan.grade == "A+",
+                   CommunityScan.last_scanned_at < CERTIFIED_MARK_SINCE)
+            .order_by(CommunityScan.last_scanned_at.asc()).limit(fresh_n)
+        )).all()
+        stalest = (await db.execute(
             select(CommunityScan.surface, CommunityScan.owner, CommunityScan.repo)
             .order_by(CommunityScan.last_scanned_at.asc()).limit(fresh_n)
         )).all()
+    rows = list(dict.fromkeys([tuple(r) for r in pre_rule] + [tuple(r) for r in stalest]))
+    rows = rows[:max(fresh_n, len(pre_rule))]
     refreshed = 0
     for surface, owner, repo in rows:
         surf = (surface or "github").lower()
@@ -1701,6 +1790,7 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
     global _reply_poster_task
     global _starter_pack_task, _auto_follow_task, _security_scan_task
     global _api_health_task, _github_budget_task, _lock_refresh_task
+    global _mcp_probe_task, _mcp_reject_task
 
     if _scheduler_task is not None and not _scheduler_task.done():
         logger.debug("Scheduler already running, skipping start")
@@ -1874,6 +1964,21 @@ async def start_scheduler(interval: int | None = None) -> asyncio.Task | None:
             name="behavioral-eval",
         )
 
+    # MCP connector health: probe /mcp in both protocol eras (10 min) and watch the
+    # client reject rate (15 min); emails the admin when /mcp breaks. On by default
+    # when DEBUG is false (MCP_HEALTH_ENABLED overrides). Lock holder only.
+    from src.jobs import mcp_health as _mcp_health
+
+    if _mcp_health.enabled():
+        if _mcp_probe_task is None or _mcp_probe_task.done():
+            _mcp_probe_task = asyncio.create_task(
+                _mcp_health.probe_loop(), name="mcp-health-probe",
+            )
+        if _mcp_reject_task is None or _mcp_reject_task.done():
+            _mcp_reject_task = asyncio.create_task(
+                _mcp_health.reject_loop(), name="mcp-health-rejects",
+            )
+
     return _scheduler_task
 
 
@@ -1883,6 +1988,7 @@ def stop_scheduler() -> None:
     global _reply_poster_task
     global _starter_pack_task, _auto_follow_task, _security_scan_task
     global _api_health_task, _github_budget_task, _lock_refresh_task
+    global _mcp_probe_task, _mcp_reject_task
 
     # Cancel the lock refresh first — its CancelledError handler releases the Redis key
     if _lock_refresh_task is not None and not _lock_refresh_task.done():
@@ -1934,3 +2040,8 @@ def stop_scheduler() -> None:
         _github_budget_task.cancel()
         logger.info("GitHub budget probe task cancelled")
     _github_budget_task = None
+
+    for _t in (_mcp_probe_task, _mcp_reject_task):
+        if _t is not None and not _t.done():
+            _t.cancel()
+    _mcp_probe_task = _mcp_reject_task = None

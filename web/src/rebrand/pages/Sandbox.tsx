@@ -147,7 +147,8 @@ export default function RebrandSandbox() {
   return (
     <div className="max-w-[880px] mx-auto px-6 py-14">
       <Helmet>
-        <title>API Sandbox — AgentAvow</title>
+        <title>API Sandbox · AgentAvow</title>
+        <link rel="canonical" href="https://agentavow.com/sandbox" />
         <meta
           name="description"
           content="Try the AgentAvow tool-safety scan API with no signup. Mint a 15-minute token and run live, read-only calls against the public scan API."

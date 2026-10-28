@@ -94,7 +94,7 @@ If verification throws, the attestation was tampered with or the key doesn't mat
 ## Tool definitions: per-tool digests and drift
 
 For an MCP server (and for skills and tool manifests), the signed `scan` block also pins **what the server
-served**, so a gate can check that the tool it is about to call is the one that was graded:
+served**, so a gate can check that the tool it is about to call is the one that was checked:
 
 - `scan.toolDigests` — one digest per served tool, keyed `tool:<name>`. Each is `sha256:` over the RFC 8785
   canonical bytes of `{"profile": "agentavow.mcp-tool-definition.v1", "tool": {…}}`, where the tool is the
@@ -102,10 +102,10 @@ served**, so a gate can check that the tool it is about to call is the one that 
   `annotations` (missing or null fields omitted; `_meta` never hashed).
 - `scan.toolManifestDigest` — a fold over the per-tool digests: the whole served tool set in one value.
 - `toolDrift` (top-level, only when present) — the diff against our previous scan of the same server: which
-  tools were added, removed or changed since the last grade.
+  tools were added, removed or changed since the last check.
 
 A consumer holding the server's `tools/list` recomputes the digest of the tool it is authorizing, with no call
-to us, and compares it with the signed one. A mismatch means the definition changed after the grade — the
+to us, and compares it with the signed one. A mismatch means the definition changed after the check — the
 per-tool rug-pull — even if a fresh scan of the code would still come back clean. `annotations` is inside the
 digest on purpose: a flipped `readOnlyHint` or `destructiveHint` is the cheapest redefinition.
 

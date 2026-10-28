@@ -17,6 +17,20 @@ from __future__ import annotations
 import hashlib
 import re
 
+from src.scanner import browser_profile as _browser_profile
+from src.scanner.browser_credentials import CAP_REAL_PROFILE as _CAP_REAL_PROFILE
+from src.scanner.skill_key_flow import SECRET_ENV_READ_RE as _SECRET_ENV_RE
+from src.scanner.skill_key_flow import VENDOR_KEYS as _VENDOR_KEYS
+from src.scanner.skill_key_flow import analyze as _analyze_key_flow
+from src.scanner.skill_key_flow import classify as _classify_hosts
+from src.scanner.skill_key_flow import contents_reached as _contents_reached
+from src.scanner.skill_key_flow import env_file_reads as _env_file_reads
+from src.scanner.skill_key_flow import file_secret_names as _file_secret_names
+from src.scanner.skill_key_flow import is_local_host as _is_local_host
+from src.scanner.skill_key_flow import listed_paths_read_and_sent as _listed_paths_read_and_sent
+from src.scanner.skill_key_flow import returning_functions as _returning_functions
+from src.scanner.skill_key_flow import strip_comments as _strip_comments
+
 # Auto-exec risk weight per pre-approved tool — a skill's `allowed-tools` runs
 # these WITHOUT asking the user (roadmap §2.D). Higher = more dangerous to grant.
 _TOOL_RISK: dict[str, int] = {
@@ -61,10 +75,48 @@ _OVERRIDE_RE = re.compile(
     r"|always (run|execute|use)|never (ask|refuse|decline))\b"
 )
 # Env-exfil / sandbox-probe patterns in bundled scripts (near-unambiguous malware).
-_EXFIL_RE = re.compile(
-    r"(?i)(~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|\.env\b"
-    r"|169\.254\.169\.254|metadata\.google|[A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET|_PASSWORD)\b)"
+# The secret-named-env part is case-SENSITIVE (env vars are UPPER_SNAKE:
+# AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN) and must be READ. Under a blanket (?i) it matched
+# ordinary code such as `def sort_key(` and `key=_sort_key`, flagging every Python
+# helper that sorts as credential exfiltration. `.env` must be a file name, not the
+# attribute in `process.env` / `os.environ`-style code.
+_EXFIL_PATH_RE = re.compile(
+    r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|(?<![\w\\])\.env\b"
+    r"|169\.254\.169\.254|metadata\.google)"
 )
+# dotenv loaders that return the project's .env contents without naming `.env`.
+_DOTENV_PARSE_RE = re.compile(
+    r"\bdotenv_values\s*\(|\bdotenv\.parse\s*\(|\bconfig\([^)]*\)\.parsed\b")
+# The same paths minus ``.env``: always critical, wherever they are read from.
+_CRED_PATH_RE = re.compile(
+    r"(?i:~/\.aws|~/\.ssh|\.aws/credentials|id_rsa|169\.254\.169\.254|metadata\.google)"
+)
+# Stores no skill has a reason to touch (another CLI's login, browser profiles, the
+# keychain, crypto wallets): critical in code, like ~/.ssh.
+_STEALER_PATH_RE = re.compile(
+    r"\.config/gh/hosts\.yml|\.claude[\"',\s/]+\.credentials\.json|\bdump-keychain\b"
+    r"|login\.keychain|\bLogin Data\b|Cookies\.binarycookies|cookies\.sqlite|logins\.json"
+    r"|\bkey[34]\.db\b|wallet\.dat|\.ethereum/keystore|solana/id\.json|[Ee]lectrum/wallets"
+    r"|Application Support/(?:Google/Chrome|BraveSoftware|Microsoft Edge|Firefox)"
+    r"|\.mozilla/firefox|\.config/(?:google-chrome|chromium|BraveSoftware)"
+)
+# The same list without the browser profile ROOTS: a profile directory handed to a
+# browser launch as its profile is judged by ``browser_profile.launch_only``; a file
+# inside a profile (Login Data, cookies.sqlite, key4.db) stays critical on sight.
+_STEALER_FILE_RE = re.compile(
+    r"\.config/gh/hosts\.yml|\.claude[\"',\s/]+\.credentials\.json|\bdump-keychain\b"
+    r"|login\.keychain|\bLogin Data\b|Cookies\.binarycookies|cookies\.sqlite|logins\.json"
+    r"|\bkey[34]\.db\b|wallet\.dat|\.ethereum/keystore|solana/id\.json|[Ee]lectrum/wallets"
+)
+# Other tools' configs (they hold those tools' API keys): critical when the contents
+# are sent anywhere. Reading or editing them alone is what installers do.
+_TOOL_CONFIG_RE = re.compile(
+    r"\.cursor/mcp\.json|claude_desktop_config\.json|~/\.claude\.json|\.codeium/windsurf"
+    r"|\.claude/settings(?:\.local)?\.json"
+)
+# The secret-named env READ (not a docstring mention) lives in skill_key_flow, which
+# also decides whether a known vendor key leaves for a non-vendor host.
+_EXFIL_RE = re.compile(_EXFIL_PATH_RE.pattern + "|" + _SECRET_ENV_RE.pattern)
 _SCRIPT_EXT = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
 
 
@@ -115,6 +167,15 @@ def _finding(category: str, name: str, severity: str, where: str, remediation: s
     return Finding(
         category=category, name=name, severity=severity,
         file_path=where, line_number=0, snippet="", remediation=remediation,
+    )
+
+
+def _capability(category: str, name: str, where: str, remediation: str, tag: str):
+    """A low, never-scored capability note (what the skill DOES, not a defect)."""
+    from src.scanner.scan import Finding
+    return Finding(
+        category=category, name=name, severity="low", file_path=where, line_number=0,
+        snippet="", remediation=remediation, kind="capability", capability=tag,
     )
 
 
@@ -267,23 +328,42 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
     # collect ACTUAL capabilities for the declared-vs-actual drift check (§6).
     net_scripts: list[str] = []
     exec_scripts: list[str] = []
+    # Helpers in one bundled file that return a secret, called from another file.
+    extern: dict[str, str] = {}
+    for path, text in files.items():
+        if text and path.lower().endswith(_SCRIPT_EXT):
+            for f, key in _returning_functions(text, path).items():
+                extern.setdefault(f, key)
     for path, text in files.items():
         if not text or not path.lower().endswith(_SCRIPT_EXT):
             continue
         result.script_count += 1
-        if _EXFIL_RE.search(text):
-            result.findings.append(_finding(
-                "exfiltration",
-                f"Bundled script {path} reads credentials / cloud-metadata / secret-named env",
-                "critical", path,
-                "Reading ~/.aws, ~/.ssh, .env, *_KEY/*_TOKEN, or 169.254.169.254 from a skill "
-                "script is a near-unambiguous exfiltration pattern.",
-            ))
+        others = [t for p, t in files.items()
+                  if p != path and t and p.lower().endswith(_SCRIPT_EXT)]
+        launch = _profile_launch_findings(path, text)
+        result.findings.extend(launch)
+        result.findings.extend(_credential_findings(
+            path, text, extern, others,
+            profile_launch_only=bool(launch) and _browser_profile.launch_only(
+                path, text, {p: t for p, t in files.items()
+                             if t and p.lower().endswith(_SCRIPT_EXT)})))
         if _CAP_NETWORK_RE.search(text):
             net_scripts.append(path)
         if _CAP_EXEC_RE.search(text):
             exec_scripts.append(path)
-        result.findings.extend(_scan_text(text, path))
+        scanned = _scan_text(text, path)
+        if launch:
+            # The high above says it, louder than the engine's info chip.
+            scanned = [f for f in scanned
+                       if getattr(f, "capability", "") != _CAP_REAL_PROFILE]
+        result.findings.extend(scanned)
+    # A host in a pattern array was relaxed with only its own file in view: another
+    # bundled file that names the array or sources the file puts it back.
+    # Likewise a signed payload whose signer another bundled file redefines.
+    from src.scanner.npm_scripts import restore_signature_hosts, restore_signing_relaxed
+    tree = {p: t for p, t in files.items() if t}
+    restore_signature_hosts(result.findings, tree)
+    restore_signing_relaxed(result.findings, tree)
 
     # 6. Declared-vs-actual capability DRIFT — a bundled script exercises a capability
     # the always-loaded `allowed-tools` never declared. The user approves a narrow
@@ -325,6 +405,171 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
     return result
 
 
+_CRED_EXFIL_NAME = "Bundled script {path} reads credentials / cloud-metadata / secret-named env"
+
+
+def _profile_launch_findings(path: str, text: str) -> list:
+    """A browser automation launch pointed at the user's real browser profile: high.
+    The browser runs logged in to every site the user is; the script can act as them."""
+    if _browser_profile.profile_launch_line(text, path) is None:
+        return []
+    return [_finding(
+        "skill_capability", _browser_profile.PROFILE_LAUNCH_NAME.format(path=path), "high",
+        path, _browser_profile.PROFILE_LAUNCH_REMEDIATION)]
+
+
+# A credential path named in a regex, a pattern table or a docstring is a scanner's
+# or a guard's list of what to look for, not a read (graphify, deepsafe-scan,
+# clawdefender in the 2026-10-19 DNC set).
+_REGEX_CALL_RE = re.compile(
+    r"re\.compile|\bre\.(?:search|match|fullmatch|findall|finditer|sub|split)\s*\("
+    r"|\bnew\s+RegExp\s*\(|\bRegExp\s*\(|\bgrep\s+-\w*[EPF]")
+_STR_LIT_RE = re.compile(r"""([\"'])(?:\\.|(?!\1).)*\1""")
+_LIST_ITEM_RE = re.compile(r"""^\s*[rRbBuUfF]{0,2}([\"'])(?:\\.|(?!\1).)*\1\s*[,\])}]?\s*,?\s*$""")
+_PY_DOCSTRING_RE = re.compile(r"""(?m)^[ \t]*[rRbBuU]?(\"\"\"|''')[\s\S]*?\1""")
+
+
+_REGEX_SYNTAX_RE = re.compile(r"\(\?[:=!<]|\\[./bdsw]|\[\^|\\\|")
+_GREP_RE = re.compile(r"\b(?:e?grep|rg|ag)\b")
+
+
+def _pattern_line(line: str) -> bool:
+    if _REGEX_CALL_RE.search(line) or _LIST_ITEM_RE.match(line) \
+            or len(_STR_LIT_RE.findall(line)) >= 3:
+        return True
+    # The path inside a regex-shaped literal (`r"(?:~\/)\.(ssh\/id_rsa|…)"`) or a grep
+    # alternation (`grep -r "~/.ssh\|~/.aws"`), not a path operand.
+    for m in _STR_LIT_RE.finditer(line):
+        lit = m.group(0)
+        if (_CRED_PATH_RE.search(lit) or _STEALER_PATH_RE.search(lit)) and (
+                _REGEX_SYNTAX_RE.search(lit) or (_GREP_RE.search(line) and "|" in lit)):
+            return True
+    return False
+
+
+def _credential_path_read(code: str, path: str, profile_launch_only: bool = False) -> bool:
+    """A credential / stealer path used as a path (not only listed in a pattern table,
+    a regex or a docstring), or a listed one whose contents reach a network call.
+
+    ``profile_launch_only``: the file's browser profile directories only feed a browser
+    launch (``browser_profile.launch_only``), so a line naming nothing but a profile
+    root is not a read."""
+    if path.lower().endswith(".py"):
+        code = _PY_DOCSTRING_RE.sub(lambda m: "\n" * m.group(0).count("\n"), code)
+    listed = False
+    for line in code.splitlines():
+        if _CRED_PATH_RE.search(line) or _STEALER_PATH_RE.search(line):
+            if not _pattern_line(line):
+                if (profile_launch_only and not _CRED_PATH_RE.search(line)
+                        and not _STEALER_FILE_RE.search(line)):
+                    continue
+                return True
+            listed = True
+    if not listed:
+        return False
+    both = re.compile(_CRED_PATH_RE.pattern + "|" + _STEALER_PATH_RE.pattern)
+    return _listed_paths_read_and_sent(code, both, path)
+
+
+def _credential_findings(path: str, text: str, extern: dict[str, str] | None = None,
+                         others: list[str] | None = None,
+                         profile_launch_only: bool = False) -> list:
+    """Credential reads in one bundled script (DNC sample precision, 2026-10-19).
+
+    * Commented-out lines are not code.
+    * ~/.ssh, ~/.aws, cloud metadata, another CLI's login, browser profiles, the
+      keychain and wallets: critical on sight. Except a browser profile DIRECTORY that
+      only feeds a browser launch (``profile_launch_only``): that file gets the high
+      "drives your real browser profile" finding instead (``_profile_launch_findings``).
+      Another tool's MCP / settings file: critical when its contents are sent anywhere.
+    * A secret-named env var or a ``.env`` file's contents: only when SENT
+      (``skill_key_flow.classify``). To its own vendor: a capability note. To an
+      endpoint the user configures, or a skill-specific key to a host its name doesn't
+      match: high. A well-known vendor / infrastructure key, a nameless key or file
+      contents to a stranger host, or anything to a paste site / request bin / IP:
+      critical.
+    * A ``.env`` outside the skill's folder that is read but not sent: medium.
+    """
+    code = _strip_comments(text, path)
+    name = _CRED_EXFIL_NAME.format(path=path)
+    crit_remediation = (
+        "A skill script that reads ~/.aws, ~/.ssh, browser or wallet files, or sends a "
+        "secret (*_KEY / *_TOKEN / .env contents) to a host that isn't the secret's own "
+        "vendor is a near-unambiguous exfiltration pattern. A vendor key sent only to "
+        "that vendor's API is not flagged."
+    )
+    if (_credential_path_read(code, path, profile_launch_only)
+            or (_TOOL_CONFIG_RE.search(code) and _contents_reached(code, _TOOL_CONFIG_RE, path))):
+        return [_finding("exfiltration", name, "critical", path, crit_remediation)]
+
+    uses = _analyze_key_flow(text, path, extern)
+    file_keys = _file_secret_names(code, path)
+    env_reads = _env_file_reads(code, path) if _EXFIL_PATH_RE.search(code) else "none"
+    if env_reads == "none" and _DOTENV_PARSE_RE.search(code):
+        env_reads = "foreign"   # dotenv_values() / dotenv.parse(): the project's .env
+    env_sev, env_bad = None, []
+    if env_reads != "none":
+        # Keys pulled out of the .env BY NAME may excuse their own vendor's host
+        # (a whole .env sent anywhere is caught by credential_flow, auth-only rule).
+        from src.scanner.credential_flow import _EXTRACT_RE
+        extracted = {n for m in _EXTRACT_RE.finditer(code) for n in m.groups() if n}
+        # The WHOLE contents to an unresolved / local host are critical ("dump"); one
+        # value pulled out of the .env there is high ("extracted").
+        keys = file_keys | extracted
+        whole = _classify_hosts(
+            _contents_reached(code, path=path, whole=True, others=others), None, keys)
+        one = _classify_hosts(_contents_reached(code, path=path), None, keys, "extracted")
+        rank = {"critical": 0, "high": 1, None: 2}
+        env_sev, env_bad = min((whole, one), key=lambda r: rank[r[0]])
+
+    out: list = []
+    crit = [u for u in uses if u.severity == "critical"]
+    if crit or env_sev == "critical":
+        bad = sorted({h for u in crit for h in u.destinations if h != "?"}
+                     | {h for h in env_bad if h != "?"})
+        what = ", ".join(u.env_name for u in crit[:3]) or "a secret"
+        out.append(_finding(
+            "exfiltration",
+            name + (f" and sends {what} to {', '.join(bad[:3])}" if bad else ""),
+            "critical", path, crit_remediation,
+        ))
+        return out
+    high = [u for u in uses if u.severity == "high"]
+    if high or env_sev == "high":
+        keys = ", ".join(u.env_name for u in high[:3]) or "a value read from your .env"
+        named = sorted({h for u in high for h in u.destinations
+                        if h != "?" and not _is_local_host(h)}
+                       | {h for h in env_bad if h != "?" and not _is_local_host(h)})
+        where = ", ".join(named[:3]) if named else "an endpoint you configure"
+        out.append(_finding(
+            "exfiltration",
+            f"Bundled script {path} sends {keys} to {where}",
+            "high", path,
+            "The script sends this secret to a URL it takes from your environment, its "
+            "config or its arguments (or a local host), or to a host its name doesn't "
+            "match (often the skill's own service). Check the endpoint before you "
+            "connect: whoever runs it receives the key.",
+        ))
+    elif env_reads == "foreign":
+        out.append(_finding(
+            "exfiltration",
+            f"Bundled script {path} reads a .env file outside its own folder",
+            "medium", path,
+            "The script reads a .env from your home or project directory. Nothing in "
+            "it is sent out, but that file can hold every secret you have.",
+        ))
+    for vendor in sorted({u.vendor for u in uses if u.vendor and u.severity is None
+                          and (u.sent or u.env_name in _VENDOR_KEYS)}):
+        out.append(_capability(
+            "secret", f"Uses your {vendor} API key", path,
+            f"The script reads your {vendor} API key and only calls {vendor}'s "
+            f"API with it. Expected for a {vendor} integration; make sure you're "
+            "happy to share that key.",
+            "secret:vendor_api_key",
+        ))
+    return out
+
+
 def _scan_text(text: str, where: str) -> list:
     """Reuse the repo scanner's 12-category engine over a skill file."""
     if not text or not text.strip():
@@ -334,6 +579,10 @@ def _scan_text(text: str, where: str) -> list:
         findings, _pos, _sup = _scan_content(text, where)
     except Exception:
         return []
+    # Only this file is in view: a maintainer-script downgrade stands only when no
+    # reachable install script runs a local file (npm_scripts).
+    from src.scanner.npm_scripts import restore_externally_invoked
+    restore_externally_invoked(findings, {where: text})
     for f in findings:
         f.file_path = where
     return findings

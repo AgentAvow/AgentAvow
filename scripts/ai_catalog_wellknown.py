@@ -207,6 +207,24 @@ def fetch_tools_list(endpoint: str) -> tuple[list, dict]:
     return tools, server_info
 
 
+SAFETY_MODEL_SPEC_URL = (
+    "https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/"
+    "agentavow-safety-model-v1.md"
+)
+
+_ANSWER_PHRASES = {
+    "safe": "Safe to connect",
+    "review": "Review before you connect",
+    "do_not_connect": "Do not connect",
+}
+
+
+def _answer_phrase(scan: dict) -> str:
+    """The three-answer phrase for the inlined self-scan, with a trailing ", "."""
+    phrase = _ANSWER_PHRASES.get(str(scan.get("decision") or ""))
+    return f"{phrase}, " if phrase else ""
+
+
 def build_server_card(tools: list, server_info: dict, endpoint: str, publisher: str) -> dict:
     """An SEP-2127 Server Card. Tools are not a card field; they ride in ``_meta``."""
     name = server_info.get("name") or "agentavow-trust"
@@ -216,8 +234,10 @@ def build_server_card(tools: list, server_info: dict, endpoint: str, publisher: 
         "version": server_info.get("version") or "0.0.0",
         "title": "AgentAvow Trust",
         "description": (
-            "Signed, offline-verifiable safety grades for repos, packages, "
-            "and MCP servers. Read-only."
+            "Is this tool safe for your agent to connect? Safe to connect, Review "
+            "before you connect, or Do not connect, with a signed, offline-verifiable "
+            "trust score and an adoption score for repos, packages, and MCP servers. "
+            "Read-only."
         ),
         "websiteUrl": f"https://{publisher}",
         "repository": {"source": "github", "url": "https://github.com/agentgraph-co/agentgraph"},
@@ -258,8 +278,9 @@ def _scan_attestation(scan: dict, endpoint: str) -> dict | None:
         "digest": sha256_digest(raw),
         "size": len(raw),
         "description": (
-            f"AgentAvow scan verdict for mcp:{endpoint}: grade {scan.get('grade')}, "
-            f"score {scan.get('security_score')}/100, tier {scan.get('trust_tier')}. "
+            f"AgentAvow scan verdict for mcp:{endpoint}: "
+            f"{_answer_phrase(scan)}"
+            f"trust score {scan.get('security_score')}/100, tier {scan.get('trust_tier')}. "
             f"Compact JWS ({scan.get('algorithm', 'EdDSA')}, kid {scan.get('key_id')}); "
             f"verify against {scan.get('jwks_url')}. "
             f"Issued {payload.get('issuedAt', '?')}, expires {payload.get('expiresAt', '?')}. "
@@ -294,7 +315,8 @@ def build_catalog(
         "identity": identity,
         "identityType": "did",
         "trustSchema": {
-            "identifier": f"https://{publisher}/docs/safety-model",
+            # The published spec (there is no /docs/safety-model page on the site).
+            "identifier": SAFETY_MODEL_SPEC_URL,
             "version": "1",
             "governanceUri": f"https://{publisher}/docs/verify-attestations",
             "verificationMethods": ["did:web"],

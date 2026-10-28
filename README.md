@@ -6,11 +6,11 @@
 [![PyPI - agentavow-trust](https://img.shields.io/pypi/v/agentavow-trust?label=agentavow-trust&color=blue)](https://pypi.org/project/agentavow-trust/)
 [![Wellknown](https://wellknown.network/agents/agentavow-trust/badge.svg)](https://wellknown.network/agents/agentavow-trust)
 
-AgentAvow gives any tool, MCP server, package, or skill an AI agent connects to a **signed, verifiable safety grade** you can recompute offline — the "is this tool safe to connect?" layer.
+AgentAvow answers "is this tool safe for my agent to connect?" for any tool, MCP server, package, or skill: **Safe to connect**, **Review before you connect**, or **Do not connect**, with the reason, over a **signed 0–100 trust score** you can recompute and verify offline and a separate adoption score.
 
 ## MCP Server — Trust & Security for AI Agents
 
-Check the security posture of any agent or tool directly from Claude Code:
+Check whether a tool is safe before your agent connects to it, from Claude, ChatGPT, Cursor, VS Code or any MCP client. For a local install:
 
 ```bash
 pip install agentavow-trust
@@ -20,7 +20,7 @@ See [sdk/mcp-server/](sdk/mcp-server/) for setup and full tool list.
 
 ### Connect from Claude
 
-**Claude Code plugin (recommended).** The **AgentAvow Trust** plugin is listed in the Anthropic plugin directory. It bundles the MCP connector, a `/scan` command, a skill that scans a server or package before Claude adds or installs it, a SessionStart hook that grades each MCP server you have configured the first time it sees it (warn-only, fail-open), and a PreToolUse gate that checks the grade on file before each MCP tool call: it denies a call to a server in the blocked tier and asks before a tool whose definition changed since it was graded. You can also install it straight from this repo:
+**Claude Code plugin (recommended).** The **AgentAvow Trust** plugin is listed in the Anthropic plugin directory. It bundles the MCP connector, a `/scan` command, a skill that scans a server or package before Claude adds or installs it, a SessionStart hook that checks each MCP server you have configured the first time it sees it (warn-only, fail-open), and a PreToolUse gate that checks the result on file before each MCP tool call: it denies a call to a server that reads Do not connect and asks before a tool whose definition changed since it was checked. You can also install it straight from this repo:
 
 ```
 /plugin marketplace add AgentAvow/AgentAvow
@@ -34,6 +34,10 @@ Then try `/scan npm chalk`. The hook skips servers on localhost or a private net
 ```
 claude mcp add --transport http agentavow https://agentavow.com/mcp
 ```
+
+### Connect from ChatGPT
+
+AgentAvow is in the **ChatGPT plugin directory**: [add it here](https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344). It brings the same eight read-only tools and the trust card, plus a scan-before-connect skill. No sign-in.
 
 ### Connect from your editor
 
@@ -60,15 +64,15 @@ For the local stdio server instead: `pip install agentavow-trust`.
 
 ## Key Features
 
-- **Free, anonymous scanning** — Point AgentAvow at any GitHub repo, MCP server, npm or PyPI package, or OpenClaw skill (or a wallet address that resolves to one) and get a safety grade back. No account, no install. Results cache for 1 hour; `?force=true` re-scans.
-- **Two scores: trust + adoption** — Every scan returns a **0–100 trust score** (with a trust tier and a plain safe / needs-review verdict) and an **adoption score** built from real usage (downloads, stars, installs). The trust score is computed from the findings; five per-category subscores (secret hygiene, code safety, data handling, filesystem access, dependency health) are reported beside it as independent axes. Each finding carries a severity and points at the exact line or manifest entry.
+- **Free, anonymous scanning** — Point AgentAvow at any GitHub repo, MCP server, npm or PyPI package, or OpenClaw skill (or a wallet address that resolves to one) and get one of three answers back with its reason. No account, no install. Results cache for 1 hour; `?force=true` re-scans.
+- **Two scores: trust + adoption** — Every scan leads with one of three answers and its reason (Safe to connect / Review before you connect / Do not connect), then a **0–100 trust score** (with a trust tier as detail) and an **adoption score** built from real usage (downloads, stars, installs). The trust score is computed from the findings; five per-category subscores (secret hygiene, code safety, data handling, filesystem access, dependency health) are reported beside it as independent axes. Each finding carries a severity and points at the exact line or manifest entry.
 - **Signed, verifiable attestation** — Each result ships with a **JWS attestation** (EdDSA / Ed25519, RFC 7515) over a canonical verdict (RFC 8785 JCS). Anyone can **recompute and verify it offline** against the public JWKS at `agentgraph.co/.well-known/jwks.json` — the score is a product, the signature is the proof under it.
-- **Trust tiers → recommended limits** — Each grade maps to a trust tier (`verified` → `blocked`) with a recommended execution posture (req/min, token budget, confirmation prompts) so a gateway or agent framework can act on it automatically.
-- **Trust badge** — A one-line, shields.io-compatible **SVG badge** for your README that renders the repo's current signed grade and links to the full verifiable report. Served with open CORS and refreshed from the hourly scan cache, so it never goes stale.
-- **Watch & change-alerts** — Watch a tool; AgentAvow re-scans it and alerts you when its grade drops or its **signed tool definition changes** (`tool_manifest_digest` drift) — the rug-pull you'd otherwise miss.
+- **Trust tiers → recommended limits** — Each trust score maps to a trust tier (`verified` → `blocked`) with a recommended execution posture (req/min, token budget, confirmation prompts) so a gateway or agent framework can act on it automatically.
+- **Trust badge** — A one-line, shields.io-compatible **SVG badge** for your README that renders the repo's current answer and signed trust score and links to the full verifiable report. Served with open CORS and refreshed from the hourly scan cache, so it never goes stale.
+- **Watch & change-alerts** — Watch a tool; AgentAvow re-scans it and alerts you when its score drops or its **signed tool definition changes** (`tool_manifest_digest` drift) — the rug-pull you'd otherwise miss.
 - **Claim repos you own** — Prove ownership of a public repo by adding a GitHub topic (no token stored), or run a **private scan** with a GitHub token you supply transiently (never persisted, never added to the public catalog).
 - **Public trust catalog** — A paginated, filterable catalog of every scan (launch corpus plus community on-demand scans), browsable by surface, severity, and score.
-- **MCP server & CI gating** — The **AgentAvow Trust** MCP server (`agentavow-trust`) exposes scanning to Claude Code and other clients, and a GitHub Action / CLI can gate merges on a minimum grade.
+- **MCP server & CI gating** — The **AgentAvow Trust** MCP server (`agentavow-trust`) exposes scanning to Claude Code and other clients, and a GitHub Action, GitLab CI component, Bitbucket Pipe, Azure Pipelines template, or local CLI can fail a build when the answer is Do not connect (`fail_on: do_not_connect`). The npm package `agentavow-trust` adds per-call gates for the Vercel AI SDK, Flue, the Claude Agent SDK and the OpenAI Agents SDK; LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates for Python live in `src/bridges/`. For policy engines and gateways, [integrations/opa/](integrations/opa/) is an Open Policy Agent policy (with an Envoy `ext_authz` example) and [integrations/litellm/](integrations/litellm/) is a guardrail for LiteLLM's MCP gateway. A runnable rug-pull demo is in [demos/rugpull/](demos/rugpull/).
 
 ## Tech Stack
 
@@ -197,8 +201,9 @@ The public scanning API needs **no authentication**. All app endpoints use the `
 
 | Endpoint | Path | Description |
 |----------|------|-------------|
-| **Scan** | `GET /public/scan/{owner}/{repo}` | Scan a repo/tool; returns grade, tier, findings, and a signed JWS attestation. `?force=true` bypasses the 1-hour cache. |
-| **Badge** | `GET /public/scan/{owner}/{repo}/badge` | Shields-compatible **SVG** trust badge (open CORS), cached five minutes in the browser and an hour at the edge. |
+| **Scan** | `GET /public/scan/{owner}/{repo}` | Scan a repo/tool; returns the answer (`decision`) and its reason, the trust score, tier, findings, and a signed JWS attestation. `?force=true` bypasses the 1-hour cache. |
+| **Badge** | `GET /public/scan/{owner}/{repo}/badge` | 20px **SVG** README badge (open CORS): the answer, the trust bar with the score, the adoption dial with the count. `?style=card` for the 360×230 card, `?style=classic` for the previous badge, `?theme=light\|dark`. Cached an hour in the browser and a day at the edge. |
+| **Card** | `GET /public/scan/{owner}/{repo}/card.svg` | The trust card the `widget.js` embed shows. Cached five minutes in the browser and an hour at the edge. |
 | **Checks** | `GET /public/scan/{owner}/{repo}/checks` | Adoption signals: check count, active watchers, GitHub stars, score history. |
 | **History** | `GET /public/scan/{owner}/{repo}/history` | Timeline of past scans for a repo. |
 | **Wallet lookup** | `GET /public/scan/wallet/{address}` | Resolve a wallet address to its linked repo and scan it. |

@@ -9,20 +9,22 @@ AgentAvow answers one question: **is this tool safe for your agent to connect to
 | Answer | Short label | `decision` | When |
 |---|---|---|---|
 | **Safe to connect** | Safe | `safe` | nothing below applies, including a clean scan of very little code (the reason says so) |
-| **Review before you connect** | Review | `review` | a high finding, a published advisory on this version, a deprecated package, or a score under 51 |
-| **Do not connect** | Blocked | `do_not_connect` | a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package |
+| **Review before you connect** | Review | `review` | a hardcoded credential, a high finding, a published advisory on this version, a deprecated package, or a score under 51 |
+| **Do not connect** | Don't connect | `do_not_connect` | a critical finding (other than a hardcoded credential), a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package |
 
 The reason always rides next to the phrase: "one high finding: undeclared network call", "nothing found in 1,200 files", "nothing found; little code to inspect", "a planted credential left the sandbox". The API returns it as `decision_reason`.
 
 The rule, in the order it is checked (the first match wins):
 
-1. **Do not connect** — a canary credential left the [sandbox](./behavioral-sandbox.md); this version is listed as malicious (OpenSSF MAL advisory); a known-malicious dependency; a blocking critical finding in the code (shipped, installed, a defect — never a capability); any other critical sandbox finding.
-2. **Review before you connect** — a blocking high finding in the code; a high sandbox finding (undeclared network call, an internal address fetched, a read-only tool that wrote files); a published advisory that affects the scanned version; a deprecated package; or a trust score under 51.
+1. **Do not connect** — a canary credential left the [sandbox](./behavioral-sandbox.md); this version is a known-malicious package (malware advisory), from an OpenSSF MAL record or a GitHub advisory for embedded malicious code; a known-malicious dependency; a blocking critical finding in the code (shipped, installed, a defect — never a capability) other than a hardcoded credential; any other critical sandbox finding.
+2. **Review before you connect** — a hardcoded credential (an API key or token shipped in the code): it exposes the vendor whose key leaked, not you, so on its own it reads Review, with the reason "a hardcoded credential in its code (it exposes the vendor's key, not yours)" (beside any other critical finding the answer is still Do not connect); a blocking high finding in the code; a high sandbox finding (undeclared network call, an internal address fetched, a read-only tool that wrote files); a published advisory that affects the scanned version; a deprecated package; or a trust score under 51.
 3. **Safe to connect** — everything else. When fewer than 8 files were scanned and nothing critical, high or medium was found, the answer is still Safe and the reason says so: "nothing found; little code to inspect". For a remote MCP server, where we read the tool definitions it serves and not its code, the reason is "tool definitions clean; server code not inspected". The trust score stays capped at 74 (3 files or fewer) or 82 (4 to 7 files), so the thin evidence still shows in the number.
+
+"Nothing found" covers only what the scan read. When it selected something it could not read — a source file over 500 KB (an agent instruction file such as AGENTS.md or mcp.json is named on its own), a file that would not download or could not be scanned, files past the 200-file limit or the time limit, a truncated or unreadable file tree, package files skipped for size, a file a skill's instructions link to, a model's custom code, a container image layer, a skill in a collection that was not graded, a dependency file it could not fetch, a vulnerability lookup that failed, or an MCP tool list it could not read in full — a Safe reason ends with it ("nothing found in 120 files; 1 file over 500 KB was not fully read"), and every surface lists it under **Not checked**. The API returns the counts as `coverage_gaps` (signed as `scan.coverageGaps`) and the sentences as `not_checked`. These never change the score, and most never change the answer. The exception is when the scan could not read the thing it exists to read. In that case the answer is **Review before you connect**, with the reason: no code could be read at all because the file tree or every download failed, an agent instruction file was over 500 KB, a file a skill's instructions link to was not read, an MCP tool list could not be read, or a model's custom code was not read. A package that genuinely holds no code still reads Safe. Badges show a visible **partial** marker when anything was not checked.
 
 Adoption is never an input. Advisory results never count either: a live probe of a remote server, a sandbox that did not run, needed credentials or timed out adds no finding. While the sandbox is still running, the answer comes from the static scan, says "sandbox still running", and carries `decision_final: false`; it can move to Review when the run lands, shown as an update.
 
-The answer is unsigned and sits beside the signed verdict; the score, tier and findings it reads are the signed ones. Certified is a separate axis: a Certified tool reads **Safe to connect · Certified**.
+The answer is unsigned and sits beside the signed verdict; the score, tier and findings it reads are the signed ones. Certified is a separate axis: a Certified tool reads **Safe to connect · Certified**, and the mark never sits beside any other answer.
 
 ## Two separate scores
 
@@ -31,7 +33,7 @@ We publish **two** scores and never mix them:
 - **Trust** — *is it safe?* The signed 0–100 score, from static analysis + supply-chain + provenance.
 - **Adoption** — *do real, independent parties rely on it?* A distinct signal (with "rising" vs "established" states) from downloads, reverse-dependents, stars, and first-party data.
 
-A widely-adopted tool can still be a serious trust risk (bigger blast radius, not higher trust). A pristine unknown can be top-tier **Trusted** with near-zero adoption. **Popular is not the same as safe** — so adoption is never an input to the trust score, the three-phrase answer, or the safe / needs-review verdict. A CVE costs the same points in a package with 40k dependents as in one with none. Adoption is the second score, reported beside the first: it tells you how many independent parties rely on the tool, which is what is at stake if the trust score is wrong.
+A widely-adopted tool can still be a serious trust risk (bigger blast radius, not higher trust). A pristine unknown can be top-tier **Trusted** with near-zero adoption. **Popular is not the same as safe** — so adoption is never an input to the trust score or the three-phrase answer. A CVE costs the same points in a package with 40k dependents as in one with none. Adoption is the second score, reported beside the first: it tells you how many independent parties rely on the tool, which is what is at stake if the trust score is wrong.
 
 ## The trust score: 0–100
 
@@ -50,9 +52,11 @@ The tier tells a gateway how hard to throttle; the phrase tells a person what to
 
 Every static finding carries a `kind`. A **defect** is something a reviewer would agree is wrong — a shell command built from a variable, `node -e` / `python -c` with dynamic code, a `curl … | sh`, a PEM key body, a payload decoded and exec'd — and it moves the trust score. A **capability** is something the tool *does* — runs a fixed command (`git status`), evaluates its own expressions, writes a file at a path you give it, unpickles its own cache — and is listed in `capabilities` so you can see it, but it never moves the score and never blocks. A finding in a file a consumer never installs (an sdist's `Makefile`, `scripts/`, `bench/`; anything absent from the wheel) is reported with `installed: false` and is informational only.
 
-### Certified — the earned top tier
+A shell command is a **high** finding only when it is a real risk: untrusted input (a request, fetched content, a tool or bot-command parameter) is in reach of it, a decoded or fetched value builds it, or its text downloads, decodes, pipes into a shell, runs inline interpreter code or touches credential files. A shell library, test runner or REPL running a command built from its own values is a **medium** defect: reported and scored, but not on its own a reason to review.
 
-**Certified is a distinct, cryptographically-earned tier** — not just a high number. A clean 100 we only saw the *repo* for is **Trusted, not Certified**. Certification requires **all six** of:
+### Certified — a separate mark beside Safe to connect
+
+**Certified is a separate, cryptographically-earned mark** — not one of the six tiers and not just a high number; it shows beside Safe to connect. A clean 100 we only saw the *repo* for is **Trusted, not Certified**. Certification requires **all six** of:
 
 1. We scanned the **published artifact**, not just the repo.
 2. **Build provenance is verified** and cryptographically bound to the source (Sigstore / PEP-740).
@@ -60,6 +64,8 @@ Every static finding carries a `kind`. A **defect** is something a reviewer woul
 4. **Zero critical/high** findings, and no known-malicious dependency.
 5. The signed verdict **recomputes offline** against its pinned snapshots.
 6. **Complete scan** — the whole tree was read, not sampled or truncated.
+
+The **Certified mark** shows only when all six pass **and** the answer is **Safe to connect** at a trust score of **81 or above**, the sandbox result is in, and there was enough code to inspect (8 or more files), and nothing an attacker could cheaply hide from the scan went unread (a failed fetch, an MCP tool list read only in part, a skill file not read, an agent instruction file over 500 KB, or an oversized file padded with filler; a large bundled file that was read at its head and tail keeps the mark). A tool that passes the six checks but reads Review (a deprecation, an advisory against this version, a high finding, a sandbox catch) shows "Certified checks pass" on its page with the reason, not the mark. The API carries both: `certified.eligible` (the six checks, signed) and `certified_mark` (what every surface displays). Gate on `certified_mark`.
 
 Certification is **re-checked every scan and is revocable**: if provenance expires, drift appears, or a new critical lands, certification is revoked automatically. "Certified" means *currently, verifiably true* — not "was true once." It is not buyable, not self-attested, and not reachable by a repo-only scan no matter how clean.
 
@@ -95,7 +101,7 @@ Point AgentAvow at anything your agent connects to — a repo, a package on four
 - **PyPI package** (`pypi:requests`) — the published sdist/wheel: real bytes, `setup.py` install-exec, drift, and provenance.
 - **crates (Rust)** (`crates:serde`) — the published `.crate`, the real extracted tree through the same engine.
 - **Hugging Face model** (`hf:org/model`) — the model card, configs, and any custom `modeling_*.py` — **plus a census of the weight format**: pickle-backed weights (`.bin`/`.pt`/`.ckpt`) execute arbitrary code on load, so they raise an `insecure_deserialization` finding (a safetensors copy lowers it).
-- **Container image** (`docker:nginx`, `ghcr.io/org/img`) — the **image config** (runs-as-root, secrets baked into `ENV`/labels, exposed SSH, a stale base) **plus a bounded scan of the actual layer filesystem** (the same static engine over the code baked into the image, newest layers first).
+- **Container image** (`docker:nginx`, `ghcr.io/org/img`) — the **image config** (runs-as-root, secrets baked into `ENV`/labels, exposed SSH, a stale base) **plus the image's layers**, pulled within a size and time budget and checked against their digests. The same static engine reads the image author's own files (app directories, entrypoint scripts, `/etc` config; the base OS and third-party package trees are skipped). The installed packages (Debian/Ubuntu `dpkg`, Alpine `apk`, Python and npm) are checked against OSV, and only CVEs with a released fix are reported, as dependency advisories, which never decide the answer. A cosign signature or attestation on the image's digest counts as provenance. If an image is too large to read in full, the page says how many layers were read and why.
 - **MCP server** (`mcp:https://…`) — the **live tool surface** it actually serves: schema risk, hidden instructions in tool descriptions, dangerous-capability taxonomy + the lethal trifecta, annotation truthfulness.
 - **Agent Skill (OpenClaw)** (`owner/repo`) — the capability manifest: the `allowed-tools` **auto-exec grant**, always-loaded-description injection, lifecycle-hook escalation, and credential-exfil in bundled scripts.
 

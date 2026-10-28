@@ -1,5 +1,5 @@
 {
- "_doc": "Static known-good corpus (precision PR 2). Top PyPI + npm packages by downloads, pinned to one version with the archive production scans and (PyPI) the wheel whose member list is the installed surface. Archives are downloaded into a cache, verified by sha256, and NEVER executed or installed. Default expectation: no package is 'do_not_connect'. `expect` (safe|review) is recorded only after a human read the reason. Rebuild with scripts/corpus/build_manifest.py; run with scripts/corpus/run_static_corpus.py.",
+ "_doc": "Static known-good corpus (precision PR 2). Top PyPI + npm packages by downloads, pinned to one version with the archive production scans (PyPI: a wheel first, the sdist only when no wheel fits; for an sdist, the wheel whose member list is the installed surface). Archives are downloaded into a cache, verified by sha256, and NEVER executed or installed. Default expectation: no package is 'do_not_connect'. `expect` (safe|review) is recorded only after a human read the reason. Rebuild with scripts/corpus/build_manifest.py; run with scripts/corpus/run_static_corpus.py.",
  "built": "2026-10-07",
  "sources": {
   "pypi": {
@@ -22,16 +22,12 @@
    "name": "boto3",
    "version": "1.43.109",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/2a/80/0430e16c302b0d1a4ca3c8c69ffee9e4f8f2170d56162d2761b34fd512ba/boto3-1.43.109.tar.gz",
-    "sha256": "c829bc3352e1e3922d8fe1db10b697182ac411b64ce5fc3acb0a06a29837417e",
-    "size": 112661
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/a1/56/c83a8fdadf06f631d1a0c4d82fc8daa9e1a40f6354264fba20c186363f49/boto3-1.43.109-py3-none-any.whl",
     "sha256": "703a81baed186d31e27cf50065d25a9faeb704f009e7c56b0f002ca52a328896",
     "size": 140044
    },
+   "wheel": null,
    "id": "pypi/boto3",
    "source": "top-pypi-30d#1",
    "also": [
@@ -45,16 +41,12 @@
    "name": "packaging",
    "version": "26.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz",
-    "sha256": "94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79",
-    "size": 313412
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl",
     "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
     "size": 129956
    },
+   "wheel": null,
    "id": "pypi/packaging",
    "source": "top-pypi-30d#2"
   },
@@ -63,16 +55,12 @@
    "name": "typing-extensions",
    "version": "4.16.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f6/cc/6253133b5bb138fc3306cebfbda2c520f545d36b5be2c7255cc528bb45d6/typing_extensions-4.16.0.tar.gz",
-    "sha256": "dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5",
-    "size": 113555
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
     "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
     "size": 45571
    },
+   "wheel": null,
    "id": "pypi/typing-extensions",
    "source": "top-pypi-30d#3"
   },
@@ -81,16 +69,12 @@
    "name": "idna",
    "version": "3.20",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f5/08/8eea9d4b8302028f3abb2c0813953f7aec26d33b7a8960ed760e65ff29fa/idna-3.20.tar.gz",
-    "sha256": "a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44",
-    "size": 216463
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
     "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
     "size": 69583
    },
+   "wheel": null,
    "id": "pypi/idna",
    "source": "top-pypi-30d#4"
   },
@@ -99,16 +83,12 @@
    "name": "urllib3",
    "version": "2.8.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz",
-    "sha256": "63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63",
-    "size": 458972
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl",
     "sha256": "0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
     "size": 135717
    },
+   "wheel": null,
    "id": "pypi/urllib3",
    "source": "top-pypi-30d#5"
   },
@@ -117,16 +97,12 @@
    "name": "certifi",
    "version": "2026.7.22",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a3/c2/24167ea9858356b47a87a50d39908bfdb72ceeefe0041586e704e5376b3a/certifi-2026.7.22.tar.gz",
-    "sha256": "741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55",
-    "size": 138112
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl",
     "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
     "size": 136983
    },
+   "wheel": null,
    "id": "pypi/certifi",
    "source": "top-pypi-30d#6"
   },
@@ -135,16 +111,12 @@
    "name": "requests",
    "version": "2.34.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/ac/c3/e2a2b89f2d3e2179abd6d00ebd70bff6273f37fb3e0cc209f48b39d00cbf/requests-2.34.2.tar.gz",
-    "sha256": "f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed",
-    "size": 142856
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl",
     "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
     "size": 73075
    },
+   "wheel": null,
    "id": "pypi/requests",
    "source": "top-pypi-30d#7",
    "also": [
@@ -158,16 +130,12 @@
    "name": "charset-normalizer",
    "version": "3.5.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/33/1c/f41d4e74c28ab327ff3acd36053f7ea506c55872d7a90b0fa71aa3ab0c89/charset_normalizer-3.5.2.tar.gz",
-    "sha256": "39de2a259fc954455c57274dc94c79d5842774e1247a016aff30bc0efed0f4ef",
-    "size": 172659
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/fc/ad/d07d7862a62ffa6d79d68074d14823243dd235a77c45262acbf6adeb28bf/charset_normalizer-3.5.2-py3-none-any.whl",
     "sha256": "b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685",
     "size": 68872
    },
+   "wheel": null,
    "id": "pypi/charset-normalizer",
    "source": "top-pypi-30d#8"
   },
@@ -176,16 +144,12 @@
    "name": "cryptography",
    "version": "50.0.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9d/af/182eb91b0df3fe75c4d9f26fe70684569566745f6ba7e5c9c73a862c5252/cryptography-50.0.2.tar.gz",
-    "sha256": "7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5",
-    "size": 880623
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/f8/cc/1d33befb3cd7ea7e77d2d73f43f2066471da1b21f24a6156efcaabf6d2e8/cryptography-50.0.2-cp314-cp314t-win_amd64.whl",
+    "sha256": "78198641e5be9521beea5aa782bb551a58068d10e6eb04c9c680c1b69f2e7d45",
+    "size": 3795868
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/e5/56/d194340cc4a57535e82e1bee9e89667ac4b7c13b5d3f59686deae3094dd5/cryptography-50.0.2-cp311-abi3-macosx_11_0_arm64.whl",
-    "sha256": "fa8f5efb344d6908a1ce62f4a24e2e5780f825d6f53f5f50ec5ffacac72936cb",
-    "size": 3914904
-   },
+   "wheel": null,
    "id": "pypi/cryptography",
    "source": "top-pypi-30d#9",
    "also": [
@@ -199,16 +163,12 @@
    "name": "setuptools",
    "version": "84.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/6d/44/f5da03a8ef95d369145c5bb53050e7877c9f3d312e128605fd9504829143/setuptools-84.0.0.tar.gz",
-    "sha256": "f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73",
-    "size": 1168449
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl",
     "sha256": "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
     "size": 818216
    },
+   "wheel": null,
    "id": "pypi/setuptools",
    "source": "top-pypi-30d#10"
   },
@@ -217,16 +177,12 @@
    "name": "cffi",
    "version": "2.1.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz",
-    "sha256": "dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be",
-    "size": 530807
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/db/e2/7e8109f65445bdc673a7b54f02c677de462db75674220fd1335efc8eb598/cffi-2.1.1-cp311-cp311-win32.whl",
+    "sha256": "f8ec5e643a9a937f64e1999eb9f75d072263751912dc5cd06d3c85f8f44be7c3",
+    "size": 174470
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/b6/d2/2cde336b375f55c76ca670f0be3978cc048e31e24f3b4d7ce8473150a388/cffi-2.1.1-cp310-cp310-macosx_10_15_x86_64.whl",
-    "sha256": "baed1e86cc735622097354b9d1281406caf42ff42a886d29faa8e8d1630333be",
-    "size": 183779
-   },
+   "wheel": null,
    "id": "pypi/cffi",
    "source": "top-pypi-30d#11"
   },
@@ -235,16 +191,12 @@
    "name": "Pygments",
    "version": "2.21.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz",
-    "sha256": "610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c",
-    "size": 5005329
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl",
     "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
     "size": 1250147
    },
+   "wheel": null,
    "id": "pypi/pygments",
    "source": "top-pypi-30d#12"
   },
@@ -253,16 +205,12 @@
    "name": "PyYAML",
    "version": "6.0.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/pyyaml-6.0.3.tar.gz",
-    "sha256": "d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f",
-    "size": 130960
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/de/94/980b50a6531b3019e45ddeada0626d45fa85cbe22300844a7983285bed3b/pyyaml-6.0.3-cp313-cp313-win32.whl",
+    "sha256": "d0eae10f8159e8fdad514efdc92d74fd8d682c933a6dd088030f3834bc8e6b26",
+    "size": 137427
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/f4/a0/39350dd17dd6d6c6507025c0e53aef67a9293a6d37d3511f23ea510d5800/pyyaml-6.0.3-cp310-cp310-macosx_10_13_x86_64.whl",
-    "sha256": "214ed4befebe12df36bcc8bc2b64b396ca31be9304b8f59e25c11cf94a4c033b",
-    "size": 184227
-   },
+   "wheel": null,
    "id": "pypi/pyyaml",
    "source": "top-pypi-30d#13"
   },
@@ -271,16 +219,12 @@
    "name": "python-dateutil",
    "version": "2.9.0.post0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz",
-    "sha256": "37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3",
-    "size": 342432
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
     "sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427",
     "size": 229892
    },
+   "wheel": null,
    "id": "pypi/python-dateutil",
    "source": "top-pypi-30d#14"
   },
@@ -289,16 +233,12 @@
    "name": "six",
    "version": "1.17.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz",
-    "sha256": "ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81",
-    "size": 34031
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl",
     "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
     "size": 11050
    },
+   "wheel": null,
    "id": "pypi/six",
    "source": "top-pypi-30d#15"
   },
@@ -307,16 +247,12 @@
    "name": "pluggy",
    "version": "1.6.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz",
-    "sha256": "7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3",
-    "size": 69412
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl",
     "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
     "size": 20538
    },
+   "wheel": null,
    "id": "pypi/pluggy",
    "source": "top-pypi-30d#16"
   },
@@ -325,16 +261,12 @@
    "name": "botocore",
    "version": "1.43.109",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/3c/da/424aaef4727876f4095bd2c10e683bb8531ac3bea56b0b6efd29eeb57f91/botocore-1.43.109.tar.gz",
-    "sha256": "46b15bea4d942aaea6d7ab7c4b8a3a7290305064a3b41a6cb271cde9da3ba371",
-    "size": 16301678
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/7c/d7/bf9e5988baf1245f3ac373e09f3204f641e7a2db170f512f236aa90961d6/botocore-1.43.109-py3-none-any.whl",
     "sha256": "cd00edff465264fb448e36acc9ee29a828f738fff3746270b3f685a19194a5a6",
     "size": 15998671
    },
+   "wheel": null,
    "id": "pypi/botocore",
    "source": "top-pypi-30d#17"
   },
@@ -343,16 +275,12 @@
    "name": "pydantic",
    "version": "2.13.5",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/53/ef/fc4f868f4e2cee79f863883abffceff107875f569b848507319842d2a681/pydantic-2.13.5.tar.gz",
-    "sha256": "51a9c5f7b2f8e636f04c6cada605d9b6a3bf1348fdf945a3d8869b19bba0ee08",
-    "size": 845750
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/eb/47/c95ffc2009878c7aac0c5e08528022dcb885933252a88b5f170058014464/pydantic-2.13.5-py3-none-any.whl",
     "sha256": "346a034f080da3755d8e9cb5e00e8b07de1d39e4f6e2c87d8ab7cafa0b269a73",
     "size": 472589
    },
+   "wheel": null,
    "id": "pypi/pydantic",
    "source": "top-pypi-30d#18",
    "also": [
@@ -366,16 +294,12 @@
    "name": "pycparser",
    "version": "3.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/1b/7d/92392ff7815c21062bea51aa7b87d45576f649f16458d78b7cf94b9ab2e6/pycparser-3.0.tar.gz",
-    "sha256": "600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29",
-    "size": 103492
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/0c/c3/44f3fbbfa403ea2a7c779186dc20772604442dde72947e7d01069cbe98e3/pycparser-3.0-py3-none-any.whl",
     "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992",
     "size": 48172
    },
+   "wheel": null,
    "id": "pypi/pycparser",
    "source": "top-pypi-30d#19"
   },
@@ -384,16 +308,12 @@
    "name": "click",
    "version": "8.5.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c7/0e/7fa0ef50764b67090eca4114772a2abf8b6148198475e54c660b97caeee6/click-8.5.0.tar.gz",
-    "sha256": "ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34",
-    "size": 382235
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl",
     "sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
     "size": 125251
    },
+   "wheel": null,
    "id": "pypi/click",
    "source": "top-pypi-30d#20"
   },
@@ -402,16 +322,12 @@
    "name": "pydantic_core",
    "version": "2.49.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/0b/31/2de1e4f86615a3c1f598934dc9d557d473d87820c33c23582c7aaa6e145a/pydantic_core-2.49.0.tar.gz",
-    "sha256": "67440399d87a2c160ddff9dc013d12812785cfde18b648a295d57043f034a9fb",
-    "size": 500092
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/57/6e/592912b19c96b911e728813696919a2a34258f99187da1e54aa3222b06a5/pydantic_core-2.49.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+    "sha256": "62535ce2294441c986da1aeb743f7255ac99f3e0a3119bd8c44b36406d9f3721",
+    "size": 1449332
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/99/da/27fbb6465bedc6283b27773402930164b1d1014601d9267dc41ebee25dff/pydantic_core-2.49.0-cp310-cp310-macosx_10_12_x86_64.whl",
-    "sha256": "68c53d957497e4001e4104c5fb64e90239461b128de0d5151bb8bc8053d70b4a",
-    "size": 2121253
-   },
+   "wheel": null,
    "id": "pypi/pydantic-core",
    "source": "top-pypi-30d#21"
   },
@@ -420,16 +336,12 @@
    "name": "anyio",
    "version": "4.15.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a9/d2/f4d173e22df740bc37b1db102b386ba719b66e95b0f0d751f556b387e6d2/anyio-4.15.1.tar.gz",
-    "sha256": "9f28306018cbd6d329e64a36d58256edff76dd996fe423bc957326e578b82a94",
-    "size": 276966
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl",
     "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
     "size": 132079
    },
+   "wheel": null,
    "id": "pypi/anyio",
    "source": "top-pypi-30d#22"
   },
@@ -438,16 +350,12 @@
    "name": "numpy",
    "version": "2.5.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/13/01/11703282db468b85f6f7b8c7f22d058de5970d5c7e60a3a8aaa313c3de36/numpy-2.5.3.tar.gz",
-    "sha256": "df2d5874ff183595a4ba404edd04f6bd9b5505c1d7708573f6a6c17489a67563",
-    "size": 20791231
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/ab/2a/98282aa5b8f58b1157d440bb6282eed47e3632a5de53a714fbab17e659fe/numpy-2.5.3-cp313-cp313-macosx_14_0_arm64.whl",
+    "sha256": "f9a2353b37a1a9e78fd82b27ad7e2a32a2d036604d18f02b05e3136c62ca3b09",
+    "size": 5439695
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/d6/50/8fdbb16af64895706a45f06a4068e29db732ec180f3c1375f14123359138/numpy-2.5.3-cp312-cp312-macosx_10_13_x86_64.whl",
-    "sha256": "cb189f09db39283b26bfd061ec16189e14f71c6755207f72a0f7540867afe5b9",
-    "size": 16994982
-   },
+   "wheel": null,
    "id": "pypi/numpy",
    "source": "top-pypi-30d#23"
   },
@@ -456,16 +364,12 @@
    "name": "pytest",
    "version": "9.1.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz",
-    "sha256": "1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313",
-    "size": 1636369
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl",
     "sha256": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c",
     "size": 386536
    },
+   "wheel": null,
    "id": "pypi/pytest",
    "source": "top-pypi-30d#24",
    "also": [
@@ -479,16 +383,12 @@
    "name": "iniconfig",
    "version": "2.3.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/01/e1/2069291243c926a2ff1cd706c7f3eeb9b62144bf60f77c9fb9ff2fb26bd3/iniconfig-2.3.1.tar.gz",
-    "sha256": "67f4b9c50da0dedf52af349e7749a80a9057a5031199791b906c3bb3ae878960",
-    "size": 21209
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/56/43/4ca9e49d27a1fcf6bece6f6aec0ea46bb9112489b93d4b688fb415457bdb/iniconfig-2.3.1-py3-none-any.whl",
     "sha256": "9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7",
     "size": 7552
    },
+   "wheel": null,
    "id": "pypi/iniconfig",
    "source": "top-pypi-30d#25"
   },
@@ -497,16 +397,12 @@
    "name": "annotated-types",
    "version": "0.8.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/5f/56/a8120250d128bed162cd73c76d45f6ef9991f3e068f62a8ee060afa3104a/annotated_types-0.8.0.tar.gz",
-    "sha256": "13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7",
-    "size": 15893
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl",
     "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
     "size": 13427
    },
+   "wheel": null,
    "id": "pypi/annotated-types",
    "source": "top-pypi-30d#26"
   },
@@ -515,16 +411,12 @@
    "name": "h11",
    "version": "0.16.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/01/ee/02a2c011bdab74c6fb3c75474d40b3052059d95df7e73351460c8588d963/h11-0.16.0.tar.gz",
-    "sha256": "4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1",
-    "size": 101250
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl",
     "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
     "size": 37515
    },
+   "wheel": null,
    "id": "pypi/h11",
    "source": "top-pypi-30d#27"
   },
@@ -533,16 +425,12 @@
    "name": "typing-inspection",
    "version": "0.4.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a3/26/b09b8010994eccc3c09092e6b34058f36a460eea2d4c3e8b910c695975a0/typing_inspection-0.4.4.tar.gz",
-    "sha256": "547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47",
-    "size": 76928
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl",
     "sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
     "size": 14750
    },
+   "wheel": null,
    "id": "pypi/typing-inspection",
    "source": "top-pypi-30d#28"
   },
@@ -551,16 +439,12 @@
    "name": "attrs",
    "version": "26.1.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9a/8e/82a0fe20a541c03148528be8cac2408564a6c9a0cc7e9171802bc1d26985/attrs-26.1.0.tar.gz",
-    "sha256": "d03ceb89cb322a8fd706d4fb91940737b6642aa36998fe130a9bc96c985eff32",
-    "size": 952055
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/attrs-26.1.0-py3-none-any.whl",
     "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
     "size": 67548
    },
+   "wheel": null,
    "id": "pypi/attrs",
    "source": "top-pypi-30d#29"
   },
@@ -569,16 +453,12 @@
    "name": "s3transfer",
    "version": "0.19.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/76/43/35e4d8aa320bffe8287fe8f65f578fa2d2db0a64212f0e710dce58267854/s3transfer-0.19.2.tar.gz",
-    "sha256": "ba0309fd86be3c27dbf78cdd813c13c5e1df16e5874b99d2535ebbdfb9892993",
-    "size": 165592
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/bc/e7/5c595c75e9f41a44f30e526eda465ea0b4eec93470e074e4a111b253f13a/s3transfer-0.19.2-py3-none-any.whl",
     "sha256": "d8168eccca828cbb2cd573675333f3bddd254313a9c42494b84c76b539e8ba25",
     "size": 90216
    },
+   "wheel": null,
    "id": "pypi/s3transfer",
    "source": "top-pypi-30d#30"
   },
@@ -587,16 +467,12 @@
    "name": "aiobotocore",
    "version": "3.9.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a5/95/4f7e0453d5e81bdb1b40ecf09f135bb88e12ce27fdb3efa125022dcca5d7/aiobotocore-3.9.2.tar.gz",
-    "sha256": "8e32238c5bd77717ab1ac90077ff51ab141d025528115ccc7cc9b50b2d176e5f",
-    "size": 524343
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/09/ab/c8f982c4dfaab49200e31820a4ffe6275356f7dcaaa1024735d8f8b4e048/aiobotocore-3.9.2-py3-none-any.whl",
     "sha256": "363b4892423b272eb84afbb58000da0be6ccd0cf8a68b98438c957d05b841efc",
     "size": 102571
    },
+   "wheel": null,
    "id": "pypi/aiobotocore",
    "source": "top-pypi-30d#31"
   },
@@ -605,16 +481,12 @@
    "name": "protobuf",
    "version": "7.36.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d9/89/5b8517baa72f84a67b8a307ba953c91057af618bf40bf676f3c03551f8f0/protobuf-7.36.2.tar.gz",
-    "sha256": "497d0463ff3316681da6c0b9e8d06cb465d61abce00b613ab42226175644d1bb",
-    "size": 512737
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/e4/04/d52c7016b04b6c5108f26691f9d33ec82a9b65d041f1a9c771137693d618/protobuf-7.36.2-py3-none-any.whl",
     "sha256": "bdb3a345d48db958e6ce1f18e508beb0cc981d64f24088427549c866cd039f1e",
     "size": 179806
    },
+   "wheel": null,
    "id": "pypi/protobuf",
    "source": "top-pypi-30d#32"
   },
@@ -623,16 +495,12 @@
    "name": "httpx",
    "version": "0.28.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz",
-    "sha256": "75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc",
-    "size": 141406
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl",
     "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
     "size": 73517
    },
+   "wheel": null,
    "id": "pypi/httpx",
    "source": "top-pypi-30d#33",
    "also": [
@@ -646,16 +514,12 @@
    "name": "MarkupSafe",
    "version": "3.0.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/38/9b/e422a865e1d5d57d0e509b4e0bf1c1a70a7f6382c29a5aa428df994c8bc8/markupsafe-3.0.4.tar.gz",
-    "sha256": "2e9ad7dd851bf45fab9f75cbff4cb493fee9979e8d8c7c9c3ee119022518edd6",
-    "size": 153777
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/ed/85/ea548dc013962eb73653124bc595635fbf9e0fa41d1f181a967ccb784dfb/markupsafe-3.0.4-cp313-cp313-ios_13_0_x86_64_iphonesimulator.whl",
+    "sha256": "7a83aa6e4805df46fed18e989d3d16f86ef60cb50bbc8d9ce3a6be89165fbf6e",
+    "size": 11443
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/41/aa/9a65962e364bf19745f6bec7bde398fb1f5ca53ad2e734258e6198cc32ba/markupsafe-3.0.4-cp310-cp310-macosx_10_9_x86_64.whl",
-    "sha256": "dd8ea6ebee7aedbf7c749fa80521d9ccf1ba473e0d1e14805caafbaad281c889",
-    "size": 11521
-   },
+   "wheel": null,
    "id": "pypi/markupsafe",
    "source": "top-pypi-30d#34"
   },
@@ -664,16 +528,12 @@
    "name": "httpcore",
    "version": "1.0.9",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz",
-    "sha256": "6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8",
-    "size": 85484
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl",
     "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
     "size": 78784
    },
+   "wheel": null,
    "id": "pypi/httpcore",
    "source": "top-pypi-30d#35"
   },
@@ -682,16 +542,12 @@
    "name": "python-dotenv",
    "version": "1.2.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/74/26/2fbeedb218a787a5eea551c7532cac4e009f83d689dd2faa0d0353473f86/python_dotenv-1.2.4.tar.gz",
-    "sha256": "f0d53e69935a851c0dcc78f3ab7aaccd8cabef0b92382b576b824212902873c0",
-    "size": 60824
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/60/d1/38f3a3405989a89ac18390803e70c6ad7c7760da4f9b83cbeca0c44a0c72/python_dotenv-1.2.4-py3-none-any.whl",
     "sha256": "42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc",
     "size": 23266
    },
+   "wheel": null,
    "id": "pypi/python-dotenv",
    "source": "top-pypi-30d#36"
   },
@@ -700,16 +556,12 @@
    "name": "PyJWT",
    "version": "2.15.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/43/ea/5194e52748b0da83d71e082d75496eaec6e58f419f5e184786ded517e6a9/pyjwt-2.15.1.tar.gz",
-    "sha256": "4f259e80cdfb6b3fc18a7de51fd1ef9ec79652f25019bae68975ca2468a34df8",
-    "size": 121252
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/50/ca/44de4e75f8aadc457f0634be3b542815078ded46dca30efb960edeecad6e/pyjwt-2.15.1-py3-none-any.whl",
     "sha256": "42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193",
     "size": 33860
    },
+   "wheel": null,
    "id": "pypi/pyjwt",
    "source": "top-pypi-30d#37"
   },
@@ -718,16 +570,12 @@
    "name": "platformdirs",
    "version": "4.12.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/42/23/4a86fc741c38c5b69792a4ef954b281afa69bea9f083f881de1b0d23bc07/platformdirs-4.12.3.tar.gz",
-    "sha256": "427fc0bb321ae0c5b037fa03238ca74820437be162e78b4848c4d4055b9b766c",
-    "size": 59538
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/c5/9b/6ce1ead737fe496611bda600c263b9a11ae7bd8f41bb13f9bd7e0a2c37a4/platformdirs-4.12.3-py3-none-any.whl",
     "sha256": "080f3b39423b5abfca9a23d84c4e9795f54d395cd8459867a8ded44084fcd5f8",
     "size": 32493
    },
+   "wheel": null,
    "id": "pypi/platformdirs",
    "source": "top-pypi-30d#38"
   },
@@ -736,16 +584,12 @@
    "name": "fsspec",
    "version": "2026.9.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/77/cd/9be253869fc42e764de7f3dedd6969af7d44ff9c3375214a3442a6f3fc08/fsspec-2026.9.0.tar.gz",
-    "sha256": "0f08147951c8cb31d844c3547d631053b127863b60be04cf06e121333ee0e2fe",
-    "size": 333545
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/6c/c0/a98505f18594f1bce828bb159cec0fcf9860562f1a2c85913409fc8f3d9e/fsspec-2026.9.0-py3-none-any.whl",
     "sha256": "8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f",
     "size": 221738
    },
+   "wheel": null,
    "id": "pypi/fsspec",
    "source": "top-pypi-30d#39"
   },
@@ -754,16 +598,12 @@
    "name": "pandas",
    "version": "3.0.6",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e2/17/d7b106e05bfa642e8694451e7d3d759c6a241c5386a5d962e4f66c047e06/pandas-3.0.6.tar.gz",
-    "sha256": "66b07ef7315a31bfe1089cd3d71a7de781c9dca986762d0b4fe7c0ef17465d10",
-    "size": 4667686
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/c7/33/5b717af24d2f27995e51e0875a269dddd373045216e34cf62e3aa764eaa1/pandas-3.0.6-cp312-cp312-pyemscripten_2024_0_wasm32.whl",
+    "sha256": "2a8fc94be2ee5f1d86f97aacd8cc566f81680b6498e76f3007421bb5d98151bf",
+    "size": 7118499
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/7d/48/88e8d250d28efa8163294f6809a71683c7ee67f63ac7c33021c0503b3547/pandas-3.0.6-cp311-cp311-macosx_10_9_x86_64.whl",
-    "sha256": "085e3786ae6b2e82b406266bce36690f72b9dc1421903ba9296b2981a9fcf586",
-    "size": 10391798
-   },
+   "wheel": null,
    "id": "pypi/pandas",
    "source": "top-pypi-30d#40"
   },
@@ -772,16 +612,12 @@
    "name": "Jinja2",
    "version": "3.1.6",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz",
-    "sha256": "0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d",
-    "size": 245115
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl",
     "sha256": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
     "size": 134899
    },
+   "wheel": null,
    "id": "pypi/jinja2",
    "source": "top-pypi-30d#41"
   },
@@ -790,16 +626,12 @@
    "name": "jmespath",
    "version": "1.1.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d3/59/322338183ecda247fb5d1763a6cbe46eff7222eaeebafd9fa65d4bf5cb11/jmespath-1.1.0.tar.gz",
-    "sha256": "472c87d80f36026ae83c6ddd0f1d05d4e510134ed462851fd5f754c8c3cbb88d",
-    "size": 27377
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl",
     "sha256": "a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64",
     "size": 20419
    },
+   "wheel": null,
    "id": "pypi/jmespath",
    "source": "top-pypi-30d#42"
   },
@@ -808,16 +640,12 @@
    "name": "pathspec",
    "version": "1.1.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6fd36efb827202a2d997a375e160a71eb2888a925aac1/pathspec-1.1.1.tar.gz",
-    "sha256": "17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a",
-    "size": 135180
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl",
     "sha256": "a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189",
     "size": 57328
    },
+   "wheel": null,
    "id": "pypi/pathspec",
    "source": "top-pypi-30d#43"
   },
@@ -826,16 +654,12 @@
    "name": "filelock",
    "version": "4.0.12",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/53/e4/34efcb869715cf299e47d1ac7b2624d2bcb6f2d3dffc2f0abe8417f65ab2/filelock-4.0.12.tar.gz",
-    "sha256": "cf42711a7ac791818b299fab0332a088c65aeeefa36290de98db92c434303b0c",
-    "size": 253880
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/da/a1/b047e1c486a2c66283633b7dbb73872ca16ca1ce6a426f70d4d037fc8e1c/filelock-4.0.12-py3-none-any.whl",
     "sha256": "5f17ee83ecee8a6f3e389c75822fb70a1c2f0506b99438a6dffa1d56793588c8",
     "size": 111732
    },
+   "wheel": null,
    "id": "pypi/filelock",
    "source": "top-pypi-30d#44"
   },
@@ -844,16 +668,12 @@
    "name": "starlette",
    "version": "1.7.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/7b/2b/3850dc6bf7ef71b088962eba31dafc6cffd2f96e577ebb0bb316df96da3e/starlette-1.7.0.tar.gz",
-    "sha256": "c79f74ea63cff761804fbbfb182f1e0b440c2d07b164d24700c5a1bab5d6ff5d",
-    "size": 2736246
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/4e/d6/1ec1b290f9e0fb067899b61e1d37a30c923068bad260b216dbe37a7d2967/starlette-1.7.0-py3-none-any.whl",
     "sha256": "67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e",
     "size": 78980
    },
+   "wheel": null,
    "id": "pypi/starlette",
    "source": "top-pypi-30d#45"
   },
@@ -862,16 +682,12 @@
    "name": "uvicorn",
    "version": "0.54.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/da/34/30e9280707135d2cfc589dfff3cb796bd07a3aeb1a3e415ba09dd89d7bb4/uvicorn-0.54.0.tar.gz",
-    "sha256": "a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620",
-    "size": 112283
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/38/0c/b54a4fdd7f90a3af8b02ebc9ce6712c2c208b7926a2f7bad95c33ebbe943/uvicorn-0.54.0-py3-none-any.whl",
     "sha256": "505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf",
     "size": 87427
    },
+   "wheel": null,
    "id": "pypi/uvicorn",
    "source": "top-pypi-30d#46"
   },
@@ -880,16 +696,12 @@
    "name": "multidict",
    "version": "7.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c4/64/642465a4827331a98ba4ae29f97658be25d1bdcb868872a2f78f7482b507/multidict-7.0.0.tar.gz",
-    "sha256": "a7fcd089a0af2e0ef053c0d39c22c9ebf2434dddcb91034fd2f59ec99623788e",
-    "size": 280561
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/46/a4/a3e9e72ed0f99587e9e96c3de72b743e1385e5e2b15fb583d8dfc05ffffb/multidict-7.0.0-py3-none-any.whl",
     "sha256": "1ba6a45450243bd8953223adff7183fce5e3f9f3556a03bd17a674caaa046215",
     "size": 26592
    },
+   "wheel": null,
    "id": "pypi/multidict",
    "source": "top-pypi-30d#47"
   },
@@ -898,16 +710,12 @@
    "name": "jsonschema",
    "version": "4.26.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b3/fc/e067678238fa451312d4c62bf6e6cf5ec56375422aee02f9cb5f909b3047/jsonschema-4.26.0.tar.gz",
-    "sha256": "0c26707e2efad8aa1bfc5b7ce170f3fccc2e4918ff85989ba9ffa9facb2be326",
-    "size": 366583
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/69/90/f63fb5873511e014207a475e2bb4e8b2e570d655b00ac19a9a0ca0a385ee/jsonschema-4.26.0-py3-none-any.whl",
     "sha256": "d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce",
     "size": 90630
    },
+   "wheel": null,
    "id": "pypi/jsonschema",
    "source": "top-pypi-30d#48"
   },
@@ -916,16 +724,12 @@
    "name": "rpds-py",
    "version": "2026.9.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/42/68/3bd46b8a5e01d3c2ebdf9c5e9497912e3fe0cde02bac21a7130ca866e403/rpds_py-2026.9.1.tar.gz",
-    "sha256": "4793ef7f78268b124b73fa933440f01d258bbae01de9fa53e9080c9ab0425a12",
-    "size": 63948
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/19/03/11ca09099bab5f53373a80a334c424ec917c13d050760a59499d2af5171e/rpds_py-2026.9.1-cp314-cp314t-win32.whl",
+    "sha256": "bf35d0568abda97233239ce32896d3ad53fccc537832c104e30c94aa5fb93569",
+    "size": 203341
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/f5/6d/ddb8dfcf41892ba9c672d27988592c038d30db61708230313831b6780a1b/rpds_py-2026.9.1-cp311-cp311-macosx_10_12_x86_64.whl",
-    "sha256": "2711d29b653b3bce48a63d18b9c6b53274669e6d6c4094dddeb4d9a0e45128b2",
-    "size": 344947
-   },
+   "wheel": null,
    "id": "pypi/rpds-py",
    "source": "top-pypi-30d#49"
   },
@@ -934,16 +738,12 @@
    "name": "yarl",
    "version": "1.25.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/75/16/e8be8e2fb175bbf41a0680381a319f1199fae256588241a2ac8677eafb49/yarl-1.25.1.tar.gz",
-    "sha256": "03dd38de09bc213e9a8b29761eec33ee1d5318dac0e49d8af36e4d27830e23a7",
-    "size": 246245
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/54/22/318c7980066769c6bcd9221ed2248294f5698811da099013098c670565ed/yarl-1.25.1-py3-none-any.whl",
     "sha256": "681c758b0490f9e96b78e5fa8e8dc6e648e9185bb6eaebe73183c33ea0c445f3",
     "size": 63617
    },
+   "wheel": null,
    "id": "pypi/yarl",
    "source": "top-pypi-30d#50"
   },
@@ -952,16 +752,12 @@
    "name": "aiohttp",
    "version": "3.14.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/93/2f/6a91adaa2dc26877d6ed2f54c0370c8910f019db7d77c5c6a194611e93ea/aiohttp-3.14.4.tar.gz",
-    "sha256": "831fc5bd39ec2517851e348f613ddb5447a47cf4b71cb09845af7ad7ed45d8f9",
-    "size": 8077839
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/2b/27/5e1f8446545be98e9416af59c396b1ed1f9f3294afb0a40ee3a709889273/aiohttp-3.14.4-py3-none-any.whl",
     "sha256": "5c6758ba62aea282c537179cfc8474a90f2b5f7b089cc5ff66d8920d86a9bfdd",
     "size": 279487
    },
+   "wheel": null,
    "id": "pypi/aiohttp",
    "source": "top-pypi-30d#51"
   },
@@ -970,16 +766,12 @@
    "name": "rich",
    "version": "15.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz",
-    "sha256": "edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36",
-    "size": 230680
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl",
     "sha256": "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb",
     "size": 310654
    },
+   "wheel": null,
    "id": "pypi/rich",
    "source": "top-pypi-30d#52"
   },
@@ -988,16 +780,12 @@
    "name": "tomlkit",
    "version": "0.15.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/94/96/e07752635b98536177fa1f37671c8f3cdde2e724c6bcf6034b2cfb571565/tomlkit-0.15.1.tar.gz",
-    "sha256": "e25bbf38843005246210a12982776f27f99cb9be67160e14434d0c0d21ee1e97",
-    "size": 180129
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-0.15.1-py3-none-any.whl",
     "sha256": "177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304",
     "size": 49449
    },
+   "wheel": null,
    "id": "pypi/tomlkit",
    "source": "top-pypi-30d#53"
   },
@@ -1006,16 +794,12 @@
    "name": "markdown-it-py",
    "version": "4.2.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/06/ff/7841249c247aa650a76b9ee4bbaeae59370dc8bfd2f6c01f3630c35eb134/markdown_it_py-4.2.0.tar.gz",
-    "sha256": "04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49",
-    "size": 82454
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl",
     "sha256": "9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a",
     "size": 91687
    },
+   "wheel": null,
    "id": "pypi/markdown-it-py",
    "source": "top-pypi-30d#54"
   },
@@ -1024,16 +808,12 @@
    "name": "propcache",
    "version": "0.5.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b3/9a/9fbf4e4ec0c2d7f1c32519fff782ef467859b8faa9fbc5331a96f6395d43/propcache-0.5.4.tar.gz",
-    "sha256": "ff6b113f50bc066a698db5d944d2c6dc7507168dd3341e255a8892fd0715a558",
-    "size": 61545
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/f5/cd/785c64ed382f3f04201870267b02783f63b4678c2acfddc177a3ebcc2727/propcache-0.5.4-py3-none-any.whl",
     "sha256": "62c60aec739ed00124573cce1178138fd690c7676352d67a37328c1cf51d7468",
     "size": 16338
    },
+   "wheel": null,
    "id": "pypi/propcache",
    "source": "top-pypi-30d#55"
   },
@@ -1042,16 +822,12 @@
    "name": "referencing",
    "version": "0.37.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/22/f5/df4e9027acead3ecc63e50fe1e36aca1523e1719559c499951bb4b53188f/referencing-0.37.0.tar.gz",
-    "sha256": "44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8",
-    "size": 78036
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/2c/58/ca301544e1fa93ed4f80d724bf5b194f6e4b945841c5bfd555878eea9fcb/referencing-0.37.0-py3-none-any.whl",
     "sha256": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
     "size": 26766
    },
+   "wheel": null,
    "id": "pypi/referencing",
    "source": "top-pypi-30d#56"
   },
@@ -1060,16 +836,12 @@
    "name": "jsonschema-specifications",
    "version": "2025.9.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz",
-    "sha256": "b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d",
-    "size": 32855
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl",
     "sha256": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
     "size": 18437
    },
+   "wheel": null,
    "id": "pypi/jsonschema-specifications",
    "source": "top-pypi-30d#57"
   },
@@ -1078,16 +850,12 @@
    "name": "mdurl",
    "version": "0.1.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz",
-    "sha256": "bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba",
-    "size": 8729
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl",
     "sha256": "84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8",
     "size": 9979
    },
+   "wheel": null,
    "id": "pypi/mdurl",
    "source": "top-pypi-30d#58"
   },
@@ -1096,16 +864,12 @@
    "name": "pillow",
    "version": "12.3.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/1c/3d/bb7fca845737cf9d7dbde16ed1843984665ff2e0a518f5db43e77ec540b9/pillow-12.3.0.tar.gz",
-    "sha256": "3b8182a766685eaa002637e28b4ec8d6b18819a0c71f579bf0dbaa5830297cce",
-    "size": 47025035
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/c9/ac/6b11f2875f1c2ac040d84e1bbf9cf22a88038f901ca1037898b280b38365/pillow-12.3.0-cp314-cp314-win_arm64.whl",
+    "sha256": "e91206ee562682b51b98ef4b26a6ef48fd84e15fd4c4bc5ec768eb641d206838",
+    "size": 2565995
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/25/c2/669d88644cddb1485bd9534e63e8cf476c8e51cb3c3a1297677023505c0e/pillow-12.3.0-cp310-cp310-macosx_10_10_x86_64.whl",
-    "sha256": "6c0016e7b354317c4e9e525b937ac8596c38d2d232b419529b9cd7a1cd46e39a",
-    "size": 5392418
-   },
+   "wheel": null,
    "id": "pypi/pillow",
    "source": "top-pypi-30d#59"
   },
@@ -1114,16 +878,12 @@
    "name": "opentelemetry-api",
    "version": "1.45.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/2e/02/6e0ae9cc61bd3169d401077b507b3ebc344745171e1051ab430be012dcd9/opentelemetry_api-1.45.1.tar.gz",
-    "sha256": "aa38ed19bcc084ba42782a73255b3582283eced7ad6dddbd6695189e69adfb75",
-    "size": 72804
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/1e/41/f7dcf80b81ee8e71c1a2b59f14208bc723edbd89ed027a73b175abf6348e/opentelemetry_api-1.45.1-py3-none-any.whl",
     "sha256": "b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb",
     "size": 60256
    },
+   "wheel": null,
    "id": "pypi/opentelemetry-api",
    "source": "top-pypi-30d#60"
   },
@@ -1132,16 +892,12 @@
    "name": "frozenlist",
    "version": "1.8.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/2d/f5/c831fac6cc817d26fd54c7eaccd04ef7e0288806943f7cc5bbf69f3ac1f0/frozenlist-1.8.0.tar.gz",
-    "sha256": "3ede829ed8d842f6cd48fc7081d7a41001a56f1f38603f9d49bf3020d59a31ad",
-    "size": 45875
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/9a/9a/e35b4a917281c0b8419d4207f4334c8e8c5dbf4f3f5f9ada73958d937dcc/frozenlist-1.8.0-py3-none-any.whl",
     "sha256": "0c18a16eab41e82c295618a77502e17b195883241c563b00f0aa5106fc4eaa0d",
     "size": 13409
    },
+   "wheel": null,
    "id": "pypi/frozenlist",
    "source": "top-pypi-30d#61"
   },
@@ -1150,16 +906,12 @@
    "name": "tqdm",
    "version": "4.70.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz",
-    "sha256": "cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4",
-    "size": 171846
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl",
     "sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
     "size": 80199
    },
+   "wheel": null,
    "id": "pypi/tqdm",
    "source": "top-pypi-30d#62"
   },
@@ -1168,16 +920,12 @@
    "name": "pip",
    "version": "26.2.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/ae/15/4500e320e6b101ec3b719ae85b697d9940b6cda672bc555bd6016fc60c6f/pip-26.2.1.tar.gz",
-    "sha256": "f6ad667e89a1fe78046c8f13232b247200f5258d7828f3f7883d660878e0813f",
-    "size": 1848877
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl",
     "sha256": "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e",
     "size": 1816632
    },
+   "wheel": null,
    "id": "pypi/pip",
    "source": "top-pypi-30d#63"
   },
@@ -1186,16 +934,12 @@
    "name": "googleapis-common-protos",
    "version": "1.75.5",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/8d/2b/6ce81972d5c8cab9705fddce3153be63222d9e12fd96f8baba5038a744dd/googleapis_common_protos-1.75.5.tar.gz",
-    "sha256": "c7a866fc34ed29a3b10af627a4b9b1dc2433313ca6e959f0ae4feb132047ed72",
-    "size": 156513
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/65/b9/6b29500a1c581ff4d77fd83c6568d068bee06f1b139fb6eb0a4f2d4bce8a/googleapis_common_protos-1.75.5-py3-none-any.whl",
     "sha256": "d7285525c23039db98f2463e6d5a4f9b958b94d497f03a844ece3259c4e72d5d",
     "size": 307737
    },
+   "wheel": null,
    "id": "pypi/googleapis-common-protos",
    "source": "top-pypi-30d#64"
   },
@@ -1204,16 +948,12 @@
    "name": "pyasn1",
    "version": "0.6.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a4/9a/23310166d960def5897e91fe20e5b724601b02a22e84ba1f94232c0b7f67/pyasn1-0.6.4.tar.gz",
-    "sha256": "9c447d8431c947fe4c8febc4ed9e760bc29011a5b01e5c74b67025bd9fb8ce81",
-    "size": 151262
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/9a/3b/6163796d69c3977d1e4287bea4a6979161cbbdd170ebb430511e8e1999ce/pyasn1-0.6.4-py3-none-any.whl",
     "sha256": "deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b",
     "size": 84410
    },
+   "wheel": null,
    "id": "pypi/pyasn1",
    "source": "top-pypi-30d#65"
   },
@@ -1222,16 +962,12 @@
    "name": "aiosignal",
    "version": "1.4.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/61/62/06741b579156360248d1ec624842ad0edf697050bbaf7c3e46394e106ad1/aiosignal-1.4.0.tar.gz",
-    "sha256": "f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7",
-    "size": 25007
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/fb/76/641ae371508676492379f16e2fa48f4e2c11741bd63c48be4b12a6b09cba/aiosignal-1.4.0-py3-none-any.whl",
     "sha256": "053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e",
     "size": 7490
    },
+   "wheel": null,
    "id": "pypi/aiosignal",
    "source": "top-pypi-30d#66"
   },
@@ -1240,16 +976,12 @@
    "name": "aiohappyeyeballs",
    "version": "2.7.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/ce/f4/eec0465c2f67b2664688d0240b3212d5196fd89e741df67ddb81f8d35658/aiohappyeyeballs-2.7.1.tar.gz",
-    "sha256": "065665c041c42a5938ed220bdcd7230f22527fbec085e1853d2402c8a3615d9d",
-    "size": 24757
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/71/43/1947f06babed6b3f1d7f38b0c767f52df66bfb2bc10b468c4a7de9eceff2/aiohappyeyeballs-2.7.1-py3-none-any.whl",
     "sha256": "9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472",
     "size": 15038
    },
+   "wheel": null,
    "id": "pypi/aiohappyeyeballs",
    "source": "top-pypi-30d#67"
   },
@@ -1258,16 +990,12 @@
    "name": "websockets",
    "version": "17.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/01/89/3f825ab71c242fffb62ea8fe638741c290f62f8d7aadf8125ff897747af3/websockets-17.2.tar.gz",
-    "sha256": "36c2fb94c990cc2545143b12690e2de6c16300f9dbe5b4f33fa300cf57dc8792",
-    "size": 188355
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/8a/58/835cd51934d6780fa586f275b5d9901eead6d81569b4343b3767cdbaae4c/websockets-17.2-py3-none-any.whl",
     "sha256": "6aa59f0ef92e796b2db6f5f26550c4713c0e4036899fadf02f55e2ed4db0b7ae",
     "size": 211883
    },
+   "wheel": null,
    "id": "pypi/websockets",
    "source": "top-pypi-30d#68"
   },
@@ -1276,16 +1004,12 @@
    "name": "annotated-doc",
    "version": "0.0.5",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/5a/8e/38aa427ed5402449e226975b649c5dc73ccadfefeb95e6aecb8f8ea4b6b6/annotated_doc-0.0.5.tar.gz",
-    "sha256": "c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb",
-    "size": 10758
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl",
     "sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
     "size": 5302
    },
+   "wheel": null,
    "id": "pypi/annotated-doc",
    "source": "top-pypi-30d#69"
   },
@@ -1294,16 +1018,12 @@
    "name": "wrapt",
    "version": "2.5.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/3e/d2/a254a26d8ceaea87e0eee2e89fcfe53ddc1858418647493bb2937549ab6f/wrapt-2.5.0.tar.gz",
-    "sha256": "c48cdb6c904dca76d9915a579e4a5fab6b0c25f650c1019ce78a78effaf7a345",
-    "size": 183288
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/87/7d/5ed859fad4b5eddd598a846150aaab2703730ed4886c5c5e03b0df0cfdd5/wrapt-2.5.0-py3-none-any.whl",
     "sha256": "107eea1a511e98a3a5033b0c2cb403fbb37f05dee6ac1fb85c0460d311ec278c",
     "size": 81586
    },
+   "wheel": null,
    "id": "pypi/wrapt",
    "source": "top-pypi-30d#70"
   },
@@ -1312,16 +1032,12 @@
    "name": "pytz",
    "version": "2026.5",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/14/21/d83d6ef28c4c912c4bb4d1dcf591f7b8c6bde87b9c66f9f454677314e16d/pytz-2026.5.tar.gz",
-    "sha256": "fa23724b9c486543b9ff54a327ee7569ac83ade54bb9afd0fc18676620401c86",
-    "size": 318572
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/4f/ef/c66110d46fb800dda0bf33164182dfadabe26a90e4476844d502a23dca8e/pytz-2026.5-py2.py3-none-any.whl",
     "sha256": "e658af3757f9e26a9d25dd2aff38335acd92bc9104f890a894b2c1ba28311b03",
     "size": 506342
    },
+   "wheel": null,
    "id": "pypi/pytz",
    "source": "top-pypi-30d#71"
   },
@@ -1330,16 +1046,12 @@
    "name": "sniffio",
    "version": "1.3.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz",
-    "sha256": "f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc",
-    "size": 20372
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl",
     "sha256": "2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2",
     "size": 10235
    },
+   "wheel": null,
    "id": "pypi/sniffio",
    "source": "top-pypi-30d#72"
   },
@@ -1348,16 +1060,12 @@
    "name": "tzdata",
    "version": "2026.5",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d9/68/f1b440335057bfce71b6e50a9d09445aa2ecbd08359a337976627b8409e7/tzdata-2026.5.tar.gz",
-    "sha256": "8cc73c0a0bfca7dbfa59235d60b2eff82231dee33f53d206db1acd9173cfc0a7",
-    "size": 200404
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10e7ed03ab25e006cd741092b718/tzdata-2026.5-py2.py3-none-any.whl",
     "sha256": "b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac",
     "size": 347996
    },
+   "wheel": null,
    "id": "pypi/tzdata",
    "source": "top-pypi-30d#73"
   },
@@ -1366,16 +1074,12 @@
    "name": "fastapi",
    "version": "0.142.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b8/2c/d69ce63c27bf9c5e574ab425118390102924503b4b3cdf33c07a69744dd2/fastapi-0.142.4.tar.gz",
-    "sha256": "7fe2e254a0a948b88f432b02b8f627463285248233bba0998ed9640191e2ff57",
-    "size": 467841
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/75/6a/c3e85c05b2ec12e9d352b6f1700e29e0fb3f0fff2511b9c44cdf8837577d/fastapi-0.142.4-py3-none-any.whl",
     "sha256": "8a651aa071a9f92c8217cca1d0b044bf9c326f336578be0a728a1a1f22ec52d2",
     "size": 144456
    },
+   "wheel": null,
    "id": "pypi/fastapi",
    "source": "top-pypi-30d#74",
    "also": [
@@ -1389,16 +1093,12 @@
    "name": "google-auth",
    "version": "2.61.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c7/0b/9788e913f2202da49068c27ce821eebcf96319240a89d7bb11f206d6471f/google_auth-2.61.0.tar.gz",
-    "sha256": "37f0815967322e8c32b12bf422531e8b637cafdaae0acbb9141117cfe6a96f23",
-    "size": 398379
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/1e/68/c2ff6043d93fda69e5c12a834d0be3b3fa6c762e89732160532566be621b/google_auth-2.61.0-py3-none-any.whl",
     "sha256": "ca60266a37475ae68b63bac007272f46094b3d571abe92aded329b6cfb568025",
     "size": 268021
    },
+   "wheel": null,
    "id": "pypi/google-auth",
    "source": "top-pypi-30d#75",
    "also": [
@@ -1412,16 +1112,12 @@
    "name": "zipp",
    "version": "4.1.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/dc/23/655a1802fe8041302c959774ca7c80b53bc24737ff3ef45cb50ef11bd96c/zipp-4.1.1.tar.gz",
-    "sha256": "7ebb7a44c021b29fd8dbd7cce6812d0d7b5b454521f93cc71af6ccd155aaa70b",
-    "size": 27649
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/b5/98/df615823cd9419131ce19fba00de53a663794369e198aade064a244b385d/zipp-4.1.1-py3-none-any.whl",
     "sha256": "8979f52d874162f485ff2981e3891f3a3317b7a3dd43ff1e1775b9304f307a9c",
     "size": 10582
    },
+   "wheel": null,
    "id": "pypi/zipp",
    "source": "top-pypi-30d#76"
   },
@@ -1430,16 +1126,12 @@
    "name": "greenlet",
    "version": "3.5.6",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/3e/6e/0091f175ccd02b02bc8811bbcbcc6ac2e980be116e3b2f7a736ca322bf84/greenlet-3.5.6.tar.gz",
-    "sha256": "8e67c43bdfc88d5fee6db0d3e40175b362fc95fb85f0412d233b9b203c53a575",
-    "size": 207653
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/a7/4f/4af258e1ce388eb64be82d6466b7d0b3bc3eede154e14c3360a76a759b71/greenlet-3.5.6-cp310-cp310-macosx_11_0_universal2.whl",
     "sha256": "95e7c44d072db623a1aab04ce488cf9533294a77ed9d072cd503a3596f4106ac",
     "size": 292967
    },
+   "wheel": null,
    "id": "pypi/greenlet",
    "source": "top-pypi-30d#77"
   },
@@ -1448,16 +1140,12 @@
    "name": "importlib-metadata",
    "version": "9.0.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/6f/7e/1e7e8dc30634b93ebb3d58a3dea569ad146e656218d3960ab04f62047b29/importlib_metadata-9.0.1.tar.gz",
-    "sha256": "ab830580bc0ef3db61ce8fae716389e5462b67e033018bab6d8f80ef17172f99",
-    "size": 59124
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/b3/55/ecca97ae19075f1fac62def77731e7f535e6c1fb8f92ff08160c5e6dade8/importlib_metadata-9.0.1-py3-none-any.whl",
     "sha256": "bba5600596a7e21f3eef53281cf28d6a5195634d2f2b78ff9501a3272c6eaab0",
     "size": 27920
    },
+   "wheel": null,
    "id": "pypi/importlib-metadata",
    "source": "top-pypi-30d#78"
   },
@@ -1466,16 +1154,12 @@
    "name": "pydantic-settings",
    "version": "2.15.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/68/ca/31c57507b13119d7d3cfa1576dad2911a4861e3be07b579395f4e9d393f9/pydantic_settings-2.15.0.tar.gz",
-    "sha256": "694b793e84f766ba76a90ebdefc01d0a9a045dab0382bee70393da93712ad117",
-    "size": 261253
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/30/a4/2bffa9f8e804325a09867f0e9d30795c80ea9f8d62560bd1b6ad6220eb2f/pydantic_settings-2.15.0-py3-none-any.whl",
     "sha256": "0ba092c291c94baceb5eff768aa0d56400a457585bc0175925a5a5510303da42",
     "size": 69413
    },
+   "wheel": null,
    "id": "pypi/pydantic-settings",
    "source": "top-pypi-30d#79"
   },
@@ -1484,16 +1168,12 @@
    "name": "wheel",
    "version": "0.48.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d0/20/50ed6bdf27dec98b568a8ae25dc599f35baa3d9709f9e83fd1edb56b9a90/wheel-0.48.0.tar.gz",
-    "sha256": "94800765601e9171bf5d58d066e640662842bcedcbab982b2c90787a2c987322",
-    "size": 66471
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/2e/29/69cfbb602cd91690c55d38ba9fe53e6a7e76a6fa647bf38f19c138d25449/wheel-0.48.0-py3-none-any.whl",
     "sha256": "3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab",
     "size": 33320
    },
+   "wheel": null,
    "id": "pypi/wheel",
    "source": "top-pypi-30d#80"
   },
@@ -1502,16 +1182,12 @@
    "name": "tenacity",
    "version": "9.2.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/82/9e/497c1c8ebe5a5b5d1d4a7511aea22c0bb1a97e3170d98abdef0e1b34265a/tenacity-9.2.1.tar.gz",
-    "sha256": "a606b5c808d0cded4a359d5b9932d867ff2a6a6b64d37350260fd01bbdf83839",
-    "size": 58261
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/d6/26/1ff2b0721ac66a3ec5b1402b333110b352ab0a8724052ac279a7b82d40c4/tenacity-9.2.1-py3-none-any.whl",
     "sha256": "9e56f17539296baab7beabb08b92f6ee3d7be92d8be72d763360677c2ad6580e",
     "size": 32310
    },
+   "wheel": null,
    "id": "pypi/tenacity",
    "source": "top-pypi-30d#81"
   },
@@ -1520,16 +1196,12 @@
    "name": "trove-classifiers",
    "version": "2026.9.21.13",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/bf/93/af436dfaa845cab5d96f0adbc1e4f3730532d37fa249e4eb796fb1d7fc82/trove_classifiers-2026.9.21.13.tar.gz",
-    "sha256": "0a9ebc8d4e2f3e8a22848c5258033035bec17a3012ac3fea16dbaa764489eb71",
-    "size": 17085
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/30/81/0da8afb52a71d0a4f2bd3152357b1a441e393b286374802b9d3addab4ab5/trove_classifiers-2026.9.21.13-py3-none-any.whl",
     "sha256": "8b1ff4f9c191b1040b71c37f1e445ab99732911e3cd91de52838453a854d7a17",
     "size": 14232
    },
+   "wheel": null,
    "id": "pypi/trove-classifiers",
    "source": "top-pypi-30d#82"
   },
@@ -1538,16 +1210,12 @@
    "name": "python-multipart",
    "version": "0.0.32",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/5b/42/55c32bb9b12693c092ad250a0e82edb5b31ddeda6eb772de5f308b3804ad/python_multipart-0.0.32.tar.gz",
-    "sha256": "be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e",
-    "size": 46881
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/e1/04/e8135ebd1ad02c56ec633277529b2602ff99ff634be76cdba5744cf554fd/python_multipart-0.0.32-py3-none-any.whl",
     "sha256": "ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23",
     "size": 30042
    },
+   "wheel": null,
    "id": "pypi/python-multipart",
    "source": "top-pypi-30d#83"
   },
@@ -1556,16 +1224,12 @@
    "name": "pyasn1-modules",
    "version": "0.4.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e9/e6/78ebbb10a8c8e4b61a59249394a4a594c1a7af95593dc933a349c8d00964/pyasn1_modules-0.4.2.tar.gz",
-    "sha256": "677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6",
-    "size": 307892
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/47/8d/d529b5d697919ba8c11ad626e835d4039be708a35b0d22de83a269a6682c/pyasn1_modules-0.4.2-py3-none-any.whl",
     "sha256": "29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a",
     "size": 181259
    },
+   "wheel": null,
    "id": "pypi/pyasn1-modules",
    "source": "top-pypi-30d#84"
   },
@@ -1574,16 +1238,12 @@
    "name": "grpcio-status",
    "version": "1.84.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/52/45/f80309cdb6a7dbf8f65e2082dd2ddc9797ba7180516a73c54d966ba632c4/grpcio_status-1.84.0.tar.gz",
-    "sha256": "5caf28ba7184b81f618b5f7f094859fd2541bf429d2189bbbcd715c9c2cdcee2",
-    "size": 14015
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/71/c4/3a77e4273e866b1b0c412afd80882e95941a37170032b5109d847c501124/grpcio_status-1.84.0-py3-none-any.whl",
     "sha256": "0c182ca0d6e60acbfd0e14499cf39a155e4827a1c3fd9f7638e49af15a74c30a",
     "size": 14639
    },
+   "wheel": null,
    "id": "pypi/grpcio-status",
    "source": "top-pypi-30d#85"
   },
@@ -1592,16 +1252,12 @@
    "name": "pyarrow",
    "version": "25.0.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/3d/e3/27f57f80141379d60defe6703eb50a707325706f07fedfd1312c7a751995/pyarrow-25.0.1.tar.gz",
-    "sha256": "9150a83248bfed9813ea3c3af74c3856c1984d444aa28e58bf7733b9750ddf6a",
-    "size": 1201653
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/67/67/b554a8e09f3f3decccf405eb8fbe86696321cbcb5b62d18b4a5057a4c113/pyarrow-25.0.1-cp310-cp310-win_amd64.whl",
+    "sha256": "60e89d8f13861a1f7f8d950fa54aebb8023b30734d0ac51ffa80beabe2df4bba",
+    "size": 27848683
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/0a/3e/5cd70becb51e1d044c54ba5e627424a6e87df5b98008cbd22cc6abd409ca/pyarrow-25.0.1-cp310-cp310-macosx_12_0_arm64.whl",
-    "sha256": "0b1edbb2f385a6a65e9711b62ba86ac54a7816a3f8d17bb3e8a5929d65fb2485",
-    "size": 35954271
-   },
+   "wheel": null,
    "id": "pypi/pyarrow",
    "source": "top-pypi-30d#86"
   },
@@ -1610,16 +1266,12 @@
    "name": "SQLAlchemy",
    "version": "2.1.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/1f/44/311bac6b6ef81e4dfd0287d04900108b1f5c00c9761dd3c0a2b7b9d0f86b/sqlalchemy-2.1.4.tar.gz",
-    "sha256": "7bd7ad604487daa7eab8716471c29a7185f17b5287ce73bb7bc79fea050d8cfd",
-    "size": 10544216
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/f7/62/dbf11a262f6fbb41390cab2d8e47a30ec0961018b68201607b599dd489f5/sqlalchemy-2.1.4-py3-none-any.whl",
     "sha256": "0b96edcc2cd60fe1e35f67a46f4eb076e57297841b9eae949ac5f196593f00a7",
     "size": 2054935
    },
+   "wheel": null,
    "id": "pypi/sqlalchemy",
    "source": "top-pypi-30d#87"
   },
@@ -1628,16 +1280,12 @@
    "name": "hatchling",
    "version": "1.32.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f6/97/b5312f01a8c6daf729a9d272dd442e0c546dbcc630495788786c4b567ed0/hatchling-1.32.4.tar.gz",
-    "sha256": "c4468f73144c054d2aab4ef0f0378c43b9878bf07f8ffd6b79690e970d375f07",
-    "size": 58065
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/5f/80/91f51f439c05d4ec4623c22928ce16a938d6d793bf709477830823497859/hatchling-1.32.4-py3-none-any.whl",
     "sha256": "08ecf7548fb48205e7f213d70c71e67b8271b7242093dc3f1da578b42c734a2c",
     "size": 78748
    },
+   "wheel": null,
    "id": "pypi/hatchling",
    "source": "top-pypi-30d#88"
   },
@@ -1646,16 +1294,12 @@
    "name": "grpcio",
    "version": "1.84.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/3f/4f/4435c0aae54657258d9cfcba78598f3d9e5fe4c82ff18d78558567b90faf/grpcio-1.84.0.tar.gz",
-    "sha256": "19aaf172fc2edbefccce3f6e92c5150975dbe56c45744e9e87cf72ebdf85bfbe",
-    "size": 13493876
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/8c/8f/77fd4a7a913b636785479922349c4cb98d94d05d15652e556b3ca0df6663/grpcio-1.84.0-cp313-cp313-win32.whl",
+    "sha256": "70bb4ce8be0c5606bec259cbd7152374470396413b7863a658a08c849e6b29ff",
+    "size": 4477974
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/3a/4b/a0dc421d049b743093eae90caeb5dd92ced7226cd4919dc4de34c81455b6/grpcio-1.84.0-cp310-cp310-linux_armv7l.whl",
-    "sha256": "71fd60e6e426d293d0a2f685115ad0a0845117602cf13605a4be7524fb5f7bba",
-    "size": 6450049
-   },
+   "wheel": null,
    "id": "pypi/grpcio",
    "source": "top-pypi-30d#89"
   },
@@ -1664,16 +1308,12 @@
    "name": "pyparsing",
    "version": "3.3.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e4/11/b213bebff182584360cb8d17c72c1677fec5c5c228de439e63bcf8ab1c8f/pyparsing-3.3.3.tar.gz",
-    "sha256": "928ae7e20211f3b6f3915a72f06a0cfd29ab9d24279dd6346b6b1a7146397d36",
-    "size": 1050487
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/38/bb/d215ee7c73b61497b28a5503f9f53523f294fcc936762b7caf90e0c1c2b5/pyparsing-3.3.3-py3-none-any.whl",
     "sha256": "ece8c00a69cf01b45d0b1dedabb469c90d8caf996d4fda40f147627a122849a4",
     "size": 126420
    },
+   "wheel": null,
    "id": "pypi/pyparsing",
    "source": "top-pypi-30d#90"
   },
@@ -1682,16 +1322,12 @@
    "name": "lxml",
    "version": "6.1.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/23/ad/28ecd7cb894d172f3c9c80a075eeeb2017ac62e3632cee05a5f9493547eb/lxml-6.1.3.tar.gz",
-    "sha256": "45222d94ddd511536f3b2f7d9deae3b2339b4ce0f075f1ca25703b07cad9dd21",
-    "size": 4211198
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/66/0b/95e7b23fa6af8cffb958278b20f9693b5881636d6325a00d380a895fdf78/lxml-6.1.3-pp39-pypy39_pp73-win_amd64.whl",
+    "sha256": "be5346653c0b0e34be96869ff9dbeba23860156f89a2896a64c64fb419260cb6",
+    "size": 3508379
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/29/6b/a7d5c08e19a8e69887ed722fffaefdbaffc8959d5ef5c370a65e52c895ac/lxml-6.1.3-cp310-cp310-macosx_10_9_universal2.whl",
-    "sha256": "40bcbd9f94166ffe925811e730607385cec959f42fb1bb7dad83748680465221",
-    "size": 8575497
-   },
+   "wheel": null,
    "id": "pypi/lxml",
    "source": "top-pypi-30d#91"
   },
@@ -1700,16 +1336,12 @@
    "name": "jiter",
    "version": "0.17.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9c/1f/8176d92e001f86505424b41664032ae26a882bc9ca41a32c803f373f9195/jiter-0.17.0.tar.gz",
-    "sha256": "03e432f226a453851079fb84cd17c6da9991eab723e28d716f14ae3d906e0c12",
-    "size": 229037
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/be/21/5388684a5a38af3557cd9c2424b9827c71809cff24373c75ef9d0d3dfba9/jiter-0.17.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+    "sha256": "70f19a2ca8429f91e82eeffb2f51cb87bc2d6e953b009b91a92d29c3a16ccb03",
+    "size": 110459
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/e8/fb/0b68a8666a203ab349334e502285153ac97e84a1a3e2f80de8385ed0899c/jiter-0.17.0-cp310-cp310-macosx_10_12_x86_64.whl",
-    "sha256": "ed1a24005daac667d577402d75a2922f9775a165b146b883ff1ad3602d8be689",
-    "size": 290968
-   },
+   "wheel": null,
    "id": "pypi/jiter",
    "source": "top-pypi-30d#92"
   },
@@ -1718,16 +1350,12 @@
    "name": "regex",
    "version": "2026.9.29",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/fc/f2/af1da9d3ceed77bfcdce40427d49ba0be94e4fe84245e3bfef68c10e75b6/regex-2026.9.29.tar.gz",
-    "sha256": "8b5fcc4771732191b2b7d1dd68d8f0353f47f8d90b6150f6dce58bf1112442cb",
-    "size": 419199
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/cb/a1/46ba549e65562ca04608b24179b8a7bb6f146ae0e7c6d7f5e70f3339c8ba/regex-2026.9.29-cp311-cp311-win32.whl",
+    "sha256": "18ae8eed4526e35bdb754d61562b90bf5c00a67fdcf3cc1380dd59597486631b",
+    "size": 268940
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/f6/37/404442e7296554792e2de4c0c8f8b95ee491a3c227d6ff90d4cebf2dbde3/regex-2026.9.29-cp310-cp310-macosx_10_9_universal2.whl",
-    "sha256": "9916fda742cd4eede63b286f58c06718324265d727ce0856eb1aac86d0d150d6",
-    "size": 495402
-   },
+   "wheel": null,
    "id": "pypi/regex",
    "source": "top-pypi-30d#93"
   },
@@ -1736,16 +1364,12 @@
    "name": "watchfiles",
    "version": "1.3.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b3/68/e6aa0b77d217b31f8f486ec0cdfe5e00e6e38dc0be657e7d85819b9faf0a/watchfiles-1.3.0.tar.gz",
-    "sha256": "99aee4a07847c06820765fd7b1b49ceac4f3f711ccb7d104655a33231de1c207",
-    "size": 108119
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/25/9d/b9deb52f1e4528ffe44338c5ebab95c32ed79203082da661de50288e130a/watchfiles-1.3.0-cp314-cp314t-win32.whl",
+    "sha256": "81c989d7267bfb7b676cd32c83bec97914e396870983cbf493e29415037bff5e",
+    "size": 270863
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/68/fa/c0b840d5d8bafe640925408ce11095948c8945bb61be1e67d0ab629b872a/watchfiles-1.3.0-cp310-abi3-macosx_10_12_x86_64.whl",
-    "sha256": "000b9688fc8133037a8b075c8ebf98f32844ff8964dda61e85c1db547dafc441",
-    "size": 399703
-   },
+   "wheel": null,
    "id": "pypi/watchfiles",
    "source": "top-pypi-30d#94"
   },
@@ -1754,16 +1378,12 @@
    "name": "s3fs",
    "version": "2026.9.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f7/fe/ab89ab94cc1293849bc1a60876b589007bdd43f59a06ca309e717bd45dc7/s3fs-2026.9.0.tar.gz",
-    "sha256": "ec078ff0122d28fd21d36ea4987794e4f42ecd6e8785eeaa083208771c1464e5",
-    "size": 89163
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/bc/9c/15fb18bd708949dc953fe120be8d3c7a1b1b140c2592a9c81ce7961e9ecf/s3fs-2026.9.0-py3-none-any.whl",
     "sha256": "eb185fd98e20a1c9375087d9b2a6ef506f0cd01ae0c0c94efc79f88403fb81fe",
     "size": 33126
    },
+   "wheel": null,
    "id": "pypi/s3fs",
    "source": "top-pypi-30d#95"
   },
@@ -1772,16 +1392,12 @@
    "name": "ruff",
    "version": "0.16.10",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c4/49/23802c45f093eb14bde54b141d2b2f058edfa63a06db7beed047308cc08f/ruff-0.16.10.tar.gz",
-    "sha256": "eff4728c4eaae93f0955cd264d24b2ab348e74bf59986ccf282ba6dc16b3b017",
-    "size": 4958724
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/9f/16/1a5a4a2657effe4806110f2b907313802f1367fcdbb29e8122766e407fab/ruff-0.16.10-py3-none-macosx_11_0_arm64.whl",
+    "sha256": "3031a4a2e8e7b8a46f70be45f198c35a11ece509a94b80334d8d397a33c67550",
+    "size": 9774282
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/2f/21/ebce22e1d90cdb2cd691026b9c6e9bec6499f0b396089481755b5d49efff/ruff-0.16.10-py3-none-linux_armv6l.whl",
-    "sha256": "488b0fe3f3574210e5cf80d9f59b9e3ab17a127a8155de3f307b392589cfb511",
-    "size": 10095557
-   },
+   "wheel": null,
    "id": "pypi/ruff",
    "source": "top-pypi-30d#96"
   },
@@ -1790,16 +1406,12 @@
    "name": "scipy",
    "version": "1.18.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/7e/74/66de6258867beb2ef08f35f9f2ac017a52cacd5081714d239ff1a442d458/scipy-1.18.1.tar.gz",
-    "sha256": "52c4b7422442aba924d03ad4019852b08a92e64ea187b933135687bfe2747307",
-    "size": 30781235
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/9a/d7/21d890274f75ea37a8209d5519e72da3da90302e3b9fb8397a0918386a62/scipy-1.18.1-cp313-cp313-macosx_14_0_arm64.whl",
+    "sha256": "ea324d9dd34c38bfb9bec8ca4d1b407db97dbb74029f566b8e322b1b6fe56fe6",
+    "size": 20456846
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/18/f7/240c110c08693826b4513a52f5717d62ec7c7af72f2920821247c03b17b3/scipy-1.18.1-cp312-cp312-macosx_10_15_x86_64.whl",
-    "sha256": "457fd7a2a8edeb044ab6ffbc0aa03ff6cd18491356e5e0c834d76ce621b916d1",
-    "size": 31111061
-   },
+   "wheel": null,
    "id": "pypi/scipy",
    "source": "top-pypi-30d#97"
   },
@@ -1808,16 +1420,12 @@
    "name": "soupsieve",
    "version": "2.10",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/71/c3/1b817965ac12dc002d7c9cd7dfffdd7d4fbf9b45763ef2ffe7b86ee94670/soupsieve-2.10.tar.gz",
-    "sha256": "49e9380d7d2905463583bafe285e818c7366a9ed7b3aee221c1ac79c905d8bc0",
-    "size": 124337
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/66/87/5ed59e1d0290564e2027ed066c52b059892c4637741337fc0967183c8d4d/soupsieve-2.10-py3-none-any.whl",
     "sha256": "8596eb8967d744174820280fa62b4542a2e955bfaccca73ed8a13c6eb8e9b502",
     "size": 38019
    },
+   "wheel": null,
    "id": "pypi/soupsieve",
    "source": "top-pypi-30d#98"
   },
@@ -1826,16 +1434,12 @@
    "name": "beautifulsoup4",
    "version": "4.15.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/43/65/318323f98dbee45d42dff61d8f047181bc6f2268a9068cfad035a46be5af/beautifulsoup4-4.15.0.tar.gz",
-    "sha256": "288e3ca7d54b06f2ac191970bc275c1939cb46d450b255bf6718b04aa37ab4f7",
-    "size": 632571
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/88/c6/92fcd42f1ba33e1184263f25bfabf3d27c383410470f169e4b8163bf9c17/beautifulsoup4-4.15.0-py3-none-any.whl",
     "sha256": "d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9",
     "size": 109924
    },
+   "wheel": null,
    "id": "pypi/beautifulsoup4",
    "source": "top-pypi-30d#99"
   },
@@ -1844,16 +1448,12 @@
    "name": "openai",
    "version": "3.26.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b4/07/cd478a4595282ac72e31090531bb37f8a1b6fd9cb45c1da6d6215078a4d9/openai-3.26.0.tar.gz",
-    "sha256": "73b470c09cf2171dce930e36af01c6632241adda0120ad84302ad229f9130a5a",
-    "size": 1820994
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/fd/37/08c6d71d542b079364221fcbaee863ead900b53cd89db17f4bd0ec83f41a/openai-3.26.0-py3-none-any.whl",
     "sha256": "050597ff71ff4025177405a41fa4019d4f9feae5826645b63b8e35b6e9a3c88b",
     "size": 2164504
    },
+   "wheel": null,
    "id": "pypi/openai",
    "source": "top-pypi-30d#100"
   },
@@ -1862,16 +1462,12 @@
    "name": "google-api-core",
    "version": "2.41.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/0a/c7/5c90a4b12d68efe3a6c277c9d0336e3d1e7f64b41dfb780e35d0eefec77a/google_api_core-2.41.0.tar.gz",
-    "sha256": "73e89a86baef6680934adeee6fbd0ceaf20c1393ab229b2f9b34efb23b0fdef3",
-    "size": 262821
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/18/93/98877c3d38474e3c4a8f9149e4b63c31f9e474abf09def1cada7489bfeaa/google_api_core-2.41.0-py3-none-any.whl",
     "sha256": "1f3d626b7a8022dda8deef200b845057231ddc7cbf0d999026bdf61ba38d7fdf",
     "size": 215644
    },
+   "wheel": null,
    "id": "pypi/google-api-core",
    "source": "top-pypi-30d#101"
   },
@@ -1880,16 +1476,12 @@
    "name": "opentelemetry-semantic-conventions",
    "version": "0.66b1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/46/e4/dbbfb2a010c4db2224a5114638acede6fe563d33cc20fb1752cebcbe6298/opentelemetry_semantic_conventions-0.66b1.tar.gz",
-    "sha256": "497ca63bf383723411e8eaf60c8779e9877633c936bb641080adab59d0eb6ec8",
-    "size": 150250
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/bc/14/67f8aa798857f8cf686f515bf93d9bb877ce952ddc8efae0fa25b45ce0d6/opentelemetry_semantic_conventions-0.66b1-py3-none-any.whl",
     "sha256": "d4cddeb4315490b35213f55e2bdc9ac54bb1e4d318927475bed62b35545e581b",
     "size": 206279
    },
+   "wheel": null,
    "id": "pypi/opentelemetry-semantic-conventions",
    "source": "top-pypi-30d#102"
   },
@@ -1898,16 +1490,12 @@
    "name": "psutil",
    "version": "7.2.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/aa/c6/d1ddf4abb55e93cebc4f2ed8b5d6dbad109ecb8d63748dd2b20ab5e57ebe/psutil-7.2.2.tar.gz",
-    "sha256": "0746f5f8d406af344fd547f1c8daa5f5c33dbc293bb8d6a16d80b4bb88f59372",
-    "size": 493740
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/e7/36/5ee6e05c9bd427237b11b3937ad82bb8ad2752d72c6969314590dd0c2f6e/psutil-7.2.2-cp36-abi3-macosx_10_9_x86_64.whl",
+    "sha256": "ed0cace939114f62738d808fdcecd4c869222507e266e574799e9c0faa17d486",
+    "size": 129090
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/51/08/510cbdb69c25a96f4ae523f733cdc963ae654904e8db864c07585ef99875/psutil-7.2.2-cp313-cp313t-macosx_10_13_x86_64.whl",
-    "sha256": "2edccc433cbfa046b980b0df0171cd25bcaeb3a68fe9022db0979e7aa74a826b",
-    "size": 130595
-   },
+   "wheel": null,
    "id": "pypi/psutil",
    "source": "top-pypi-30d#103",
    "also": [
@@ -1921,16 +1509,12 @@
    "name": "coverage",
    "version": "7.16.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/2f/55/d1eaf3e73781174340a00dc1ba2aee8a65f82fadb18e2797b192b6b3925b/coverage-7.16.2.tar.gz",
-    "sha256": "ca64d9f1f384f151b9511bec01126072acd2f313439f8ed015a22d8790aab6fa",
-    "size": 971999
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/3f/0c/7a64e1ac90541a8edf50daef0914848011fb057a5bf55284a4811e21939a/coverage-7.16.2-py3-none-any.whl",
     "sha256": "11d28e9123a9156cb405d8d27b44256c9a58fb5decc2073a8f17862057e3aa0f",
     "size": 215754
    },
+   "wheel": null,
    "id": "pypi/coverage",
    "source": "top-pypi-30d#104"
   },
@@ -1939,16 +1523,12 @@
    "name": "openpyxl",
    "version": "3.1.5",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/3d/f9/88d94a75de065ea32619465d2f77b29a0469500e99012523b91cc4141cd1/openpyxl-3.1.5.tar.gz",
-    "sha256": "cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050",
-    "size": 186464
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl",
     "sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
     "size": 250910
    },
+   "wheel": null,
    "id": "pypi/openpyxl",
    "source": "top-pypi-30d#105"
   },
@@ -1957,16 +1537,12 @@
    "name": "et-xmlfile",
    "version": "2.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d3/38/af70d7ab1ae9d4da450eeec1fa3918940a5fafb9055e934af8d6eb0c2313/et_xmlfile-2.0.0.tar.gz",
-    "sha256": "dab3f4764309081ce75662649be815c4c9081e88f0837825f90fd28317d4da54",
-    "size": 17234
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl",
     "sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
     "size": 18059
    },
+   "wheel": null,
    "id": "pypi/et-xmlfile",
    "source": "top-pypi-30d#106"
   },
@@ -1975,16 +1551,12 @@
    "name": "tomli",
    "version": "2.5.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b0/78/9ad63712633ed3ab5cc1a648d863d7e7da371e9425e209555a0fe711b695/tomli-2.5.0.tar.gz",
-    "sha256": "264507556cd8b8c8e7c6ee037cdf443a463f03f4c958e57195e3d369711b8ff6",
-    "size": 17662
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/60/3f/3e3f8fd0919249b0200c80fbc4f9a1e70be19f9883da71dfb7f8b9ab8aca/tomli-2.5.0-py3-none-any.whl",
     "sha256": "32a7b79ac57a2e83670ce329ccf675798bc5a2094783a63676866b70503f2e2b",
     "size": 14765
    },
+   "wheel": null,
    "id": "pypi/tomli",
    "source": "top-pypi-30d#107"
   },
@@ -1993,16 +1565,12 @@
    "name": "distro",
    "version": "1.9.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz",
-    "sha256": "2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed",
-    "size": 60722
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl",
     "sha256": "7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2",
     "size": 20277
    },
+   "wheel": null,
    "id": "pypi/distro",
    "source": "top-pypi-30d#108"
   },
@@ -2011,16 +1579,12 @@
    "name": "opentelemetry-sdk",
    "version": "1.45.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a1/79/7392e21a1c8f0c61d90b223e31c7e48cb9d452e91a6b820ad24cca5f23c4/opentelemetry_sdk-1.45.1.tar.gz",
-    "sha256": "63d24a6ca645019a631e6a51999c73e93adcac1196ca640b8ae78a7cc4762bf3",
-    "size": 218324
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/95/3c/87c42b4bd6dd297536f04cd9383d212ac557ecd49f2cbdcd46da1c9ef5c8/opentelemetry_sdk-1.45.1-py3-none-any.whl",
     "sha256": "c604c11dc429810812348989115fa44bd558772a3d7442afc43d024f2c250ca4",
     "size": 140063
    },
+   "wheel": null,
    "id": "pypi/opentelemetry-sdk",
    "source": "top-pypi-30d#109"
   },
@@ -2029,16 +1593,12 @@
    "name": "shellingham",
    "version": "1.5.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz",
-    "sha256": "8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de",
-    "size": 10310
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl",
     "sha256": "7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686",
     "size": 9755
    },
+   "wheel": null,
    "id": "pypi/shellingham",
    "source": "top-pypi-30d#110"
   },
@@ -2047,16 +1607,12 @@
    "name": "mypy-extensions",
    "version": "1.1.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a2/6e/371856a3fb9d31ca8dac321cda606860fa4548858c0cc45d9d1d4ca2628b/mypy_extensions-1.1.0.tar.gz",
-    "sha256": "52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558",
-    "size": 6343
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl",
     "sha256": "1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505",
     "size": 4963
    },
+   "wheel": null,
    "id": "pypi/mypy-extensions",
    "source": "top-pypi-30d#111"
   },
@@ -2065,16 +1621,12 @@
    "name": "colorama",
    "version": "0.4.6",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz",
-    "sha256": "08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44",
-    "size": 27697
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl",
     "sha256": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
     "size": 25335
    },
+   "wheel": null,
    "id": "pypi/colorama",
    "source": "top-pypi-30d#112"
   },
@@ -2083,16 +1635,12 @@
    "name": "proto-plus",
    "version": "1.29.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/46/70/783e33ffbb4466cc154a94f79b869b92a451e2bd45605054e68ff68b7af6/proto_plus-1.29.0.tar.gz",
-    "sha256": "cfb4e62ad7e13dd18f346cabbda00cab39930d36a05791fd81ddb074d6ee884f",
-    "size": 58592
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/b1/05/a3ef5b1161498e7b5a2a60288a9cf41b9149e94555423a43ec536737ac1a/proto_plus-1.29.0-py3-none-any.whl",
     "sha256": "8acd070469a7aaf43f440b022ef9757c8cac1a9f866e933f59ae98669ddc6c8b",
     "size": 50786
    },
+   "wheel": null,
    "id": "pypi/proto-plus",
    "source": "top-pypi-30d#113"
   },
@@ -2101,16 +1649,12 @@
    "name": "typer",
    "version": "0.27.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/03/51/d33db42cc72ffd8c30777547b42d01f0cbf9d95a770457698d0174b3ed71/typer-0.27.3.tar.gz",
-    "sha256": "d0396f770a560ab1b0a8504e13b5f254b728cedb05c61cf0359e944e50ce8901",
-    "size": 205303
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/07/ea/2e31b67051e91a133189e9c000c222502ddc6969856416de0d095de4c0b0/typer-0.27.3-py3-none-any.whl",
     "sha256": "e50022f28b82a86313e54501317a1db64bf8f8d036ff8cfe5ca7e47675454aff",
     "size": 123312
    },
+   "wheel": null,
    "id": "pypi/typer",
    "source": "top-pypi-30d#114"
   },
@@ -2119,16 +1663,12 @@
    "name": "requests-oauthlib",
    "version": "2.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/42/f2/05f29bc3913aea15eb670be136045bf5c5bbf4b99ecb839da9b422bb2c85/requests-oauthlib-2.0.0.tar.gz",
-    "sha256": "b3dffaebd884d8cd778494369603a9e7b58d29111bf6b41bdc2dcd87203af4e9",
-    "size": 55650
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/3b/5d/63d4ae3b9daea098d5d6f5da83984853c1bbacd5dc826764b249fe119d24/requests_oauthlib-2.0.0-py2.py3-none-any.whl",
     "sha256": "7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36",
     "size": 24179
    },
+   "wheel": null,
    "id": "pypi/requests-oauthlib",
    "source": "top-pypi-30d#115"
   },
@@ -2137,16 +1677,12 @@
    "name": "virtualenv",
    "version": "21.14.5",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c4/f9/f323b3b6058cff3853b31cf6a49c0425ed797bf9611572ec10d065e08bac/virtualenv-21.14.5.tar.gz",
-    "sha256": "c4cb6c13e46b57225a999c7e22a09b163393878facc7ac4c059a57f46faa1647",
-    "size": 5467127
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/df/93/084f10ebbecdedf7902ed68fbecc903f0e9c5742155bfffb05eccbc071da/virtualenv-21.14.5-py3-none-any.whl",
     "sha256": "b0651e0174982bba17cc6f0aaa2ef496730cb85a3f35eb5d1119d1c904f7d1da",
     "size": 5487482
    },
+   "wheel": null,
    "id": "pypi/virtualenv",
    "source": "top-pypi-30d#116"
   },
@@ -2155,16 +1691,12 @@
    "name": "ghapi",
    "version": "2.1.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d7/87/06f5a2f26567b5d6360fbc74dfb2af49b08c664958e89ce4a1aeaa4999c2/ghapi-2.1.4.tar.gz",
-    "sha256": "100893f3ded361b2c063607d85b035ca74ad93e71e1788837c55a3972bdad733",
-    "size": 390775
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/bb/39/fa98108d2ce7a67cdec9d6b1a1d452c41a3caa6879a7ca407422ce37b8b1/ghapi-2.1.4-py3-none-any.whl",
     "sha256": "a2256802663bab9f979cad38da194eb540221cb02e069b554b22ce0a0ddb7ddc",
     "size": 391662
    },
+   "wheel": null,
    "id": "pypi/ghapi",
    "source": "top-pypi-30d#117"
   },
@@ -2173,16 +1705,12 @@
    "name": "wcwidth",
    "version": "0.9.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f0/b4/7830542634bb2d3e62aa3b586a72d5b3b6c91c3168929e7000ef3fed041d/wcwidth-0.9.2.tar.gz",
-    "sha256": "ae0ef90b90f6af38b54f1fe6d58662ec33b3cb4b8391958a62416d654231727b",
-    "size": 955039
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/9c/b4/0bfa065af506540d9d558e3e5548cff00bc1f9b24e6e2a8512498e8628de/wcwidth-0.9.2-py3-none-any.whl",
     "sha256": "89ca642c5bf0101157a09366be69fad0379db1f700ae39a920e103234573670e",
     "size": 301667
    },
+   "wheel": null,
    "id": "pypi/wcwidth",
    "source": "top-pypi-30d#118",
    "expect": "safe",
@@ -2193,16 +1721,12 @@
    "name": "cachetools",
    "version": "7.2.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/31/44/71476a5812da1ddf2c9a3efd31ae76d01480a1cf03ed13ac28aa8f2402e4/cachetools-7.2.1.tar.gz",
-    "sha256": "b1a7537025c06abf96fcc1443e496af9a3fb95e774e70e1f0af226f73f7f2dcc",
-    "size": 41357
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/f0/c9/2a61d784caf0d869a3326728c57c7203f50cc53f3cca2ee76bf924769eb4/cachetools-7.2.1-py3-none-any.whl",
     "sha256": "63aa53dfe7473c10cccdd5a01dedf76ef2c4b73a58840d9396e7d0752cbdac3b",
     "size": 17006
    },
+   "wheel": null,
    "id": "pypi/cachetools",
    "source": "top-pypi-30d#119"
   },
@@ -2211,16 +1735,12 @@
    "name": "exceptiongroup",
    "version": "1.3.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz",
-    "sha256": "8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219",
-    "size": 30371
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/8a/0e/97c33bf5009bdbac74fd2beace167cab3f978feb69cc36f1ef79360d6c4e/exceptiongroup-1.3.1-py3-none-any.whl",
     "sha256": "a7a39a3bd276781e98394987d3a5701d0c4edffb633bb7a5144577f82c773598",
     "size": 16740
    },
+   "wheel": null,
    "id": "pypi/exceptiongroup",
    "source": "top-pypi-30d#120"
   },
@@ -2229,16 +1749,12 @@
    "name": "mcp",
    "version": "2.3.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9d/8d/e0d339616f4810e9051d4aba6887afab289ab1f81875fe908b606cdfd0e3/mcp-2.3.0.tar.gz",
-    "sha256": "8b147a50441cf059dc88c684e0aeed3687f0aa0f39c6cde7b90330effd2b34d8",
-    "size": 4171955
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/20/d7/4a2878f128df729db3ca04e71bfce26405cc2e0c9ebe19c592feeb4c61b9/mcp-2.3.0-py3-none-any.whl",
     "sha256": "dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377",
     "size": 368664
    },
+   "wheel": null,
    "id": "pypi/mcp",
    "source": "top-pypi-30d#121",
    "also": [
@@ -2252,16 +1768,12 @@
    "name": "huggingface-hub",
    "version": "2.1.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/5e/58/542f21ca4af36c79b157280abc1874cd0d8dedd45a8a3554759a859abe02/huggingface_hub-2.1.1.tar.gz",
-    "sha256": "c56285bb7047ff1fe510f23be0705934fb3fd43afda75543341e6574a7e79630",
-    "size": 1037212
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/33/23/885b3a3b510c305f1d84421913935e19b6a48b93d173a0541674c1e88c2a/huggingface_hub-2.1.1-py3-none-any.whl",
     "sha256": "d76fa1d8e6a59e01f012b1d88da604c099c7a0f2e26b1cc7d708f0a4283bd2a2",
     "size": 838033
    },
+   "wheel": null,
    "id": "pypi/huggingface-hub",
    "source": "top-pypi-30d#122",
    "known_fp": {
@@ -2275,16 +1787,12 @@
    "name": "sse-starlette",
    "version": "3.5.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e4/be/0123026f719d1a7936f214a88b553bb5701e04ff2511147c1dab0c5035eb/sse_starlette-3.5.0.tar.gz",
-    "sha256": "75de713aa8a9441513cc283220826da079d982770965b951e9437720e8bafdb2",
-    "size": 36794
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/be/e4/cdda14023c316d71493bc54fdffc3dd006631b88866145c9d3cc33e0f1df/sse_starlette-3.5.0-py3-none-any.whl",
     "sha256": "3e6e1070df3f0f5d9cea81496de92dbb72f6721871d99748ece67441dd8b7997",
     "size": 17407
    },
+   "wheel": null,
    "id": "pypi/sse-starlette",
    "source": "top-pypi-30d#123"
   },
@@ -2293,16 +1801,12 @@
    "name": "truststore",
    "version": "0.10.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/53/a3/1585216310e344e8102c22482f6060c7a6ea0322b63e026372e6dcefcfd6/truststore-0.10.4.tar.gz",
-    "sha256": "9d91bd436463ad5e4ee4aba766628dd6cd7010cf3e2461756b3303710eebc301",
-    "size": 26169
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/19/97/56608b2249fe206a67cd573bc93cd9896e1efb9e98bce9c163bcdc704b88/truststore-0.10.4-py3-none-any.whl",
     "sha256": "adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981",
     "size": 18660
    },
+   "wheel": null,
    "id": "pypi/truststore",
    "source": "top-pypi-30d#124"
   },
@@ -2311,16 +1815,12 @@
    "name": "more-itertools",
    "version": "11.1.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/de/1d/f4da6f02cdffe04d6362210b807146a26044c88d839208aec273bb0d9184/more_itertools-11.1.0.tar.gz",
-    "sha256": "48e8f4d9e7e5878571ecf6f2b4e57634f93cd474cc8cfbd2376f2d11b396e30d",
-    "size": 145772
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/e8/3d/1087453384dbde46a8c7f9356eead2c58be8a7bf156bca40243377c85715/more_itertools-11.1.0-py3-none-any.whl",
     "sha256": "4b65538ae22f6fed0ce4874efd317463a7489796a0939fa66824dd542125a192",
     "size": 72226
    },
+   "wheel": null,
    "id": "pypi/more-itertools",
    "source": "top-pypi-30d#125"
   },
@@ -2329,16 +1829,12 @@
    "name": "dnspython",
    "version": "2.8.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/8c/8b/57666417c0f90f08bcafa776861060426765fdb422eb10212086fb811d26/dnspython-2.8.0.tar.gz",
-    "sha256": "181d3c6996452cb1189c4046c61599b84a5a86e099562ffde77d26984ff26d0f",
-    "size": 368251
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/ba/5a/18ad964b0086c6e62e2e7500f7edc89e3faa45033c71c1893d34eed2b2de/dnspython-2.8.0-py3-none-any.whl",
     "sha256": "01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af",
     "size": 331094
    },
+   "wheel": null,
    "id": "pypi/dnspython",
    "source": "top-pypi-30d#126"
   },
@@ -2347,16 +1843,12 @@
    "name": "oauthlib",
    "version": "4.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/7a/d8/a1bcc8ba112a627f8ffbdc212a78ce18d3ac07e91a5ca65d27918eee25a1/oauthlib-4.0.0.tar.gz",
-    "sha256": "efb274799819440f95b4ab3b818869f1ce9ae26c5beacba0201d1a1b76b54f86",
-    "size": 187232
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/d9/f4/78229a1066068ca14fc60fb26cf7381cabe4382261392b90e5f9552722d4/oauthlib-4.0.0-py3-none-any.whl",
     "sha256": "624c28c13a0a59cabf9747dfa52af63be3e512a7f2714df16e91b5b3a145e6cd",
     "size": 159715
    },
+   "wheel": null,
    "id": "pypi/oauthlib",
    "source": "top-pypi-30d#127"
   },
@@ -2365,16 +1857,12 @@
    "name": "pytest-asyncio",
    "version": "1.4.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/43/7c/d36d04db312ecf4298932ef77e6e4a9e8ad017906e24e34f0b0c361a2473/pytest_asyncio-1.4.0.tar.gz",
-    "sha256": "c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42",
-    "size": 58514
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl",
     "sha256": "933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1",
     "size": 16930
    },
+   "wheel": null,
    "id": "pypi/pytest-asyncio",
    "source": "top-pypi-30d#128"
   },
@@ -2383,16 +1871,12 @@
    "name": "httpx2",
    "version": "2.13.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d5/44/474bef2a0e9d90f1715d32cb98b0738695ca17ba324095fb2497ed7fbd59/httpx2-2.13.1.tar.gz",
-    "sha256": "e48744a19e3af5ee48313d0ce5fe941d5422fae5705ea922a4aabf94d7800dfa",
-    "size": 100405
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/d8/9c/6fe8931fd9f381042a9e4c7d5a7b4cbf7016b252bec0c99a49fce42c3326/httpx2-2.13.1-py3-none-any.whl",
     "sha256": "6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4",
     "size": 95597
    },
+   "wheel": null,
    "id": "pypi/httpx2",
    "source": "top-pypi-30d#129"
   },
@@ -2401,16 +1885,12 @@
    "name": "httpcore2",
    "version": "2.13.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz",
-    "sha256": "e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103",
-    "size": 68071
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/09/ba/a4568248771ce81957bfb7cc600264a40fbcda092391ee1c415c50be4bea/httpcore2-2.13.1-py3-none-any.whl",
     "sha256": "e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a",
     "size": 83423
    },
+   "wheel": null,
    "id": "pypi/httpcore2",
    "source": "top-pypi-30d#130"
   },
@@ -2419,16 +1899,12 @@
    "name": "distlib",
    "version": "0.4.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c9/02/bd72be9134d25ed783ecbbc38a539ffaefbf90c78418c7fb7229600dbac7/distlib-0.4.3.tar.gz",
-    "sha256": "f152097224a0ae24be5a0f6bae1b9359af82133bce63f98a95f86cae1aede9ed",
-    "size": 615141
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/02/08/9c41fb51ab5b43eb21674aff13df270e8ba6c4b29c8624e328dc7a9482af/distlib-0.4.3-py2.py3-none-any.whl",
     "sha256": "4b0ce306c966eb73bc3a7b6abad017c556dadd92c44701562cd528ac7fde4d5b",
     "size": 470628
    },
+   "wheel": null,
    "id": "pypi/distlib",
    "source": "top-pypi-30d#131"
   },
@@ -2437,16 +1913,12 @@
    "name": "editables",
    "version": "0.6",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/82/f8/02a4e9a0cb961b0feeb431ac96b231c157ecdcbbeacafe9e2fdb4b1dde39/editables-0.6.tar.gz",
-    "sha256": "1163834902381c4613787951c5914800fdf155ae08848a373b8ea5006780977c",
-    "size": 16763
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/cc/0e/d095533037fc9468f947b19f2da53f869804632b508808de41e86e801797/editables-0.6-py3-none-any.whl",
     "sha256": "d70e4698078a1d033e7786d9c64e5be070d058a67c21417024d38a58ac20aa43",
     "size": 5438
    },
+   "wheel": null,
    "id": "pypi/editables",
    "source": "top-pypi-30d#132"
   },
@@ -2455,16 +1927,12 @@
    "name": "opentelemetry-proto",
    "version": "1.45.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/4b/7f/15f014fb195da6c2dbb6c71399b8e76824878718e94de6454038488eed28/opentelemetry_proto-1.45.1.tar.gz",
-    "sha256": "79e0fb95e4616691a469439238aa9224d75779b3e108e895d1aa125ab29ca77c",
-    "size": 46488
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/ab/9a/42ec8180a769516ae757e893b69736826efceac7332553915b4528a91c6d/opentelemetry_proto-1.45.1-py3-none-any.whl",
     "sha256": "f38e2a8413053c180cd3d2637fbb279673ec2f6a6e09c995aafa2f452c52b46e",
     "size": 72488
    },
+   "wheel": null,
    "id": "pypi/opentelemetry-proto",
    "source": "top-pypi-30d#133"
   },
@@ -2473,16 +1941,12 @@
    "name": "httptools",
    "version": "0.8.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/43/e5/d471fcb0e14523fe1c3f4ba58ca52480e7bd70ad7109a3846bc75892f7fb/httptools-0.8.0.tar.gz",
-    "sha256": "6b2a32f18d97e16e90827d7a819ffa8dbd8cc245fc4e1fa9d1095b54ef4bd999",
-    "size": 271342
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/0d/66/b96623b27e51a68199ef4efdda0613cced9233fe3062ac74e50749c5ad37/httptools-0.8.0-cp313-cp313-win_amd64.whl",
+    "sha256": "7685df791fad561384bfb139e77fde27a1ffd93134e016f95a0db424ffbf77b1",
+    "size": 90117
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/40/b9/be66eb0decd730d89b9c94f930e4b8d87787b05724bb84af98bfd825f72c/httptools-0.8.0-cp310-cp310-macosx_10_9_universal2.whl",
-    "sha256": "bf3b6f807c8541503cecfbb8a8dffb385640d0d96102f3d112aa8740f9b7c826",
-    "size": 208805
-   },
+   "wheel": null,
    "id": "pypi/httptools",
    "source": "top-pypi-30d#134"
   },
@@ -2491,16 +1955,12 @@
    "name": "sortedcontainers",
    "version": "2.4.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f23394729afe52f3bf7adec04bf9ed2c820b39e19299111/sortedcontainers-2.4.0.tar.gz",
-    "sha256": "25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88",
-    "size": 30594
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl",
     "sha256": "a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0",
     "size": 29575
    },
+   "wheel": null,
    "id": "pypi/sortedcontainers",
    "source": "top-pypi-30d#135"
   },
@@ -2509,16 +1969,12 @@
    "name": "uvloop",
    "version": "0.23.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/fa/42/02c739ce85fb2ee8d99212c61417da8140c6b87e9d97c430bea520d76044/uvloop-0.23.0.tar.gz",
-    "sha256": "28d160f51ab4da3b187063652e643dea6831072add4adc1e6d62afbe73b6be27",
-    "size": 2559185
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/3b/8b/f389c19c2669ed81a7f576e654d44638a21d9bd0d61f67f62ca79d765ea5/uvloop-0.23.0-cp38-cp38-macosx_10_9_x86_64.whl",
+    "sha256": "5a3e0f56ec19bfd9ad1605572878dd6ff7f01b325f4fc154812ae70d615c3aff",
+    "size": 763637
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/5d/aa/a67389d92dc118bb6b48cb57b08bf6f24925a07e05de196e4b998c339017/uvloop-0.23.0-cp310-cp310-macosx_10_9_universal2.whl",
-    "sha256": "ce17bc317d089f361b33521654c13e30eacfd3d2034fd34e613ca9c51c969686",
-    "size": 1420655
-   },
+   "wheel": null,
    "id": "pypi/uvloop",
    "source": "top-pypi-30d#136"
   },
@@ -2527,16 +1983,12 @@
    "name": "docstring-parser",
    "version": "0.18.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e0/4d/f332313098c1de1b2d2ff91cf2674415cc7cddab2ca1b01ae29774bd5fdf/docstring_parser-0.18.0.tar.gz",
-    "sha256": "292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015",
-    "size": 29341
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/a7/5f/ed01f9a3cdffbd5a008556fc7b2a08ddb1cc6ace7effa7340604b1d16699/docstring_parser-0.18.0-py3-none-any.whl",
     "sha256": "b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b",
     "size": 22484
    },
+   "wheel": null,
    "id": "pypi/docstring-parser",
    "source": "top-pypi-30d#137"
   },
@@ -2545,16 +1997,12 @@
    "name": "psycopg2-binary",
    "version": "2.9.13",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/ed/76/7b4383014be0fcc6c1c0e24292845a14e1672cf17fca62ca0a2bd5f4563d/psycopg2_binary-2.9.13.tar.gz",
-    "sha256": "e324ecf60f952d21dd11413b8bbed0951bbd99579a06fd06f28bfc37737cd373",
-    "size": 378112
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/a5/5a/c4b1cdba78d3f60389d768db580cb9255b6bd1f01df98e5131b26322133c/psycopg2_binary-2.9.13-cp310-cp310-win_amd64.whl",
+    "sha256": "28eb30bf4a52c1117406f45771038faa96f882fdeeeb0ce43b960a1dbc6c1fd2",
+    "size": 2767600
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/4f/5d/4a82fcded401927a320ba4e0fd341f75ec7c83e92f5c1388ba27ccb21f91/psycopg2_binary-2.9.13-cp310-cp310-macosx_10_9_x86_64.whl",
-    "sha256": "c519e406287085f43aa0d3061936edf1ba51286093532f215315c6ab8ba92c3b",
-    "size": 3725660
-   },
+   "wheel": null,
    "id": "pypi/psycopg2-binary",
    "source": "top-pypi-30d#138"
   },
@@ -2563,16 +2011,12 @@
    "name": "pytest-cov",
    "version": "7.1.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b1/51/a849f96e117386044471c8ec2bd6cfebacda285da9525c9106aeb28da671/pytest_cov-7.1.0.tar.gz",
-    "sha256": "30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2",
-    "size": 55592
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/9d/7a/d968e294073affff457b041c2be9868a40c1c71f4a35fcc1e45e5493067b/pytest_cov-7.1.0-py3-none-any.whl",
     "sha256": "a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678",
     "size": 22876
    },
+   "wheel": null,
    "id": "pypi/pytest-cov",
    "source": "top-pypi-30d#139"
   },
@@ -2581,16 +2025,12 @@
    "name": "redis",
    "version": "8.1.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a8/99/604f0b666d4c616d891cf77ebb9db6bb21601344c051aebf1b72b9ff915f/redis-8.1.0.tar.gz",
-    "sha256": "6e1a19beef9225c83efd689c7e6b7da2d5215b1f42cd13b7fc3714d0a09c7b25",
-    "size": 5254356
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/66/9d/c5731f6e3608663d4d3656fd8d3aecee8b509c3082818f5a13eae925baea/redis-8.1.0-py3-none-any.whl",
     "sha256": "a4fe1aac3d3b3cc791d4b3d5931c5a956045dc951ee74d1c913ee3ac4d2ee9fb",
     "size": 560618
    },
+   "wheel": null,
    "id": "pypi/redis",
    "source": "top-pypi-30d#140"
   },
@@ -2599,16 +2039,12 @@
    "name": "networkx",
    "version": "3.7",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/dc/76/3af777226b63a5e64a6b36b1ec5855c14e2b94a37096d4760e595fc43511/networkx-3.7.tar.gz",
-    "sha256": "fd77a511bd90f39f3d016351345b52cf5319b813bdca01de3f755d3cca62e96a",
-    "size": 1866482
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/7e/cd/fe58041e9011f307c490e3e17dd48cc516448f7c698a3f2d9d9d65d7e6a8/networkx-3.7-py3-none-any.whl",
     "sha256": "e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0",
     "size": 2142205
    },
+   "wheel": null,
    "id": "pypi/networkx",
    "source": "top-pypi-30d#141"
   },
@@ -2617,16 +2053,12 @@
    "name": "opentelemetry-exporter-otlp-proto-common",
    "version": "1.45.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c1/8e/65e85e5137991a3c493b11682151d198638a5bc1dd4b4c5f67e013c57d7c/opentelemetry_exporter_otlp_proto_common-1.45.1.tar.gz",
-    "sha256": "2e4adcc3a67bcf57804fc49514f0ef64974ca7590aa3491da389852b4a0628f6",
-    "size": 18873
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/84/aa/92f225d353904e7f70b8b3e3c1b02db0cf56f744c2e83c581dc372e78873/opentelemetry_exporter_otlp_proto_common-1.45.1-py3-none-any.whl",
     "sha256": "2f446183ae7047b036226f1d846c41a834b0e8755ad13b51a51dd38952eb466c",
     "size": 15393
    },
+   "wheel": null,
    "id": "pypi/opentelemetry-exporter-otlp-proto-common",
    "source": "top-pypi-30d#142"
   },
@@ -2635,16 +2067,12 @@
    "name": "defusedxml",
    "version": "0.7.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz",
-    "sha256": "1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69",
-    "size": 75520
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl",
     "sha256": "a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61",
     "size": 25604
    },
+   "wheel": null,
    "id": "pypi/defusedxml",
    "source": "top-pypi-30d#143"
   },
@@ -2653,16 +2081,12 @@
    "name": "requests-toolbelt",
    "version": "1.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f3/61/d7545dafb7ac2230c70d38d31cbfe4cc64f7144dc41f6e4e4b78ecd9f5bb/requests-toolbelt-1.0.0.tar.gz",
-    "sha256": "7681a0a3d047012b5bdc0ee37d7f8f07ebe76ab08caeccfc3921ce23c88d5bc6",
-    "size": 206888
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/3f/51/d4db610ef29373b879047326cbf6fa98b6c1969d6f6dc423279de2b1be2c/requests_toolbelt-1.0.0-py2.py3-none-any.whl",
     "sha256": "cccfdd665f0a24fcf4726e690f65639d272bb0637b9b92dfd91a5568ccf6bd06",
     "size": 54481
    },
+   "wheel": null,
    "id": "pypi/requests-toolbelt",
    "source": "top-pypi-30d#144"
   },
@@ -2671,16 +2095,12 @@
    "name": "msgpack",
    "version": "1.2.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/0a/e7/bb605a7bab2d8425a64b3fa762b39dc1bf1c7e3f11ba6fb5413d6db0ff8c/msgpack-1.2.3.tar.gz",
-    "sha256": "32edb81a2b5eb7cd7c9d941b2bfbbb082fd2cd09e0e725930316af6b708db186",
-    "size": 196517
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/29/8c/456df77f00d701df9d6980ffb80291bce6e4e2e112e25a4dfae216f0715a/msgpack-1.2.3-cp313-cp313-pyemscripten_2025_0_wasm32.whl",
+    "sha256": "62cc1a4ef0e553bac32c8342e1f04834aca7de276b92744eb7307db77759b890",
+    "size": 53347
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/6d/aa/5b6b09f835791045282dc5d08431db599a5f4743a69fe2f6670045a2cd85/msgpack-1.2.3-cp310-cp310-macosx_10_9_x86_64.whl",
-    "sha256": "ec0030361cc861ac699b2ef1c695b741fa145c88f8667fa3d7e3f73deeb648a3",
-    "size": 90927
-   },
+   "wheel": null,
    "id": "pypi/msgpack",
    "source": "top-pypi-30d#145"
   },
@@ -2689,16 +2109,12 @@
    "name": "fonttools",
    "version": "4.66.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/87/b6/126c659ab7e0e03e01a5f5d223abf7b2c0691ae92718085a212a3924a2a3/fonttools-4.66.1.tar.gz",
-    "sha256": "64967c6ddb0d4c610dfd8cb1485981b2d27972ddfb7d4bbbd9e199d2a089c450",
-    "size": 3694174
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/f6/10/d45b74135d5d642cb3a4fb0a957c1613ef93de4c8548671dfc3a5bf38299/fonttools-4.66.1-py3-none-any.whl",
     "sha256": "7234ae9e28db64273fbbfa72caebd0a97e3bdba6b05064114741b9539ef339d0",
     "size": 1202222
    },
+   "wheel": null,
    "id": "pypi/fonttools",
    "source": "top-pypi-30d#146"
   },
@@ -2707,16 +2123,12 @@
    "name": "rsa",
    "version": "4.9.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/da/8a/22b7beea3ee0d44b1916c0c1cb0ee3af23b700b6da9f04991899d0c555d4/rsa-4.9.1.tar.gz",
-    "sha256": "e7bdbfdb5497da4c07dfd35530e1a902659db6ff241e39d9953cad06ebd0ae75",
-    "size": 29034
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/64/8d/0133e4eb4beed9e425d9a98ed6e081a55d195481b7632472be1af08d2f6b/rsa-4.9.1-py3-none-any.whl",
     "sha256": "68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762",
     "size": 34696
    },
+   "wheel": null,
    "id": "pypi/rsa",
    "source": "top-pypi-30d#147"
   },
@@ -2725,16 +2137,12 @@
    "name": "hf-xet",
    "version": "1.7.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9e/27/06d899ea7bd721d272f84aac98bdb238de98af4cc767a69056d967d68c71/hf_xet-1.7.0.tar.gz",
-    "sha256": "d406ec79053c0871817f700c2ac8c36ba0d87f9c34b7458b0f0063bb218b0466",
-    "size": 985689
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/ff/3a/5e8b363391adcbb002e191dbf924dab31464ea9c45adfeb73502afc36d35/hf_xet-1.7.0-cp314-cp314t-macosx_11_0_arm64.whl",
+    "sha256": "57bc157b8b7fe3bee9dcb9af7f3da8de41801c3b31a9ef68a77a33c6a6be382f",
+    "size": 3553588
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/9f/7c/3e45174942e6793adde6cba4daa7fb037275cf02a944d9eadfcf9ff33b86/hf_xet-1.7.0-cp314-cp314t-macosx_10_12_x86_64.whl",
-    "sha256": "fa029678be1ba7f953c409b0b27bf15cc69cd1c9b3a674fbd78856ebefca1052",
-    "size": 3803919
-   },
+   "wheel": null,
    "id": "pypi/hf-xet",
    "source": "top-pypi-30d#148"
   },
@@ -2743,16 +2151,12 @@
    "name": "Werkzeug",
    "version": "3.1.9",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a4/34/4dd12fc8bb7d61c91467ec3efe415ffa7d5456f799954b40c5bbaeae470e/werkzeug-3.1.9.tar.gz",
-    "sha256": "55ca7c70a75689be937aa27f8ff4b018f06ff4838fc73045560bf0f5a1291060",
-    "size": 940188
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/a1/38/df03f564f43cec2684823f3cccae1a652ee7face1cbaa76fb223096e64d7/werkzeug-3.1.9-py3-none-any.whl",
     "sha256": "6392e50c78460ba618e5b21f08a71f59c99ce99cdc6cf6e3dd7e6ccca8754fab",
     "size": 228700
    },
+   "wheel": null,
    "id": "pypi/werkzeug",
    "source": "top-pypi-30d#149",
    "expect": "review",
@@ -2763,16 +2167,12 @@
    "name": "scikit-learn",
    "version": "1.9.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d2/eb/eaf5e07fcc0da7149b0e084f24e54edd7441b9a89ce7e034032ae97fe3a0/scikit_learn-1.9.1.tar.gz",
-    "sha256": "629cada3e33e2b9bf376cdc7614a47a4140b8aedc1d836579e359736fbd82977",
-    "size": 7786908
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/9e/08/7a89bcdadd1fff0d464d01056417b646c9abcbc54f7297a0a1203bba5ebb/scikit_learn-1.9.1-cp313-cp313-win_arm64.whl",
+    "sha256": "613f0a783ca05aa844a4e1ac42d48425058f2c52be73f40f8cd98b7cd111acd6",
+    "size": 7875398
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/79/67/1904bf57ab9ea77b5ba3899178bcb35ff8d814fc38ef6d1283bcddeaf04a/scikit_learn-1.9.1-cp311-cp311-macosx_10_9_x86_64.whl",
-    "sha256": "326c188f92084bf58664229f4578eeab6176313b37cd5dfc85abd92b94130c58",
-    "size": 8823771
-   },
+   "wheel": null,
    "id": "pypi/scikit-learn",
    "source": "top-pypi-30d#150"
   },
@@ -2781,16 +2181,12 @@
    "name": "prompt_toolkit",
    "version": "3.0.53",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/7d/ea/39b988c938f75cb75d7045b5c69f8bfed47ee2152c8837fb403de29d6fb8/prompt_toolkit-3.0.53.tar.gz",
-    "sha256": "9ec8a0ad96d5c56148b3f914aa79c1564c3fde5d2e6b876e7bc327e353cf8fa6",
-    "size": 435492
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl",
     "sha256": "01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2",
     "size": 392288
    },
+   "wheel": null,
    "id": "pypi/prompt-toolkit",
    "source": "top-pypi-30d#151"
   },
@@ -2799,16 +2195,12 @@
    "name": "Mako",
    "version": "1.4.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/5a/09/e07c4b5579a79f4b16f8d4f29f6c54514ac787c4ad506b8c4f28a0e6b0bf/mako-1.4.3.tar.gz",
-    "sha256": "cd6537fe88d5fec315c55c2f8529bc4ce7a9a352ad7db3eeaa6a66e2dd4ec37a",
-    "size": 412799
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/6d/a0/053d6af3e8f871e0073b4a36732d9e65be77a72e5434c31b94f6af78a6bb/mako-1.4.3-py3-none-any.whl",
     "sha256": "723296007c870bfd6b3f0c3230dba7198096e5269297ebf5e4eff9e7ffa39d4f",
     "size": 80164
    },
+   "wheel": null,
    "id": "pypi/mako",
    "source": "top-pypi-30d#152"
   },
@@ -2817,16 +2209,12 @@
    "name": "orjson",
    "version": "3.13.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f2/72/380b97dc45bd162d23afe5194721ef678d9eac7cfaa549fe2873f7f0a518/orjson-3.13.0.tar.gz",
-    "sha256": "d1de5eb04485110c5da4c657e49168995d55e076b1ce60f1a042e254f4186c4f",
-    "size": 2732604
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/a9/a5/d9a44321e6f66c0f64b45be587395f87ad94cb447bce7d92286f6b97d46a/orjson-3.13.0-cp314-cp314-manylinux2014_armv7l.manylinux_2_17_armv7l.whl",
+    "sha256": "6c8bfe728b81b0fd58a3c7f3f9c5a113f87f2992c9948e0f28707aafd737c0bc",
+    "size": 113146
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/11/8c/25b6e2bd4f6b8e67a6b5acbc11a8cff4970e35c79837a24ec7db8732238d/orjson-3.13.0-cp310-cp310-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl",
-    "sha256": "4f66eac85b072092e9941c3111882afd7527bf926cbc717038fa3654b582002b",
-    "size": 223510
-   },
+   "wheel": null,
    "id": "pypi/orjson",
    "source": "top-pypi-30d#153"
   },
@@ -2835,16 +2223,12 @@
    "name": "alembic",
    "version": "1.20.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/ed/aa/02910bdb8e2f1444f6654d5b296cd827d126f82209050ee7b1000f92ac4b/alembic-1.20.0.tar.gz",
-    "sha256": "db505480647bc60386c5369402f4a57a506b7539c9e9ef5e270d45cbbe4939bf",
-    "size": 2093272
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/3f/27/78a89b55b0904d222183164e079b4ca56208e94eff1d35ad1f1ad5be9b06/alembic-1.20.0-py3-none-any.whl",
     "sha256": "77eb101048d95f982c0353e9233404889dcd7a6fc244c107836c0e2fc9cf7d9d",
     "size": 268719
    },
+   "wheel": null,
    "id": "pypi/alembic",
    "source": "top-pypi-30d#154"
   },
@@ -2853,16 +2237,12 @@
    "name": "tiktoken",
    "version": "0.14.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/66/62/167a842aa0429d45f5e797354fd4343a96f6043d67d0513c675c7b8d36e6/tiktoken-0.14.0.tar.gz",
-    "sha256": "231dec90efcdccf1b565a1416107736f1e09b1a08fe736ef9d6363e626d03874",
-    "size": 38898
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/c9/e0/c65603f0c44811def666d3fbf611bf2af3b5e1ef613e06c19411419830b3/tiktoken-0.14.0-cp313-cp313-win_amd64.whl",
+    "sha256": "90a762670c7f968184723769a06ed51f5cf5ce5dcd1e30164f25c72d85c2d1f1",
+    "size": 940883
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/5e/82/d60a7a5d7bff7b4641d556ea68ea5914ea6edc3774a12eb1c0d444701382/tiktoken-0.14.0-cp310-cp310-macosx_10_12_x86_64.whl",
-    "sha256": "3b12e54f8bec91433e41aff65d8d1f209a4f678081163747079806e5361f6c91",
-    "size": 1095817
-   },
+   "wheel": null,
    "id": "pypi/tiktoken",
    "source": "top-pypi-30d#155"
   },
@@ -2871,16 +2251,12 @@
    "name": "pyOpenSSL",
    "version": "26.4.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/3f/e8/7325d258199b159eb2c03fe32107533e2832e70e63f4fb88a6aa00023201/pyopenssl-26.4.0.tar.gz",
-    "sha256": "28dfcce0162b9211413e26dfbfdf1d24317fbeba18fc93c12400a1856b2a0bc7",
-    "size": 182046
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/51/ad/2cf6d3fa2fae5c79e1ed9960c0d42badd0f94d81dd12b50604cdc839e648/pyopenssl-26.4.0-py3-none-any.whl",
     "sha256": "f0eb0cb2d581d3ad2b9c489468485e7f2ab6727d08401bcf9d824c3caddf3c1c",
     "size": 56026
    },
+   "wheel": null,
    "id": "pypi/pyopenssl",
    "source": "top-pypi-30d#156"
   },
@@ -2889,16 +2265,12 @@
    "name": "opentelemetry-exporter-otlp-proto-http",
    "version": "1.45.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/1b/17/26487707ea4caa97b17e6e4b5fa72133a53512ffa2f5cf7a49ef284b29cb/opentelemetry_exporter_otlp_proto_http-1.45.1.tar.gz",
-    "sha256": "45c218405ce3fd879596924b1874bf9a8f6880206d61065c5a912c8e5c297fb7",
-    "size": 28839
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/aa/1f/517eaa0187ba106a9da97160ce2add3a371812681dc440930b267f714e42/opentelemetry_exporter_otlp_proto_http-1.45.1-py3-none-any.whl",
     "sha256": "24a97cf3753c7fb52fad44a696e452ff371686339e2acf3309e2eda3d0230700",
     "size": 22180
    },
+   "wheel": null,
    "id": "pypi/opentelemetry-exporter-otlp-proto-http",
    "source": "top-pypi-30d#157"
   },
@@ -2907,16 +2279,12 @@
    "name": "nodeenv",
    "version": "1.11.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9a/8e/105de02c1322cfada6d9710d9146ef8026419d433c9d08359a2d35805811/nodeenv-1.11.0.tar.gz",
-    "sha256": "3ce8fe5b71d16e8af7039ca65257354100bc772965d6bc549070649e53b1b146",
-    "size": 99301
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/54/c8/12811c9b48fde162bb72b6f2e78fada9a247a09d7bb5be2050a5d099c77b/nodeenv-1.11.0-py2.py3-none-any.whl",
     "sha256": "edaa16e6c14d7cf395d75d4bbd5a26390f4dc06501a33b4e76282b02cc688a25",
     "size": 34277
    },
+   "wheel": null,
    "id": "pypi/nodeenv",
    "source": "top-pypi-30d#158"
   },
@@ -2925,16 +2293,12 @@
    "name": "threadpoolctl",
    "version": "3.7.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/00/dc/6c58154c1c65f758ea979e7139cb76993a9cfc662d14e9be3c4a667cfb77/threadpoolctl-3.7.0.tar.gz",
-    "sha256": "61348cfb77d53b9242e0017029244b559b810c142ced65b4e21eeca1843959a7",
-    "size": 31961
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl",
     "sha256": "cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be",
     "size": 26362
    },
+   "wheel": null,
    "id": "pypi/threadpoolctl",
    "source": "top-pypi-30d#159"
   },
@@ -2943,16 +2307,12 @@
    "name": "isodate",
    "version": "0.7.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/54/4d/e940025e2ce31a8ce1202635910747e5a87cc3a6a6bb2d00973375014749/isodate-0.7.2.tar.gz",
-    "sha256": "4cd1aa0f43ca76f4a6c6c0292a85f40b35ec2e43e315b59f06e6d32171a953e6",
-    "size": 29705
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/15/aa/0aca39a37d3c7eb941ba736ede56d689e7be91cab5d9ca846bde3999eba6/isodate-0.7.2-py3-none-any.whl",
     "sha256": "28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15",
     "size": 22320
    },
+   "wheel": null,
    "id": "pypi/isodate",
    "source": "top-pypi-30d#160"
   },
@@ -2961,16 +2321,12 @@
    "name": "langchain",
    "version": "1.4.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a2/aa/0fcaf5d7dbebcf7d0eb74293dca5aee6f0558242731f4dee4a800cc2431d/langchain-1.4.3.tar.gz",
-    "sha256": "aed5c1a7cd581f70ddc076b75fdbcbae8031b8373983f86efd287aa70798abc2",
-    "size": 738607
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/30/03/8cc027f9d297473de94f134546dae2bfca255161ebbda988522fc509e1d5/langchain-1.4.3-py3-none-any.whl",
     "sha256": "0334066939dd1c7551889727ed2d09a72dea7a6aed2193ffb61817fb658d8921",
     "size": 164708
    },
+   "wheel": null,
    "id": "pypi/langchain",
    "source": "top-pypi-30d#161"
   },
@@ -2979,16 +2335,12 @@
    "name": "python-discovery",
    "version": "1.6.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/0c/57/250bd238b966cece44328235eb85290045d059265fdaf7527a3a958123db/python_discovery-1.6.1.tar.gz",
-    "sha256": "cf87d3627dfb4412437fdd5b13eae402607722998d21567993aedbc59b23c15e",
-    "size": 84338
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/16/7d/e9ffbadfbf89c93848412d04594135c4ae8c1d37d9e053b9c3ed718fabc4/python_discovery-1.6.1-py3-none-any.whl",
     "sha256": "d43fcdef879fe795352bd13ccf8d185ba5a9f86f36cfcd00529f596e737442b3",
     "size": 38664
    },
+   "wheel": null,
    "id": "pypi/python-discovery",
    "source": "top-pypi-30d#162"
   },
@@ -2997,16 +2349,12 @@
    "name": "cloudpickle",
    "version": "3.1.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/27/fb/576f067976d320f5f0114a8d9fa1215425441bb35627b1993e5afd8111e5/cloudpickle-3.1.2.tar.gz",
-    "sha256": "7fda9eb655c9c230dab534f1983763de5835249750e85fbcef43aaa30a9a2414",
-    "size": 22330
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl",
     "sha256": "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a",
     "size": 22228
    },
+   "wheel": null,
    "id": "pypi/cloudpickle",
    "source": "top-pypi-30d#163"
   },
@@ -3015,16 +2363,12 @@
    "name": "tokenizers",
    "version": "0.23.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/18/1e/bc6587c5ab643b2e17776cace9070a2ae73549c86bffac9934a600bf3c31/tokenizers-0.23.2.tar.gz",
-    "sha256": "7f0f085686b9de0d0079e6f874ae053600db64c5d13049e0bbc0119926d25aac",
-    "size": 385745
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/f3/1f/c79a01f671a49728ebb0b61f7ff9ea45663b66cab40bc0858e9859b25c16/tokenizers-0.23.2-cp310-abi3-win32.whl",
+    "sha256": "debf978920d93ba9c219bd67cc4bbfaf912c9039e41e7a28b91ec15e3728c95a",
+    "size": 2592809
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/4d/ed/8a443528baa6fac8dfe8c3b75b038c63ac92bb539bcabe311e227c718173/tokenizers-0.23.2-cp310-abi3-macosx_10_12_x86_64.whl",
-    "sha256": "85a9a357a3764aecc904ee76bdaf8cf1ad8e5a67a1b929a487c4a39b49ed0e90",
-    "size": 3148852
-   },
+   "wheel": null,
    "id": "pypi/tokenizers",
    "source": "top-pypi-30d#164"
   },
@@ -3033,16 +2377,12 @@
    "name": "PyNaCl",
    "version": "1.6.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d9/9a/4019b524b03a13438637b11538c82781a5eda427394380381af8f04f467a/pynacl-1.6.2.tar.gz",
-    "sha256": "018494d6d696ae03c7e656e5e74cdfd8ea1326962cc401bcf018f1ed8436811c",
-    "size": 3511692
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/29/7d/5945b5af29534641820d3bd7b00962abbbdfee84ec7e19f0d5b3175f9a31/pynacl-1.6.2-cp38-abi3-win_arm64.whl",
+    "sha256": "834a43af110f743a754448463e8fd61259cd4ab5bbedcf70f9dabad1d28a394c",
+    "size": 184801
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/4b/79/0e3c34dc3c4671f67d251c07aa8eb100916f250ee470df230b0ab89551b4/pynacl-1.6.2-cp314-cp314t-macosx_10_10_universal2.whl",
-    "sha256": "622d7b07cc5c02c666795792931b50c91f3ce3c2649762efb1ef0d5684c81594",
-    "size": 390064
-   },
+   "wheel": null,
    "id": "pypi/pynacl",
    "source": "top-pypi-30d#165"
   },
@@ -3051,16 +2391,12 @@
    "name": "chardet",
    "version": "7.6.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/b1/51/cd61c567092a6cec796144510a68aff158ebfc1df82950a45bae65f28413/chardet-7.6.0.tar.gz",
-    "sha256": "93d9df6089ded42ed1fe9f57e272c0b74bd0464d45c0c7d50f09f26f31105c3c",
-    "size": 914462
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/cf/6e/5a0b348fa4cd7847567a28c6e697ccf58391960bfd13a6e7473ee23ca2f2/chardet-7.6.0-py3-none-any.whl",
     "sha256": "4076d795897ce45239825956a1334e134322ecc4bfe84dbb12acd5390de0fbc1",
     "size": 680279
    },
+   "wheel": null,
    "id": "pypi/chardet",
    "source": "top-pypi-30d#166"
   },
@@ -3069,16 +2405,12 @@
    "name": "websocket-client",
    "version": "1.9.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d8/cb/a5abcc2891249f393827c650c6296660ce40374ac22d99ab9aea41f9d2a2/websocket_client-1.9.2.tar.gz",
-    "sha256": "0fcb57545848be86992e128218fd96dd87a6769ffdb1a968dff79632b85604d0",
-    "size": 84110
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/d5/d2/cc4dc1271e464942db7ee278baae2daa99ee77cb2af744025c04da585a3e/websocket_client-1.9.2-py3-none-any.whl",
     "sha256": "e1a673830a9c7bfa47b1cd3d5e4178f4c9651d80a4eab02c9c23a1c3ec6250ce",
     "size": 95786
    },
+   "wheel": null,
    "id": "pypi/websocket-client",
    "source": "top-pypi-30d#167"
   },
@@ -3087,16 +2419,12 @@
    "name": "joblib",
    "version": "1.6.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d5/1d/537ab090f302b838943a1b56497dd53059b9a9b46a074936470173a2e207/joblib-1.6.0.tar.gz",
-    "sha256": "2ccc96785b12046c08fd6d55839c12857831b54a3c1673ffadd2f04bfc4eda03",
-    "size": 327903
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl",
     "sha256": "3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba",
     "size": 306115
    },
+   "wheel": null,
    "id": "pypi/joblib",
    "source": "top-pypi-30d#168"
   },
@@ -3105,16 +2433,12 @@
    "name": "matplotlib",
    "version": "3.11.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e7/c8/9aa712a0afb882649424dd8de8ad9aa6235e796e84c6052e8f6dc1598d0d/matplotlib-3.11.2.tar.gz",
-    "sha256": "cec596316640f2b394b8f0daa0ea61a8eae82d017b620b9f202befb972a59ea4",
-    "size": 32660610
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/49/c1/13b70871c98d7e93f0d2ed71f226b8d6f873f1372124046068a6b4902fb5/matplotlib-3.11.2-cp311-cp311-win_arm64.whl",
+    "sha256": "57b9ea60a835937c2012861923cbb91f47db8565775d326d1c42fc926aa10351",
+    "size": 9023542
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/c0/a9/a7fc5a63c427aeb9a4b99d6a0449f891be0952d3aee2b85229099f7b9f54/matplotlib-3.11.2-cp311-cp311-macosx_10_12_x86_64.whl",
-    "sha256": "5e1e923a3fc3326b99ec0a6ff1ab1338ac6c6cc62ad9d8a9c944197c7f8c6221",
-    "size": 9461046
-   },
+   "wheel": null,
    "id": "pypi/matplotlib",
    "source": "top-pypi-30d#169"
   },
@@ -3123,16 +2447,12 @@
    "name": "tzlocal",
    "version": "5.4.4",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/81/5b/879b2f932adfa7a053c360d50bc896c977fa6426109185f7c12ebdd0cb9d/tzlocal-5.4.4.tar.gz",
-    "sha256": "8dbb8660838688a7b6ba4fed31d18dedf842afb4d47ca050d6d891c2c15f3be4",
-    "size": 31170
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/9e/a4/017a7a6cbe387d961a688ec31364ae60a5c4e22c96ae9921b79a947c855d/tzlocal-5.4.4-py3-none-any.whl",
     "sha256": "aae09f0126a8a86fa736be266eb4a471380d26a0de3bc14844e7821fee3e2a15",
     "size": 18115
    },
+   "wheel": null,
    "id": "pypi/tzlocal",
    "source": "top-pypi-30d#170"
   },
@@ -3141,16 +2461,12 @@
    "name": "email-validator",
    "version": "2.3.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/f5/22/900cb125c76b7aaa450ce02fd727f452243f2e91a61af068b40adba60ea9/email_validator-2.3.0.tar.gz",
-    "sha256": "9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426",
-    "size": 51238
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/de/15/545e2b6cf2e3be84bc1ed85613edd75b8aea69807a71c26f4ca6a9258e82/email_validator-2.3.0-py3-none-any.whl",
     "sha256": "80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4",
     "size": 35604
    },
+   "wheel": null,
    "id": "pypi/email-validator",
    "source": "top-pypi-30d#171"
   },
@@ -3159,16 +2475,12 @@
    "name": "GitPython",
    "version": "3.2.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/6e/2d/6f6e649818da44d4499604802c89329b8d9799687a124e3a5e467a643336/gitpython-3.2.0.tar.gz",
-    "sha256": "fb92310af6844d96adc95ca066ed2e617c00e1dbd146a326626c81e72e18cc2e",
-    "size": 238091
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/fa/48/f36d233ce749d1bb880cb5e6f8bb171dc2effabc7435c31da604d831b3ec/gitpython-3.2.0-py3-none-any.whl",
     "sha256": "bd70c5ec05cd2b797423e7eb312147d2458d3cca92085888fba2213f85905537",
     "size": 228537
    },
+   "wheel": null,
    "id": "pypi/gitpython",
    "source": "top-pypi-30d#172"
   },
@@ -3177,16 +2489,12 @@
    "name": "azure-core",
    "version": "1.41.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a6/f3/b416179e408990df5db0d516283022dde0f5d0111d98c1a848e41853e81c/azure_core-1.41.0.tar.gz",
-    "sha256": "f46ff5dfcd230f25cf1c19e8a34b8dc08a337b2503e268bb600a16c00db8ad5a",
-    "size": 381042
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/5b/db/325c6d7312d2200251c52323878281045aaffcb5586612296484e4280eaa/azure_core-1.41.0-py3-none-any.whl",
     "sha256": "522b4011e8180b1a3dcd2024396a4e7fe9ac37fb8597db47163d230b5efe892d",
     "size": 220920
    },
+   "wheel": null,
    "id": "pypi/azure-core",
    "source": "top-pypi-30d#173"
   },
@@ -3195,16 +2503,12 @@
    "name": "mypy",
    "version": "2.4.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/34/4e/64300736cf0a0373a27b94a91b664ee7382e36f77b0621bae6381da3e180/mypy-2.4.0.tar.gz",
-    "sha256": "77bdaebd452f43fcfc4cc3ba94352a3ea537cd01e3f2d0879f48673d2ec00d6e",
-    "size": 4064425
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/81/12/46ae8670c98a3cd0286ca5645c2f918f8f6be65edfed81b916010619f668/mypy-2.4.0-py3-none-any.whl",
     "sha256": "d01c5d26a352acc6d5cf3128225477e1e8465e8d3029d4c345807fbf7f3cf093",
     "size": 2800734
    },
+   "wheel": null,
    "id": "pypi/mypy",
    "source": "top-pypi-30d#174"
   },
@@ -3213,16 +2517,12 @@
    "name": "itsdangerous",
    "version": "2.2.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9c/cb/8ac0172223afbccb63986cc25049b154ecfb5e85932587206f42317be31d/itsdangerous-2.2.0.tar.gz",
-    "sha256": "e0050c0b7da1eea53ffaf149c0cfbb5c6e2e2b69c4bef22c81fa6eb73e5f6173",
-    "size": 54410
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/04/96/92447566d16df59b2a776c0fb82dbc4d9e07cd95062562af01e408583fc4/itsdangerous-2.2.0-py3-none-any.whl",
     "sha256": "c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef",
     "size": 16234
    },
+   "wheel": null,
    "id": "pypi/itsdangerous",
    "source": "top-pypi-30d#175"
   },
@@ -3231,16 +2531,12 @@
    "name": "google-cloud-core",
    "version": "2.8.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/55/71/d6081acadf55d4233271c39860f0d140ef61fbdb4bceb2075e9c2905d947/google_cloud_core-2.8.0.tar.gz",
-    "sha256": "365f8e4518ae81c8101b8dea5fc1c32a960badedb8b511f19db2843cbbd285d2",
-    "size": 36605
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/12/ed/1b09640a565e5d34d4e517463f65a67a11f9dcdeb6b6e8220f2d06aaf489/google_cloud_core-2.8.0-py3-none-any.whl",
     "sha256": "e235b0952f7ffe7b9c71a4cf96b506d9cfb557e22557c412f0df9b7068b5d007",
     "size": 31048
    },
+   "wheel": null,
    "id": "pypi/google-cloud-core",
    "source": "top-pypi-30d#176"
   },
@@ -3249,16 +2545,12 @@
    "name": "zstandard",
    "version": "0.25.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/fd/aa/3e0508d5a5dd96529cdc5a97011299056e14c6505b678fd58938792794b1/zstandard-0.25.0.tar.gz",
-    "sha256": "7713e1179d162cf5c7906da876ec2ccb9c3a9dcbdffef0cc7f70c3667a205f0b",
-    "size": 711513
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/b8/e9/29cc59d4a9d51b3fd8b477d858d0bd7ab627f700908bf1517f46ddd470ae/zstandard-0.25.0-cp39-cp39-win32.whl",
+    "sha256": "1cd5da4d8e8ee0e88be976c294db744773459d51bb32f707a0f166e5ad5c8649",
+    "size": 436460
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/56/7a/28efd1d371f1acd037ac64ed1c5e2b41514a6cc937dd6ab6a13ab9f0702f/zstandard-0.25.0-cp310-cp310-macosx_10_9_x86_64.whl",
-    "sha256": "e59fdc271772f6686e01e1b3b74537259800f57e24280be3f29c8a0deb1904dd",
-    "size": 795256
-   },
+   "wheel": null,
    "id": "pypi/zstandard",
    "source": "top-pypi-30d#177"
   },
@@ -3267,16 +2559,12 @@
    "name": "httpx-sse",
    "version": "0.4.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/0f/4c/751061ffa58615a32c31b2d82e8482be8dd4a89154f003147acee90f2be9/httpx_sse-0.4.3.tar.gz",
-    "sha256": "9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d",
-    "size": 15943
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/d2/fd/6668e5aec43ab844de6fc74927e155a3b37bf40d7c3790e49fc0406b6578/httpx_sse-0.4.3-py3-none-any.whl",
     "sha256": "0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc",
     "size": 8960
    },
+   "wheel": null,
    "id": "pypi/httpx-sse",
    "source": "top-pypi-30d#178"
   },
@@ -3285,16 +2573,12 @@
    "name": "kiwisolver",
    "version": "1.5.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/ba/07/bd78e6a8fae171ea041ef5bba3ed21a003522fa088834b069b1909981f30/kiwisolver-1.5.1.tar.gz",
-    "sha256": "f1303ef2eec81262a4b708c3e858afe58d7c75ad91c1c05266eda7673369859a",
-    "size": 104395
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/22/98/a6849f04dc18b5400e8b98affa2cd8fd86ed583085f036e57b32e571f4fa/kiwisolver-1.5.1-pp311-pypy311_pp73-macosx_11_0_arm64.whl",
+    "sha256": "8af9b142ad719ae3a911ebf616bc4b78b32bbab84d6a40d3ad2f129670509957",
+    "size": 57400
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/23/54/1b8d2bc580414cc75b3a5b3d195981a6facacd8a8d986e589d0a3b51a709/kiwisolver-1.5.1-cp310-cp310-macosx_10_9_universal2.whl",
-    "sha256": "1acc7e5b7ef05e9da8bb70cd6c7c4513090213d2e1ad9720f599f0bf6c52aec5",
-    "size": 123362
-   },
+   "wheel": null,
    "id": "pypi/kiwisolver",
    "source": "top-pypi-30d#179"
   },
@@ -3303,16 +2587,12 @@
    "name": "dill",
    "version": "0.4.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/81/e1/56027a71e31b02ddc53c7d65b01e68edf64dea2932122fe7746a516f75d5/dill-0.4.1.tar.gz",
-    "sha256": "423092df4182177d4d8ba8290c8a5b640c66ab35ec7da59ccfa00f6fa3eea5fa",
-    "size": 187315
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/1e/77/dc8c558f7593132cf8fefec57c4f60c83b16941c574ac5f619abb3ae7933/dill-0.4.1-py3-none-any.whl",
     "sha256": "1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d",
     "size": 120019
    },
+   "wheel": null,
    "id": "pypi/dill",
    "source": "top-pypi-30d#180"
   },
@@ -3321,16 +2601,12 @@
    "name": "ruamel.yaml",
    "version": "0.19.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c7/3b/ebda527b56beb90cb7652cb1c7e4f91f48649fbcd8d2eb2fb6e77cd3329b/ruamel_yaml-0.19.1.tar.gz",
-    "sha256": "53eb66cd27849eff968ebf8f0bf61f46cdac2da1d1f3576dd4ccee9b25c31993",
-    "size": 142709
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl",
     "sha256": "27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93",
     "size": 118102
    },
+   "wheel": null,
    "id": "pypi/ruamel-yaml",
    "source": "top-pypi-30d#181"
   },
@@ -3339,16 +2615,12 @@
    "name": "bcrypt",
    "version": "5.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/d4/36/3329e2518d70ad8e2e5817d5a4cac6bba05a47767ec416c7d020a965f408/bcrypt-5.0.0.tar.gz",
-    "sha256": "f748f7c2d6fd375cc93d3fba7ef4a9e3a092421b8dbf34d8d4dc06be9492dfdd",
-    "size": 25386
+    "kind": "wheel",
+    "url": "https://files.pythonhosted.org/packages/2d/df/9714173403c7e8b245acf8e4be8876aac64a209d1b392af457c79e60492e/bcrypt-5.0.0-cp313-cp313t-win_arm64.whl",
+    "sha256": "9fffdb387abe6aa775af36ef16f55e318dcda4194ddbf82007a6f21da29de8f5",
+    "size": 139626
    },
-   "wheel": {
-    "url": "https://files.pythonhosted.org/packages/13/85/3e65e01985fddf25b64ca67275bb5bdb4040bd1a53b66d355c6c37c8a680/bcrypt-5.0.0-cp313-cp313t-macosx_10_12_universal2.whl",
-    "sha256": "f3c08197f3039bec79cee59a606d62b96b16669cff3949f21e74796b6e3cd2be",
-    "size": 481806
-   },
+   "wheel": null,
    "id": "pypi/bcrypt",
    "source": "top-pypi-30d#182"
   },
@@ -3357,16 +2629,12 @@
    "name": "identify",
    "version": "2.6.20",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/53/35/d70c0006c7cee65999ea94a6273e60b2094f600a3d8b71b04318253fc643/identify-2.6.20.tar.gz",
-    "sha256": "ad729860a923858d26917c2f4fb0a1d83d27a75b1e090c06440c573f048f3285",
-    "size": 99681
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/fa/70/fffc9613501877c0a10a1ef73a165e6ded3e53f6e7502227fef56d973933/identify-2.6.20-py2.py3-none-any.whl",
     "sha256": "6a16b69b93187244e0548cbfd25b3e4a6f9a7a2ad784625c3bec2b8d27b81aaa",
     "size": 99506
    },
+   "wheel": null,
    "id": "pypi/identify",
    "source": "top-pypi-30d#183"
   },
@@ -3375,16 +2643,12 @@
    "name": "tabulate",
    "version": "0.10.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/46/58/8c37dea7bbf769b20d58e7ace7e5edfe65b849442b00ffcdd56be88697c6/tabulate-0.10.0.tar.gz",
-    "sha256": "e2cfde8f79420f6deeffdeda9aaec3b6bc5abce947655d17ac662b126e48a60d",
-    "size": 91754
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/99/55/db07de81b5c630da5cbf5c7df646580ca26dfaefa593667fc6f2fe016d2e/tabulate-0.10.0-py3-none-any.whl",
     "sha256": "f0b0622e567335c8fabaaa659f1b33bcb6ddfe2e496071b743aa113f8774f2d3",
     "size": 39814
    },
+   "wheel": null,
    "id": "pypi/tabulate",
    "source": "top-pypi-30d#184"
   },
@@ -3393,16 +2657,12 @@
    "name": "opentelemetry-instrumentation",
    "version": "0.66b1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/a5/03/89e47ff8d52a4f83b343e6eb9ef1698ff45357216e5b6b2b21e0da5c5c7d/opentelemetry_instrumentation-0.66b1.tar.gz",
-    "sha256": "e79a510f7d87c72d95e964ddb42193a0d9a75668c027d980eab032ea1322a5ce",
-    "size": 43308
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/da/b2/d1413681ff43e13ac9860df27e1226d3199ab0b97b352ceea41abcc660a5/opentelemetry_instrumentation-0.66b1-py3-none-any.whl",
     "sha256": "4c4aa14dc9a24a02325a9d4c42c4d0208dbb1374c2b1b8fe6c9392d59f3e1008",
     "size": 36904
    },
+   "wheel": null,
    "id": "pypi/opentelemetry-instrumentation",
    "source": "top-pypi-30d#185"
   },
@@ -3411,16 +2671,12 @@
    "name": "pre-commit",
    "version": "4.6.2",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/74/89/1f3e8e1fc3e97de0fa963495832f581f025f29471602a309e48808244292/pre_commit-4.6.2.tar.gz",
-    "sha256": "8f5d7bfb021ecdbcd9d49d89847082dd24172ccde534390081a679ad046e2441",
-    "size": 198670
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/45/e2/bbb7129c9e7999a6b8ee9cca3b66486c25c423ab5a75f34071798b74ce94/pre_commit-4.6.2-py2.py3-none-any.whl",
     "sha256": "e2dde9a75d3bce11bd3831c26d134df00a2803c1d818be6a0383c3dcda25dc4e",
     "size": 226202
    },
+   "wheel": null,
    "id": "pypi/pre-commit",
    "source": "top-pypi-30d#186"
   },
@@ -3429,16 +2685,12 @@
    "name": "smmap",
    "version": "5.0.3",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/1f/ea/49c993d6dfdd7338c9b1000a0f36817ed7ec84577ae2e52f890d1a4ff909/smmap-5.0.3.tar.gz",
-    "sha256": "4d9debb8b99007ae47165abc08670bd74cb74b5227dda7f643eccc4e9eb5642c",
-    "size": 22506
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/c1/d4/59e74daffcb57a07668852eeeb6035af9f32cbfd7a1d2511f17d2fe6a738/smmap-5.0.3-py3-none-any.whl",
     "sha256": "c106e05d5a61449cf6ba9a1e650227ecfb141590d2a98412103ff35d89fc7b2f",
     "size": 24390
    },
+   "wheel": null,
    "id": "pypi/smmap",
    "source": "top-pypi-30d#187"
   },
@@ -3447,16 +2699,12 @@
    "name": "msal",
    "version": "1.39.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/bb/85/747d28986a44b715cc51cf57aa021c8fd94e9614064261ceec77320e8b0b/msal-1.39.0.tar.gz",
-    "sha256": "6ab7de335e6d7f5717e2c7e1dbf86e4dda2f6acf3c56773b78dc53ebc6395b5f",
-    "size": 205360
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/a4/32/178457385925ce301c7b3232bd85665d4df57da39568b62dcfc74031873f/msal-1.39.0-py3-none-any.whl",
     "sha256": "2d2577886906cd7293850dffa2da29119966c213bfc6ec0cecf8bf7621e1ca77",
     "size": 131629
    },
+   "wheel": null,
    "id": "pypi/msal",
    "source": "top-pypi-30d#188"
   },
@@ -3465,16 +2713,12 @@
    "name": "cfgv",
    "version": "3.5.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/4e/b5/721b8799b04bf9afe054a3899c6cf4e880fcf8563cc71c15610242490a0c/cfgv-3.5.0.tar.gz",
-    "sha256": "d5b1034354820651caa73ede66a6294d6e95c1b00acc5e9b098e917404669132",
-    "size": 7334
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/db/3c/33bac158f8ab7f89b2e59426d5fe2e4f63f7ed25df84c036890172b412b5/cfgv-3.5.0-py2.py3-none-any.whl",
     "sha256": "a8dc6b26ad22ff227d2634a65cb388215ce6cc96bbcc5cfde7641ae87e8dacc0",
     "size": 7445
    },
+   "wheel": null,
    "id": "pypi/cfgv",
    "source": "top-pypi-30d#189"
   },
@@ -3483,16 +2727,12 @@
    "name": "google-cloud-storage",
    "version": "3.16.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/ae/54/d487cd2bcf2c94befce79baa677c54fa863f88c221e5481a4066ab08c33e/google_cloud_storage-3.16.0.tar.gz",
-    "sha256": "3f75cf8ad345d68ef33f0c69db8a8b3f34f160b1524e75d73890602b7b8a4d6e",
-    "size": 17351062
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/47/bf/1a0f5f7fc1d4af8b95fc1da72d3cfe84ac709ef4dcabfd2182ef9cfe3a7a/google_cloud_storage-3.16.0-py3-none-any.whl",
     "sha256": "59e54ff1f7f8a7253c01f593f79d253728c122a8901b83f68fe7464a4131539f",
     "size": 343457
    },
+   "wheel": null,
    "id": "pypi/google-cloud-storage",
    "source": "top-pypi-30d#190"
   },
@@ -3501,16 +2741,12 @@
    "name": "keyring",
    "version": "25.7.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/43/4b/674af6ef2f97d56f0ab5153bf0bfa28ccb6c3ed4d1babf4305449668807b/keyring-25.7.0.tar.gz",
-    "sha256": "fe01bd85eb3f8fb3dd0405defdeac9a5b4f6f0439edbb3149577f244a2e8245b",
-    "size": 63516
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/81/db/e655086b7f3a705df045bf0933bdd9c2f79bb3c97bfef1384598bb79a217/keyring-25.7.0-py3-none-any.whl",
     "sha256": "be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f",
     "size": 39160
    },
+   "wheel": null,
    "id": "pypi/keyring",
    "source": "top-pypi-30d#191"
   },
@@ -3519,16 +2755,12 @@
    "name": "h2",
    "version": "4.4.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e7/85/7c366e69d84c17bb778fe41419e1fbcce3033d5b7ce29bbffff0a98b859f/h2-4.4.1.tar.gz",
-    "sha256": "4e866ffb1a869ae14dd9b5e6beb5c24a13da0495ad72b65925ded182521c1516",
-    "size": 2157281
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/7e/22/e85faf23bd72a92d1921e37d674ca56eb298a3c8be31fdecef0ff2b3aaac/h2-4.4.1-py3-none-any.whl",
     "sha256": "0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6",
     "size": 62636
    },
+   "wheel": null,
    "id": "pypi/h2",
    "source": "top-pypi-30d#192"
   },
@@ -3537,16 +2769,12 @@
    "name": "hpack",
    "version": "4.2.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/26/5b/fcabf6028144a8723726318b07a32c2f3314acdff6265743cf08a344b18e/hpack-4.2.0.tar.gz",
-    "sha256": "0895cfa3b5531fc65fe439c05eb65144f123bf7a394fcaa56aa423548d8e45c0",
-    "size": 51300
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/71/b4/4a9fcfb2aef6ba44d9073ecd301443aa00b3dac95de5619f2a7de7ec8a91/hpack-4.2.0-py3-none-any.whl",
     "sha256": "858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986",
     "size": 34246
    },
+   "wheel": null,
    "id": "pypi/hpack",
    "source": "top-pypi-30d#193"
   },
@@ -3555,16 +2783,12 @@
    "name": "anthropic",
    "version": "1.12.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/9e/12/8d257f79868dca43175b1860618273ef52bb6c241bef29adf8808c8836ec/anthropic-1.12.0.tar.gz",
-    "sha256": "a54f6a63e3a4ad94acca6fc9528da531a523bfc846d304d02d7f190d6b7c9b48",
-    "size": 1556079
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/ef/f8/799d742b26ebfc6dc67800fe4f17a5851c1c694c719cfa668de75a910be8/anthropic-1.12.0-py3-none-any.whl",
     "sha256": "e7781a0c88452e695ff5524b9daa490e9c0d47c1529cd0bc14370973e48b12d4",
     "size": 1919670
    },
+   "wheel": null,
    "id": "pypi/anthropic",
    "source": "top-pypi-30d#194"
   },
@@ -3573,16 +2797,12 @@
    "name": "langchain-core",
    "version": "1.6.7",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/0b/0e/cd8ace920319158f1111ad3e6d6a418254fad7594402a57560ff285d5127/langchain_core-1.6.7.tar.gz",
-    "sha256": "55842ca61ffb460787c6f62c8bf775275972e9b9a3fd9b2210931eb77d038e2d",
-    "size": 1009564
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/af/fb/12b08f501fb2fc379b82eb5c391b56c6ecc70d30aedeb4acb44de03a9252/langchain_core-1.6.7-py3-none-any.whl",
     "sha256": "e12cb80b2008b0484c33d209c42d6290ef173f7be9d639b372aba0d438676cdd",
     "size": 572761
    },
+   "wheel": null,
    "id": "pypi/langchain-core",
    "source": "top-pypi-30d#195"
   },
@@ -3591,16 +2811,12 @@
    "name": "gitdb",
    "version": "4.0.12",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/72/94/63b0fc47eb32792c7ba1fe1b694daec9a63620db1e313033d18140c2320a/gitdb-4.0.12.tar.gz",
-    "sha256": "5ef71f855d191a3326fcfbc0d5da835f26b13fbcba60c32c21091c349ffdb571",
-    "size": 394684
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/a0/61/5c78b91c3143ed5c14207f463aecfc8f9dbb5092fb2869baf37c273b2705/gitdb-4.0.12-py3-none-any.whl",
     "sha256": "67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf",
     "size": 62794
    },
+   "wheel": null,
    "id": "pypi/gitdb",
    "source": "top-pypi-30d#196"
   },
@@ -3609,16 +2825,12 @@
    "name": "decorator",
    "version": "5.3.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/60/8b/32f9823da46cde7df2087faa08cd98d01b908f8dcab982cdba9c84e85355/decorator-5.3.1.tar.gz",
-    "sha256": "4cbcdd55a6efadb9dbea26b858f4fb3264567b52d69ca0d25b721b553f60ea82",
-    "size": 58084
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/05/7f/798705f5296a58ca505d600456748d1be48078eac8a7050d8a98bc9edb89/decorator-5.3.1-py3-none-any.whl",
     "sha256": "f47fe6fdbd2edd623ecfe36875d37aba411624e2670dd395dddae1358689bb3c",
     "size": 10365
    },
+   "wheel": null,
    "id": "pypi/decorator",
    "source": "top-pypi-30d#197"
   },
@@ -3627,16 +2839,12 @@
    "name": "hyperframe",
    "version": "6.1.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/02/e7/94f8232d4a74cc99514c13a9f995811485a6903d48e5d952771ef6322e30/hyperframe-6.1.0.tar.gz",
-    "sha256": "f630908a00854a7adeabd6382b43923a4c4cd4b821fcb527e6ab9e15382a3b08",
-    "size": 26566
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/48/30/47d0bf6072f7252e6521f3447ccfa40b421b6824517f82854703d0f5a98b/hyperframe-6.1.0-py3-none-any.whl",
     "sha256": "b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5",
     "size": 13007
    },
+   "wheel": null,
    "id": "pypi/hyperframe",
    "source": "top-pypi-30d#198"
   },
@@ -3645,16 +2853,12 @@
    "name": "jaraco.classes",
    "version": "3.4.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/06/c0/ed4a27bc5571b99e3cff68f8a9fa5b56ff7df1c2251cc715a652ddd26402/jaraco.classes-3.4.0.tar.gz",
-    "sha256": "47a024b51d0239c0dd8c8540c6c7f484be3b8fcf0b2d85c13825780d3b3f3acd",
-    "size": 11780
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/7f/66/b15ce62552d84bbfcec9a4873ab79d993a1dd4edb922cbfccae192bd5b5f/jaraco.classes-3.4.0-py3-none-any.whl",
     "sha256": "f662826b6bed8cace05e7ff873ce0f9283b5c924470fe664fff1c2f00f581790",
     "size": 6777
    },
+   "wheel": null,
    "id": "pypi/jaraco-classes",
    "source": "top-pypi-30d#199"
   },
@@ -3663,16 +2867,12 @@
    "name": "google-cloud-bigquery",
    "version": "3.46.1",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/fe/80/9a6f1e7368ee0bc73dd5d6f26005d4e05ce18ffca1ef0de63fa41357253e/google_cloud_bigquery-3.46.1.tar.gz",
-    "sha256": "c5564a58fc3c99b003cd334a8f302c6224bd34cb55c87476a3c445be1d00538b",
-    "size": 529893
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/41/57/b9bc61a4bad2f1f59b61191d0c099c4d75a4f65d3a5649a6c164610defab/google_cloud_bigquery-3.46.1-py3-none-any.whl",
     "sha256": "ee0e73d06a624c26445458e75f04deed894ed50a0c46bdc876f30c50e05ec6c2",
     "size": 268065
    },
+   "wheel": null,
    "id": "pypi/google-cloud-bigquery",
    "source": "top-pypi-30d#200"
   },
@@ -6496,16 +5696,12 @@
    "name": "paramiko",
    "version": "5.0.0",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/62/93/dcc25d52f49022ae6175d15e6bd751f1acc99b98bc61fc55e5155a7be2e7/paramiko-5.0.0.tar.gz",
-    "sha256": "36763b5b95c2a0dcfdf1abc48e48156ee425b21efe2f0e787c2dd5a95c0e5e79",
-    "size": 1548586
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/82/5b/eadf6d45de38d30ab603f49393b6cd2cbe7e233af8cf90197e32782b68a9/paramiko-5.0.0-py3-none-any.whl",
     "sha256": "b7044611c30140d9a75261653210e2002977b71a0497ff3ba0d98d7edbf62f7c",
     "size": 208919
    },
+   "wheel": null,
    "id": "pypi/paramiko",
    "source": "scope-sample",
    "expect": "safe",
@@ -6810,16 +6006,12 @@
    "name": "mcp-server-fetch",
    "version": "2026.8.18",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/ba/6c/db2e93b243c74c06c2b939af7fc2349df6048754073a1f4966ddfb065286/mcp_server_fetch-2026.8.18.tar.gz",
-    "sha256": "da12533c8218c7a4ee2eb9d789170a317cf758c07cb2cc0211a91bdb0d4b7254",
-    "size": 90020
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/5a/2d/c8d2e50796d6e3c77fa1932b9b010df36168edb5f5387c98a524ef77f110/mcp_server_fetch-2026.8.18-py3-none-any.whl",
     "sha256": "6642df733a1032e7f37d0f13849af8a944d46c02420d2c070cc14e0948f8fcc2",
     "size": 9067
    },
+   "wheel": null,
    "id": "pypi/mcp-server-fetch",
    "source": "sandbox-known-good"
   },
@@ -6828,16 +6020,12 @@
    "name": "mcp-server-git",
    "version": "2026.8.18",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/c1/40/df8626a07853166320547045a719cef66ff31c91dda13e8b988ec4cf08ea/mcp_server_git-2026.8.18.tar.gz",
-    "sha256": "96894ca661cfda45174a8882d4ca97d1f5261301c72ccad006ff04f4108f173f",
-    "size": 64961
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/64/6b/2c03a87808ab787d568f4405ad79f27ea7b0498d9eea5086f01c25b153bc/mcp_server_git-2026.8.18-py3-none-any.whl",
     "sha256": "6c32a8e771564122a9bafac373cf871fb3ab540ddc1ba0ee8e9c8c6e9878aef7",
     "size": 11001
    },
+   "wheel": null,
    "id": "pypi/mcp-server-git",
    "source": "sandbox-known-good"
   },
@@ -6846,16 +6034,12 @@
    "name": "mcp-server-time",
    "version": "2026.8.18",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/32/1a/5687ea89a5cb79f641141a7c010ff9c425bdf4e6cac02e8cfb49aa81f310/mcp_server_time-2026.8.18.tar.gz",
-    "sha256": "ec1313feb558a848838217d922bd218e9f7ca217cb0f7b890ee75ab94bf962e0",
-    "size": 63254
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/ad/d9/fcc7f85f0cdcfa8da9c650439128dd72be21855a126b745f17cf43f24b11/mcp_server_time-2026.8.18-py3-none-any.whl",
     "sha256": "1407583af42dc0163909d855c9ef20114a12b4981c3975033721a7906cdd212a",
     "size": 6821
    },
+   "wheel": null,
    "id": "pypi/mcp-server-time",
    "source": "sandbox-known-good"
   },
@@ -6864,16 +6048,12 @@
    "name": "mcp-server-sqlite",
    "version": "2025.4.25",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/e4/59/8b9ceea660cf973429c3fc3b8f1ea91c77790b934b098c2b78b152c598a7/mcp_server_sqlite-2025.4.25.tar.gz",
-    "sha256": "5c396211adb90595d06a505ac836657fc76ee4439e132acdf65caf21b4a8de42",
-    "size": 25783
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/fc/f3/dbffd53873eafd8773e289fdd0cb96dc4f793071973df07e79a4e9bae425/mcp_server_sqlite-2025.4.25-py3-none-any.whl",
     "sha256": "5ba5706aa29d249a3cde8226577e021c07792d3198e9db40fd005578d2a0801d",
     "size": 9618
    },
+   "wheel": null,
    "id": "pypi/mcp-server-sqlite",
    "source": "sandbox-known-good"
   },
@@ -6882,16 +6062,12 @@
    "name": "markitdown-mcp",
    "version": "0.0.1a7",
    "archive": {
-    "kind": "sdist",
-    "url": "https://files.pythonhosted.org/packages/55/19/f2117369e57765c1525c51460c0b2e1fbf37f65e717d98d82331e578a426/markitdown_mcp-0.0.1a7.tar.gz",
-    "sha256": "bb4cef66502b445304c73f232d5ef6e54b38c13ffcbff337b17d1623526c67b0",
-    "size": 6367
-   },
-   "wheel": {
+    "kind": "wheel",
     "url": "https://files.pythonhosted.org/packages/14/d2/da9734267f80f190e16546103cf2d75015b13f26ededfe18d1af9d71e241/markitdown_mcp-0.0.1a7-py3-none-any.whl",
     "sha256": "e38dce929a28b210a936396c4e1546b30b02601667c79dfa104afd6a7e3b818b",
     "size": 6145
    },
+   "wheel": null,
    "id": "pypi/markitdown-mcp",
    "source": "sandbox-known-good"
   },

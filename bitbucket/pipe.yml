@@ -1,0 +1,40 @@
+name: AgentAvow scan
+image: ghcr.io/agentavow/scanner:pipe-0.1
+category: Security
+description: >-
+  Offline tool-safety scan of the checkout: the answer (Safe to connect, Review before
+  you connect, Do not connect), the trust score, and a Code Insights report with one
+  annotation per finding. Fails the build on Do not connect by default.
+repository: https://github.com/AgentAvow/AgentAvow/tree/main/bitbucket
+maintainer:
+  name: AgentAvow
+  website: https://agentavow.com
+vendor:
+  name: AgentAvow
+  website: https://agentavow.com
+tags:
+  - security
+  - mcp
+  - ai-agents
+  - supply-chain
+variables:
+  - name: FAIL_ON
+    default: do_not_connect
+    description: "Fail on this answer or worse: do_not_connect | review | none."
+  - name: FAIL_ON_FINDINGS
+    default: none
+    description: "Also fail on any finding at or above: none | critical | high | medium."
+  - name: SCAN_PATHS
+    default: "."
+    description: Space-separated directories to scan, relative to the repository root.
+  - name: CODE_INSIGHTS
+    default: "true"
+    description: Post a Code Insights report and annotations to the commit.
+  - name: MIN_SCORE
+    default: "0"
+    description: Legacy score gate (0-100). 0 turns it off; gate on FAIL_ON instead.
+  - name: BITBUCKET_ACCESS_TOKEN
+    default: ""
+    description: >-
+      Optional. Only needed when the Pipelines proxy is not available (self-hosted
+      runners); a repository access token with pull request and repository scopes.

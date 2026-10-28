@@ -12,7 +12,7 @@ from src.jobs import scheduler as sch
 async def test_rescan_github_uses_public_scan(monkeypatch):
     called = {}
 
-    async def fake_public_scan(owner, repo, force, db):
+    async def fake_public_scan(owner, repo, force, db, behavioral=False):
         called["args"] = (owner, repo, force)
         return SimpleNamespace(trust_score=90)
 

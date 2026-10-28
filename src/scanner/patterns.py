@@ -8,7 +8,9 @@ import re
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "AWS Access Key",
-        re.compile(r"AKIA[0-9A-Z]{16}"),
+        # Left-bounded: "AKIA" + 16 upper/digits inside a base64 blob (an embedded font
+        # in pillow's ImageFont.py) is not a key.
+        re.compile(r"(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}"),
         "critical",
     ),
     (
@@ -114,6 +116,38 @@ INLINE_CODE_DANGER_RE = re.compile(
 SHELL_DANGER_RE = re.compile(
     r"""\||\$\(|`|&&|;|>\s*/dev|\bcurl\b|\bwget\b|https?://|\bbase64\b|\bnc\b|"""
     r"""\bchmod\s+\+x\b|\beval\b|\b(?:ba)?sh\s+-c\b|\bpython3?\s+-c\b|\bnode\s+-e\b""",
+    re.IGNORECASE,
+)
+# Precision PR 2: the PAYLOAD tokens of a shell string, i.e. what makes a shell command
+# more than "runs these programs": a downloader, a decoder, an inline interpreter, a
+# URL, a subshell, a /dev/tcp socket. Pipes, `;`, `&&` and redirects between fixed
+# programs are not on this list: a shell string whose text is visible and free of these
+# tokens is a medium, not a high.
+SHELL_PAYLOAD_DANGER_RE = re.compile(
+    r"""\$\(|`|[<>]&?\s*/dev/(?:tcp|udp)|\bcurl\b|\bwget\b|https?://|\bbase64\b|\bnc\b|"""
+    r"""\bncat\b|\bsocat\b|\bchmod\s+\+x\b|\beval\b|\b(?:ba|z|da|k)?sh\s+-c\b|"""
+    # inline code, also with combined flags (`python3 -Bc`, `node -pe`, `node --eval`)
+    r"""\bpython[\d.]*\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*c|\bnode\s+(?:-[A-Za-z]*[ep]\b|--eval\b|"""
+    r"""--print\b)|\bperl\s+-\w*e\b|\bruby\s+-\w*e\b|-enc(?:odedcommand)?\b|\biex\b|"""
+    # PowerShell's encoded command under any accepted abbreviation (-e, -ec, -EncodedC…)
+    r"""\b(?:powershell|pwsh)(?:\.exe)?\b[^|;&\n]*\s[-/]e(?:c|n\w*)?\b|"""
+    r"""invoke-expression|downloadstring|frombase64string|"""
+    # Windows download-and-run binaries; a runtime that runs code from stdin / a URL
+    r"""\bcertutil\b[^|;&\n]*-urlcache|\bbitsadmin\b[^|;&\n]*/transfer|\bmshta\b|"""
+    r"""\bregsvr32\b[^|;&\n]*/i:|\|\s*(?:bun|deno)\b|"""
+    # installing from a git URL / tarball at runtime
+    r"""\b(?:npm|pnpm|yarn)\s+(?:i|install|add)\b[^|;&\n]*(?:\.tgz\b|github:|gitlab:|"""
+    r"""bitbucket:|git\+)|\bpip[\d.]*\s+install\b[^|;&\n]*git\+|"""
+    # piping into a shell / interpreter (also by path: `| /bin/sh`, `| /usr/bin/env bash`)
+    r"""\|\s*(?:sudo\s+)?(?:/[\w./-]*/)?(?:env\s+)?(?:ba|z|da|k)?sh\b|"""
+    r"""\|\s*(?:/[\w./-]*/)?(?:python[\d.]*|node|perl|ruby)\b|"""
+    # recursive delete of a root / home path
+    r"""\brm\s+-\w*[rR]\w*\s+(?:--no-preserve-root\s+)?(?:/|~|\$HOME|\$\{HOME\})(?=[\s*;&|'"]|$)|"""
+    # credential files
+    r"""\.ssh/|id_rsa|\.aws/credentials|/etc/(?:passwd|shadow)|\.netrc|\.npmrc|\.pypirc|"""
+    # a staged dropper: a shell running a script from a temp dir, or a .sh script there
+    r"""\b(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*['"]?/(?:tmp|var/tmp|dev/shm)/|"""
+    r"""(?:^|[\s'"=])/(?:tmp|var/tmp|dev/shm)/[^\s'"]*\.sh\b""",
     re.IGNORECASE,
 )
 # An eval/exec argument that is DECODED first (base64 / hex / zlib / reversed) is the
@@ -235,7 +269,11 @@ EXFILTRATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "HTTP POST with sensitive data",
         re.compile(
-            r"""(?:requests\.post|httpx\.post|fetch|axios\.post)\s*\([^)]*(?:key|secret|token|password|credential)""",
+            # `fetch` is the global fetch() only: not a method (`db.fetch(key)`), not
+            # part of a name (`get_or_fetch(self._key)`), not a definition
+            # (`def fetch(self, key)`, `async fetch(key) {`). Precision PR 2.
+            r"""(?:requests\.post|httpx\.post|(?<![\w.$])(?<!def )(?<!function )(?<!async )"""
+            r"""fetch|axios\.post)\s*\([^)]*(?:key|secret|token|password|credential)""",
             re.IGNORECASE,
         ),
         "high",
@@ -254,7 +292,10 @@ EXFILTRATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "Base64 encode + send",
-        re.compile(r"base64\.b64encode.*(?:post|send|request)", re.IGNORECASE),
+        # The send must be a CALL (`.post(`, `send(`, `urlopen(`): the bare word matched
+        # OAuth's `request.body` / `request_token["key"]` (precision PR 2).
+        re.compile(r"base64\.b64encode.*\b(?:post|send\w*|request|urlopen|fetch)\s*\(",
+                   re.IGNORECASE),
         "high",
     ),
     (
@@ -299,7 +340,8 @@ DYNAMIC_REMOTE_LOAD_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ),
     (
         "Remote response text fed to exec/eval (Python)",
-        re.compile(r"""(?:eval|exec)\s*\(.*\.(?:text|content|body|json\(\))"""),
+        # Bare eval/exec only: `ast.literal_eval(parsed.body)` is the safe parser.
+        re.compile(r"""(?<![\w.])(?:eval|exec)\s*\(.*\.(?:text|content|body|json\(\))"""),
         "high",
     ),
     (
@@ -368,8 +410,20 @@ DYNAMIC_REMOTE_LOAD_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         # Excludes well-known LOCAL build/lint/test tools (vite, tsc, eslint, …): `npx vite
         # build` runs the repo's own devDependency, not a remote download — flagging it was
         # a false positive hitting nearly every JS/TS project's Dockerfile/CI.
+        # The argv form (`spawn('npx', ['-y', 'some-tool'])`) is the same load: before the
+        # adversarial recall review of #24 it was never matched at all.
         re.compile(
-            r"""\b(?:npx|uvx)\s+(?!(?:vite|tsc|vue-tsc|svelte-check|tailwindcss|webpack|"""
+            r"""(?:\b(?:npx|uvx)\s+"""
+            # `execSync('npx -y pkg')`: the auto-confirm flag, inside a run call
+            r"""|\b(?:exec\w*|spawn\w*|run|system|popen|Popen|check_call|check_output|call)"""
+            r"""\s*\(\s*['"`](?:[^'"`]*?\s)?(?:npx|uvx)\s+(?:(?:-y|--yes)\s+)+"""
+            # spawn('npx', ['-y', 'pkg']) / subprocess.run(['npx', 'pkg']): the argv form
+            r"""|['"](?:npx|uvx)(?:\.cmd)?['"]\s*,\s*\[\s*"""
+            r"""(?:['"](?:-y|--yes|-q|--quiet|-p|--package)['"]\s*,\s*)*['"]"""
+            r"""|(?:\b(?:run|call|Popen|check_call|check_output|spawn\w*|exec\w*)\s*\(\s*)\[\s*"""
+            r"""['"](?:npx|uvx)(?:\.cmd)?['"]\s*,\s*"""
+            r"""(?:['"](?:-y|--yes|-q|--quiet|-p|--package)['"]\s*,\s*)*['"])"""
+            r"""(?!(?:vite|tsc|vue-tsc|svelte-check|tailwindcss|webpack|"""
             r"""rollup|esbuild|tsup|parcel|next|nuxt|astro|remix|eslint|prettier|biome|"""
             r"""stylelint|jest|vitest|mocha|ava|playwright|cypress|tsx|ts-node|nodemon|"""
             r"""storybook|turbo|nx|rimraf|cross-env|concurrently|npm-run-all|serve|"""
@@ -563,7 +617,7 @@ MANIFEST_EXEC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
 
 # Dangerous content inside an npm lifecycle install hook (#5).
 INSTALL_SCRIPT_DANGER_RE = re.compile(
-    r"""(?:curl|wget)\b|\|\s*(?:ba)?sh\b|\bnode\s+(?:-e|--eval)\b|"""
+    r"""(?:curl|wget)\b|\|\s*(?:ba)?sh\b|\bnode\s+(?:-e|--eval|-p|--print|-pe|-ep)\b|"""
     r"""\bpython3?\s+-c\b|base64\s+(?:-d|--decode|-D)\b|\beval\b|"""
     r"""https?://|\bchmod\s+\+x\b|>\s*/dev/""",
     re.IGNORECASE,
@@ -597,6 +651,11 @@ INVISIBLE_UNICODE_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         "medium",
     ),
 ]
+# In prose (a code comment, a shipped README) one stray ZWSP is copy-paste debris; a RUN
+# of zero-width characters is the hidden-text shape (each character one bit of an
+# encoded message). Comments and markdown use this bar instead of the per-character rule.
+ZERO_WIDTH_RUN_RE = re.compile("[\u200b\u200c\u200d\u2060\u180e\ufeff]{4,}")
+ZERO_WIDTH_RUN_NAME = "Zero-width character run (hidden text)"
 
 # --- Prompt injection / tool-description poisoning ---
 # category="prompt_injection". Imperative-override or hidden-instruction phrases in tool
@@ -740,7 +799,10 @@ OBFUSCATION_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     (
         "Reversed/rotated string decode",
         re.compile(
-            r"""(?:reversed|rot13|codecs\.decode)\s*\(.*(?:exec|eval|import)""",
+            # Bounded, and the sink must be a call: in a minified bundle a `reversed(`
+            # and the word "important" 10 KB apart are not decode-then-exec.
+            r"""(?<![\w.])(?:reversed|rot13|codecs\.decode)\s*\(.{0,200}?"""
+            r"""\b(?:exec|eval|__import__|import_module)\s*\(""",
             re.IGNORECASE,
         ),
         "high",

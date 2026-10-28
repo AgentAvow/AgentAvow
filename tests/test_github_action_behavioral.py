@@ -161,12 +161,17 @@ def _decided(decision, reason, **extra):
 
 def test_phrase_is_printed_first_with_its_reason_and_certified(tmp_path):
     p = _run(tmp_path, _decided("safe", "nothing found in 40 files",
-                                certified={"eligible": True}))
+                                certified={"eligible": True}, certified_mark=True))
     assert p.returncode == 0, p.stderr
     lines = [ln for ln in p.stdout.splitlines() if ln and not ln.startswith(("::", "Scanning"))]
     assert lines[0] == "Safe to connect · Certified — nothing found in 40 files"
     summary = (tmp_path / "summary.md").read_text()
     assert "### Safe to connect · Certified\nnothing found in 40 files" in summary
+    # raw eligibility without the mark (e.g. beside Review) prints no Certified
+    p = _run(tmp_path, _decided("review", "one high finding: eval",
+                                certified={"eligible": True}))
+    assert "Review before you connect — one high finding: eval" in p.stdout
+    assert "Certified" not in p.stdout
 
 
 def test_fail_on_defaults_to_do_not_connect(tmp_path):

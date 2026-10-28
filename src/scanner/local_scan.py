@@ -29,6 +29,8 @@ from pathlib import Path
 
 from src.scanner.scan import (
     _DEP_FILES,
+    _MAX_FILES_PER_REPO,
+    _OVERSIZED_WINDOW,
     ScanResult,
     _calculate_category_scores,
     _calculate_trust_score,
@@ -38,27 +40,32 @@ from src.scanner.scan import (
     _dedupe_findings,
     _detect_language,
     _finding_is_blocking,
-    _is_nonshipped_path,
-    _is_test_or_doc_file,
     _load_allowlist,
+    _oversized_gap_counts,
+    _oversized_scan_files,
+    _regrade_misnamed_tests,
     _scan_content,
     _scan_dependencies,
+    _scan_oversized_text,
     _select_scan_files,
     _should_skip_path,
+    finding_is_shipped,
 )
-from src.scanner.verdict import Decision, decide
+from src.scanner.verdict import Decision, certified_mark, coverage_gap_notes, decide
 from src.trust_tiers import trust_word, verdict_phrase
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
-def _is_shipped(path: str) -> bool:
-    """False for test/doc/example paths — those score at a fraction, so the output
-    leads with the shipped surface an agent actually runs."""
-    return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
+def _is_shipped(f) -> bool:
+    """False for test/doc/example/infra findings — those score at a fraction, so the
+    output leads with the shipped surface an agent actually runs."""
+    return finding_is_shipped(f)
 
-# Skip files larger than ~1MB — matches the practical hosted fetch cap and keeps
-# a huge generated/vendored file from dominating the scan.
+# Whole-file read cap for the non-source reads (manifests, dependency files, config).
+# Source files follow the hosted per-file cap instead: ``_select_scan_files`` leaves out
+# anything over ``scan._MAX_FILE_SIZE`` and ``_oversized_scan_files`` reads its head
+# and tail, disclosed as a coverage gap.
 _MAX_FILE_BYTES = 1_000_000
 
 # Directory names pruned at walk time (never scanned, never counted). Mirrors what
@@ -77,6 +84,28 @@ def _read_text(p: Path) -> str | None:
         return p.read_text(encoding="utf-8", errors="ignore")
     except (OSError, ValueError):
         return None
+
+
+def _read_window(p: Path, *, tail: bool) -> str | None:
+    """The first (``tail=False``) or last ``_OVERSIZED_WINDOW`` bytes of a file, decoded
+    as the hosted scan decodes its HTTP Range windows (``scan._fetch_file_window``).
+    None when unreadable; ``_scan_oversized_text`` then discloses the file as not read."""
+    try:
+        with p.open("rb") as fh:
+            if tail:
+                size = fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, size - _OVERSIZED_WINDOW))
+            data = fh.read(_OVERSIZED_WINDOW)
+    except (OSError, ValueError):
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def _file_size(p: Path) -> int:
+    try:
+        return p.stat().st_size if p.is_file() else 0
+    except (OSError, ValueError):
+        return 0
 
 
 def _git_tracked_files(root: Path) -> list[str] | None:
@@ -111,14 +140,15 @@ def _walk_tree(root: Path) -> list[dict]:
     """
     tracked = _git_tracked_files(root)
     if tracked is not None:
-        return [{"path": p, "type": "blob"} for p in tracked]
+        return [{"path": p, "type": "blob", "size": _file_size(root / p)} for p in tracked]
     out: list[dict] = []
     for dirpath, dirnames, filenames in os.walk(root):
         # prune in-place so os.walk doesn't descend into them
         dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
         for fn in filenames:
-            rel = (Path(dirpath) / fn).relative_to(root).as_posix()
-            out.append({"path": rel, "type": "blob"})
+            full = Path(dirpath) / fn
+            rel = full.relative_to(root).as_posix()
+            out.append({"path": rel, "type": "blob", "size": _file_size(full)})
     return out
 
 
@@ -229,16 +259,30 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
             pass
 
     # --- select scannable files (shared with the hosted path — can't drift) ---
+    # Each tree item carries its on-disk ``size``, so the hosted per-file cap
+    # (``_MAX_FILE_SIZE``) leaves the same files out here as there.
     scan_files, result.total_scannable_files, result.sampled = _select_scan_files(
         tree, user_excludes,
     )
+    # Coverage gaps, counted as ``scan_repo`` counts them (disclosure only).
+    gaps: dict = {}
+    n_oversized, n_agent_over = _oversized_gap_counts(tree, user_excludes)
+    if n_oversized:
+        gaps["oversized_files"] = n_oversized
+    if n_agent_over:
+        gaps["oversized_agent_files"] = n_agent_over
+    if result.total_scannable_files > len(scan_files):
+        gaps["over_file_cap"] = result.total_scannable_files - len(scan_files)
+        gaps["file_cap"] = _MAX_FILES_PER_REPO
 
     # --- per-file static analysis (the 12 categories) ---
     allowlist = _load_allowlist()
+    local_texts: dict[str, str] = {}
     for it in scan_files:
         content = read(it["path"])
         if not content:
             continue
+        local_texts[it["path"]] = content
         findings, positives, suppressed = _scan_content(content, it["path"], allowlist)
         result.findings.extend(findings)
         result.positive_signals.extend(positives)
@@ -247,6 +291,27 @@ def scan_local(root: str | Path, *, name: str | None = None) -> ScanResult:
         digest = _canonical_tool_digest(content, it["path"])
         if digest:
             result.tool_digests[it["path"]] = digest
+    from src.scanner.npm_scripts import restore_externally_invoked
+    restore_externally_invoked(result.findings, local_texts)
+    # A test-named file that is not test code (or that running code uses) is graded as
+    # shipped code (same rule as scan_repo).
+    result.findings = _regrade_misnamed_tests(result.findings, local_texts, allowlist,
+                                              paths=[it["path"] for it in tree])
+    # A printed install hint lowered per file holds only with the whole tree in view.
+    from src.scanner.package_context import recheck_printed_hints
+    recheck_printed_hints(result.findings, local_texts)
+
+    # --- oversized source files: head + tail, disclosed (as scan_repo does) ---
+    oversized = _oversized_scan_files(tree, user_excludes)
+    if oversized:
+        result.sampled = True  # the middle of each file is not read
+        for it in oversized:
+            p = root / it["path"]
+            result.findings.extend(_scan_oversized_text(
+                _read_window(p, tail=False), _read_window(p, tail=True), it["path"],
+                int(it.get("size", 0)), allowlist,
+            ))
+    result.coverage_gaps = {k: gaps[k] for k in sorted(gaps)}
     result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
 
     # --- dependency findings (offline regex over manifests/lockfiles) ---
@@ -296,6 +361,7 @@ def decision_for_result(result: ScanResult) -> Decision:
         "deprecation": getattr(result, "deprecation", None),
         "incident_history": getattr(result, "incident_history", None) or {},
         "supply_chain": getattr(result, "supply_chain", None) or {},
+        "coverage_gaps": result.coverage_gaps or {},
     })
 
 
@@ -322,10 +388,20 @@ def result_to_dict(result: ScanResult) -> dict:
         "decision_reason": dec.reason,
         "trust_score": result.trust_score,
         "tier": _tier(result.trust_score),
+        # `certified` = the signed provenance gate; `certified_mark` = the display rule
+        # (Safe to connect, score >= 81, not thin; verdict.certified_mark) — the one a
+        # headline shows. A local scan has no sandbox, so its decision is final.
         "certified": bool((result.certified or {}).get("eligible")),
+        "certified_mark": certified_mark(
+            {"certified": result.certified or {}, "trust_score": result.trust_score,
+             "metadata": {"files_scanned": result.files_scanned}}, dec),
         "files_scanned": result.files_scanned,
         "total_scannable_files": result.total_scannable_files,
         "sampled": result.sampled,
+        # What the scan selected but could not read in full (same keys and wording as
+        # the hosted API's ``coverage_gaps`` / ``not_checked``; disclosure only).
+        "coverage_gaps": result.coverage_gaps or {},
+        "not_checked": coverage_gap_notes({"coverage_gaps": result.coverage_gaps or {}}),
         "primary_language": result.primary_language,
         "is_mcp_server": result.is_mcp_server,
         "declared_scope": result.declared_scope or {},
@@ -347,7 +423,7 @@ def result_to_dict(result: ScanResult) -> dict:
                 "file": f.file_path,
                 "line": f.line_number,
                 "remediation": f.remediation,
-                "shipped": _is_shipped(f.file_path),
+                "shipped": _is_shipped(f),
                 "kind": f.kind,
                 "capability": f.capability,
                 "installed": f.installed,
@@ -355,7 +431,7 @@ def result_to_dict(result: ScanResult) -> dict:
             # shipped findings first, then by severity — lead with what an agent runs
             for f in sorted(
                 result.findings,
-                key=lambda x: (not _is_shipped(x.file_path),
+                key=lambda x: (not _is_shipped(x),
                                _SEV_RANK.get(x.severity, 5)),
             )
         ],
@@ -450,11 +526,16 @@ def result_to_code_quality(result: ScanResult, path_prefix: str = "") -> list[di
     return report
 
 
+# The checkout root each CI system exports: GitLab, Bitbucket Pipelines, Azure Pipelines.
+_CI_ROOT_VARS = ("CI_PROJECT_DIR", "BITBUCKET_CLONE_DIR", "BUILD_SOURCESDIRECTORY")
+
+
 def _scan_path_prefix(root: Path) -> str:
-    """The scanned directory relative to the CI project root, when it is inside
-    one (``CI_PROJECT_DIR`` is what GitLab exports). Empty when they coincide or the
-    scan is outside the checkout, so report paths stay repo-relative either way."""
-    project_dir = os.environ.get("CI_PROJECT_DIR")
+    """The scanned directory relative to the CI checkout root, when it is inside
+    one (``CI_PROJECT_DIR`` on GitLab, ``BITBUCKET_CLONE_DIR`` on Bitbucket,
+    ``BUILD_SOURCESDIRECTORY`` on Azure). Empty when they coincide or the scan is
+    outside the checkout, so report paths stay repo-relative either way."""
+    project_dir = next((os.environ[v] for v in _CI_ROOT_VARS if os.environ.get(v)), "")
     if not project_dir:
         return ""
     try:
@@ -464,12 +545,118 @@ def _scan_path_prefix(root: Path) -> str:
     return "" if rel == Path(".") else rel.as_posix()
 
 
+# Where a local or CI result points a reader: what the offline scan covers and what a
+# hosted scan adds (dependency CVEs, the sandbox, adoption, a signature).
+REPORT_LINK = "https://agentavow.com/docs/run-locally"
+
+
+def _headline(d: dict) -> str:
+    return d["verdict_phrase"] + (" · Certified" if d["certified_mark"] else "")
+
+
+def _md_cell(text: str) -> str:
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def result_to_markdown(result: ScanResult, gate_failure: str | None = None,
+                       label: str = "") -> str:
+    """A short Markdown summary for CI pages (Azure ``##vso[task.uploadsummary]``,
+    Bitbucket build logs, a PR comment): the answer and reason first, then both
+    scores, the gate outcome and the top findings."""
+    d = result_to_dict(result)
+    c = d["counts"]
+    files = f"{d['files_scanned']} scanned" + (
+        f" of {d['total_scannable_files']} (sampled)" if d["sampled"] else "")
+    gate = f"failed: {gate_failure}" if gate_failure else "passed"
+    lines = [
+        f"### AgentAvow: {_md_cell(label or d['tool'])}",
+        "",
+        f"**{_headline(d)}**: {_md_cell(d['decision_reason'])}",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| Trust score | {d['trust_score']}/100 ({d['tier']}) |",
+        "| Adoption | not measured offline (it needs registry data; a hosted scan adds it) |",
+        f"| Files | {files} |",
+        f"| Findings | {c['critical']} critical, {c['high']} high, {c['medium']} medium, "
+        f"{c['low']} low |",
+        f"| Gate | {_md_cell(gate)} |",
+    ]
+    if d["not_checked"]:
+        lines.append(f"| Not checked | {_md_cell('; '.join(d['not_checked']))} |")
+    top = [f for f in d["findings"] if f["severity"] in ("critical", "high")][:10]
+    if top:
+        lines += ["", "**Top findings**", ""]
+        for f in top:
+            lines.append(f"- `{f['severity']}` {_md_cell(f['name'])} "
+                         f"(`{f['file']}:{f['line']}`)")
+    lines += ["", "An offline scan leaves out dependency CVEs, the sandbox, adoption and a "
+                  f"signature. [What this covers]({REPORT_LINK})", ""]
+    return "\n".join(lines)
+
+
+# Bitbucket Code Insights: report + annotations.
+# https://developer.atlassian.com/cloud/bitbucket/rest/api-group-reports/
+_BB_SEVERITY = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM",
+                "low": "LOW", "info": "LOW"}
+_BB_MAX_ANNOTATIONS = 1000  # per report
+
+
+def result_to_bitbucket_insights(result: ScanResult, path_prefix: str = "",
+                                 gate_failure: str | None = None) -> dict:
+    """A Bitbucket Code Insights report and its annotations, as one JSON document
+    ``{"report": {...}, "annotations": [...]}``. The pipe PUTs the report and POSTs
+    the annotations in batches of 100; the report shows on the commit and the pull
+    request, and each annotation on its line in the PR diff."""
+    d = result_to_dict(result)
+    c = d["counts"]
+    report = {
+        "title": "AgentAvow",
+        "details": f"{_headline(d)}: {d['decision_reason']}"[:2000],
+        "report_type": "SECURITY",
+        "reporter": "AgentAvow",
+        "link": REPORT_LINK,
+        "result": "FAILED" if gate_failure else "PASSED",
+        "data": [
+            {"title": "Answer", "type": "TEXT", "value": d["verdict_phrase"]},
+            {"title": "Trust score", "type": "NUMBER", "value": d["trust_score"]},
+            {"title": "Tier", "type": "TEXT", "value": d["tier"]},
+            {"title": "Critical", "type": "NUMBER", "value": c["critical"]},
+            {"title": "High", "type": "NUMBER", "value": c["high"]},
+            {"title": "Files scanned", "type": "NUMBER", "value": d["files_scanned"]},
+        ],
+    }
+    prefix = path_prefix.strip("/")
+    seen: dict[tuple[str, str, str], int] = {}
+    annotations: list[dict] = []
+    ordered = sorted(result.findings,
+                     key=lambda f: (not _is_shipped(f), _SEV_RANK.get(f.severity, 5),
+                                    f.file_path, f.line_number))
+    for f in ordered[:_BB_MAX_ANNOTATIONS]:
+        path = f"{prefix}/{f.file_path}" if prefix else f.file_path
+        key = (path, f.category, f.name)
+        ordinal = seen.get(key, 0)
+        seen[key] = ordinal + 1
+        ann = {
+            "external_id": _code_quality_fingerprint(path, f.category, f.name, ordinal)[:50],
+            "annotation_type": "VULNERABILITY",
+            "summary": f"{f.name} ({f.category})"[:450],
+            "severity": _BB_SEVERITY.get(f.severity, "MEDIUM"),
+            "path": path,
+            "line": max(1, f.line_number),
+        }
+        if f.remediation:
+            ann["details"] = f.remediation[:2000]
+        annotations.append(ann)
+    return {"report": report, "annotations": annotations}
+
+
 def _print_human(result: ScanResult, stream=sys.stderr) -> None:
     d = result_to_dict(result)
     c = d["counts"]
     print(f"\nAgentAvow — {d['tool']}", file=stream)
     print(f"  Verdict     : {d['verdict_phrase']}"
-          + (" · Certified" if d["certified"] else "")
+          + (" · Certified" if d["certified_mark"] else "")
           + f" — {d['decision_reason']}", file=stream)
     print(f"  Trust score : {d['trust_score']}/100  (tier: {d['tier']})"
           + ("  ✓ Certified-eligible" if d["certified"] else ""), file=stream)
@@ -478,11 +665,13 @@ def _print_human(result: ScanResult, stream=sys.stderr) -> None:
           file=stream)
     print(f"  Findings    : {c['critical']} critical · {c['high']} high · "
           f"{c['medium']} medium · {c['low']} low", file=stream)
+    for note in d["not_checked"]:
+        print(f"  Not checked : {note}", file=stream)
     if result.is_mcp_server:
         print("  Context     : MCP server (fs_access/unsafe_exec discounted)", file=stream)
     top = sorted(
         [f for f in result.findings if f.severity in ("critical", "high")],
-        key=lambda x: (not _is_shipped(x.file_path), _SEV_RANK.get(x.severity, 5)),
+        key=lambda x: (not _is_shipped(x), _SEV_RANK.get(x.severity, 5)),
     )[:15]
     if top:
         print("\n  Top findings:", file=stream)
@@ -510,14 +699,23 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--gitlab-code-quality", metavar="FILE",
                     help="write a GitLab Code Quality report to FILE "
                          "(artifacts:reports:codequality, shows in the MR widget)")
+    sc.add_argument("--name", metavar="NAME",
+                    help="name to show for the scanned tree (default: the directory "
+                         "name; CI wrappers pass the repository name)")
+    sc.add_argument("--markdown", metavar="FILE",
+                    help="write a short Markdown summary to FILE (answer, both scores, "
+                         "gate outcome, top findings) for CI summary pages")
+    sc.add_argument("--bitbucket-insights", metavar="FILE",
+                    help="write a Bitbucket Code Insights report + annotations to FILE")
     sc.add_argument("--min-score", type=int, default=None,
                     help="exit non-zero if the trust score is below this (CI gate)")
     sc.add_argument("--fail-on",
                     choices=["do_not_connect", "review", "critical", "high", "medium"],
-                    default=None,
-                    help="exit non-zero on this decision or worse (do_not_connect | "
+                    action="append", default=None,
+                    help="exit non-zero on this answer or worse (do_not_connect | "
                          "review), or if any finding at/above this severity is present "
-                         "(critical | high | medium)")
+                         "(critical | high | medium). Repeat to combine an answer gate "
+                         "with a severity gate.")
     sc.add_argument("--quiet", action="store_true", help="suppress the human summary")
     # allow bare `agentavow <path>` as shorthand for `agentavow scan <path>`
     args, _ = p.parse_known_args(argv)
@@ -526,7 +724,7 @@ def main(argv: list[str] | None = None) -> int:
         p.print_help(sys.stderr)
         return 2
 
-    result = scan_local(args.path)
+    result = scan_local(args.path, name=args.name)
     if result.error:
         print(f"agentavow: {result.error}", file=sys.stderr)
         return 2
@@ -548,28 +746,41 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.gitlab_code_quality).write_text(json.dumps(report, indent=2),
                                                   encoding="utf-8")
 
-    # --- CI gating ---
-    if args.min_score is not None and result.trust_score < args.min_score:
-        print(f"agentavow: FAIL — score {result.trust_score} < min {args.min_score}",
-              file=sys.stderr)
+    # --- CI gating --- (decided before the gate-aware reports are written, so a
+    # Markdown summary or Code Insights report records the outcome; the exit code
+    # comes last, after every report is on disk.)
+    failure = _gate_failure(args, result)
+    if args.markdown:
+        Path(args.markdown).write_text(result_to_markdown(result, failure),
+                                       encoding="utf-8")
+    if args.bitbucket_insights:
+        insights = result_to_bitbucket_insights(
+            result, _scan_path_prefix(Path(args.path)), failure)
+        Path(args.bitbucket_insights).write_text(json.dumps(insights, indent=2),
+                                                 encoding="utf-8")
+    if failure:
+        print(f"agentavow: FAIL — {failure}", file=sys.stderr)
         return 1
-    if args.fail_on in ("do_not_connect", "review"):
-        dec = decision_for_result(result)
-        failing = ("do_not_connect",) if args.fail_on == "do_not_connect" \
-            else ("do_not_connect", "review")
-        if dec.decision in failing:
-            print(f"agentavow: FAIL — {verdict_phrase(dec)}: {dec.reason}",
-                  file=sys.stderr)
-            return 1
-    elif args.fail_on:
-        order = {"critical": 3, "high": 2, "medium": 1}
-        thresh = order[args.fail_on]
-        if any(order.get(f.severity, 0) >= thresh for f in result.findings):
-            print(f"agentavow: FAIL — findings at/above '{args.fail_on}' present",
-                  file=sys.stderr)
-            return 1
     return 0
 
+
+def _gate_failure(args, result: ScanResult) -> str | None:
+    """Why the CI gate fails (``--min-score`` / each ``--fail-on``), or None."""
+    if args.min_score is not None and result.trust_score < args.min_score:
+        return f"score {result.trust_score} < min {args.min_score}"
+    for fail_on in args.fail_on or ():
+        if fail_on in ("do_not_connect", "review"):
+            dec = decision_for_result(result)
+            failing = ("do_not_connect",) if fail_on == "do_not_connect" \
+                else ("do_not_connect", "review")
+            if dec.decision in failing:
+                return f"{verdict_phrase(dec)}: {dec.reason}"
+        else:
+            order = {"critical": 3, "high": 2, "medium": 1}
+            thresh = order[fail_on]
+            if any(order.get(f.severity, 0) >= thresh for f in result.findings):
+                return f"findings at/above '{fail_on}' present"
+    return None
 
 if __name__ == "__main__":
     raise SystemExit(main())

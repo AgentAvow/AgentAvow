@@ -69,6 +69,9 @@ SEVERITIES = ("critical", "high", "medium", "low", "info")
 # decide()'s thin-coverage reason: nothing found in fewer than 8 files. Since
 # 2026-10-08 (#19) it reads safe; the report lists these packages separately.
 THIN_COVERAGE_REASON = "nothing found; little code to inspect"
+# ...and at zero files read (a metapackage whose code ships in a dependency).
+THIN_NO_CODE_REASON = "nothing found; no code to inspect"
+THIN_REASONS = (THIN_COVERAGE_REASON, THIN_NO_CODE_REASON)
 
 
 @dataclass
@@ -256,7 +259,8 @@ def gate(manifest: dict, results: dict[str, dict]) -> list[str]:
 
 def _is_thin(r: dict) -> bool:
     """Safe on thin coverage: nothing found, little code to inspect."""
-    return r.get("label") == "safe" and r.get("reason") == THIN_COVERAGE_REASON
+    # A Safe reason may end with what was not read ("; 1 file over 500 KB was not read").
+    return r.get("label") == "safe" and str(r.get("reason") or "").startswith(THIN_REASONS)
 
 
 def public(r: dict) -> dict:

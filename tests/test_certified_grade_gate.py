@@ -116,6 +116,23 @@ def test_certified_status_drift_fails():
     assert status["checks"]["no_drift"] is False
 
 
+def test_certified_status_package_install_hook_fails_no_drift():
+    """A registry-only package scan has no repo diff (drift empty); its install hook
+    comes from the artifact summary and must still fail the no-hook check (core-js)."""
+    from src.scanner.scan import _certified_status
+
+    status = _certified_status(_clean_result(
+        drift={}, artifact_scan={"ok": True, "has_install_hook": True},
+    ))
+    assert status["eligible"] is False
+    assert status["checks"]["no_drift"] is False
+
+    status = _certified_status(_clean_result(
+        drift={}, artifact_scan={"ok": True, "has_install_hook": False},
+    ))
+    assert status["checks"]["no_drift"] is True
+
+
 def test_certified_status_sampled_fails_full_coverage():
     from src.scanner.scan import _certified_status
 
@@ -143,10 +160,19 @@ def _scannable(**over):
 
 
 def test_serializer_grade_certified_a_plus(gate_on):
-    data = psr._scan_result_to_dict(_scannable())
+    data = psr._scan_result_to_dict(_scannable(files_scanned=40, total_scannable_files=40))
     assert data["grade"] == "A+"
     assert data["certified"]["eligible"] is True
     assert data["provenance"]["verified"] is True
+
+
+def test_serializer_grade_follows_the_certified_mark_not_eligibility(gate_on):
+    """A+ follows the Certified MARK: eligible but thin (5 files) or not Safe → A."""
+    thin = psr._scan_result_to_dict(_scannable())
+    assert thin["certified"]["eligible"] is True and thin["grade"] == "A"
+    dep = psr._scan_result_to_dict(_scannable(files_scanned=40, total_scannable_files=40,
+                                              deprecation="use y"))
+    assert dep["grade"] == "A"
 
 
 def test_serializer_grade_uncertified_capped(gate_on):

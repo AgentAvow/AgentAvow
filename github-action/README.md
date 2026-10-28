@@ -1,6 +1,6 @@
 # AgentAvow Trust Scan - GitHub Action
 
-Check the security posture of any public repository using the [AgentAvow](https://agentavow.com) trust infrastructure. Every pull request gets an automated trust scan comment that leads with one of three answers — **Safe to connect**, **Review before you connect**, or **Do not connect** — and the one reason behind it, with the 0–100 trust score, category breakdown and actionable findings underneath.
+Check the security posture of any public repository using the [AgentAvow](https://agentavow.com) trust infrastructure. Every pull request gets an automated trust scan comment that leads with one of three answers — **Safe to connect**, **Review before you connect**, or **Do not connect** — and the one reason behind it, with both scores (the 0–100 trust score and the adoption score), the category breakdown and actionable findings underneath.
 
 No API key required. Works on any public repository.
 

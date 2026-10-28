@@ -1,6 +1,6 @@
 # AgentAvow scanner: the slim, mirrorable CI image.
 #
-# Intended name: ghcr.io/agentavow/scanner:<version>  (not published yet)
+# Published as ghcr.io/agentavow/scanner:0.1 (rebuilt from main by CI).
 #
 # This image carries ONLY the offline static scanner (`agentavow scan`): the same
 # 12-category detection engine and scoring the hosted service runs, over a checked-out
@@ -62,8 +62,11 @@ COPY src/trust_tiers.py /opt/agentavow/src/trust_tiers.py
 COPY src/scanner/ /opt/agentavow/src/scanner/
 
 # `agentavow` on PATH, same entry point pyproject.toml registers (src.scanner.local_scan:main).
+# `agentavow-bitbucket` is the Bitbucket Pipelines wrapper (bitbucket/README.md): it
+# runs the scan per SCAN_PATHS and posts a Code Insights report.
 RUN printf '#!/bin/sh\nexec python3 -m src.scanner.local_scan "$@"\n' > /usr/local/bin/agentavow \
-    && chmod 0755 /usr/local/bin/agentavow \
+    && printf '#!/bin/sh\nexec python3 -m src.scanner.ci_bitbucket "$@"\n' > /usr/local/bin/agentavow-bitbucket \
+    && chmod 0755 /usr/local/bin/agentavow /usr/local/bin/agentavow-bitbucket \
     && python3 -m compileall -q /opt/agentavow/src \
     && agentavow --help >/dev/null
 

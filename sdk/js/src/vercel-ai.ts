@@ -158,9 +158,9 @@ export const PHRASES = {
   safe: 'Safe to connect', review: 'Review before you connect', do_not_connect: 'Do not connect',
 } as const;
 
-/** "Do not connect", "Review before you connect · Certified", … */
+/** "Do not connect", "Safe to connect · Certified", … (the mark only beside Safe). */
 export function headline(d: Decision): string {
-  return PHRASES[d.decision] + (d.certified ? ' · Certified' : '');
+  return PHRASES[d.decision] + (d.certified && d.decision === 'safe' ? ' · Certified' : '');
 }
 
 const SWITCH: Partial<Record<Decision['outcome'], string>> = {

@@ -269,7 +269,7 @@ def test_dependency_lines_lead_with_the_phrase_and_never_block(hook, monkeypatch
     }
     out = _run(hook, monkeypatch, capsys, lambda t, force=False, stored=False: scores[t["pkg"]])
     msg = out["systemMessage"]
-    assert ("Dependencies: graded all 3 — 0 Safe, 2 Review, 1 Blocked (needs attention: "
+    assert ("Dependencies: graded all 3 — 0 Safe, 2 Review, 1 Don't connect (needs attention: "
             "'evil-pkg' Do not connect — 2 critical findings, including hardcoded key).") in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert ("⚠️ dependency 'fastapi' (pypi:fastapi): Review before you connect — 30 high "
@@ -294,9 +294,17 @@ def test_verdict_reads_the_api_decision_and_falls_back_to_the_same_rule(hook):
     v = hook._verdict({"trust_score": 92, "decision": "review", "decision_final": False,
                        "decision_reason": "one high finding: x; sandbox still running",
                        "certified": {"eligible": True}})
-    assert (v["decision"], v["decision_final"], v["certified"]) == ("review", False, True)
-    assert hook._answer(v) == ("Review before you connect · Certified — one high finding: x; "
+    # raw eligibility is the provenance gate, not the mark: no mark beside Review
+    assert (v["decision"], v["decision_final"], v["certified"]) == ("review", False, False)
+    assert hook._answer(v) == ("Review before you connect — one high finding: x; "
                                "sandbox still running · AgentAvow 92/100")
+    m = hook._verdict({"trust_score": 92, "decision": "safe", "decision_final": True,
+                       "decision_reason": "nothing found in 340 files",
+                       "certified": {"eligible": True}, "certified_mark": True})
+    assert m["certified"] is True
+    assert hook._answer(m).startswith("Safe to connect · Certified — ")
+    # a stray mark beside Review never prints
+    assert not hook._headline({**v, "certified": True}).endswith("Certified")
     # older API response: decided locally
     assert hook._verdict({"trust_score": 40, "findings": {"critical": 1}})["decision"] == \
         "do_not_connect"
@@ -309,6 +317,16 @@ def test_verdict_reads_the_api_decision_and_falls_back_to_the_same_rule(hook):
                             "coverage": {"surface": "mcp"}})
     assert (remote["decision"], remote["decision_reason"]) == (
         "safe", "tool definitions clean; server code not inspected")
+    # zero files read (a metapackage) is thin too; a remote MCP with 0 tools keeps its
+    # own reason; a response with no files_scanned stays plain "no critical or high".
+    empty = hook._verdict({"trust_score": 74, "metadata": {"files_scanned": 0}})
+    assert (empty["decision"], empty["decision_reason"]) == (
+        "safe", "nothing found; no code to inspect")
+    no_tools = hook._verdict({"trust_score": 74, "metadata": {"files_scanned": 0},
+                              "coverage": {"surface": "mcp"}})
+    assert no_tools["decision_reason"] == "tool definitions clean; server code not inspected"
+    assert hook._verdict({"trust_score": 90})["decision_reason"] == \
+        "no critical or high findings"
     assert hook._verdict({"trust_score": 90, "behavioral": {
         "ran": True, "canary_exfil": [{"host": "x"}]}})["decision"] == "do_not_connect"
     assert hook._verdict({"trust_score": 90, "behavioral": {

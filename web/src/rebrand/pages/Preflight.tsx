@@ -1,11 +1,11 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { getTrustTier } from '../../components/trust/gradeSystem'
 import api from '../../lib/api'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
-import { DecisionLine } from '../components/TrustMark'
+import { CertifiedMark, DecisionLine, TrustBar } from '../components/TrustMark'
 import SEOHead from '../../components/SEOHead'
 
 /**
@@ -83,13 +83,17 @@ function GateRow({ g }: { g: Gate }) {
 }
 
 export default function RebrandPreflight() {
-  const [input, setInput] = useState('')
+  // ?target= prefills and runs (a score page links here with its own target).
+  const [sp] = useSearchParams()
+  const initial = sp.get('target') || ''
+  const [input, setInput] = useState(initial)
   const [data, setData] = useState<Preflight | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const autoRan = useRef(false)
 
-  const run = async () => {
-    const req = toRequest(input)
+  const run = async (value: string = input) => {
+    const req = toRequest(value)
     if (!req) { setError('Enter an owner/repo, a GitHub URL, or an https:// MCP endpoint.'); return }
     setLoading(true); setError(''); setData(null)
     try {
@@ -102,6 +106,12 @@ export default function RebrandPreflight() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (initial && !autoRan.current) { autoRan.current = true; void run(initial) }
+    // run once for the prefilled target only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial])
 
   const tier = data ? getTrustTier(data.trust_score) : null
   const blockers = data?.gates.filter((g) => g.severity === 'blocker') ?? []
@@ -136,7 +146,7 @@ export default function RebrandPreflight() {
             placeholder="owner/repo, a GitHub URL, or https://your-server/mcp"
             className="flex-1 min-w-[240px] px-4 py-3 rounded-xl bg-surface border border-border focus:border-primary-light outline-none text-[14px] font-mono"
           />
-          <button onClick={run} disabled={loading} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 disabled:opacity-60">
+          <button onClick={() => run()} disabled={loading} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 disabled:opacity-60">
             {loading ? 'Checking…' : 'Run preflight →'}
           </button>
         </div>
@@ -155,15 +165,16 @@ export default function RebrandPreflight() {
                   {data.directory_ready ? '● Directory-Ready' : '● Needs changes before you submit'}
                 </div>
                 <h2 className="mt-1 text-2xl font-extrabold">{data.target}</h2>
-                <DecisionLine row={{ trust_score: data.trust_score, decision: data.decision, decision_reason: data.decision_reason, certified: { eligible: data.certified } }} className="mt-1 text-[14px]" />
+                <DecisionLine row={{ trust_score: data.trust_score, decision: data.decision, decision_reason: data.decision_reason, certified_mark: data.certified }} className="mt-1 text-[14px]" />
                 <p className="text-[13px] text-text-muted mt-0.5">
                   {data.summary.blockers_total - data.summary.blockers_failed}/{data.summary.blockers_total} blockers pass
                   {data.summary.warnings > 0 && ` · ${data.summary.warnings} warning${data.summary.warnings === 1 ? '' : 's'}`}
                 </p>
               </div>
-              <div className="text-right">
-                <div className="font-mono text-[34px] font-bold tabular-nums leading-none" style={{ color: tier.color }}>{data.trust_score}</div>
-                <div className="text-[11px] text-text-muted mt-1">tier {tier.name}{data.certified && ' · Certified'}</div>
+              {/* the trust mark in the badge design: the bar with the score to its right
+                  (the Certified mark only when the result carries certified_mark) */}
+              <div className="shrink-0">
+                {data.certified ? <CertifiedMark score={data.trust_score} scale={0.85} /> : <TrustBar score={data.trust_score} scale={0.85} />}
               </div>
             </div>
           </div>
@@ -171,6 +182,7 @@ export default function RebrandPreflight() {
           {/* blockers */}
           <div className="mt-6 glass rounded-2xl px-6 py-4">
             <h3 className="text-[12px] font-mono uppercase tracking-wide text-text-muted mb-1">Blockers — must pass to be listed</h3>
+            <p className="text-[12.5px] text-text-muted mb-1">A failed blocker is a predicted rejection at review. Fix every one before you submit.</p>
             {blockers.map((g) => <GateRow key={g.id} g={g} />)}
           </div>
 
@@ -178,6 +190,7 @@ export default function RebrandPreflight() {
           {warnings.length > 0 && (
             <div className="mt-4 glass rounded-2xl px-6 py-4">
               <h3 className="text-[12px] font-mono uppercase tracking-wide text-text-muted mb-1">Recommended — clean these up</h3>
+              <p className="text-[12.5px] text-text-muted mb-1">Warnings are worth fixing but don&apos;t block a listing on their own. A tool annotation that reads wrong only from its description wording is a warning; one backed by evidence (a command parameter on a read-only tool, or the sandbox seeing it write) is a blocker.</p>
               {warnings.map((g) => <GateRow key={g.id} g={g} />)}
             </div>
           )}

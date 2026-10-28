@@ -1,0 +1,23 @@
+# Example azure-pipelines.yml that runs the AgentAvow scan on pull requests and main.
+
+trigger:
+  branches:
+    include: [main]
+pr:
+  branches:
+    include: ['*']
+
+resources:
+  repositories:
+    - repository: agentavow
+      type: github
+      name: AgentAvow/AgentAvow
+      endpoint: github-agentavow   # a GitHub service connection in your project
+      ref: refs/heads/main         # pin a commit or tag for a reproducible gate
+
+jobs:
+  - template: azure-devops/templates/agentavow-scan.yml@agentavow
+    parameters:
+      failOn: do_not_connect       # do_not_connect | review | none
+      failOnFindings: none         # none | critical | high | medium
+      scanPaths: ['.']

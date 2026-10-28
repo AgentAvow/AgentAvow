@@ -13,7 +13,9 @@ is code-analysis only, matching the signed trust_score.
 """
 from __future__ import annotations
 
-SAFE_BAR = 81  # A/A+ floor for the binary "safe" call (matches the site verdict)
+# The old binary rule's score bar, kept for ``is_safe_legacy`` and the MCP connector's
+# legacy fields; the answer itself is ``decide()`` (Safe can read from 51).
+SAFE_BAR = 81
 
 
 def is_safe(data: dict) -> bool:
@@ -57,6 +59,22 @@ def sandbox_alarm(data: dict) -> bool:
                for f in (b.get("findings") or []) if isinstance(f, dict))
 
 
+def _version_key(v: str) -> tuple:
+    """A loose sort key for release strings ("1.10.0" > "1.9.2"); never raises."""
+    parts = []
+    for p in str(v).lstrip("v").split("."):
+        num = "".join(ch for ch in p if ch.isdigit())
+        parts.append((int(num) if num else 0, p))
+    return tuple(parts)
+
+
+def _highest_fix(advisories: list[dict]) -> str | None:
+    """The release that fixes ALL the listed advisories = the highest ``fixed_in``
+    (Kenne, 2026-10-19: an own advisory reads Review and names the fixed version)."""
+    fixes = [str(a.get("fixed_in")) for a in advisories if a.get("fixed_in")]
+    return max(fixes, key=_version_key) if fixes else None
+
+
 def is_advisory_block(b: dict) -> bool:
     """True for a ``behavioral`` block that is advisory only — the opt-in live probe of a
     remote MCP server (``plan == "live-probe"``). Its findings are reported, never a
@@ -73,7 +91,7 @@ def verdict_reason(data: dict, safe: bool | None = None) -> str:
                               a read-only tool that wrote, a leaked canary credential).
     - ``known_vulnerability`` — a published advisory (GHSA/CVE) affects this version.
     - ``deprecated``        — no risk found; the maintainer retired the package.
-    - ``thin_coverage``     — no risk found, but too little code to inspect (<8 files).
+    - ``thin_coverage``     — no risk found, but too little code to inspect (0-7 files).
     - ``low_signals``       — no risk found, held down by non-finding signals
                               (maintainer/provenance/adoption), not detected risk.
 
@@ -96,7 +114,8 @@ def verdict_reason(data: dict, safe: bool | None = None) -> str:
     if isinstance(dep, str) and dep.strip():
         return "deprecated"
     files = (data.get("metadata") or {}).get("files_scanned")
-    return "thin_coverage" if isinstance(files, int) and 0 < files < 8 else "low_signals"
+    thin = isinstance(files, int) and not isinstance(files, bool) and 0 <= files < 8
+    return "thin_coverage" if thin else "low_signals"
 
 
 def verdict_label(safe: bool) -> str:
@@ -107,15 +126,23 @@ def verdict_label(safe: bool) -> str:
 # ── The three-phrase decision ─────────────────────────────────────────────────────
 # ONE rule for what every surface leads with (enterprise plan, LOCKED 2026-10-07):
 #
-#   do_not_connect  "Do not connect"            a blocking critical defect (static), a
+#   do_not_connect  "Do not connect"            a blocking critical defect (static) other
+#                                               than a hardcoded credential, a
 #                                               planted credential leaving the sandbox or
 #                                               any other critical sandbox finding, a
 #                                               known-malicious dependency / OpenSSF MAL
 #                                               advisory on this version
-#   review          "Review before you connect" a blocking high defect (static or
+#   review          "Review before you connect" a blocking critical hardcoded
+#                                               credential (category ``secret``) alone, a
+#                                               blocking high defect (static or
 #                                               sandbox), a published advisory affecting
 #                                               the scanned version, deprecation, a score
-#                                               under 51
+#                                               under 51, or a scan that could not read
+#                                               what it exists to read (an MCP tool list,
+#                                               no code at all after a tree / fetch
+#                                               failure, an agent-instruction file over
+#                                               the cap, a file a skill links, a model's
+#                                               custom code)
 #   safe            "Safe to connect"           otherwise, including thin static
 #                                               coverage with nothing found (the reason
 #                                               says so; decided 2026-10-08, #19)
@@ -126,7 +153,9 @@ def verdict_label(safe: bool) -> str:
 # (``is_advisory_block``), a run that did not happen, needed credentials or timed out
 # contributes no finding. A capability (``kind == "capability"``) is never a defect.
 # While ``behavioral.pending`` is true the decision is provisional (``final=False``) and
-# the reason says the sandbox is still running.
+# the reason says the sandbox is still running (or, ``state == "queued"``, waiting for a
+# slot). The API stops saying pending after a while (``slots.PENDING_MAX_AGE``), so a
+# busy or down sandbox can't keep a decision provisional for hours.
 #
 # UNSIGNED: the decision rides beside the signed verdict; it is not in the JWS.
 # TS twin: ``decide()`` in ``web/src/components/trust/gradeSystem.ts`` — the two must
@@ -140,9 +169,49 @@ DECISION_VALUES = (DECISION_SAFE, DECISION_REVIEW, DECISION_DO_NOT_CONNECT)
 REVIEW_SCORE_FLOOR = 51  # below this, accumulated findings alone mean "review"
 THIN_COVERAGE_FILES = 8  # fewer static files than this, with nothing found = thin
 PENDING_SUFFIX = "; sandbox still running"
+# Pending because every sandbox slot is busy (``behavioral.state == "queued"``), not
+# because a run is going. Past the pending age limit the API stops saying pending.
+QUEUED_SUFFIX = "; waiting for a sandbox slot"
 THIN_REASON = "nothing found; little code to inspect"
+# Thin coverage at zero files: the package was read and held no code to scan.
+THIN_REASON_NO_CODE = "nothing found; no code to inspect"
 # A live MCP server scan reads the served tool definitions only (files = tools).
 THIN_REASON_REMOTE_MCP = "tool definitions clean; server code not inspected"
+# A remote MCP server whose tools/list could not be read (error, timeout, transport
+# failure) reads Review: the tool definitions are what we exist to read (Kenne, 10-20).
+TOOL_LIST_UNREAD_REASON = "the server's tool list could not be read"
+# The same rule for a tool list read only in part: a later page failed or was too
+# large, a cursor repeated, or the page cap was reached (``tool_list_paged``).
+TOOL_LIST_PAGED_REASON = "only part of the server's tool list could be read"
+# An advertised resources/ or prompts/list that could not be read, or was too large to
+# read: prompt and resource text is injection surface an agent reads (Kenne, 10-20).
+RESOURCE_LIST_UNREAD_REASON = "the server's resource list could not be read"
+PROMPT_LIST_UNREAD_REASON = "the server's prompt list could not be read"
+RESOURCE_PROMPT_LISTS_UNREAD_REASON = "the server's resource and prompt lists could not be read"
+# The same principle for the other things we exist to read (partial-coverage audit,
+# 2026-10-20). Each reads Review with its own reason; disclosure-only gaps stay Safe.
+# No file read because the tree or every fetch failed (an outage, not an empty
+# metapackage: THIN_REASON_NO_CODE stays Safe for one).
+CODE_UNREAD_REASON = "the scan could not read the code"
+# An agent-instruction file (SKILL.md, AGENTS.md, CLAUDE.md, mcp.json, server.json) over
+# the 500 KB read cap: padding it is the published evasion, and it is what agents read.
+AGENT_FILE_UNREAD_REASON = "an agent instruction file was too large to read"
+# A file SKILL.md links (too large, past the file cap, or not fetched).
+SKILL_REF_UNREAD_REASON = "a file the skill's instructions use could not be read"
+# A Hugging Face model's custom .py (too large, past the file cap, or not fetched):
+# custom code runs on load with trust_remote_code.
+CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
+
+# A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
+# yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
+# the tool, so on its own it caps at Review, never Do not connect (Kenne, 2026-10-19).
+# A secret alongside any other blocking critical is still Do not connect.
+# Category ``secret`` is ONLY for a hardcoded credential value. A rule that reads or
+# sends the user's credentials (exfiltration) must never use it, or it would inherit
+# this cap; tests/test_secret_category_guard.py pins every emitter.
+SECRET_CATEGORY = "secret"
+SECRET_REASON_ONE = "a hardcoded credential{where} (it exposes the vendor's key, not yours)"
+SECRET_REASON_MANY = "{n} hardcoded credentials{where} (they expose the vendor's keys, not yours)"
 
 # Human names for the sandbox rules a reason can cite.
 _BEHAVIORAL_LABELS = {
@@ -234,6 +303,14 @@ def _is_blocking_item(i: dict) -> bool:
     return i.get("shipped") is not False
 
 
+def _surface_is(data: dict, surface: str) -> bool:
+    for key in ("coverage", "surface_detail"):
+        block = data.get(key)
+        if isinstance(block, dict) and block.get("surface") == surface:
+            return True
+    return False
+
+
 def _is_remote_mcp(data: dict) -> bool:
     """A live MCP server scan (``scan_mcp``): only the served tool definitions were
     read, no server code. Marked ``coverage.surface == "mcp"`` (or the same in
@@ -245,10 +322,224 @@ def _is_remote_mcp(data: dict) -> bool:
     return False
 
 
-def _count_phrase(n: int, severity: str, label: str | None) -> str:
+# ── Where the leading finding sits (wording only) ─────────────────────────────────
+# "3 critical findings, including curl/wget piped to shell" read as "this package runs
+# curl|bash when installed" even when the command ships in instructions it hands an
+# agent. The reason names the leading finding's place. Path rules only (pure; the TS
+# twin ``findingWhere`` in gradeSystem.ts must match).
+WHERE_CODE = " in its code"
+WHERE_INSTALL = " in its install script"
+WHERE_AGENTS = " in instructions it gives agents"
+WHERE_TOOLS = " in its tool definitions"
+WHERE_DEPENDENCY = " in a dependency"
+
+# Files an agent is handed as instructions (mirrors src.scanner.package_context).
+_AGENT_FILE_NAMES = frozenset({
+    "skill.md", "agents.md", "agent.md", "claude.md", "gemini.md", "copilot-instructions.md",
+    ".cursorrules", ".windsurfrules", ".clinerules", "llms.txt", "llms-full.txt",
+    "mcp.json", ".mcp.json", "server.json", "ai-plugin.json", "manifest.json",
+    "plugin.json", "marketplace.json", "tools.json", "smithery.yaml", "smithery.yml",
+    "agents.yaml", "agents.yml", "tasks.yaml", "tasks.yml",
+})
+_AGENT_DIRS = frozenset({
+    "skills", "skill", ".claude", ".claude-plugin", ".cursor", ".windsurf", ".agents",
+    ".codex", ".gemini", "agents", "prompts", "instructions", "commands",
+})
+_TEXT_EXTS = (".md", ".mdc", ".txt", ".yaml", ".yml", ".json", ".toml")
+WHERE_DATA = " in a data file it ships"
+_DATA_EXTS = (".yaml", ".yml", ".json", ".jsonl", ".toml", ".xml", ".txt", ".csv", ".tsv")
+# Data-format files a tool executes (lifecycle scripts, CI, compose): read as code.
+_EXECUTED_DATA_NAMES = frozenset({
+    "package.json", "pyproject.toml", "setup.cfg", "docker-compose.yml",
+    "docker-compose.yaml", "compose.yml", "compose.yaml", "action.yml", "action.yaml",
+    ".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml", ".pre-commit-config.yaml",
+})
+_CI_DIRS = frozenset({".github", ".gitlab", ".circleci", ".buildkite", "workflows"})
+
+
+def finding_where(i: dict) -> str:
+    """`` in its code`` / `` in its install script`` / `` in instructions it gives
+    agents`` / `` in its tool definitions`` / `` in a data file it ships`` /
+    `` in a dependency`` for a listed finding."""
+    cat = i.get("category")
+    if cat == "install_hook":
+        return WHERE_INSTALL
+    if cat == "dependency":
+        return WHERE_DEPENDENCY
+    path = str(i.get("file_path") or "").replace("\\", "/").lower()
+    if path.startswith(("tool:", "prompt:", "resource:", "server:")):
+        return WHERE_TOOLS
+    parts = [p for p in path.split("/") if p]
+    name = parts[-1] if parts else ""
+    # A deciding finding in package.json sits in its scripts: a maintainer-only script
+    # is low and never decides, so what is left runs from an install lifecycle script.
+    if name == "package.json":
+        return WHERE_INSTALL
+    if name in _AGENT_FILE_NAMES or name.endswith(".mdc") or (
+            name.endswith(_TEXT_EXTS) and (name.startswith("readme")
+                                           or any(p in _AGENT_DIRS for p in parts[:-1]))):
+        return WHERE_AGENTS
+    if (name.endswith(_DATA_EXTS) and name not in _EXECUTED_DATA_NAMES
+            and not any(p in _CI_DIRS for p in parts[:-1])):
+        return WHERE_DATA
+    return WHERE_CODE
+
+
+def _count_phrase(n: int, severity: str, label: str | None, where: str = "") -> str:
     if n == 1:
-        return f"one {severity} finding" + (f": {label}" if label else "")
-    return f"{n} {severity} findings" + (f", including {label}" if label else "")
+        return f"one {severity} finding{where}" + (f": {label}" if label else "")
+    return f"{n} {severity} findings{where}" + (f", including {label}" if label else "")
+
+
+def finding_decides(i: dict) -> bool:
+    """Whether a listed finding is an input to the decision: a blocking critical/high
+    (static code, install hook, known-malicious dependency, own advisory) or a sandbox
+    critical/high (``sandbox: True``). Dependency advisories, mediums, lows and
+    capabilities are not. Used to list the findings that decided the answer first."""
+    if not isinstance(i, dict):
+        return False
+    if str(i.get("severity") or "").lower() not in ("critical", "high"):
+        return False
+    return bool(i.get("sandbox")) or _is_blocking_item(i)
+
+
+def _is_dependency_advisory(i: dict) -> bool:
+    """A vulnerable-dependency finding (``category == "dependency"``): reported and
+    counted in the totals, never a decision input (a known-malicious one is)."""
+    return (i.get("category") == "dependency" and i.get("kind") != "capability"
+            and not _is_malicious_item(i))
+
+
+def _dependency_counts(data: dict, items: list) -> tuple[int, int]:
+    """(critical, high) dependency advisories, as the totals beside the reason count
+    them: the larger of the listed items and the scored supply-chain counts (the item
+    list is capped)."""
+    crit = sum(1 for i in items if _is_dependency_advisory(i)
+               and str(i.get("severity") or "").lower() == "critical")
+    high = sum(1 for i in items if _is_dependency_advisory(i)
+               and str(i.get("severity") or "").lower() == "high")
+    sc = data.get("supply_chain") if isinstance(data.get("supply_chain"), dict) else {}
+    counts = sc.get("counts")
+    if sc.get("scored") is True and isinstance(counts, dict):
+        crit = max(crit, _int(counts.get("critical")))
+        high = max(high, _int(counts.get("high")))
+    return crit, high
+
+
+def _dependency_phrase(crit: int, high: int) -> str:
+    """``6 critical and 43 high`` (empty when neither)."""
+    parts = []
+    if crit > 0:
+        parts.append(f"{crit} critical")
+    if high > 0:
+        parts.append(f"{high} high")
+    return " and ".join(parts)
+
+
+# ── What the scan could not check (wording only) ─────────────────────────────────
+# A "nothing found" answer covers only what was read. ``coverage_gaps`` (public JSON,
+# signed as ``scan.coverageGaps``) counts what the scan selected but could not read;
+# every surface states it next to the answer, and a Safe reason ends with it, so a
+# result with unread files never reads as a clean bill for the whole tool. Disclosure
+# only: nothing here changes the decision or the score (the MCP list gaps that read
+# Review are decided in decide(), not here). TS twin: ``coverageGapNotes``
+# in gradeSystem.ts (byte-identical; tests/test_decision.py runs both).
+COVERAGE_GAP_REASON_MAX = 2  # notes named in a Safe reason; the rest are counted
+DEFAULT_FILE_CAP = 200
+
+
+def _files_phrase(n: int, noun: str = "file") -> str:
+    return f"{n:,} {noun}" + ("" if n == 1 else "s")
+
+
+def _was(n: int) -> str:
+    return "was" if n == 1 else "were"
+
+
+def coverage_gap_notes(data: dict) -> list[str]:
+    """Plain-English notes for what the scan could not check, from ``coverage_gaps``
+    (empty when the scan read everything it selected, or for older cached shapes)."""
+    data = data if isinstance(data, dict) else {}
+    g = data.get("coverage_gaps")
+    if not isinstance(g, dict):
+        return []
+    notes: list[str] = []
+    # What an agent is handed to read comes first: these are the cheap ways to hide
+    # an instruction from the scan.
+    n = _int(g.get("oversized_agent_files"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'agent instruction file')} over 500 KB {_was(n)} "
+                     "not read")
+    n = _int(g.get("skill_refs_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} the skill's instructions link to {_was(n)} not read")
+    n = _int(g.get("custom_code_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'custom code file')} in the model {_was(n)} not read")
+    n = _int(g.get("oversized_files"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} over 500 KB {_was(n)} not fully read")
+    n = _int(g.get("fetch_failed"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} could not be fetched")
+    n = _int(g.get("scan_errors"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} could not be scanned")
+    n = _int(g.get("time_limit_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} {_was(n)} not read before the time limit")
+    n = _int(g.get("over_file_cap"))
+    if n > 0:
+        cap = _int(g.get("file_cap")) or DEFAULT_FILE_CAP
+        notes.append(f"{_files_phrase(n)} past the {cap:,}-file limit {_was(n)} not read")
+    if g.get("tree_truncated") is True:
+        notes.append("GitHub returned only part of the file tree")
+    if g.get("tree_unavailable") is True:
+        notes.append("the file list could not be read")
+    n = _int(g.get("package_skipped"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n)} in the package {_was(n)} skipped for size")
+    n = _int(g.get("dependency_files_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'dependency file')} could not be read")
+    if g.get("advisory_lookup") == "failed":
+        notes.append("the vulnerability database lookup failed")
+    if g.get("tool_list_unread") is True:
+        notes.append("the server's tool list could not be read")
+    if g.get("tool_list_paged") is True:
+        n = _int(g.get("pages_read"))
+        if n > 1:
+            notes.append(f"only the first {n:,} pages of the server's tool list were read")
+        elif n == 1:
+            notes.append("only the first page of the server's tool list was read")
+        else:
+            notes.append("only part of the server's tool list was read")
+    for kind in ("resource", "prompt"):
+        if g.get(f"{kind}_list_too_large") is True:
+            notes.append(f"the server's {kind} list was too large to read")
+        elif g.get(f"{kind}_list_unread") is True:
+            notes.append(f"the server's {kind} list could not be read")
+    n = _int(g.get("image_layers_unread"))
+    if n > 0:
+        why = g.get("image_layers_reason")
+        why = f" ({why})" if isinstance(why, str) and why else ""
+        notes.append(f"{_files_phrase(n, 'image layer')} {_was(n)} not read{why}")
+    n = _int(g.get("skills_ungraded"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'skill')} in the repo {_was(n)} not graded")
+    return notes
+
+
+def coverage_gap_suffix(data: dict) -> str:
+    """``; <note>; <note>; and N more coverage gaps`` for a Safe reason ("" when
+    none)."""
+    notes = coverage_gap_notes(data)
+    if not notes:
+        return ""
+    head = notes[:COVERAGE_GAP_REASON_MAX]
+    rest = len(notes) - len(head)
+    more = f"; and {_files_phrase(rest, 'more coverage gap')}" if rest > 0 else ""
+    return "; " + "; ".join(head) + more
 
 
 def _first(items: list, pred) -> dict | None:
@@ -267,7 +558,10 @@ def decide(data: dict) -> Decision:
     items = [i for i in (findings.get("items") or []) if isinstance(i, dict)]
     meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     files = meta.get("files_scanned")
-    files = files if isinstance(files, int) and not isinstance(files, bool) else 0
+    # An explicit 0 (we read the package and it held no code) is thin coverage; a result
+    # with no files_scanned at all (older cached shapes) is unknown, not thin.
+    files_known = isinstance(files, int) and not isinstance(files, bool)
+    files = files if files_known else 0
 
     b = data.get("behavioral")
     b = b if isinstance(b, dict) else None
@@ -276,8 +570,21 @@ def decide(data: dict) -> Decision:
     b_findings = [f for f in ((b or {}).get("findings") or []) if isinstance(f, dict)] \
         if b_live else []
 
+    suffix = "" if not pending else (
+        QUEUED_SUFFIX if b and b.get("state") == "queued" else PENDING_SUFFIX)
+
     def done(decision: str, reason: str) -> Decision:
-        return Decision(decision, not pending, reason + (PENDING_SUFFIX if pending else ""))
+        return Decision(decision, not pending, reason + suffix)
+
+    # Dependency advisories are never decision inputs, but the totals beside the reason
+    # count them; a reason that counts findings names them too, so the two never seem
+    # to disagree ("5 high findings in its code; plus 6 critical and 43 high in
+    # dependencies"). Wording only: nothing here changes the decision.
+    dep_c, dep_h = _dependency_counts(data, items)
+    deps = _dependency_phrase(dep_c, dep_h)
+    in_code = " in its code" if deps else ""
+    in_sandbox = " in the sandbox" if deps else ""
+    plus_deps = f"; plus {deps} in dependencies" if deps else ""
 
     def sev(i: dict) -> str:
         return str(i.get("severity") or "").lower()
@@ -291,7 +598,7 @@ def decide(data: dict) -> Decision:
         else {}
     if inc.get("current_version_affected") is True:
         return done(DECISION_DO_NOT_CONNECT,
-                    "this version is listed as malicious (OpenSSF MAL advisory)")
+                    "this version is a known-malicious package (malware advisory)")
     mal = _first(items, _is_malicious_item)
     sc = data.get("supply_chain") if isinstance(data.get("supply_chain"), dict) else {}
     sc_mal = sc.get("malicious")
@@ -303,42 +610,67 @@ def decide(data: dict) -> Decision:
     def is_advisory(i: dict) -> bool:
         return i.get("category") == "known_vulnerability" and i.get("kind") != "capability"
 
+    def is_secret(i: dict) -> bool:
+        return (i.get("category") == SECRET_CATEGORY and i.get("kind") != "capability"
+                and not _is_malicious_item(i))
+
+    # Blocking critical hardcoded credentials: reviewed below, never Do not connect.
+    secrets = [i for i in items if sev(i) == "critical" and _is_blocking_item(i)
+               and is_secret(i)]
+
     def defect(severity: str):
         """(count, first item) of blocking static defects at ``severity``; an own
-        advisory is not a defect here (it reads as review below)."""
+        advisory is not a defect here (it reads as review below), and neither is a
+        critical hardcoded credential (``secrets``, also reviewed below)."""
+        crit = severity == "critical"
         hits = [i for i in items if sev(i) == severity and _is_blocking_item(i)
-                and not is_advisory(i)]
+                and not is_advisory(i) and not (crit and is_secret(i))]
         headline = findings.get(severity)
         if isinstance(headline, int) and not isinstance(headline, bool):
             adv = sum(1 for i in items if sev(i) == severity and is_advisory(i))
-            n = max(headline - adv, 0)
+            n = max(headline - adv - (len(secrets) if crit else 0), 0)
         else:
             n = len(hits)
         if n and not hits:
             hits = [i for i in items if sev(i) == severity and i.get("kind") != "capability"
-                    and i.get("installed") is not False and not is_advisory(i)]
+                    and i.get("installed") is not False and not is_advisory(i)
+                    and not (crit and is_secret(i))]
         return n, (hits[0] if hits else None)
+
+    def where(item: dict | None) -> str:
+        """The leading finding's place; without an item, " in its code" only when the
+        dependency clause needs the contrast (as before)."""
+        return finding_where(item) if item is not None else in_code
 
     n_crit, crit = defect("critical")
     if n_crit:
         return done(DECISION_DO_NOT_CONNECT, _count_phrase(
-            n_crit, "critical", _label(crit.get("name")) if crit else None))
+            n_crit, "critical", _label(crit.get("name")) if crit else None, where(crit))
+            + plus_deps)
     b_crit = [f for f in b_findings if sev(f) == "critical"]
     if b_crit:
         f = b_crit[0]
         label = _BEHAVIORAL_LABELS.get(str(f.get("rule") or "")) or _label(f.get("name"))
-        return done(DECISION_DO_NOT_CONNECT, f"the sandbox caught a critical behavior: {label}")
+        return done(DECISION_DO_NOT_CONNECT,
+                    f"the sandbox caught a critical behavior: {label}" + plus_deps)
 
     # ── review ────────────────────────────────────────────────────────────────────
+    if secrets:
+        w = finding_where(secrets[0])
+        reason = (SECRET_REASON_ONE.format(where=w) if len(secrets) == 1
+                  else SECRET_REASON_MANY.format(n=len(secrets), where=w))
+        return done(DECISION_REVIEW, reason + plus_deps)
     n_high, high = defect("high")
     if n_high:
         return done(DECISION_REVIEW, _count_phrase(
-            n_high, "high", _label(high.get("name")) if high else None))
+            n_high, "high", _label(high.get("name")) if high else None, where(high))
+            + plus_deps)
     b_high = [f for f in b_findings if sev(f) == "high"]
     if b_high:
         f = b_high[0]
         label = _BEHAVIORAL_LABELS.get(str(f.get("rule") or "")) or _label(f.get("name"))
-        return done(DECISION_REVIEW, _count_phrase(len(b_high), "high", label))
+        return done(DECISION_REVIEW,
+                    _count_phrase(len(b_high), "high", label, in_sandbox) + plus_deps)
 
     raw_adv = data.get("advisories")
     if not (isinstance(raw_adv, list) and raw_adv):
@@ -351,23 +683,58 @@ def decide(data: dict) -> Decision:
     adv_item = _first(items, is_advisory)
     if advisories or adv_item is not None:
         aid = str((advisories[0].get("id") if advisories else "") or "")
+        fix = _highest_fix(advisories)
         return done(DECISION_REVIEW, "a published advisory affects this version"
-                    + (f" ({aid})" if aid else ""))
+                    + (f" ({aid})" if aid else "") + (f"; fixed in {fix}" if fix else ""))
     dep = data.get("deprecation")
     if isinstance(dep, str) and dep.strip():
         return done(DECISION_REVIEW, "the maintainer has deprecated this package")
     if score < REVIEW_SCORE_FLOOR:
         return done(DECISION_REVIEW, f"trust score {score}/100 is under {REVIEW_SCORE_FLOOR}")
+    gap = data.get("coverage_gaps")
+    gap = gap if isinstance(gap, dict) else {}
+    if gap.get("tool_list_unread") is True:
+        return done(DECISION_REVIEW, TOOL_LIST_UNREAD_REASON)
+    if gap.get("tool_list_paged") is True:
+        return done(DECISION_REVIEW, TOOL_LIST_PAGED_REASON)
+    res_gap = gap.get("resource_list_unread") is True or gap.get("resource_list_too_large") is True
+    pr_gap = gap.get("prompt_list_unread") is True or gap.get("prompt_list_too_large") is True
+    if res_gap or pr_gap:
+        return done(DECISION_REVIEW, RESOURCE_PROMPT_LISTS_UNREAD_REASON if res_gap and pr_gap
+                    else RESOURCE_LIST_UNREAD_REASON if res_gap else PROMPT_LIST_UNREAD_REASON)
+    if files_known and files == 0 and (
+            gap.get("tree_truncated") is True or gap.get("tree_unavailable") is True
+            or _int(gap.get("fetch_failed")) > 0
+            or _int(gap.get("time_limit_unread")) > 0):
+        return done(DECISION_REVIEW, CODE_UNREAD_REASON)
+    if _int(gap.get("oversized_agent_files")) > 0:
+        return done(DECISION_REVIEW, AGENT_FILE_UNREAD_REASON)
+    if _int(gap.get("skill_refs_unread")) > 0:
+        return done(DECISION_REVIEW, SKILL_REF_UNREAD_REASON)
+    if _int(gap.get("custom_code_unread")) > 0:
+        return done(DECISION_REVIEW, CUSTOM_CODE_UNREAD_REASON)
 
     found = any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 and i.get("installed") is not False for i in items)
 
     # ── safe ──────────────────────────────────────────────────────────────────────
-    # Thin coverage (0 < files < 8, nothing found) reads Safe and says so in the reason
+    # A Safe reason ends with what the scan could not check (wording only).
+    gaps = coverage_gap_suffix(data)
+
+    def safe(reason: str) -> Decision:
+        return done(DECISION_SAFE, reason + gaps)
+
+    if deps:
+        noun = "advisory" if dep_c + dep_h == 1 else "advisories"
+        return safe(f"no critical or high findings in its code (dependencies: {deps} {noun})")
+    # Thin coverage (0 <= files < 8, nothing found) reads Safe and says so in the reason
     # (Kenne, 2026-10-08, #19). The 74 / 82 evidence cap on the score still shows it.
-    if 0 < files < THIN_COVERAGE_FILES and not found:
-        return done(DECISION_SAFE, THIN_REASON_REMOTE_MCP if _is_remote_mcp(data)
-                    else THIN_REASON)
+    # Zero files (a metapackage whose code ships in a dependency, an image read only to
+    # its config) is the thinnest case and says there was no code at all.
+    if files_known and 0 <= files < THIN_COVERAGE_FILES and not found:
+        if _is_remote_mcp(data):
+            return safe(THIN_REASON_REMOTE_MCP)
+        return safe(THIN_REASON if files > 0 else THIN_REASON_NO_CODE)
     if files > 0:
         n = f"{files:,}"
         unit = "file" if files == 1 else "files"
@@ -375,4 +742,90 @@ def decide(data: dict) -> Decision:
                   else f"nothing found in {n} {unit}")
     else:
         reason = "no critical or high findings" if found else "nothing found"
-    return done(DECISION_SAFE, reason)
+    return safe(reason)
+
+
+# ── The Certified mark (display rule) ─────────────────────────────────────────────
+# ``certified.eligible`` is the signed six-check provenance gate (safety model §8) and
+# never changes here. The MARK ("✓ Certified <score>") is a display rule on top of it
+# (§10, Kenne 2026-10-08): it sits only beside Safe to connect, once the sandbox result
+# is final, at a score of 81 or above, never on thin coverage, and never beside a
+# coverage gap that is cheap for an attacker to cause (``cheap_coverage_gap``; a plain
+# oversized bundle keeps it). Every surface reads
+# this one function (or the API's ``certified_mark`` field); fail closed on anything
+# missing. TS twin: ``certifiedMarkStatus()`` in gradeSystem.ts (byte-identical; the
+# equivalence table is in tests/test_decision.py).
+
+CERTIFIED_MARK_MIN_SCORE = 81
+
+MARK_NOT_SAFE = "not_safe"
+MARK_PENDING = "sandbox_pending"
+MARK_SCORE = "score_below_81"
+MARK_THIN = "thin_coverage"
+MARK_GAPS = "coverage_gaps"
+
+# The disclosure finding ``scan._scan_oversized_text`` emits when an oversized file's
+# head is filler (the published padding evasion).
+PADDED_FINDING = "Oversized source file padded with filler"
+
+
+def cheap_coverage_gap(data: dict) -> bool:
+    """Whether ``coverage_gaps`` holds a gap that is cheap for an attacker to cause: a
+    fetch that failed, an MCP tool list unread or only partly read, a skill file not
+    read (any gap on a skill scan, or a collection skill not graded), an
+    agent-instruction file over the read cap, or an oversized file the padding rule
+    fired on. A plain big file (a bundled ``.js``) is not one: its head and tail were
+    read and nothing says it was padded. Display rule only (the Certified mark)."""
+    data = data if isinstance(data, dict) else {}
+    g = data.get("coverage_gaps")
+    if not isinstance(g, dict):
+        return False
+    if _int(g.get("fetch_failed")) > 0:
+        return True
+    if g.get("tool_list_unread") is True or g.get("tool_list_paged") is True:
+        return True
+    if _int(g.get("oversized_agent_files")) > 0 or _int(g.get("skill_refs_unread")) > 0:
+        return True
+    if _int(g.get("skills_ungraded")) > 0:
+        return True
+    if _surface_is(data, "openclaw") and (
+            _int(g.get("oversized_files")) > 0 or _int(g.get("over_file_cap")) > 0
+            or g.get("tree_truncated") is True):
+        return True
+    if _int(g.get("oversized_files")) > 0:
+        findings = data.get("findings") if isinstance(data.get("findings"), dict) else {}
+        items = findings.get("items") if isinstance(findings.get("items"), list) else []
+        if any(isinstance(i, dict) and i.get("name") == PADDED_FINDING for i in items):
+            return True
+    return False
+
+
+def certified_mark_status(data: dict, decision: Decision | None = None) -> tuple[bool, str]:
+    """(mark, why_not). ``why_not`` is "" when the mark shows or when the tool is not
+    eligible at all (nothing to explain); otherwise the one condition that suppressed
+    an earned eligibility. ``decision`` defaults to ``decide(data)``; pass the applied
+    one (sandbox block + adjusted score) when the caller already has it."""
+    data = data if isinstance(data, dict) else {}
+    cert = data.get("certified")
+    if not (isinstance(cert, dict) and cert.get("eligible") is True):
+        return False, ""
+    d = decision if isinstance(decision, Decision) else decide(data)
+    if d.decision != DECISION_SAFE:
+        return False, MARK_NOT_SAFE
+    if not d.final:
+        return False, MARK_PENDING
+    if _int(data.get("trust_score")) < CERTIFIED_MARK_MIN_SCORE:
+        return False, MARK_SCORE
+    meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    files = meta.get("files_scanned")
+    files = files if isinstance(files, int) and not isinstance(files, bool) else 0
+    if files < THIN_COVERAGE_FILES:
+        return False, MARK_THIN
+    if cheap_coverage_gap(data):
+        return False, MARK_GAPS
+    return True, ""
+
+
+def certified_mark(data: dict, decision: Decision | None = None) -> bool:
+    """Whether a result shows the Certified mark (see ``certified_mark_status``)."""
+    return certified_mark_status(data, decision)[0]

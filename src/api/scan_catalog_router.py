@@ -22,6 +22,7 @@ import re
 import threading
 import time
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +118,7 @@ class CatalogSandbox(BaseModel):
     exercised: bool | None = None  # MCP server launched OK (None: not an MCP plan)
     findings: int = 0
     unexpected_egress: int = 0
+    timed_out: bool = False  # the run hit its time limit: partial, never "clean"
 
 
 class CatalogRow(BaseModel):
@@ -127,6 +129,9 @@ class CatalogRow(BaseModel):
     endpoint_url: str | None = None  # for x402 surface
     trust_score: int | None = None
     grade: str | None = None  # letter grade WITH the A+ certified gate (roadmap §7)
+    # The Certified display mark (src.scanner.verdict.certified_mark) for this row: a
+    # stored A+ written under the mark rule. Lists read this, never ``grade``.
+    certified_mark: bool | None = None
     critical: int | None = None
     high: int | None = None
     findings_count: int | None = None
@@ -151,6 +156,8 @@ class CatalogRow(BaseModel):
 
     @model_validator(mode="after")
     def _fill_decision(self) -> CatalogRow:
+        if self.certified_mark is None:
+            self.certified_mark = self.grade == "A+"
         if self.trust_score is not None and self.decision is None:
             from src.scanner.verdict import decide
             findings: dict[str, Any] = {}
@@ -192,6 +199,7 @@ def _sandbox_summary(block: Any) -> CatalogSandbox | None:
         exercised=(bool(ex.get("launch_ok")) if ex is not None else None),
         findings=len([f for f in (block.get("findings") or []) if isinstance(f, dict)]),
         unexpected_egress=len(block.get("unexpected_egress") or []),
+        timed_out=bool(block.get("timed_out") or (ex or {}).get("timed_out")),
     )
 
 
@@ -322,6 +330,89 @@ def _row_grade(
     return _display_grade(score, None, critical or 0)
 
 
+# Prod first served the certified_mark rule (#119, 308d7e64) at about 05:44Z; before
+# that a stored A+ followed raw ``certified.eligible`` (it could sit on a pending
+# sandbox or a thin-coverage scan). A stored A+ written earlier is not trusted as the
+# mark: it reads A until the row is re-scanned (fail closed), unless the cached scan it
+# came from still passes ``certified_mark()`` at the same score (_mark_from_cached_scan).
+CERTIFIED_MARK_SINCE = datetime(2026, 10, 9, 6, 0, tzinfo=timezone.utc)
+
+
+def _stored_grade_for_mark(grade: str | None, scanned_at: datetime | None) -> str | None:
+    if grade != "A+":
+        return grade
+    if scanned_at is None:
+        return "A"
+    if scanned_at.tzinfo is None:
+        scanned_at = scanned_at.replace(tzinfo=timezone.utc)
+    return grade if scanned_at >= CERTIFIED_MARK_SINCE else "A"
+
+
+def _is_pre_rule_a_plus(grade: str | None, scanned_at: datetime | None) -> bool:
+    """A stored A+ that ``_stored_grade_for_mark`` would demote (written before the rule)."""
+    return grade == "A+" and _stored_grade_for_mark(grade, scanned_at) == "A"
+
+
+async def _mark_from_cached_scan(owner: str, repo: str, trust_score: int | None) -> bool:
+    """Re-check a pre-rule stored A+ against the scan it was written from.
+
+    The 7-day stale copy of the public scan cache holds the scan data; the mark is
+    ``certified_mark()`` on its static part, which is exactly what the scan path stores
+    the A+ from. Fail closed: no cached scan, a different score (the row and the cache
+    disagree), or any error means no mark. Read-only; nothing is written back."""
+    try:
+        from src import cache
+        from src.api.public_scan_router import _STALE_CACHE_PREFIX
+        from src.scanner.verdict import certified_mark
+
+        data = await cache.get(f"{_STALE_CACHE_PREFIX}{owner}/{repo}")
+        if not isinstance(data, dict) or data.get("trust_score") != trust_score:
+            return False
+        static = {k: v for k, v in data.items() if k != "behavioral"}
+        return certified_mark(static)
+    except Exception:
+        logger.debug("cached mark check failed for %s/%s", owner, repo, exc_info=True)
+        return False
+
+
+async def _mark_as_page_shows(owner: str, repo: str, trust_score: int | None) -> bool | None:
+    """The Certified mark the row's own result page shows right now, from the cached
+    scan plus the sandbox state (``_badge_view``: a pending or missing sandbox run
+    means no mark). None when no cached scan with this score exists (nothing to check
+    against); False on any error (fail closed). Read-only: never starts a run."""
+    try:
+        from src import cache
+        from src.api.public_scan_router import (
+            _CACHE_PREFIX,
+            _STALE_CACHE_PREFIX,
+            _badge_view,
+        )
+
+        key = f"{owner}/{repo}"
+        data = await cache.get(f"{_CACHE_PREFIX}{key}") or await cache.get(
+            f"{_STALE_CACHE_PREFIX}{key}")
+        if not isinstance(data, dict) or data.get("trust_score") != trust_score:
+            return None
+        static = {k: v for k, v in data.items()
+                  if k not in ("behavioral", "decision", "certified_mark")}
+        return (await _badge_view(static, trust_score, (owner, repo)))[1]
+    except Exception:
+        logger.debug("page mark check failed for %s/%s", owner, repo, exc_info=True)
+        return False
+
+
+_DECISIONS = frozenset({"safe", "review", "do_not_connect"})
+
+
+def _stored_decision(row: Any) -> str | None:
+    """A community row's stored ``decision`` when it is a valid answer and the row has
+    a score; else None (the CatalogRow validator recomputes it)."""
+    d = getattr(row, "decision", None)
+    if d in _DECISIONS and getattr(row, "trust_score", None) is not None:
+        return d
+    return None
+
+
 def _guard_stale_score(score: int | None, critical: int | None) -> int | None:
     """Safety net for pre-calibration stored/seed rows. A row still reading Trusted
     (>=81) while carrying a critical is impossible under the fixed scorer — floor it so
@@ -405,6 +496,18 @@ def _flagged_counts(rows: Iterable[CatalogRow]) -> dict[str, Any]:
     return c
 
 
+def _raw_decision(raw: dict, score: int | None) -> dict[str, Any]:
+    """The answer a launch-scan row stored at scan time (``decision`` /
+    ``decision_reason``, written by scripts/launch_scans/_common.summarize_scan_result
+    from decide() over the full result). Empty when absent, invalid or the row has no
+    score, so the CatalogRow validator recomputes it from score + counts."""
+    d = raw.get("decision")
+    if score is None or d not in _DECISIONS:
+        return {}
+    reason = raw.get("decision_reason")
+    return {"decision": d, "decision_reason": reason if isinstance(reason, str) else None}
+
+
 def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     """Convert a per-surface raw record into the unified row shape."""
     if surface == "x402":
@@ -438,6 +541,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
             findings_count=raw.get("findings_count"),
             primary_language=raw.get("primary_language"),
             scan_error=oc_err,
+            **_raw_decision(raw, oc_score),
             adoption_count=raw.get("adoption_count") or raw.get("stars"),
             adoption_unit=raw.get("adoption_unit") or ("stars" if raw.get("stars") else None),
             adoption_score=raw.get("adoption_score"),
@@ -462,6 +566,7 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
         is_mcp_server=raw.get("is_mcp_server"),
         scan_error=err,
         skipped=raw.get("skipped"),
+        **_raw_decision(raw, score),
         # Adoption signal: prefer a stored adoption_count (community rows), else fall
         # back to repo stars the scanner captured, so Browse shows adoption for the
         # static corpus too (was blank for everything but community scans).
@@ -471,7 +576,10 @@ def _normalize_row(surface: str, raw: dict) -> CatalogRow:
     )
 
 
-def _load_surface(surface: str, path: Path, results_key: str = "results") -> list[CatalogRow]:
+def _load_surface(
+    surface: str, path: Path, results_key: str = "results",
+    failed: set[str] | None = None,
+) -> list[CatalogRow]:
     if not path.exists():
         logger.warning("scan_catalog: missing %s", path)
         return []
@@ -479,6 +587,8 @@ def _load_surface(surface: str, path: Path, results_key: str = "results") -> lis
         data = json.loads(path.read_text())
     except Exception as e:
         logger.error("scan_catalog: failed to parse %s: %s", path, e)
+        if failed is not None:
+            failed.add(path.name)
         return []
     results = data.get(results_key, data) if isinstance(data, dict) else data
     if not isinstance(results, list):
@@ -486,25 +596,56 @@ def _load_surface(surface: str, path: Path, results_key: str = "results") -> lis
     return [_normalize_row(surface, r) for r in results if isinstance(r, dict)]
 
 
-def _load_rows() -> list[CatalogRow]:
+# The launch-scan files the static catalog is built from: (surface, file, list key).
+# OpenClaw's 500-skills scan uses a top-level 'repos' key instead of 'results'.
+_CATALOG_SOURCES: tuple[tuple[str, str, str], ...] = (
+    ("x402", "x402-results.json", "results"),
+    ("mcp", "mcp-registry-results.json", "results"),
+    ("npm", "npm-agents-results.json", "results"),
+    ("pypi", "pypi-agents-results.json", "results"),
+    ("openclaw", "openclaw-results.json", "repos"),
+)
+
+
+def _load_rows(failed: set[str] | None = None) -> list[CatalogRow]:
     rows: list[CatalogRow] = []
-    rows += _load_surface("x402", _DATA_DIR / "x402-results.json")
-    rows += _load_surface("mcp", _DATA_DIR / "mcp-registry-results.json")
-    rows += _load_surface("npm", _DATA_DIR / "npm-agents-results.json")
-    rows += _load_surface("pypi", _DATA_DIR / "pypi-agents-results.json")
-    # OpenClaw 500-skills scan uses a different file shape: top-level
-    # 'repos' key instead of 'results'.
-    rows += _load_surface(
-        "openclaw", _DATA_DIR / "openclaw-results.json", results_key="repos"
-    )
+    for surface, fname, key in _CATALOG_SOURCES:
+        rows += _load_surface(surface, _DATA_DIR / fname, results_key=key, failed=failed)
     return rows
+
+
+def _source_signature() -> tuple[tuple[str, int | None, int | None], ...]:
+    """(file, mtime_ns, size) for every catalog source file; a missing file reads
+    (file, None, None). The host re-score scripts rewrite these files atomically
+    (tmp + rename), so any rewrite changes the signature."""
+    out: list[tuple[str, int | None, int | None]] = []
+    for _surface, fname, _key in _CATALOG_SOURCES:
+        try:
+            st = (_DATA_DIR / fname).stat()
+            out.append((fname, st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((fname, None, None))
+    return tuple(out)
 
 
 def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
     """Assemble the cached catalog (rows + summary + facets). `rows` defaults to the
-    launch-scan files on disk; tests pass fixture rows directly."""
+    launch-scan files on disk; tests pass fixture rows directly.
+
+    A catalog built from disk carries ``source_sig``, the signature of the files it was
+    read from (taken BEFORE reading, so a rewrite during the read triggers another
+    rebuild). ``reload_catalog_if_sources_changed`` compares it to the files now on
+    disk. A fixture-built catalog has none and is never reloaded."""
+    source_sig: tuple[Any, ...] | None = None
     if rows is None:
-        rows = _load_rows()
+        source_sig = _source_signature()
+        failed: set[str] = set()
+        rows = _load_rows(failed)
+        if failed:
+            # A file that did not parse must not be remembered as read: mark it so the
+            # next check sees a difference and retries.
+            source_sig = tuple(
+                (f, -1, -1) if f in failed else (f, m, s) for f, m, s in source_sig)
 
     # Categorize the static corpus ONCE at build time (cached) — doing it per request
     # over ~37k rows was a real CPU cost. Community rows (small, fresh) categorize per
@@ -556,7 +697,8 @@ def _build_catalog(rows: list[CatalogRow] | None = None) -> dict[str, Any]:
     )
     # Sorted score list for percentile lookups ("safer than X% of scanned tools").
     scores = sorted(r.trust_score for r in rows if r.trust_score is not None)
-    return {"rows": rows, "summary": summary, "static_cats": static_cats, "scores": scores}
+    return {"rows": rows, "summary": summary, "static_cats": static_cats, "scores": scores,
+            "source_sig": source_sig}
 
 
 def _get_catalog() -> dict[str, Any]:
@@ -570,6 +712,32 @@ def _get_catalog() -> dict[str, Any]:
         if _CATALOG_CACHE is None:
             _CATALOG_CACHE = _build_catalog()
         return _CATALOG_CACHE
+
+
+def reload_catalog_if_sources_changed() -> bool:
+    """Rebuild this process's static catalog when a launch-scan file on disk changed
+    since it was built. Blocking (a rebuild reads every file, ~6s): run it in a thread.
+    The old catalog keeps serving until the new one is swapped in; the view and
+    /flagged-stat caches are keyed on the catalog object, so the swap retires them.
+
+    This is how a host re-score run reaches Browse: the backend mounts
+    data/launch-scans read-only, and every uvicorn worker runs this from its
+    /flagged-stat timer (every FLAGGED_STAT_REFRESH_SECONDS). No HTTP call is needed,
+    and unlike the old POST /refresh (which reached one worker) it covers all of them.
+    Returns True when it rebuilt."""
+    global _CATALOG_CACHE
+    cached = _CATALOG_CACHE
+    if cached is None or cached.get("source_sig") is None:
+        return False  # nothing built yet (the first read builds it) or a fixture catalog
+    if _source_signature() == cached["source_sig"]:
+        return False
+    with _CATALOG_BUILD_LOCK:
+        if _CATALOG_CACHE is not cached:
+            return False  # rebuilt meanwhile (another thread or an admin refresh)
+        fresh = _build_catalog()
+        _CATALOG_CACHE = fresh
+    logger.info("scan_catalog: source files changed, rebuilt (%d rows)", len(fresh["rows"]))
+    return True
 
 
 async def _community_rows(db: AsyncSession) -> list[CatalogRow]:
@@ -607,7 +775,29 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
             select(CommunityScan).order_by(CommunityScan.last_scanned_at.desc()).limit(2000)
         )
         out: list[CatalogRow] = []
+        seen: set[tuple[str, str]] = set()
         for c in result.scalars().all():
+            # Newest first: a case-only duplicate (Chris221/x vs chris221/x) of a
+            # GitHub/skill row is the same repo, so only its latest scan is listed.
+            _key = ((getattr(c, "surface", None) or "github").lower(), (c.full_name or "").lower())
+            if _key[0] in ("github", "openclaw"):
+                if _key in seen:
+                    continue
+                seen.add(_key)
+            stored_grade = _stored_grade_for_mark(c.grade, getattr(c, "last_scanned_at", None))
+            if _is_pre_rule_a_plus(c.grade, getattr(c, "last_scanned_at", None)) and (
+                await _mark_from_cached_scan(c.owner, c.repo, c.trust_score)
+            ):
+                stored_grade = "A+"
+            if stored_grade == "A+":
+                # A stored A+ is written from the static scan, before the sandbox has
+                # run. The list shows the mark only when the row's own page does
+                # (sandbox final and clean); a row with no cached scan to check keeps
+                # its stored mark. Re-evaluated every COMMUNITY_ROWS_TTL_SECONDS, so a
+                # row gains the mark once its sandbox run lands.
+                page_mark = await _mark_as_page_shows(c.owner, c.repo, c.trust_score)
+                if page_mark is False:
+                    stored_grade = "A"
             # Route each community row by its real surface (default github for
             # pre-t18 rows): npm/pypi → package name, mcp → endpoint URL, else repo.
             surf = (getattr(c, "surface", None) or "github").lower()
@@ -629,7 +819,13 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
                     repository_url=repository_url,
                     endpoint_url=endpoint_url,
                     trust_score=c.trust_score,
-                    grade=_row_grade(c.trust_score, c.grade),
+                    grade=_row_grade(c.trust_score, stored_grade),
+                    # The answer decided at scan time over the full result, as the
+                    # row's own page shows it; None on a pre-t24 row, which the
+                    # validator recomputes from score + counts.
+                    decision=_stored_decision(c),
+                    decision_reason=(getattr(c, "decision_reason", None)
+                                     if _stored_decision(c) else None),
                     critical=c.critical,
                     high=c.high,
                     findings_count=c.findings_count,
@@ -648,7 +844,7 @@ async def _fetch_community_rows(db: AsyncSession) -> list[CatalogRow] | None:
 @router.get("", response_model=CatalogResponse, dependencies=[Depends(rate_limit_reads)])
 async def scan_catalog(
     surface: str | None = Query(
-        None, pattern="^(x402|mcp|npm|pypi|crates|huggingface|docker|openclaw|community)$",
+        None, pattern="^(x402|mcp|npm|pypi|github|crates|huggingface|docker|openclaw|community)$",
     ),
     q: str | None = Query(None, max_length=200),
     severity: str | None = Query(None, pattern="^(critical|high|clean|skipped)$"),
@@ -719,6 +915,50 @@ async def _cached_default_view(key: tuple[Any, ...], db: AsyncSession) -> Catalo
     return out
 
 
+async def _lead_with_skill_collections(rows: list[CatalogRow]) -> list[CatalogRow]:
+    """A repo graded as a collection of agent skills is ONE tool in Browse: its skill
+    row, scored as the collection (the worst skill), the same number its result page,
+    badge and card lead with. The plain GitHub row for that repo is dropped. Only repos
+    with a cached collection result are touched (cache-only, no scans)."""
+    # Only repos listed BOTH as a skill and as a plain repo need a look (a handful);
+    # the OpenClaw corpus alone is thousands of rows and must not cost a cache read each.
+    github_names = {(r.full_name or "").lower() for r in rows if r.surface == "github"}
+    skill_rows = {(r.full_name or "").lower(): r for r in rows
+                  if r.surface == "openclaw" and (r.full_name or "").lower() in github_names}
+    if not skill_rows:
+        return rows
+    from src.api.public_scan_router import _skill_collection_data
+
+    replaced: dict[int, CatalogRow] = {}  # id(original skill row) -> collection-scored copy
+    superseded: set[str] = set()
+    for key, srow in skill_rows.items():
+        if "/" not in key:
+            continue
+        owner, repo = (srow.full_name or "").split("/", 1)
+        coll = await _skill_collection_data(owner, repo)
+        if coll is None:
+            continue
+        superseded.add(key)
+        f = coll.get("findings") or {}
+        update: dict[str, Any] = {
+            "trust_score": coll.get("trust_score", srow.trust_score),
+            "critical": f.get("critical", srow.critical),
+            "high": f.get("high", srow.high),
+        }
+        if update["trust_score"] is not None:
+            # The collection's own answer, as its page leads with (model_copy does not
+            # re-run the validator, so the skill row's answer would otherwise stay).
+            from src.scanner.verdict import decide
+
+            d = decide(coll)
+            update["decision"], update["decision_reason"] = d.decision, d.reason
+        replaced[id(srow)] = srow.model_copy(update=update)
+    if not superseded:
+        return rows
+    return [replaced.get(id(r), r) for r in rows
+            if not (r.surface == "github" and (r.full_name or "").lower() in superseded)]
+
+
 async def _catalog_view(
     surface: str | None, q: str | None, severity: str | None, grade: str | None,
     category: str | None, decision: Any, sort: str, limit: int, offset: int,
@@ -748,6 +988,7 @@ async def _catalog_view(
     # except the dedicated 'community' tab (which shows them all, below).
     if community and surface != "community":
         rows = rows + community
+    rows = await _lead_with_skill_collections(rows)
 
     # Static rows are already categorized at build time (cached). Only categorize the
     # small community set here, and merge its counts onto the cached static counts.
@@ -794,15 +1035,17 @@ async def _catalog_view(
     elif severity == "skipped":
         filtered = [r for r in filtered if _severity_bucket(r) == BUCKET_SKIPPED]
 
-    # Grade filter (curation): "certified" = A+ only; a tier value (verified … minimal)
-    # = that tier's score floor and above (src/trust_tiers.py); A/B/C = the legacy
-    # letter band and above, kept for links already in the wild.
-    if grade in TIER_FLOORS:
+    # Grade filter (curation): "certified" = rows carrying the Certified mark; a tier
+    # value (verified … minimal) = that tier's score floor and above
+    # (src/trust_tiers.py); A/B/C = the legacy letter band and above, kept for links
+    # already in the wild.
+    if grade == "certified":
+        filtered = [r for r in filtered if r.certified_mark]
+    elif grade in TIER_FLOORS:
         _floor = TIER_FLOORS[grade]
         filtered = [r for r in filtered if r.trust_score is not None and r.trust_score >= _floor]
     elif grade:
         _min_ok = {
-            "certified": {"A+"},
             "A": {"A+", "A"},
             "B": {"A+", "A", "B"},
             "C": {"A+", "A", "B", "C"},
@@ -860,7 +1103,11 @@ async def refresh_catalog(
     current_entity: Entity = Depends(get_current_entity),
 ) -> dict[str, Any]:
     """Force-rebuild the in-memory catalog from disk. Admin only: the rebuild reads
-    every scan file on disk, so an anonymous caller must not be able to trigger it."""
+    every scan file on disk, so an anonymous caller must not be able to trigger it.
+
+    Host scripts do not call this: each worker reloads on its own when a launch-scan
+    file changes (``reload_catalog_if_sources_changed``). This rebuilds only the worker
+    that answers the request; it stays for an admin who wants it now."""
     require_admin(current_entity)
     global _CATALOG_CACHE
     _CATALOG_CACHE = None
@@ -934,6 +1181,12 @@ async def _refresh_flagged_stat() -> None:
     global _FLAGGED_STAT_CACHE
     gen = _FLAGGED_STAT_GEN
     try:
+        # Pick up a host re-score's rewritten launch-scan files (see
+        # reload_catalog_if_sources_changed); the timer runs this in every worker.
+        try:
+            await asyncio.to_thread(reload_catalog_if_sources_changed)
+        except Exception:
+            logger.warning("scan catalog source reload failed", exc_info=True)
         catalog = await asyncio.to_thread(_get_catalog)
         from src.database import async_session
 

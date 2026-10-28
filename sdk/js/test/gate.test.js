@@ -471,17 +471,22 @@ test('onReview: confirm asks the hook; warnings reach onWarn', { skip }, async (
 
 test('the Certified mark rides next to the decision, never inside it', { skip }, () => {
   const policy = mod.resolvePolicy({});
-  const certified = mod.deriveDecision(verified(scanJson({ score: 97, extra: { certified: { eligible: true, checks: {} } } })), policy);
+  const certified = mod.deriveDecision(verified(scanJson({ score: 97, extra: { certified: { eligible: true, checks: {} }, certified_mark: true } })), policy);
   assert.equal(certified.decision, 'safe');
   assert.equal(certified.certified, true);
   assert.match(certified.reason, /Certified/);
+  // Raw eligibility alone is the provenance gate, not the mark (fail closed).
+  const eligibleOnly = mod.deriveDecision(verified(scanJson({ score: 97, extra: { certified: { eligible: true, checks: {} } } })), policy);
+  assert.equal(eligibleOnly.certified, false);
   const plain = mod.deriveDecision(verified(scanJson({ score: 97, extra: { certified: { eligible: false } } })), policy);
   assert.equal(plain.certified, false);
   assert.doesNotMatch(plain.reason, /Certified/);
-  // A Certified mark on a result the policy still blocks is reported, not used to wave it through.
+  // The mark never rides beside a blocked result, and never waves it through.
   const blocked = mod.deriveDecision(verified(scanJson({ score: 97, critical: 1, extra: { certified_mark: true } })), policy);
   assert.equal(blocked.decision, 'do_not_connect');
-  assert.equal(blocked.certified, true);
+  assert.equal(blocked.certified, false);
+  assert.equal(mod.certifiedOf({ certified_mark: true }), true);
+  assert.equal(mod.certifiedOf({ certified: { eligible: true } }), false);
   assert.equal(mod.certifiedOf({ certified: true }), true);
   assert.equal(mod.certifiedOf({}), false);
 });

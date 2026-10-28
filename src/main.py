@@ -302,6 +302,28 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "tokens are INSECURE. Set JWT_SECRET in .env / .env.secrets."
         )
 
+    # Behavioral sandbox slots: drop the legacy INCR counter (it leaked when a deploy
+    # killed a run; the per-slot keys that replaced it expire on their own), then give
+    # the sandbox queue a first drain once the app is up (runs cancelled by the last
+    # shutdown were put back on it).
+    if getattr(settings, "scanner_behavioral_enabled", False):
+        try:
+            import asyncio as _aio_sb
+
+            async def _sandbox_startup() -> None:
+                from src.api.public_scan_router import _drain_behavioral_queue
+                from src.scanner.behavioral.slots import cleanup_legacy_counter
+
+                await cleanup_legacy_counter()
+                await _aio_sb.sleep(15)
+                await _drain_behavioral_queue()
+
+            _sandbox_startup_task = _aio_sb.create_task(  # noqa: F841
+                _sandbox_startup(), name="sandbox-startup",
+            )
+        except Exception:
+            logging.getLogger(__name__).warning("sandbox startup skipped", exc_info=True)
+
     # Pre-generate OpenAPI schema (avoids 3s+ generation on first request)
     app.openapi()
 
@@ -359,6 +381,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from src.api.scan_catalog_router import stop_flagged_stat_refresher
 
     await stop_flagged_stat_refresher()
+
+    # Shutdown: cancel in-flight sandbox runs so their slots are handed back (and the
+    # coordinates re-queued) instead of waiting out the slot TTL. Best effort.
+    try:
+        from src.scanner.behavioral.slots import shutdown as _sandbox_shutdown
+
+        await _sandbox_shutdown()
+    except Exception:
+        logging.getLogger(__name__).warning("sandbox slot shutdown failed", exc_info=True)
 
     # Shutdown: clean up Redis connections
     from src.redis_client import close_redis

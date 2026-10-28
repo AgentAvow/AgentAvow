@@ -52,7 +52,7 @@ export default function StateOfAgentSecurityQ3() {
       <Reveal>
         <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">State of Agent Security · Q3 2026</span>
         <h1 className="mt-3 text-3xl md:text-5xl font-extrabold tracking-tight leading-[1.05]">
-          We graded <span className="tabular-nums">{scanned.toLocaleString()}</span> agent tools.
+          We scanned <span className="tabular-nums">{scanned.toLocaleString()}</span> agent tools.
           <br /><span className="gradient-text-bio"><CountUp value={pct} suffix="%" /></span> have a high or critical severity finding.
         </h1>
         <p className="mt-5 text-text-muted text-[16px] leading-relaxed max-w-[64ch]">
@@ -83,7 +83,7 @@ export default function StateOfAgentSecurityQ3() {
             <p className="mt-1.5 text-text-muted text-[13.5px] leading-relaxed">We do not count low/medium noise, and findings that live only in a tool's test/example files are scored at a fraction. A tool is not judged on its test suite. A tool with both a critical and a high finding is counted once.</p>
           </div>
           <div className="glass rounded-xl p-5">
-            <div className="text-[15px] font-semibold">Only graded tools count</div>
+            <div className="text-[15px] font-semibold">Only scanned tools count</div>
             <p className="mt-1.5 text-text-muted text-[13.5px] leading-relaxed">The denominator is tools that received a verdict. Registry entries we could not fetch or scan ({mcp.skipped.toLocaleString()} MCP entries alone) are listed in the Index as skipped and are in neither the numerator nor the denominator.</p>
           </div>
           <div className="glass rounded-xl p-5">

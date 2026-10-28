@@ -99,14 +99,15 @@ _TC = {
 # [shield AgentGraph | 0.85 verified]
 # ---------------------------------------------------------------------------
 
-def _scan_badge_info(scan_status: str | None) -> tuple[str, str]:
+def _scan_badge_info(scan_status: str | None, partial: bool = False) -> tuple[str, str]:
     """Return (label, color) for the scan segment. A three-phrase decision value
-    (safe | review | do_not_connect) renders its short label (Safe / Review / Blocked)
-    in the phrase colour; the legacy scan_result words keep their glyphs."""
+    (safe | review | do_not_connect) renders its short label (Safe / Review / Don't connect)
+    in the phrase colour, with " · partial" when the scan disclosed coverage gaps; the
+    legacy scan_result words keep their glyphs."""
     from src.trust_tiers import DECISION_BY_VALUE
     if scan_status in DECISION_BY_VALUE:
         d = DECISION_BY_VALUE[scan_status]
-        return d.label, d.color
+        return d.label + (" · partial" if partial else ""), d.color
     if scan_status == "clean":
         return "scan \u2713", "#22C55E"  # green check
     if scan_status == "warnings":
@@ -123,6 +124,7 @@ def _render_compact_svg(
     has_operator: bool,
     is_provisional: bool,
     scan_status: str | None = None,
+    partial: bool = False,
 ) -> str:
     tc = _TC
     color = _trust_tier_color(score)
@@ -139,7 +141,7 @@ def _render_compact_svg(
     value_width = math.ceil(value_text_w + 10)
 
     # Optional scan status segment
-    scan_label, scan_color = _scan_badge_info(scan_status)
+    scan_label, scan_color = _scan_badge_info(scan_status, partial)
     scan_width = 0
     if scan_label:
         scan_text_w = _text_width(scan_label)
@@ -206,6 +208,7 @@ def _render_detailed_svg(
     is_provisional: bool,
     entity_name: str,
     scan_status: str | None = None,
+    partial: bool = False,
 ) -> str:
     tc = _TC
     color = _trust_tier_color(score)
@@ -236,7 +239,7 @@ def _render_detailed_svg(
     check_x = left_width + mid_width + right_width - 14
 
     # Optional scan status segment
-    scan_label, scan_color = _scan_badge_info(scan_status)
+    scan_label, scan_color = _scan_badge_info(scan_status, partial)
     scan_width = 0
     if scan_label:
         scan_text_w = _text_width(scan_label)
@@ -312,6 +315,7 @@ def _render_minimal_svg(
     has_operator: bool,
     is_provisional: bool,
     scan_status: str | None = None,
+    partial: bool = False,
 ) -> str:
     color = _trust_tier_color(score)
     score_pct = str(round(score * 100))
@@ -324,7 +328,7 @@ def _render_minimal_svg(
     text_x = icon_size + 4 + text_w / 2
 
     # Optional scan status segment
-    scan_label, scan_color = _scan_badge_info(scan_status)
+    scan_label, scan_color = _scan_badge_info(scan_status, partial)
     scan_width = 0
     if scan_label:
         scan_text_w = _text_width(scan_label)
@@ -386,6 +390,7 @@ def _render_flat_square_svg(
     has_operator: bool,
     is_provisional: bool,
     scan_status: str | None = None,
+    partial: bool = False,
 ) -> str:
     tc = _TC
     color = _trust_tier_color(score)
@@ -401,7 +406,7 @@ def _render_flat_square_svg(
     value_width = math.ceil(value_text_w + 10)
 
     # Optional scan status segment
-    scan_label, scan_color = _scan_badge_info(scan_status)
+    scan_label, scan_color = _scan_badge_info(scan_status, partial)
     scan_width = 0
     if scan_label:
         scan_text_w = _text_width(scan_label)
@@ -477,24 +482,27 @@ def _render_badge_svg(
     style: str = "compact",
     entity_name: str = "",
     scan_status: str | None = None,
+    partial: bool = False,
 ) -> str:
-    """Render an SVG trust badge in the requested style (single self-contained palette)."""
+    """Render an SVG trust badge in the requested style (single self-contained palette).
+    ``partial`` (the scan disclosed coverage gaps) adds a visible " · partial" to the
+    scan segment."""
     if style == "detailed":
         return _render_detailed_svg(
             score, has_operator, is_provisional, entity_name,
-            scan_status,
+            scan_status, partial,
         )
     if style == "minimal":
         return _render_minimal_svg(
-            score, has_operator, is_provisional, scan_status,
+            score, has_operator, is_provisional, scan_status, partial,
         )
     if style == "flat-square":
         return _render_flat_square_svg(
-            score, has_operator, is_provisional, scan_status,
+            score, has_operator, is_provisional, scan_status, partial,
         )
     # compact (default)
     return _render_compact_svg(
-        score, has_operator, is_provisional, scan_status,
+        score, has_operator, is_provisional, scan_status, partial,
     )
 
 
@@ -640,15 +648,18 @@ async def get_trust_badge_svg(
         .limit(1)
     )
     scan_status = None
+    partial = False
     if scan:
-        # The scan segment shows the three-phrase decision (Safe / Review / Blocked),
-        # decided from the stored findings + the scan's own score band.
-        from src.scanner.verdict import decide
-        vulns = [v for v in (scan.vulnerabilities or []) if isinstance(v, dict)]
-        scan_status = decide({
-            "trust_score": round(score * 100),
-            "findings": {"items": vulns},
-        }).decision if scan.scan_result != "error" else "error"
+        # The scan segment shows the three-phrase decision (Safe / Review / Don't connect),
+        # decided from the stored findings + the scan's own score, by the same helper
+        # the bot security-scan report uses (so the badge never reads better than it).
+        from src.scanner.service import decide_stored_scan, stored_scan_decision_input
+        from src.scanner.verdict import coverage_gap_notes
+        dec = decide_stored_scan(scan, fallback_score=round(score * 100))
+        scan_status = dec.decision if dec is not None else "error"
+        # A visible "partial" when the stored scan disclosed coverage gaps.
+        partial = dec is not None and bool(coverage_gap_notes(
+            stored_scan_decision_input(getattr(scan, "vulnerabilities", None))))
 
     svg = _render_badge_svg(
         score=score,
@@ -657,6 +668,7 @@ async def get_trust_badge_svg(
         style=style,
         entity_name=entity.display_name or str(entity_id),
         scan_status=scan_status,
+        partial=partial,
     )
 
     # Apply scale by wrapping in viewBox if scale > 1

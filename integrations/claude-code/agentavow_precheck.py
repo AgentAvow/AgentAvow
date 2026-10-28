@@ -60,7 +60,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "0.1.24"
+__version__ = "0.1.33"
 
 API = "https://agentavow.com/api/v1/public/scan"
 WEB = "https://agentavow.com"
@@ -560,12 +560,12 @@ _RANK = {"do_not_connect": 0, "review": 1, "safe": 2}
 
 
 def _counts(graded: list[tuple[str, dict]]) -> str:
-    """'3 Safe, 1 Review, 0 Blocked' — the short labels of the three answers."""
+    """'3 Safe, 1 Review, 0 Don't connect' — the short labels of the three answers."""
     n = {k: 0 for k in _RANK}
     for _, r in graded:
         n[_dval(r)] += 1
     out = f"{n['safe']} Safe, {n['review']} Review"
-    return out + (f", {n['do_not_connect']} Blocked" if n["do_not_connect"] else "")
+    return out + (f", {n['do_not_connect']} Don't connect" if n["do_not_connect"] else "")
 
 
 def _worst(graded: list[tuple[str, dict]]) -> tuple[str, dict] | None:
@@ -729,14 +729,26 @@ def _decision(data: dict, advisories: int, incident: bool) -> tuple[str, str, bo
         return out("review", "the maintainer has deprecated this package")
     if score < 51:
         return out("review", f"trust score {score}/100 is under 51")
+    # A remote MCP server whose tool list could not be read, or was read only in part,
+    # reads Review: the tool definitions are what AgentAvow exists to read (Kenne, 10-20).
+    gaps = data.get("coverage_gaps") if isinstance(data.get("coverage_gaps"), dict) else {}
+    if gaps.get("tool_list_unread") is True:
+        return out("review", "the server's tool list could not be read")
+    if gaps.get("tool_list_paged") is True:
+        return out("review", "only part of the server's tool list could be read")
     files = (data.get("metadata") or {}).get("files_scanned")
     found = any(_sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 for i in items)
-    if isinstance(files, int) and 0 < files < 8 and not found:
+    # Thin coverage: 0-7 files read with nothing found (0 = the package held no code,
+    # e.g. a metapackage whose code ships in a dependency). Missing files_scanned = unknown.
+    if isinstance(files, int) and not isinstance(files, bool) and 0 <= files < 8 \
+            and not found:
         remote_mcp = any(isinstance(data.get(k), dict) and data[k].get("surface") == "mcp"
                          for k in ("coverage", "surface_detail"))
-        return out("safe", "tool definitions clean; server code not inspected" if remote_mcp
-                   else "nothing found; little code to inspect")
+        if remote_mcp:
+            return out("safe", "tool definitions clean; server code not inspected")
+        return out("safe", "nothing found; little code to inspect" if files
+                   else "nothing found; no code to inspect")
     return out("safe", "no critical or high findings")
 
 
@@ -778,8 +790,10 @@ def _dval(r: dict) -> str:
 
 def _headline(r: dict) -> str:
     """'Safe to connect · Certified' — the answer, with the mark when earned."""
-    phrase = DECISION_PHRASES[_dval(r)]
-    return phrase + (" · Certified" if r.get("certified") else "")
+    dval = _dval(r)
+    # The mark only ever sits beside Safe to connect.
+    return DECISION_PHRASES[dval] + (" · Certified" if r.get("certified") and dval == "safe"
+                                     else "")
 
 
 def _why(r: dict) -> str:
@@ -828,8 +842,11 @@ def _verdict(data: dict) -> dict:
         "decision": decision,
         "decision_reason": decision_reason,
         "decision_final": decision_final,
-        "certified": bool((data.get("certified") or {}).get("eligible") is True),
-        "verdict": "safe" if (score >= 81 and blocking == 0) else "needs review",
+        # The Certified MARK (the API's display rule: Safe to connect, final, score >= 81,
+        # not thin), never the raw provenance gate; a response without it shows no mark.
+        "certified": data.get("certified_mark") is True,
+        # Legacy two-way field for older cache readers; follows the answer.
+        "verdict": "safe" if decision == "safe" else "needs review",
         "reason": str(data.get("verdict_reason") or ""),
         "blocking": blocking,
         "critical": critical,
@@ -841,7 +858,19 @@ def _verdict(data: dict) -> dict:
         "tool_manifest_digest": data.get("tool_manifest_digest") or None,
         "sandbox": _sandbox_summary(data.get("behavioral")),
         "deprecated": bool(data.get("deprecation")),
+        # What the scan could not read (``coverage_gaps`` kinds: oversized_files,
+        # package_skipped, fetch_failed, tool_list_unread …), so a Safe answer that left
+        # part of the target unread can say so at install time.
+        "gaps": sorted(k for k, v in (data.get("coverage_gaps") or {}).items()
+                       if v and k not in _GAP_METADATA)
+        if isinstance(data.get("coverage_gaps"), dict) else [],
     }
+
+
+# Keys in ``coverage_gaps`` that describe a gap rather than being one (the file cap that
+# applied, how many tool-list pages were read, why image layers went unread). Gap kinds
+# themselves are counts, booleans or a "failed" string, so they are kept by truthiness.
+_GAP_METADATA = frozenset({"file_cap", "pages_read", "image_layers_reason"})
 
 
 # Package-registry hosts an install always reaches; left out of the one-line network
@@ -891,10 +920,18 @@ def _sandbox_summary(b: object) -> str:
     running. Empty when there is nothing to say. Read-only; no extra request."""
     if not isinstance(b, dict):
         return ""
+    if b.get("pending") and b.get("state") == "queued":
+        pos = b.get("queue_position")
+        return "sandbox: waiting for a free slot" + (
+            f" (position {pos} in the queue)" if isinstance(pos, int) else "")
     if b.get("pending"):
         return "sandbox: running now, results in about a minute"
+    if not b.get("ran") and b.get("state") == "unavailable":
+        return "sandbox: unavailable, static analysis only"
     if not b.get("ran"):
-        return ""
+        # A run that did not happen is not a clean run: say so (as the MCP output does).
+        why = " ".join(str(b.get("reason") or b.get("error") or "").split())[:120]
+        return f"sandbox: did not run{f' ({why})' if why else ''}, static analysis only"
     findings = [f for f in (b.get("findings") or []) if isinstance(f, dict)]
     if b.get("canary_exfil") and not any(
             f.get("rule") == "credential_canary_exfiltrated" for f in findings):
@@ -911,10 +948,13 @@ def _sandbox_summary(b: object) -> str:
     ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else None
     hosts = sorted({str(h) for h in (b.get("egress_hosts") or []) if h} - _REGISTRY_HOSTS)
     net = f"network only {_hosts(hosts)}" if hosts else "no network beyond the registry"
+    # A run stopped by its time limit is partial; never let it read as a full run.
+    partial = bool(b.get("timed_out") or (ex or {}).get("timed_out"))
     if ex and ex.get("launch_ok"):
         called = len({c.get("tool") for c in (ex.get("calls") or [])
                       if isinstance(c, dict) and c.get("tool")})
-        return f"sandbox: called {called} tool{'' if called == 1 else 's'}, {net}"
+        return ("sandbox: " + ("ran partly (hit its time limit), " if partial else "")
+                + f"called {called} tool{'' if called == 1 else 's'}, {net}")
     plan = str(b.get("plan") or "")
     if ex is not None or plan.endswith("-mcp"):
         gs = b.get("grade_summary") if isinstance(b.get("grade_summary"), dict) else {}
@@ -924,6 +964,8 @@ def _sandbox_summary(b: object) -> str:
         else:
             why = _START_SHORT.get(reason, "")
         return "sandbox: not started" + (f" ({why})" if why else "")
+    if partial:
+        return f"sandbox: ran partly (hit its time limit), {net}"
     return f"sandbox: installed, {net}"
 
 
@@ -933,7 +975,7 @@ def _sandbox_summary(b: object) -> str:
 # older GRADE_EPOCH (bump the epoch whenever server-side scoring changes materially).
 # A re-check whose decision (Safe / Review / Do not connect) is unchanged is silent;
 # a changed decision is reported, naming the old answer.
-GRADE_EPOCH = "2026-10-08b"
+GRADE_EPOCH = "2026-10-21"
 GRADE_MAX_AGE = 7 * 24 * 3600
 
 
@@ -995,8 +1037,15 @@ def _install_source() -> str:
     return "plugin" if (plugin_root / ".claude-plugin").is_dir() else "manual"
 
 
+# Which hook is calling, for AgentAvow's usage counts only. The install-time hook
+# (agentavow_pre_install.py) reuses this module's scan code and sets this to
+# "agentavow-preinstall" so install-time checks can be counted apart from session-start
+# checks. Nothing else about the request changes.
+UA_PRODUCT = "agentavow-precheck"
+
+
 def _user_agent() -> str:
-    return f"agentavow-precheck/{__version__} ({_install_source()})"
+    return f"{UA_PRODUCT}/{__version__} ({_install_source()})"
 
 
 def _fetch(path: str, params: dict) -> dict:
@@ -1068,6 +1117,50 @@ def _intro_message() -> str:
             "and it is graded before it is added and again at your next session start; open "
             "a project and its direct dependencies are graded too. To check any tool right "
             f"now, {how}.")
+
+
+INSTALL_STATS_KEY = "install_checks"  # written by agentavow_pre_install.py (STATS_KEY there)
+
+
+def _install_clause(cache: dict) -> str:
+    """' Since the last session AgentAvow checked 4 package installs — all Safe to
+    connect.' from the install-time hook's counter in the meta entry, then reset it.
+    Empty when nothing was installed (most session starts stay exactly as they were)."""
+    meta = cache.get(META_KEY)
+    if not isinstance(meta, dict):
+        return ""
+    st = meta.get(INSTALL_STATS_KEY)
+    if not isinstance(st, dict):
+        return ""
+    try:
+        n, flagged = int(st.get("count") or 0), int(st.get("flagged") or 0)
+    except (TypeError, ValueError):
+        n, flagged = 0, 0
+    meta = dict(meta)
+    meta.pop(INSTALL_STATS_KEY, None)
+    cache[META_KEY] = meta
+    if n <= 0:
+        return ""
+    what = f"{n} package install{'' if n == 1 else 's'}"
+    if not flagged:
+        return f" Since the last session AgentAvow checked {what} — all Safe to connect."
+    return (f" Since the last session AgentAvow checked {what}; {flagged} needed a look "
+            "(reported at the time).")
+
+
+def _print_install_only(clause: str) -> None:
+    """The quiet line when the install counter is the only news: one sentence for the
+    person, and Claude is asked to relay it once."""
+    print(json.dumps({
+        "systemMessage": "AgentAvow: " + clause,
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": (
+                "AgentAvow install checks. The user has NOT seen this. At the start of your "
+                f"first reply, in one short line, tell them: \"AgentAvow: {clause}\" Then "
+                "carry on; do not mention it again."),
+        },
+    }))
 
 
 def _show_intro_once() -> None:
@@ -1153,10 +1246,16 @@ def main() -> None:
     except Exception:
         deps = []
     if not targets and not deps:
+        cache = _load_cache()
+        clause = _install_clause(cache)
+        if clause and _save_cache(cache):
+            _print_install_only(clause.strip())
+            return
         _show_intro_once()
         return
 
     cache = _load_cache()
+    install_clause = _install_clause(cache)
     started = time.monotonic()
     now = time.time()
     results: dict[str, dict | None] = {}  # id -> verdict, None = unscannable
@@ -1216,6 +1315,9 @@ def main() -> None:
 
     _save_cache(cache)
     if not lines:
+        if install_clause:
+            _print_install_only(install_clause.strip())
+            return
         _quiet_context(cache, targets, deps)
         return
 
@@ -1224,7 +1326,7 @@ def main() -> None:
     except Exception:
         elsewhere = 0
     summary = _summary(graded, elsewhere, dep_clause, servers_present=bool(targets),
-                       server_news=bool(server_lines))
+                       server_news=bool(server_lines)) + install_clause
     try:
         earlier = _previously_graded(cache, targets, deps, lines)
     except Exception:

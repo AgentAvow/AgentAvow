@@ -39,7 +39,8 @@ def test_package_response_carries_the_unsigned_decision():
     from src.api.public_scan_router import _package_response
     resp = _package_response("o/r", _data(85, items=[_high()], high=1), "jws", False)
     assert (resp.decision, resp.decision_final) == ("review", True)
-    assert resp.decision_reason == "one high finding: shell command built from user input"
+    assert resp.decision_reason == ("one high finding in its code: shell command built "
+                                    "from user input")
     # the binary verdict keeps its meaning beside it
     assert resp.verdict == "needs_review"
 
@@ -94,7 +95,7 @@ def test_embed_badge_value_leads_with_the_label():
 
 def test_entity_badge_scan_segment_is_the_short_label():
     from src.api.badge_router import _scan_badge_info
-    assert _scan_badge_info("do_not_connect") == ("Blocked", "#EF4444")
+    assert _scan_badge_info("do_not_connect") == ("Don't connect", "#EF4444")
     assert _scan_badge_info("review")[0] == "Review"
     assert _scan_badge_info("clean")[0].startswith("scan")  # legacy value still renders
 
@@ -179,14 +180,33 @@ def test_local_cli_human_line_leads_with_phrase_and_certified(tmp_path):
     buf = io.StringIO()
     _print_human(result, stream=buf)
     line = [ln for ln in buf.getvalue().splitlines() if "Verdict" in ln][0]
-    assert "· Certified — " in line
-    assert any(p in line for p in ("Safe to connect", "Review before you connect"))
+    # one file is thin coverage: eligible, but no Certified mark on the headline
+    assert "Safe to connect — " in line and "Certified —" not in line
+    for i in range(9):
+        (tmp_path / f"m{i}.py").write_text(f"def f{i}():\n    return {i}\n")
+    result = scan_local(str(tmp_path))
+    result.certified = {"eligible": True}
+    assert result.trust_score >= 81 and result.files_scanned >= 8
+    buf = io.StringIO()
+    _print_human(result, stream=buf)
+    line = [ln for ln in buf.getvalue().splitlines() if "Verdict" in ln][0]
+    assert "Safe to connect · Certified — " in line
 
 
 def test_local_cli_fail_on_decision(tmp_path):
     from src.scanner.local_scan import main
     (tmp_path / "app.py").write_text("def hello():\n    return 1\n")
     assert main(["scan", str(tmp_path), "--quiet", "--fail-on", "do_not_connect"]) == 0
+
+
+def test_local_cli_fail_on_repeats(tmp_path):
+    """GitLab passes an answer gate and a severity gate together; either can fail."""
+    from src.scanner.local_scan import main
+    (tmp_path / "app.py").write_text(
+        "import subprocess\n\ndef run(cmd):\n    return subprocess.run(cmd, shell=True)\n")
+    base = ["scan", str(tmp_path), "--quiet", "--fail-on", "do_not_connect"]
+    assert main(base) == 0
+    assert main(base + ["--fail-on", "medium"]) == 1
 
 
 # ── tool gate ───────────────────────────────────────────────────────────────────
@@ -218,8 +238,8 @@ def test_stdio_mcp_server_result_leads_with_the_phrase():
         sys.path.pop(0)
     out = server._scan_result(
         {"trust_score": 98, "verdict": "safe", "verdict_reason": "clean",
-         "certified": CERT, "decision": "safe", "decision_reason": "nothing found in 3 files",
-         "trust_tier": "verified"},
+         "certified": CERT, "certified_mark": True, "decision": "safe",
+         "decision_reason": "nothing found in 3 files", "trust_tier": "verified"},
         "o/r", "repo", "https://x", "/api")
     assert out["decision"] == "safe" and out["verdict"] == "safe"
     assert out["summary"].startswith("Safe to connect · Certified — nothing found")

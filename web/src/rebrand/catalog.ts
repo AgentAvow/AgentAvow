@@ -32,6 +32,7 @@ export interface CatalogRow {
   endpoint_url?: string | null
   trust_score: number | null
   grade?: string | null  // letter grade WITH the A+ certified gate (roadmap §7)
+  certified_mark?: boolean | null  // the Certified display mark; lists read this, never grade
   critical: number | null
   high: number | null
   findings_count: number | null
@@ -57,6 +58,7 @@ export interface CatalogSandbox {
   exercised?: boolean | null  // MCP server launched OK in the sandbox (null: not an MCP plan)
   findings: number
   unexpected_egress: number
+  timed_out?: boolean  // the run hit its time limit: partial
 }
 
 export interface CatalogResponse {

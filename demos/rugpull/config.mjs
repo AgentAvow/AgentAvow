@@ -14,8 +14,8 @@ export const API_BASE = `http://127.0.0.1:${API_PORT}/api/v1`;
 export const JWKS_URL = `http://127.0.0.1:${API_PORT}/.well-known/jwks.json`;
 export const STATE = path.resolve(process.env.RUGPULL_STATE ?? path.join(HERE, '.state'));
 
-// The demo grader's identity. Deliberately not AgentAvow's: a gate on its
-// defaults (issuer did:web:agentgraph.co, AgentAvow's JWKS) rejects these grades.
+// The demo scanner's identity. Deliberately not AgentAvow's: a gate on its
+// defaults (issuer did:web:agentgraph.co, AgentAvow's JWKS) rejects these results.
 export const DEMO_ISSUER = 'did:web:demo.invalid';
 export const DEMO_KID = 'demo-not-agentavow';
 
@@ -39,12 +39,12 @@ export function readApprovals() {
 
 /**
  * The gate the protected agent runs with. Policy, in words:
- *   - read grades from the local demo grader and verify them against its JWKS
+ *   - read results from the local demo scanner and verify them against its JWKS
  *     (issuer did:web:demo.invalid), never trusting the unsigned JSON;
  *   - onDrift 'block': a tool whose served definition does not hash to the
  *     signed digest is do_not_connect, whatever the score;
- *   - onReview 'confirm': a "Review before you connect" grade runs only if the
- *     security team recorded an approval of that exact graded manifest
+ *   - onReview 'confirm': a "Review before you connect" answer runs only if the
+ *     security team recorded an approval of that exact scanned manifest
  *     (`approvals.json`, written by approve.mjs). No approval, no call.
  * Everything else is the SDK default (allowFloor 51, fail closed on API errors).
  */

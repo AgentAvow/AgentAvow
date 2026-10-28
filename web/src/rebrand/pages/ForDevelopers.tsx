@@ -113,7 +113,7 @@ export default function RebrandForDevelopers() {
         {[
           ['01', 'Scan', 'Free, no signup. Paste your repo/package at the check page, or run it locally:', 'agentavow scan .', rp('/rebrand/check')],
           ['02', 'Fix', 'The report lists each finding with the exact file, line, and a fix — plus a signed attestation of the result.', 'critical · high · medium', rp('/rebrand/docs/how-grading-works')],
-          ['03', 'Earn & claim', 'Hit the bar and you earn the score — the top tier is Certified (a public, conjunctive gate, no cheating). Then claim your badge.', 'Score → Certified', rp('/rebrand/certified')],
+          ['03', 'Earn & claim', 'Hit the bar and you earn the score; pass the public, conjunctive Certified gate (no cheating) and the Certified mark shows beside Safe to connect. Then claim your badge.', 'Score → Certified', rp('/rebrand/certified')],
         ].map(([n, h, p, code, href]) => (
           <Link key={n} to={href} className="glass card-hover rounded-xl p-5 block min-w-0">
             <div className="font-mono text-[12px] text-primary-light">{n}</div>
@@ -132,24 +132,48 @@ export default function RebrandForDevelopers() {
       </Reveal>
       <Reveal>
         <div className="mt-4 glass rounded-xl p-5">
-          <div className="text-[15px] font-semibold">Gate pull requests on the score and on sandbox behavior</div>
+          <div className="text-[15px] font-semibold">Gate pull requests on the answer and on sandbox behavior</div>
           <p className="mt-1.5 text-text-muted text-[13.5px] leading-relaxed max-w-[64ch]">
-            For a public repo, the hosted GitHub Action comments the trust score on every PR. When the repo publishes a
+            For a public repo, the hosted GitHub Action comments the answer and the trust score on every PR, and fails the build when the answer is Do not connect. When the repo publishes a
             package (or is a JavaScript or Python project), AgentAvow also runs it in the behavioral sandbox and the
             Action prints a <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">Sandbox:</code> line.
             Set <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">fail_on_behavioral: true</code> to
-            fail the build on a high or critical sandbox finding. It is a separate gate from <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">min_score</code>,
+            fail the build on a high or critical sandbox finding. It is a separate gate from <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">fail_on</code>,
             and a pending sandbox run never fails the step.
           </p>
           <pre className="mt-3 font-mono text-[12px] bg-surface border border-border rounded-xl px-4 py-3 text-text overflow-x-auto">{`- uses: AgentAvow/AgentAvow/github-action@main
   with:
-    min_score: 70
-    fail_on_findings: true
+    fail_on: do_not_connect   # the default; "review" is stricter
     fail_on_behavioral: true`}</pre>
           <div className="mt-2.5 flex gap-4 flex-wrap text-[13px]">
             <a href="https://github.com/AgentAvow/AgentAvow/tree/main/github-action" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary-light hover:text-primary">Action inputs ↗</a>
             <Link to={rp('/rebrand/docs/behavioral-sandbox')} className="font-semibold text-primary-light hover:text-primary">How the sandbox works →</Link>
           </div>
+        </div>
+      </Reveal>
+      <Reveal>
+        <div className="mt-4 glass rounded-xl p-5">
+          <div className="text-[15px] font-semibold">Other places to gate</div>
+          <ul className="mt-2 space-y-1.5 text-[13.5px] text-text-muted max-w-[64ch]">
+            {([
+              ['GitLab CI', 'run the scanner in your own runner, MR widget included', '/rebrand/docs/run-locally#gitlab-ci-self-managed-behind-a-firewall'],
+              ['Bitbucket Pipelines', 'a pipe that posts a Code Insights report on the pull request', '/rebrand/docs/run-locally#bitbucket-pipelines'],
+              ['Azure DevOps', 'a pipeline template with a run summary and SARIF', '/rebrand/docs/run-locally#azure-devops'],
+              ['Agent runtime', 'LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates check each tool before the call', '/rebrand/docs/gate-on-the-grade#gate-your-agent-at-runtime-sdk--bridges'],
+              ['Vercel AI SDK', 'wrap your tools so a Do not connect answer never runs', '/rebrand/docs/gate-on-the-grade#vercel-ai-sdk'],
+              ['Flue', 'gate the tools a Flue agent connects to', '/rebrand/docs/gate-on-the-grade#flue'],
+              ['Claude Agent SDK', 'leave out a server that fails, and deny each mcp__ call that does', '/rebrand/docs/gate-on-the-grade#claude-agent-sdk'],
+              ['OpenAI Agents SDK', 'wrap an MCP server so connect, listTools and callTool are checked', '/rebrand/docs/gate-on-the-grade#openai-agents-sdk'],
+              ['Open Policy Agent', 'a Rego policy your gateway or Envoy asks before a server or tool call', '/rebrand/docs/gate-on-the-grade#open-policy-agent'],
+              ['LiteLLM proxy', 'a guardrail on every MCP tool call through LiteLLM\'s MCP gateway', '/rebrand/docs/gate-on-the-grade#litellm-proxy'],
+              ['Behavioral sandbox', 'see what a package actually does when it runs', '/rebrand/sandbox'],
+              ['Claim your repo', 'prove you own it and manage its listing', '/rebrand/claim'],
+            ] as const).map(([h, p, to]) => (
+              <li key={h}>
+                <Link to={rp(to)} className="font-semibold text-primary-light hover:text-primary">{h} →</Link> <span>{p}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </Reveal>
 
@@ -175,10 +199,10 @@ export default function RebrandForDevelopers() {
 
         <div className="mt-5 grid sm:grid-cols-2 gap-4">
           {[
-            ['Embeddable widget', 'The full dual-mark card + an in-browser "Verify offline" button, for docs sites and landing pages — one script tag.', rp('/rebrand/badge')],
+            ['Embeddable widget', 'The trust card (answer, trust bar, adoption dial) plus an in-browser "Verify offline" button, for docs sites and landing pages. One script tag.', rp('/rebrand/badge')],
             ['Share / social card', 'A downloadable card of your score for a launch post, changelog, or slide.', rp('/rebrand/badge')],
             ['Signed report link', 'The full report + JWS attestation at agentavow.com/check/you/your-repo — verifiable offline against our JWKS.', rp('/rebrand/check')],
-            ['The "Certified" mark', 'Earn the top tier through the public conjunctive gate and display the Certified treatment — the earned top tier.', rp('/rebrand/certified')],
+            ['The "Certified" mark', 'Pass the public conjunctive gate and the Certified mark shows beside Safe to connect — a separate mark, not a tier.', rp('/rebrand/certified')],
           ].map(([h, p, href]) => (
             <Link key={h} to={href} className="block rounded-xl border border-border/60 p-4 hover:border-primary-light/60 transition-colors">
               <div className="text-[14px] font-semibold">{h}</div>
@@ -194,16 +218,18 @@ export default function RebrandForDevelopers() {
           <Eyebrow>For anyone running an agent</Eyebrow>
           <h2 className="mt-2 text-xl md:text-2xl font-bold">Give your agent a safety check before it connects anything.</h2>
           <p className="mt-2 text-text-muted text-[14.5px] max-w-[64ch] leading-relaxed">
-            Add AgentAvow's own MCP server to Claude Code, Cursor, or any MCP client. Now your agent can ask
+            Add AgentAvow's own MCP server to Claude, ChatGPT, Cursor, or any MCP client. Now your agent can ask
             <strong className="text-text"> "is this tool safe to install?"</strong> and get a signed 0–100 score + findings
             back — <em>before</em> it connects an unknown server or runs a package. Free, no account, read-only.
           </p>
           <div className="mt-4 font-mono text-[10.5px] uppercase tracking-wide text-text-muted mb-2">One click →</div>
           <div className="flex gap-2.5 flex-wrap">
             <a href="https://claude.ai/directory/connectors/agentavow" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 font-semibold text-[13.5px] px-4 py-2 rounded-lg text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Add to Claude ↗</a>
+            <a href="https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to ChatGPT ↗</a>
             <a href={cursorStdio(AA_MCP)} className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to Cursor →</a>
             <a href={vscodeStdio(AA_MCP)} className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Add to VS Code →</a>
             <a href="https://pypi.org/project/agentavow-trust/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">PyPI ↗</a>
+            <a href="https://www.npmjs.com/package/agentavow-trust" target="_blank" rel="noopener noreferrer" className="inline-flex items-center font-semibold text-[13.5px] px-4 py-2 rounded-lg border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">npm ↗</a>
           </div>
           <p className="mt-3 text-[13px] text-text-muted">Claude Code: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">{claudeCodeStdio(AA_MCP)}</code></p>
           <p className="mt-2 text-[13px] text-text-muted">Or install the Claude Code plugin, which also scans each new MCP server at session start: <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin marketplace add AgentAvow/AgentAvow</code> then <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded break-all">/plugin install agentavow-trust@agentavow</code>. Its verdict line for each server includes the sandbox result (for example <code className="font-mono text-[12px] text-primary-light bg-surface px-1.5 py-0.5 rounded">sandbox: clean, 9 tool(s) exercised</code>) and says when the maintainer has deprecated the package. <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="text-primary-light hover:underline">How it works</Link>.</p>

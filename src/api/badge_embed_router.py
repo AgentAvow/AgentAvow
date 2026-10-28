@@ -39,6 +39,7 @@ def _render_embed_badge_svg(
     is_verified: bool,
     scan_status: str | None = None,
     decision: str | None = None,
+    partial: bool = False,
 ) -> str:
     """Render a shields.io-style three-segment badge as SVG.
 
@@ -50,7 +51,8 @@ def _render_embed_badge_svg(
     score_pct = str(round(score * 100))
     status_char = "✓" if is_verified else "✗"  # ✓ / ✗ (was double-escaped → rendered literal text)
     _d = decision_for(decision or round(score * 100))
-    value_text = f"{_d.label} · {score_pct} {status_char}"
+    # " · partial": a visible marker that the scan disclosed coverage gaps.
+    value_text = f"{_d.label} · {score_pct} {status_char}" + (" · partial" if partial else "")
 
     label = "AgentAvow"
     label_width = verdana_width(label) + BADGE_PADDING
@@ -162,12 +164,17 @@ async def get_embeddable_badge(
         .limit(1)
     )
     scan_status = scan.scan_result if scan else None
+    from src.scanner.service import stored_scan_decision_input
     from src.scanner.verdict import decide
-    dec = decide({
-        "trust_score": round(score * 100),
-        "findings": {"items": [v for v in ((scan.vulnerabilities if scan else None) or [])
-                               if isinstance(v, dict)]},
-    })
+    # Same input as the entity badge and the bot security-scan report. An errored scan
+    # has no findings to read (scan_status still says "error").
+    dec_input = stored_scan_decision_input(
+        scan.vulnerabilities if scan is not None and scan.scan_result != "error" else None,
+        fallback_score=round(score * 100),
+    )
+    dec = decide(dec_input)
+    from src.scanner.verdict import coverage_gap_notes
+    not_checked = coverage_gap_notes(dec_input)
 
     # Truncate long names to keep the badge readable
     max_name_len = 20
@@ -185,6 +192,7 @@ async def get_embeddable_badge(
             "badge_color": color,
             "scan_status": scan_status,
             **dec.as_dict(),
+            "not_checked": not_checked,
             "schema_version": 1,
         }
         return JSONResponse(
@@ -195,7 +203,7 @@ async def get_embeddable_badge(
     # SVG format (default)
     svg = _render_embed_badge_svg(
         entity_name, score, is_verified, scan_status=scan_status,
-        decision=dec.decision,
+        decision=dec.decision, partial=bool(not_checked),
     )
     return Response(
         content=svg,

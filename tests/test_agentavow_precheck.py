@@ -369,6 +369,22 @@ def test_nothing_to_scan_shows_the_intro_once_and_makes_no_request(hook, monkeyp
     assert json.loads(hook.CACHE.read_text())[hook.META_KEY]["intro_shown"] == hook.__version__
 
 
+def test_install_count_is_relayed_once_at_the_next_session_start(hook, monkeypatch, capsys):
+    # The install-time hook counted 3 package installs; nothing else is new this start.
+    hook.CACHE.write_text(json.dumps({hook.META_KEY: {
+        "intro_shown": hook.__version__,
+        hook.INSTALL_STATS_KEY: {"count": 3, "flagged": 0, "since": 1.0}}}))
+    calls = []
+    first = _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: calls.append(t))
+    assert first["systemMessage"] == (
+        "AgentAvow: Since the last session AgentAvow checked 3 package installs — "
+        "all Safe to connect.")
+    assert "do not mention it again" in first["hookSpecificOutput"]["additionalContext"]
+    # said once, then the counter is gone: the next start is silent again
+    assert _run_raw(hook, monkeypatch, capsys, [], lambda t, force=False: calls.append(t)) == {}
+    assert calls == []
+
+
 def test_manual_copy_intro_points_at_the_site_not_the_plugin_command(tmp_path, monkeypatch):
     manual = _load(MANUAL_COPY)
     msg = manual._intro_message()
@@ -389,7 +405,7 @@ def test_graded_servers_produce_a_visible_summary_and_a_first_reply_instruction(
               "https://c.example/mcp": _ok(74, "needs review", 0)}
     out = _run_raw(hook, monkeypatch, capsys, targets, lambda t, force=False: scores[t["id"]])
     msg = out["systemMessage"]
-    assert msg.startswith("AgentAvow pre-check: graded 3 MCP servers — 2 Safe, 0 Review, 1 Blocked")
+    assert msg.startswith("AgentAvow pre-check: graded 3 MCP servers — 2 Safe, 0 Review, 1 Don't connect")
     assert "(needs attention: 'b' Do not connect — one critical finding: eval)" in msg
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "has NOT seen this" in ctx and "first reply" in ctx
@@ -491,8 +507,16 @@ def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_pa
 
 @pytest.mark.parametrize("behavioral, expected", [
     (None, ""),
-    ({"ran": False, "reason": "off"}, ""),
+    # A run that did not happen says so (as the MCP output does), never silence.
+    ({"ran": False, "reason": "off"}, "sandbox: did not run (off), static analysis only"),
+    ({"ran": False}, "sandbox: did not run, static analysis only"),
     ({"ran": False, "pending": True}, "sandbox: running now, results in about a minute"),
+    ({"ran": False, "pending": True, "state": "queued", "queue_position": 3},
+     "sandbox: waiting for a free slot (position 3 in the queue)"),
+    ({"ran": False, "pending": True, "state": "queued"}, "sandbox: waiting for a free slot"),
+    ({"ran": False, "pending": False, "state": "unavailable",
+      "reason": "sandbox unavailable, static analysis only"},
+     "sandbox: unavailable, static analysis only"),
     ({"ran": True, "findings": [], "plan": "npm-mcp",
       "egress_hosts": ["registry.npmjs.org", "api.x.com"],
       "exercise": {"launch_ok": True, "calls": [{"tool": f"t{i}"} for i in range(9)]
@@ -531,6 +555,13 @@ def test_meta_cache_entry_is_never_treated_as_a_server(hook, monkeypatch, tmp_pa
      "sandbox: not started"),
     ({"ran": True, "findings": [], "exercise": None, "egress_hosts": ["registry.npmjs.org"]},
      "sandbox: installed, no network beyond the registry"),
+    # A run stopped by its time limit is partial (litellm's page said "clean").
+    ({"ran": True, "findings": [], "exercise": None, "timed_out": True,
+      "egress_hosts": ["registry.npmjs.org"]},
+     "sandbox: ran partly (hit its time limit), no network beyond the registry"),
+    ({"ran": True, "findings": [], "egress_hosts": [],
+      "exercise": {"launch_ok": True, "timed_out": True, "calls": [{"tool": "a"}]}},
+     "sandbox: ran partly (hit its time limit), called 1 tool, no network beyond the registry"),
 ])
 def test_sandbox_summary_in_the_verdict(behavioral, expected):
     mod = _load(PLUGIN_COPY)
@@ -576,3 +607,34 @@ def test_plugin_manifest_carries_every_directory_listing_field():
     for field in ("documentationUrl", "supportUrl", "privacyPolicyUrl", "termsOfServiceUrl"):
         assert urllib.parse.urlsplit(plugin[field]).scheme == "https", field
     assert (PLUGIN_DIR / plugin["icon"]).is_file()
+
+
+def test_verdict_records_what_the_scan_could_not_read():
+    mod = _load(PLUGIN_COPY)
+    v = mod._verdict({"trust_score": 90, "findings": {"items": []}, "decision": "safe",
+                      "coverage_gaps": {"oversized_files": 2, "package_skipped": 0,
+                                        "fetch_failed": 1}})
+    assert v["gaps"] == ["fetch_failed", "oversized_files"]   # zero / false kinds dropped
+    assert mod._verdict({"trust_score": 90, "findings": {"items": []}})["gaps"] == []
+    # Metadata that describes a gap is not a gap kind; counts and "failed" strings are.
+    v = mod._verdict({"trust_score": 90, "findings": {"items": []}, "decision": "safe",
+                      "coverage_gaps": {"tool_list_paged": True, "pages_read": 20,
+                                        "over_file_cap": 12, "file_cap": 200,
+                                        "image_layers_unread": 1,
+                                        "image_layers_reason": "unsupported compression",
+                                        "advisory_lookup": "failed"}})
+    assert v["gaps"] == ["advisory_lookup", "image_layers_unread", "over_file_cap",
+                         "tool_list_paged"]
+
+
+@pytest.mark.parametrize("gap,reason", [
+    ("tool_list_unread", "the server's tool list could not be read"),
+    ("tool_list_paged", "only part of the server's tool list could be read"),
+])
+def test_fallback_decision_reads_review_when_the_tool_list_was_not_fully_read(gap, reason):
+    # A response without the API's own decision (older API) is decided by the same rule.
+    mod = _load(PLUGIN_COPY)
+    v = mod._verdict({"trust_score": 92, "findings": {"items": []},
+                      "metadata": {"files_scanned": 3},
+                      "coverage": {"surface": "mcp"}, "coverage_gaps": {gap: True}})
+    assert (v["decision"], v["decision_reason"]) == ("review", reason)

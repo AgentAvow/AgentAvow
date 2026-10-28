@@ -9,7 +9,7 @@
 #     - local: /ci/agentavow-scan.gitlab-ci.yml
 #   # or, from a mirrored project at a pinned tag:
 #     - project: <group>/agentavow
-#       ref: v0.1.0
+#       ref: main          # or a tag you create on your mirror
 #       file: /gitlab/agentavow-scan.gitlab-ci.yml
 #
 # Override the AGENTAVOW_* variables in your own `variables:` block or on the job.
@@ -17,8 +17,10 @@
 variables:
   # The scanner image. Behind a firewall, point this at your internal registry.
   AGENTAVOW_IMAGE: "ghcr.io/agentavow/scanner:0.1"
-  # Fail below this trust score (0-100). 81 is the floor of "Safe to connect".
-  AGENTAVOW_MIN_SCORE: "81"
+  # Fail on this answer or worse: do_not_connect | review | none
+  AGENTAVOW_FAIL_ON_ANSWER: "do_not_connect"
+  # Legacy: also fail below this trust score (0-100). "0" turns it off.
+  AGENTAVOW_MIN_SCORE: "0"
   # Also fail on any finding at or above this severity: none | critical | high | medium
   AGENTAVOW_FAIL_ON: "none"
   # Directory to scan, relative to the repository root.
@@ -34,8 +36,9 @@ agentavow-scan:
     - |
       set -- "$AGENTAVOW_PATH" \
         --json agentavow-scan.json \
-        --gitlab-code-quality gl-code-quality-report.json \
-        --min-score "$AGENTAVOW_MIN_SCORE"
+        --gitlab-code-quality gl-code-quality-report.json
+      if [ "$AGENTAVOW_FAIL_ON_ANSWER" != "none" ]; then set -- "$@" --fail-on "$AGENTAVOW_FAIL_ON_ANSWER"; fi
+      if [ "${AGENTAVOW_MIN_SCORE:-0}" != "0" ]; then set -- "$@" --min-score "$AGENTAVOW_MIN_SCORE"; fi
       if [ "$AGENTAVOW_FAIL_ON" != "none" ]; then set -- "$@" --fail-on "$AGENTAVOW_FAIL_ON"; fi
       agentavow scan "$@"
   artifacts:

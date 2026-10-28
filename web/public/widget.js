@@ -3,7 +3,8 @@
  *
  *   <script src="https://agentavow.com/widget.js" data-tool="npm/chalk"></script>
  *
- * Renders the always-current scores card (the hosted card.svg) as a link to the
+ * Renders the always-current trust card (the hosted card.svg — the same design as
+ * the README badge: trust and adoption meters) as a link to the
  * full report, and adds a "Verify offline" control that recomputes the Ed25519
  * (JWS/EdDSA) signature IN THE VISITOR'S BROWSER against the public JWKS — so the
  * trust check runs on the reader's machine, not on a claim we make. No framework,
@@ -12,6 +13,7 @@
  * Attributes on the <script> (or a target <div data-agentavow-tool="...">):
  *   data-tool   required — coordinate: "npm/chalk", "pypi/requests", "owner/repo"
  *   data-verify "true" (default) | "false"  — hide the verify control
+ *   data-theme  "auto" (default, follows the reader's colour scheme) | "light" | "dark"
  */
 (function () {
   'use strict';
@@ -27,6 +29,29 @@
   function coordToPath(tool) {
     // "npm:chalk" and "npm/chalk" both mean npm/chalk; pass through owner/repo.
     return String(tool || '').trim().replace(/^https?:\/\/[^/]+\//, '').replace(':', '/');
+  }
+
+  // Published packages (scoped npm "@scope/name" and Hugging Face "org/model" included)
+  // use the /package/<surface>/<name> routes and the /check/pkg/ report; anything else
+  // is a GitHub owner/repo.
+  var PKG_SURFACES = { npm: 'npm', pypi: 'pypi', python: 'pypi', crates: 'crates',
+    crate: 'crates', huggingface: 'huggingface', hf: 'huggingface', docker: 'docker' };
+
+  function routesFor(path) {
+    var i = path.indexOf('/');
+    var head = i > 0 ? path.slice(0, i).toLowerCase() : '';
+    var surface = PKG_SURFACES[head];
+    if (surface && i < path.length - 1) {
+      var name = path.slice(i + 1);
+      return {
+        api: ORIGIN + '/api/v1/public/scan/package/' + surface + '/' + name,
+        report: ORIGIN + '/check/pkg/' + surface + '/' + name,
+      };
+    }
+    return {
+      api: ORIGIN + '/api/v1/public/scan/' + path,
+      report: ORIGIN + '/check/' + path,
+    };
   }
 
   function b64urlToBytes(s) {
@@ -69,12 +94,14 @@
     return n;
   }
 
-  function mount(host, tool, wantVerify) {
+  function mount(host, tool, wantVerify, theme) {
     var path = coordToPath(tool);
     if (!path) return;
-    var cardUrl = ORIGIN + '/api/v1/public/scan/' + path + '/card.svg';
-    var reportUrl = ORIGIN + '/check/' + path;
-    var verdictUrl = ORIGIN + '/api/v1/public/scan/' + path + '/verdict.json';
+    theme = (theme === 'light' || theme === 'dark') ? theme : 'auto';
+    var routes = routesFor(path);
+    var cardUrl = routes.api + '/card.svg' + (theme === 'auto' ? '' : '?theme=' + theme);
+    var reportUrl = routes.report;
+    var verdictUrl = routes.api + '/verdict.json';
 
     var wrap = el('div', 'display:inline-block;width:100%;max-width:360px;' +
       'font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.4');
@@ -134,7 +161,7 @@
       var placeholder = el('div');
       t.appendChild(placeholder);
       mount(placeholder, t.getAttribute('data-agentavow-tool'),
-        t.getAttribute('data-verify') !== 'false');
+        t.getAttribute('data-verify') !== 'false', t.getAttribute('data-theme'));
     }
   }
 
@@ -147,7 +174,7 @@
       var anchor = el('span');
       s.parentNode.insertBefore(anchor, s.nextSibling);
       mount(anchor, s.getAttribute('data-tool'),
-        s.getAttribute('data-verify') !== 'false');
+        s.getAttribute('data-verify') !== 'false', s.getAttribute('data-theme'));
     }
   }
 

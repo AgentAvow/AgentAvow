@@ -6,6 +6,14 @@ name: Static corpus
 # results must match the committed tests/corpus/static/expected.json (update it in the
 # same PR with `--write-expected` so the drift is reviewed). Archives are downloaded into
 # a cache keyed on the manifest hash and are NEVER executed or installed.
+#
+# Two corpora, two jobs: the registry top by downloads (manifest.json / expected.json)
+# and the install-check corpus, AgentAvow's catalog top-200 npm + top-200 PyPI by
+# adoption (install_check_manifest.json / install_check_expected.json), the packages the
+# Claude Code plugin's install check actually sees. They overlap little; a precision
+# regression can show in one and not the other (vercel and pm2 did, 2026-10-15).
+# A third job runs the adversarial recall sets (tests/adversarial): hand-built packages
+# whose payload is reachable, pinned per case, so a relaxing rule cannot open a hole.
 
 on:
   pull_request:
@@ -15,6 +23,7 @@ on:
       - "scripts/corpus/**"
       - "tests/corpus/static/**"
       - "tests/fixtures/static/**"
+      - "tests/adversarial/**"
       - ".github/workflows/static-corpus.yml"
   schedule:
     - cron: "17 6 * * *"   # nightly
@@ -29,7 +38,7 @@ concurrency:
 
 jobs:
   corpus:
-    name: Static corpus (400 packages)
+    name: Static corpus (registry top, 428 packages)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -74,3 +83,75 @@ jobs:
           name: static-corpus-report
           path: ${{ runner.temp }}/static-corpus-report.md
           if-no-files-found: ignore
+
+  install-check-corpus:
+    name: Static corpus (install-check, 400 packages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DEBUG: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[prod,dev]"
+
+      - name: Restore archive cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/agentavow-install-check-corpus
+          key: install-check-corpus-${{ hashFiles('tests/corpus/static/install_check_manifest.json') }}
+          restore-keys: |
+            install-check-corpus-
+
+      - name: Run the corpus gate
+        run: >-
+          python -I scripts/corpus/run_static_corpus.py
+          --manifest tests/corpus/static/install_check_manifest.json
+          --expected tests/corpus/static/install_check_expected.json
+          --cache ~/.cache/agentavow-install-check-corpus
+          --workers 4
+          --fail-on-diff
+          --report "$RUNNER_TEMP/install-check-corpus-report.md"
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/install-check-corpus-report.md" ]; then
+            head -c 900000 "$RUNNER_TEMP/install-check-corpus-report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-check-corpus-report
+          path: ${{ runner.temp }}/install-check-corpus-report.md
+          if-no-files-found: ignore
+
+  adversarial:
+    name: Adversarial recall sets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEBUG: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[prod,dev]"
+
+      # No database: --noconftest skips the suite's DB fixtures (these tests only build
+      # tarballs in memory and run the scanner).
+      - name: Run the attack sets
+        run: python -m pytest tests/adversarial -q --noconftest -p no:cacheprovider

@@ -101,3 +101,7 @@ If you maintain a framework that emits trust-relevant attestations — identity,
 ---
 
 *Composable trust isn't a framework. It's the floor under all the frameworks.*
+
+---
+
+*Licence: [CC BY 4.0](LICENSE-CC-BY-4.0.txt); see [CTEF-LICENSE.md](CTEF-LICENSE.md).*

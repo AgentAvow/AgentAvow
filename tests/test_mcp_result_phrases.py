@@ -66,7 +66,7 @@ def test_safe_certified_leads_with_the_phrase_and_suffix(follows):
 
 def test_review_leads_with_the_phrase_and_reason(follows):
     first = _first(REVIEW)
-    assert first.startswith("⚠️ Review before you connect — one high finding: unsafe eval "
+    assert first.startswith("⚠️ Review before you connect — one high finding in its code: unsafe eval "
                             "call. x · npm: trust 70/100.")
     text = ms._scan_block(REVIEW, "use", RP, "x · npm")
     assert "⚠ REVIEW" not in text and "**Top findings:**" in text
@@ -74,7 +74,7 @@ def test_review_leads_with_the_phrase_and_reason(follows):
 
 def test_do_not_connect_leads_with_the_phrase_and_reason(follows):
     first = _first(BLOCK)
-    assert first.startswith("⛔ Do not connect — one critical finding: hardcoded AWS key. "
+    assert first.startswith("⛔ Do not connect — one critical finding in its code: hardcoded AWS key. "
                             "x · npm: trust 40/100.")
     text = ms._scan_block(BLOCK, "use", RP, "x · npm", install_hint="npm install x")
     assert "npm install x" not in text
@@ -209,7 +209,7 @@ def test_card_leads_with_phrase_reason_and_certified():
 def test_card_review_and_do_not_connect():
     r = _render(_struct(REVIEW))
     assert "Review before you connect" in r["lead"]["html"]
-    assert "one high finding: unsafe eval call" in r["lead"]["html"]
+    assert "one high finding in its code: unsafe eval call" in r["lead"]["html"]
     assert r["pill"]["display"] == "none" and r["accent"] == "#F59E0B"
     b = _render(_struct(BLOCK))
     assert "Do not connect" in b["lead"]["html"] and b["accent"] == "#EF4444"
@@ -254,11 +254,11 @@ def test_next_line_per_decision():
     assert thin.startswith("**Next:** Safe to connect: connect it as usual. The score is "
                            "capped because there's little code to inspect (3 files)")
     review = _next(REVIEW)
-    assert review.startswith("**Next:** Review before you connect (one high finding: unsafe "
-                             "eval call): read the findings above")
+    assert review.startswith("**Next:** Review before you connect (one high finding in its "
+                             "code: unsafe eval call): read the findings above")
     block = _next(BLOCK, "npm install x")
-    assert block.startswith("**Next:** Do not connect or install it (one critical finding: "
-                            "hardcoded AWS key). The full report has the evidence: ")
+    assert block.startswith("**Next:** Do not connect or install it (one critical finding in "
+                            "its code: hardcoded AWS key). The full report has the evidence: ")
     assert "/check/pkg/npm/x" in block and "alternative" in block
 
 
@@ -301,3 +301,54 @@ def test_metadata_text_describes_the_three_answers():
         assert "needs review" not in t and "needs-review" not in t, name
         assert "letter grade" not in t.lower() and ">=81" not in t and "81+" not in t, name
     assert "Certified" in texts["claude"] and "Certified" in texts["get_started"]
+
+
+# vercel/next.js on claude.ai: the reason named a high finding in the tool's own code
+# while top_findings led with three critical dependency advisories.
+NEXTJS_SHAPE = {
+    "trust_score": 58, "trust_tier": "standard", "metadata": {"files_scanned": 200},
+    "findings": {"total": 10, "critical": 0, "high": 1, "items": [
+        *[{"severity": "critical", "category": "dependency",
+           "name": f"Vulnerable dependency: handlebars@4.7.9 (GHSA-{n})",
+           "file_path": "lockfile", "line_number": 1, "shipped": True, "kind": "defect",
+           "installed": True} for n in range(3)],
+        *[{"severity": "high", "category": "dependency", "name": "Vulnerable dependency: tar",
+           "file_path": "lockfile", "line_number": 1, "shipped": True, "kind": "defect",
+           "installed": True}] * 5,
+        {"severity": "high", "category": "unsafe_exec", "name": "execSync / spawn (Node.js)",
+         "file_path": "packages/next/x.js", "line_number": 4, "shipped": True,
+         "kind": "defect", "installed": True},
+        {"severity": "medium", "category": "fs_access", "name": "fs write",
+         "file_path": "packages/next/y.js", "line_number": 2, "shipped": True,
+         "kind": "defect", "installed": True},
+    ]},
+    "certified": {"eligible": False},
+}
+
+
+def test_top_findings_lead_with_what_decided():
+    items = NEXTJS_SHAPE["findings"]["items"]
+    rows = ms._grouped_findings(items, 3)
+    assert [r["what"] for r in rows] == [
+        "execSync / spawn (Node.js)",
+        "Vulnerable dependency: handlebars@4.7.9 (GHSA-0)",
+        "Vulnerable dependency: handlebars@4.7.9 (GHSA-1)",
+    ]
+    assert set(rows[0]) == {"severity", "category", "what", "where", "remediation", "count"}
+    sc = ms._scan_struct(NEXTJS_SHAPE, "vercel/next.js", "github", RP, API, None)
+    assert len(sc["top_findings"]) == 3
+    assert sc["top_findings"][0]["what"] == "execSync / spawn (Node.js)"
+    assert sc["decision_reason"] == ("one high finding in its code: execSync / spawn (Node.js);"
+                                     " plus 3 critical and 5 high in dependencies")
+    text = ms._scan_block(NEXTJS_SHAPE, "use", RP, "vercel/next.js")
+    top = text.split("**Top findings:**", 1)[1].strip().splitlines()
+    assert "execSync / spawn (Node.js)" in top[0]
+    assert "Vulnerable dependency: tar (×5)" in "\n".join(top[:5])
+
+
+def test_top_findings_without_decision_inputs_stay_severity_first():
+    rows = ms._grouped_findings([
+        {"severity": "medium", "category": "fs_access", "name": "m"},
+        {"severity": "critical", "category": "dependency", "name": "Vulnerable dependency: a"},
+    ], 3)
+    assert [r["severity"] for r in rows] == ["critical", "medium"]

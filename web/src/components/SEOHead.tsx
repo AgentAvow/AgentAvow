@@ -1,7 +1,7 @@
 import { Helmet } from 'react-helmet-async'
 
 const BASE_URL = 'https://agentavow.com'
-const DEFAULT_DESCRIPTION = 'AgentAvow gives any tool, MCP server, or package a signed, verifiable safety grade — check it free, verify it offline, and get alerted the moment it changes.'
+const DEFAULT_DESCRIPTION = 'Check any tool, MCP server, or package before your agent connects: Safe to connect, Review before you connect, or Do not connect. Signed trust score, adoption score, verifiable offline.'
 const OG_IMAGE = `${BASE_URL}/og-image.png`
 
 interface SEOHeadProps {
@@ -23,7 +23,10 @@ export default function SEOHead({
   noindex = false,
   jsonLd,
 }: SEOHeadProps) {
-  const fullTitle = title ? `${title} - AgentAvow` : 'AgentAvow'
+  // One format everywhere: "<Page> · AgentAvow". A title that already ends in the
+  // brand (any separator) isn't branded twice.
+  const bare = (title || '').replace(/\s*[-—–·|]\s*AgentAvow\s*$/i, '').trim()
+  const fullTitle = bare ? `${bare} · AgentAvow` : 'AgentAvow'
   const canonicalUrl = `${BASE_URL}${path}`
 
   return (

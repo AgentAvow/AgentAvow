@@ -15,13 +15,14 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +33,10 @@ from src.api.rate_limit import (
 )
 from src.config import settings
 from src.database import get_db
+from src.scanner.behavioral import slots as _behavioral_slots
+from src.scanner.verdict import certified_mark as _certified_mark
+from src.scanner.verdict import certified_mark_status as _certified_mark_status
+from src.scanner.verdict import coverage_gap_notes as _coverage_gap_notes
 from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_safe as _is_safe
 from src.scanner.verdict import verdict_label as _verdict_label
@@ -41,6 +46,7 @@ from src.signing import (
     create_jws,
     get_trust_v2_kid,
     get_trust_v2_signing_key,
+    rfc3339_ms,
 )
 
 # Scan attestations sign over RFC 8785 (JCS) canonical bytes so a consumer can
@@ -160,14 +166,15 @@ class PublicScanResponse(BaseModel):
     # Plain "is this safe to connect?" verdict, shared verbatim with the MCP connector
     # (src/scanner/verdict.py) so the two surfaces never disagree. Adoption is never an
     # input — code-analysis only, matching trust_score.
-    verdict: str = "needs_review"  # safe | needs_review (score >= 81 and no critical/high)
+    verdict: str = "needs_review"  # safe | needs_review: "safe" iff decide() reads safe
     verdict_reason: str = "low_signals"  # clean | blocking_findings | thin_coverage | low_signals
     # The three-phrase headline every surface leads with (src/scanner/verdict.decide):
     # safe ("Safe to connect") | review ("Review before you connect") | do_not_connect
     # ("Do not connect"), plus the one condition that triggered it. Derived from the
     # applied behavioral block; provisional (decision_final=false) while the sandbox is
     # still running. UNSIGNED — rides beside `verdict`, not inside the JWS. Adoption is
-    # never an input; Certified is a separate axis (`certified`).
+    # never an input; Certified is a separate axis (`certified` = the signed gate,
+    # `certified_mark` = the displayed mark, only ever beside Safe to connect).
     decision: str = "review"
     decision_final: bool = True
     decision_reason: str = ""
@@ -176,10 +183,27 @@ class PublicScanResponse(BaseModel):
     # Informational — never a score or verdict input.
     capabilities: list[dict] = []
     positive_signals: list[str] = []
-    grade: str = ""  # letter grade with the A+ certified gate applied (roadmap §7)
+    # Deprecated: kept for old clients only. Read `decision` (the answer), `trust_score`
+    # and `certified` instead; no AgentAvow surface shows a letter grade.
+    grade: str = Field(
+        "", json_schema_extra={"deprecated": True},
+        description="Deprecated legacy field; read decision, trust_score and certified.")
     certified: dict = {}  # A+ certified-tier eligibility {eligible, checks} (roadmap §7)
+    # The Certified MARK — the field every surface and gateway acts on: eligible AND
+    # decision == safe AND final AND score >= 81 AND not thin coverage (safety model
+    # §10 display rule; ``verdict.certified_mark``). ``certified.eligible`` above is the
+    # signed provenance gate and can be true beside Review; the mark never is.
+    # ``certified_mark_reason`` names why an earned eligibility shows no mark
+    # (not_safe | sandbox_pending | score_below_81 | thin_coverage | coverage_gaps), else "".
+    certified_mark: bool = False
+    certified_mark_reason: str = ""
     coverage: dict = {}  # scan_depth / provenance_binding / db_snapshots (recompute discipline)
     supply_chain: dict = {}  # OSV/deps.dev summary (signed into the JWS; mirrored here for readers)
+    # What the scan selected but could NOT read, by cause (only non-zero keys; empty =
+    # everything selected was read). Signed as scan.coverageGaps. `not_checked` is the
+    # same in plain English; a Safe decision_reason ends with it. Never a score input.
+    coverage_gaps: dict = {}
+    not_checked: list[str] = []
     # Context-only incident history — OSV MAL- advisories for THIS package's own coordinate
     # ("was it ever compromised?"). NOT scored, NOT signed; empty for repos w/o a coordinate
     # or non-OSV ecosystems. {checked, has_incident, current_version_affected, count, incidents[]}.
@@ -205,6 +229,12 @@ class PublicScanResponse(BaseModel):
     # #8 tool-definition pinning — signed into the JWS `scan` block
     tool_manifest_digest: str | None = None
     tool_digests: dict[str, str] = {}
+    # Display list of the served tools (name, declared annotations, digest, source).
+    # Unsigned — the signed per-tool digests are tool_digests above.
+    tool_list: list[dict] = []
+    # A repo that is a collection of agent skills leads with the collection result
+    # (its worst skill). The repo's own code scan stays in the fields above.
+    skill_collection: dict | None = None
     tool_drift: dict | None = None  # digest diff vs the previous scan (rug-pull signal)
     jws: str  # Signed attestation (EdDSA, RFC 7515)
     algorithm: str = "EdDSA"
@@ -229,7 +259,7 @@ class PublicScanResponse(BaseModel):
     # Proxy gateway hint
     gateway_info: dict = {
         "status": "available",
-        "docs": "https://agentavow.com/docs/trust-gateway",
+        "docs": "https://agentavow.com/docs/gate-on-the-grade",
         "description": "Trust-tiered rate limiting gateway for AI agent tool execution",
     }
 
@@ -508,6 +538,10 @@ async def _run_and_cache_behavioral(
         logger.exception("behavioral tier failed for %s", name)
         return {"ran": False, "reason": "behavioral tier error"}
     _duration = time.monotonic() - _t0
+    if not res.ran and res.error:
+        # Runner-level failures, by reason, for the sandbox watchdog
+        # (src/jobs/sandbox_watchdog.py): sandbox_disk_low means the box itself is sick.
+        await _bump_behavioral(f"runner_error:{str(res.error).split(':', 1)[0][:40]}")
     block = res.to_public_dict()
     block["findings"] = [
         {"category": f.category, "name": f.name, "severity": f.severity,
@@ -516,6 +550,21 @@ async def _run_and_cache_behavioral(
         for f in behavioral_findings(res)
     ]
     block["declared_egress"] = sorted(expected_hosts or [])
+    # The tools the sandbox saw the server serve (name, declared annotations, digest of
+    # the observed definition) + the blast radius they imply. Unsigned display data;
+    # the signed observation below is unchanged.
+    try:
+        from src.scanner.mcp_scan import analyze_mcp
+        from src.scanner.mcp_tool_list import mcp_shaped, tool_list_from_transcript
+        _tr = getattr(res, "transcript", None)
+        if _tr is not None and getattr(_tr, "tools", None):
+            block["tool_list"] = tool_list_from_transcript(_tr)
+            _surf = analyze_mcp(mcp_shaped(_tr))
+            block["tool_surface"] = {"blast_radius": _surf.blast_radius,
+                                     "capabilities": _surf.capabilities,
+                                     "lethal_trifecta": _surf.lethal_trifecta}
+    except Exception:  # noqa: BLE001 — display data must never fail the block
+        pass
     try:
         block["grade_summary"] = grade_summary(res)
     except Exception:  # noqa: BLE001 — a UI summary must never fail the block
@@ -528,6 +577,8 @@ async def _run_and_cache_behavioral(
             _behavioral_cache_key(surface, name, expected_hosts, plan), json.dumps(block),
             ex=_BEHAVIORAL_CACHE_TTL,
         )
+        await _behavioral_slots.clear_pending(
+            _behavioral_cache_key(surface, name, expected_hosts, plan))
     except Exception:
         pass
     return block
@@ -614,7 +665,8 @@ def _apply_behavioral_score(data: dict, block: dict | None) -> dict:
     tier = _compute_tier(score)
     crit = int(((data.get("findings") or {}).get("critical")) or 0)
     out["trust_score"] = score
-    out["grade"] = _display_grade(score, (data.get("certified") or {}).get("eligible"), crit)
+    out["grade"] = _display_grade(
+        score, _certified_mark({**out, "behavioral": block}), crit)
     out["trust_tier"] = tier["tier"]
     out["recommended_limits"] = tier["recommended_limits"]
     out["behavioral_evidence"] = eff["evidence"]
@@ -642,17 +694,19 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     plan = _behavioral_plan(data, surface)
     run_kwargs = {"plan": plan, "env_names": _behavioral_env_names(data),
                   "readme_text": _behavioral_readme(data)}
+    member = _behavioral_cache_key(surface, str(name), declared, plan)
     if force:
-        if not await _acquire_behavioral_slot():
+        handle = await _acquire_behavioral_slot()
+        if handle is None:
             await _bump_behavioral("slot_rejected")
-            return {"ran": False, "pending": True,
-                    "reason": "sandbox busy — every slot is in use; try again in a minute"}
-        try:
+            pos = await _behavioral_slots.enqueue(
+                member, _queue_payload(surface, str(name), declared, run_kwargs, force=True),
+                "normal")
+            return _queued_block(pos)
+        async with _behavioral_slots.holding(handle, lock_ttl=None):
             return await _run_and_cache_behavioral(
                 surface, str(name), declared, **run_kwargs) or {
                 "ran": False, "reason": "behavioral tier error"}
-        finally:
-            await _release_behavioral_slot()
     cached = await _get_cached_behavioral(surface, str(name), declared, plan)
     if cached:
         await _bump_behavioral("cache_hit")
@@ -660,54 +714,133 @@ async def _behavioral_block(data: dict, force: bool = False) -> dict | None:
     await _bump_behavioral("cache_miss")
     # Not cached — run it in the background so it's ready next time, return pending now.
     # One detonation per coordinate at a time (lock), and a global cap on concurrent runs
-    # (slots): the sandbox is one small box. A request that finds no slot stays pending
-    # and the next request for the coordinate tries again.
-    if await _acquire_behavioral_lock(surface, str(name), declared, plan):
-        if await _acquire_behavioral_slot():
-            asyncio.create_task(_run_in_slot(surface, str(name), declared, run_kwargs))
-        else:
-            await _bump_behavioral("slot_rejected")
-            await _release_behavioral_lock(surface, str(name), declared, plan)
-    return {"ran": False, "pending": True, "reason": "analysis running — reload in ~1 min"}
+    # (slots): the sandbox is one small box. A request that finds no slot is QUEUED and
+    # starts when a slot frees. Who is asking sets the priority: a viewer is normal, the
+    # catalog re-score (``slots.low_priority()``) is low.
+    priority = _behavioral_slots.current_priority()
+    payload = _queue_payload(surface, str(name), declared, run_kwargs)
+    outcome = await _start_behavioral_payload(payload, priority, check_cache=False)
+    if outcome in ("started", "locked"):
+        await _behavioral_slots.pending_age(member)
+        return _running_block()
+    if priority == "normal":  # a real request turned away (low work waiting is normal)
+        await _bump_behavioral("slot_rejected")
+    pos = await _behavioral_slots.enqueue(member, payload, priority)
+    if priority == "normal" and await _behavioral_slots.pending_age(member) \
+            > _behavioral_slots.PENDING_MAX_AGE:
+        await _bump_behavioral("pending_expired")
+        return {"ran": False, "pending": False, "state": "unavailable",
+                "reason": BEHAVIORAL_UNAVAILABLE_REASON}
+    return _queued_block(pos)
 
 
-async def _run_in_slot(surface: str, name: str, declared: set[str], run_kwargs: dict) -> None:
+BEHAVIORAL_RUNNING_REASON = "analysis running — reload in ~1 min"
+BEHAVIORAL_UNAVAILABLE_REASON = "sandbox unavailable, static analysis only"
+
+
+def _running_block() -> dict:
+    return {"ran": False, "pending": True, "state": "running",
+            "reason": BEHAVIORAL_RUNNING_REASON}
+
+
+def _queued_block(position: int | None) -> dict:
+    """Pending because every sandbox slot is busy (not because a run is going)."""
+    out = {"ran": False, "pending": True, "state": "queued",
+           "reason": "waiting for a sandbox slot — every slot is in use"}
+    if position is not None:
+        out["queue_position"] = int(position) + 1
+        out["reason"] += f"; queued at position {int(position) + 1}"
+    return out
+
+
+_QUEUE_README_LIMIT = 64_000  # = runner._README_LIMIT; the runner never reads past it
+
+
+def _queue_payload(surface: str, name: str, declared: set[str] | None, run_kwargs: dict,
+                   *, force: bool = False) -> dict:
+    """Everything a queued run needs to start later, JSON-safe."""
+    kw = dict(run_kwargs or {})
+    if isinstance(kw.get("readme_text"), str):
+        kw["readme_text"] = kw["readme_text"][:_QUEUE_README_LIMIT]
+    out = {"surface": surface, "name": str(name), "declared": sorted(declared or []),
+           "run_kwargs": kw}
+    if force:
+        out["force"] = True
+    return out
+
+
+async def _start_behavioral_payload(payload: dict, priority: str = "normal", *,
+                                    check_cache: bool = True) -> str:
+    """Start a background run for a queue payload. Returns ``started``, ``cached``
+    (already have a block; a forced payload skips this check), ``locked`` (a run for
+    the coordinate is in flight) or ``no_slot``. Never raises."""
     try:
-        await _run_and_cache_behavioral(surface, name, declared, **run_kwargs)
-    finally:
-        await _release_behavioral_slot()
+        surface, name = str(payload["surface"]), str(payload["name"])
+        declared = set(payload.get("declared") or [])
+        run_kwargs = dict(payload.get("run_kwargs") or {})
+    except (KeyError, TypeError, AttributeError):
+        return "invalid"
+    plan = run_kwargs.get("plan")
+    if check_cache and not payload.get("force") and await _get_cached_behavioral(
+            surface, name, declared, plan):
+        return "cached"
+    if not await _acquire_behavioral_lock(surface, name, declared, plan):
+        return "locked"
+    lock_key = _behavioral_cache_key(surface, name, declared, plan) + ":lock"
+    handle = await _acquire_behavioral_slot(priority, lock_key=lock_key)
+    if handle is None:
+        await _release_behavioral_lock(surface, name, declared, plan)
+        return "no_slot"
+    _behavioral_slots.spawn(
+        _run_in_slot(surface, name, declared, run_kwargs, handle, priority=priority))
+    return "started"
 
 
-_BEHAVIORAL_SLOTS_KEY = "behavioral:slots:active"
-_BEHAVIORAL_SLOT_TTL = 600  # a crashed worker can hold a slot at most this long
-
-
-async def _acquire_behavioral_slot() -> bool:
-    """Global concurrency cap across all workers (Redis counter). Fails OPEN."""
+async def _drain_behavioral_queue() -> int:
+    """Start queued runs while slots are free (called when a slot frees and by the
+    periodic loop). Returns runs started."""
     from src.config import settings
-    limit = int(getattr(settings, "scanner_behavioral_max_concurrent", 2) or 2)
-    try:
-        from src.redis_client import get_redis
-        r = get_redis()
-        n = int(await r.incr(_BEHAVIORAL_SLOTS_KEY))
-        await r.expire(_BEHAVIORAL_SLOTS_KEY, _BEHAVIORAL_SLOT_TTL)
-        if n > limit:
-            await r.decr(_BEHAVIORAL_SLOTS_KEY)
-            return False
-        return True
-    except Exception:
-        return True
+    if not getattr(settings, "scanner_behavioral_enabled", False):
+        return 0
+    return await _behavioral_slots.drain(_start_behavioral_payload)
 
 
-async def _release_behavioral_slot() -> None:
+async def _run_in_slot(surface: str, name: str, declared: set[str], run_kwargs: dict,
+                       handle: object = None, *, priority: str = "normal") -> None:
+    """The background run. Holds ``handle`` (heartbeat, compare-and-delete release).
+    Cancelled at shutdown: the coordinate goes back on the queue and its lock is freed
+    so it runs again after the restart. Otherwise the next queued run starts."""
+    plan = (run_kwargs or {}).get("plan")
     try:
-        from src.redis_client import get_redis
-        r = get_redis()
-        n = int(await r.decr(_BEHAVIORAL_SLOTS_KEY))
-        if n < 0:
-            await r.set(_BEHAVIORAL_SLOTS_KEY, 0, ex=_BEHAVIORAL_SLOT_TTL)
-    except Exception:
-        pass
+        async with _behavioral_slots.holding(handle, lock_ttl=_BEHAVIORAL_LOCK_TTL):
+            await _run_and_cache_behavioral(surface, name, declared, **run_kwargs)
+    except asyncio.CancelledError:
+        try:
+            await _release_behavioral_lock(surface, name, declared, plan)
+            await _behavioral_slots.enqueue(
+                _behavioral_cache_key(surface, name, declared, plan),
+                _queue_payload(surface, name, declared, run_kwargs), priority)
+        except BaseException:  # noqa: BLE001 — shutdown is best effort
+            pass
+        raise
+    except Exception:  # noqa: BLE001 — a background task has nobody to raise to
+        logger.exception("behavioral background run failed for %s:%s", surface, name)
+    await _drain_behavioral_queue()
+
+
+async def _acquire_behavioral_slot(priority: str = "normal", *, lock_key: str = ""):
+    """A ``slots.SlotHandle`` or None. Normal fails OPEN on a Redis error (see
+    ``slots.acquire_slot``)."""
+    return await _behavioral_slots.acquire_slot(priority, lock_key=lock_key)
+
+
+async def _release_behavioral_slot(handle: object = None) -> None:
+    await _behavioral_slots.release_slot(handle)
+
+
+async def behavioral_slots_in_use() -> int:
+    """Live (unexpired) leases — for the admin dashboard and ops checks."""
+    return await _behavioral_slots.slots_in_use()
 
 
 async def _release_behavioral_lock(surface: str, name: str, expected_hosts: set[str] | None,
@@ -732,6 +865,8 @@ async def _bump_behavioral(name: str, by: int = 1) -> None:
         k = f"{_BM}:{name}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
         await r.incrby(k, by)
         await r.expire(k, _BM_TTL)
+        if name == "slot_rejected":  # lifetime total feeds the slot watchdog
+            await r.incrby(f"{_BM}:total:{name}", by)
     except Exception:
         pass
 
@@ -825,6 +960,43 @@ async def _track_checker(request) -> None:
         pass
 
 
+def _qbool(v: object) -> bool:
+    """A route parameter as a real bool. Called directly (internal callers, scripts), an
+    omitted parameter is FastAPI's ``Query(False)`` object, which is TRUTHY; only a real
+    bool counts."""
+    return v if isinstance(v, bool) else False
+
+
+def _qstr(v: object) -> str | None:
+    """A route parameter as a str or None (an omitted ``Query(None)`` reads None)."""
+    return v if isinstance(v, str) else None
+
+
+async def _page_decision(
+    data: dict, coordinate: tuple[str, str] | None = None,
+) -> tuple[str, str]:
+    """(decision, reason) the tool's own result page leads with for this scan result:
+    ``decide()`` over the full scan data (advisories, deprecation, malicious
+    dependencies, coverage) with a CACHED sandbox block folded in, as
+    ``_package_response`` does. Cache-only: never starts a sandbox run. A run still
+    pending has no say in the decision, so it is left out and the stored reason carries
+    no "sandbox pending" suffix that would go stale."""
+    block = None
+    try:
+        block = await _cached_behavioral_for(_package_sandbox_input(data, coordinate))
+        if not isinstance(block, dict) or block.get("pending"):
+            block = None
+    except Exception:  # noqa: BLE001 — no block = the static answer
+        logger.debug("cached sandbox lookup failed for %s", coordinate, exc_info=True)
+    try:
+        applied = _apply_behavioral_score(data, block) if block else data
+    except Exception:  # noqa: BLE001
+        logger.debug("sandbox score effect failed for %s", coordinate, exc_info=True)
+        applied, block = data, None
+    d = _decide({**applied, "behavioral": block})
+    return d.decision, d.reason
+
+
 async def _capture_community_scan(
     owner: str, repo: str, data: dict, db: AsyncSession, surface: str = "github",
 ) -> None:
@@ -846,18 +1018,35 @@ async def _capture_community_scan(
     _score = data.get("trust_score")
     _grade = data.get("grade") or (
         _display_grade(
-            _score, (data.get("certified") or {}).get("eligible"),
+            _score, _certified_mark(data),
             (data.get("findings") or {}).get("critical") or 0,
         )
         if _score is not None else None
     )
     surface = (surface or "github").lower()
+    if surface in ("github", "openclaw"):
+        # GitHub owner/repo names are case-insensitive: reuse an existing row's casing
+        # so "Chris221/x" and "chris221/x" update one row instead of making two.
+        try:
+            existing = (await db.execute(
+                select(CommunityScan.owner, CommunityScan.repo).where(
+                    CommunityScan.surface == surface,
+                    safunc.lower(CommunityScan.owner) == owner.lower(),
+                    safunc.lower(CommunityScan.repo) == repo.lower(),
+                ).order_by(CommunityScan.last_scanned_at.desc()).limit(1)
+            )).first()
+            if existing:
+                owner, repo = existing[0], existing[1]
+        except Exception:  # noqa: BLE001 — fall back to the name as given
+            logger.debug("community case lookup failed for %s/%s", owner, repo, exc_info=True)
     if surface in ("npm", "pypi", "crates", "huggingface", "docker"):
         _full = f"{surface}:{repo}"
     elif surface == "mcp":
         _full = repo
     else:  # github / openclaw
         _full = f"{owner}/{repo}"
+    _dec, _dec_reason = await _page_decision(data, (owner, repo)) if _score is not None \
+        else (None, None)
     values = dict(
         surface=surface,
         owner=owner,
@@ -869,6 +1058,8 @@ async def _capture_community_scan(
         high=findings.get("high"),
         findings_count=findings.get("total"),
         primary_language=lang,
+        decision=_dec,
+        decision_reason=_dec_reason,
         scan_count=1,
     )
     stmt = pg_insert(CommunityScan).values(**values).on_conflict_do_update(
@@ -876,6 +1067,8 @@ async def _capture_community_scan(
         set_=dict(
             trust_score=values["trust_score"],
             grade=values["grade"],
+            decision=values["decision"],
+            decision_reason=values["decision_reason"],
             critical=values["critical"],
             high=values["high"],
             findings_count=values["findings_count"],
@@ -951,7 +1144,7 @@ async def _record_scan_history(
             owner=owner, repo=repo, full_name=full_name,
             trust_score=new_score,
             grade=data.get("grade"),
-            certified=bool((data.get("certified") or {}).get("eligible")),
+            certified=_certified_mark(data),  # the display mark, not raw eligibility
             critical=findings.get("critical"),
             high=findings.get("high"),
             tool_manifest_digest=new_digest,
@@ -1086,11 +1279,23 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
     _supply_chain = result_data.get("supply_chain") or {}
     if _supply_chain:
         scan_block["supplyChain"] = _supply_chain
+    # What the scan selected but could not read (oversized / unfetched / past the cap /
+    # truncated tree / skipped package members / failed advisory lookup). Signed so a
+    # verifier sees the "nothing found" claim's scope; omitted when nothing was missed.
+    _gaps = result_data.get("coverage_gaps") or {}
+    if _gaps:
+        scan_block["coverageGaps"] = _gaps
     # The signed sandbox observation that moved the score (see score_effect.py): with
     # the observation JWS (sha256 below) + staticScore, the number is recomputable.
     _bev = result_data.get("behavioral_evidence")
     if _bev:
         scan_block["behavioralEvidence"] = _bev
+    # Live MCP scans: the observation of the tools/list read (endpoint, TLS facts of the
+    # connection that served each page, every page, capture interval), bound to the
+    # same toolManifestDigest. Additive; omitted for every other surface.
+    _obs = result_data.get("mcp_observation")
+    if _obs:
+        scan_block["observation"] = _obs
     payload = {
         "@context": "https://schema.agentgraph.co/attestation/security/v1",
         "type": "SecurityPostureAttestation",
@@ -1103,9 +1308,9 @@ def _build_scan_payload(repo: str, result_data: dict, drift: dict | None = None)
             "id": _subject_id(repo),
             "repo": repo,
         },
-        "scannedAt": result_data.get("scanned_at", now.isoformat()),
-        "issuedAt": now.isoformat(),
-        "expiresAt": (now + timedelta(hours=24)).isoformat(),
+        "scannedAt": result_data.get("scanned_at", rfc3339_ms(now)),
+        "issuedAt": rfc3339_ms(now),
+        "expiresAt": rfc3339_ms(now + timedelta(hours=24)),
         "scan": scan_block,
         "recommendedLimits": result_data["recommended_limits"],
     }
@@ -1148,13 +1353,14 @@ def _scan_result_to_dict(result: object) -> dict:
     # scored at a fraction, so a package isn't judged on its test-suite noise. Sort:
     # shipped first, then by severity, so the top of the (capped) list is the surface
     # an agent actually runs.
-    from src.scanner.scan import _is_nonshipped_path, _is_test_or_doc_file
-
-    def _is_shipped(path: str) -> bool:
-        return not (_is_nonshipped_path(path) or _is_test_or_doc_file(path))
+    from src.scanner.scan import finding_is_shipped
+    from src.scanner.verdict import finding_decides
 
     _sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    finding_items = [
+    # Order: the findings that decided the answer (blocking critical/high in the tool's
+    # own code) first, then shipped before non-shipped, then severity — so a pile of
+    # vulnerable-dependency advisories never leads above the defect the reason names.
+    finding_items = sorted((
         {
             "category": f.category,
             "name": f.name,
@@ -1162,16 +1368,14 @@ def _scan_result_to_dict(result: object) -> dict:
             "file_path": f.file_path,
             "line_number": f.line_number,
             "remediation": f.remediation or "",
-            "shipped": _is_shipped(f.file_path),
+            "shipped": finding_is_shipped(f),
             "kind": getattr(f, "kind", "defect") or "defect",
             "capability": getattr(f, "capability", "") or "",
             "installed": bool(getattr(f, "installed", True)),
         }
-        for f in sorted(
-            result.findings,
-            key=lambda x: (not _is_shipped(x.file_path), _sev_rank.get(x.severity, 5)),
-        )
-    ][:100]
+        for f in result.findings
+    ), key=lambda i: (not finding_decides(i), not i["shipped"],
+                      _sev_rank.get(i["severity"], 5)))[:100]
 
     tier_info = _compute_tier(result.trust_score)
 
@@ -1184,12 +1388,12 @@ def _scan_result_to_dict(result: object) -> dict:
     _sampled = bool(getattr(result, "sampled", False))
 
     _certified = getattr(result, "certified", {}) or {}
-    return {
+    out = {
         "trust_score": result.trust_score,
-        # Letter grade with the A+ certified gate applied (flag-gated; == score-only
-        # grade when the gate is off). Stored so every consumer reads one grade.
-        "grade": _display_grade(
-            result.trust_score, _certified.get("eligible"), ship_crit),
+        # Letter grade with the A+ gate applied (flag-gated; == score-only grade when
+        # the gate is off), set below from the Certified mark. Stored so every consumer
+        # reads one grade.
+        "grade": "",
         "trust_tier": tier_info["tier"],
         "recommended_limits": tier_info["recommended_limits"],
         "scan_result": scan_result,
@@ -1245,17 +1449,25 @@ def _scan_result_to_dict(result: object) -> dict:
         "category_scores": getattr(result, "category_scores", {}),
         "tool_digests": getattr(result, "tool_digests", {}) or {},
         "tool_manifest_digest": getattr(result, "tool_manifest_digest", None),
+        "tool_list": list(getattr(result, "tool_list", []) or []),
+        # Live MCP scans: how tools/list was read (signed as scan.observation).
+        "mcp_observation": getattr(result, "mcp_observation", None),
         # Phase 0/1: recompute-discipline coverage block (surface, scan_depth,
         # db_snapshots, evidence_anchors) + the OSV/deps.dev supply-chain summary.
         "coverage": getattr(result, "coverage", {}) or {},
         "supply_chain": getattr(result, "supply_chain", {}) or {},
+        # What the scan selected but could not read (disclosure only; never scored).
+        "coverage_gaps": getattr(result, "coverage_gaps", {}) or {},
         # Context-only incident history (OSV MAL- for the target's own coordinate).
         "incident_history": getattr(result, "incident_history", {}) or {},
         "deprecation": getattr(result, "deprecation", None),
         "package_version": (getattr(result, "artifact_scan", None) or {}).get("version"),
         "published_at": (getattr(result, "artifact_scan", None) or {}).get("published_at"),
-        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "scanned_at": rfc3339_ms(datetime.now(timezone.utc)),
     }
+    # A+ follows the Certified MARK (static: no sandbox block yet), not raw eligibility.
+    out["grade"] = _display_grade(result.trust_score, _certified_mark(out), ship_crit)
+    return out
 
 
 def _compute_tool_drift(old: dict | None, new: dict) -> dict | None:
@@ -1317,7 +1529,10 @@ def _package_response(
     from silently defaulting on one path because a hand-written construction forgot it.
     """
     _decision = _decide({**data, "behavioral": behavioral})
+    _mark, _mark_why = _certified_mark_status({**data, "behavioral": behavioral}, _decision)
     return PublicScanResponse(
+        certified_mark=_mark,
+        certified_mark_reason=_mark_why,
         decision=_decision.decision,
         decision_final=_decision.final,
         decision_reason=_decision.reason,
@@ -1338,6 +1553,8 @@ def _package_response(
         certified=data.get("certified") or {},
         coverage=data.get("coverage", {}),
         supply_chain=data.get("supply_chain", {}),
+        coverage_gaps=data.get("coverage_gaps") or {},
+        not_checked=_coverage_gap_notes(data),
         incident_history=data.get("incident_history", {}),
         deprecation=data.get("deprecation"),
         package_version=data.get("package_version"),
@@ -1360,6 +1577,7 @@ def _package_response(
         jws=jws,
         tool_manifest_digest=data.get("tool_manifest_digest"),
         tool_digests=data.get("tool_digests", {}),
+        tool_list=data.get("tool_list", []) or [],
     )
 
 
@@ -1442,6 +1660,118 @@ async def _refresh_package(surface: str, name: str, version: str | None,
         pass  # best-effort; the next stored read serves whatever exists
 
 
+_PKG_BADGE_SURFACES = ("npm", "pypi", "crates", "huggingface", "docker")
+
+
+async def _package_badge_data(surface: str, name: str) -> dict | None:
+    """The cached package result for a badge: fresh, else stale (refreshed in the
+    background), else a fresh scan now (a README badge must not decay to grey)."""
+    data = await _get_cached(surface, name)
+    if data:
+        return data
+    stale = await _get_stale_cached(surface, name)
+    if stale:
+        _schedule_package_refresh(surface, name, None, surface, name)
+        return stale
+    try:
+        from src.scanner.scan import scan_package
+        result = await asyncio.wait_for(scan_package(surface, name), timeout=60)
+    except Exception:
+        logger.warning("badge package scan failed for %s:%s", surface, name, exc_info=True)
+        return None
+    if getattr(result, "error", None):
+        return None
+    data = _scan_result_to_dict(result)
+    await _set_cached(surface, name, data)
+    return data
+
+
+@router.get(
+    "/package/{surface}/{name:path}/badge",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+)
+async def package_badge(
+    surface: str, name: str, request: Request, db: AsyncSession = Depends(get_db),
+) -> Response:
+    """README badge for a published package, including names with a slash: scoped
+    npm (`/package/npm/@scope/name/badge`) and Hugging Face
+    (`/package/huggingface/org/model/badge`). Same output and query options as
+    `/{owner}/{repo}/badge`."""
+    import inspect
+
+    surface = (surface or "").strip().lower()
+    surface = {"hf": "huggingface", "python": "pypi", "crate": "crates"}.get(surface, surface)
+    name = (name or "").strip().strip("/")
+    if surface not in _PKG_BADGE_SURFACES:
+        raise HTTPException(404, "Unknown package surface")
+    if not name or len(name) > 214 or ".." in name or any(c.isspace() for c in name):
+        raise HTTPException(400, "Invalid package name")
+    # Forward the query options the badge renderer takes (metric, style, theme, …).
+    # Called directly (not through FastAPI), so unset options take their declared
+    # defaults here rather than arriving as Query() markers.
+    extra = {}
+    for pname, param in inspect.signature(scan_badge).parameters.items():
+        if pname in ("owner", "repo", "db"):
+            continue
+        if pname in request.query_params:
+            value = request.query_params[pname]
+            # Same validation FastAPI would apply on the direct route.
+            for m in getattr(param.default, "metadata", None) or []:
+                pat = getattr(m, "pattern", None)
+                if pat and not re.fullmatch(pat, value):
+                    raise HTTPException(422, f"Invalid value for {pname}")
+            extra[pname] = value
+        elif param.default is not inspect.Parameter.empty:
+            d = param.default
+            extra[pname] = getattr(d, "default", d)
+    return await scan_badge(owner=surface, repo=name, db=db, **extra)
+
+
+@router.get(
+    "/package/{surface}/{name:path}/card.svg",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+)
+async def package_card(
+    surface: str,
+    name: str,
+    style: str = Query("card", pattern="^(card|card-stacked|classic)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """The website-embed card for a published package, including names with a slash
+    (scoped npm ``/package/npm/@scope/name/card.svg``, Hugging Face ``org/model``)."""
+    surface = (surface or "").strip().lower()
+    surface = {"hf": "huggingface", "python": "pypi", "crate": "crates"}.get(surface, surface)
+    name = (name or "").strip().strip("/")
+    if surface not in _PKG_BADGE_SURFACES:
+        raise HTTPException(404, "Unknown package surface")
+    if not name or len(name) > 214 or ".." in name or any(c.isspace() for c in name):
+        raise HTTPException(400, "Invalid package name")
+    return await scan_card(owner=surface, repo=name, style=style, theme=theme, db=db)
+
+
+@router.get(
+    "/package/{surface}/{name:path}/verdict.json",
+    dependencies=[Depends(rate_limit_reads)],
+    response_class=Response,
+)
+async def package_verdict(
+    surface: str, name: str, db: AsyncSession = Depends(get_db),
+) -> Response:
+    """The widget's offline-verify payload for a package, names with a slash included.
+    Cache-only, like ``/{owner}/{repo}/verdict.json``."""
+    surface = (surface or "").strip().lower()
+    surface = {"hf": "huggingface", "python": "pypi", "crate": "crates"}.get(surface, surface)
+    name = (name or "").strip().strip("/")
+    if surface not in _PKG_BADGE_SURFACES:
+        raise HTTPException(404, "Unknown package surface")
+    if not name or len(name) > 214 or ".." in name or any(c.isspace() for c in name):
+        raise HTTPException(400, "Invalid package name")
+    return await scan_verdict(owner=surface, repo=name, db=db)
+
+
 @router.get(
     "/package/{surface}/{name:path}",
     response_model=PublicScanResponse,
@@ -1467,6 +1797,8 @@ async def scan_package_endpoint(
     bytes (``scan_depth = artifact``) with the package's own build provenance
     verified. E.g. ``/public/scan/package/npm/chalk`` or
     ``/public/scan/package/pypi/requests?version=2.32.5``. Cached 1h."""
+    force, behavioral, stored = _qbool(force), _qbool(behavioral), _qbool(stored)
+    version = _qstr(version)
     surface = (surface or "").strip().lower()
     if surface == "python":
         surface = "pypi"
@@ -1554,6 +1886,13 @@ async def scan_package_endpoint(
 
     data = _scan_result_to_dict(result)
     await _set_cached(cache_owner, cache_repo, data)
+    if not version:
+        # Record the latest-version result: the catalog row and the score-history
+        # point (the signed /drift/pkg feed and the package page's history).
+        try:
+            await _capture_community_scan(surface, name, data, db, surface=surface)
+        except Exception:
+            logger.debug("package capture failed for %s:%s", surface, name, exc_info=True)
     return await _signed_response(data, cached=False)
 
 
@@ -1581,18 +1920,52 @@ async def scan_skill_endpoint(
     scripts. `coverage.surface = openclaw`. E.g. `/public/scan/skill/owner/repo`.
     The behavioral sandbox (plan `skill`) clones the repo and runs its hooks and
     scripts; the signed observation comes back in `behavioral`."""
+    return await _skill_scan(owner, repo, None, request, _qbool(force), _qbool(behavioral))
+
+
+@router.get(
+    "/skill/{owner}/{repo}/{skill_path:path}",
+    response_model=PublicScanResponse,
+    dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
+)
+async def scan_one_skill_endpoint(
+    owner: str,
+    repo: str,
+    skill_path: str,
+    request: Request = None,
+    force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    behavioral: bool = Query(False, description="Force a fresh behavioral sandbox run"),
+    db: AsyncSession = Depends(get_db),
+) -> PublicScanResponse:
+    """Grade ONE skill inside a repo that holds many (e.g.
+    `/public/scan/skill/anthropics/skills/skills/pdf`). The skill is named by its
+    directory, or by its folder name when that is unambiguous."""
+    skill_path = (skill_path or "").strip().strip("/")
+    if (not skill_path or ".." in skill_path or len(skill_path) > 200
+            or not all(c.isalnum() or c in "-_./" for c in skill_path)):
+        raise HTTPException(400, "Invalid skill path")
+    return await _skill_scan(owner, repo, skill_path, request, _qbool(force),
+                             _qbool(behavioral))
+
+
+async def _skill_scan(
+    owner: str, repo: str, skill_path: str | None, request: Request | None,
+    force: bool, behavioral: bool,
+) -> PublicScanResponse:
     if not all(c.isalnum() or c in "-_." for c in owner):
         raise HTTPException(400, "Invalid owner")
     if not repo.replace("-", "").replace("_", "").replace(".", "").isalnum():
         raise HTTPException(400, "Invalid repo name")
-    full = f"skill:{owner}/{repo}"
     full_name = f"{owner}/{repo}"
+    cache_key = f"{full_name}/{skill_path}" if skill_path else full_name
+    full = f"skill:{cache_key}"
     if behavioral:
         force = True  # a deep scan is paired with a fresh static scan (same as repos)
 
     async def _signed_response(data: dict, *, cached: bool) -> PublicScanResponse:
         """Sandbox block first (cached / background / forced), folded into the score
-        that gets signed — the same shape as the repo and package endpoints."""
+        that gets signed — the same shape as the repo and package endpoints. Every
+        skill in a repo shares the repo's sandbox run (it clones the whole repo)."""
         block = await _behavioral_block(
             {**data, "repo_full_name": full_name, "surface_kind": "skill"},
             force=behavioral)
@@ -1602,7 +1975,7 @@ async def scan_skill_endpoint(
         return resp
 
     if not force:
-        cached = await _get_cached("skill", full_name)
+        cached = await _get_cached("skill", cache_key)
         if cached:
             return await _signed_response(cached, cached=True)
 
@@ -1614,7 +1987,9 @@ async def scan_skill_endpoint(
     from src.scanner.scan import scan_skill
 
     try:
-        result = await asyncio.wait_for(scan_skill(owner, repo), timeout=60)
+        result = await asyncio.wait_for(
+            scan_skill(owner, repo, skill_path) if skill_path else scan_skill(owner, repo),
+            timeout=60)
     except asyncio.TimeoutError:
         raise HTTPException(
             503, "Scan is taking longer than expected — please retry shortly.",
@@ -1626,8 +2001,97 @@ async def scan_skill_endpoint(
         raise HTTPException(code, f"Scan error: {result.error}")
 
     data = _scan_result_to_dict(result)
-    await _set_cached("skill", full_name, data)
+    await _set_cached("skill", cache_key, data)
+    # A multi-skill repo graded every skill: cache each one so its own page opens
+    # at once instead of re-scanning.
+    for sub_path, sub in (getattr(result, "per_skill", None) or {}).items():
+        if sub_path:
+            try:
+                sub.repo = f"skill:{full_name}/{sub_path}"
+                await _set_cached("skill", f"{full_name}/{sub_path}", _scan_result_to_dict(sub))
+            except Exception:
+                logger.debug("per-skill cache failed for %s/%s", full_name, sub_path,
+                             exc_info=True)
     return await _signed_response(data, cached=False)
+
+
+def _mcp_identity(endpoint: str) -> tuple[str, str]:
+    """(normalized url, cache key) for a live MCP endpoint, exactly as the scan route
+    computes them. Raises HTTPException(400) on a bad or credentialed URL."""
+    import hashlib
+
+    from src.ssrf import CredentialedURLError, mcp_endpoint_identity, validate_url_https
+
+    try:
+        url = mcp_endpoint_identity(validate_url_https(endpoint, field_name="endpoint"))
+    except CredentialedURLError:
+        raise HTTPException(400, "endpoint path looks like a credential")
+    except Exception:
+        raise HTTPException(400, "endpoint must be a valid https:// URL")
+    return url, "mcp_" + hashlib.sha256(url.encode()).hexdigest()[:22]
+
+
+async def _mcp_badge_data(url: str, key: str) -> dict | None:
+    """The endpoint's result for a badge or card: fresh, else stale, else one live scan
+    now (an embedded badge must not decay to grey). None when it can't be scanned."""
+    data = await _get_cached("mcp", key) or await _get_stale_cached("mcp", key)
+    if data:
+        return data
+    try:
+        from src.scanner.scan import scan_mcp
+        result = await asyncio.wait_for(scan_mcp(url), timeout=30)
+    except Exception:
+        logger.warning("badge MCP scan failed for %s", url, exc_info=True)
+        return None
+    if getattr(result, "error", None):
+        return None
+    data = _scan_result_to_dict(result)
+    await _set_cached("mcp", key, data)
+    return data
+
+
+async def _mcp_badge_svg(endpoint: str, style: str, theme: str) -> Response:
+    from src.api.badge_avow import render_avow_badge
+
+    url, key = _mcp_identity(endpoint)
+    data = await _mcp_badge_data(url, key)
+    score = data.get("trust_score") if data else None
+    decision, certified = await _badge_view(data, score)
+    a_pct, count, unit = await surface_adoption_summary("mcp", "mcp", url)
+    host = url.split("://", 1)[-1]
+    svg = render_avow_badge(
+        style=style, decision=decision if score is not None else None,
+        score=int(score) if score is not None else None,
+        certified=certified if score is not None else False,
+        brand=settings.badge_brand, theme=theme, coordinate=f"mcp:{host}",
+        adoption=count, adoption_unit=unit, adoption_pct=a_pct,
+        not_checked=len(_coverage_gap_notes(data or {})),
+    )
+    return Response(content=svg, media_type="image/svg+xml", headers={
+        "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "Access-Control-Allow-Origin": "*",
+    })
+
+
+@router.get("/mcp/badge", dependencies=[Depends(rate_limit_reads)], response_class=Response)
+async def mcp_badge(
+    endpoint: str = Query(..., description="The MCP server's Streamable-HTTP URL"),
+    style: str = Query("compact", pattern="^(compact|card|card-stacked)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
+) -> Response:
+    """README/website badge for a live MCP endpoint (`?endpoint=https://…`), in the
+    same design as the repo and package badges. Open CORS, regenerated per view."""
+    return await _mcp_badge_svg(endpoint, style, theme)
+
+
+@router.get("/mcp/card.svg", dependencies=[Depends(rate_limit_reads)], response_class=Response)
+async def mcp_card(
+    endpoint: str = Query(..., description="The MCP server's Streamable-HTTP URL"),
+    style: str = Query("card", pattern="^(card|card-stacked)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
+) -> Response:
+    """The website-embed card for a live MCP endpoint."""
+    return await _mcp_badge_svg(endpoint, style, theme)
 
 
 @router.get(
@@ -1657,6 +2121,8 @@ async def scan_mcp_endpoint(
     E.g. `/public/scan/mcp?endpoint=https://mcp.example.com/mcp`.
     `&probe=true` additionally runs the opt-in live probe (see `probe`)."""
     import hashlib
+
+    force, probe = _qbool(force), _qbool(probe)
 
     from src.ssrf import CredentialedURLError, mcp_endpoint_identity, validate_url_https
 
@@ -1709,6 +2175,10 @@ async def scan_mcp_endpoint(
 
     data = _scan_result_to_dict(result)
     await _set_cached("mcp", key, data)
+    # A durable history point when the score or the signed tool-set digest changed:
+    # the endpoint page's score history and the /drift/mcp feed read it.
+    if len(full) <= 512:
+        await _record_scan_history(full, "mcp", "mcp", url[:255], data, db)
     # Only diff against a scan that pinned digests: a copy cached before live-MCP
     # digests existed has none, and every tool would read as newly added.
     drift = (
@@ -1819,7 +2289,8 @@ async def submit_tool(
                 public_scan(owner=owner, repo=repo, force=True, db=db), timeout=90,
             )
             return {"listed": True, "surface": "github", "identifier": f"{owner}/{repo}",
-                    "grade": resp.grade, "trust_score": resp.trust_score}
+                    "grade": resp.grade, "trust_score": resp.trust_score,
+                    "decision": resp.decision, "decision_reason": resp.decision_reason}
 
         if surface == "openclaw":
             if "/" not in ident:
@@ -1850,8 +2321,11 @@ async def submit_tool(
 
         data = _scan_result_to_dict(result)
         await _capture_community_scan(cap_owner, cap_repo, data, db, surface=surface)
+        from src.scanner.verdict import decide
+        _dec = decide(data)
         return {"listed": True, "surface": surface, "identifier": ident,
-                "grade": data.get("grade"), "trust_score": data.get("trust_score")}
+                "grade": data.get("grade"), "trust_score": data.get("trust_score"),
+                "decision": _dec.decision, "decision_reason": _dec.reason}
     except asyncio.TimeoutError:
         raise HTTPException(503, "Scan is taking longer than expected — please retry shortly.")
     except HTTPException:
@@ -1929,12 +2403,13 @@ async def scan_by_wallet(
     owner, repo = repo_id.split("/", 1)
 
     # Delegate to the main scan endpoint
-    scan_result = await public_scan(owner=owner, repo=repo, db=db)
+    scan_result = await public_scan(owner=owner, repo=repo, force=False, db=db)
     return {
         "found": True,
         "wallet": wallet_address,
         "chain": chain,
         "entity_id": str(binding.entity_id),
+        "repo": f"{owner}/{repo}",
         "scan": scan_result.dict(),
     }
 
@@ -1945,6 +2420,32 @@ async def scan_by_wallet(
     dependencies=[Depends(rate_limit_reads), Depends(rate_limit_scans)],
 )
 async def public_scan(
+    owner: str,
+    repo: str,
+    request: Request = None,
+    force: bool = Query(False, description="Bypass cache and force a fresh scan"),
+    behavioral: bool = Query(
+        False,
+        description="Also run the behavioral sandbox tier (deep scan, ~45s; implies "
+        "a fresh scan).",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> PublicScanResponse:
+    """Scan a GitHub repo and return the three-phrase answer, trust score, tier and
+    findings, with a signed JWS attestation (see ``_public_scan_repo``). A repo that is
+    a collection of agent skills also carries ``skill_collection``: the collection's
+    answer (its worst skill), which the result page, badge and card lead with."""
+    resp = await _public_scan_repo(owner, repo, request, force, behavioral, db)
+    try:
+        coll = await _skill_collection_data(owner, repo)
+        if coll is not None:
+            resp.skill_collection = _skill_collection_summary(owner, repo, coll)
+    except Exception:  # noqa: BLE001
+        logger.debug("skill_collection attach failed for %s/%s", owner, repo, exc_info=True)
+    return resp
+
+
+async def _public_scan_repo(
     owner: str,
     repo: str,
     request: Request = None,
@@ -1972,6 +2473,12 @@ async def public_scan(
     - ``blocked`` (0-10): execution denied
     """
     full_name = f"{owner}/{repo}"
+    # Internal callers (catalog re-score, gateway, claims, sandbox, wallet lookup) call
+    # this function directly; an omitted parameter is then FastAPI's ``Query(False)``
+    # object, which is TRUTHY — it silently forced a fresh scan plus an inline sandbox
+    # run on every such call. Only a real bool counts.
+    force = force if isinstance(force, bool) else False
+    behavioral = behavioral if isinstance(behavioral, bool) else False
 
     # Validate inputs
     if not owner.isalnum() and not all(c.isalnum() or c in "-_." for c in owner):
@@ -2160,6 +2667,20 @@ _HISTORY_CACHE_PREFIX = "public_scan_history:"
 _HISTORY_CACHE_TTL = 3600  # 1 hour
 
 
+def _stored_vulnerabilities_count(vulns: object) -> int:
+    """Findings in a stored ``FrameworkSecurityScan.vulnerabilities``: a scanner row is
+    a dict (``total_findings``, else its ``findings`` list); a bridge import a list."""
+    if isinstance(vulns, list):
+        return len(vulns)
+    if isinstance(vulns, dict):
+        total = vulns.get("total_findings")
+        if isinstance(total, int) and not isinstance(total, bool):
+            return total
+        found = vulns.get("findings")
+        return len(found) if isinstance(found, list) else 0
+    return 0
+
+
 async def _lookup_entity_by_repo(repo: str, db: AsyncSession):
     """Resolve an `owner/repo` slug to an Entity row, or None."""
     from src.models import Entity
@@ -2208,8 +2729,8 @@ async def public_scan_history(
             "@context": "https://schema.agentgraph.co/attestation/scan-history/v1",
             "type": "ScanHistoryAttestation",
             "subject": {"id": f"github:{full_name}", "repo": full_name},
-            "issuedAt": datetime.now(timezone.utc).isoformat(),
-            "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "issuedAt": rfc3339_ms(datetime.now(timezone.utc)),
+            "expiresAt": rfc3339_ms(datetime.now(timezone.utc) + timedelta(hours=1)),
             "history": {
                 "entityId": payload.get("entity_id"),
                 "scoreTimeline": payload.get("score_timeline", []),
@@ -2233,8 +2754,8 @@ async def public_scan_history(
             "@context": "https://schema.agentgraph.co/attestation/scan-history/v1",
             "type": "ScanHistoryAttestation",
             "subject": {"id": f"github:{full_name}", "repo": full_name},
-            "issuedAt": datetime.now(timezone.utc).isoformat(),
-            "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "issuedAt": rfc3339_ms(datetime.now(timezone.utc)),
+            "expiresAt": rfc3339_ms(datetime.now(timezone.utc) + timedelta(hours=1)),
             "history": {
                 "entityId": None,
                 "scoreTimeline": [],
@@ -2274,9 +2795,7 @@ async def public_scan_history(
             "framework": row.framework,
             "scan_result": row.scan_result,
             "scanned_at": row.scanned_at.isoformat() if row.scanned_at else "",
-            "vulnerabilities_count": (
-                len(row.vulnerabilities) if isinstance(row.vulnerabilities, list) else 0
-            ),
+            "vulnerabilities_count": _stored_vulnerabilities_count(row.vulnerabilities),
         }
         for row in scan_rows
     ]
@@ -2292,8 +2811,8 @@ async def public_scan_history(
         "@context": "https://schema.agentgraph.co/attestation/scan-history/v1",
         "type": "ScanHistoryAttestation",
         "subject": {"id": f"github:{full_name}", "repo": full_name},
-        "issuedAt": datetime.now(timezone.utc).isoformat(),
-        "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "issuedAt": rfc3339_ms(datetime.now(timezone.utc)),
+        "expiresAt": rfc3339_ms(datetime.now(timezone.utc) + timedelta(hours=1)),
         "history": {
             "entityId": payload["entity_id"],
             "scoreTimeline": score_timeline,
@@ -2357,6 +2876,135 @@ def _badge_decision(scan_data: dict | None, score) -> str:
     return decide({"trust_score": score}).decision
 
 
+async def _cached_behavioral_for(data: dict) -> dict | None:
+    """The sandbox block the result page shows for this scan, CACHE-ONLY: a badge, card
+    or OG render never starts a sandbox run. None when there is none cached."""
+    try:
+        target = _behavioral_target(data)
+        if not target:
+            return None
+        surface, name = target
+        return await _get_cached_behavioral(
+            surface, str(name), _declared_egress(data), _behavioral_plan(data, surface))
+    except Exception:  # noqa: BLE001 — best-effort; no block = static result
+        return None
+
+
+def _package_sandbox_input(data: dict, coordinate: tuple[str, str] | None) -> dict:
+    """The input the result page hands ``_behavioral_block`` for this cached scan. A
+    cached scan carries no target of its own: the package page supplies the package
+    coordinate from its route and the repo page adds ``repo_full_name``. A badge, card,
+    OG image or catalog read must add the same, or it would see no sandbox target and
+    treat the result as final (showing a mark the page withholds)."""
+    data = data if isinstance(data, dict) else {}
+    if (not coordinate or (data.get("package_coordinate") or {}).get("name")
+            or data.get("repo_full_name")):
+        return data
+    owner, name = (str(coordinate[0]), str(coordinate[1]))
+    if not owner or not name:
+        return data
+    if owner.lower() in ("npm", "pypi", "docker"):
+        return {"package_coordinate": {"surface": owner.lower(), "name": name},
+                "declared_scope": data.get("declared_scope") or {},
+                "artifact_scan": data.get("artifact_scan") or data.get("surface_detail") or {},
+                "env_reads": data.get("env_reads") or []}
+    if owner.lower() in ("mcp", "skill", "crates", "huggingface"):
+        return data  # those pages have no sandbox target of this kind
+    return {**data, "repo_full_name": f"{owner}/{name}"}
+
+
+async def _behavioral_peek(data: dict, coordinate: tuple[str, str] | None = None) -> dict | None:
+    """The sandbox state the result page would show for this scan, WITHOUT side effects
+    (no run started, no queue entry, no pending clock). A cached run is returned as is.
+    With none cached, a sandboxable tool reads pending (the page would start or queue a
+    run), or unavailable once the page's pending clock is past ``PENDING_MAX_AGE``, the
+    same cut-off ``_behavioral_block`` applies. None when the tool has no sandbox target
+    or the tier is off, so the result is static and final. This is what keeps a badge,
+    card, OG image or catalog row from showing the Certified mark while the page says
+    the mark waits for the sandbox."""
+    try:
+        data = _package_sandbox_input(data, coordinate)
+        cached = await _cached_behavioral_for(data)
+        if cached:
+            return cached
+        from src.config import settings
+        if not getattr(settings, "scanner_behavioral_enabled", False):
+            return None
+        target = _behavioral_target(data)
+        if not target:
+            return None
+        surface, name = target
+        declared = _declared_egress(data)
+        plan = _behavioral_plan(data, surface)
+        age = await _behavioral_slots.peek_pending_age(
+            _behavioral_cache_key(surface, str(name), declared, plan))
+        if age is not None and age > _behavioral_slots.PENDING_MAX_AGE:
+            return {"ran": False, "pending": False, "state": "unavailable",
+                    "reason": BEHAVIORAL_UNAVAILABLE_REASON}
+        return _queued_block(None)
+    except Exception:  # noqa: BLE001 — unknown sandbox state never earns the mark
+        return _queued_block(None)
+
+
+async def _badge_view(scan_data: dict | None, score,
+                      coordinate: tuple[str, str] | None = None) -> tuple[str, bool]:
+    """(decision, certified_mark) for a badge / card / OG render, read from the same
+    applied data the result page shows (the cached sandbox block folded in). An API
+    response already carries both. No scan → decided from the bare score, never a mark
+    (fail closed)."""
+    if not isinstance(scan_data, dict):
+        return _badge_decision(None, score), False
+    d = scan_data.get("decision")
+    mark = scan_data.get("certified_mark")
+    if isinstance(d, str) and d and isinstance(mark, bool):
+        return d, mark
+    block = await _behavioral_peek(scan_data, coordinate)
+    applied = _apply_behavioral_score(scan_data, block) if block else dict(scan_data)
+    marked = {**applied, "behavioral": block}
+    dec = _decide(marked)
+    return dec.decision, _certified_mark(marked, dec)
+
+
+async def _mark_for_cached(scan_data: dict | None,
+                           coordinate: tuple[str, str] | None = None) -> bool:
+    """The Certified mark for a cached scan (see ``_badge_view``)."""
+    return (await _badge_view(scan_data, None, coordinate))[1]
+
+
+async def _skill_collection_data(owner: str, repo: str) -> dict | None:
+    """The cached multi-skill collection result for a GitHub repo (the same applied
+    data /check/skill/<owner>/<repo> shows), or None when the repo isn't a graded
+    collection. Cache-only: a repo page, badge or card never starts a skill scan."""
+    try:
+        key = f"{owner}/{repo}"
+        data = await _get_cached("skill", key) or await _get_stale_cached("skill", key)
+        if not isinstance(data, dict) or not (data.get("surface_detail") or {}).get("collection"):
+            return None
+        probe = {**data, "repo_full_name": key, "surface_kind": "skill"}
+        block = await _cached_behavioral_for(probe)
+        applied = _apply_behavioral_score(data, block) if block else dict(data)
+        return {**applied, "behavioral": block}
+    except Exception:  # noqa: BLE001 — best-effort; the repo scan still stands
+        logger.debug("skill collection lookup failed for %s/%s", owner, repo, exc_info=True)
+        return None
+
+
+def _skill_collection_summary(owner: str, repo: str, data: dict) -> dict:
+    sd = data.get("surface_detail") or {}
+    dec = _decide(data)
+    return {
+        "trust_score": data.get("trust_score"),
+        "decision": dec.decision,
+        "decision_final": dec.final,
+        "decision_reason": dec.reason,
+        "worst_skill": sd.get("worst_skill"),
+        "skills_total": sd.get("skills_total"),
+        "skills_graded": len(sd.get("skills") or []),
+        "report_url": f"https://agentavow.com/check/skill/{owner}/{repo}",
+        "api_url": f"https://agentavow.com/api/v1/public/scan/skill/{owner}/{repo}",
+    }
+
+
 def _trust_score_color(score: int) -> str:
     """0-100 Trust mark colour — delegates to the shared badge_style mapping so
     every badge/card/OG surface colours identically (green->red at 80/60/40/20)."""
@@ -2373,9 +3021,18 @@ async def scan_badge(
     owner: str,
     repo: str,
     metric: str = Query("trust", pattern="^(trust|adoption|combined)$"),
+    style: str = Query("compact", pattern="^(compact|card|card-stacked|classic)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Return an SVG badge for README embedding.
+
+    ``style`` picks the look from the shared badge design system
+    (``src.api.badge_avow``): ``compact`` (default) is the 20px README badge with the
+    trust and adoption meters; ``card`` is the website-embed card as an image;
+    ``classic`` is the previous shields-style pill. ``theme`` (auto / light / dark)
+    pins the colours; ``auto`` follows the viewer's colour scheme.
+    ``metric=adoption`` keeps the adoption-only classic badge.
 
     ``metric=trust`` (default) shows the signed grade — the composite trust score
     when the repo is imported ("Trust: A 92"), else the security scan ("Scan: B 74").
@@ -2404,8 +3061,9 @@ async def scan_badge(
 
     # Check if this repo is imported as an AgentGraph entity
     entity_trust = await _get_entity_trust(full_name, db)
-    certified = False  # the earned top tier — renders a distinct badge treatment
+    certified = False  # the Certified mark — renders a distinct badge treatment
     scan_data: dict | None = None  # the scan the three-phrase decision is read from
+    composite = False  # the number is the entity composite, not the scan's score
 
     # Determine which score to show: composite trust vs security scan
     if (
@@ -2416,17 +3074,30 @@ async def scan_badge(
         # Entity exists on AgentGraph — show composite trust score
         score = entity_trust["composite_score"]
         score_type = "Trust"
-        # Certified is a repo/artifact property — read it from the cached scan if present.
-        _c = await _get_cached(owner, repo)
-        certified = bool((( _c or {}).get("certified") or {}).get("eligible"))
-        scan_data = _c
+        # The phrase is read from the cached scan when present. The Certified mark is
+        # NOT: it belongs to the scan's own score, and here the number is the entity
+        # composite, so pairing them would certify a number the scan never earned.
+        scan_data = await _get_cached(owner, repo)
+        composite = True
+    elif owner.lower() in _PKG_BADGE_SURFACES:
+        # A published package (/npm/semver/badge, /package/npm/@scope/x/badge): read
+        # the PACKAGE result. The repo fallback below would scan a GitHub repo that
+        # happens to be named <surface>/<name> (github.com/npm/semver).
+        scan_data = await _package_badge_data(owner.lower(), repo)
+        score = scan_data.get("trust_score") if scan_data else None
+        score_type = "Scan"
     else:
-        # No entity — fall back to security scan score
+        # No entity — a skill collection leads with its worst skill; else the
+        # security scan score.
+        coll = await _skill_collection_data(owner, repo)
         cached = await _get_cached(owner, repo)
-        if cached:
+        if coll is not None:
+            score = coll.get("trust_score")
+            score_type = "Scan"
+            scan_data = coll
+        elif cached:
             score = cached["trust_score"]
             score_type = "Scan"
-            certified = bool((cached.get("certified") or {}).get("eligible"))
             scan_data = cached
         else:
             # Cache miss: regenerate on demand rather than decaying to a grey
@@ -2438,12 +3109,26 @@ async def scan_badge(
                 fresh = await public_scan(owner=owner, repo=repo, force=False, db=db)
                 score = fresh.security_score
                 score_type = "Scan"
-                certified = bool((getattr(fresh, "certified", None) or {}).get("eligible"))
                 scan_data = fresh.model_dump()
             except Exception:
                 logger.warning("badge regenerate failed for %s/%s", owner, repo, exc_info=True)
                 score = None
                 score_type = None
+
+    # The DISPLAY gate (certified_mark via _badge_view): the mark shows only on a final
+    # Safe to connect with the full conjunctive gate, never on an entity composite.
+    decision, certified = await _badge_view(scan_data, score, (owner, repo))
+    if composite or score is None:
+        certified = False
+
+    not_checked = len(_coverage_gap_notes(scan_data or {}))
+    if style != "classic":
+        return await _avow_badge_response(
+            owner, repo, style=style, theme=theme, score=score, certified=certified,
+            decision=decision if score is not None else None, db=db,
+            not_checked=not_checked)
+    # A visible "partial" marker when the scan disclosed coverage gaps (every style).
+    partial = PARTIAL_SUFFIX if (not_checked and score is not None) else ""
 
     # Combined = trust + adoption in one badge (adoption never travels alone)
     if metric == "combined":
@@ -2452,19 +3137,18 @@ async def scan_badge(
         ) else "github"
         _as, a_count, _au = await surface_adoption_summary(a_surface, owner, repo)
         return _combined_badge_response(
-            score, a_count, certified=certified,
-            decision=_badge_decision(scan_data, score))
+            score, a_count, certified=certified, decision=decision, partial=partial)
 
     # Build badge — the three-phrase short label leads, the 0-100 number is the
     # evidence ("Safe · 92/100"). A Certified tool keeps the distinct earned-tier
     # treatment (the CertifiedMark gradient), with the phrase in front of the mark.
     _ = score_type  # composite vs scan: both read as the tool's decision + number
     if score is not None and certified:
-        return _certified_badge_response(int(score), _badge_decision(scan_data, score))
+        return _certified_badge_response(int(score), decision, partial=partial)
     if score is not None:
-        _d = _decision_for(_badge_decision(scan_data, score))
+        _d = _decision_for(decision)
         color = _d.color
-        label = f"{_d.label} · {score}/100"
+        label = f"{_d.label} · {score}/100{partial}"
     else:
         color = "#6b7280"
         label = "not scanned"
@@ -2479,20 +3163,39 @@ async def scan_badge(
 async def scan_card(
     owner: str,
     repo: str,
+    style: str = Query("card", pattern="^(card|card-stacked|classic)$"),
+    theme: str = Query("auto", pattern="^(auto|light|dark)$"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """The LIVE dual-mark card as a hosted SVG — trust bar + adoption needle, branded,
-    always-current. Link/embed it like the badge (`<img>`), never a stale download."""
+    """The LIVE card as a hosted SVG — the website embed (``widget.js`` renders it),
+    always-current. Link/embed it like the badge (`<img>`), never a stale download.
+
+    ``style=card`` (default) is the shared badge design system's card (trust and
+    adoption meters, ``src.api.badge_avow``); ``style=classic`` is the previous
+    trust-bar + adoption-needle card; ``style=card-stacked`` keeps the round-3 stacked
+    layout. ``theme`` = auto / light / dark."""
     full_name = f"{owner}/{repo}"
-    # Trust score — composite entity, else cached scan, else regenerate on demand.
+    is_pkg = owner.lower() in _PKG_BADGE_SURFACES
+    # Trust score — a package reads the PACKAGE result (the repo path would scan a
+    # GitHub repo named <surface>/<name>); a repo reads the composite entity, else the
+    # cached scan, else regenerates on demand.
     score: int | None = None
-    entity_trust = await _get_entity_trust(full_name, db)
-    cached = await _get_cached(owner, repo)
-    scan_data: dict | None = cached
-    if entity_trust and entity_trust.get("composite_score") is not None:
-        score = entity_trust["composite_score"]
+    scan_data: dict | None = None
+    composite = False
+    if is_pkg:
+        scan_data = await _package_badge_data(owner.lower(), repo)
+        score = scan_data.get("trust_score") if scan_data else None
     else:
-        if cached:
+        entity_trust = await _get_entity_trust(full_name, db)
+        cached = await _get_cached(owner, repo)
+        coll = await _skill_collection_data(owner, repo)
+        scan_data = coll if coll is not None else cached
+        if entity_trust and entity_trust.get("composite_score") is not None:
+            score = entity_trust["composite_score"]
+            composite = True
+        elif coll is not None:
+            score = coll.get("trust_score")
+        elif cached:
             score = cached["trust_score"]
         else:
             try:
@@ -2502,32 +3205,34 @@ async def scan_card(
             except Exception:
                 score = None
 
-    # Adoption — surface-aware headline + 0-100 score.
-    a_surface = owner.lower() if owner.lower() in (
-        "npm", "pypi", "crates", "huggingface", "docker",
-    ) else "github"
-    a_score100, a_count, _unit = await surface_adoption_summary(a_surface, owner, repo)
-    # Use the SAME full multi-axis adoption score the score page shows, so the card's
-    # tier word can never disagree with the report (surface_adoption_summary is a
-    # lighter, stars-only estimate for some surfaces). Keep its headline count.
-    try:
-        _full = await scan_adoption(owner=owner, repo=repo, db=db)
-        _fs = _full.get("adoption_score_100") if _full else None
-        if _fs is not None and not _full.get("insufficient_data"):
-            a_score100 = _fs
-    except Exception:
-        pass
-    coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
+    decision, mark = await _badge_view(scan_data, score, (owner, repo))
+    cert = bool(mark and not composite and score is not None)
+    not_checked = len(_coverage_gap_notes(scan_data or {}))
 
+    if style in ("card", "card-stacked"):
+        # The same renderer, adoption source and cache headers as badge?style=card.
+        return await _avow_badge_response(
+            owner, repo, style=style, theme=theme, score=score, certified=cert,
+            decision=decision if score is not None else None, db=db,
+            cache_control="public, max-age=300, s-maxage=3600",
+            not_checked=not_checked)
+
+    a_surface, a_score100, a_count, a_unit = await _card_adoption(owner, repo, db)
+    coordinate = f"{owner} : {repo}" if a_surface != "github" else full_name
     from src.api.card_svg import render_card_svg
+    adisp = _compact_int(a_count) or None
+    if adisp and a_unit:
+        from src.adoption_units import short_unit
+        adisp = f"{adisp} {short_unit(a_unit)}"
     svg = render_card_svg(
         coordinate=coordinate,
         score=int(score) if score is not None else None,
-        adoption_display=_compact_int(a_count) or None,
+        adoption_display=adisp,
         adoption_pct=int(a_score100 or 0),
         adoption_tier=None,
-        decision=_badge_decision(scan_data, score) if score is not None else None,
-        certified=bool(((scan_data or {}).get("certified") or {}).get("eligible")),
+        decision=decision if score is not None else None,
+        certified=cert,
+        partial=bool(not_checked and score is not None),
     )
     return Response(
         content=svg,
@@ -2566,15 +3271,21 @@ async def scan_verdict(
             jws = create_jws(canonicalize(payload))
             score100 = int(cached.get("trust_score") or 0)
             from src.scanner.verdict import decide
+            _dval, _mark = await _badge_view(cached, score100, (owner, repo))
             body = {
                 "coordinate": full_name,
                 **decide(cached).as_dict(),
+                # `certified` = the signed provenance gate (matches the JWS); the
+                # widget shows the mark only from `certified_mark`.
                 "certified": bool((cached.get("certified") or {}).get("eligible")),
+                "certified_mark": _mark,
                 "score": score100,
                 "grade": cached.get("grade") or _grade_from_score(score100),
                 "jws": jws,
                 "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
-                "link": f"https://agentavow.com/check/{full_name}",
+                "link": (f"https://agentavow.com/check/pkg/{full_name}"
+                         if owner.lower() in _PKG_BADGE_SURFACES
+                         else f"https://agentavow.com/check/{full_name}"),
             }
         else:
             body = {"coordinate": full_name, "jws": None, "error": "not_scanned"}
@@ -2603,6 +3314,9 @@ async def og_image(
     subtitle: str = Query("", max_length=400),
     decision: str = Query("", max_length=16),
     certified: str = Query("", max_length=1),
+    adoption: str = Query("", max_length=16),
+    adoption_unit: str = Query("", max_length=24),
+    adoption_pct: str = Query("", max_length=4),
 ) -> Response:
     """Dynamic Open Graph card (1200×630 PNG) for a score page — the grade + name +
     one-liner, so a shared link unfurls into a rich card everywhere. Query-driven so
@@ -2617,10 +3331,16 @@ async def og_image(
         score_val = max(0, min(100, int(s)))
     try:
         from src.api.og_image import render_og_png
+        _ad, _ap = (adoption or "").strip(), (adoption_pct or "").strip()
         png = render_og_png(
             title=title.strip() or "Is this tool safe?",
             grade=grade.strip(), score=score_val, subtitle=subtitle.strip(),
             decision=decision.strip() or None, certified=certified.strip() == "1",
+            # adoption is optional and lenient: "0" = known, no signal; absent = unknown
+            adoption=int(_ad) if _ad.isdigit() else None,
+            adoption_unit=(adoption_unit or "").strip() or None,
+            adoption_pct=min(100, int(_ap)) if _ap.isdigit() else None,
+            adoption_known=_ad.isdigit(),
         )
         return Response(
             content=png,
@@ -2648,9 +3368,12 @@ def _compact_int(n: int | None) -> str:
     return str(n)
 
 
+PARTIAL_SUFFIX = " · partial"
+
+
 def _combined_badge_response(
     score: int | None, count: int | None, certified: bool = False,
-    decision: str | None = None,
+    decision: str | None = None, partial: str = "",
 ) -> Response:
     """Three-segment [AgentAvow | trust | ★count] badge — trust + adoption in one.
     The trust segment leads with the three-phrase short label ("Safe · 92/100"). The
@@ -2667,11 +3390,11 @@ def _combined_badge_response(
     cert = certified and score is not None
     _d = _decision_for(decision or score) if score is not None else None
     if cert:
-        trust_label = f"{_d.label} · ✓ Certified {score}"
+        trust_label = f"{_d.label} · ✓ Certified {score}{partial}"
         trust_fill = "url(#agcert)"
         trust_text = "#06231f"
     else:
-        trust_label = f"{_d.label} · {score}/100" if _d is not None else "not scanned"
+        trust_label = f"{_d.label} · {score}/100{partial}" if _d is not None else "not scanned"
         trust_fill = _d.color if _d is not None else "#6b7280"
         trust_text = "#fff"
     adopt_label = f"★ {_compact_int(count)}" if count else "New"
@@ -2703,7 +3426,9 @@ def _combined_badge_response(
     )
 
 
-def _certified_badge_response(score: int, decision: str | None = None) -> Response:
+def _certified_badge_response(
+    score: int, decision: str | None = None, partial: str = "",
+) -> Response:
     """The earned-tier badge: [AgentAvow | Safe · ✓ Certified NN] with the CertifiedMark
     teal→magenta gradient (matches the on-site mark). The phrase's short label leads;
     Certified stays. Only rendered for a tool that currently clears the conjunctive
@@ -2711,7 +3436,7 @@ def _certified_badge_response(score: int, decision: str | None = None) -> Respon
     import math
 
     from src.api.badge_style import BADGE_FONT, CERT_GRADIENT, cert_gradient_def, verdana_width
-    label = f"{_decision_for(decision or score).label} · ✓ Certified {score}"
+    label = f"{_decision_for(decision or score).label} · ✓ Certified {score}{partial}"
     label_width = math.ceil(verdana_width(label) * 1.1 + 16)  # bold: ~10% wider
     total_width = 80 + label_width
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
@@ -2729,6 +3454,56 @@ def _certified_badge_response(score: int, decision: str | None = None) -> Respon
         media_type="image/svg+xml",
         headers={
             "Cache-Control": "public, max-age=3600, s-maxage=86400",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+async def _card_adoption(
+    owner: str, repo: str, db: AsyncSession | None = None,
+) -> tuple[str, int | None, int | None, str | None]:
+    """(surface, adoption_score_100, headline_count, unit) for every badge and card
+    style, so the compact badge, ``badge?style=card`` and ``card.svg`` can never
+    disagree. The level comes from the full multi-axis score the report shows when it
+    has data; the headline count and unit come from the surface summary."""
+    a_surface = owner.lower() if owner.lower() in _PKG_BADGE_SURFACES else "github"
+    try:
+        a_pct, count, unit = await surface_adoption_summary(a_surface, owner, repo)
+    except Exception:
+        a_pct, count, unit = None, None, None
+    if db is not None and a_surface == "github":
+        try:
+            full = await scan_adoption(owner=owner, repo=repo, db=db)
+            fs = full.get("adoption_score_100") if full else None
+            if fs is not None and not full.get("insufficient_data"):
+                a_pct = fs
+        except Exception:
+            pass
+    return a_surface, a_pct, count, unit
+
+
+async def _avow_badge_response(
+    owner: str, repo: str, *, style: str, theme: str, score: int | None,
+    certified: bool, decision: str | None, db: AsyncSession | None = None,
+    cache_control: str = "public, max-age=3600, s-maxage=86400",
+    not_checked: int = 0,
+) -> Response:
+    """The opt-in Avow badge family (``src.api.badge_avow``) — same inputs and the same
+    open-CORS, regenerate-per-view headers as the classic badge."""
+    from src.api.badge_avow import render_avow_badge
+    a_surface, a_pct, adoption, a_unit = await _card_adoption(owner, repo, db)
+    coordinate = f"{owner}/{repo}" if a_surface == "github" else f"{owner}:{repo}"
+    svg = render_avow_badge(
+        style=style, decision=decision, score=int(score) if score is not None else None,
+        certified=certified, brand=settings.badge_brand, theme=theme,
+        coordinate=coordinate, adoption=adoption, adoption_unit=a_unit,
+        adoption_pct=a_pct, not_checked=not_checked,
+    )
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": cache_control,
             "Access-Control-Allow-Origin": "*",
         },
     )
@@ -2824,6 +3599,21 @@ async def _github_stars(owner: str, repo: str) -> int | None:
         return stars
     except Exception:
         return None
+
+
+@router.get("/{owner}/{repo}/collection", dependencies=[Depends(rate_limit_reads)])
+async def scan_skill_collection(owner: str, repo: str) -> dict:
+    """The skill-collection lead for a GitHub repo, from cache only.
+
+    The Check page asks this before requesting the repo scan, so a known skill
+    collection redirects to its collection page at once instead of waiting on a
+    full repo code scan. 404 when the repo isn't a graded collection (yet)."""
+    if not all(c.isalnum() or c in "-_." for c in owner + repo) or not owner or not repo:
+        raise HTTPException(status_code=404, detail="Not a skill collection")
+    coll = await _skill_collection_data(owner, repo)
+    if not coll:
+        raise HTTPException(status_code=404, detail="Not a skill collection")
+    return _skill_collection_summary(owner, repo, coll)
 
 
 @router.get("/{owner}/{repo}/checks", dependencies=[Depends(rate_limit_reads)])
@@ -3135,7 +3925,11 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
         # resolve to a github coordinate. Bare-endpoint MCPs (repo is a URL, or no
         # owner) have no registry signal → absent, not fabricated.
         r = repo.strip()
-        if owner.strip() and r and not r.lower().startswith("http"):
+        # The check page asks with owner="mcp" and repo=<endpoint URL>; a schemeless
+        # endpoint ("mcp.deepwiki.com/mcp") is still an endpoint, not a GitHub repo.
+        is_endpoint = r.lower().startswith("http") or (
+            owner.strip().lower() == "mcp" and "." in r.split("/", 1)[0])
+        if owner.strip() and r and not is_endpoint:
             stars = await _github_stars(owner.strip(), r)
             if stars is not None:
                 headline = {"count": stars, "unit": "stars"}
@@ -3154,6 +3948,23 @@ async def _surface_adoption_axes(surface: str, owner: str, repo: str):
                         **{k: _mcp[k] for k in _ekeys if k in _mcp}))
             except Exception:
                 logger.debug("axis-E fetch failed for mcp %s/%s", owner, r, exc_info=True)
+        elif is_endpoint:
+            # A bare endpoint: the official MCP registry listing that serves this exact
+            # URL, and the stars of the GitHub repo that listing names. Not listed, or
+            # no linked repo → no count (never a guess). See mcp_endpoint_adoption.py.
+            from src.scanner.mcp_endpoint_adoption import (
+                endpoint_registry_listing,
+                linked_github,
+            )
+            listing = await endpoint_registry_listing(r)
+            gh = linked_github(listing.get("repository")) if listing.get("listed") else None
+            if gh:
+                stars = await _github_stars(gh[0], gh[1])
+                if stars is not None:
+                    headline = {"count": stars, "unit": "stars (linked repo)",
+                                "source": f"github.com/{gh[0]}/{gh[1]}",
+                                "registry_name": listing.get("name")}
+                    axes.append(build_axis_stars(stars=stars))
     elif s == "github":
         stars = await _github_stars(owner.strip(), repo.strip())
         if stars is not None:
@@ -3334,10 +4145,10 @@ async def scan_og_image(
 ) -> Response:
     """Return a 1200x630 SVG Open Graph preview card for social sharing.
 
-    Shows the letter grade, score, safety verdict, and findings summary.
-    Used as the ``og:image`` in ``/check/:owner/:repo`` pages so that
-    links shared on Twitter, Slack, Discord, and iMessage render a rich
-    preview card with the trust grade.
+    Shows the answer (Safe to connect / Review before you connect / Do not connect),
+    the trust score and the findings summary. Used as the ``og:image`` in
+    ``/check/:owner/:repo`` pages so that links shared on Twitter, Slack, Discord, and
+    iMessage render a rich preview card.
     """
     full_name = f"{owner}/{repo}"
 
@@ -3357,12 +4168,13 @@ async def scan_og_image(
         score = entity_trust["composite_score"]
         grade = entity_trust["grade"]
     else:
-        cached = await _get_cached(owner, repo)
+        # A skill collection leads with its worst skill (same as page/badge/card).
+        cached = await _skill_collection_data(owner, repo) or await _get_cached(owner, repo)
         if cached:
             score = cached["trust_score"]
-            _elig = (cached.get("certified") or {}).get("eligible")
             grade = cached.get("grade") or _display_grade(
-                score, _elig, (cached.get("findings") or {}).get("critical") or 0)
+                score, _certified_mark(cached),
+                (cached.get("findings") or {}).get("critical") or 0)
             findings = cached.get("findings", {})
             critical = findings.get("critical", 0)
             high = findings.get("high", 0)
@@ -3379,7 +4191,7 @@ async def scan_og_image(
     # The three-phrase headline (src.scanner.verdict.decide), with " · Certified" when
     # the tool carries the mark; the score + tier ride underneath as evidence.
     _decision = _badge_decision(scan_data, score) if grade != "?" else None
-    _cert = bool(((scan_data or {}).get("certified") or {}).get("eligible"))
+    _cert = bool(scan_data) and await _mark_for_cached(scan_data, (owner, repo))
     verdict = (_decision_for(_decision).phrase + (" · Certified" if _cert else "")
                if _decision else "Not yet scanned")
 
@@ -3391,12 +4203,23 @@ async def scan_og_image(
         subtitle = (_cached.get("tool_description") or "").strip()
     if not subtitle:
         subtitle = verdict
+    a_known, a_pct, a_count, a_unit = False, None, None, None
+    if grade != "?":
+        try:
+            # The same multi-axis level the badges and card.svg show (_card_adoption),
+            # so the preview never reads "Established" where the badge reads "Rising".
+            _surf, a_pct, a_count, a_unit = await _card_adoption(owner, repo, db)
+            a_known = True
+        except Exception:  # noqa: BLE001 — adoption is optional on the card
+            a_known = False
     try:
         from src.api.og_image import render_og_png
         png = render_og_png(
             title=full_name, grade=grade,
             score=int(score) if score is not None else None, subtitle=subtitle,
             decision=_decision, certified=_cert,
+            adoption=a_count, adoption_unit=a_unit, adoption_pct=a_pct,
+            adoption_known=a_known,
         )
         return Response(
             content=png, media_type="image/png",

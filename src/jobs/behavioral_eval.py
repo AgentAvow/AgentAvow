@@ -213,22 +213,33 @@ async def apply_corpus_edit(
 
 @contextlib.asynccontextmanager
 async def hold_slot(*, wait_s: float | None = None, poll_s: float = 10.0):
-    """Acquire one of the global sandbox slots (the same counter the public scan path
-    uses), waiting up to ``wait_s`` for one to free up. Released on exit."""
-    from src.api.public_scan_router import _acquire_behavioral_slot, _release_behavioral_slot
+    """Acquire one of the global sandbox slots (the same per-slot keys the public scan
+    path uses), waiting up to ``wait_s`` for one to free up. Heartbeats while held;
+    released on exit (compare-and-delete), then the sandbox queue gets a chance."""
+    from src.api.public_scan_router import (
+        _acquire_behavioral_slot,
+        _drain_behavioral_queue,
+        _release_behavioral_slot,
+    )
     from src.config import settings
+    from src.scanner.behavioral.slots import start_heartbeat
 
     budget = float(wait_s if wait_s is not None
                    else getattr(settings, "behavioral_eval_slot_wait_sec", 600))
     deadline = time.monotonic() + budget
-    while not await _acquire_behavioral_slot():
+    while not (handle := await _acquire_behavioral_slot(lock_key=RUNNING_KEY)):
         if time.monotonic() >= deadline:
             raise NoSandboxSlotError(f"no sandbox slot within {budget:.0f}s")
         await asyncio.sleep(poll_s)
+    hb = start_heartbeat(handle)
     try:
         yield
     finally:
-        await _release_behavioral_slot()
+        if hb is not None:
+            hb.cancel()
+        await _release_behavioral_slot(handle)
+        with contextlib.suppress(Exception):
+            await _drain_behavioral_queue()
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +370,29 @@ def _failed_fixtures(report: dict) -> set[str]:
     return set((report.get("fixtures") or {}).get("failed") or [])
 
 
+def _kg_rows(report: dict) -> dict[str, dict]:
+    return {f"{r['surface']}:{r['name']}": r for r in report.get("rows") or []
+            if r.get("kind") == "known_good"}
+
+
+def _lost_expected(previous: dict, current: dict) -> list[dict]:
+    """Known-good packages that produced an EXPECTED finding last time, ran this time,
+    and no longer produce it. That is the sandbox going blind, not the package getting
+    safer: on 2026-10-08 a full scratch disk truncated every capture, the tiny fixtures
+    still passed, and mcp-server-fetch silently lost ssrf_internal_fetch."""
+    prev_rows, out = _kg_rows(previous), []
+    for key, row in sorted(_kg_rows(current).items()):
+        if not row.get("ran") or row.get("error"):
+            continue
+        expected = set(row.get("expect_rules") or [])
+        before = set((prev_rows.get(key) or {}).get("rules") or []) & expected
+        lost = sorted(before - set(row.get("rules") or []))
+        if lost:
+            surface, _, name = key.partition(":")
+            out.append({"surface": surface, "name": name, "rules": lost})
+    return out
+
+
 def compute_diff(previous: dict | None, current: dict) -> dict:
     """What changed since the last report. ``regression`` is the alert condition; it is
     never set on the first-ever run."""
@@ -376,10 +410,12 @@ def compute_diff(previous: dict | None, current: dict) -> dict:
         "newly_not_exercised": [],
         "newly_exercised": [],
         "exercised_delta": 0,
+        "lost_expected_findings": [],
         "regression": False,
     }
     if previous is None:
         return diff
+    diff["lost_expected_findings"] = _lost_expected(previous, current)
     prev_fp = _fp_map(previous)
     prev_failed = _failed_fixtures(previous)
     diff["fixture_regressions"] = sorted(set(cur_failed) - prev_failed)
@@ -397,7 +433,7 @@ def compute_diff(previous: dict | None, current: dict) -> dict:
     prev_count = (previous.get("known_good") or {}).get("exercised") or 0
     diff["exercised_delta"] = int(cur_ex) - int(prev_count)
     diff["regression"] = bool(
-        cur_failed or diff["new_false_positives"]
+        cur_failed or diff["new_false_positives"] or diff["lost_expected_findings"]
         or diff["exercised_delta"] <= -EXERCISED_DROP_ALERT)
     return diff
 
@@ -412,6 +448,11 @@ def summarize_regression(report: dict) -> tuple[str, str]:
         parts.append("new false positives: " + ", ".join(
             f"{f['surface']}:{f['name']} ({', '.join(f['rules'])})"
             for f in d["new_false_positives"]))
+    if d.get("lost_expected_findings"):
+        parts.append("sandbox stopped catching known findings (check capture health on "
+                     "the box): " + ", ".join(
+                         f"{f['surface']}:{f['name']} ({', '.join(f['rules'])})"
+                         for f in d["lost_expected_findings"]))
     if (d.get("exercised_delta") or 0) <= -EXERCISED_DROP_ALERT:
         parts.append(f"exercised dropped by {-d['exercised_delta']} "
                      f"({', '.join(d.get('newly_not_exercised') or []) or 'see report'})")
@@ -442,6 +483,20 @@ async def alert_regression(report: dict) -> dict:
     HMAC-signed path watch alerts use). Returns what was delivered; never raises."""
     title, body = summarize_regression(report)
     logger.warning("%s %s — %s", ALERT_LOG_PREFIX, title, body)
+    return await notify_admins(title, body, reference_id="behavioral-eval", payload={
+        "type": WEBHOOK_TYPE, "event": "behavioral_eval_regression",
+        "title": title, "body": body, "ran_at": report.get("ran_at"),
+        "fixtures": report.get("fixtures"),
+        "known_good": {k: v for k, v in (report.get("known_good") or {}).items()
+                       if k != "not_started"},
+        "diff": report.get("diff"),
+    })
+
+
+async def notify_admins(title: str, body: str, *, reference_id: str, payload: dict) -> dict:
+    """An ops alert to every admin: an in-app notification plus the admin's HMAC-signed
+    alert webhook (``payload`` is the webhook body). Returns what was delivered; never
+    raises. Shared by the eval regression alert and the sandbox watchdog."""
     out = {"notified": 0, "webhooks": 0}
     try:
         from src.api.notification_router import create_notification
@@ -455,7 +510,7 @@ async def alert_regression(report: dict) -> dict:
             for admin in admins:
                 try:
                     await create_notification(db, admin.id, NOTIFICATION_KIND, title, body,
-                                              reference_id="behavioral-eval")
+                                              reference_id=reference_id)
                     out["notified"] += 1
                 except Exception:
                     logger.exception("%s notification to %s failed",
@@ -469,14 +524,7 @@ async def alert_regression(report: dict) -> dict:
                     hook = await _watcher_hook(db, admin.id)
                     if hook is None:
                         continue
-                    hook.last_status = await deliver_to_hook(hook, {
-                        "type": WEBHOOK_TYPE, "event": "behavioral_eval_regression",
-                        "title": title, "body": body, "ran_at": report.get("ran_at"),
-                        "fixtures": report.get("fixtures"),
-                        "known_good": {k: v for k, v in (report.get("known_good") or {}).items()
-                                       if k != "not_started"},
-                        "diff": report.get("diff"),
-                    })
+                    hook.last_status = await deliver_to_hook(hook, payload)
                     hook.last_delivery_at = datetime.now(timezone.utc)
                     out["webhooks"] += 1
                 except Exception:

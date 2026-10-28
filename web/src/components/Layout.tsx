@@ -19,7 +19,7 @@ function SiteFooter() {
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="flex flex-col items-center gap-5">
           {/* Nav links — two groups */}
-          <nav aria-label="Footer navigation" className="flex items-center gap-4 text-xs text-text-muted">
+          <nav aria-label="Footer navigation" className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-text-muted">
             <Link to="/check" className="hover:text-text transition-colors">Check</Link>
             <Link to="/scans" className="hover:text-text transition-colors">Scans</Link>
             <Link to="/research" className="hover:text-text transition-colors">Research</Link>

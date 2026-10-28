@@ -305,6 +305,23 @@ async def rate_limit_writes(request: Request) -> None:
             )
 
 
+# Page-view analytics fire on every navigation; on the shared 20/min write bucket a
+# visitor browsing briskly hit 429s (and burned the quota real writes need). Give
+# them their own, roomier per-IP bucket.
+ANALYTICS_EVENTS_PER_MINUTE = 120
+
+
+async def rate_limit_analytics(request: Request) -> None:
+    ip = _get_client_ip(request)
+    key = f"analytics:{ip}"
+    if not await _limiter.check(key, ANALYTICS_EVENTS_PER_MINUTE):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded",
+            headers=_rate_limit_response(0, ANALYTICS_EVENTS_PER_MINUTE),
+        )
+
+
 async def rate_limit_scans(request: Request) -> None:
     """Tighter per-IP limit for on-demand /public/scan/{owner}/{repo}.
 

@@ -132,7 +132,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str | None = None
     smtp_password: str | None = None
-    from_email: str = "noreply@agentgraph.co"
+    from_email: str = "noreply@agentavow.com"
 
     # Perspective API (Google text toxicity scoring)
     perspective_api_key: str | None = None
@@ -412,6 +412,32 @@ class Settings(BaseSettings):
 
     # Admin account email (used for bot ownership, alerts, marketing)
     admin_email: str = "admin@agentgraph.co"
+
+    # MCP connector health alerting (src/jobs/mcp_health.py). On 2026-10-17..20 every
+    # first request from current Claude clients got 400 "Unsupported protocol version"
+    # and nothing alerted; these checks email the admin when /mcp breaks.
+    # None = on when DEBUG is false (prod), off in dev/staging/tests unless set.
+    # Also needs ENABLE_SCHEDULER (the loops run on the scheduler-lock worker).
+    mcp_health_enabled: bool | None = None
+    # Fixed operator setting (never request-derived): the public URL clients hit.
+    mcp_health_probe_url: str = "https://agentavow.com/mcp"
+    mcp_health_probe_interval_seconds: int = 10 * 60
+    mcp_health_probe_timeout_seconds: float = 20.0
+    # Timeouts / connection errors / 5xx must repeat this many probes in a row before
+    # they alert (a single network blip is not an outage). 4xx, JSON-RPC errors, tool
+    # count and tools/list drift alert on the first failing probe.
+    mcp_health_transient_failures_before_alert: int = 2
+    # Passive reject-rate check over the request counters the /mcp front keeps.
+    mcp_health_reject_check_interval_seconds: int = 15 * 60
+    mcp_health_reject_window_minutes: int = 30
+    mcp_health_reject_min_requests: int = 30
+    mcp_health_reject_error_ratio: float = 0.10
+    # "Unsupported protocol version" rejects in the window that alert on their own.
+    mcp_health_unsupported_version_min: int = 3
+    # One email per distinct problem per this many hours (plus one "recovered" email).
+    mcp_health_alert_dedupe_hours: int = 6
+    # Recipient; empty = admin_email.
+    mcp_health_alert_email: str = ""
 
     # Marketing bot system
     marketing_enabled: bool = False

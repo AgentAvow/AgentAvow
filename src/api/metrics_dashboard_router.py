@@ -240,10 +240,14 @@ def is_hook_request(path: str | None, user_agent: str | None) -> bool:
 
 async def record_hook_checkin(client_ip: str | None, user_agent: str | None) -> None:
     """One hook scan today, on one more distinct machine (salted per-day HLL, nothing
-    identifying stored). Best-effort — never raises."""
+    identifying stored). Best-effort — never raises.
+
+    A machine is keyed on its IP alone, not IP + User-Agent: the hook's User-Agent
+    carries the plugin version, so on a release day every upgrading machine would
+    otherwise count twice (10-08/10-09 read 80/91 against ~52/54 distinct IPs)."""
     try:
         await bump_metric("hook_scan")
-        await record_unique("hook:machines", client_ip, user_agent)
+        await record_unique("hook:machines", client_ip, None)
     except Exception:
         pass
 
@@ -304,11 +308,13 @@ _TIER_CASE = case(
 
 _TIER_ORDER = [t.value for t in TIERS]
 
-# The three-phrase headline over the same corpus, from what a catalog row stores (the
-# blocking critical / high counts + the score): the `decide()` rule without the inputs
-# a row does not keep (advisories, deprecation, coverage, sandbox), so it is the
-# catalog's view, matching CatalogRow.decision.
+# The three-phrase headline over the same corpus: the row's stored `decision` (decided
+# at scan time by `decide()` over the full result, as the tool's page shows it), else
+# for a pre-t24 row the `decide()` rule over what it stores (blocking critical / high
+# counts + the score). Matches CatalogRow.decision in Browse and the catalog API.
 _DECISION_CASE = case(
+    (CommunityScan.decision.in_(("safe", "review", "do_not_connect")),
+     CommunityScan.decision),
     (func.coalesce(CommunityScan.critical, 0) > 0, "do_not_connect"),
     (func.coalesce(CommunityScan.high, 0) > 0, "review"),
     (CommunityScan.trust_score < 51, "review"),
@@ -799,6 +805,7 @@ BEHAVIORAL_PREFIX = f"{_METRICS_PREFIX}behavioral:"
 BEHAVIORAL_DAILY = (
     "runs", "exercised", "with_findings", "canary_leaks", "slot_rejected",
     "cache_hit", "cache_miss", "killed", "duration_sum", "duration_max",
+    "queued", "queue_started", "queue_dropped", "pending_expired",
 )
 BEHAVIORAL_START_REASONS = (
     "started", "needs_credentials", "needs_arguments", "missing_binary",
@@ -912,6 +919,13 @@ async def _behavioral_backfill_block(day_strs: list[str]) -> dict:
     }
 
 
+async def _behavioral_live() -> dict:
+    """Right now: how many sandbox slots are held and how deep the wait queue is."""
+    from src.scanner.behavioral import slots
+    return {"slots_held": await slots.slots_in_use(), "slots": slots.max_slots(),
+            "queue_depth": await slots.queue_depth()}
+
+
 async def _behavioral_aggregate(window: str) -> dict:
     from src.config import settings
 
@@ -936,6 +950,11 @@ async def _behavioral_aggregate(window: str) -> dict:
         "with_findings": tot("with_findings"),
         "canary_leaks": tot("canary_leaks"),
         "slot_rejected": slot_rejected,
+        "queued": tot("queued"),
+        "queue_started": tot("queue_started"),
+        "queue_dropped": tot("queue_dropped"),
+        "pending_expired": tot("pending_expired"),
+        "live": await _behavioral_live(),
         "killed": killed,
         "cache_hits": hits,
         "cache_misses": misses,
@@ -1006,8 +1025,15 @@ _TRAFFIC_INT_COLUMNS = (
     "calls_other", "callers_other", "calls_total", "hook_machines_hll",
     "owner_cc_reqs", "owner_cc_sessions", "owner_hook_reqs", "owner_scans_200",
     "cc_machines_excl_owner", "hook_machines_excl_owner", "log_complete",
+    "checked_machines", "checked_machines_excl_owner", "preinstall_reqs",
+    "cc_session_starters",
 )
 _TRAFFIC_NOTES = [
+    "checked_machines = distinct machines where the plugin checked something on its own "
+    "that day (session-start hook or install-time hook), excluding the owner's test "
+    "machines in the _excl_owner variant. This is the headline usage number: the plugin "
+    "earns its keep through these automatic checks far more than through hand-called "
+    "tools. Install-time checks are counted separately from plugin 0.1.28 (2026-10-14).",
     "Claude-origin traffic per UTC day, written once a day by scripts/ops/"
     "anthropic_traffic_snapshot.py on the prod host (cron 00:40 UTC for the previous day); "
     "kept in Redis without expiry so the series outlives the 4-day nginx log window.",
@@ -1023,7 +1049,29 @@ _TRAFFIC_NOTES = [
     "data/owner-ips.txt on the host (Kenne's test machines).",
     "log_complete = 0 means the nginx log did not cover all 24 hours of that day (partial "
     "day or a log rotation gap); treat that row as a lower bound.",
+    "cc_sessions = Claude Code session starts. Through 2026-10-19 it counted the one "
+    "protocol-version rejection (HTTP 400) every new session hit before retrying (mcp 1.x); "
+    "the MCP SDK 2.3 upgrade (2026-10-20) removed that rejection, so the old count fell to "
+    "zero while use did not. Days from 2026-10-20 show no value until the snapshot reads "
+    "the server's own session-start counter (rows marked cc_sessions_source = session_start). "
+    "Series break at 2026-10-20: the two counts are not spliced together.",
 ]
+
+# First UTC day whose nginx-derived cc_sessions (a count of protocol-version 400s) no
+# longer counts session starts (the MCP SDK 2.3 upgrade, 2026-10-20 00:16Z). From here a
+# row's cc_sessions is shown only when it came from the session-start counter.
+_CC_SESSIONS_PROXY_END = "2026-10-20"
+
+
+def _drop_dead_cc_sessions(row: dict) -> dict:
+    """Blank cc_sessions / owner_cc_sessions on a row past the proxy's end unless the
+    snapshot wrote it from the session-start counter (``cc_sessions_source``)."""
+    if (row.get("day", "") >= _CC_SESSIONS_PROXY_END
+            and row.get("cc_sessions_source") != "session_start"):
+        row["cc_sessions"] = None
+        if "owner_cc_sessions" in row:
+            row["owner_cc_sessions"] = None
+    return row
 
 
 async def _traffic_rows(n_days: int) -> tuple[list[str], list[dict]]:
@@ -1050,7 +1098,7 @@ async def _traffic_rows(n_days: int) -> tuple[list[str], list[dict]]:
                         row[key] = None
                 elif key != "day":
                     row[key] = val
-            rows.append(row)
+            rows.append(_drop_dead_cc_sessions(row))
     except Exception:
         logging.getLogger(__name__).exception("traffic rows unavailable")
         return [], []
@@ -1074,7 +1122,9 @@ async def traffic_metrics(
         for col in ("cc_machines", "cc_new_machines_30d", "cc_sessions", "claudeai_reqs",
                     "hook_machines_nginx", "hook_reqs", "calls_claude_code",
                     "callers_claude_code", "calls_claude", "callers_claude", "calls_chatgpt",
-                    "cc_machines_excl_owner", "hook_machines_excl_owner")
+                    "cc_machines_excl_owner", "hook_machines_excl_owner",
+                    "checked_machines", "checked_machines_excl_owner", "preinstall_machines",
+                    "preinstall_reqs")
     }
     latest = rows[-1] if rows else None
     return {

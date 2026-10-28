@@ -285,7 +285,7 @@ async def test_scan_skill_collects_env_reads_for_canaries(monkeypatch):
     async def fake_token():
         return "tok"
 
-    async def fake_tree(owner, repo, token):
+    async def fake_tree(owner, repo, token, meta_out=None):
         return ([{"path": "SKILL.md", "type": "blob"},
                  {"path": "scripts/sync.py", "type": "blob"}], False, True, "main")
 

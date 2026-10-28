@@ -76,7 +76,7 @@ class DecisionPhrase:
 DECISIONS: tuple[DecisionPhrase, ...] = (
     DecisionPhrase("safe", "Safe to connect", "Safe", "#22C55E", "#15803D"),
     DecisionPhrase("review", "Review before you connect", "Review", "#F59E0B", "#B45309"),
-    DecisionPhrase("do_not_connect", "Do not connect", "Blocked", "#EF4444", "#B91C1C"),
+    DecisionPhrase("do_not_connect", "Do not connect", "Don't connect", "#EF4444", "#B91C1C"),
 )
 DECISION_BY_VALUE: dict[str, DecisionPhrase] = {d.value: d for d in DECISIONS}
 
@@ -178,9 +178,17 @@ def decision_color(decision: object, light: bool = False) -> str:
 
 
 def is_certified(data: dict | None) -> bool:
-    """Whether a scan carries the Certified mark (the full conjunctive gate)."""
-    c = (data or {}).get("certified") if isinstance(data, dict) else None
-    return bool(isinstance(c, dict) and c.get("eligible") is True)
+    """Whether a result shows the Certified MARK: the API's ``certified_mark`` when the
+    result carries it, else the display rule (``verdict.certified_mark``: eligible AND
+    Safe to connect AND final AND score >= 81 AND not thin) decided here. Not the raw
+    ``certified.eligible`` provenance gate — that one alone can sit beside Review."""
+    if not isinstance(data, dict):
+        return False
+    mark = data.get("certified_mark")
+    if isinstance(mark, bool):
+        return mark
+    from src.scanner.verdict import certified_mark
+    return certified_mark(data)
 
 
 def headline(decision: object, certified: bool = False) -> str:

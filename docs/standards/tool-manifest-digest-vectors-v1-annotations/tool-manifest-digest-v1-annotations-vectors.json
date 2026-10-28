@@ -1,0 +1,323 @@
+{
+  "suite": "tool-manifest-digest-v1-annotations",
+  "spec": "Agent-Authority-Conformance/aps-conformance-suite#155 — an annotation-only drift case for the tool-manifest-digest-v1 per-tool binding, in its own pinned packet so the v1 packet and its run records are unchanged",
+  "status": "proposed — same derivation, axes and gate shape as tool-manifest-digest-v1; adds a baseline whose served definition carries annotations and a drift case that changes one annotation only",
+  "claim_ceiling": "rely=true establishes exactly this: at evaluation_time, the named issuer had signed a static-analysis grade for this server, the grade covered a tool of this name, the definition the gate was served for that tool is the one the scan graded, and the signature, subject and validity window all check. It establishes nothing about runtime behavior, nothing about what the tool does when invoked, nothing about other tools on the server, and nothing about definitions the scan did not observe. Whether a gate proceeds on rely=true is a separately versioned admission policy.",
+  "establishes": "An annotation change alone, with every other hashed field byte-identical, breaks the per-tool binding: annotations are part of the preimage. It does not establish anything about what readOnlyHint means for the tool: the hint is a declaration by the server, not a property the scan measured, and nothing here concerns runtime.",
+  "derivation": {
+    "attestation": "compact JWS (RFC 7515), alg EdDSA (Ed25519), payload = RFC 8785 JCS canonical bytes of the verdict; signature over ASCII(BASE64URL(header) || \".\" || BASE64URL(payload)).",
+    "subject": "subject.id = \"mcp:\" + the endpoint URL that was scanned. The subject is the server, not a tool.",
+    "tool_digest": "scan.toolDigests[\"tool:<name>\"] = \"sha256:\" + hex(sha256(JCS({ profile: \"agentavow.mcp-tool-definition.v1\", tool }))) where tool is the served definition restricted to name, title, description, inputSchema, outputSchema, annotations (a missing or null field is omitted; _meta and unknown fields are never hashed). A gate can compute observed_tool_digest from the tools/list it is served, with no call to the issuer.",
+    "tool_key": "as in tool-manifest-digest-v1: \"tool:\" + the name, percent-encoded and length-cut by the v1 rules. The tool names here are plain ASCII; the v1 packet carries the key_encoding pairs.",
+    "manifest_digest": "scan.toolManifestDigest = sha-256 folded over the per-tool digests (the v0 whole-server binding; not used by the gate).",
+    "drift_definition": "the served definition of the named tool with annotations.readOnlyHint set from true to false; every other field and annotation key unchanged. Its digest is the annotation-drift gate's observed_tool_digest."
+  },
+  "author_set": "agentgraph (AgentAvow attestation layer, did:web:agentgraph.co).",
+  "axes": {
+    "signature_valid": "Ed25519 verifies under the pinned JWK whose kid matches the JWS header. Binds the signer to what it signed, and no further.",
+    "canonical_bytes": "jcs(JSON.parse(payload)) equals the payload bytes. Recomputability check; independent of the signature.",
+    "subject_binds": "payload.subject.id equals gate.subject_id.",
+    "tool_binds": "payload.scan.toolDigests has the key \"tool:<gate.tool_name>\" (encoded as above): the scan observed a tool of that name.",
+    "tool_digest_binds": "that entry equals gate.observed_tool_digest. \"not_evaluated\" when tool_binds is false: there is no signed digest to compare.",
+    "fresh": "gate.evaluation_time is within [issuedAt, expiresAt), compared as exact instants.",
+    "rely": "all six axes true. None of the six is derived from another."
+  },
+  "issuer": {
+    "id": "did:web:agentgraph.co",
+    "jwks_url": "https://agentgraph.co/.well-known/jwks.json",
+    "jwk": {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "JwovTLVbpgk85zlMNruTiLzp85dAucsZWngs8NisBFg",
+      "kid": "agentgraph-security-v1",
+      "use": "sig",
+      "alg": "EdDSA"
+    }
+  },
+  "attestation": {
+    "source_url": "https://agentavow.com/api/v1/public/scan/mcp?endpoint=https%3A%2F%2Fdocs.mcp.cloudflare.com%2Fmcp&force=true",
+    "subject": {
+      "id": "mcp:https://docs.mcp.cloudflare.com/mcp",
+      "repo": "mcp:https://docs.mcp.cloudflare.com/mcp"
+    },
+    "issuedAt": "2026-10-13T16:08:39.064Z",
+    "expiresAt": "2026-10-14T16:08:39.064Z",
+    "trustScore": 63,
+    "toolManifestDigest": "sha256:211d64b4964c1fa9bba7d4d21b7d0f486c7e61f40f2fb720670045192edc9da5",
+    "toolDigests": {
+      "tool:migrate_pages_to_workers_guide": "sha256:4cea48b1da7e1cf9b964d39568c73593b2a726d09f57f02080cd89b9753b2a01",
+      "tool:search_cloudflare_documentation": "sha256:6294e99197f065f40014c8f43b0cd632affb227f790e8ec57b8c21e77937a84b"
+    },
+    "payload_sha256": "cc91178556e75451ef450f029246ebbb2584ef922e87f93226aebded699c861e",
+    "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTE0VDE2OjA4OjM5LjA2NFoiLCJpc3N1ZWRBdCI6IjIwMjYtMTAtMTNUMTY6MDg6MzkuMDY0WiIsImlzc3VlciI6eyJpZCI6ImRpZDp3ZWI6YWdlbnRncmFwaC5jbyIsIm5hbWUiOiJBZ2VudEF2b3ciLCJ1cmwiOiJodHRwczovL2FnZW50Z3JhcGguY28ifSwicmVjb21tZW5kZWRMaW1pdHMiOnsibWF4X3Rva2Vuc19wZXJfY2FsbCI6NDA5NiwicmVxdWVzdHNfcGVyX21pbnV0ZSI6MzAsInJlcXVpcmVfdXNlcl9jb25maXJtYXRpb24iOmZhbHNlfSwic2NhbiI6eyJjYXRlZ29yeVNjb3JlcyI6eyJjb2RlX3NhZmV0eSI6ODUsImRhdGFfaGFuZGxpbmciOjEwMCwiZGVwZW5kZW5jeV9oZWFsdGgiOjEwMCwiZmlsZXN5c3RlbV9hY2Nlc3MiOjEwMCwic2VjcmV0X2h5Z2llbmUiOjEwMH0sImNvdmVyYWdlIjp7ImRiX3NuYXBzaG90cyI6e30sImxpdmVfb2JzZXJ2ZWQiOnRydWUsInBvaW50X2luX3RpbWUiOiIyMDI2LTEwLTEzVDE2OjA4OjM5LjA1NTYwM1oiLCJwcm92ZW5hbmNlX2JpbmRpbmciOiJuL2EiLCJzY2FuX2RlcHRoIjoiYXJ0aWZhY3QrbGl2ZSIsInN1cmZhY2UiOiJtY3AifSwiZmlsZXNTY2FubmVkIjoyLCJmaWxlc1RvdGFsIjoyLCJmaW5kaW5ncyI6eyJjYXRlZ29yaWVzIjp7InNjaGVtYV9yaXNrIjoxfSwiY3JpdGljYWwiOjAsImNyaXRpY2FsX2FsbCI6MCwiaGlnaCI6MSwiaGlnaF9hbGwiOjEsIml0ZW1zIjpbeyJjYXBhYmlsaXR5IjoiIiwiY2F0ZWdvcnkiOiJzY2hlbWFfcmlzayIsImZpbGVfcGF0aCI6InRvb2w6c2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbjpwYXJhbTpxdWVyeSIsImluc3RhbGxlZCI6dHJ1ZSwia2luZCI6ImRlZmVjdCIsImxpbmVfbnVtYmVyIjowLCJuYW1lIjoiVG9vbCAnc2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbicgdGFrZXMgYSBmcmVlZm9ybSAncXVlcnknIiwicmVtZWRpYXRpb24iOiJDb25zdHJhaW4gJ3F1ZXJ5JyB3aXRoIGFuIGVudW0vcGF0dGVybjsgZnJlZWZvcm0gaXMgYW4gaW5qZWN0aW9uL1JDRSB2ZWN0b3IuIiwic2V2ZXJpdHkiOiJoaWdoIiwic2hpcHBlZCI6dHJ1ZX1dLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjoxfSwicG9zaXRpdmVTaWduYWxzIjpbIjIgdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0Ijoid2FybmluZ3MiLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDptaWdyYXRlX3BhZ2VzX3RvX3dvcmtlcnNfZ3VpZGUiOiJzaGEyNTY6NGNlYTQ4YjFkYTdlMWNmOWI5NjRkMzk1NjhjNzM1OTNiMmE3MjZkMDlmNTdmMDIwODBjZDg5Yjk3NTNiMmEwMSIsInRvb2w6c2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbiI6InNoYTI1Njo2Mjk0ZTk5MTk3ZjA2NWY0MDAxNGM4ZjQzYjBjZDYzMmFmZmIyMjdmNzkwZThlYzU3YjhjMjFlNzc5MzdhODRiIn0sInRvb2xNYW5pZmVzdERpZ2VzdCI6InNoYTI1NjoyMTFkNjRiNDk2NGMxZmE5YmJhN2Q0ZDIxYjdkMGY0ODZjN2U2MWY0MGYyZmI3MjA2NzAwNDUxOTJlZGM5ZGE1IiwidHJ1c3RTY29yZSI6NjMsInRydXN0VGllciI6InN0YW5kYXJkIn0sInNjYW5uZWRBdCI6IjIwMjYtMTAtMTNUMTY6MDg6MzkuMDU1WiIsInN1YmplY3QiOnsiaWQiOiJtY3A6aHR0cHM6Ly9kb2NzLm1jcC5jbG91ZGZsYXJlLmNvbS9tY3AiLCJyZXBvIjoibWNwOmh0dHBzOi8vZG9jcy5tY3AuY2xvdWRmbGFyZS5jb20vbWNwIn0sInR5cGUiOiJTZWN1cml0eVBvc3R1cmVBdHRlc3RhdGlvbiJ9.QIn7QsESz_mN3fOnF1DrS979f4EUJpuCdBYy3UIB1GtdYUpYuwC5LA6GJNNIM6y84KW5wPhoQwmWzJS7K8QcBg"
+  },
+  "observed_tools": [
+    {
+      "name": "search_cloudflare_documentation",
+      "description": "Search the Cloudflare documentation.\n\n\t\tThis tool should be used to answer any question about Cloudflare products or features, including:\n\t\t- Workers, Pages, R2, Images, Stream, D1, Durable Objects, KV, Workflows, Hyperdrive, Queues\n\t\t- AI Search, Workers AI, Vectorize, AI Gateway, Browser Run\n\t\t- Zero Trust, Access, Tunnel, Gateway, Browser Isolation, WARP, DDOS, Magic Transit, Magic WAN\n\t\t- CDN, Cache, DNS, Zaraz, Argo, Rulesets, Terraform, Account and Billing\n\n\t\tResults are returned as semantically similar chunks to the query.\n\t\t",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "annotations": {
+        "title": "Search Cloudflare docs",
+        "readOnlyHint": true
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "similarity": {
+                  "type": "number",
+                  "description": "Similarity score from AI Search"
+                },
+                "id": {
+                  "type": "string",
+                  "description": "Source file ID"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Developer documentation URL"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Documentation page title"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Matching documentation chunk text"
+                }
+              },
+              "required": [
+                "similarity",
+                "id",
+                "url",
+                "title",
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "migrate_pages_to_workers_guide",
+      "description": "ALWAYS read this guide before migrating Pages projects to Workers.",
+      "inputSchema": {
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Get Pages migration guide",
+        "readOnlyHint": true
+      }
+    }
+  ],
+  "drift_definition": {
+    "name": "search_cloudflare_documentation",
+    "description": "Search the Cloudflare documentation.\n\n\t\tThis tool should be used to answer any question about Cloudflare products or features, including:\n\t\t- Workers, Pages, R2, Images, Stream, D1, Durable Objects, KV, Workflows, Hyperdrive, Queues\n\t\t- AI Search, Workers AI, Vectorize, AI Gateway, Browser Run\n\t\t- Zero Trust, Access, Tunnel, Gateway, Browser Isolation, WARP, DDOS, Magic Transit, Magic WAN\n\t\t- CDN, Cache, DNS, Zaraz, Argo, Rulesets, Terraform, Account and Billing\n\n\t\tResults are returned as semantically similar chunks to the query.\n\t\t",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "annotations": {
+      "title": "Search Cloudflare docs",
+      "readOnlyHint": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "similarity": {
+                "type": "number",
+                "description": "Similarity score from AI Search"
+              },
+              "id": {
+                "type": "string",
+                "description": "Source file ID"
+              },
+              "url": {
+                "type": "string",
+                "description": "Developer documentation URL"
+              },
+              "title": {
+                "type": "string",
+                "description": "Documentation page title"
+              },
+              "text": {
+                "type": "string",
+                "description": "Matching documentation chunk text"
+              }
+            },
+            "required": [
+              "similarity",
+              "id",
+              "url",
+              "title",
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "results"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "vectors": [
+    {
+      "name": "annotation-match",
+      "note": "The positive case. The gate authorizes the named tool, whose served definition carries annotations.readOnlyHint: true, computes the digest of the definition it was served, and that digest equals the one the scan signed for that tool, inside the validity window. Every axis passes.",
+      "gate": {
+        "subject_id": "mcp:https://docs.mcp.cloudflare.com/mcp",
+        "tool_name": "search_cloudflare_documentation",
+        "observed_tool_digest": "sha256:6294e99197f065f40014c8f43b0cd632affb227f790e8ec57b8c21e77937a84b",
+        "evaluation_time": "2026-10-13T17:08:39.064Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": true,
+        "tool_digest_binds": true,
+        "fresh": true,
+        "rely": true
+      }
+    },
+    {
+      "name": "annotation-drift",
+      "note": "The named tool exists, but the definition the gate was served differs from the one the scan graded in one annotation only: readOnlyHint is false instead of true. Name, title, description, inputSchema, outputSchema and the other annotation keys are byte-identical (drift_definition carries the full definition). The annotation is part of the hashed preimage, so the per-tool binding breaks. Do not rely. This says nothing about what the tool does: readOnlyHint is a declaration, not a measurement.",
+      "gate": {
+        "subject_id": "mcp:https://docs.mcp.cloudflare.com/mcp",
+        "tool_name": "search_cloudflare_documentation",
+        "observed_tool_digest": "sha256:7369e8db0094c35b8034bf1b04c258cbb43303a63f9e5b53be6b35a927c2b265",
+        "evaluation_time": "2026-10-13T17:08:39.064Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": true,
+        "tool_digest_binds": false,
+        "fresh": true,
+        "rely": false
+      }
+    },
+    {
+      "name": "unknown-tool",
+      "note": "The gate authorizes a tool name the scan never observed. The server, signature and freshness all check; the attestation says nothing about this tool. tool_digest_binds is not evaluated because there is no signed digest to compare. Do not rely.",
+      "gate": {
+        "subject_id": "mcp:https://docs.mcp.cloudflare.com/mcp",
+        "tool_name": "purge_cloudflare_cache",
+        "observed_tool_digest": "sha256:6294e99197f065f40014c8f43b0cd632affb227f790e8ec57b8c21e77937a84b",
+        "evaluation_time": "2026-10-13T17:08:39.064Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": false,
+        "tool_digest_binds": "not_evaluated",
+        "fresh": true,
+        "rely": false
+      }
+    },
+    {
+      "name": "wrong-subject",
+      "note": "A valid grade for one server presented for another. Same tool name, same digest, wrong subject. Do not rely.",
+      "gate": {
+        "subject_id": "mcp:https://mcp.example.com/mcp",
+        "tool_name": "search_cloudflare_documentation",
+        "observed_tool_digest": "sha256:6294e99197f065f40014c8f43b0cd632affb227f790e8ec57b8c21e77937a84b",
+        "evaluation_time": "2026-10-13T17:08:39.064Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": false,
+        "tool_binds": true,
+        "tool_digest_binds": true,
+        "fresh": true,
+        "rely": false
+      }
+    },
+    {
+      "name": "past-expiry",
+      "note": "Same attestation, evaluated after expiresAt. A signed verdict does not verify forever. Treated as unsigned.",
+      "gate": {
+        "subject_id": "mcp:https://docs.mcp.cloudflare.com/mcp",
+        "tool_name": "search_cloudflare_documentation",
+        "observed_tool_digest": "sha256:6294e99197f065f40014c8f43b0cd632affb227f790e8ec57b8c21e77937a84b",
+        "evaluation_time": "2026-10-14T17:08:39.064Z"
+      },
+      "jws": "reference",
+      "expect": {
+        "signature_valid": true,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": true,
+        "tool_digest_binds": true,
+        "fresh": false,
+        "rely": false
+      }
+    },
+    {
+      "name": "tampered-payload",
+      "note": "Payload edited after signing (trustScore raised to 99), re-canonicalized, original signature kept. Canonical bytes still check; the signature does not. Canonical form is not authenticity. Do not rely.",
+      "gate": {
+        "subject_id": "mcp:https://docs.mcp.cloudflare.com/mcp",
+        "tool_name": "search_cloudflare_documentation",
+        "observed_tool_digest": "sha256:6294e99197f065f40014c8f43b0cd632affb227f790e8ec57b8c21e77937a84b",
+        "evaluation_time": "2026-10-13T17:08:39.064Z"
+      },
+      "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTE0VDE2OjA4OjM5LjA2NFoiLCJpc3N1ZWRBdCI6IjIwMjYtMTAtMTNUMTY6MDg6MzkuMDY0WiIsImlzc3VlciI6eyJpZCI6ImRpZDp3ZWI6YWdlbnRncmFwaC5jbyIsIm5hbWUiOiJBZ2VudEF2b3ciLCJ1cmwiOiJodHRwczovL2FnZW50Z3JhcGguY28ifSwicmVjb21tZW5kZWRMaW1pdHMiOnsibWF4X3Rva2Vuc19wZXJfY2FsbCI6NDA5NiwicmVxdWVzdHNfcGVyX21pbnV0ZSI6MzAsInJlcXVpcmVfdXNlcl9jb25maXJtYXRpb24iOmZhbHNlfSwic2NhbiI6eyJjYXRlZ29yeVNjb3JlcyI6eyJjb2RlX3NhZmV0eSI6ODUsImRhdGFfaGFuZGxpbmciOjEwMCwiZGVwZW5kZW5jeV9oZWFsdGgiOjEwMCwiZmlsZXN5c3RlbV9hY2Nlc3MiOjEwMCwic2VjcmV0X2h5Z2llbmUiOjEwMH0sImNvdmVyYWdlIjp7ImRiX3NuYXBzaG90cyI6e30sImxpdmVfb2JzZXJ2ZWQiOnRydWUsInBvaW50X2luX3RpbWUiOiIyMDI2LTEwLTEzVDE2OjA4OjM5LjA1NTYwM1oiLCJwcm92ZW5hbmNlX2JpbmRpbmciOiJuL2EiLCJzY2FuX2RlcHRoIjoiYXJ0aWZhY3QrbGl2ZSIsInN1cmZhY2UiOiJtY3AifSwiZmlsZXNTY2FubmVkIjoyLCJmaWxlc1RvdGFsIjoyLCJmaW5kaW5ncyI6eyJjYXRlZ29yaWVzIjp7InNjaGVtYV9yaXNrIjoxfSwiY3JpdGljYWwiOjAsImNyaXRpY2FsX2FsbCI6MCwiaGlnaCI6MSwiaGlnaF9hbGwiOjEsIml0ZW1zIjpbeyJjYXBhYmlsaXR5IjoiIiwiY2F0ZWdvcnkiOiJzY2hlbWFfcmlzayIsImZpbGVfcGF0aCI6InRvb2w6c2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbjpwYXJhbTpxdWVyeSIsImluc3RhbGxlZCI6dHJ1ZSwia2luZCI6ImRlZmVjdCIsImxpbmVfbnVtYmVyIjowLCJuYW1lIjoiVG9vbCAnc2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbicgdGFrZXMgYSBmcmVlZm9ybSAncXVlcnknIiwicmVtZWRpYXRpb24iOiJDb25zdHJhaW4gJ3F1ZXJ5JyB3aXRoIGFuIGVudW0vcGF0dGVybjsgZnJlZWZvcm0gaXMgYW4gaW5qZWN0aW9uL1JDRSB2ZWN0b3IuIiwic2V2ZXJpdHkiOiJoaWdoIiwic2hpcHBlZCI6dHJ1ZX1dLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjoxfSwicG9zaXRpdmVTaWduYWxzIjpbIjIgdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0Ijoid2FybmluZ3MiLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDptaWdyYXRlX3BhZ2VzX3RvX3dvcmtlcnNfZ3VpZGUiOiJzaGEyNTY6NGNlYTQ4YjFkYTdlMWNmOWI5NjRkMzk1NjhjNzM1OTNiMmE3MjZkMDlmNTdmMDIwODBjZDg5Yjk3NTNiMmEwMSIsInRvb2w6c2VhcmNoX2Nsb3VkZmxhcmVfZG9jdW1lbnRhdGlvbiI6InNoYTI1Njo2Mjk0ZTk5MTk3ZjA2NWY0MDAxNGM4ZjQzYjBjZDYzMmFmZmIyMjdmNzkwZThlYzU3YjhjMjFlNzc5MzdhODRiIn0sInRvb2xNYW5pZmVzdERpZ2VzdCI6InNoYTI1NjoyMTFkNjRiNDk2NGMxZmE5YmJhN2Q0ZDIxYjdkMGY0ODZjN2U2MWY0MGYyZmI3MjA2NzAwNDUxOTJlZGM5ZGE1IiwidHJ1c3RTY29yZSI6OTksInRydXN0VGllciI6InZlcmlmaWVkIn0sInNjYW5uZWRBdCI6IjIwMjYtMTAtMTNUMTY6MDg6MzkuMDU1WiIsInN1YmplY3QiOnsiaWQiOiJtY3A6aHR0cHM6Ly9kb2NzLm1jcC5jbG91ZGZsYXJlLmNvbS9tY3AiLCJyZXBvIjoibWNwOmh0dHBzOi8vZG9jcy5tY3AuY2xvdWRmbGFyZS5jb20vbWNwIn0sInR5cGUiOiJTZWN1cml0eVBvc3R1cmVBdHRlc3RhdGlvbiJ9.QIn7QsESz_mN3fOnF1DrS979f4EUJpuCdBYy3UIB1GtdYUpYuwC5LA6GJNNIM6y84KW5wPhoQwmWzJS7K8QcBg",
+      "expect": {
+        "signature_valid": false,
+        "canonical_bytes": true,
+        "subject_binds": true,
+        "tool_binds": true,
+        "tool_digest_binds": true,
+        "fresh": true,
+        "rely": false
+      }
+    }
+  ]
+}

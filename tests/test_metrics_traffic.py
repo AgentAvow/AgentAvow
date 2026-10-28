@@ -70,6 +70,22 @@ async def test_series_is_per_day_with_gaps_left_empty(redis):
     assert any("nginx-origin" in n for n in body["notes"])
 
 
+@pytest.mark.parametrize("day,source,shown", [
+    ("2026-10-19", None, True),            # the protocol-reject proxy, valid through 10-19
+    ("2026-10-20", None, False),           # proxy gone after the SDK upgrade: blanked
+    ("2026-10-21", "nginx_400", False),
+    ("2026-10-25", "session_start", True),  # from the server's session-start counter
+])
+def test_cc_sessions_series_break(day, source, shown):
+    row = {"day": day, "cc_sessions": 1400, "owner_cc_sessions": 3}
+    if source:
+        row["cc_sessions_source"] = source
+    out = md._drop_dead_cc_sessions(dict(row))
+    assert (out["cc_sessions"] == 1400) is shown
+    assert (out["owner_cc_sessions"] == 3) is shown
+    assert any("Series break at 2026-10-20" in n for n in md._TRAFFIC_NOTES)
+
+
 async def test_non_admin_is_refused(redis):
     async with AsyncClient(transport=ASGITransport(app=_app(admin=False)), base_url="http://t") as c:
         res = await c.get("/api/v1/admin/metrics/traffic")
@@ -86,3 +102,45 @@ async def test_redis_failure_fails_open(monkeypatch):
         res = await c.get("/api/v1/admin/metrics/traffic", params={"days": 7})
     assert res.status_code == 200
     assert res.json()["rows"] == [] and res.json()["latest"] is None
+
+
+def _snapshot_module():
+    import importlib.util
+    from pathlib import Path
+    path = (Path(__file__).resolve().parents[1] / "scripts" / "ops"
+            / "anthropic_traffic_snapshot.py")
+    spec = importlib.util.spec_from_file_location("anthropic_traffic_snapshot", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_snapshot_reads_cc_sessions_from_the_session_start_counter():
+    snap = _snapshot_module()
+    assert snap._cc_sessions_fields({"session_start_cc": 312, "session_starters_cc": 240}) == {
+        "cc_sessions": 312, "cc_sessions_source": "session_start",
+        "cc_session_starters": 240, "owner_cc_sessions": ""}
+    # Before the counter exists (key missing): the nginx 400 proxy, tagged as such.
+    assert snap._cc_sessions_fields({"session_start_cc": None}) == {
+        "cc_sessions_source": "nginx_400"}
+    # The deploy day's count is partial: not used before the first full day.
+    assert snap._cc_sessions_fields({"session_start_cc": 4}, "2026-10-21") == {
+        "cc_sessions_source": "nginx_400"}
+    assert snap._cc_sessions_fields({"session_start_cc": 4}, "2026-10-22")[
+        "cc_sessions_source"] == "session_start"
+    assert {"cc_sessions_source", "cc_session_starters"} <= set(snap.COLUMNS)
+
+
+def test_snapshot_rewrites_old_rows_under_the_new_header(tmp_path):
+    snap = _snapshot_module()
+    path = tmp_path / "traffic.csv"
+    path.write_text("day,cc_sessions\n2026-10-19,1903\n")
+    snap.write_row({"day": "2026-10-22", "cc_sessions": 300,
+                    "cc_sessions_source": "session_start"}, str(path))
+    lines = path.read_text().splitlines()
+    assert lines[0].split(",") == snap.COLUMNS
+    rows = {r.split(",")[0]: r for r in lines[1:]}
+    assert set(rows) == {"2026-10-19", "2026-10-22"}
+    col = snap.COLUMNS.index("cc_sessions_source")
+    assert rows["2026-10-22"].split(",")[col] == "session_start"
+    assert rows["2026-10-19"].split(",")[col] == ""

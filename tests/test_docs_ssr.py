@@ -6,6 +6,8 @@ reviewers see the docs, not the SPA's empty shell.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -240,3 +242,33 @@ async def test_unknown_slug_is_a_404_that_still_shows_the_hub(client: AsyncClien
     resp = await client.get("/api/v1/docpages/does-not-exist")
     assert resp.status_code == 404
     assert "AgentAvow Documentation" in resp.text
+
+
+def test_italic_renders_and_identifiers_stay_literal():
+    assert mod._inline("a *b* c") == "a <em>b</em> c"
+    assert mod._inline("_not_ here") == "<em>not</em> here"
+    assert mod._inline("trust_score and min_score") == "trust_score and min_score"
+    assert mod._inline("2*3*4") == "2*3*4"
+    assert mod._inline("**bold** and *it*") == "<strong>bold</strong> and <em>it</em>"
+    assert mod._inline("`a_b_` x") == "<code>a_b_</code> x"
+
+
+@pytest.mark.parametrize("slug,title", mod.DOCS)
+def test_no_doc_leaves_literal_emphasis_markers(slug, title):
+    body = mod._render_body(mod._load(slug) or "")
+    # strip code so `*` / `_` inside code spans and blocks don't count
+    text = re.sub(r"<(pre|code)>.*?</\1>", "", body, flags=re.S)
+    assert not re.search(r"(?<![\w*])\*[A-Za-z][^*<\n]*\*(?![\w*])", text), slug
+
+
+@pytest.mark.asyncio
+async def test_doc_page_has_one_h1_and_a_way_back(client: AsyncClient):
+    resp = await client.get("/api/v1/docpages/check-guide")
+    assert resp.status_code == 200
+    assert resp.text.count("<h1") == 1
+    assert 'class="top"' in resp.text and 'href="/docs"' in resp.text
+
+
+@pytest.mark.parametrize("slug,title", mod.DOCS)
+def test_no_internal_rebrand_note_in_docs(slug, title):
+    assert "Staged rebrand doc" not in (mod._load(slug) or "")

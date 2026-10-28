@@ -46,10 +46,42 @@ def test_injection_blocks():
     assert _gate(r, "no_injection")["status"] == "fail"
 
 
-def test_annotation_lie_blocks():
-    r = evaluate_gates(_mcp_data(categories={"annotation_lie": 1}), surface="mcp", auth=None)
-    assert _gate(r, "truthful_annotations")["status"] == "fail"
+def _with_items(data, *items):
+    data["findings"]["items"] = list(items)
+    return data
+
+
+def test_annotation_lie_with_evidence_blocks():
+    """HIGH = evidence (a command/script param on a read-only tool, or the sandbox
+    watched it write): a predicted rejection."""
+    d = _with_items(_mcp_data(categories={"annotation_lie": 1}),
+                    {"category": "annotation_lie", "severity": "high"})
+    r = evaluate_gates(d, surface="mcp", auth=None)
+    g = _gate(r, "truthful_annotations")
+    assert g["status"] == "fail" and g["severity"] == "blocker"
     assert r["directory_ready"] is False
+
+
+def test_annotation_lie_from_wording_only_warns():
+    """MEDIUM = inferred from description wording alone: a warning, not a blocker
+    (Kenne, 2026-10-08)."""
+    d = _with_items(_mcp_data(categories={"annotation_lie": 2}),
+                    {"category": "annotation_lie", "severity": "medium"},
+                    {"category": "annotation_lie", "severity": "medium"})
+    r = evaluate_gates(d, surface="mcp", auth=None)
+    g = _gate(r, "truthful_annotations")
+    assert g["status"] == "warn" and g["severity"] == "warning"
+    assert "2 read-only tool(s)" in g["detail"]
+    assert r["directory_ready"] is True
+    assert r["summary"]["warnings"] >= 1
+
+
+def test_annotation_lie_mixed_blocks_on_the_high_one():
+    d = _with_items(_mcp_data(categories={"annotation_lie": 2}),
+                    {"category": "annotation_lie", "severity": "high"},
+                    {"category": "annotation_lie", "severity": "medium"})
+    g = _gate(evaluate_gates(d, surface="mcp", auth=None), "truthful_annotations")
+    assert g["status"] == "fail" and g["detail"].startswith("1 tool(s)")
 
 
 def test_lethal_trifecta_blocks():

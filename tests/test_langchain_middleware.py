@@ -199,11 +199,34 @@ def test_evaluate_allow_with_matching_digest():
 
 def test_evaluate_low_score():
     g = tg.Grade.from_response(SERVER, grade_json(score=64))
-    d = tg.evaluate("ask_wiki_question", SERVER, g, served_definition=TOOL)
+    d = tg.evaluate("ask_wiki_question", SERVER, g, min_score=81, served_definition=TOOL)
     assert not d.allow and d.outcome == "low_score"
     assert "64/100" in d.reason and "below the floor of 81" in d.reason
     assert "Report: https://agentavow.com/check/mcp?endpoint=" in d.reason
     assert tg.evaluate("t", SERVER, g, min_score=60, served_definition=TOOL).allow
+
+
+def test_default_policy_follows_the_answer_not_the_81_rule():
+    """A tool that reads Safe to connect at 64 runs by default (floor 51); one that
+    reads Review is stopped unless fail_on is relaxed to do_not_connect."""
+    safe = tg.Grade.from_response(SERVER, {**grade_json(score=64), "decision": "safe",
+                                           "decision_reason": "nothing found"})
+    assert tg.DEFAULT_MIN_SCORE == 51
+    assert tg.evaluate("ask_wiki_question", SERVER, safe, served_definition=TOOL).allow
+    review = tg.Grade.from_response(SERVER, {**grade_json(score=88), "decision": "review",
+                                             "decision_reason": "deprecated by its maintainer"})
+    d = tg.evaluate("ask_wiki_question", SERVER, review, served_definition=TOOL)
+    assert not d.allow and d.outcome == "decision"
+    assert "Review before you connect (deprecated by its maintainer)" in d.reason
+    assert tg.evaluate("t", SERVER, review, served_definition=TOOL,
+                       fail_on="do_not_connect").allow
+    dnc = tg.Grade.from_response(SERVER, {**grade_json(score=88), "decision": "do_not_connect",
+                                          "decision_reason": "known-malicious package"})
+    assert not tg.evaluate("t", SERVER, dnc, served_definition=TOOL,
+                           fail_on="do_not_connect").allow
+    assert tg.evaluate("t", SERVER, dnc, served_definition=TOOL, fail_on="none").allow
+    with pytest.raises(ValueError):
+        tg.ToolGate(fail_on="sometimes")
 
 
 def test_evaluate_high_finding_blocks_even_with_a_good_score():

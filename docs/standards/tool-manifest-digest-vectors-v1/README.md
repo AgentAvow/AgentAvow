@@ -71,12 +71,16 @@ A consumer reports these separately. None is derived from another.
   computed from the definition it was served. `not_evaluated` when `tool_binds` is false:
   there is no signed digest to compare, and the verifier says so rather than reporting a
   failure it did not measure.
-- **fresh**: `evaluation_time` is inside `[issuedAt, expiresAt)`.
+- **fresh**: `evaluation_time` is inside `[issuedAt, expiresAt)`, compared as instants, not as
+  strings, at the precision the timestamps carry. The signed times have microseconds and an
+  explicit `+00:00`; gate times have milliseconds and `Z`. A string comparison, or a parser that
+  truncates to milliseconds (JavaScript `Date`), misjudges a gate time just inside the window.
+  See the [supported time contract and boundary controls](time-contract.md).
 
-`rely` is all six. Whether a gate proceeds on `rely=true` is a separately versioned
+`rely` is true only when all six axes are `true`; `not_evaluated` is not `true`, so it never relies. Whether a gate proceeds on `rely=true` is a separately versioned
 admission policy.
 
-## The six cases
+## The seven cases
 
 1. **tool-match**: the positive case.
 2. **unknown-tool**: the gate authorizes `delete_wiki_page`, which the scan never saw.
@@ -87,8 +91,16 @@ admission policy.
 5. **past-expiry**: evaluated after `expiresAt`.
 6. **tampered-payload**: score raised after signing, payload re-canonicalized, original
    signature kept. Canonical bytes still check; the signature does not.
+7. **boundary-fresh**: a gate time inside the window by less than a millisecond. It is
+   `expiresAt` truncated to millisecond precision and written with `Z`, the shape a
+   millisecond clock produces. Every axis passes. A consumer that compares the timestamps
+   as strings, or parses them with something that truncates to milliseconds, reads it as
+   expired.
 
-Each negative fails exactly one axis, and the verifier asserts that.
+Each negative fails exactly one axis, and the verifier asserts that. `boundary-fresh` is a
+second positive rather than a negative: it is the only case where comparing instants,
+truncating to milliseconds and comparing strings do not all agree, so it is the one that
+tells a correct consumer from one that happens to pass the other six.
 
 ## What the verifier also checks
 
@@ -101,7 +113,7 @@ correctly.
 
 ## Key encoding
 
-The pinned server's tool names are plain ASCII, so the six cases never exercise the
+The pinned server's tool names are plain ASCII, so the seven cases never exercise the
 key rules. `key_encoding` in the vector file carries thirteen name-to-key pairs that
 do: seven for percent-encoding (`=`, `%`, space, a tab, `é`, an emoji) and six for the
 length rule (an encoded body of exactly 128 stays literal; 129 ASCII characters, 200
@@ -208,6 +220,17 @@ reader's `pyproject.toml` says Python 3.13 or newer; it also runs on 3.14. Its r
 dependencies are `cryptography` and `rfc8785`, at the versions pinned in that
 requirements file.
 
+## Contributors
+
+- **Mayur Agnihotri** ([@Mayur021](https://github.com/Mayur021)): a separate reader that reproduced all six cases on
+  2026-10-08, the finding that string or millisecond comparison misjudges freshness inside the window, and the
+  `boundary-fresh` vector (#131).
+- **Sankalp Gilda, Probity** ([@astrogilda](https://github.com/astrogilda)): the signed-map reader run in CI
+  (`probity-v1-compat`), and nanosecond-exact time comparison with calendar checks, a locally signed
+  200 ns window fixture and 49 controls (#132).
+
+Contributions to this folder are accepted under its Apache-2.0 licence; see `CONTRIBUTING.md` at the repository root.
+
 ## Licence
 
 This directory (the vector file, `source.json`, `generate.mjs`, `verify.mjs` and this README) is licensed under
@@ -237,3 +260,22 @@ who performs it.
   (merged 2026-10-07) with per-claim records: an independent record for the key encoding, per-tool
   digests, canonical bytes, signature and case verdicts (a lab-operated run of a reader written by
   Probity), and independently operated runs of these verifiers for v0 and the one-axis property.
+- **Probity Observer** consumes this set as a gate input before a local file effect
+  ([`TOOL-MANIFEST-EFFECT`](https://github.com/probityai/agent-evidence-observer/blob/00e92b0a3fcf53376ebafc6cc9b4abde7e9fdc8c/docs/reference/TOOL-MANIFEST-EFFECT.md)
+  at `probityai/agent-evidence-observer@00e92b0`, fixture vendored unchanged). Three recorded runs, all
+  with the same six-case axes and `--verify` exit 0:
+  - [author-operated](https://github.com/probityai/agent-evidence/issues/24#issuecomment-6275394206)
+    by AgentAvow, macOS arm64, Python 3.12.13;
+  - [reproduced](https://github.com/probityai/agent-evidence/issues/50) by a non-author operator
+    (Pico, @piiiico) on Linux aarch64. Its output files are byte-identical to the author's once the
+    run clock (`runEvaluationTime`) is set to the same value;
+  - [replayed](https://github.com/probityai/agent-evidence/issues/50#issuecomment-6375111046) by the
+    reader's author (Probity, @astrogilda) on Linux x86_64, with the same byte-identical result.
+
+  All three ran the same reader code, so the second and third are reproductions on other platforms,
+  not independent implementations.
+
+## See also
+
+- [v1-annotations](../tool-manifest-digest-vectors-v1-annotations/): a separate pinned packet adding an annotation-only drift case; this packet and its run records are unchanged.
+- [w3c-v01](w3c-v01/): the runs of this set by `verify.mjs`, the Probity reader and heldfast, written as v0.1 reports of the W3C Agent Conformance CG reporting format, with the command that re-runs them.

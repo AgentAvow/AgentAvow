@@ -1,0 +1,2645 @@
+"""Printed install hints: a `curl … | bash` the code shows a person and never runs.
+
+pm2 prints ``Install NVM: $ curl …/install.sh | bash`` when NVM is missing; the Vercel
+CLI tells you how to reinstall it (``To reinstall the CLI manually, run: ${CURL_…}``);
+gemini-mcp-tool puts the Antigravity installer in an ENOENT error message. Each matches
+the critical "curl/wget piped to shell" rule as text, and none of them runs it.
+
+:func:`hint_only` answers one question for one pipe-to-shell match in a JS / TS or
+Python file: does the matched string reach ONLY human-facing output? It follows the
+string's value, conservatively, and says yes only when every path ends in
+
+* a print / log call (``console.*``, ``process.stdout|stderr.write``, a logger method
+  the package itself defines whose body runs nothing, Python ``print`` / ``logging`` /
+  ``click.echo`` …);
+* an ``Error`` / exception message, or a ``throw`` (unless some ``catch`` in the
+  package hands a caught error to a command runner);
+* a discarded expression, a comparison, or an import / export list.
+
+On the way the value may pass through string building (``+``, template / f-string
+interpolation, ``.join`` / ``.trim`` …, colour formatters such as chalk), a ternary, an
+array that is only pushed to and joined, a ``const`` / ``var`` binding (every read in
+scope is followed), an object property of a top-level constant (every read of the
+object must be a static ``.prop``), or a function's return value (every call site is
+followed). Anything else, including any read the walk cannot classify, a direct
+``eval`` in scope, the name mentioned inside a string, a namespace import of the
+defining module, or a module that does not tokenize cleanly, keeps the finding as it
+was. ``files`` is the whole package for an artifact scan (exported names are followed
+into every file that mentions them) or just the one file for a per-file scan, where a
+name that leaves the file keeps its severity.
+
+Not applied to shell scripts, package.json lifecycle scripts, Markdown / agent
+instruction files or any other format: those are unchanged.
+"""
+from __future__ import annotations
+
+import ast
+import copy
+import re
+from bisect import bisect_right
+from pathlib import Path
+
+JS_EXTS = frozenset({".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts"})
+PY_EXTS = frozenset({".py"})
+_DTS_SUFFIXES = (".d.ts", ".d.mts", ".d.cts")
+# Files that may mention a name without running anything: type declarations, source
+# maps, prose. Any OTHER file that mentions a followed name (package.json, a shell
+# script, a YAML config …) keeps the finding.
+_INERT_SUFFIXES = (".d.ts", ".d.mts", ".d.cts", ".map", ".md", ".markdown", ".txt",
+                   ".rst", ".html", ".htm", ".css", ".svg", ".png", ".jpg", ".gif")
+
+WHY = ("Install command shown to a person (printed, logged, or put in an error "
+       "message); no code in the package runs it. Reported for visibility.")
+
+_MAX_STEPS = 400  # total climb steps per question (bounded work on a huge bundle)
+
+
+def is_supported(path: str) -> bool:
+    p = path.lower()
+    if p.endswith(_DTS_SUFFIXES):
+        return False
+    return Path(p).suffix in JS_EXTS or Path(p).suffix in PY_EXTS
+
+
+class _UnclassifiedError(Exception):
+    """The walk met something it cannot classify: keep the finding."""
+
+
+# ---------------------------------------------------------------------------
+# JavaScript / TypeScript tokenizer
+# ---------------------------------------------------------------------------
+
+_ID_RE = re.compile(r"#?[A-Za-z_$\u0080-￿][\w$\u0080-￿]*")
+_NUM_RE = re.compile(r"(?:0[xXoObB][\w]+|\d[\d_]*(?:\.[\d_]*)?(?:[eE][+-]?\d+)?n?"
+                     r"|\.\d[\d_]*(?:[eE][+-]?\d+)?)")
+_WS_RE = re.compile(r"[ \t\r\f\v ﻿  ]+")
+_SQ_RE = re.compile(r"'(?:[^'\\\n]|\\[\s\S])*'")
+_DQ_RE = re.compile(r'"(?:[^"\\\n]|\\[\s\S])*"')
+_TPL_BODY_RE = re.compile(r"(?:[^`\\$]|\\[\s\S]|\$(?!\{))*")
+_REGEX_RE = re.compile(r"/(?![*/])(?:[^/\\\[\n]|\\.|\[(?:[^\]\\\n]|\\.)*\])+/[A-Za-z]*")
+_PUNCTS = sorted("""
+>>>= ... === !== **= <<= >>= >>> &&= ||= ??= => == != <= >= && || ?? ?. ++ -- += -= *= /=
+%= &= |= ^= ** << >> { } ( ) [ ] ; , < > + - * / % & | ^ ! ~ ? : = . @
+""".split(), key=len, reverse=True)
+_PUNCT_RE = re.compile("|".join(re.escape(p) for p in _PUNCTS))
+_REGEX_AFTER_KW = frozenset({
+    "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw",
+    "case", "do", "else", "yield", "await",
+})
+
+
+class _Toks:
+    """Token arrays for one JS file: type, start, end, value, newline-before, match."""
+
+    __slots__ = ("typ", "st", "en", "val", "nl", "match", "head", "clean", "by_val")
+
+    def __init__(self, text: str) -> None:
+        typ: list[str] = []
+        st: list[int] = []
+        en: list[int] = []
+        val: list[str] = []
+        nl: list[bool] = []
+        match: dict[int, int] = {}
+        head: dict[int, int] = {}  # template mid/tail → its head
+        stack: list[tuple[str, int]] = []  # ("(", i) / ("[", i) / ("{", i) / ("T", head)
+        clean = True
+        i, n = 0, len(text)
+        saw_nl = False
+        if text.startswith("#!"):
+            j = text.find("\n")
+            i = n if j == -1 else j
+        prev_sig: tuple[str, str] | None = None
+
+        def emit(t: str, a: int, b: int) -> None:
+            nonlocal saw_nl, prev_sig
+            typ.append(t)
+            st.append(a)
+            en.append(b)
+            v = text[a:b] if t in ("id", "punct") else ""
+            val.append(v)
+            nl.append(saw_nl)
+            saw_nl = False
+            prev_sig = (t, v)
+
+        def template(start: int, opener: str, head_idx: int | None) -> int:
+            """Scan template text from ``start``; emit a token; return next pos."""
+            nonlocal clean
+            m = _TPL_BODY_RE.match(text, start)
+            j = m.end()
+            if j < n and text[j] == "`":
+                if opener == "`":
+                    emit("tpl", start - 1, j + 1)
+                else:
+                    emit("tpl_tail", start - 1, j + 1)
+                    k = len(typ) - 1
+                    head[k] = head_idx
+                    match[head_idx] = k
+                    match[k] = head_idx
+                return j + 1
+            if text.startswith("${", j):
+                if opener == "`":
+                    emit("tpl_head", start - 1, j + 2)
+                    k = len(typ) - 1
+                    stack.append(("T", k))
+                else:
+                    emit("tpl_mid", start - 1, j + 2)
+                    head[len(typ) - 1] = head_idx
+                    stack.append(("T", head_idx))
+                return j + 2
+            clean = False  # unterminated template
+            return n
+
+        while i < n:
+            c = text[i]
+            if c == "\n":
+                saw_nl = True
+                i += 1
+                continue
+            m = _WS_RE.match(text, i)
+            if m:
+                i = m.end()
+                continue
+            if text.startswith("//", i) or text.startswith("<!--", i):
+                j = text.find("\n", i)
+                i = n if j == -1 else j
+                continue
+            if text.startswith("/*", i):
+                j = text.find("*/", i + 2)
+                if j == -1:
+                    clean = False
+                    break
+                if "\n" in text[i:j]:
+                    saw_nl = True
+                i = j + 2
+                continue
+            if c == "'" or c == '"':
+                m = (_SQ_RE if c == "'" else _DQ_RE).match(text, i)
+                if not m:
+                    clean = False
+                    emit("punct", i, i + 1)
+                    i += 1
+                    continue
+                emit("str", i, m.end())
+                i = m.end()
+                continue
+            if c == "`":
+                i = template(i + 1, "`", None)
+                continue
+            if c == "}" and stack and stack[-1][0] == "T":
+                _, h = stack.pop()
+                i = template(i + 1, "}", h)
+                continue
+            m = _ID_RE.match(text, i)
+            if m:
+                emit("id", i, m.end())
+                i = m.end()
+                continue
+            m = _NUM_RE.match(text, i)
+            if m and m.end() > i:
+                emit("num", i, m.end())
+                i = m.end()
+                continue
+            if c == "/":
+                regex_ok = (prev_sig is None
+                            or prev_sig[0] in ("tpl_head", "tpl_mid")
+                            or (prev_sig[0] == "punct" and prev_sig[1] not in (")", "]", "}"))
+                            or (prev_sig[0] == "id" and prev_sig[1] in _REGEX_AFTER_KW))
+                if regex_ok:
+                    m = _REGEX_RE.match(text, i)
+                    if m:
+                        emit("regex", i, m.end())
+                        i = m.end()
+                        continue
+                else:
+                    # Read as division. If it could also open a regex literal that
+                    # holds an unpaired quote (`if (a) /'/.test(b)`), the two readings
+                    # disagree on what is string and what is code: not clean.
+                    m = _REGEX_RE.match(text, i)
+                    # (A span through `;` is two statements, not a regex.)
+                    if m and prev_sig[1] in (")", "}") and ";" not in m.group(0) and any(
+                            m.group(0).count(q) % 2 for q in "'\"`"):
+                        clean = False
+            m = _PUNCT_RE.match(text, i)
+            if m:
+                p = m.group(0)
+                emit("punct", i, m.end())
+                k = len(typ) - 1
+                if p in ("(", "[", "{"):
+                    stack.append((p, k))
+                elif p in (")", "]", "}"):
+                    want = {")": "(", "]": "[", "}": "{"}[p]
+                    if stack and stack[-1][0] == want:
+                        o = stack.pop()[1]
+                        match[o] = k
+                        match[k] = o
+                    else:
+                        clean = False
+                i = m.end()
+                continue
+            # Anything else (JSX text, a stray byte): not a clean JS tokenization.
+            clean = False
+            i += 1
+        if stack:
+            clean = False
+        self.typ, self.st, self.en, self.val, self.nl = typ, st, en, val, nl
+        self.match, self.head, self.clean = match, head, clean
+        by_val: dict[str, list[int]] = {}
+        for k, (t, v) in enumerate(zip(typ, val)):
+            if t == "id":
+                by_val.setdefault(v, []).append(k)
+        self.by_val = by_val
+
+    def __len__(self) -> int:
+        return len(self.typ)
+
+    def is_p(self, k: int, *vals: str) -> bool:
+        return 0 <= k < len(self.typ) and self.typ[k] == "punct" and self.val[k] in vals
+
+    def is_id(self, k: int, *vals: str) -> bool:
+        return 0 <= k < len(self.typ) and self.typ[k] == "id" and (
+            not vals or self.val[k] in vals)
+
+    def at(self, pos: int) -> int:
+        """Index of the token whose span contains ``pos`` (or -1)."""
+        k = bisect_right(self.st, pos) - 1
+        if k >= 0 and self.st[k] <= pos < self.en[k]:
+            return k
+        return -1
+
+
+_KEYWORDS = frozenset({
+    "if", "for", "while", "switch", "catch", "with", "return", "typeof", "void",
+    "delete", "throw", "new", "in", "of", "instanceof", "case", "do", "else", "var",
+    "let", "const", "function", "class", "export", "import", "default", "yield",
+    "await", "async", "try", "finally", "extends", "super", "this", "null", "true",
+    "false", "undefined", "debugger", "break", "continue", "static", "get", "set",
+})
+_LEFT_STOP_PUNCT = frozenset({
+    "=", "(", "[", "{", ",", ";", "=>", "+=", "-=", "*=", "/=", "%=", "**=", "<<=",
+    ">>=", ">>>=", "&=", "|=", "^=", "&&=", "||=", "??=", "...",
+})
+_RIGHT_STOP_PUNCT = frozenset({
+    ")", "]", "}", ",", ";", "=", "=>", "+=", "-=", "*=", "/=", "%=", "**=", "<<=",
+    ">>=", ">>>=", "&=", "|=", "^=", "&&=", "||=", "??=",
+})
+_STOP_KW = frozenset({
+    "return", "throw", "case", "yield", "else", "do", "var", "let", "const", "export",
+    "default", "if", "while", "for", "switch", "with", "catch", "extends", "import",
+    "from",
+})
+_COND_KW = frozenset({"if", "while", "switch", "for"})
+# Methods on a string / array that hand back a value derived from it and call nothing.
+_SAFE_METHODS = frozenset({
+    "join", "trim", "trimStart", "trimEnd", "toString", "slice", "substring", "concat",
+    "padStart", "padEnd", "toUpperCase", "toLowerCase", "split", "includes",
+    "startsWith", "endsWith", "indexOf", "length", "at", "charAt",
+})
+_CONSOLE_METHODS = frozenset({"log", "error", "warn", "info", "debug", "trace"})
+# Method names a package's own output layer uses. Accepted only when the package defines
+# the method and no definition of it runs anything.
+_OUTPUT_METHODS = frozenset({
+    "log", "error", "warn", "warning", "info", "debug", "trace", "print", "printOut",
+    "printError", "fatal", "note", "success", "notice", "verbose", "say", "hint",
+    "always",  # neurolink's `logger.always(…)`: console.log past the level filter
+})
+_STYLE_NAMES = frozenset({
+    "default", "bold", "dim", "italic", "underline", "inverse", "strikethrough", "reset",
+    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray",
+    "grey", "redBright", "greenBright", "yellowBright", "blueBright", "magentaBright",
+    "cyanBright", "whiteBright", "blackBright", "bgRed", "bgGreen", "bgYellow",
+    "bgBlue", "bgMagenta", "bgCyan", "bgWhite", "bgBlack", "visible", "hidden",
+})
+# Dependencies a print method may call with the message (formatting / terminal output).
+_SAFE_OUTPUT_DEPS = frozenset({
+    "util", "node:util", "chalk", "picocolors", "kleur", "colorette", "strip-ansi",
+    "ansi-escapes", "wrap-ansi", "string-width", "log-symbols", "figures", "boxen",
+    "cli-cursor", "ora", "supports-color", "ansi-styles", "ansis", "colors", "cli-color",
+})
+_COLOR_LIB_RE = re.compile(r"(?i)chalk|kleur|picocolors|colorette|ansi[_-]?colors")
+_BUILTIN_ERRORS = frozenset({
+    "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError",
+    "URIError", "AggregateError",
+})
+# What a definition's body must not contain for a print / format method to be trusted.
+_JS_SINK_RE = re.compile(
+    r"""child_process|(?<!['"])\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|"""
+    r"""fork|execa\w*|eval|system|popen|shell)\b(?!['"])|\bFunction\s*\(|\$\s*`|\bshelljs\b|Reflect\s*\."""
+    r"""\s*apply|\bimport\s*\(|\brequire\s*\(\s*[^'"`\s)]|\bvm\s*\.\s*run|writeFile|"""
+    r"""\[\s*[\w$.]+\s*\]\s*\(""")
+_JS_RUN_CALL = (r"(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|execa\w*|eval|"
+                r"Function|system|popen|\$)")
+# Where a thrown error's message can land: a catch binding, a rejection handler, a
+# process-level error handler.
+_CATCH_RE = re.compile(
+    r"""\bcatch\s*\(\s*([\w$]+)\s*\)|\.catch\s*\(\s*(?:async\s*)?(?:function\s*[\w$]*\s*)?"""
+    r"""\(?\s*([\w$]+)|['"](?:uncaughtException|unhandledRejection|error)['"]\s*,\s*"""
+    r"""(?:async\s*)?(?:function\s*[\w$]*\s*)?\(?\s*([\w$]+)|\.then\s*\([^,()]*,\s*"""
+    r"""(?:async\s*)?(?:function\s*[\w$]*\s*)?\(?\s*([\w$]+)""")
+# `console` / the std streams replaced, wrapped or bound to something else.
+_CONSOLE_SHADOW_RE = re.compile(
+    r"""\bconsole\s*(?:\.\s*[\w$]+\s*|\[[^\]]*\]\s*)?=(?!=)|\b(?:var|let|const|function|"""
+    r"""class)\s+console\b|defineProperty\s*\(\s*console\b|assign\s*\(\s*console\b|"""
+    r"""[(,]\s*console\s*[,)=]|\{\s*console\s*[,}:]|[,{]\s*console\s*\}|\bConsole\s*\(|"""
+    r"""process\s*\.\s*std(?:out|err)\s*(?:\.\s*write\s*)?=(?!=)|"""
+    r"""defineProperty\s*\(\s*process\b|setPrototypeOf\s*\(\s*console\b|"""
+    r"""['"`]console['"`]\s*\]\s*=|defineProperty\s*\([^,]*,\s*['"`]console['"`]|"""
+    r"""\bwith\s*\(|"""
+    # `console` read as a value (`const c = console; c.log = …`): an alias that can be
+    # written through.
+    r"""(?<![=!<>])=\s*console\s*(?:[;,)}\n]|$)|\breturn\s+console\b|:\s*console\s*[,}]""")
+
+# An MCP stdio server keeps stdout for the protocol and moves human output to stderr:
+#
+#     import { Console } from 'node:console';
+#     const err = new Console({ stdout: process.stderr, stderr: process.stderr });
+#     console.log = err.log.bind(err);
+#     process.stdout.write = (chunk, enc, cb) => { process.stderr.write(…); … };
+#
+# Each line hits ``_CONSOLE_SHADOW_RE``, and the shadow check is tree-wide, so one such
+# server anywhere in a monorepo kept every printed hint in every other package critical
+# (atomicstrata/atomicmemory, 2026-10-28). Output still goes to a std stream, so these
+# exact shapes are excused hit by hit (:func:`_stderr_routing_excused`); any other hit
+# in the same file still counts.
+_NODE_CONSOLE_IMPORT_RE = re.compile(
+    r"""\bimport\s*\{\s*Console\s*\}\s*from\s*['"](?:node:)?console['"]|"""
+    r"""\b(?:const|let|var)\s*\{\s*Console\s*\}\s*=\s*require\s*\(\s*['"](?:node:)?console['"]"""
+    r"""\s*\)""")
+# Every identifier a replacement ``process.stdout.write`` may use besides its own
+# parameters and locals: the std streams, Buffer decoding, a microtask, type words.
+_STREAM_FN_VOCAB = frozenset({
+    "process", "Buffer", "queueMicrotask", "typeof", "return", "true", "false",
+    "undefined", "null", "const", "let", "if", "else", "function", "as", "void",
+    # TypeScript type words: never called, never a member root.
+    "string", "unknown", "boolean", "number", "BufferEncoding", "Uint8Array",
+})
+# ... and these only as a member (``process.stderr.write``, ``Buffer.from(c).toString()``).
+_STREAM_FN_MEMBERS = frozenset({"stdout", "stderr", "write", "from", "toString"})
+_TS_TYPE_WORDS = frozenset({"string", "unknown", "boolean", "number", "BufferEncoding",
+                            "Uint8Array"})
+# Globals the excused shapes rely on; a file that binds one of them gets no excusal.
+_STD_GLOBALS = frozenset({"process", "Buffer", "queueMicrotask"})
+_ASSIGN_OPS = frozenset({"=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=",
+                         "&=", "|=", "^=", "&&=", "||=", "??=", "++", "--"})
+
+
+def _std_globals_bound(t: _Toks) -> bool:
+    """Does the file declare, take as a parameter, destructure into, or assign one of
+    ``_STD_GLOBALS`` (``function f(process) …``, ``globalThis.process = …``)?"""
+    for name in _STD_GLOBALS:
+        for k in t.by_val.get(name, []):
+            if t.is_id(k - 1, "var", "let", "const", "function", "class", "import", "catch"):
+                return True
+            if t.is_p(k + 1, *_ASSIGN_OPS) or t.is_p(k - 1, "++", "--"):
+                return True
+            if (t.is_p(k - 1, "(", ",", "{", "[", "...")
+                    and t.is_p(k + 1, ",", ")", "}", "]", "=>")):
+                return True  # a parameter, a destructuring target or a shorthand
+            if t.is_p(k - 1, "(", ",") and t.is_p(k + 1, ":", "?", "?:", "="):
+                return True  # a typed / optional / defaulted parameter (or a key: kept)
+    return False
+
+
+def _std_stream_at(t: _Toks, k: int) -> int | None:
+    """``process.stdout`` / ``process.stderr`` starting at token ``k``: the index after
+    it, else None."""
+    if (t.is_id(k, "process") and not t.is_p(k - 1, ".", "?.") and t.is_p(k + 1, ".")
+            and t.is_id(k + 2, "stdout", "stderr")):
+        return k + 3
+    return None
+
+
+def _console_over_std(t: _Toks, k: int) -> int | None:
+    """``new Console(process.stderr[, process.stderr])`` or ``new Console({ stdout:
+    process.stderr, stderr: process.stderr })`` with ``new`` at ``k``: the index of the
+    closing paren, else None. No other option is accepted."""
+    if not (t.is_id(k, "new") and t.is_id(k + 1, "Console") and t.is_p(k + 2, "(")):
+        return None
+    close = t.match.get(k + 2)
+    if close is None:
+        return None
+    j = k + 3
+    if t.is_p(j, "{"):
+        end = t.match.get(j)
+        if end is None or end + 1 != close:
+            return None
+        j += 1
+        seen: set[str] = set()
+        while j < end:
+            if (not t.is_id(j, "stdout", "stderr") or t.val[j] in seen
+                    or not t.is_p(j + 1, ":")):
+                return None
+            seen.add(t.val[j])
+            nxt = _std_stream_at(t, j + 2)
+            if nxt is None:
+                return None
+            j = nxt + 1 if t.is_p(nxt, ",") else nxt
+            if j > end or (j < end and not t.is_p(nxt, ",")):
+                return None
+        return close if seen else None
+    n = 0
+    while j < close:
+        nxt = _std_stream_at(t, j)
+        if nxt is None:
+            return None
+        n += 1
+        j = nxt + 1 if t.is_p(nxt, ",") else nxt
+        if j < close and not t.is_p(nxt, ","):
+            return None
+    return close if 1 <= n <= 2 else None
+
+
+def _bound_console_method(t: _Toks, k: int, name: str) -> int | None:
+    """``console.<m> = <name>.<m>.bind(<name>)`` with ``console`` at ``k`` (``m`` a
+    console method, the same on both sides, and the statement ending there): the
+    index of the closing paren, else None."""
+    if not (t.is_id(k, "console") and not t.is_p(k - 1, ".", "?.") and t.is_p(k + 1, ".")
+            and t.is_id(k + 2) and t.val[k + 2] in _CONSOLE_METHODS and t.is_p(k + 3, "=")
+            and t.is_id(k + 4, name) and t.is_p(k + 5, ".") and t.is_id(k + 6, t.val[k + 2])
+            and t.is_p(k + 7, ".") and t.is_id(k + 8, "bind") and t.is_p(k + 9, "(")
+            and t.is_id(k + 10, name) and t.is_p(k + 11, ")")):
+        return None
+    k_end = k + 11
+    if k_end + 1 < len(t) and not (t.is_p(k_end + 1, ";", "}") or t.nl[k_end + 1]):
+        return None
+    return k_end
+
+
+def _stream_write_fn_ok(t: _Toks, a: int) -> bool:
+    """The right-hand side of ``process.std(out|err).write =`` starting at token ``a``
+    is a function, optionally parenthesised and cast (``(…) as typeof …``), built only
+    from its own parameters and locals and ``_STREAM_FN_VOCAB``: no computed member, and
+    a parameter or local is only ever called with no arguments. It can write to a std
+    stream and call back; it cannot reach anything that runs a command."""
+    j = a
+    if t.is_p(j, "("):
+        if t.match.get(j) is None:
+            return False
+        j += 1
+    if t.is_id(j, "function"):
+        j += 1
+        if t.is_id(j) and not t.is_p(j, "("):
+            j += 1
+    if not t.is_p(j, "("):
+        return False
+    params_close = t.match.get(j)
+    if params_close is None:
+        return False
+    # Parameters: an identifier right after the list's `(` or a `,` (a TS type follows
+    # a `:` and is checked against the vocabulary like everything else).
+    names = {t.val[q] for q in range(j + 1, params_close)
+             if t.is_id(q) and t.is_p(q - 1, "(", ",")}
+    # End of the statement: `;`, or a newline before a token that cannot continue it.
+    end = len(t)
+    q = a
+    while q < len(t):
+        if t.typ[q] == "punct" and t.val[q] in ("(", "[", "{") and q in t.match:
+            q = t.match[q] + 1
+            continue
+        if t.is_p(q, ";", ")", "]", "}") or (
+                q > a and t.nl[q] and t.typ[q] in ("id", "str", "num")
+                and not t.is_id(q, "as")):
+            end = q
+            break
+        q += 1
+    if end <= params_close:
+        return False
+    for q in range(a, end):
+        if t.is_id(q) and t.is_id(q - 1, "const", "let"):
+            names.add(t.val[q])
+    for q in range(a, end):
+        if t.is_p(q, "[", "?.["):
+            return False
+        if t.is_p(q, *_ASSIGN_OPS) and not (
+                t.is_p(q, "=") and t.is_id(q - 1) and t.is_id(q - 2, "const", "let")):
+            return False  # only `const x = …` / `let x = …`: nothing is stored outside
+        if not t.is_id(q):
+            continue
+        v = t.val[q]
+        if t.is_p(q - 1, ".", "?."):
+            if v not in _STREAM_FN_MEMBERS:
+                return False
+            continue
+        if v in names:
+            if t.is_p(q + 1, "(") and not t.is_p(q + 2, ")"):
+                return False  # a parameter / local called with arguments
+            continue
+        if v not in _STREAM_FN_VOCAB:
+            return False
+        if v in ("process", "Buffer") and not t.is_p(q + 1, "."):
+            return False
+        if v == "queueMicrotask" and not t.is_p(q + 1, "("):
+            return False
+        if v in _TS_TYPE_WORDS and t.is_p(q + 1, "(", ".", "?."):
+            return False
+    return True
+
+
+def _stderr_routing_excused(text: str) -> set[int]:
+    """Start offsets of ``_CONSOLE_SHADOW_RE`` hits in ``text`` (one JS / TS file) that
+    only keep output on a std stream (the MCP stdio shape above):
+
+    * ``new Console(…)`` over ``process.stdout`` / ``process.stderr`` only, ``Console``
+      imported from ``node:console`` and used nowhere else in the file;
+    * ``console.<m> = X.<m>.bind(X)`` where ``const X = new Console(…)`` is such a
+      console and ``X`` is read nowhere else in the file;
+    * ``process.std(out|err).write = <function>`` whose body passes
+      :func:`_stream_write_fn_ok`."""
+    out: set[int] = set()
+    t = _Toks(text)
+    if not t.clean or _std_globals_bound(t):
+        return out
+    imp = list(_NODE_CONSOLE_IMPORT_RE.finditer(text))
+    consoles: dict[str, int] = {}  # const name -> its `new` token
+    if len(imp) == 1:
+        span = imp[0].span()
+        news: dict[int, int] = {}
+        ok = True
+        for k in t.by_val.get("Console", []):
+            if span[0] <= t.st[k] < span[1]:
+                continue
+            close = _console_over_std(t, k - 1)
+            if close is None:
+                ok = False
+                break
+            news[k - 1] = close
+        if ok:
+            for nk, close in news.items():
+                out.add(t.st[nk + 1])
+                if (t.is_p(nk - 1, "=") and t.is_id(nk - 2) and t.is_id(nk - 3, "const")
+                        and (close + 1 >= len(t) or t.is_p(close + 1, ";")
+                             or t.nl[close + 1])):
+                    consoles[t.val[nk - 2]] = nk - 2
+    for name, decl in consoles.items():
+        excused: list[int] = []
+        allowed = {decl}
+        for k in t.by_val.get("console", []):
+            if _bound_console_method(t, k, name) is not None:
+                excused.append(k)
+                allowed.update((k + 4, k + 10))
+        if excused and set(t.by_val.get(name, [])) <= allowed \
+                and len(_decl_re(name).findall(text)) == 1:
+            out.update(t.st[k] for k in excused)
+    for k in t.by_val.get("process", []):
+        nxt = _std_stream_at(t, k)
+        if (nxt is not None and t.is_p(nxt, ".") and t.is_id(nxt + 1, "write")
+                and t.is_p(nxt + 2, "=") and _stream_write_fn_ok(t, nxt + 3)):
+            out.add(t.st[k])
+    return out
+
+
+def _decl_re(name: str) -> re.Pattern:
+    return re.compile(r"\b(?:var|let|const|function|class)\s+" + re.escape(name) + r"\b")
+
+
+def _shadow_hit(rx: re.Pattern, text: str) -> bool:
+    """Does ``rx`` (``_CONSOLE_SHADOW_RE`` or its whole-tree variant) hit ``text``
+    anywhere :func:`_stderr_routing_excused` does not excuse?"""
+    excused: set[int] | None = None
+    for m in rx.finditer(text):
+        if excused is None:
+            excused = _stderr_routing_excused(text)
+        if m.start() not in excused:
+            return True
+    return False
+
+
+def _handler_body(text: str, start: int) -> str:
+    """The block (or concise arrow body) of a catch / error handler starting near
+    ``start`` (approximate; bounded)."""
+    k = start
+    while k < len(text) and k < start + 80 and text[k] not in "{\n;":
+        k += 1
+    if k < len(text) and text[k] == "{":
+        depth, j, lim = 0, k, min(len(text), k + 20000)
+        while j < lim:
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        return text[k:j + 1]
+    return text[start:start + 600]
+
+
+def _binding_spec(text: str, name: str) -> str | None:
+    """The module specifier ``name`` is imported / required from in ``text``."""
+    r = re.escape(name)
+    m = re.search(
+        r"""\bimport\s*(?:[\w$]+\s*,\s*)?\{[^}]*(?<![\w$])""" + r
+        + r"""(?![\w$])[^}]*\}\s*from\s*['"]([^'"]+)['"]|\bimport\s+""" + r
+        + r"""\b[^;'"]*?from\s*['"]([^'"]+)['"]|\bimport\s*\*\s*as\s+""" + r
+        + r"""\s+from\s*['"]([^'"]+)['"]|(?<![\w$.])""" + r
+        + r"""\s*=\s*(?:__toESM\s*\(\s*)?require\s*\(\s*['"]([^'"]+)['"]|\{[^}]*"""
+        + r"""(?<![\w$])""" + r + r"""(?![\w$])[^}]*\}\s*=\s*require\s*\(\s*['"]"""
+        + r"""([^'"]+)['"]""", text)
+    return next((g for g in m.groups() if g), None) if m else None
+
+
+def _concise_body(text: str, j: int) -> str:
+    """A concise arrow body from ``j``: up to the first top-level ``,`` ``;`` or
+    closing bracket (bounded)."""
+    depth, k, lim = 0, j, min(len(text), j + 2000)
+    while k < lim:
+        ch = text[k]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                break
+            depth -= 1
+        elif ch in ",;\n" and depth == 0:
+            break
+        k += 1
+    return text[j:k]
+
+
+def _def_bodies(text: str, name: str) -> list[str]:
+    """Bodies (approximate) of every JS definition of ``name`` in ``text``."""
+    n = re.escape(name)
+    rx = re.compile(
+        r"\bfunction\s*\*?\s*" + n + r"\s*\(|(?<![\w$])" + n
+        + r"\s*[:=]\s*(?:async\s+)?(?:function\b|\([^()]*\)\s*=>|[\w$]+\s*=>)|"
+        r"(?:^|[;{},\s])(?:async\s+|static\s+|get\s+|set\s+)*" + n
+        + r"\s*\([^()]*\)\s*(?::\s*[\w$<>\[\]|, ]+\s*)?\{|(?<![\w$])" + n
+        + r"\s*[:=]\s*[\w$.]+\s*\.\s*bind\s*\(")
+    out = []
+    for m in rx.finditer(text):
+        j = m.end()
+        brace = text.find("{", m.end() - 1, m.end() + 400)
+        arrow_end = m.group(0).rstrip().endswith("=>")
+        if (arrow_end and not text[j:j + 50].lstrip().startswith("{")) or brace == -1:
+            out.append(_concise_body(text, j))
+            continue
+        depth, k, lim = 0, brace, min(len(text), brace + 30000)
+        while k < lim:
+            ch = text[k]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        out.append(text[brace:k + 1])
+    return out
+
+
+class _JsFlow:
+    """Follow one value through JS code (module docstring)."""
+
+    def __init__(self, files: dict[str, str], package: bool) -> None:
+        self.files = files
+        self.package = package
+        self._toks: dict[str, _Toks] = {}
+        self.steps = 0
+        self.followed: set[tuple] = set()
+        self._catch_ok: bool | None = None
+        self.uses = 0
+        self._console_ok: bool | None = None
+        self.code_paths = [p for p in files if Path(p.lower()).suffix in JS_EXTS
+                           and not p.lower().endswith(_DTS_SUFFIXES)]
+
+    # -- helpers ---------------------------------------------------------------
+    def toks(self, path: str) -> _Toks:
+        t = self._toks.get(path)
+        if t is None:
+            t = _Toks(self.files[path])
+            self._toks[path] = t
+        if not t.clean:
+            raise _UnclassifiedError(f"{path}: does not tokenize cleanly")
+        return t
+
+    def tick(self) -> None:
+        self.steps += 1
+        if self.steps > _MAX_STEPS:
+            raise _UnclassifiedError("walk too long")
+
+    # -- entry -----------------------------------------------------------------
+    def literal(self, path: str, start: int, end: int) -> None:
+        """The pipe-to-shell match spans [start, end) of ``path``."""
+        t = self.toks(path)
+        k = t.at(start)
+        if k < 0:
+            raise _UnclassifiedError("match not in a token")
+        ty = t.typ[k]
+        if ty in ("str", "tpl"):
+            if end > t.en[k]:
+                raise _UnclassifiedError("match spans more than one literal")
+            a = b = k
+        elif ty in ("tpl_head", "tpl_mid", "tpl_tail"):
+            h = k if ty == "tpl_head" else t.head[k]
+            tail = t.match[h]
+            if end > t.en[tail]:
+                raise _UnclassifiedError("match leaves the template")
+            a, b = h, tail
+        else:
+            raise _UnclassifiedError("match is not inside a string literal")
+        # `key: "curl … | bash"` in an object literal bound to a top-level constant.
+        if t.is_p(a - 1, ":") and a == b and t.is_p(b + 1, ",", "}") \
+                and (t.typ[a - 2] in ("id", "str")) and t.is_p(a - 3, "{", ","):
+            self.property_value(path, t, a)
+            return
+        self.value(path, a, b)
+
+    # -- property of a top-level object constant ---------------------------------
+    def property_value(self, path: str, t: _Toks, k: int) -> None:
+        key = t.val[k - 2] if t.typ[k - 2] == "id" else \
+            self.files[path][t.st[k - 2] + 1:t.en[k - 2] - 1]
+        if not re.fullmatch(r"[\w$]+", key or ""):
+            raise _UnclassifiedError("computed / odd property key")
+        # Find the object literal's '{'.
+        j = k - 3
+        while j >= 0 and not t.is_p(j, "{"):
+            if t.is_p(j, ")", "]", "}"):
+                j = t.match[j]
+            elif t.typ[j] == "tpl_tail":
+                j = t.match[j]
+            elif t.is_p(j, "(", "["):
+                raise _UnclassifiedError("property inside a nested expression")
+            j -= 1
+        if j < 0:
+            raise _UnclassifiedError("no object literal")
+        if not (t.is_p(j - 1, "=") and t.is_id(j - 2) and t.is_id(j - 3, "const", "let", "var")):
+            raise _UnclassifiedError("object literal is not a constant's initializer")
+        if self.depth_of(t, j) != 0:
+            raise _UnclassifiedError("object constant is not top-level")
+        container = t.val[j - 2]
+        exported = t.is_id(j - 4, "export")
+        if not t.is_p(t.match[j] + 1, ";") and not (
+                t.match[j] + 1 < len(t) and t.nl[t.match[j] + 1]) and t.match[j] + 1 < len(t):
+            raise _UnclassifiedError("object literal is part of a larger expression")
+        self.check_name_unmentioned(key, path, exclude=(path, k - 2))
+        self.check_namespace_imports(path)
+        files = self.scope_files(path, exported or self.mentions_exported(path, container))
+        used_before = self.uses
+        for fp in files:
+            if container not in self.files[fp] and key not in self.files[fp]:
+                continue
+            ft = self.toks(fp)
+            for r in ft.by_val.get(container, []):
+                if fp == path and r == j - 2:
+                    continue
+                if ft.is_p(r - 1, ".", "?."):
+                    continue  # someone else's `.RETIREMENT`
+                if self.specifier(ft, r, fp):
+                    continue
+                if ft.is_p(r + 1, ".", "?.") and ft.is_id(r + 2):
+                    if ft.val[r + 2] == key:
+                        self.value(fp, r, r + 2, chain=True)
+                    elif ft.is_p(r + 3, "=") or ft.is_p(r + 3, "(") or ft.is_p(r + 3, "["):
+                        # Writing / calling another member: not our value, but `C.x = C`
+                        # style aliasing is still caught at the read of `C` itself.
+                        pass
+                    continue
+                raise _UnclassifiedError(f"{container} used as a whole")
+            # `.key` reads on any object (aliases of the container read it this way).
+            for r in ft.by_val.get(key, []):
+                if fp == path and r == k - 2:
+                    continue
+                if ft.is_p(r - 1, ".", "?.") and ft.is_id(r - 2, container):
+                    continue  # already followed above
+                if ft.is_p(r - 1, ".", "?."):
+                    self.value(fp, r - 2 if ft.is_id(r - 2) else r, r, chain=True)
+                    continue
+                if ft.is_p(r + 1, ":") and ft.is_p(r - 1, "{", ","):
+                    raise _UnclassifiedError(f"another object defines {key}")
+                if self.specifier(ft, r, fp):
+                    continue
+                raise _UnclassifiedError(f"bare read of {key}")
+        if self.uses == used_before:
+            raise _UnclassifiedError("never read: nothing shows it to a person")
+
+    def depth_of(self, t: _Toks, k: int) -> int:
+        """Number of brace / paren / bracket groups enclosing token ``k``."""
+        d = 0
+        j = k - 1
+        while j >= 0:
+            if t.is_p(j, ")", "]", "}"):
+                j = t.match[j] - 1
+                continue
+            if t.typ[j] == "tpl_tail":
+                j = t.match[j] - 1
+                continue
+            if t.is_p(j, "(", "[", "{") or t.typ[j] in ("tpl_head", "tpl_mid"):
+                d += 1
+                if t.typ[j] == "tpl_mid":
+                    j = t.head[j]
+            j -= 1
+        return d
+
+    def enclosing_open(self, t: _Toks, k: int) -> int:
+        """The nearest unmatched opener left of ``k`` (-1 at top level)."""
+        j = k - 1
+        while j >= 0:
+            if t.is_p(j, ")", "]", "}") or t.typ[j] == "tpl_tail":
+                j = t.match[j] - 1
+                continue
+            if t.is_p(j, "(", "[", "{") or t.typ[j] in ("tpl_head", "tpl_mid"):
+                return j
+            j -= 1
+        return -1
+
+    # -- the value walk ----------------------------------------------------------
+    def value(self, path: str, a: int, b: int, chain: bool = False) -> None:
+        """Token range [a, b] of ``path`` evaluates to (a string built from) our
+        value. Raise _UnclassifiedError unless every place it can go is human output."""
+        self.uses += 1
+        t = self.toks(path)
+        while True:
+            self.tick()
+            if t.typ[a] in ("tpl", "tpl_head") and a > 0 and (
+                    (t.typ[a - 1] == "id" and t.val[a - 1] not in _KEYWORDS)
+                    or t.is_p(a - 1, ")", "]") or t.typ[a - 1] == "tpl_tail"):
+                raise _UnclassifiedError("tagged template (zx `$`, a custom tag)")
+            nb = self.postfix(t, b)
+            if nb is None:
+                return
+            a, b = self.expand(t, a, nb)
+            p, nx = a - 1, b + 1
+            # template interpolation `${ value }`
+            if p >= 0 and t.typ[p] in ("tpl_head", "tpl_mid") and nx < len(t) \
+                    and t.typ[nx] in ("tpl_mid", "tpl_tail"):
+                h = p if t.typ[p] == "tpl_head" else t.head[p]
+                a, b = h, t.match[h]
+                continue
+            if p < 0:
+                return  # program-level expression statement: value discarded
+            if t.is_p(p, ","):
+                o = self.enclosing_open(t, a)
+                if o == -1:
+                    return  # top-level sequence expression: discarded
+                # An array element (`spawn('sh', ['-c', "curl … | sh"])`) or the last
+                # value of a sequence keeps climbing from the whole group, as below.
+                r = self.in_open(path, t, o, a, b)
+                if r is not None:
+                    a, b = r
+                    continue
+                return
+            if t.is_p(p, "(", "[", "{"):
+                r = self.in_open(path, t, p, a, b)
+                if r is not None:
+                    a, b = r
+                    continue
+                return
+            if t.is_p(p, ";", "}"):
+                return  # expression statement
+            if t.typ[p] == "id":
+                kw = t.val[p]
+                if kw == "return":
+                    self.returned(path, t, p)
+                    return
+                if kw == "throw":
+                    self.require_no_catch_exec()
+                    return
+                if kw == "case":
+                    return
+                if kw in ("else", "do"):
+                    return  # statement
+                raise _UnclassifiedError(f"value after keyword {kw}")
+            if t.is_p(p, "=>"):
+                self.arrow_returned(path, t, p)
+                return
+            if t.is_p(p, "="):
+                self.assigned(path, t, p)
+                return
+            if t.is_p(p, "+="):
+                self.assigned(path, t, p)
+                return
+            raise _UnclassifiedError(f"value after {t.val[p] or t.typ[p]}")
+
+    def postfix(self, t: _Toks, b: int) -> int | None:
+        """Absorb `.method(...)`, `.prop`, `[i]` applied to the value; each called
+        method must be one that calls nothing (``_SAFE_METHODS``). None: the value
+        is only appended to (``arr.push(other)``)."""
+        a_call = False
+        while True:
+            nx = b + 1
+            if t.is_p(nx, ".", "?.") and t.is_id(nx + 1):
+                name = t.val[nx + 1]
+                if t.is_p(nx + 2, "(") and name in ("push", "unshift") and not a_call:
+                    return None  # something else appended to the value: neutral
+                if t.is_p(nx + 2, "("):
+                    if name not in _SAFE_METHODS:
+                        raise _UnclassifiedError(f".{name}() applied to the value")
+                    self.require_literal_args(t, nx + 2)
+                    b = t.match[nx + 2]
+                    a_call = True
+                    continue
+                if name not in _SAFE_METHODS:
+                    raise _UnclassifiedError(f".{name} read from the value")
+                b = nx + 1
+                continue
+            if t.is_p(nx, "["):
+                b = t.match[nx]
+                continue
+            if t.is_p(nx, "(") or t.typ[nx:nx + 1] in (["tpl"], ["tpl_head"]):
+                raise _UnclassifiedError("the value is called")
+            return b
+
+    def require_literal_args(self, t: _Toks, o: int) -> None:
+        for j in range(o + 1, t.match[o]):
+            if t.typ[j] not in ("str", "num", "regex") and not t.is_p(j, ","):
+                raise _UnclassifiedError("non-literal argument to a string method")
+
+    def expand(self, t: _Toks, a: int, b: int) -> tuple[int, int]:
+        """Widen [a, b] over operators to the enclosing expression's boundaries."""
+        open_q = 0
+        j = a - 1
+        while j >= 0:
+            ty, v = t.typ[j], t.val[j]
+            if ty == "punct" and v in (")", "]", "}"):
+                if v == "}":
+                    break
+                j = t.match[j] - 1
+                continue
+            if ty == "tpl_tail":
+                j = t.match[j] - 1
+                continue
+            if ty in ("tpl_head", "tpl_mid"):
+                break
+            if ty == "punct" and v in _LEFT_STOP_PUNCT:
+                break
+            if ty == "id" and v in _STOP_KW:
+                break
+            if ty == "punct" and v == ":":
+                if self.has_q_left(t, j):
+                    open_q -= 1
+                    j -= 1
+                    continue
+                break
+            if ty == "punct" and v == "?":
+                open_q += 1
+            if t.nl[j + 1] if j + 1 < len(t) else False:
+                # ASI: a statement ended at the newline before token j+1.
+                if self.asi_break(t, j):
+                    break
+            j -= 1
+        a = j + 1
+        cnt = 0
+        pend = max(open_q, 0)
+        k = b + 1
+        while k < len(t):
+            ty, v = t.typ[k], t.val[k]
+            if ty in ("tpl_mid", "tpl_tail"):
+                break
+            if ty == "punct" and v in ("(", "[", "{"):
+                if v == "{":
+                    break
+                k = t.match[k] + 1
+                continue
+            if ty == "tpl_head":
+                k = t.match[k] + 1
+                continue
+            if ty == "punct" and v in _RIGHT_STOP_PUNCT:
+                break
+            if ty == "id" and v in _STOP_KW:
+                break
+            if ty == "punct" and v == "?":
+                cnt += 1
+            elif ty == "punct" and v == ":":
+                if cnt > 0:
+                    cnt -= 1
+                elif pend > 0:
+                    pend -= 1
+                else:
+                    break
+            if t.nl[k] and self.asi_break(t, k - 1):
+                break
+            k += 1
+        return a, k - 1
+
+    def asi_break(self, t: _Toks, j: int) -> bool:
+        """A newline after token ``j`` ends a statement (approximate ASI)."""
+        if j < 0 or j + 1 >= len(t):
+            return False
+        left_end = t.typ[j] in ("id", "str", "tpl", "tpl_tail", "num", "regex") \
+            or t.is_p(j, ")", "]", "}", "++", "--")
+        right_start = t.typ[j + 1] in ("id", "str", "tpl", "tpl_head", "num") \
+            or t.is_p(j + 1, "++", "--", "!", "~")
+        if t.typ[j] == "id" and t.val[j] in ("typeof", "void", "new", "delete", "in",
+                                              "instanceof", "await"):
+            return False
+        return left_end and right_start
+
+    def has_q_left(self, t: _Toks, j: int) -> bool:
+        """Is the ':' at ``j`` a ternary colon (a '?' to its left in the same
+        expression)?"""
+        k = j - 1
+        depth_q = 0
+        while k >= 0:
+            ty, v = t.typ[k], t.val[k]
+            if ty == "punct" and v in (")", "]"):
+                k = t.match[k] - 1
+                continue
+            if ty == "tpl_tail":
+                k = t.match[k] - 1
+                continue
+            if ty == "punct" and v == ":":
+                depth_q += 1
+            elif ty == "punct" and v == "?":
+                if depth_q == 0:
+                    return True
+                depth_q -= 1
+            elif (ty == "punct" and v in _LEFT_STOP_PUNCT | {"}"}) or ty in (
+                    "tpl_head", "tpl_mid") or (ty == "id" and v in _STOP_KW):
+                return False
+            k -= 1
+        return False
+
+    def callee(self, t: _Toks, o: int) -> tuple[list[str], int, bool] | None:
+        """For the '(' at ``o``: the callee's member chain, its first token, and
+        whether ``new`` precedes it; None when '(' is not a call."""
+        j = o - 1
+        if j < 0:
+            return None
+        if t.typ[j] == "id" and t.val[j] in _KEYWORDS and t.val[j] not in ("super",):
+            return None
+        if not (t.typ[j] == "id" or t.is_p(j, ")", "]")):
+            return None
+        names: list[str] = []
+        while True:
+            if t.typ[j] == "id":
+                names.append(t.val[j])
+                if t.is_p(j - 1, ".", "?.") and j - 2 >= 0:
+                    j -= 2
+                    continue
+                break
+            return [], j, False  # `f()(…)` / `a[b](…)`: unknown callee
+        names.reverse()
+        is_new = t.is_id(j - 1, "new")
+        return names, j - (1 if is_new else 0), is_new
+
+    def in_open(self, path: str, t: _Toks, o: int, a: int, b: int):
+        """The value is inside the group opened at ``o``. Returns a new range to keep
+        climbing, or None when the value has been classified as safe."""
+        v = t.val[o] if t.typ[o] == "punct" else ""
+        if v == "(":
+            c = self.callee(t, o)
+            if c is None:
+                kw = t.val[o - 1] if t.is_id(o - 1) else ""
+                if kw in _COND_KW:
+                    return None  # condition: the value is tested, not run
+                if kw == "catch" or kw == "function" or kw == "with":
+                    raise _UnclassifiedError(f"value in {kw}(…)")
+                if not t.is_p(t.match[o] + 1, "=>"):
+                    # grouping (or a sequence inside parens)
+                    if any(t.is_p(j, ",") and self.enclosing_open(t, j) == o
+                           for j in range(o + 1, t.match[o])):
+                        if b + 1 != t.match[o]:
+                            return None  # not the last element of a sequence
+                    return o, t.match[o]
+                raise _UnclassifiedError("value in arrow parameters")
+            names, first, is_new = c
+            if not names:
+                raise _UnclassifiedError("unknown callee")
+            return self.call(path, t, o, names, first, is_new)
+        if v == "[":
+            j = o - 1
+            if j >= 0 and (t.typ[j] in ("id", "str", "tpl", "tpl_tail")
+                           and t.val[j] not in _KEYWORDS or t.is_p(j, ")", "]")):
+                raise _UnclassifiedError("value used as a computed key")
+            return o, t.match[o]
+        if v == "{":
+            if self.specifier(t, a, path) and a == b:
+                return None
+            raise _UnclassifiedError("value in an object literal or block")
+        raise _UnclassifiedError("value in an unknown group")
+
+    def call(self, path: str, t: _Toks, o: int, names: list[str], first: int,
+             is_new: bool):
+        last = names[-1]
+        # String formatting: `chalk.bold(x)`, `import_chalk.default.dim(x)`, `String(x)`.
+        lib_at = next((i for i, n in enumerate(names) if _COLOR_LIB_RE.search(n)), None)
+        if names == ["String"] or (
+                lib_at is not None and all(n in _STYLE_NAMES for n in names[lib_at + 1:])):
+            if len(names) > 1:
+                self.require_method_safe(path, names, must_exist=False)
+            self.require_plain_args(path, t, o)
+            return first, t.match[o]
+        # Array building: `lines.push(x)` → follow `lines`.
+        if len(names) == 2 and last in ("push", "unshift"):
+            self.follow_binding(path, t, names[0], first)
+            return None
+        # Output.
+        if names[0] == "console" and len(names) == 2 and last in _CONSOLE_METHODS:
+            self.require_console_unshadowed()
+            return None
+        if names in (["process", "stdout", "write"], ["process", "stderr", "write"]):
+            # A replaced stream write (`process.stdout.write = s => execSync(s)`) is
+            # caught by the same guard as a replaced console.
+            self.require_console_unshadowed()
+            return None
+        if len(names) >= 2 and last in _OUTPUT_METHODS and names[0] != "console":
+            self.require_method_safe(path, names, must_exist=True)
+            self.require_plain_args(path, t, o)
+            return None
+        # Error messages: `new Error(x)`, `reject(new Error(x))`, `throw Error(x)`.
+        if len(names) == 1 and last in _BUILTIN_ERRORS:
+            self.require_not_redefined(last)
+            self.require_no_catch_exec()
+            return None
+        raise _UnclassifiedError(f"value passed to {'.'.join(names)}()")
+
+    # -- bindings ------------------------------------------------------------------
+    def assigned(self, path: str, t: _Toks, eq: int) -> None:
+        """``NAME = value`` / ``const NAME = value`` / ``NAME += value``."""
+        lhs = eq - 1
+        if not t.is_id(lhs) or t.val[lhs] in _KEYWORDS:
+            raise _UnclassifiedError("assignment to a member, pattern or keyword")
+        before = lhs - 1
+        if t.is_p(before, ".", "?."):
+            raise _UnclassifiedError("assignment to a member")
+        name = t.val[lhs]
+        if t.is_id(before, "var", "let", "const"):
+            decl = before
+        elif t.is_p(before, ","):
+            decl = self.decl_of_list(t, before)
+            if decl is None:
+                raise _UnclassifiedError("assignment inside a sequence")
+        else:
+            if not (before < 0 or t.is_p(before, ";", "{", "}") or t.nl[lhs]):
+                raise _UnclassifiedError("chained or nested assignment")
+            self.follow_binding(path, t, name, lhs)
+            return
+        self.follow_decl(path, t, name, lhs, decl)
+
+    def decl_of_list(self, t: _Toks, comma: int) -> int | None:
+        j = comma - 1
+        while j >= 0:
+            if t.is_p(j, ")", "]", "}") or t.typ[j] == "tpl_tail":
+                j = t.match[j] - 1
+                continue
+            if t.is_id(j, "var", "let", "const"):
+                return j
+            if t.is_p(j, ";", "(", "[", "{") or t.typ[j] in ("tpl_head", "tpl_mid"):
+                return None
+            j -= 1
+        return None
+
+    def follow_binding(self, path: str, t: _Toks, name: str, near: int) -> None:
+        """Follow a name assigned without a declaration keyword: find its
+        declaration in the file (it must have one)."""
+        decls = [k for k in t.by_val.get(name, [])
+                 if t.is_id(k - 1, "var", "let", "const")
+                 or (t.is_p(k - 1, ",") and self.decl_of_list(t, k - 1) is not None
+                     and t.is_p(k + 1, "=", ";", ","))]
+        if len(decls) != 1:
+            raise _UnclassifiedError(f"no single declaration for {name}")
+        k = decls[0]
+        decl = k - 1 if t.is_id(k - 1) else self.decl_of_list(t, k - 1)
+        self.follow_decl(path, t, name, k, decl)
+
+    def follow_decl(self, path: str, t: _Toks, name: str, at: int, decl: int) -> None:
+        key = (path, "decl", at)
+        if key in self.followed:
+            return
+        self.followed.add(key)
+        kind = t.val[decl]
+        o = self.enclosing_open(t, decl)
+        if kind == "var":
+            # Function scope: widen to the outermost block of this top-level statement.
+            while o != -1:
+                outer = self.enclosing_open(t, o)
+                if outer == -1:
+                    break
+                o = outer
+        top_level = o == -1
+        if top_level:
+            lo, hi = 0, len(t) - 1
+        else:
+            if not t.is_p(o, "{"):
+                o2 = o
+                while o2 != -1 and not t.is_p(o2, "{"):
+                    o2 = self.enclosing_open(t, o2)
+                if o2 == -1:
+                    lo, hi = 0, len(t) - 1
+                    top_level = True
+                else:
+                    o = o2
+            if not top_level:
+                lo, hi = o, t.match[o]
+        exported = top_level and (t.is_id(decl - 1, "export") or self.mentions_exported(
+            path, name))
+        self.require_no_direct_eval(t, lo, hi)
+        self.check_name_unmentioned(
+            name, path, exclude=(path, at),
+            span=None if (exported or (top_level and self.package)) else (lo, hi))
+        if exported:
+            self.check_namespace_imports(path)
+        # A top-level name is followed into every file of a package even when it is
+        # not exported (a script evaluated into the global scope shares it).
+        files = self.scope_files(path, exported or (top_level and self.package)) \
+            if top_level else [path]
+        used_before = self.uses
+        for fp in files:
+            if name not in self.files[fp]:
+                continue
+            ft = self.toks(fp)
+            for r in ft.by_val.get(name, []):
+                if fp == path and (r == at or not (lo <= r <= hi)):
+                    continue
+                self.read(fp, ft, r)
+        if self.uses == used_before:
+            raise _UnclassifiedError("never read: nothing shows it to a person")
+
+    def read(self, fp: str, ft: _Toks, r: int) -> None:
+        """Classify one occurrence of a followed variable name."""
+        if ft.is_p(r - 1, ".", "?."):
+            return  # `obj.name`: a different property
+        if ft.is_p(r + 1, ":") and ft.is_p(r - 1, "{", ",") and self.enclosing_open(
+                ft, r) != -1 and ft.is_p(self.enclosing_open(ft, r), "{") \
+                and not self.has_q_left(ft, r + 1):
+            return  # `{ name: … }`: an object key
+        if ft.is_p(r + 1, "=", "+=") and not ft.is_p(r - 1, ",", "{", "["):
+            return  # overwritten / appended to: a write, not a read
+        if ft.is_id(r - 1, "var", "let", "const", "function", "class"):
+            raise _UnclassifiedError("name redeclared")
+        if self.specifier(ft, r, fp):
+            return
+        self.value(fp, r, r)
+
+    def specifier(self, t: _Toks, r: int, path: str) -> bool:
+        """``import { NAME } from …`` / ``export { NAME }``: neutral in a package
+        scan (importers are followed by name); unknown in a per-file scan."""
+        o = self.enclosing_open(t, r)
+        if o == -1 or not t.is_p(o, "{"):
+            return False
+        j = o - 1
+        if t.is_p(j, ","):
+            j -= 1
+            if t.is_id(j):
+                j -= 1
+        if not t.is_id(j, "import", "export"):
+            if t.is_id(j, "type") and t.is_id(j - 1, "import", "export"):
+                j -= 1
+            else:
+                return False
+        if t.is_id(r + 1, "as") or t.is_id(r - 1, "as"):
+            raise _UnclassifiedError("renamed import / export")
+        if not self.package:
+            raise _UnclassifiedError("name leaves the file (export)")
+        return True
+
+    def returned(self, path: str, t: _Toks, ret: int) -> None:
+        """``return value``: follow every call of the enclosing function."""
+        o = self.enclosing_open(t, ret)
+        while o != -1:
+            if t.is_p(o, "{"):
+                name = self.function_name(t, o)
+                if name is not None:
+                    if name == "":
+                        raise _UnclassifiedError("returned from an anonymous function")
+                    self.follow_function(path, t, name, o)
+                    return
+            o = self.enclosing_open(t, o)
+        raise _UnclassifiedError("return outside a function")
+
+    def function_name(self, t: _Toks, o: int) -> str | None:
+        """Name of the function whose body opens at ``o``; "" if anonymous; None
+        if the block is not a function body."""
+        j = o - 1
+        if t.is_p(j, ":") and t.typ[j - 1] == "id":  # TS return type `): T {`
+            k = j - 1
+            while k >= 0 and not t.is_p(k, ")"):
+                k -= 1
+            j = k
+        if t.is_p(j, "=>"):
+            return self.arrow_binding(t, j)
+        if not t.is_p(j, ")"):
+            return None
+        po = t.match[j]
+        q = po - 1
+        if t.is_id(q, "function"):
+            return self.anon_binding(t, q)
+        if t.is_id(q) and t.val[q] not in _KEYWORDS:
+            if t.is_id(q - 1, "function") or t.is_p(q - 1, "*"):
+                return t.val[q]
+            if t.is_p(q - 1, "{", "}", ";", ",") or t.is_id(q - 1, "async", "static", "get",
+                                                            "set") or t.nl[q]:
+                return t.val[q]  # method shorthand
+            return None
+        if t.is_id(q, "if", "for", "while", "switch", "catch", "with"):
+            return None
+        return None
+
+    def anon_binding(self, t: _Toks, fn: int) -> str:
+        j = fn - 1
+        if t.is_id(j, "async"):
+            j -= 1
+        if t.is_p(j, "=", ":") and t.is_id(j - 1):
+            return t.val[j - 1]
+        return ""
+
+    def arrow_binding(self, t: _Toks, arrow: int) -> str:
+        j = arrow - 1
+        if t.is_p(j, ")"):
+            j = t.match[j] - 1
+        elif t.is_id(j):
+            j -= 1
+        else:
+            return ""
+        if t.is_id(j, "async"):
+            j -= 1
+        if t.is_p(j, "=", ":") and t.is_id(j - 1):
+            return t.val[j - 1]
+        return ""
+
+    def arrow_returned(self, path: str, t: _Toks, arrow: int) -> None:
+        name = self.arrow_binding(t, arrow)
+        if not name:
+            raise _UnclassifiedError("concise body of an anonymous arrow")
+        self.follow_function(path, t, name, arrow)
+
+    def follow_function(self, path: str, t: _Toks, name: str, at: int) -> None:
+        key = ("fn", name)
+        if key in self.followed:
+            return
+        self.followed.add(key)
+        self.check_name_unmentioned(name, path, exclude=None)
+        files = self.scope_files(path, True) if self.package else [path]
+        if not self.package and self.mentions_exported(path, name):
+            raise _UnclassifiedError("function leaves the file (export)")
+        if self.package:
+            self.check_namespace_imports(path)
+        used_before = self.uses
+        for fp in files:
+            if name not in self.files[fp]:
+                continue
+            ft = self.toks(fp)
+            for r in ft.by_val.get(name, []):
+                if ft.is_p(r + 1, "("):
+                    # a call: its result carries the value
+                    start = r
+                    while ft.is_p(start - 1, ".", "?.") and ft.is_id(start - 2):
+                        start -= 2
+                    if ft.is_id(start - 1, "function"):
+                        continue  # the declaration itself
+                    if self.function_name_decl_at(ft, r):
+                        continue
+                    self.value(fp, start, ft.match[r + 1])
+                    continue
+                if ft.is_p(r + 1, "=", ":") and (self.function_def_follows(ft, r)):
+                    continue  # `name = function (…)` / `name: (…) =>` definition
+                if ft.is_id(r - 1, "function"):
+                    continue
+                if self.specifier(ft, r, fp):
+                    continue
+                raise _UnclassifiedError(f"function {name} used other than by a call")
+        if self.uses == used_before:
+            raise _UnclassifiedError("never read: nothing shows it to a person")
+
+    def function_name_decl_at(self, t: _Toks, r: int) -> bool:
+        """Is the ``name(`` at ``r`` a method-shorthand definition (``name(a) {``)?"""
+        close = t.match.get(r + 1)
+        if close is None:
+            return False
+        nxt = close + 1
+        if t.is_p(nxt, ":"):
+            nxt += 1
+            while nxt < len(t) and not t.is_p(nxt, "{", ";", "=>"):
+                nxt += 1
+        return t.is_p(nxt, "{") and (t.is_p(r - 1, "{", "}", ";", ",")
+                                      or t.is_id(r - 1, "async", "static", "get", "set")
+                                      or t.nl[r])
+
+    def function_def_follows(self, t: _Toks, r: int) -> bool:
+        j = r + 2
+        if t.is_id(j, "async"):
+            j += 1
+        if t.is_id(j, "function"):
+            return True
+        if t.is_p(j, "("):
+            return t.is_p(t.match[j] + 1, "=>")
+        return t.is_id(j) and t.is_p(j + 1, "=>")
+
+    # -- package-wide guards ---------------------------------------------------------
+    def scope_files(self, path: str, leaves_file: bool) -> list[str]:
+        if not leaves_file:
+            return [path]
+        if not self.package:
+            raise _UnclassifiedError("name leaves the file")
+        return [path] + [p for p in self.code_paths if p != path]
+
+    def mentions_exported(self, path: str, name: str) -> bool:
+        text = self.files[path]
+        n = re.escape(name)
+        return bool(re.search(
+            r"\bexport\s+(?:default\s+)?(?:async\s+)?(?:function\s*\*?|class|const|let|var)"
+            r"\s+" + n + r"\b|\bexport\s*\{[^}]*\b" + n + r"\b|\bexports\s*\.\s*" + n
+            + r"\b|module\s*\.\s*exports\b[^;]*\b" + n + r"\b", text))
+
+    def check_name_unmentioned(self, name: str, path: str, exclude, span=None) -> None:
+        """A followed name inside a string (``this['X']``, ``eval('X')``) or in a
+        non-code file (package.json, a shell script) keeps the finding."""
+        rx = re.compile(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])")
+        paths = [path] if span is not None else list(self.files)
+        for fp in paths:
+            text = self.files[fp]
+            if not text or name not in text:
+                continue
+            low = fp.lower()
+            if Path(low).suffix in JS_EXTS and not low.endswith(_DTS_SUFFIXES):
+                ft = self.toks(fp)
+                rng = range(span[0], span[1] + 1) if (span and fp == path) else range(len(ft))
+                for k in rng:
+                    if ft.typ[k] in ("str", "tpl", "tpl_head", "tpl_mid", "tpl_tail", "regex") \
+                            and rx.search(text, ft.st[k], ft.en[k]):
+                        raise _UnclassifiedError(f"{name} named inside a string")
+            elif low.endswith(_INERT_SUFFIXES):
+                continue
+            elif rx.search(text):
+                raise _UnclassifiedError(f"{name} mentioned in {fp}")
+
+    def check_namespace_imports(self, path: str) -> None:
+        """A module whose exports are reachable as a namespace (``import * as m``,
+        ``require('./m')``, ``import('./m')``, ``export * from``) can be iterated."""
+        stem = Path(path).stem
+        if not stem:
+            return
+        rx = re.compile(r"""['"`][^'"`\n]*[/'"`]""" + re.escape(stem)
+                        + r"""(?:\.[cm]?[jt]sx?)?['"`]""")
+        for fp in self.code_paths:
+            text = self.files[fp]
+            if stem not in text:
+                continue
+            ft = self.toks(fp)
+            for m in rx.finditer(text):
+                k = ft.at(m.start())
+                if k < 0 or ft.typ[k] != "str":
+                    continue
+                # Allowed: `import { a, b } from "./m"` / `export { a } from "./m"`.
+                if ft.is_id(k - 1, "from") and ft.is_p(k - 2, "}"):
+                    o = ft.match[k - 2]
+                    j = o - 1
+                    if ft.is_id(j, "type"):
+                        j -= 1
+                    if ft.is_id(j, "import", "export"):
+                        continue
+                if ft.is_id(k - 1, "import") and ft.is_p(k + 1, ";"):
+                    continue  # side-effect import
+                raise _UnclassifiedError(f"{fp} reaches {path} as a namespace")
+
+    def require_no_direct_eval(self, t: _Toks, lo: int, hi: int) -> None:
+        for k in t.by_val.get("eval", []):
+            if lo <= k <= hi and t.is_p(k + 1, "(") and not t.is_p(k - 1, "."):
+                raise _UnclassifiedError("direct eval in scope")
+
+    def require_console_unshadowed(self) -> None:
+        if self._console_ok is None:
+            self._console_ok = not any(
+                _shadow_hit(_CONSOLE_SHADOW_RE, self.files[p]) for p in self.code_paths)
+        if not self._console_ok:
+            raise _UnclassifiedError("console is reassigned or shadowed")
+
+    def require_not_redefined(self, name: str) -> None:
+        rx = re.compile(r"\b(?:class|function)\s+" + name + r"\b|(?<![\w$.])" + name
+                        + r"\s*=(?!=)|\b(?:var|let|const)\s+" + name + r"\b")
+        for p in self.code_paths:
+            if rx.search(self.files[p]):
+                raise _UnclassifiedError(f"{name} is redefined")
+
+    def require_no_catch_exec(self) -> None:
+        """A caught error handed to a command runner turns a message into a command."""
+        if self._catch_ok is None:
+            ok = True
+            for p in self.code_paths:
+                text = self.files[p]
+                if not any(w in text for w in ("catch", "Exception", "Rejection", "then",
+                                               "'error'", '"error"')):
+                    continue
+                for m in _CATCH_RE.finditer(text):
+                    v = m.group(1) or m.group(2) or m.group(3) or m.group(4)
+                    if not v or v in _KEYWORDS:
+                        continue
+                    if self.handler_runs(text, _handler_body(text, m.end()), v):
+                        ok = False
+                        break
+                if not ok:
+                    break
+            self._catch_ok = ok
+        if not self._catch_ok:
+            raise _UnclassifiedError("a caught error reaches a command runner")
+
+    def handler_runs(self, text: str, body: str, v: str) -> bool:
+        """Does ``body`` hand ``v`` (or a name derived from it) to a command runner,
+        directly or through a function the package defines with a runner inside?"""
+        derived = {v}
+        for _ in range(4):
+            grew = False
+            for m in re.finditer(r"(?<![\w$.])([A-Za-z_$][\w$]*)\s*=(?![=>])\s*([^;\n]{0,300})",
+                                 body):
+                if m.group(1) not in derived and any(
+                        re.search(r"(?<![\w$])" + re.escape(d) + r"(?![\w$])", m.group(2))
+                        for d in derived):
+                    derived.add(m.group(1))
+                    grew = True
+            if not grew:
+                break
+        names = "|".join(re.escape(d) for d in derived)
+        mention = r"[^;]*?(?<![\w$])(?:" + names + r")(?![\w$])"
+        if re.search(r"\b" + _JS_RUN_CALL + r"\s*(?:\.\s*(?:call|apply)\s*)?\(" + mention, body) \
+                or re.search(r"\$\s*`[^`]*\$\{[^}]*(?<![\w$])(?:" + names + r")", body):
+            return True
+        for m in re.finditer(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*\((" + mention + r")", body):
+            fn = m.group(1)
+            if fn in _KEYWORDS:
+                continue
+            for p in self.code_paths:
+                if fn in self.files[p] and any(_JS_SINK_RE.search(bb)
+                                               for bb in _def_bodies(self.files[p], fn)):
+                    return True
+        return False
+
+    def require_plain_args(self, path: str, t: _Toks, o: int) -> None:
+        """No argument of a print / format call names a command runner (a ``color``
+        callback parameter could be handed ``execSync``)."""
+        if _JS_SINK_RE.search(self.files[path], t.en[o], t.st[t.match[o]]):
+            raise _UnclassifiedError("a command runner is passed to the print call")
+
+    def receiver_file(self, path: str, root: str, hops: int = 4,
+                      allow_deps: bool = False) -> str | None:
+        """The package file that defines ``root`` (the object a print method is called
+        on), following relative imports. A receiver from a dependency, a parameter or a
+        global is unknown."""
+        if root == "this":
+            return path
+        if hops <= 0:
+            raise _UnclassifiedError("receiver import chain too long")
+        text = self.files[path]
+        spec = _binding_spec(text, root)
+        if spec is not None:
+            if not spec.startswith((".", "/")):
+                if allow_deps and spec.split("/")[0] in _SAFE_OUTPUT_DEPS:
+                    return None  # a terminal-colour dependency (chalk, ansis …)
+                raise _UnclassifiedError(f"{root} comes from the dependency {spec}")
+            target = self.resolve_import(path, spec)
+            if target is None:
+                raise _UnclassifiedError(f"cannot resolve {spec}")
+            return self.receiver_file(target, root, hops - 1, allow_deps)
+        r = re.escape(root)
+        if re.search(r"\b(?:var|let|const|class|function)\s+" + r + r"\b|[,;{}]\s*" + r
+                     + r"\s*=(?![=>])|^\s*" + r + r"\s*=(?![=>])", text, re.M):
+            return path
+        raise _UnclassifiedError(f"{root} is not defined in the package")
+
+    def resolve_import(self, path: str, spec: str) -> str | None:
+        import posixpath
+        base = posixpath.normpath(posixpath.join(posixpath.dirname(path), spec))
+        stem = re.sub(r"\.[cm]?js$", "", base)
+        for cand in (base, stem + ".js", stem + ".mjs", stem + ".cjs", stem + ".ts",
+                     stem + ".mts", stem + ".cts", stem + ".tsx", base + "/index.js",
+                     base + "/index.ts"):
+            if cand in self.files:
+                return cand
+        return None
+
+    def require_method_safe(self, path: str, names: list[str], must_exist: bool) -> None:
+        """The print / format method ``names[-1]`` as defined in the file that defines
+        the receiver runs nothing, down three calls."""
+        def_file = self.receiver_file(path, names[0], allow_deps=not must_exist)
+        if def_file is None:
+            return
+        method = names[-1]
+        if must_exist:
+            # Another file may replace the method after import (`logger.always =
+            # s => execSync(s)`, `Object.assign(logger, {…})`): a rebinding of it
+            # anywhere in view that runs a command keeps the finding.
+            r, mth = re.escape(names[-2]), re.escape(method)
+            rebind = re.compile(
+                r"(?<![\w$])" + r + r"\s*(?:\.|\?\.)\s*" + mth + r"\s*=(?![=>])|"
+                r"(?<![\w$])" + r + r"\s*\[\s*['\"`]" + mth + r"['\"`]\s*\]\s*=(?![=>])|"
+                r"Object\s*\.\s*(?:assign|defineProperty|defineProperties|setPrototypeOf)"
+                r"\s*\(\s*" + r + r"\b")
+            for t in self.files.values():
+                for m in rebind.finditer(t or ""):
+                    rhs = t[m.end(): m.end() + 400]
+                    if _JS_SINK_RE.search(rhs) or self.aliased_to_sink(t, method):
+                        raise _UnclassifiedError(f"{'.'.join(names)} is reassigned")
+        text = self.files[def_file]
+        bodies = _def_bodies(text, method)
+        if must_exist and not bodies:
+            raise _UnclassifiedError(f"{'.'.join(names)}() has no definition in the package")
+        if self.aliased_to_sink(text, method):
+            raise _UnclassifiedError(f"{method} is bound to a command runner")
+        self.check_bodies(def_file, bodies, 3, set())
+
+    def check_member_calls(self, body: str, depth: int, seen: set) -> None:
+        """``this.transport.write(s)`` / ``sink.log(s)`` in a print method: the method
+        may live on an object from another file (a custom winston / pino transport),
+        so every definition of that method name anywhere in view must run nothing.
+        Only ``console.*`` and ``process.stdout|stderr.write`` are taken as given."""
+        for mm in re.finditer(r"([A-Za-z_$][\w$]*)\s*\??\.\s*([A-Za-z_$][\w$]*)\s*\(", body):
+            recv, meth = mm.groups()
+            if recv in ("console", "Math", "JSON", "Object", "Array", "String", "Number",
+                        "Date", "Promise", "Symbol", "util", "path") or \
+                    (recv in ("stdout", "stderr") and meth == "write") or \
+                    meth in _SAFE_METHODS or meth in _STYLE_NAMES or \
+                    meth in ("push", "unshift", "map", "filter", "forEach", "reduce",
+                             "replace", "toFixed", "toISOString", "stringify",
+                             "hasOwnProperty", "keys", "values", "entries", "has",
+                             "get", "set", "test", "match") or \
+                    _COLOR_LIB_RE.search(recv):
+                continue
+            key = "." + meth
+            if key in seen:
+                continue
+            seen.add(key)
+            if len(seen) > 60:
+                raise _UnclassifiedError("a print method calls too much to follow")
+            for fp2, t2 in self.files.items():
+                if not t2 or meth not in t2 or Path(fp2.lower()).suffix not in JS_EXTS:
+                    continue
+                if self.aliased_to_sink(t2, meth):
+                    raise _UnclassifiedError(f"{meth} is bound to a command runner")
+                bodies = _def_bodies(t2, meth)
+                if any(_JS_SINK_RE.search(b) for b in bodies):
+                    raise _UnclassifiedError(f"{recv}.{meth}() runs a command")
+                if bodies and depth > 0:
+                    self.check_bodies(fp2, bodies, depth - 1, seen)
+
+    def check_bodies(self, fp: str, bodies: list[str], depth: int, seen: set) -> None:
+        text = self.files[fp]
+        for body in bodies:
+            if _JS_SINK_RE.search(body):
+                raise _UnclassifiedError("a print method runs a command")
+            if re.search(r"\.\s*write\s*\(", body) and re.search(r"\bstd(?:in|io)\b", text):
+                raise _UnclassifiedError("a print method writes to a stream in a file "
+                                         "that touches a child's stdin")
+            self.check_member_calls(body, depth, seen)
+            for m in re.finditer(r"([A-Za-z_$][\w$]*)\s*\(", body):
+                n = m.group(1)
+                if n in _KEYWORDS or n in _STYLE_NAMES or n in seen or n in (
+                        "console", "String", "Number", "Boolean", "write", "format",
+                        "require"):
+                    continue
+                seen.add(n)
+                if len(seen) > 60:
+                    raise _UnclassifiedError("a print method calls too much to follow")
+                if self.aliased_to_sink(text, n):
+                    raise _UnclassifiedError(f"{n} is bound to a command runner")
+                spec = _binding_spec(text, n)
+                if spec is not None:
+                    if not spec.startswith((".", "/")):
+                        if spec.split("/")[0] not in _SAFE_OUTPUT_DEPS:
+                            raise _UnclassifiedError(f"a print method calls {n} from {spec}")
+                        continue
+                    target = self.resolve_import(fp, spec)
+                    if target is None:
+                        raise _UnclassifiedError(f"cannot resolve {spec}")
+                    if self.aliased_to_sink(self.files[target], n):
+                        raise _UnclassifiedError(f"{n} is bound to a command runner")
+                    if depth > 0:
+                        self.check_bodies(target, _def_bodies(self.files[target], n),
+                                          depth - 1, seen)
+                    continue
+                if depth > 0:
+                    self.check_bodies(fp, _def_bodies(text, n), depth - 1, seen)
+
+    def aliased_to_sink(self, text: str, name: str) -> bool:
+        """``log: cp.execSync`` / ``const log = run`` / ``this.log = exec.bind(…)``:
+        ``name`` bound to something other than a function literal that is (or was
+        assigned) a command runner."""
+        rx = re.compile(r"(?<![\w$])" + re.escape(name)
+                        + r"\s*(?::|=(?![=>]))\s*([^;\n,}]{0,200})")
+        for m in rx.finditer(text):
+            rhs = m.group(1).strip()
+            if re.match(r"(?:async\s+)?(?:function\b|\([^()]*\)\s*=>|[\w$]+\s*=>)", rhs):
+                continue
+            if _JS_SINK_RE.search(rhs):
+                return True
+            ident = re.match(r"([\w$]+)(?:\s*\.\s*([\w$]+))*\s*$", rhs)
+            if ident:
+                last = re.findall(r"[\w$]+", rhs)[-1]
+                if last == name or last in _KEYWORDS:
+                    continue
+                if re.search(r"(?<![\w$])" + re.escape(last)
+                             + r"\s*(?::|=(?![=>]))\s*[^;\n,}]{0,200}?(?:"
+                             + _JS_SINK_RE.pattern + ")", text):
+                    return True
+                if any(_JS_SINK_RE.search(b) for b in _def_bodies(text, last)):
+                    return True
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+
+_PY_PRINT_ATTRS = frozenset({
+    "echo", "secho", "info", "warning", "warn", "error", "debug", "critical",
+    "exception", "log", "print", "fatal",
+})
+_PY_PRINT_BASES = frozenset({
+    "click", "typer", "logging", "logger", "log", "_logger", "LOGGER", "LOG", "console",
+    "rich", "warnings", "self.logger", "self.log", "self._logger", "cls.logger",
+})
+_PY_STR_METHODS = frozenset({
+    "format", "strip", "rstrip", "lstrip", "join", "replace", "upper", "lower",
+})
+_PY_SINK_RE = re.compile(
+    r"\bsubprocess\b|\bos\.(?:system|popen|exec\w*|spawn\w*)|\bexec\s*\(|\beval\s*\(|"
+    r"\bPopen\b|\bpty\.spawn|\bcompile\s*\(|\brunpy\b|\bcommands\.|\bsh\.|\bplumbum\b")
+
+
+_PY_IMPORT_BY_NAME_RE = re.compile(
+    r"import_module|__import__|\bmodules\b|pkgutil|runpy|SourceFileLoader|"
+    r"spec_from_file_location|find_spec|load_module|find_module|\bexec\b|\beval\b")
+_PY_IMPORT_BY_NAME = ("import_module", "__import__", "SourceFileLoader",
+                      "spec_from_file_location", "run_module", "run_path", "find_spec",
+                      "load_module", "find_module")
+
+
+_PY_OWN_NAMESPACE_RE = re.compile(
+    r"\bf_globals\b|\b_getframe\b|\bcurrentframe\b|\bgetmodule\b|"
+    r"\bglobals\b|\bvars\s*\(\s*\)|\b__name__\s*\]")
+
+
+def _const_strings(expr: ast.AST, tr: ast.AST, parents: dict, depth: int
+                   ) -> set[str] | None:
+    """Every string ``expr`` can hold, when the file spells them all out: a literal, or
+    a name bound only from literals or from a lookup in a module-level dict / tuple of
+    literals (the lazy-import table ``module_path, attr = _LAZY_IMPORTS[name]``).
+    None when anything else could flow in."""
+    if depth > 4:
+        return None
+    if isinstance(expr, ast.Constant):
+        return {expr.value} if isinstance(expr.value, str) else set()
+    if isinstance(expr, (ast.Tuple, ast.List)):
+        out: set[str] = set()
+        for el in expr.elts:
+            sub = _const_strings(el, tr, parents, depth + 1)
+            if sub is None:
+                return None
+            out |= sub
+        return out
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Div, ast.Add)):
+        # `ROOT / "skills" / "x.py"`, `".".join`-free `"pkg." + "x"`: a path or name
+        # whose unknown part is a prefix still ends in the literal tail it spells.
+        right = _const_strings(expr.right, tr, parents, depth + 1)
+        if right is None:
+            return None
+        left = _const_strings(expr.left, tr, parents, depth + 1)
+        if isinstance(expr.op, ast.Div):
+            heads = left if left is not None else {""}
+            out = {h + "/" + r for h in heads for r in right}
+        else:
+            if left is None:
+                # Only a tail that starts at a separator says where the name ends.
+                if not all(r[:1] in (".", "/") for r in right):
+                    return None
+                left = {""}
+            out = {h + r for h in left for r in right}
+        return out if len(out) <= 64 else None
+    if isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Name):
+        table = _module_literal(expr.value.id, tr)
+        if isinstance(table, ast.Dict):
+            return _const_strings(ast.Tuple(elts=list(table.values), ctx=ast.Load()),
+                                  tr, parents, depth + 1)
+        if isinstance(table, (ast.Tuple, ast.List)):
+            return _const_strings(table, tr, parents, depth + 1)
+        return None
+    if not isinstance(expr, ast.Name):
+        return None
+    name = expr.id
+    out = set()
+    found = False
+    for node in ast.walk(tr):
+        if isinstance(node, ast.arg) and node.arg == name:
+            return None
+        if isinstance(node, ast.Name) and node.id == name and isinstance(
+                node.ctx, (ast.Store, ast.Del)):
+            par = parents.get(node)
+            if isinstance(par, ast.Assign) and node in par.targets:
+                sub = _const_strings(par.value, tr, parents, depth + 1)
+            elif isinstance(par, ast.Tuple) and isinstance(parents.get(par), ast.Assign) \
+                    and par in parents[par].targets:
+                # `a, b = TABLE[k]`: each slot holds one of the table's literals.
+                sub = _const_strings(parents[par].value, tr, parents, depth + 1)
+            else:
+                return None
+            if sub is None:
+                return None
+            out |= sub
+            found = True
+        elif isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+                (a.asname or a.name).split(".")[0] == name for a in node.names):
+            return None
+        elif isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+            return None
+    return out if found else None
+
+
+def _module_literal(name: str, tr: ast.AST) -> ast.AST | None:
+    """The literal a module-level name is bound to, when it is bound exactly once at
+    module level, nowhere else, and never mutated (``TABLE[k] = …``, ``.update``)."""
+    if not isinstance(tr, ast.Module):
+        return None
+    value = None
+    for stmt in tr.body:
+        tgt = None
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            tgt, val = stmt.targets[0], stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            tgt, val = stmt.target, stmt.value
+        if isinstance(tgt, ast.Name) and tgt.id == name:
+            if value is not None:
+                return None
+            value = val
+    if not isinstance(value, (ast.Dict, ast.Tuple, ast.List)):
+        return None
+    stores = 0
+    for node in ast.walk(tr):
+        if isinstance(node, ast.Name) and node.id == name and not isinstance(
+                node.ctx, ast.Load):
+            stores += 1
+        elif isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and \
+                node.value.id == name and not isinstance(node.ctx, ast.Load):
+            return None
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and \
+                node.value.id == name:
+            return None  # TABLE.update(…) / .append(…) / .setdefault(…)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+            return None
+    return value if stores == 1 else None
+
+
+def _imports_by_name(tr: ast.AST, parents: dict, suffix: list[str], name: str,
+                     *, code_strings: bool = True) -> bool:
+    """Could the tree load the module by a name (``importlib.import_module(n)``,
+    ``__import__("pkg.svc")``, ``sys.modules[key]``, ``runpy`` / ``pkgutil``, ``exec`` /
+    ``eval`` of a computed string) and read ``name`` from it other than statically?
+    ``suffix`` is the module's ``[parent, stem]`` (or ``[stem]``); a literal module name
+    that ends in neither names another module. ``import_module(n)`` whose result is
+    only read for other attributes (a lazy-import table: ``getattr(module, attr)``
+    with ``attr`` one of the table's literals) does not read ``name``.
+    ``code_strings``: also count ``exec`` / ``eval`` of a computed string (the caller
+    passes False for a file that never names the module: code it execs from outside,
+    an MCP tool's ``exec(code)``, would have to spell the module out to reach it, and
+    a literal spelling it is refused by ``check_strings``)."""
+    stem = suffix[-1]
+    stem_rx = re.compile(r"(?<![\w])" + re.escape(stem) + r"(?![\w])")
+    def names_it(arg: ast.AST) -> bool:
+        cands = _const_strings(arg, tr, parents, 0)
+        if cands is None:
+            return True  # a computed name could be this module
+        for c in cands:
+            # "pkg.beta.svc", ".svc", "svc", "pkg/beta/svc.py": names this module.
+            segs = [x for x in re.sub(r"\.py$", "", c.strip()).replace("\\", "/")
+                    .replace("/", ".").split(".") if x]
+            if segs and (segs[-len(suffix):] == suffix or segs == [stem]):
+                return True
+        return False
+
+    for node in ast.walk(tr):
+        if isinstance(node, ast.ImportFrom) and node.module in ("sys", "importlib",
+                                                                "importlib.util"):
+            if any(a.name == "modules" or (a.asname and a.asname != a.name)
+                   or a.name == "*" for a in node.names):
+                return True  # `from sys import modules`, `import_module as im`
+        if isinstance(node, ast.Call):
+            fn = ast.unparse(node.func)
+            if fn.startswith(("pkgutil.", "runpy.")):
+                return True
+            if fn in ("exec", "eval"):
+                if code_strings and any(
+                        not (isinstance(a, ast.Constant) and isinstance(a.value, str)
+                             and not stem_rx.search(a.value)) for a in node.args):
+                    return True
+            elif fn.endswith(_PY_IMPORT_BY_NAME):
+                if any(names_it(a) for a in node.args) or any(
+                        names_it(k.value) for k in node.keywords):
+                    if fn.endswith("import_module") and _module_value_inert(
+                            node, tr, parents, name):
+                        continue
+                    return True
+        elif isinstance(node, ast.Attribute) and node.attr == "modules" and \
+                ast.unparse(node.value) == "sys":
+            par = parents.get(node)
+            if isinstance(par, ast.Subscript) and par.value is node and \
+                    not names_it(par.slice):
+                continue  # sys.modules["other"]
+            if isinstance(par, ast.Compare) and node in par.comparators and \
+                    not names_it(par.left):
+                continue  # "other" in sys.modules
+            if isinstance(par, ast.Call) and len(par.args) >= 2 and par.args[0] is node \
+                    and ast.unparse(par.func).endswith(("setitem", "delitem")) \
+                    and not names_it(par.args[1]):
+                continue  # monkeypatch.setitem(sys.modules, "other", stub)
+            return True
+    return False
+
+
+def _module_value_inert(expr: ast.AST, tr: ast.AST, parents: dict, name: str,
+                        depth: int = 0) -> bool:
+    """A module object (``expr``) that cannot hand out ``name`` other than by a static
+    ``module.name`` read (which ``_PyFlow.module_level`` follows): only written to or
+    tested (``monkeypatch.setattr(mod, …)``, ``hasattr``, ``mod is x``), read for a
+    different static attribute, or ``getattr(mod, a)`` with ``a`` one of a set of
+    literals that excludes ``name``; through at most one plain local alias."""
+    par = parents.get(expr)
+    if isinstance(par, (ast.Compare, ast.Expr)):
+        return True
+    if isinstance(par, ast.Attribute) and par.value is expr:
+        return par.attr != "__dict__"
+    if isinstance(par, ast.Call) and par.args and par.args[0] is expr:
+        fn = ast.unparse(par.func)
+        if fn == "hasattr" or fn.endswith(("setattr", "delattr", "patch.object")):
+            return True
+        if fn == "getattr" and len(par.args) >= 2:
+            cands = _const_strings(par.args[1], tr, parents, 0)
+            return cands is not None and name not in cands and "__dict__" not in cands
+        return False
+    if isinstance(par, ast.Assign) and par.value is expr and len(par.targets) == 1 and \
+            isinstance(par.targets[0], ast.Name) and depth < 2:
+        alias = par.targets[0].id
+        scope = parents.get(par)
+        while scope is not None and not isinstance(
+                scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            scope = parents.get(scope)
+        for node in ast.walk(scope if scope is not None else tr):
+            if isinstance(node, (ast.Global, ast.Nonlocal)) and alias in node.names:
+                return False
+            if isinstance(node, ast.Name) and node.id == alias and isinstance(
+                    node.ctx, ast.Load) and not _module_value_inert(
+                        node, tr, parents, name, depth + 1):
+                return False
+        return True
+    return False
+
+
+# Stream constructors that only hold or forward text (the replacement's arguments are
+# checked too: ``TextIOWrapper(proc.stdin)`` is a process's input).
+_SAFE_STREAM_CTORS = frozenset({
+    "StringIO", "BytesIO", "TextIOWrapper", "BufferedWriter", "open", "fdopen",
+    "getwriter", "TemporaryFile", "NamedTemporaryFile", "SpooledTemporaryFile",
+    "redirect_stdout", "redirect_stderr", "nullcontext", "Path", "str", "getattr",
+})
+_SAFE_STREAM_MODULES = frozenset({"sys", "os", "io", "codecs", "tempfile", "contextlib",
+                                  "pathlib"})
+
+
+def _stream_targets(tr: ast.AST) -> list[ast.AST | None]:
+    """What ``tr`` puts in place of ``sys.stdout`` / ``sys.stderr``."""
+    out: list[ast.AST | None] = []
+    for node in ast.walk(tr):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                for el in (t.elts if isinstance(t, ast.Tuple) else [t]):
+                    if isinstance(el, ast.Attribute) and re.fullmatch(
+                            r"sys\.(?:__)?std(?:out|err)(?:__)?", ast.unparse(el)):
+                        out.append(None if isinstance(t, ast.Tuple) else node.value)
+        elif isinstance(node, ast.Call):
+            fn = ast.unparse(node.func)
+            if fn.endswith(("redirect_stdout", "redirect_stderr")):
+                out.append(node.args[0] if node.args else None)
+            elif fn == "setattr" and node.args and ast.unparse(node.args[0]) == "sys":
+                out.append(node.args[2] if len(node.args) > 2 else None)
+    return out
+
+
+class _BlankStrings(ast.NodeTransformer):
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        if isinstance(node.value, (str, bytes)):
+            return ast.copy_location(ast.Constant(value=type(node.value)()), node)
+        return node
+
+
+def _code_only(node: ast.AST) -> str:
+    """``node`` unparsed with every string literal (and every literal part of an
+    f-string) emptied: the names and calls it holds, not the words its messages use.
+    The expressions inside an f-string's ``{…}`` are kept."""
+    return ast.unparse(_BlankStrings().visit(copy.deepcopy(node)))
+
+
+class _PyFlow:
+    def __init__(self, files: dict[str, str], package: bool) -> None:
+        self.files = files
+        self.package = package
+        self._trees: dict[str, tuple[ast.AST, dict]] = {}
+        self.steps = 0
+        self.followed: set = set()
+        self.py_paths = [p for p in files if Path(p.lower()).suffix in PY_EXTS]
+        self.uses = 0
+
+    def tree(self, path: str):
+        if path not in self._trees:
+            try:
+                tr = ast.parse(self.files[path])
+            except (SyntaxError, ValueError) as exc:
+                raise _UnclassifiedError("does not parse") from exc
+            parents: dict = {}
+            for node in ast.walk(tr):
+                for ch in ast.iter_child_nodes(node):
+                    parents[ch] = node
+            self._trees[path] = (tr, parents)
+        return self._trees[path]
+
+    def tick(self) -> None:
+        self.steps += 1
+        if self.steps > _MAX_STEPS:
+            raise _UnclassifiedError("walk too long")
+
+    def literal(self, path: str, line_no: int, col: int, end_col: int) -> None:
+        tr, parents = self.tree(path)
+        line = self.files[path].split("\n")[line_no - 1]
+        bcol = len(line[:col].encode("utf-8"))
+        bend = len(line[:end_col].encode("utf-8"))
+        best = None
+        for node in ast.walk(tr):
+            if not isinstance(node, (ast.Constant, ast.JoinedStr)):
+                continue
+            if isinstance(node, ast.Constant) and not isinstance(node.value, str):
+                continue
+            if isinstance(parents.get(node), ast.JoinedStr):
+                continue
+            s = (node.lineno, node.col_offset)
+            e = (node.end_lineno, node.end_col_offset)
+            if s <= (line_no, bcol) and (line_no, bend) <= e:
+                if best is None or (s >= (best.lineno, best.col_offset)):
+                    best = node
+        if best is None:
+            raise _UnclassifiedError("match is not inside one string literal")
+        if isinstance(parents.get(best), ast.Expr):
+            raise _UnclassifiedError("a docstring / bare string")  # left to the prose rules
+        self.value(path, best)
+
+    def value(self, path: str, node: ast.AST) -> None:
+        self.uses += 1
+        tr, parents = self.tree(path)
+        while True:
+            self.tick()
+            par = parents.get(node)
+            if par is None:
+                raise _UnclassifiedError("no parent")
+            if isinstance(par, (ast.JoinedStr, ast.FormattedValue, ast.IfExp, ast.BoolOp,
+                                ast.List, ast.Tuple)):
+                if isinstance(par, ast.IfExp) and node is par.test:
+                    return
+                node = par
+                continue
+            if isinstance(par, ast.BinOp) and isinstance(par.op, (ast.Add, ast.Mod)):
+                node = par
+                continue
+            if isinstance(par, ast.Compare):
+                return
+            if isinstance(par, ast.Attribute) and par.value is node:
+                gp = parents.get(par)
+                if par.attr in _PY_STR_METHODS and isinstance(gp, ast.Call) and gp.func is par:
+                    node = gp
+                    continue
+                raise _UnclassifiedError(f".{par.attr} on the value")
+            if isinstance(par, ast.Call):
+                if node is par.func:
+                    raise _UnclassifiedError("the value is called")
+                f = par.func
+                if isinstance(f, ast.Attribute) and f.attr in ("join", "format") and \
+                        isinstance(f.value, (ast.Constant, ast.JoinedStr)):
+                    node = par
+                    continue
+                if self.is_print(path, par):
+                    return
+                if self.is_exception(path, f, parents.get(par)):
+                    return
+                raise _UnclassifiedError(f"value passed to {ast.unparse(f)[:60]}()")
+            if isinstance(par, ast.keyword):
+                raise _UnclassifiedError("value passed as a keyword argument")
+            if isinstance(par, ast.Raise):
+                return
+            if isinstance(par, ast.Return):
+                self.returned(path, par)
+                return
+            if isinstance(par, (ast.Assign, ast.AnnAssign)) and getattr(par, "value", None) is node:
+                targets = par.targets if isinstance(par, ast.Assign) else [par.target]
+                if len(targets) != 1 or not isinstance(targets[0], ast.Name):
+                    raise _UnclassifiedError("assignment to a non-name")
+                self.follow_name(path, targets[0].id, par)
+                return
+            if isinstance(par, ast.Expr):
+                return  # discarded
+            raise _UnclassifiedError(f"value in {type(par).__name__}")
+
+    def is_print(self, path: str, call: ast.Call) -> bool:
+        f = call.func
+        if self.streams_rebound():
+            return False
+        if isinstance(f, ast.Name) and f.id == "print":
+            for kw in call.keywords:
+                if kw.arg == "file" and ast.unparse(kw.value) not in ("sys.stdout",
+                                                                      "sys.stderr"):
+                    return False  # print(cmd, file=proc.stdin) feeds a shell
+                if kw.arg is None:
+                    return False
+            return not self.redefined("print")
+        if isinstance(f, ast.Attribute) and f.attr in _PY_PRINT_ATTRS:
+            base = ast.unparse(f.value)
+            if base in _PY_PRINT_BASES or base.endswith(("logger", "log", "console")):
+                if f.attr in ("echo", "secho") and any(
+                        kw.arg in ("file", None) for kw in call.keywords):
+                    return False
+                # A logging handler's emit() / a logger method the package defines runs
+                # whatever its body runs.
+                return not (self.redefined(f.attr) or self.redefined("emit")
+                            or self.redefined("handle") or self.redefined("format")
+                            or self.redefined("filter"))
+        if isinstance(f, ast.Attribute) and f.attr == "write" and ast.unparse(f.value) in (
+                "sys.stdout", "sys.stderr"):
+            return True
+        return False
+
+    def streams_rebound(self) -> bool:
+        """Does any file replace ``sys.stdout`` / ``sys.stderr`` / ``print`` (at least
+        what the tree-wide ``output_replaced`` tests)? Then nothing printed or logged
+        is a hint (Kenne, 2026-10-19)."""
+        if not hasattr(self, "_streams"):
+            self._streams = any(re.search(
+                r"\bsys\s*\.\s*std(?:out|err)\s*=(?!=)|setattr\s*\(\s*sys\b|"
+                r"redirect_std(?:out|err)", self.files[p])
+                or _PY_OUTPUT_REBOUND_RE.search(self.files[p]) for p in self.py_paths)
+        return self._streams
+
+    def stream_replacement_runs(self) -> bool:
+        """Could a replaced ``sys.stdout`` / ``sys.stderr`` hand what is written to it
+        to a command? A raised message that nothing catches is written to stderr.
+        False only when every replacement (``sys.stderr = X``, ``setattr(sys, …, X)``,
+        ``redirect_stderr(X)``) is built from ``io`` buffers, files, the original
+        streams, or a class the package defines (whose ``write`` is checked by
+        :meth:`redefined`), with no ``subprocess`` / ``.stdin`` anywhere in it."""
+        if hasattr(self, "_stream_runs"):
+            return self._stream_runs
+        found = False
+        for p in self.py_paths:
+            text = self.files[p]
+            if not re.search(r"\bstd(?:out|err)\b|redirect_std", text):
+                continue
+            try:
+                tr, parents = self.tree(p)
+            except _UnclassifiedError:
+                found = True
+                break
+            for target in _stream_targets(tr):
+                if self._stream_value_runs(target, tr, parents, 0):
+                    found = True
+                    break
+            if found:
+                break
+        self._stream_runs = found
+        return found
+
+    def _stream_value_runs(self, expr: ast.AST | None, tr: ast.AST, parents: dict,
+                           depth: int) -> bool:
+        if expr is None or depth > 6:
+            return True
+        code = _code_only(expr)
+        if _PY_SINK_RE.search(code) or re.search(r"\bstdin\b|\bpipe\b|\bsocket\b",
+                                                 code, re.I):
+            return True
+        if isinstance(expr, ast.Constant):
+            return False
+        if isinstance(expr, ast.Attribute):
+            return self._stream_value_runs(expr.value, tr, parents, depth + 1)
+        if isinstance(expr, ast.Call):
+            fn = expr.func
+            leaf = fn.attr if isinstance(fn, ast.Attribute) else (
+                fn.id if isinstance(fn, ast.Name) else "")
+            if leaf not in _SAFE_STREAM_CTORS and not self.package_class(leaf):
+                return True
+            if isinstance(fn, ast.Attribute) and self._stream_value_runs(
+                    fn.value, tr, parents, depth + 1):
+                return True
+            args = list(expr.args) + [k.value for k in expr.keywords]
+            return any(self._stream_value_runs(a, tr, parents, depth + 1) for a in args)
+        if isinstance(expr, ast.Name):
+            bound = False
+            for node in ast.walk(tr):
+                if isinstance(node, ast.alias) and (node.asname or node.name).split(
+                        ".")[0] == expr.id:
+                    if node.name.split(".")[0] not in _SAFE_STREAM_MODULES and \
+                            node.name not in _SAFE_STREAM_CTORS:
+                        return True
+                    bound = True
+                elif isinstance(node, ast.arg) and node.arg == expr.id:
+                    return True
+                elif isinstance(node, ast.Name) and node.id == expr.id and isinstance(
+                        node.ctx, ast.Store):
+                    par = parents.get(node)
+                    if isinstance(par, ast.Assign) and node in par.targets:
+                        if self._stream_value_runs(par.value, tr, parents, depth + 1):
+                            return True
+                        bound = True
+                    elif isinstance(par, ast.withitem) and par.optional_vars is node:
+                        if self._stream_value_runs(par.context_expr, tr, parents,
+                                                   depth + 1):
+                            return True
+                        bound = True
+                    else:
+                        return True
+            return not bound
+        return True
+
+    def package_class(self, name: str) -> bool:
+        """A class the package defines (its ``write`` is checked by ``redefined``)."""
+        if not name:
+            return False
+        rx = re.compile(r"^[ \t]*class\s+" + re.escape(name) + r"\b", re.M)
+        return any(rx.search(self.files[p]) for p in self.py_paths)
+
+    def is_exception(self, path: str, f: ast.AST, gp) -> bool:
+        name = f.id if isinstance(f, ast.Name) else (
+            f.attr if isinstance(f, ast.Attribute) else "")
+        if not re.search(r"(?:Error|Exception|Warning|Exit|Abort)$", name or ""):
+            return False
+        if not isinstance(gp, ast.Raise):
+            return False
+        if self.streams_rebound() and (self.redefined("write")
+                                       or self.stream_replacement_runs()):
+            # An uncaught message is written to ``sys.stderr``; a replacement stream
+            # that feeds a command (its ``write`` runs one, or it is a process's stdin)
+            # would run it. A buffer that only captures text runs nothing.
+            return False
+        return not (self.redefined(name) or self.except_runs())
+
+    def except_runs(self) -> bool:
+        """Some ``except … as e`` (or ``sys.excepthook``) in the package hands the
+        caught exception to a command runner: a message can become a command."""
+        if hasattr(self, "_except_runs"):
+            return self._except_runs
+        found = False
+        for p in self.py_paths:
+            text = self.files[p]
+            if "excepthook" in text:
+                found = True
+                break
+            if " as " not in text or not _PY_SINK_RE.search(text):
+                continue
+            try:
+                tr, _ = self.tree(p)
+            except _UnclassifiedError:
+                found = True
+                break
+            for node in ast.walk(tr):
+                if isinstance(node, ast.ExceptHandler) and node.name:
+                    # Whole handler: `c = str(e)` then `os.system(c)` is two statements.
+                    # Read as code only: a message that merely mentions the word
+                    # (``f'Failed to start subprocess: {e}'``) runs nothing.
+                    src = "\n".join(_code_only(sub) for sub in node.body)
+                    if _PY_SINK_RE.search(src) and re.search(
+                            r"(?<![\w])" + re.escape(node.name) + r"(?![\w])", src):
+                        found = True
+                if found:
+                    break
+            if found:
+                break
+        self._except_runs = found
+        return found
+
+    def redefined(self, name: str) -> bool:
+        """A def / class of ``name`` in the package whose body runs a command, or an
+        attribute rebinding (``logger.info = os.system``)."""
+        rx = re.compile(r"^([ \t]*)(?:async\s+)?(?:def|class)\s+" + re.escape(name) + r"\b",
+                        re.M)
+        rebind = re.compile(r"\.\s*" + re.escape(name) + r"\s*=(?!=)|setattr\s*\([^)]*['\"]"
+                            + re.escape(name) + r"['\"]" + (
+                                r"|^\s*print\s*=(?!=)|\bbuiltins\.print\b"
+                                if name == "print" else ""), re.M)
+        for p in self.py_paths:
+            text = self.files[p]
+            if name not in text:
+                continue
+            if rebind.search(text):
+                return True
+            for m in rx.finditer(text):
+                indent = len(m.group(1))
+                rest = text[m.end():].split("\n")
+                body_lines = [rest[0]]
+                for ln in rest[1:400]:
+                    if ln.strip() and (len(ln) - len(ln.lstrip())) <= indent:
+                        break
+                    body_lines.append(ln)
+                if _PY_SINK_RE.search("\n".join(body_lines)):
+                    return True
+        return False
+
+    def scope_of(self, path: str, node: ast.AST):
+        tr, parents = self.tree(path)
+        p = parents.get(node)
+        while p is not None and not isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                                   ast.Lambda, ast.ClassDef)):
+            p = parents.get(p)
+        return p
+
+    def follow_name(self, path: str, name: str, at: ast.AST) -> None:
+        key = (path, name, id(self.scope_of(path, at)))
+        if key in self.followed:
+            return
+        self.followed.add(key)
+        scope = self.scope_of(path, at)
+        tr, parents = self.tree(path)
+        if isinstance(scope, ast.ClassDef):
+            raise _UnclassifiedError("class attribute")
+        root = scope if scope is not None else tr
+        self.check_strings(path, name, root)
+        used_before = self.uses
+        for node in ast.walk(root):
+            if isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+                raise _UnclassifiedError("global / nonlocal")
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and \
+                    node.func.id in ("locals", "globals", "vars", "eval", "exec") and \
+                    not self.class_vars(tr, node, path):
+                raise _UnclassifiedError("dynamic namespace access")
+            if isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load):
+                self.value(path, node)
+        if scope is None:
+            self.module_level(path, name)
+        if self.uses == used_before:
+            raise _UnclassifiedError("never read: nothing shows it to a person")
+
+    @staticmethod
+    def class_names(tree: ast.AST, stem: str) -> set[str]:
+        """Names bound in ``tree`` only by a ``class`` statement or a
+        ``from <module> import <Name>`` (never a module named ``stem``, never a plain
+        ``import``, an assignment, a def or a parameter): ``vars(<one of them>)``
+        reads that object's attributes, not a module namespace (browser-use's
+        ``vars(_PythonAgent).items()``)."""
+        ok: set[str] = set()
+        bad: set[str] = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ClassDef):
+                ok.add(n.name)
+            elif isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    bound = a.asname or a.name
+                    (bad if a.name == stem or a.name == "*" else ok).add(bound)
+            elif isinstance(n, ast.Import):
+                bad.update((a.asname or a.name).split(".")[0] for a in n.names)
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                bad.add(n.name)
+            elif isinstance(n, ast.arg):
+                bad.add(n.arg)
+            elif isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+                bad.add(n.id)
+        return ok - bad
+
+    def class_vars(self, tree: ast.AST, call: ast.Call, path: str) -> bool:
+        """``vars(X)`` where ``X`` is one of :meth:`class_names`."""
+        if call.func.id != "vars" or len(call.args) != 1 or call.keywords or \
+                not isinstance(call.args[0], ast.Name):
+            return False
+        return call.args[0].id in self.class_names(tree, Path(path).stem)
+
+    def module_level(self, path: str, name: str) -> None:
+        """A module-level name can be imported from anywhere in the package."""
+        if not self.package:
+            raise _UnclassifiedError("module-level name leaves the file")
+        rx = re.compile(r"(?<![\w])" + re.escape(name) + r"(?![\w])")
+        for fp, text in self.files.items():
+            if fp == path or not text or name not in text or not rx.search(text):
+                continue
+            low = fp.lower()
+            if Path(low).suffix not in PY_EXTS:
+                if low.endswith(_INERT_SUFFIXES) or low.endswith(".pyi"):
+                    continue
+                raise _UnclassifiedError(f"{name} mentioned in {fp}")
+            tr, parents = self.tree(fp)
+            self.check_strings(fp, name, tr)
+            for node in ast.walk(tr):
+                if isinstance(node, ast.Name) and node.id == name and isinstance(
+                        node.ctx, ast.Load):
+                    self.value(fp, node)
+                elif isinstance(node, ast.Attribute) and node.attr == name and isinstance(
+                        node.ctx, ast.Load):
+                    self.value(fp, node)
+                elif isinstance(node, ast.alias) and node.asname and node.name == name:
+                    raise _UnclassifiedError("imported under another name")
+        for fp in self.py_paths:
+            text = self.files[fp]
+            if fp != path:
+                # Another file reads this module's names dynamically only through the
+                # module object (browser-use: a test that imports
+                # ``browser_use.agent.service`` and calls ``vars(action)`` does not read
+                # ``browser_use/beta/service.py``; ``monkeypatch.setattr(beta_service,
+                # …)`` writes to it).
+                if self.module_read_dynamically(fp, path, name):
+                    raise _UnclassifiedError(f"{fp} may read {path} dynamically")
+                continue
+            # The defining file: ``globals()`` / ``vars()`` / ``eval`` / ``exec`` are
+            # refused by ``follow_name``; what is left is reaching its own namespace
+            # through a frame, ``sys.modules[__name__]`` or a self-import.
+            if _PY_OWN_NAMESPACE_RE.search(text) or self.module_read_dynamically(
+                    fp, path, name):
+                raise _UnclassifiedError(f"{fp} may read {path} dynamically")
+
+    def module_read_dynamically(self, fp: str, path: str, name: str) -> bool:
+        """Could ``fp`` read the names of the module at ``path`` other than by a static
+        ``module.NAME`` (``vars(mod)``, ``getattr(mod, n)``, ``from mod import *``,
+        the module handed to a function or bound to another name, an ``importlib`` /
+        ``__import__`` / ``sys.modules`` lookup)? Conservative: True whenever a
+        reference to the module is used in a way this does not classify."""
+        text = self.files[fp]
+        parts = Path(path).with_suffix("").parts
+        if parts and parts[-1] == "__init__" and len(parts) > 1:
+            parts = parts[:-1]
+        if not parts:
+            return True
+        stem = parts[-1]
+        mentioned = re.search(r"(?<![\w])" + re.escape(stem) + r"(?![\w])", text)
+        by_name = _PY_IMPORT_BY_NAME_RE.search(text)
+        if not (mentioned or by_name):
+            return False
+        try:
+            tr, parents = self.tree(fp)
+        except _UnclassifiedError:
+            return True
+        suffix = list(parts[-2:])
+        if by_name and _imports_by_name(tr, parents, suffix, name,
+                                        code_strings=bool(mentioned)):
+            return True  # a computed module name needs no mention of the stem
+        if not mentioned:
+            return False
+        chains: list[list[str]] = []  # attribute chains that name the module object
+        for node in ast.walk(tr):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    segs = a.name.split(".")
+                    if segs[-len(suffix):] == suffix or segs == [stem]:
+                        chains.append([a.asname] if a.asname else segs)
+            elif isinstance(node, ast.ImportFrom):
+                msegs = (node.module or "").split(".") if node.module else []
+                for a in node.names:
+                    if a.name == "*":
+                        if msegs and msegs[-1] == stem:
+                            return True
+                        continue
+                    if a.name != stem:
+                        continue
+                    if len(suffix) == 1 or (msegs and msegs[-1] == suffix[0]) or (
+                            node.level and not msegs):
+                        chains.append([a.asname or a.name])
+        if not chains:
+            return False
+        roots = {c[0] for c in chains}
+        for node in ast.walk(tr):
+            if not (isinstance(node, ast.Name) and node.id in roots
+                    and isinstance(node.ctx, ast.Load)):
+                continue
+            names = [node.id]
+            top: ast.AST = node
+            while True:
+                par = parents.get(top)
+                if isinstance(par, ast.Attribute) and par.value is top:
+                    names.append(par.attr)
+                    top = par
+                    continue
+                break
+            for chain in chains:
+                n = len(chain)
+                if names[:n] == chain and len(names) > n:
+                    if names[n] == "__dict__":
+                        return True
+                    continue  # a static `module.NAME` (followed by ``module_level``)
+                if names == chain[:len(names)]:
+                    # The module object itself (or a package above it) as a value.
+                    if not _module_value_inert(top, tr, parents, name):
+                        return True
+        return False
+
+    def check_strings(self, path: str, name: str, root: ast.AST) -> None:
+        rx = re.compile(r"(?<![\w])" + re.escape(name) + r"(?![\w])")
+        for node in ast.walk(root):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and \
+                    rx.search(node.value):
+                raise _UnclassifiedError(f"{name} named inside a string")
+
+    def returned(self, path: str, ret: ast.Return) -> None:
+        fn = self.scope_of(path, ret)
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            raise _UnclassifiedError("return outside a named function")
+        key = ("fn", fn.name)
+        if key in self.followed:
+            return
+        self.followed.add(key)
+        outer = self.scope_of(path, fn)
+        if (outer is None or isinstance(outer, ast.ClassDef)) and not self.package:
+            raise _UnclassifiedError("function leaves the file")
+        paths = self.py_paths if self.package else [path]
+        used_before = self.uses
+        for fp in paths:
+            if fn.name not in self.files[fp]:
+                continue
+            tr, parents = self.tree(fp)
+            self.check_strings(fp, fn.name, tr)
+            for node in ast.walk(tr):
+                ref = (isinstance(node, ast.Name) and node.id == fn.name) or (
+                    isinstance(node, ast.Attribute) and node.attr == fn.name)
+                if not ref or not isinstance(node.ctx, ast.Load):
+                    continue
+                call = parents.get(node)
+                if isinstance(call, ast.Call) and call.func is node:
+                    self.value(fp, call)
+                else:
+                    raise _UnclassifiedError(f"{fn.name} used other than by a call")
+        if self.package:
+            for fp, text in self.files.items():
+                low = fp.lower()
+                if Path(low).suffix not in PY_EXTS and fn.name in text and not low.endswith(
+                        _INERT_SUFFIXES) and re.search(r"\b" + re.escape(fn.name) + r"\b", text):
+                    raise _UnclassifiedError(f"{fn.name} mentioned in {fp}")
+        if self.uses == used_before:
+            raise _UnclassifiedError("never read: nothing shows it to a person")
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+class Hints:
+    """Answers :func:`hint_only` for many findings over one set of files, sharing
+    tokenization and the package-wide checks between them."""
+
+    MAX_QUESTIONS = 64  # findings past this many in one package keep their severity
+
+    def __init__(self, files: dict[str, str], *, package: bool) -> None:
+        self.files = files
+        self.package = package
+        self._js: _JsFlow | None = None
+        self._py: _PyFlow | None = None
+        self.asked = 0
+
+    def why_not(self, path: str, line_no: int, pattern: re.Pattern) -> str | None:
+        """None when every match on the line is a printed hint, else the reason."""
+        if not is_supported(path):
+            return "unsupported file type"
+        text = self.files.get(path)
+        if not text:
+            return "no text"
+        lines = text.split("\n")
+        if not (0 < line_no <= len(lines)):
+            return "line out of range"
+        matches = list(pattern.finditer(lines[line_no - 1]))
+        if not matches:
+            return "no match on the line"
+        self.asked += 1
+        if self.asked > self.MAX_QUESTIONS:
+            return "too many findings to follow"
+        try:
+            if Path(path.lower()).suffix in PY_EXTS:
+                if self._py is None:
+                    self._py = _PyFlow(self.files, self.package)
+                for m in matches:
+                    self._py.steps = 0
+                    self._py.followed = set()
+                    self._py.literal(path, line_no, m.start(), m.end())
+                return None
+            if self._js is None:
+                self._js = _JsFlow(self.files, self.package)
+            offset = sum(len(ln) + 1 for ln in lines[:line_no - 1])
+            for m in matches:
+                self._js.steps = 0
+                self._js.followed = set()
+                self._js.literal(path, offset + m.start(), offset + m.end())
+            return None
+        except _UnclassifiedError as exc:
+            return str(exc) or "unknown"
+        except (RecursionError, KeyError, IndexError, ValueError) as exc:
+            return f"walk error: {type(exc).__name__}"
+
+
+_PY_OUTPUT_REBOUND_RE = re.compile(
+    r"\bsys\s*\.\s*std(?:out|err)\s*=(?!=)|setattr\s*\(\s*(?:sys|builtins)\b|"
+    r"redirect_std(?:out|err)|\bbuiltins\s*\.\s*print\s*=(?!=)|"
+    r"^\s*print\s*=(?!=)|^\s*def\s+print\s*\(", re.MULTILINE)
+
+
+# ``_CONSOLE_SHADOW_RE`` for a whole-tree check: ``return console.log(…)`` (a minified
+# bundle's logger) is a call, not ``console`` handed out as a value to write through.
+_OUTPUT_SHADOW_RE = re.compile(_CONSOLE_SHADOW_RE.pattern.replace(
+    r"\breturn\s+console\b", r"\breturn\s+console\b(?!\s*(?:\.|\?\.|\[))"))
+
+
+def output_replaced(files: dict[str, str]) -> bool:
+    """Does any code file in ``files`` replace, wrap or alias the human-facing output a
+    printed hint relies on (JS ``console`` / ``process.stdout.write``, Python
+    ``sys.stdout`` / ``print``)? Then a string "only printed" may be run."""
+    for p, text in files.items():
+        if not text or not is_supported(p):
+            continue
+        if Path(p.lower()).suffix in PY_EXTS:
+            if _PY_OUTPUT_REBOUND_RE.search(text):
+                return True
+        elif _shadow_hit(_OUTPUT_SHADOW_RE, text):
+            return True
+    return False
+
+
+def hint_only(files: dict[str, str], path: str, line_no: int, pattern: re.Pattern,
+              *, package: bool) -> bool:
+    """True when EVERY pipe-to-shell match of ``pattern`` on 1-based ``line_no`` of
+    ``path`` is a string whose value only reaches human-facing output."""
+    return Hints(files, package=package).why_not(path, line_no, pattern) is None
+
+
+def why_not(files: dict[str, str], path: str, line_no: int, pattern: re.Pattern,
+            *, package: bool) -> str | None:
+    """None when :func:`hint_only` holds, else the reason the walk stopped."""
+    return Hints(files, package=package).why_not(path, line_no, pattern)

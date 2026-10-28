@@ -191,3 +191,7 @@ This is offered as the starting PR for the cross-spec umbrella in
 - **Adopted** substrate-and-primitive layering + per-receipt-type attribution (§8).
 - **No change** to existing-field JCS canonicalization — full v0.3.2 backward
   compatibility.
+
+---
+
+*Licence: [CC BY 4.0](LICENSE-CC-BY-4.0.txt); see [CTEF-LICENSE.md](CTEF-LICENSE.md).*

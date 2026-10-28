@@ -15,6 +15,7 @@ Design (see docs/internal/claude-directory-listing-plan.md):
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextvars
 import json
 import logging
@@ -25,19 +26,23 @@ from urllib.parse import quote
 import httpx
 import jsonschema
 import mcp.types as types
+from mcp.server.context import ServerRequestContext
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.types.version import MODERN_PROTOCOL_VERSIONS
+from starlette.requests import ClientDisconnect
 
+from src.bridges import mcp_response_counter as _counter
 from src.bridges.mcp_app_view import trust_card_html
 from src.scanner.verdict import DECISION_VALUES as _DECISION_VALUES
 from src.scanner.verdict import SAFE_BAR as _SHARED_SAFE_BAR
 from src.scanner.verdict import Decision as _Decision
+from src.scanner.verdict import coverage_gap_notes as _coverage_gap_notes
 from src.scanner.verdict import decide as _decide
 from src.scanner.verdict import is_safe as _shared_is_safe
 from src.scanner.verdict import verdict_reason as _shared_verdict_reason
 from src.trust_tiers import headline as _decision_headline
-from src.trust_tiers import is_certified as _is_certified
 
 logger = logging.getLogger(__name__)
 
@@ -140,9 +145,10 @@ _ABOUT = (
     "advisory on this version, deprecation, or a score under 51), or Do not connect (a "
     "critical finding, a known-malicious dependency, or a planted credential leaving the "
     "sandbox). \"· Certified\" marks a tool that also passed every provenance check. Two "
-    "scores sit under it: trust (0-100) and adoption. A sub-81 score with zero findings "
-    "means non-finding signals (maintainer, provenance, adoption) held it down, not "
-    "detected risk.\n\n"
+    "scores sit under it: trust (0-100) and adoption. A clean result can still score "
+    "below 100: thin coverage (little code to inspect, or a remote server whose code is "
+    "not visible) caps it, and maintainer and provenance signals move it. Adoption is "
+    "never an input to trust.\n\n"
     "TRY:\n"
     "• \"scan the npm package chalk\"\n"
     "• \"scan the repo modelcontextprotocol/servers\"\n"
@@ -208,10 +214,17 @@ server: Server = Server(
 # The stateless transport builds InitializeResult per request from
 # create_initialization_options(); pick the instructions for the calling surface there
 # (the surface contextvar is set in mcp_asgi_app before the request is handled).
+# 2026-07-28 clients never send initialize: they read the same instructions from
+# server/discover (_discover below).
 _base_create_initialization_options = server.create_initialization_options
 
 
 def _create_initialization_options(*args, **kwargs):
+    # SDK 1.x always advertised `"experimental": {}`; 2.x omits it unless asked. Keep it
+    # so the handshake-era initialize result stays byte-identical to what clients (and
+    # the ChatGPT app review) already have on file.
+    if len(args) < 2:
+        kwargs.setdefault("experimental_capabilities", {})
     opts = _base_create_initialization_options(*args, **kwargs)
     try:
         opts.instructions = _instructions_for(_SURFACE.get())
@@ -349,7 +362,10 @@ def _name_not_resolved(name: str, candidates: list[dict]) -> str:
 
 async def _bump(metric: str) -> None:
     """Increment a Directory-connector usage counter. Best-effort — never raises,
-    so instrumentation can never break a tool call."""
+    so instrumentation can never break a tool call. A health-probe request (see
+    src/jobs/mcp_health) is not usage and bumps nothing."""
+    if _HEALTH_PROBE.get():
+        return
     try:
         from src.api.metrics_dashboard_router import bump_metric
         await bump_metric(f"mcp:{metric}")
@@ -372,6 +388,11 @@ _CLIENT_IP: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 _CLIENT_UA: contextvars.ContextVar[str] = contextvars.ContextVar(
     "agentavow_mcp_client_ua", default=""
+)
+# True for our own health probe (src/jobs/mcp_health), proven by an HMAC header:
+# its requests bump no usage counter and are not counted as client traffic.
+_HEALTH_PROBE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "agentavow_mcp_health_probe", default=False
 )
 
 # Order matters: "claude-code" must be tested before "claude" (it contains it).
@@ -417,6 +438,8 @@ async def _record_caller() -> None:
     """Add this tool call's machine to today's distinct-callers HLL, overall and per
     surface, so the dashboard can say how many machines invoked the connector rather
     than how many calls arrived. Best-effort — never raises."""
+    if _HEALTH_PROBE.get():
+        return
     try:
         from src.api.metrics_dashboard_router import record_unique
 
@@ -489,6 +512,35 @@ def _no_entity_help(what: str) -> str:
     )
 
 
+def _api_error_detail(e: httpx.HTTPStatusError) -> str:
+    """The public API's own one-line reason (its ``detail``), without the generic prefix.
+    Empty when the body is not the API's JSON error shape."""
+    try:
+        detail = e.response.json().get("detail")
+    except Exception:
+        return ""
+    if not isinstance(detail, str):
+        return ""
+    return detail.removeprefix("Scan error: ").strip()[:300]
+
+
+def _not_scanned_help(tool: str, detail: str) -> str:
+    """Guidance for a target AgentAvow could not grade. Never reads as a verdict."""
+    head = "Not scanned — AgentAvow could not grade this target, so there is no answer for it."
+    why = f"\nReason: {detail}" if detail else ""
+    if tool == "scan_mcp_server":
+        nxt = (
+            "\n\nThe most common cause is a server that requires sign-in (for example OAuth): "
+            "its tool list is not public, so it cannot be read without your account. You can "
+            "still check the code behind it: scan its published package with scan_package "
+            "(e.g. registry='npm', name='@scope/its-server') or its source repository with "
+            "scan_repo ('owner/name'). Not scanned is neither safe nor unsafe."
+        )
+    else:
+        nxt = "\n\nCheck the name or coordinates. Not scanned is neither safe nor unsafe."
+    return head + why + nxt
+
+
 def _identity_matches(query: str, entity: dict) -> bool:
     """True when every word of *query* appears in the entity's name or DID."""
     haystack = f"{entity.get('display_name') or ''} {entity.get('did_web') or ''}".lower()
@@ -519,10 +571,14 @@ def _findings(items: list[dict], limit: int = 5) -> list[dict]:
 def _grouped_findings(items: list[dict], limit: int = 3) -> list[dict]:
     """Collapse repeats of the same finding into one row with a count, so a single
     pattern hit in 25 files reads as 'X (×25)' rather than 25 separate findings."""
+    from src.scanner.verdict import finding_decides
+
     groups: dict[tuple, dict] = {}
+    decides: dict[tuple, bool] = {}
     order: list[tuple] = []
     for it in items:
         key = (it.get("severity"), it.get("name"))
+        decides[key] = decides.get(key, False) or finding_decides(it)
         g = groups.get(key)
         if g is None:
             groups[key] = {
@@ -536,15 +592,18 @@ def _grouped_findings(items: list[dict], limit: int = 3) -> list[dict]:
             order.append(key)
         else:
             g["count"] += 1
-    # Surface the most important first: severity (critical > high > medium > low), then
-    # the highest-count pattern within a severity — so a big cluster (e.g. vulnerable
-    # deps) isn't dropped behind a single lower-priority finding. Stable within ties.
+    # Surface the findings that decided the answer first (blocking critical/high in the
+    # tool's own code), so the list leads with what the decision reason names, not a
+    # pile of dependency advisories. Then severity (critical > high > medium > low),
+    # then the highest-count pattern within a severity — so a big cluster (e.g.
+    # vulnerable deps) isn't dropped behind a single lower-priority finding. Stable.
     sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     ranked = sorted(
-        groups.values(),
-        key=lambda g: (sev_rank.get(g["severity"], 4), -g["count"]),
+        order,
+        key=lambda k: (not decides[k], sev_rank.get(groups[k]["severity"], 4),
+                       -groups[k]["count"]),
     )
-    return ranked[:limit]
+    return [groups[k] for k in ranked[:limit]]
 
 
 def _scan_block(
@@ -586,7 +645,9 @@ def _scan_block(
 
     # Reason phrase, reused in the headline and the Next step (limited mode only).
     _files = (data.get("metadata") or {}).get("files_scanned")
-    if isinstance(_files, int) and 0 < _files < 8:
+    if isinstance(_files, int) and not isinstance(_files, bool) and _files == 0:
+        reason = "capped because there's no code to inspect (0 files)"
+    elif isinstance(_files, int) and 0 < _files < 8:
         reason = (f"capped because there's little code to inspect "
                   f"({_files} file{'' if _files == 1 else 's'})")
     else:
@@ -670,6 +731,12 @@ def _scan_block(
         lines = [f"{head}. {target}: trust {score}/100.{_why}{adopt_clause}", ""]
     else:
         lines = [f"{head} — {target}, {score}/100. {why}{adopt_clause}", ""]
+    # What the scan could not check, right under the verdict: a clean result covers only
+    # what was read (coverage_gaps; disclosure only, never a score input).
+    _gaps = _coverage_gap_notes(data)
+    if _gaps:
+        lines[1:1] = [f"**Not checked:** {'; '.join(_gaps)}. A clean result covers only "
+                      "what was read."]
 
     # Compact 8-bit card. Left-aligned with a top/bottom rule (no right border, which is
     # what breaks alignment across renderers). Renders in any monospace view.
@@ -1067,11 +1134,24 @@ def _sandbox_section(data: dict) -> list[str]:
     b = data.get("behavioral")
     if not isinstance(b, dict):
         return []
+    if b.get("pending") and b.get("state") == "queued":
+        pos = b.get("queue_position")
+        where = f" (position {pos} in the queue)" if isinstance(pos, int) else ""
+        return [f"**Sandbox:** waiting for a free sandbox slot{where} — every slot is busy. "
+                "The static result above stands; ask again in a few minutes for the "
+                "observed behavior."]
     if b.get("pending"):
         return ["**Sandbox:** running now — ask again in about a minute for the observed "
                 "behavior (tools called, network, files)."]
+    if b.get("state") == "unavailable":
+        return ["**Sandbox:** unavailable right now — this result is static analysis only "
+                "(final)."]
     if not b.get("ran"):
-        return []
+        # A run that did not happen (tier error, nothing installable) is not a clean run:
+        # say so rather than staying silent beside a static answer.
+        why = _clip(str(b.get("reason") or b.get("error") or "").strip(), 120)
+        return [f"**Sandbox:** did not run{f' ({why})' if why else ''} — this result is "
+                "static analysis only; nothing was observed running."]
     if _is_live_probe(b):
         return _live_probe_section(b)
     att = b.get("attestation") if isinstance(b.get("attestation"), dict) else None
@@ -1119,6 +1199,10 @@ def _sandbox_section(data: dict) -> list[str]:
                          f"(not a finding); {net}.")
         else:
             lines.append(head + f"{verb}; {net}.")
+    # A run stopped by the wall clock is partial; say so instead of reading as complete
+    # (the report's panel shows the same note).
+    if b.get("timed_out") or (ex or {}).get("timed_out"):
+        lines.append("- Ran partly (hit its time limit): behavior after that was not observed.")
     fs = _behavioral_findings(b)
     room = 6 - len(lines) - 1  # leave a line for the score effect
     for f in fs[: max(room, 1)]:
@@ -1194,6 +1278,17 @@ def _decision_of(data: dict) -> _Decision:
     return _decide(data)
 
 
+def _certified_mark_of(data: dict) -> bool:
+    """The Certified MARK for a /public/scan response: the API's ``certified_mark``
+    when present, else the shared display rule over the same decision the headline
+    uses (eligible AND Safe to connect AND final AND score >= 81 AND not thin)."""
+    mark = data.get("certified_mark")
+    if isinstance(mark, bool):
+        return mark
+    from src.scanner.verdict import certified_mark
+    return certified_mark(data, _decision_of(data))
+
+
 def _decision_leads(decision: _Decision, safe: bool) -> bool:
     """Whether the headline leads with the decision phrase (see HEADLINE_FOLLOWS_DECISION)."""
     if HEADLINE_FOLLOWS_DECISION:
@@ -1247,7 +1342,7 @@ def _next_step(decision: _Decision, mode: str, verb: str, cap: str, advisories: 
 def _decision_head(data: dict, decision: _Decision) -> tuple[str, str]:
     """(headline, card glyph): '✅ Safe to connect · Certified — <reason>' and the
     phrase with its icon for the monospace card."""
-    phrase = _decision_headline(decision.decision, _is_certified(data))
+    phrase = _decision_headline(decision.decision, _certified_mark_of(data))
     icon = _DECISION_ICONS.get(decision.decision, "⚠️")
     return f"{icon} {phrase} — {decision.reason}", f"{icon} {phrase}"
 
@@ -1346,13 +1441,19 @@ def _split_pinned_version(surface: str, spec: str) -> tuple[str, str | None]:
 
 def _sandbox_struct(data: dict) -> dict | None:
     """The behavioral sandbox result as stable machine-readable fields. None when the
-    tier does not apply; ``pending`` True while the first run is still going."""
+    tier does not apply; ``pending`` True while the first run is still going or waiting
+    for a slot (``state`` running / queued; ``unavailable`` = final, static only)."""
     b = data.get("behavioral")
     if not isinstance(b, dict):
         return None
     if b.get("pending") or not b.get("ran"):
-        return {"ran": False, "pending": bool(b.get("pending")),
-                "reason": b.get("reason") or None}
+        out = {"ran": False, "pending": bool(b.get("pending")),
+               "reason": b.get("reason") or None}
+        if b.get("state") in ("running", "queued", "unavailable"):
+            out["state"] = b["state"]
+        if isinstance(b.get("queue_position"), int):
+            out["queue_position"] = b["queue_position"]
+        return out
     ex = b.get("exercise") if isinstance(b.get("exercise"), dict) else {}
     gs = b.get("grade_summary") or {}
     eff = data.get("behavioral_score_effect") or {}
@@ -1406,6 +1507,13 @@ def _scan_struct(
     # Machine-readable "why": distinguishes a real risk review from a coverage cap.
     # Shared with the public API so the two surfaces never disagree.
     verdict_reason = _shared_verdict_reason(data, safe)
+    # What the scan could not check (the API's coverage_gaps / not_checked, uncapped).
+    # A "clean" verdict over a partial read says so, so a CI consumer that reads only
+    # verdict_reason never takes it for a clean bill of the whole tool.
+    gaps = data.get("coverage_gaps") if isinstance(data.get("coverage_gaps"), dict) else {}
+    not_checked = _coverage_gap_notes(data)
+    if verdict_reason == "clean" and not_checked:
+        verdict_reason = "clean_partial"
     sandbox = _sandbox_struct(data)
     # Behavioral high/critical findings are findings: a consumer that only reads
     # findings_total / top_findings must see them (a model summarising structuredContent
@@ -1427,6 +1535,11 @@ def _scan_struct(
         "tier": data.get("trust_tier"),
         "verdict": "safe" if safe else "needs_review",
         "verdict_reason": verdict_reason,
+        # What the scan selected but could not read: the plain-English notes (every one)
+        # and the machine keys. Additive, outside the advertised outputSchema's described
+        # properties until that schema can change (it allows extra keys).
+        "not_checked": not_checked,
+        "coverage_gaps": gaps,
         # The three-phrase decision (unsigned; rides beside the binary verdict above,
         # which keeps its meaning): safe | review | do_not_connect, whether it is final
         # (False while the sandbox is still running) and the one-line reason.
@@ -1453,11 +1566,11 @@ def _scan_struct(
         "sandbox": sandbox,
         # MUST match the signed attestation's certified.eligible (the 6 crypto gates) — a
         # trust product cannot have its MCP field disagree with its own signed report.
-        # The "only render the Certified MARK when also safe" rule is a DISPLAY gate applied
-        # in the card/site, NOT here. `certified_mark` carries that display value for
-        # consumers who want the badge rule without re-deriving it.
+        # The Certified MARK is the display rule on top (verdict.certified_mark: Safe to
+        # connect, final, score >= 81, not thin), the same one the site and badge use;
+        # always sent so the card never re-derives it.
         "certified": bool((data.get("certified") or {}).get("eligible")),
-        "certified_mark": bool((data.get("certified") or {}).get("eligible")) and safe,
+        "certified_mark": _certified_mark_of(data),
         # top findings, repeats collapsed to one row + count — for the card + CI triage
         "top_findings": (beh_items + _grouped_findings(items, 3))[:5],
         # context-only incident history (was this package ever compromised?) — never
@@ -1642,7 +1755,8 @@ _TOOLS: list[types.Tool] = [
             "real usage (downloads per week), findings with remediation, and a signed "
             "attestation. Also reports published advisories that affect the scanned version, "
             "the maintainer's deprecation notice, repo-vs-artifact drift (files shipped that "
-            "aren't in the source), and what a sandbox run observed when one applies. Scans the "
+            "aren't in the source), and AgentAvow's behavioral sandbox results when available. "
+            "Scans the "
             "latest version unless `version` (or a pin in the name) names one. Read-only; "
             "calls agentavow.com."
         ),
@@ -1818,7 +1932,7 @@ for _t in _TOOLS:
         _t.meta = {**_CARD_META, "openai/toolInvocation/invoking": "Scanning with AgentAvow…",
                    "openai/toolInvocation/invoked": "AgentAvow scan complete"}
         # The scan tools return structuredContent; describe it (see _SCAN_OUTPUT_SCHEMA).
-        _t.outputSchema = _SCAN_OUTPUT_SCHEMA
+        _t.output_schema = _SCAN_OUTPUT_SCHEMA
 
 # Defensive length bounds on string inputs (hygiene — these are interpolated into API
 # paths; also what our own scanner flags on unconstrained params). Generous so no real
@@ -1826,17 +1940,55 @@ for _t in _TOOLS:
 _MAXLEN = {"repo": 214, "owner": 214, "name": 214, "endpoint_url": 512,
            "entity_id": 64, "target_entity_id": 64}
 for _t in _TOOLS:
-    for _k, _p in ((_t.inputSchema or {}).get("properties") or {}).items():
+    for _k, _p in ((_t.input_schema or {}).get("properties") or {}).items():
         if _p.get("type") == "string" and "maxLength" not in _p and _k in _MAXLEN:
             _p["maxLength"] = _MAXLEN[_k]
 
 
-@server.list_tools()
+_TOOLS_BY_NAME: dict[str, types.Tool] = {_t.name: _t for _t in _TOOLS}
+
+
+# --------------------------------------------------------------------------- #
+# MCP request handlers. SDK 2.x registers `(ctx, params) -> Result` handlers by method
+# (no decorators). The bodies stay plain functions with their 1.x signatures
+# (_list_tools, _read_resource, _get_prompt, _call_tool — the tests call them
+# directly); the _on_* adapters below shape their returns into the protocol results
+# the 1.x decorators used to build, so the wire output is unchanged.
+# --------------------------------------------------------------------------- #
+# Per-request slot where an _on_* adapter leaves the wire dump of the result it built,
+# in its own key order, for _legacy_key_order (below) to restore after the SDK's
+# per-version shaping.
+_WIRE_REF: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "agentavow_mcp_wire_ref", default=None
+)
+
+
+def _keeps_wire_order(fn):
+    async def wrapper(ctx, params):
+        result = await fn(ctx, params)
+        holder = _WIRE_REF.get()
+        if holder is not None:
+            try:
+                holder["ref"] = result.model_dump(by_alias=True, mode="json", exclude_none=True)
+            except Exception:  # noqa: BLE001 — ordering is cosmetic
+                pass
+        return result
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    wrapper.__wrapped__ = fn
+    return wrapper
+
+
 async def _list_tools() -> list[types.Tool]:
     return _TOOLS
 
 
-@server.list_resources()
+async def _on_list_tools(
+    ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+) -> types.ListToolsResult:
+    return types.ListToolsResult(tools=await _list_tools())
+
+
 async def _list_resources() -> list[types.Resource]:
     _r = types.Resource(
         uri=_CARD_URI,
@@ -1873,12 +2025,35 @@ _CARD_CONTENTS_META = {
 }
 
 
-@server.read_resource()
+async def _on_list_resources(
+    ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+) -> types.ListResourcesResult:
+    return types.ListResourcesResult(resources=await _list_resources())
+
+
 async def _read_resource(uri: object) -> list[ReadResourceContents]:
     if str(uri).rstrip("/") == _CARD_URI.rstrip("/"):
         return [ReadResourceContents(content=trust_card_html(HEADLINE_FOLLOWS_DECISION),
                                      mime_type=_CARD_MIME, meta=_CARD_CONTENTS_META)]
     return []
+
+
+async def _on_read_resource(
+    ctx: ServerRequestContext, params: types.ReadResourceRequestParams
+) -> types.ReadResourceResult:
+    # Same shape SDK 1.x built from ReadResourceContents (an unknown URI is an empty
+    # contents list, as before).
+    contents: list[types.TextResourceContents | types.BlobResourceContents] = []
+    for c in await _read_resource(params.uri):
+        if isinstance(c.content, bytes):
+            contents.append(types.BlobResourceContents(
+                uri=params.uri, blob=base64.b64encode(c.content).decode(),
+                mime_type=c.mime_type or "application/octet-stream", meta=c.meta))
+        else:
+            contents.append(types.TextResourceContents(
+                uri=params.uri, text=c.content, mime_type=c.mime_type or "text/plain",
+                meta=c.meta))
+    return types.ReadResourceResult(contents=contents)
 
 
 # A discoverable "intro" the user can invoke from the client's prompt picker — the
@@ -1916,7 +2091,6 @@ _CHECK_MY_CONNECTIONS = (
 )
 
 
-@server.list_prompts()
 async def _list_prompts() -> list[types.Prompt]:
     return [
         types.Prompt(
@@ -1933,7 +2107,18 @@ async def _list_prompts() -> list[types.Prompt]:
     ]
 
 
-@server.get_prompt()
+async def _on_list_prompts(
+    ctx: ServerRequestContext, params: types.PaginatedRequestParams | None
+) -> types.ListPromptsResult:
+    return types.ListPromptsResult(prompts=await _list_prompts())
+
+
+async def _on_get_prompt(
+    ctx: ServerRequestContext, params: types.GetPromptRequestParams
+) -> types.GetPromptResult:
+    return await _get_prompt(params.name, params.arguments)
+
+
 async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResult:
     if name == "agentavow_check_my_connections":
         return types.GetPromptResult(
@@ -1956,7 +2141,6 @@ async def _get_prompt(name: str, arguments: dict | None) -> types.GetPromptResul
     )
 
 
-@server.call_tool()
 async def _call_tool(
     name: str, arguments: dict
 ) -> list[types.TextContent] | tuple[list[types.TextContent], dict] | types.CallToolResult:
@@ -1979,6 +2163,193 @@ async def _call_tool(
                      name, e.message)
         return types.CallToolResult(content=content, structuredContent=struct)
     return out
+
+
+def _tool_error(text: str) -> types.CallToolResult:
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)],
+                                is_error=True)
+
+
+def _tool_input_schema(name: str) -> dict | None:
+    """inputSchema by tool name (the SDK's Mcp-Param-* header check on 2026-07-28)."""
+    t = _TOOLS_BY_NAME.get(name)
+    return t.input_schema if t is not None else None
+
+
+async def _on_call_tool(
+    ctx: ServerRequestContext | None, params: types.CallToolRequestParams
+) -> types.CallToolResult:
+    """tools/call, with the checks SDK 1.x's @call_tool decorator ran and 2.x does not:
+    arguments validated against the tool's inputSchema (the maxLength bounds included),
+    the (content, structuredContent) pair validated against its outputSchema, and an
+    unexpected exception returned as a tool error (2.x would answer a JSON-RPC error).
+    Error texts match 1.x's."""
+    name = params.name
+    arguments = params.arguments or {}
+    tool = _TOOLS_BY_NAME.get(name)
+    try:
+        if tool is not None:
+            try:
+                jsonschema.validate(instance=arguments, schema=tool.input_schema)
+            except jsonschema.ValidationError as e:
+                return _tool_error(f"Input validation error: {e.message}")
+        results = await _call_tool(name, arguments)
+        if isinstance(results, types.CallToolResult):
+            return results
+        if isinstance(results, tuple) and len(results) == 2:
+            content, struct = results
+        else:
+            content, struct = results, None
+        if tool is not None and tool.output_schema is not None:
+            if struct is None:
+                return _tool_error("Output validation error: outputSchema defined but no "
+                                   "structured output returned")
+            try:
+                jsonschema.validate(instance=struct, schema=tool.output_schema)
+            except jsonschema.ValidationError as e:
+                return _tool_error(f"Output validation error: {e.message}")
+        return types.CallToolResult(content=list(content), structured_content=struct,
+                                    is_error=False)
+    except Exception as e:  # noqa: BLE001 — 1.x parity: a tool error, never a stack trace
+        return _tool_error(str(e))
+
+
+async def _discover(
+    ctx: ServerRequestContext, params: types.RequestParams | None
+) -> types.DiscoverResult:
+    """server/discover (2026-07-28): the SDK default, with the per-surface instructions
+    the handshake-era initialize result carries."""
+    return types.DiscoverResult(
+        supported_versions=list(MODERN_PROTOCOL_VERSIONS),
+        capabilities=server.get_capabilities(protocol_version=ctx.protocol_version),
+        instructions=_instructions_for(_SURFACE.get()),
+    )
+
+
+for _method, _params_type, _handler in (
+    ("tools/list", types.PaginatedRequestParams, _on_list_tools),
+    ("tools/call", types.CallToolRequestParams, _on_call_tool),
+    ("resources/list", types.PaginatedRequestParams, _on_list_resources),
+    ("resources/read", types.ReadResourceRequestParams, _on_read_resource),
+    ("prompts/list", types.PaginatedRequestParams, _on_list_prompts),
+    ("prompts/get", types.GetPromptRequestParams, _on_get_prompt),
+    ("server/discover", types.RequestParams, _discover),
+):
+    server.add_request_handler(_method, _params_type, _keeps_wire_order(_handler))
+server.get_tool_input_schema = _tool_input_schema
+
+
+# Handshake-era wire order. SDK 2.x shapes every result through per-version "surface"
+# models generated from the spec's JSON schema, whose fields are alphabetical, so a
+# 2025-11-25 prompts/list would come out `{"description":…,"name":…,"title":…}` instead
+# of the `{"name":…,"title":…,"description":…}` order SDK 1.x wrote (and an inputSchema
+# as `{"properties":…,"required":…,"type":…}`). JSON objects are unordered, but the
+# ChatGPT app review pins these exact bytes, so for handshake-era versions the keys are
+# put back in the order our handler built them (the 1.x wire order); for initialize,
+# which the SDK builds itself, in the order of its own InitializeResult model. Order
+# only: the values (and the set of keys) are the SDK's, untouched; a 2026-07-28 result
+# is left exactly as the SDK shaped it.
+_ORDER_MODELS: dict[str, type] = {
+    "initialize": types.InitializeResult,
+    "tools/list": types.ListToolsResult,
+    "tools/call": types.CallToolResult,
+    "resources/list": types.ListResourcesResult,
+    "resources/read": types.ReadResourceResult,
+    "prompts/list": types.ListPromptsResult,
+    "prompts/get": types.GetPromptResult,
+}
+
+
+def _reorder_like(value, ref):
+    """`value` with its object keys in `ref`'s order (keys `ref` lacks keep their place
+    after them), recursively. Never adds, drops or changes a value."""
+    if isinstance(value, dict) and isinstance(ref, dict):
+        out = {k: _reorder_like(value[k], ref[k]) for k in ref if k in value}
+        for k, v in value.items():
+            if k not in out:
+                out[k] = v
+        return out
+    if isinstance(value, list) and isinstance(ref, list) and len(value) == len(ref):
+        return [_reorder_like(v, r) for v, r in zip(value, ref)]
+    return value
+
+
+async def _legacy_key_order(ctx, call_next):
+    holder: dict = {}
+    token = _WIRE_REF.set(holder)
+    try:
+        result = await call_next(ctx)
+    finally:
+        _WIRE_REF.reset(token)
+    model = _ORDER_MODELS.get(ctx.method)
+    if (model is None or not isinstance(result, dict)
+            or ctx.protocol_version in MODERN_PROTOCOL_VERSIONS):
+        return result
+    try:
+        ref = holder.get("ref")
+        if ref is None:
+            ref = model.model_validate(result).model_dump(by_alias=True, mode="json",
+                                                          exclude_none=True)
+        return _reorder_like(result, ref)
+    except Exception:  # noqa: BLE001 — ordering is cosmetic; never fail a request over it
+        return result
+
+
+server.middleware.append(_legacy_key_order)
+
+
+# Session starts, per surface (agentgraph-72, 2026-10-21). The snapshot's cc_sessions
+# used to count the protocol-version 400 that every new Claude Code session hit; SDK 2.x
+# (PR #205) removed that reject, so a real start signal is needed. A session starts with
+# `initialize` (2024-11-05 … 2025-11-25) or `server/discover` (2026-07-28 clients never
+# send initialize). Each successful one bumps `session_start` plus its own method key and
+# adds the caller to today's distinct-starters HLL; `tools_list` is counted too, so a dip
+# can be told from a failure. Counted inline after the handler, never on error,
+# never for the health probe (_bump / _record_starter return early for it).
+_SESSION_START_METHODS = {"initialize": "initialize", "server/discover": "discover"}
+
+
+async def _record_starter() -> None:
+    """Add this session-starting machine to today's distinct-starters HLL, overall and
+    per surface (keys ``ag:metrics:uniq:mcp:initializers[:<surface>]:<day>``)."""
+    if _HEALTH_PROBE.get():
+        return
+    try:
+        from src.api.metrics_dashboard_router import record_unique
+
+        ip, ua = _CLIENT_IP.get(), _CLIENT_UA.get()
+        await record_unique("mcp:initializers", ip, ua)
+        await record_unique(f"mcp:initializers:{_SURFACE.get()}", ip, ua)
+    except Exception:
+        pass
+
+
+async def _count_session_activity(method: str) -> None:
+    try:
+        kind = _SESSION_START_METHODS.get(method)
+        if kind is not None:
+            await _bump_s("session_start")
+            await _bump_s(kind)
+            await _record_starter()
+        elif method == "tools/list":
+            await _bump_s("tools_list")
+    except Exception:  # noqa: BLE001 — instrumentation never breaks a request
+        pass
+
+
+async def _session_counter(ctx, call_next):
+    result = await call_next(ctx)  # an exception or error result propagates uncounted
+    method = getattr(ctx, "method", None)
+    if (method in _SESSION_START_METHODS or method == "tools/list") \
+            and not (isinstance(result, dict) and "error" in result):
+        # Inline, like the tool-call counters: a few local-Redis ms on these three
+        # methods. A fire-and-forget task outlived its request (and, in tests, its event
+        # loop) while holding a pooled Redis connection's lock (main CI red on 24acd935).
+        await _count_session_activity(method)
+    return result
+
+
+server.middleware.append(_session_counter)
 
 
 async def _run_tool(
@@ -2173,6 +2544,11 @@ async def _run_tool(
         if code == 503:
             return _text("The scan is still running (large target). Try again shortly — "
                          "results cache once ready.")
+        if code == 422:
+            # The scanner reached the target but could not grade it (most often an MCP
+            # server that needs sign-in, so its tool list is not public). Say so plainly:
+            # "not scanned" is neither safe nor unsafe, and retrying will not help.
+            return _text(_not_scanned_help(name, _api_error_detail(e)))
         return _text(f"AgentAvow returned an error ({code}). "
                      "Try again shortly, or check the target.")
     except Exception:  # noqa: BLE001 — actionable message; never a stack trace or internal detail
@@ -2184,21 +2560,78 @@ async def _run_tool(
 # Streamable HTTP transport — stateless JSON responses (nginx-friendly)
 # --------------------------------------------------------------------------- #
 session_manager = StreamableHTTPSessionManager(app=server, json_response=True, stateless=True)
+_PROBE_HEADER_B = _counter.PROBE_HEADER.encode()
 
 
 async def mcp_asgi_app(scope, receive, send) -> None:
     # Capture the request's User-Agent → distribution surface for per-surface
     # metrics. Fail-open: any hiccup leaves the contextvar at its "other" default.
+    probe, version = False, None
     try:
         ua = ""
         for k, v in scope.get("headers") or []:
             if k == b"user-agent":
                 ua = v.decode("latin-1", "replace")
-                break
+            elif k == b"mcp-protocol-version":
+                version = v.decode("latin-1", "replace")
+            elif k == _PROBE_HEADER_B:
+                probe = _counter.is_probe_marker(v)
         _SURFACE.set(_surface_from_ua(ua))
         _CLIENT_UA.set(ua)
         client = scope.get("client")
         _CLIENT_IP.set(str(client[0]) if client else "")
+        _HEALTH_PROBE.set(probe)
     except Exception:
         pass
-    await session_manager.handle_request(scope, receive, send)
+    if scope.get("type") != "http":
+        await session_manager.handle_request(scope, receive, send)
+        return
+    # Count what this POST was answered with (src/bridges/mcp_response_counter) for the
+    # passive reject-rate alert. Observes the response only; never alters or delays it.
+    count = (not probe and scope.get("method") == "POST" and _counter.counting_enabled())
+    seen: dict = {"status": 0, "body": bytearray()}
+
+    async def _observe(message) -> None:
+        try:
+            if message["type"] == "http.response.start":
+                seen["status"] = int(message.get("status") or 0)
+            elif (count and message["type"] == "http.response.body" and seen["status"] >= 400
+                  and len(seen["body"]) < _counter.BODY_CAP):
+                seen["body"] += (message.get("body") or b"")[:_counter.BODY_CAP]
+        except Exception:
+            pass
+        await send(message)
+
+    try:
+        await session_manager.handle_request(scope, receive, _observe)
+    except ClientDisconnect:
+        # The client hung up while we were reading its request (Sentry
+        # AGENTGRAPH-BACKEND-2C, 2026-10-23): nobody is left to answer and nothing
+        # failed on our side, so it is not an error. Fall through to the 499 below.
+        pass
+    except Exception:
+        if count:
+            _counter.record_response(500, b"", header_version=version,
+                                     surface=_SURFACE.get())
+        raise
+    if seen["status"] == 0:
+        # No response was started (a client disconnect, or the SDK returned without
+        # answering). Answer 499 "client closed request" so the middleware above us
+        # does not raise "No response returned." (seen once on 2026-10-22). Not
+        # counted as a reject: the client left, the server did not refuse it.
+        await _answer_client_closed(send)
+        return
+    if count:
+        _counter.record_response(seen["status"], bytes(seen["body"]),
+                                 header_version=version, surface=_SURFACE.get())
+
+
+async def _answer_client_closed(send) -> None:
+    """A bodiless 499 for a request whose client is already gone. Never raises: the
+    connection may be closed already."""
+    try:
+        await send({"type": "http.response.start", "status": 499,
+                    "headers": [(b"content-length", b"0")]})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+    except Exception:
+        pass

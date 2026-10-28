@@ -1,8 +1,9 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
-import { TrustMini, AdoptionMini } from '../components/TrustMark'
+import { TrustOrCertifiedMini, AdoptionMini } from '../components/TrustMark'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity, type CatalogRow } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
 import { SandboxFindingsBlock } from '../components/SandboxStats'
@@ -42,7 +43,7 @@ function RecentFeed() {
                 <div className="font-mono text-[12.5px] truncate">{it.name || it.full_name}</div>
                 <div className="font-mono text-[10px] text-text-muted/70">{SURFACE_LABEL[it.surface] || it.surface} · {ago(it.at)}</div>
               </div>
-              {it.trust_score != null && <TrustMini score={it.trust_score} />}
+              {it.trust_score != null && <TrustOrCertifiedMini row={it as unknown as Record<string, unknown> & { trust_score: number }} />}
             </div>
           )
           return href ? <Link key={i} to={href} className="block">{inner}</Link> : <div key={i}>{inner}</div>
@@ -64,10 +65,34 @@ const SURFACE_LABEL: Record<string, string> = {
   crates: 'crate', openclaw: 'skill', huggingface: 'model', docker: 'image',
 }
 
+// Our own packages (the bridge SDKs, the scanner) would otherwise top the "Safest"
+// boards, and one repo can publish several packages; neither reads as an
+// independent ranking, so boards skip ours and show one row per repo.
+const OWN_RE = /^(agentgraph|agentavow)[-_]|github\.com\/(agentgraph-co|agentavow)\//i
+
+function independent(rows: CatalogRow[], limit: number): CatalogRow[] {
+  const seen = new Set<string>()
+  const out: CatalogRow[] = []
+  for (const r of rows) {
+    const repo = (r.repository_url || r.full_name || '').toLowerCase().replace(/\.git$/, '').replace(/\/$/, '')
+    if (OWN_RE.test(r.name || '') || OWN_RE.test(repo) || /^(agentgraph-co|agentavow)\//i.test(r.full_name || '')) continue
+    if (repo && seen.has(repo)) continue
+    if (repo) seen.add(repo)
+    out.push(r)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
 function useBoard(params: Parameters<typeof fetchCatalog>[0], key: string) {
+  const limit = Number(params?.limit ?? 10)
   return useQuery({
     queryKey: ['trust-index', key],
-    queryFn: () => fetchCatalog(params),
+    // Over-fetch so the filter below still leaves a full board.
+    queryFn: async () => {
+      const data = await fetchCatalog({ ...params, limit: limit * 3 })
+      return { ...data, rows: independent(data.rows || [], limit) }
+    },
     staleTime: 300_000,
   })
 }
@@ -91,7 +116,7 @@ function linkFor(row: CatalogRow): string | null {
   return null
 }
 
-function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; certified?: boolean }) {
+function Row({ row, rank }: { row: CatalogRow; rank: number }) {
   const id = rowIdentity(row)
   const href = linkFor(row)
   const inner = (
@@ -101,10 +126,10 @@ function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; 
         <div className="font-mono text-[13.5px] truncate">{id.display}</div>
         <div className="font-mono text-[10.5px] uppercase tracking-wide text-text-muted/70">{SURFACE_LABEL[row.surface] || row.surface}</div>
       </div>
-      {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} />}
-      {certified
-        ? <span className="inline-flex items-center gap-1 font-mono text-[10.5px] font-extrabold tracking-[0.12em] px-2 py-1 rounded-full shrink-0" style={{ background: 'linear-gradient(120deg,#2dd4bf,#e879f9)', color: '#06231f' }}>✓ {row.trust_score}</span>
-        : row.trust_score != null && <TrustMini score={row.trust_score} />}
+      {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} unit={row.adoption_unit} />}
+      {/* The Certified mark follows certified_mark on every board, not just the
+          Certified one, so a certified tool reads the same wherever it is listed. */}
+      {row.trust_score != null && <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />}
     </div>
   )
   return href
@@ -112,7 +137,7 @@ function Row({ row, rank, certified = false }: { row: CatalogRow; rank: number; 
     : <div>{inner}</div>
 }
 
-function Board({ title, note, rows, isLoading, certified = false, href }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean; href?: string }) {
+function Board({ title, note, rows, isLoading, href }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean; href?: string }) {
   return (
     // min-w-0: grid items default to min-width:auto and won't shrink below their
     // content — a long tool name in a row was forcing the card past the viewport
@@ -129,7 +154,7 @@ function Board({ title, note, rows, isLoading, certified = false, href }: { titl
       <div className="mt-3 flex flex-col divide-y divide-border/40">
         {isLoading && <div className="py-8 text-center text-text-muted text-[13px]">loading…</div>}
         {!isLoading && (!rows || !rows.length) && <div className="py-8 text-center text-text-muted text-[13px]">no tools yet</div>}
-        {rows?.map((r, i) => <Row key={rowIdentity(r).display + i} row={r} rank={i + 1} certified={certified} />)}
+        {rows?.map((r, i) => <Row key={rowIdentity(r).display + i} row={r} rank={i + 1} />)}
       </div>
     </div>
   )
@@ -145,6 +170,18 @@ export default function RebrandTrustIndex() {
   const pypi = useBoard({ surface: 'pypi', sort: 'score-desc', severity: 'clean', limit: 10 }, 'pypi')
   const relied = useBoard({ sort: 'adoption', limit: 10 }, 'adoption')
   const certified = useBoard({ grade: 'certified', sort: 'score-desc', limit: 10 }, 'certified')
+  // /index#certified (linked from the Certified page): the boards above it load on
+  // their own schedule and push it down, so scroll once every board has settled, then
+  // once more on the next frame in case a late row changed the height.
+  const certifiedReady = !!certified.data?.rows?.length
+  const allSettled = certifiedReady && !mcp.isLoading && !npm.isLoading && !pypi.isLoading && !relied.isLoading
+  useEffect(() => {
+    if (!allSettled || window.location.hash !== '#certified') return
+    const go = () => document.getElementById('certified')?.scrollIntoView({ block: 'start' })
+    go()
+    const raf = requestAnimationFrame(() => requestAnimationFrame(go))
+    return () => cancelAnimationFrame(raf)
+  }, [allSettled])
 
   const summary = mcp.data?.summary || npm.data?.summary
   const { data: stat } = useQuery({ queryKey: ['flagged-stat'], queryFn: fetchFlaggedStat, staleTime: 60_000 })
@@ -166,7 +203,7 @@ export default function RebrandTrustIndex() {
           </h1>
           <p className="mt-4 text-text-muted text-[16px] leading-relaxed">
             An independent, <strong className="text-text">signed</strong> index of the tools, MCP servers, and packages AI agents
-            connect to — graded from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.
+            connect to — checked from the outside, no repo access, verifiable offline. Not the agent you build; the things it trusts.
           </p>
         </div>
       </Reveal>
@@ -184,13 +221,13 @@ export default function RebrandTrustIndex() {
               </div>
               <p className="text-text text-[15px]">
                 of scanned agent tools carry a <strong>high or critical</strong> safety finding.
-                {stat && <span className="text-text-muted"> ({stat.flagged.toLocaleString()} of {stat.scanned.toLocaleString()} graded.)</span>}
+                {stat && <span className="text-text-muted"> ({stat.flagged.toLocaleString()} of {stat.scanned.toLocaleString()} scanned.)</span>}
               </p>
             </div>
           </div>
           <div className="glass rounded-2xl p-6 flex flex-col justify-center">
             <div className="text-[40px] font-extrabold leading-none tabular-nums gradient-text">{totalScanned}</div>
-            <p className="mt-2 text-text-muted text-[13.5px]">tools, servers &amp; packages graded — every score signed &amp; recomputable.</p>
+            <p className="mt-2 text-text-muted text-[13.5px]">tools, servers &amp; packages scanned — every score signed &amp; recomputable.</p>
           </div>
         </div>
       </Reveal>
@@ -214,8 +251,8 @@ export default function RebrandTrustIndex() {
       <div className="mt-4"><Reveal><RecentFeed /></Reveal></div>
 
       {certified.data?.rows && certified.data.rows.length > 0 && (
-        <div className="mt-4">
-          <Board title="AgentAvow Certified" note="the top tier · gated" rows={certified.data.rows} isLoading={certified.isLoading} certified href={rp('/rebrand/certified')} />
+        <div id="certified" className="mt-4 scroll-mt-24">
+          <Board title="AgentAvow Certified" note="the earned mark · gated" rows={certified.data.rows} isLoading={certified.isLoading} certified href={rp('/rebrand/certified')} />
         </div>
       )}
 
@@ -223,7 +260,7 @@ export default function RebrandTrustIndex() {
       <Reveal>
         <div className="mt-16 text-center">
           <h2 className="text-2xl font-extrabold">Check the tool you're about to connect.</h2>
-          <p className="mt-2 text-text-muted text-[14.5px] max-w-[52ch] mx-auto">Paste any repo, package, or MCP server — get a signed, offline-verifiable grade in seconds. Free, no account.</p>
+          <p className="mt-2 text-text-muted text-[14.5px] max-w-[52ch] mx-auto">Paste any repo, package, or MCP server — get an answer and a signed, offline-verifiable trust score in seconds. Free, no account.</p>
           <div className="mt-5 flex gap-3 justify-center flex-wrap">
             <Link to={rp('/rebrand/check')} className="font-semibold px-6 py-3 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25">Check a tool →</Link>
             <Link to={rp('/rebrand/browse')} className="font-semibold px-6 py-3 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Browse the full catalog</Link>

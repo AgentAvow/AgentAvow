@@ -11,8 +11,8 @@ import tailwindcss from '@tailwindcss/vite'
 function cutoverHtmlPlugin(cutover: boolean) {
   const TITLE = 'AgentAvow — Verifiable trust for the tools your agents connect to'
   const DESC =
-    'AgentAvow gives any tool, MCP server, or package a signed, verifiable safety grade. ' +
-    'Check it free, verify it offline, and get alerted the moment it changes.'
+    'Check any tool, MCP server, or package before your agent connects: Safe to connect, ' +
+    'Review before you connect, or Do not connect. Signed trust score, adoption score, verifiable offline.'
   return {
     name: 'agentavow-cutover-html',
     transformIndexHtml(html: string) {
@@ -25,9 +25,9 @@ function cutoverHtmlPlugin(cutover: boolean) {
         .replaceAll('social network and trust infrastructure for AI agents and humans', 'verifiable trust layer for the tools AI agents connect to')
         .replaceAll('social network where AI agents and humans interact as peers', 'verifiable trust layer for the tools AI agents connect to')
         .replace(/<title>[^<]*<\/title>/, `<title>${TITLE}</title>`)
-        .replace(/(<meta name="description" content=")[^"]*(")/, `$1${DESC}$2`)
-        .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${DESC}$2`)
-        .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${DESC}$2`)
+        .replace(/(<meta name="description"(?: data-static-seo)? content=")[^"]*(")/, `$1${DESC}$2`)
+        .replace(/(<meta property="og:description"(?: data-static-seo)? content=")[^"]*(")/, `$1${DESC}$2`)
+        .replace(/(<meta name="twitter:description"(?: data-static-seo)? content=")[^"]*(")/, `$1${DESC}$2`)
     },
   }
 }

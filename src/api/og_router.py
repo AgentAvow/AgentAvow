@@ -20,8 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_db
-from src.scanner.verdict import decide
-from src.trust_tiers import headline, is_certified
+from src.scanner.verdict import certified_mark, decide
+from src.trust_tiers import headline
 
 logger = logging.getLogger(__name__)
 
@@ -99,12 +99,25 @@ async def og_check(
     image_url = f"{BASE_URL}/api/v1/public/scan/{owner}/{repo}/og-image"
 
     # Try to get cached scan data for rich tags
-    from src.api.public_scan_router import _get_cached, _get_entity_trust
+    from src.api.public_scan_router import (
+        _get_cached,
+        _get_entity_trust,
+        _skill_collection_data,
+    )
 
     # Check for entity trust (composite score) first
     entity_trust = await _get_entity_trust(full_name, db)
+    # A repo that is a collection of agent skills leads with its worst skill, the
+    # same number its result page, badge and card show.
+    collection = await _skill_collection_data(owner, repo)
 
-    if (
+    if collection is not None and not (
+        entity_trust and entity_trust.get("imported")
+        and entity_trust.get("composite_score") is not None
+    ):
+        score = collection.get("trust_score")
+        scan_data = collection
+    elif (
         entity_trust
         and entity_trust.get("imported")
         and entity_trust.get("composite_score") is not None
@@ -129,7 +142,12 @@ async def og_check(
             )
 
     dec = decide(scan_data) if scan_data else decide({"trust_score": score})
-    verdict = headline(dec, certified=is_certified(scan_data))
+    # The mark belongs to the scan's own score; beside an entity composite number it
+    # would pair one result's eligibility with a different score, so it never shows.
+    _composite = bool(entity_trust and entity_trust.get("imported")
+                      and entity_trust.get("composite_score") is not None)
+    verdict = headline(dec, certified=not _composite and bool(scan_data)
+                       and certified_mark(scan_data, dec))
     title = f"{full_name}: {verdict} · trust score {score}/100"
     description = f"{verdict}: {dec.reason}."
 
@@ -139,7 +157,7 @@ async def og_check(
         and entity_trust.get("imported")
         and entity_trust.get("composite_score") is not None
     ):
-        cached = await _get_cached(owner, repo)
+        cached = collection if collection is not None else await _get_cached(owner, repo)
         if cached:
             findings = cached.get("findings", {})
             critical = findings.get("critical", 0)
@@ -247,7 +265,7 @@ async def og_profile(
 # /check/mcp, /check/skill/* here; real users still get the SPA.
 
 def _og_image_url(title: str, grade: str, score, subtitle: str,
-                  data: dict | None = None) -> str:
+                  data: dict | None = None, adoption: tuple | None = None) -> str:
     from urllib.parse import urlencode
     params = {
         # Clip the title like the subtitle — a long HF/docker coordinate would otherwise
@@ -257,8 +275,18 @@ def _og_image_url(title: str, grade: str, score, subtitle: str,
     }
     if data:
         params["decision"] = decide(data).decision
-        if is_certified(data):
+        # The Certified MARK (eligible AND a final Safe answer at 81+), never raw
+        # eligibility — the card never reads "Review · Certified".
+        if certified_mark(data):
             params["certified"] = "1"
+    if adoption is not None:
+        # (score_0_100, count, unit) from surface_adoption_summary; "0" = no signal.
+        a_pct, a_count, a_unit = adoption
+        params["adoption"] = int(a_count or 0)
+        if a_pct is not None:
+            params["adoption_pct"] = int(a_pct)
+        if a_unit:
+            params["adoption_unit"] = str(a_unit)[:24]
     q = urlencode(params)
     return f"{BASE_URL}/api/v1/public/scan/og.png?{q}"
 
@@ -271,7 +299,7 @@ def _og_verdict(score: int | None, data: dict | None = None) -> str:
         return "A signed safety score — verify it offline."
     if data:
         dec = decide(data)
-        return (f"{headline(dec, certified=is_certified(data))}: {dec.reason}"
+        return (f"{headline(dec, certified=certified_mark(data, dec))}: {dec.reason}"
                 " · signed, verifiable offline.")
     return f"{headline(decide({'trust_score': score}))} · signed, verifiable offline."
 
@@ -279,65 +307,114 @@ def _og_verdict(score: int | None, data: dict | None = None) -> str:
 @router.get("/pkg/{surface}/{name:path}", response_class=HTMLResponse)
 async def og_package(surface: str, name: str) -> HTMLResponse:
     """OG tags for a package/model/container score page (/check/pkg/:surface/*)."""
-    from src.api.public_scan_router import _display_grade, _get_cached
+    from src.api.public_scan_router import _display_grade, _get_cached, _get_stale_cached
 
     surface = (surface or "").strip().lower()
     name = (name or "").strip().strip("/")
     full = f"{surface}:{name}"
     canonical_url = f"{BASE_URL}/check/pkg/{surface}/{name}"
     grade, score, subtitle = "", None, ""
-    cached = await _get_cached(surface, name)
+    # Fall back to the 7-day stale copy like the MCP and skill previews, so a package
+    # preview keeps its answer and score after the 1 h cache expires.
+    cached = await _get_cached(surface, name) or await _get_stale_cached(surface, name)
     if cached:
         score = cached.get("trust_score")
-        _elig = (cached.get("certified") or {}).get("eligible")
-        grade = cached.get("grade") or _display_grade(score or 0, _elig)
+        grade = cached.get("grade") or _display_grade(score or 0, certified_mark(cached))
         subtitle = (cached.get("tool_description") or "").strip()
     verdict = _og_verdict(score, cached)
     if not subtitle:
         subtitle = verdict
     title = f"{name} ({surface})"
     _shown = "—" if score is None else f"{int(score)}/100"
-    description = f"{name} scored {_shown} on AgentAvow — {verdict}"
-    image_url = _og_image_url(full, grade, score, subtitle, cached)
+    description = (f"{name} scored {_shown} on AgentAvow — {verdict}" if cached
+                   else f"Check {name} on AgentAvow: Safe to connect, Review before you "
+                        "connect, or Do not connect, signed and verifiable offline.")
+    image_url = _og_image_url(full, grade, score, subtitle, cached,
+                              adoption=await _adoption_for(surface, surface, name)
+                              if cached else None)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
+
+
+async def _adoption_for(surface: str, owner: str, repo: str) -> tuple | None:
+    """(score_0_100, count, unit) for the OG card's adoption dial; None when unknown.
+    Same source as the badges and card.svg (``_card_adoption``)."""
+    try:
+        from src.api.public_scan_router import _card_adoption
+        _surf, a_pct, count, unit = await _card_adoption(owner, repo)
+        return a_pct, count, unit
+    except Exception:  # noqa: BLE001 — the card renders without adoption
+        return None
 
 
 @router.get("/skill/{owner}/{repo}", response_class=HTMLResponse)
 async def og_skill(owner: str, repo: str, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
-    """OG tags for an OpenClaw skill score page (/check/skill/:owner/:repo)."""
-    from src.api.public_scan_router import _get_cached
+    """OG tags for an Agent Skill score page (/check/skill/:owner/:repo)."""
+    return await _og_skill_page(owner, repo, None)
+
+
+@router.get("/skill/{owner}/{repo}/{skill_path:path}", response_class=HTMLResponse)
+async def og_skill_one(owner: str, repo: str, skill_path: str) -> HTMLResponse:
+    """OG tags for one skill inside a multi-skill repo
+    (/check/skill/:owner/:repo/:skill_path)."""
+    return await _og_skill_page(owner, repo, skill_path.strip("/") or None)
+
+
+async def _og_skill_page(owner: str, repo: str, skill_path: str | None) -> HTMLResponse:
+    """The skill's OWN result (the "skill" cache the skill page reads), never the
+    repo scan; a multi-skill repo's page shows the repo-level (worst-skill) result."""
+    from src.api.public_scan_router import _get_cached, _get_stale_cached
 
     full_name = f"{owner}/{repo}"
-    canonical_url = f"{BASE_URL}/check/skill/{owner}/{repo}"
+    key = f"{full_name}/{skill_path}" if skill_path else full_name
+    canonical_url = f"{BASE_URL}/check/skill/{key}"
     grade, score = "", None
-    cached = await _get_cached(owner, repo)
+    cached = await _get_cached("skill", key) or await _get_stale_cached("skill", key)
     if cached:
         score = cached.get("trust_score")
         grade = cached.get("grade") or _grade_from_score(score or 0)
     verdict = _og_verdict(score, cached)
-    subtitle = "OpenClaw agent skill · " + verdict
-    title = f"{full_name} — Agent Skill"
+    skill_name = skill_path.rsplit("/", 1)[-1] if skill_path else None
+    subtitle = "Agent Skill · " + verdict
+    title = (f"{skill_name} skill ({full_name})" if skill_name
+             else f"{full_name} — Agent Skill")
     _shown = "—" if score is None else f"{int(score)}/100"
-    description = f"{full_name} scored {_shown} on AgentAvow — {verdict}"
-    image_url = _og_image_url(full_name, grade, score, subtitle, cached)
+    description = f"{title} scored {_shown} on AgentAvow — {verdict}"
+    image_url = _og_image_url(skill_name or full_name, grade, score, subtitle, cached)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))
 
 
 @router.get("/mcp", response_class=HTMLResponse)
 async def og_mcp(endpoint: str = "") -> HTMLResponse:
-    """OG tags for a live MCP server score page (/check/mcp?endpoint=…)."""
-    from urllib.parse import quote
+    """OG tags for a live MCP server score page (/check/mcp?endpoint=…), read from the
+    same cache the scan endpoint writes (keyed by the normalized endpoint)."""
+    import hashlib
+    from urllib.parse import quote, urlparse
+
+    from src.api.public_scan_router import _get_cached, _get_stale_cached
 
     ep = (endpoint or "").strip()
     canonical_url = f"{BASE_URL}/check/mcp?endpoint={quote(ep, safe='')}"
     # A clean card title: the host (+ short path), not the full scheme+query URL.
-    from urllib.parse import urlparse
     _p = urlparse(ep)
     card_title = (_p.hostname or ep or "MCP server")
     if _p.path and _p.path != "/":
         card_title += _p.path
-    title = "MCP server — safety grade"
-    subtitle = "Live-graded MCP server · " + _og_verdict(None)
-    description = f"AgentAvow live-graded this MCP server's served tool surface. {ep}".strip()
-    image_url = _og_image_url(card_title, "", None, subtitle)
+    cached, score, grade = None, None, ""
+    try:
+        from src.ssrf import mcp_endpoint_identity, validate_url_https
+        url = mcp_endpoint_identity(validate_url_https(ep, field_name="endpoint"))
+        key = "mcp_" + hashlib.sha256(url.encode()).hexdigest()[:22]
+        cached = await _get_cached("mcp", key) or await _get_stale_cached("mcp", key)
+    except Exception:  # noqa: BLE001 — an unparseable endpoint gets the generic card
+        cached = None
+    if cached:
+        score = cached.get("trust_score")
+        grade = cached.get("grade") or _grade_from_score(score or 0)
+    verdict = _og_verdict(score, cached)
+    title = f"{card_title} — MCP server"
+    subtitle = "Live-checked MCP server · " + verdict
+    _shown = "—" if score is None else f"{int(score)}/100"
+    description = (f"{card_title} scored {_shown} on AgentAvow — {verdict}" if cached
+                   else f"AgentAvow checks this MCP server's served tool surface. {ep}".strip())
+    image_url = _og_image_url(card_title, grade, score, subtitle, cached)
     return HTMLResponse(content=_render_og_html(title, description, image_url, canonical_url))

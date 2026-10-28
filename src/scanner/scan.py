@@ -5,15 +5,18 @@ Designed to run against the recruitment_prospects table of discovered repos.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import posixpath
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
 
+from src.scanner import exec_alias, npm_scripts, pipe_shell
 from src.scanner.patterns import (
     AGENT_METADATA_FILES,
     AUTH_POSITIVE_PATTERNS,
@@ -48,7 +51,10 @@ from src.scanner.patterns import (
     SSRF_URL_INPUT_RE,
     UNSAFE_EXEC_PATTERNS,
     UNTRUSTED_INPUT_RE,
+    ZERO_WIDTH_RUN_NAME,
+    ZERO_WIDTH_RUN_RE,
 )
+from src.scanner.prefilter import AnyOf, LineFilter
 
 # Inline suppression marker — append to any line to skip scanning it
 _SUPPRESSION_COMMENT = "ag-scan:ignore"
@@ -132,6 +138,16 @@ class Finding:
     # Makefile / scripts/ / bench/ / tox.ini, or any file absent from the wheel).
     # Non-installed findings are capped at severity "info" and never block.
     installed: bool = True
+    # True when the finding sits in test-only code INSIDE an otherwise-shipped file (an
+    # inline Rust ``#[cfg(test)] mod``): graded like a finding under tests/.
+    test_code: bool = False
+    # True for a payload-shaped defect (download+exec, pipe-to-shell, decoded or
+    # obfuscated exec, credential exfil, untrusted input reaching a sink, a provider
+    # secret) in a file that is otherwise downgraded: a test / doc / example dir shipped
+    # inside a published artifact, where the runtime code can import it. It keeps its
+    # severity and is graded as shipped code wherever it sits (``_scan_content``'s
+    # ``payloads_full_severity``).
+    payload: bool = False
 
 
 @dataclass
@@ -153,6 +169,13 @@ class ScanResult:
     # so a partial-coverage grade is never presented as an authoritative whole-repo verdict.
     total_scannable_files: int = 0
     sampled: bool = False
+    # What the scan selected but could NOT read, by cause (only non-zero keys): files
+    # over the 500 KB read cap, fetches that failed or timed out, files left unread at
+    # the time budget, files past the file cap, a truncated GitHub tree, package members
+    # skipped by the bounded unpack, unread dependency files, a failed advisory lookup.
+    # Disclosure only (never a score or decision input): signed as scan.coverageGaps and
+    # stated beside every answer (src/scanner/verdict.py coverage_gap_notes).
+    coverage_gaps: dict = field(default_factory=dict)
     has_readme: bool = False
     has_license: bool = False
     has_tests: bool = False
@@ -167,6 +190,15 @@ class ScanResult:
     # path -> "sha256:..."; on the live MCP surface the key is "tool:<name>"
     tool_digests: dict[str, str] = field(default_factory=dict)
     tool_manifest_digest: str | None = None  # combined digest folded into the attestation
+    # Live MCP scans: unsigned fingerprint of the served icons (src/scanner/mcp_icons.py),
+    # compared by the watch loop. Never signed, never in tool_digests / the manifest.
+    icon_fingerprint: str | None = None
+    # Live MCP scans: how the tools/list was read (endpoint asked for, TLS facts of the
+    # connection, every page). Signed as scan.observation; see mcp_observation.py.
+    mcp_observation: dict | None = None
+    # The served tools as a display list: name + declared annotations (+ digest where
+    # we hold the full definition). Unsigned; see src/scanner/mcp_tool_list.py.
+    tool_list: list[dict] = field(default_factory=list)
     # Phase 0/1 supply-chain: the recompute-discipline coverage block (surface,
     # scan_depth, db_snapshots, point_in_time) and the OSV/deps.dev summary. Both
     # are additive — a scan with the OSV pipeline disabled/unreachable leaves them
@@ -334,10 +366,42 @@ def _finding_grade_weight(f) -> float:
     test conventions (foo_test.go, foo.test.ts, foo.spec.js) that live next to
     source — those are the tool's tests, not the surface an agent connects to.
     """
-    path = f.file_path
-    if _is_nonshipped_path(path) or _is_test_or_doc_file(path):
-        return _NONSHIPPED_FINDING_WEIGHT
-    return 1.0
+    return _NONSHIPPED_FINDING_WEIGHT if _finding_is_discounted(f) else 1.0
+
+
+def _finding_is_discounted(f) -> bool:
+    """Whether a finding's SCORE weight is discounted (``_NONSHIPPED_FINDING_WEIGHT``):
+    the broad non-shipped taxonomy (test/doc/example/benchmark/scripts/tooling dirs,
+    demo/sample filenames, infra/installer scripts, inline test modules). Weight only:
+    whether a finding is shipped (and can block) is ``finding_is_shipped``."""
+    if getattr(f, "payload", False):
+        return False
+    path = getattr(f, "file_path", "") or ""
+    return bool(_is_nonshipped_path(path) or _is_test_or_doc_file(path)
+                or _is_unshipped_script(path) or getattr(f, "test_code", False))
+
+
+def finding_is_shipped(f) -> bool:
+    """Whether a finding sits in the shipped surface (the public ``shipped`` tag).
+
+    The SAME location rule ``_finding_is_blocking`` uses, so a finding the page tags
+    ``shipped: false`` never decides the answer and one that decides is never tagged
+    not-shipped (they used to disagree: ``scripts/``, ``tooling/``, ``demo_*.py`` were
+    tagged not-shipped yet blocked). False only when the location is honestly not
+    what a consumer runs: a file absent from the published artifact (``installed``,
+    computed from the artifact's file list), an inline test module, a test / fixture /
+    docs / example / benchmark dir or a co-located test file, a CI/release-infra or
+    one-time installer script. Author-controlled names an entry point can hide behind
+    (``scripts/``, ``tooling/``, ``sandbox/``, ``demo_*``) stay shipped. A
+    payload-shaped defect is shipped wherever it sits in an artifact."""
+    if getattr(f, "payload", False):
+        return True
+    if not getattr(f, "installed", True) or getattr(f, "test_code", False):
+        return False
+    path = getattr(f, "file_path", None)
+    if not path:
+        return True
+    return not (_is_blocking_exempt_path(path) or _is_unshipped_script(path))
 
 
 def _is_source_file(path: str) -> bool:
@@ -397,13 +461,28 @@ def _detect_language(files: list[dict]) -> str:
     return lang_map[top_ext]
 
 
-def _tree_blobs(tree: list[dict]) -> list[dict]:
-    """Keep only blob (file) entries under the per-file size cap."""
-    return [
+class _BlobList(list):
+    """The scannable tree, plus the blobs over the per-file size cap in ``oversized``:
+    ``scan_repo`` reads their head and tail (``_oversized_scan_files``), so a padded file
+    is disclosed instead of silently dropped. Every other consumer sees the plain list."""
+
+    oversized: list[dict]
+
+
+def _tree_blobs(tree: list[dict], oversized_out: list | None = None) -> list[dict]:
+    """Keep only blob (file) entries under the per-file size cap (the rest ride along in
+    ``.oversized``, and are also appended to ``oversized_out`` for the coverage
+    disclosure when given)."""
+    out = _BlobList(
         item for item in tree
         if item.get("type") == "blob"
         and item.get("size", 0) <= _MAX_FILE_SIZE
-    ]
+    )
+    out.oversized = [item for item in tree
+                     if item.get("type") == "blob" and item.get("size", 0) > _MAX_FILE_SIZE]
+    if oversized_out is not None:
+        oversized_out.extend(out.oversized)
+    return out
 
 
 async def _note_github(resp: httpx.Response, context: str) -> None:
@@ -511,10 +590,18 @@ async def _fetch_repo_tree(
             # Real-time rate-limit protection (metered call): alert + degrade flag.
             await _note_github(resp, f"repo tree {owner}/{repo}")
 
+        # Blobs over the read cap, for the coverage disclosure (meta_out["oversized"]),
+        # and the git tree sha: a content digest of exactly the tree that was listed.
+        _oversized: list | None = None
+        if meta_out is not None:
+            _oversized = meta_out.setdefault("oversized", [])
+
         if resp is not None and resp.status_code == 200:
             body = resp.json()
+            if meta_out is not None and isinstance(body.get("sha"), str):
+                meta_out["tree_sha"] = body["sha"]
             return (
-                _tree_blobs(body.get("tree", [])),
+                _tree_blobs(body.get("tree", []), _oversized),
                 bool(body.get("truncated")),
                 True,
                 default_branch,
@@ -538,7 +625,7 @@ async def _fetch_repo_tree(
             await _note_github(shallow, f"repo shallow tree {owner}/{repo}")
             if shallow.status_code == 200:
                 return (
-                    _tree_blobs(shallow.json().get("tree", [])),
+                    _tree_blobs(shallow.json().get("tree", []), _oversized),
                     True,
                     True,
                     default_branch,
@@ -662,7 +749,9 @@ def _js_cp_call_re(content: str) -> re.Pattern[str]:
     `<alias>.spawn(...)` for any alias this file binds. Before the precision pass the
     bare import was a file-wide high, which hid these; now that the import is only a
     capability, the calls themselves must be classified. Group 1 is the function name."""
-    aliases = {a for m in _JS_CP_ALIAS_RE.finditer(content) for a in m.groups() if a}
+    # (Both alias forms name the module, so a file without it has no alias.)
+    aliases = ({a for m in _JS_CP_ALIAS_RE.finditer(content) for a in m.groups() if a}
+               if "child_process" in content else set())
     quals = [r"require\s*\(\s*" + _JS_CP_MODULE + r"\s*\)"]
     quals += [r"(?<![\w$.])" + re.escape(a) for a in sorted(aliases)]
     return re.compile(r"(?:" + "|".join(quals) + r")\s*\.\s*" + _JS_CP_FUNCS + r"\s*\(")
@@ -677,6 +766,8 @@ def _js_defines_locally(content: str, name: str) -> bool:
     =>`` (not a ``require``/``import``), or a parameter ``function (exec)`` /
     ``(exec) =>``? Used only when the file never mentions child_process: then a bare
     ``exec(…)`` is that local function (wrap-ansi's line wrapper, a callback)."""
+    if name not in content:  # every pattern below needs the name verbatim
+        return False
     n = re.escape(name)
     if re.search(r"\bfunction\s*\*?\s*" + n + r"\s*\(", content):
         return True
@@ -689,6 +780,20 @@ _PY_EVAL_CALL_RE = re.compile(r"(?<![.\w])(eval|exec)\s*\(")
 _PY_DESER_CALL_RE = re.compile(
     r"\b(?:cPickle|_pickle|pickle|marshal|dill|jsonpickle)\.(loads?|decode)\s*\(",
 )
+_NP_LOAD_CTX_RE = re.compile(r"(?<![\w.])(?:np|numpy|\w+)\.load\s*\(|(?<![\w.])load\s*\(")
+_RUAMEL_UNSAFE_RE = re.compile(r"""typ\s*=\s*\[?\s*['"]unsafe['"]""")
+
+
+def _ruamel_safe_receiver(content: str, line: str) -> bool:
+    """``x.load(...)`` where ``x`` is bound to ruamel.yaml's ``YAML()`` in this file
+    (default typ='rt', a safe loader) and nothing in the file asks for typ='unsafe'."""
+    m = re.search(r"\b(\w+)\.(?:unsafe_)?load(?:_all)?\s*\(", line)
+    if not m or "unsafe_load" in line or _RUAMEL_UNSAFE_RE.search(content):
+        return False
+    recv = re.escape(m.group(1))
+    return bool(re.search(r"\b" + recv + r"\s*=\s*(?:ruamel\.yaml\.)?YAML\s*\(", content))
+
+
 _FS_RW_RULES = frozenset({
     "Unrestricted file read (Python)", "Unrestricted file write (Python)",
     "fs.readFileSync / writeFileSync (Node.js)",
@@ -702,6 +807,7 @@ _HEX_SINK_RE = re.compile(
     r"\b(?:exec|eval|Function|fromhex|unhexlify|b64decode|decompress|compile)\s*\(|vm\.run",
 )
 _HEX_SKIP_LANGS = frozenset({"rust", "go", "java"})
+_HEX_SINK_CHARS = 400    # ... and within this many characters of the hex run
 _DECODED_EXEC_LINE_RE = next(
     p for n, p, _s in OBFUSCATION_PATTERNS if n == "Decoded payload fed to exec/eval"
 )
@@ -899,18 +1005,206 @@ def _in_prose_string_at(line: str, pos: int, start_in: str | None = None) -> boo
     return len(line[str_start:pos].split()) >= 3
 
 
+def _in_string_literal_at(line: str, pos: int) -> bool:
+    """True if ``line[pos]`` sits inside a quoted string literal opened on that line."""
+    in_str: str | None = None
+    escape = False
+    for ch in line[:pos]:
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+        elif ch in "'\"`":
+            in_str = ch
+    return in_str is not None
+
+
+# Shell-script payload files run their text as commands; a `curl … | sh` there is code.
+_SHELL_PAYLOAD_EXTS = frozenset({".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".vbs"})
+# Anything in a file that can run a command string or hand it to code that does
+# (including indirect lookups), checked before treating a pipe-to-shell STRING in a
+# shipped test file as an executed payload.
+_FILE_EXEC_SINK_RE = re.compile(
+    r"\bsubprocess\b|\bos\.(?:system|popen|exec\w*|spawn\w*)\b|\bPopen\b|\bpty\.spawn\b|"
+    r"\bcommands\.getoutput\b|\bshlex\b|\bexec\s*\(|\beval\s*\(|\bcompile\s*\(|"
+    r"__import__|\bimportlib\b|\bgetattr\s*\(|\bchild_process\b|\bexec(?:Sync|File\w*)?\s*\(|"
+    r"\bspawn(?:Sync)?\s*\(|\bFunction\s*\(|\bvm\.\w+|\brequire\s*\(\s*[^'\"]|\bimport\s*\(|"
+    r"\bsh\s*\(|\$\s*`|\bzx\b|\bexeca\b|\bshelljs\b",
+)
+
+
+# npm runs only these package.json scripts on a consumer's machine (`npm install` of the
+# package as a dependency); everything else under "scripts" is the maintainer's.
+_NPM_CONSUMER_SCRIPTS = frozenset({
+    "preinstall", "install", "postinstall", "prepare", "preprepare", "postprepare",
+})
+_PKG_JSON_SCRIPT_RE = re.compile(r'^\s*"([^"]+)"\s*:\s*"')
+_HELP_PRINT_RE = re.compile(
+    r"\b(?:console\.(?:log|error|warn|info)|print|echo|usage|USAGE|help|HELP)\b|"
+    r"process\.std(?:out|err)\.write|sys\.std(?:out|err)\.write")
+
+
+# A call that runs its string argument as a process (JS child_process / execa / zx,
+# Python subprocess / os). Used to tell a printed `npx` hint from one that is spawned.
+_RUN_CALL_RE = re.compile(
+    r"(?<![\w$])(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|execa|execaSync"
+    r"|execaCommand|execaCommandSync|execCommand|system|popen|Popen|run|call|check_call"
+    r"|check_output|getoutput|getstatusoutput|shell|sh)\s*\(|(?<![\w$])\$\s*`")
+_BOUND_NAME_RE = re.compile(r"([A-Za-z_$][\w$]*)\s*(?::\s*[\w$<>\[\]|. ]+)?=(?![=>])[^=]*$")
+
+
+def _runs_call(text: str, extra_run: tuple = ()) -> bool:
+    """A run call in ``text``: a known runner name, or a call through a name this file
+    binds to one (``src/scanner/exec_alias.py``)."""
+    return bool(_RUN_CALL_RE.search(text)) or any(r.search(text) for r in extra_run)
+
+
+def _npx_string_runs(lines: list[str], idx: int, line: str, pos: int, str_start: int,
+                     start_in: str | None, extra_run: tuple = ()) -> bool:
+    """Is the string holding this `npx …` spawned rather than printed? It is the
+    argument of a run call on this line (`console.log(execSync('npx foo'))`), or it is
+    bound to a name that a run call in the file uses (`const USAGE = 'npx foo'` …
+    `execSync(USAGE)`). Adversarial recall review of the help-text relaxation (#24).
+    ``extra_run``: alias-call regexes for this file."""
+    if _runs_call(line[:pos], extra_run):
+        return True
+    name = None
+    if start_in is None:
+        m = _BOUND_NAME_RE.search(line[:max(0, str_start - 1)])
+        name = m.group(1) if m else None
+    else:
+        # A template literal opened on an earlier line: the binding is where it opened.
+        for n in range(idx - 1, max(-1, idx - 60), -1):
+            tick = lines[n].find("`")
+            if tick == -1:
+                continue
+            if _runs_call(lines[n][:tick + 1], extra_run):
+                return True
+            m = _BOUND_NAME_RE.search(lines[n][:tick])
+            name = m.group(1) if m else None
+            break
+    if not name or name in ("const", "let", "var"):
+        return False
+    return any(n != idx and _runs_call(ln, extra_run) and _uses_name(ln, name)
+               for n, ln in enumerate(lines))
+
+
+def _maintainer_script_owners(content: str, memo: list, idx: int, line: str,
+                              pattern: re.Pattern[str]) -> set[str] | None:
+    """The package.json scripts holding EVERY match of ``pattern`` on line ``idx``
+    when none of them is reachable from an install lifecycle script; ``None`` when a
+    match is outside ``scripts``, in a reachable script, or the file is unparseable."""
+    if not memo:
+        memo.append(npm_scripts.parse_scripts(content))
+    info = memo[0]
+    if info is None:
+        return None
+    return npm_scripts.maintainer_scripts_at(
+        info, idx, [(m.start(), m.end()) for m in pattern.finditer(line)])
+
+
+def _npx_not_a_load(file_path: str, line: str, pos: int, start_in: str | None = None,
+                    lines: list[str] | None = None, idx: int = 0,
+                    extra_run: tuple = ()) -> bool:
+    """An `npx <pkg>` that never runs for a consumer (precision PR 2): a maintainer script
+    in package.json (not an install lifecycle hook), or help text a CLI prints, i.e.
+    the match sits in a string literal that is indented help (`'  npx foo\\n'`), carries
+    a `\\n` escape, or is on a print/usage line, and the string is not itself spawned
+    (``_npx_string_runs``)."""
+    if Path(file_path).name.lower() == "package.json":
+        m = _PKG_JSON_SCRIPT_RE.match(line)
+        return bool(m and m.group(1) not in _NPM_CONSUMER_SCRIPTS and m.end() <= pos)
+    in_str: str | None = start_in
+    escape = False
+    str_start = 0
+    for i, ch in enumerate(line[:pos]):
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+        elif ch in "'\"`":
+            in_str = ch
+            str_start = i + 1
+    if in_str is None:
+        return False
+    if _npx_string_runs(lines if lines is not None else [line],
+                        idx if lines is not None else 0, line, pos, str_start, start_in,
+                        extra_run):
+        return False
+    before = line[str_start:pos]
+    if before.startswith("  ") and not before.strip():
+        return True
+    tail = line[str_start:]
+    return "\\n" in tail or bool(_HELP_PRINT_RE.search(line))
+
+
+_DOC_PROSE_EXTS = frozenset({".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc"})
+_NPX_DOC_WHY = ("Command shown in documentation; nothing in this file runs it. Reported "
+                "for visibility.")
+
+
+def _npx_doc_prose_file(file_path: str) -> bool:
+    """Documentation a person reads (README, docs/*.md, CHANGELOG …), where an `npx foo`
+    is a command shown to a human. An agent instruction file (SKILL.md, AGENTS.md,
+    CLAUDE.md, llms.txt, anything under skills/ / .claude/ / prompts/ …) tells an agent
+    to RUN it, so it is not documentation here (npx policy, 2026-10-19)."""
+    from src.scanner.package_context import AGENT_INSTRUCTION_DIRS, AGENT_INSTRUCTION_NAMES
+    p = Path(file_path.lower())
+    if p.suffix not in _DOC_PROSE_EXTS or p.name in AGENT_INSTRUCTION_NAMES:
+        return False
+    return not any(part in AGENT_INSTRUCTION_DIRS for part in p.parts[:-1])
+
+
+# One PEM body line once its quoting is peeled off: optional leading ``+``/``,``/``(``
+# (a key assembled from parts), an optional string prefix and quote, the base64 run, an
+# optional ``\n`` escape, closing quote and trailing ``,;+)]\``. The WHOLE line must be
+# that, so an identifier inside code (``elasticsearchConnectivityCheckPathPlaceholder:
+# "…"`` in an i18n table) never counts as key material.
+_PEM_BODY_LINE_RE = re.compile(
+    r"""^[\s+,(\[]*(?:[bBrRuU]{0,2}["'`])?([A-Za-z0-9+/]{40,}={0,2})"""
+    r"""(?:\\[rn])*["'`]?[\s,;+)\]\\]*$""")
+
+
+def _pem_body_token(token: str) -> bool:
+    """A base64 run shaped like a key line: >= 2 digits. A real 64-char key line holds
+    ~10 digits (no digit at all is ~2e-5 likely); a camelCase identifier holds none."""
+    return sum(ch.isdigit() for ch in token) >= 2
+
+
+def _pem_body_line(text: str) -> bool:
+    m = _PEM_BODY_LINE_RE.match(text)
+    return bool(m and _pem_body_token(m.group(1)))
+
+
+def _pem_tail_has_body(tail: str) -> bool:
+    """A body on the marker's own line, after ``\n`` escapes (a one-line JSON / string
+    literal key): any escape-separated segment is a whole base64 key line."""
+    for seg in re.split(r"\\[rn]|\s+", tail):
+        seg = seg.strip("\"'`,;+)]")
+        if PEM_BODY_RE.fullmatch(seg) and _pem_body_token(seg):
+            return True
+    return False
+
+
 def _pem_has_body(lines: list[str], idx: int, marker_end: int) -> bool:
-    """True when a real key body follows the PEM header at ``lines[idx]``: a base64 run
-    of key-line length on the same line (after a ``\\n`` escape), within the next 2
-    lines, or >= 3 such lines anywhere near a marker (a key assembled from parts)."""
-    tail = lines[idx][marker_end:]
-    if PEM_BODY_RE.search(tail):
+    """True when a real key body follows the PEM header at ``lines[idx]``: a base64 key
+    line on the same line (after a ``\n`` escape), within the next 2 lines, or >= 3 such
+    lines anywhere near a marker (a key assembled from parts). A body line is the whole
+    line (quotes/commas peeled off) in the base64 charset with digits, so prose and
+    identifiers near a bare marker (a UI placeholder string) never count."""
+    if _pem_tail_has_body(lines[idx][marker_end:]):
         return True
     for n in range(idx + 1, min(len(lines), idx + 3)):
-        if PEM_BODY_RE.search(lines[n]):
+        if _pem_body_line(lines[n]):
             return True
     lo, hi = max(0, idx - 30), min(len(lines), idx + 60)
-    body_lines = sum(1 for n in range(lo, hi) if PEM_BODY_RE.search(lines[n]))
+    body_lines = sum(1 for n in range(lo, hi) if _pem_body_line(lines[n]))
     return body_lines >= 3
 
 
@@ -930,6 +1224,70 @@ def _generic_secret_plausible(value: str) -> bool:
     n = len(value)
     entropy = -sum((c / n) * math.log2(c / n) for c in counts.values())
     return entropy >= 3.5
+
+
+_SHARED_KEY_NAME_RE = re.compile(
+    r"(?i)(?:default|public|demo|shared|sample|example|dummy|fake|placeholder|community)")
+
+
+def _assigned_identifier(line: str, key_pos: int) -> str:
+    """The whole identifier the generic-key rule matched inside: `defaultApiKey` for a
+    match that starts at `ApiKey`, `DEMO_TOKEN` for one that starts at `TOKEN`."""
+    head = re.search(r"[\w$]*$", line[:key_pos])
+    tail = re.match(r"[\w$]*", line[key_pos:])
+    return (head.group(0) if head else "") + (tail.group(0) if tail else "")
+
+
+_JS_ASSIGN_RE_CACHE: dict[str, re.Pattern] = {}
+
+
+def _resolve_js_assignment(lines: list[str], idx: int, name: str) -> str | None:
+    """The expression last assigned to JS ``name`` in the ~80 lines above ``idx``
+    (``const C = 'cu' + 'rl …'``, ``let a = 'x', b = 'y'``), as source text. A compound
+    assignment (``C += …``) makes the value unknown: ``None``. Used only to RAISE an
+    exec verdict (see ``classify_js_exec``)."""
+    from src.scanner.exec_classify import split_top_level_args
+
+    rx = _JS_ASSIGN_RE_CACHE.get(name)
+    if rx is None:
+        rx = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\s*([-+*/%|&^]?)=(?![=>])")
+        _JS_ASSIGN_RE_CACHE[name] = rx
+    for n in range(idx - 1, max(-1, idx - 80), -1):
+        m = rx.search(lines[n])
+        if not m:
+            continue
+        if m.group(1):
+            return None
+        rest = lines[n][m.end():].strip()
+        # `const script =` with the value on the following line(s), or a `+` chain that
+        # continues: read on until the statement ends (rollup's dist/native.js).
+        k = n + 1
+        while k < min(len(lines), n + 8) and k < idx and (
+                not rest or rest.endswith(("+", "=", "(", ",")) and not rest.endswith(";")):
+            nxt = lines[k].strip()
+            if not nxt or nxt.startswith("//"):
+                k += 1
+                continue
+            rest = f"{rest} {nxt}".strip()
+            k += 1
+            if rest.endswith(";"):
+                break
+        args = split_top_level_args(rest)
+        rhs = (args[0] if args else "").rstrip().rstrip(";").strip()
+        return rhs or None
+    return None
+
+
+def _text_decode_flows(lines: list[str], idx: int, call_src: str) -> bool:
+    """Does percent-decoding / ``unescape`` / a reversed string / evaluated code build
+    this exec call, inline or through a name assigned from one (80 lines above)?"""
+    from src.scanner.exec_classify import TEXT_DECODE_RE
+
+    if TEXT_DECODE_RE.search(call_src):
+        return True
+    tainted = _tainted_names(lines, idx - 80, idx + 1,
+                             lambda _n, ln: bool(TEXT_DECODE_RE.search(ln)))
+    return any(_uses_name(call_src, t) for t in tainted)
 
 
 def _resolve_py_assignment(lines: list[str], idx: int, name: str):
@@ -1012,6 +1370,43 @@ def _cooccur(
     return best
 
 
+def _cooccur_flow(
+    lines: list[str], prose: set[int], is_src, re_b: re.Pattern, max_lines: int,
+    exclude_b: re.Pattern | None = None,
+) -> int | None:
+    """Like :func:`_cooccur`, but the ``re_b`` sink must USE the source: the source
+    expression inline on the sink's line after the sink, or a name tainted from a
+    source line (assigned from it, directly or through other names). Earliest 0-based
+    line of a qualifying pair within ``max_lines`` / ``_COOCCUR_MAX_CHARS``."""
+    offsets: list[int] = []
+    pos = 0
+    for ln in lines:
+        offsets.append(pos)
+        pos += len(ln) + 1
+    src_lines = [i for i, ln in enumerate(lines) if i not in prose and is_src(ln)]
+    if not src_lines:
+        return None
+    src_set = set(src_lines)
+    tainted = _tainted_names(lines, 0, len(lines), lambda n, _ln: n in src_set)
+    best: int | None = None
+    for bi, ln in enumerate(lines):
+        if bi in prose or (exclude_b and exclude_b.search(ln)):
+            continue
+        m = re_b.search(ln)
+        if not m:
+            continue
+        sink_tail = ln[m.start():] + "\n" + (lines[bi + 1] if bi + 1 < len(lines) else "")
+        uses = is_src(ln[m.start():]) or any(_uses_name(sink_tail, t) for t in tainted)
+        if not uses:
+            continue
+        bp = offsets[bi] + m.start()
+        for ai in src_lines:
+            if abs(ai - bi) <= max_lines and abs(offsets[ai] - bp) <= _COOCCUR_MAX_CHARS:
+                cand = min(ai, bi)
+                best = cand if best is None else min(best, cand)
+    return best
+
+
 _LOADER_CTX_RE = re.compile(
     r"fetch\s*\(|urlopen|urlretrieve|requests\.|httpx\.|axios|https?\.get|\bcurl\b|\bwget\b|"
     r"pip\s+install|npm\s+install|\bimport\b|\brequire\s*\(|download|\bexec\s*\(|"
@@ -1036,9 +1431,15 @@ _UNTRUSTED_DEF_RE = re.compile(
 )
 
 
-def _untrusted_lines(lines: list[str]) -> list[int]:
-    return [i for i, ln in enumerate(lines)
-            if UNTRUSTED_INPUT_RE.search(ln) and not _UNTRUSTED_DEF_RE.search(ln)]
+def _untrusted_lines(lines: list[str], candidates=None) -> list[int]:
+    """``candidates``: the line indices UNTRUSTED_INPUT_RE can match on (from
+    ``LineFilter.lines``); None tries every line."""
+    # A comment that mentions a webhook / fetch is not an ingestion point (next.js
+    # run-tests.js: "parsed by the commenter webhook", precision PR 2).
+    idxs = range(len(lines)) if candidates is None else sorted(candidates)
+    return [i for i in idxs
+            if UNTRUSTED_INPUT_RE.search(lines[i]) and not _UNTRUSTED_DEF_RE.search(lines[i])
+            and not lines[i].lstrip().startswith(("#", "//", "*", "/*"))]
 
 
 def _near(idxs: list[int], idx: int, window: int) -> bool:
@@ -1072,6 +1473,8 @@ def _names_in(text: str) -> set[str]:
 
 
 def _uses_name(text: str, name: str) -> bool:
+    if name not in text:  # the regex below needs the name verbatim
+        return False
     return bool(re.search(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])", text))
 
 
@@ -1112,6 +1515,92 @@ def _untrusted_flows(lines: list[str], idx: int, call_src: str, untrusted: list[
     tainted = _tainted_names(lines, idx - _UNTRUSTED_WINDOW, idx + 1,
                              lambda n, _ln: n in src)
     return any(_uses_name(call_src, t) for t in tainted)
+
+
+# `'.'.join(ids[::-1])` reverses a LIST of names (IPython's completer); it is not the
+# reversed-string decode that `[::-1]` in DECODE_SINK_RE is for.
+_JOIN_REVERSED_LIST_RE = re.compile(r"""['"][^'"]+['"]\s*\.\s*join\s*\([^)]*\[::-1\]""")
+
+
+def _is_decode_line(line: str) -> bool:
+    from src.scanner.exec_classify import ASSEMBLY_DECODE_RE
+
+    if ASSEMBLY_DECODE_RE.search(line):
+        return True  # chr()/bytes([...])/fromCharCode assembly hides text like a decode
+    return bool(DECODE_SINK_RE.search(line)) and not (
+        _JOIN_REVERSED_LIST_RE.search(line)
+        and not DECODE_SINK_RE.search(_JOIN_REVERSED_LIST_RE.sub(" ", line)))
+
+
+def _decoded_flows(lines: list[str], idx: int, call_src: str) -> bool:
+    """Does a DECODED value (base64 / hex / zlib / reversed string) build this call?
+    Inline in the call, or through a name assigned from a decode within 80 lines above.
+    A decoded payload handed to a shell keeps the shell finding high (precision PR 2)."""
+    if _is_decode_line(call_src):
+        return True
+    tainted = _tainted_names(lines, idx - 80, idx + 1,
+                             lambda _n, ln: _is_decode_line(ln))
+    return any(_uses_name(call_src, t) for t in tainted)
+
+
+_EVAL_METHOD_CALL_RE = re.compile(r"\.(?:eval|exec|runsource|runcode|run_code)\s*\(")
+_PY_CALL_RE = re.compile(r"(?<![\w.])(?:self\.|cls\.)?([A-Za-z_]\w*)\s*\(")
+
+
+def _untrusted_to_eval_method(lines: list[str], untrusted: list[int],
+                              prose: set[int]) -> int | None:
+    """0-based line of the first ``.eval(`` / ``.exec(`` / ``.runsource(`` method call
+    whose argument carries untrusted input: inline, through a name assigned from it, or
+    through the parameter of a function in this file that such a name is passed to (one
+    hop). ``None`` when there is no such flow."""
+    from src.scanner.exec_classify import extract_call, split_top_level_args
+
+    src = set(untrusted)
+    tainted = _tainted_names(lines, 0, len(lines), lambda n, _ln: n in src)
+    if not tainted and not any(_EVAL_METHOD_CALL_RE.search(lines[i]) for i in untrusted):
+        return None
+    # One hop: `self.execute_command(request, cmd, frame)` taints the matching parameter
+    # of `def execute_command(self, request, command, frame)`.
+    defs: dict[str, list[str]] = {}
+    for i, ln in enumerate(lines):
+        m = re.match(r"\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(", ln)
+        if m:
+            sig = " ".join(lines[i: i + 8])
+            got = extract_call([sig], 0, 0, lang="python", max_lines=1)
+            inner = got[0][got[0].find("(") + 1: -1] if got else ""
+            params = [re.split(r"[:=]", p)[0].strip().lstrip("*")
+                      for p in split_top_level_args(inner)]
+            defs[m.group(1)] = [p for p in params if p and p not in ("self", "cls", "/", "")]
+    hop: set[str] = set()
+    for i, ln in enumerate(lines):
+        if i in prose or not tainted:
+            continue
+        for m in _PY_CALL_RE.finditer(ln):
+            params = defs.get(m.group(1))
+            if not params:
+                continue
+            got = extract_call(lines, i, m.start(1), lang="python", max_lines=6)
+            if not got:
+                continue
+            call = got[0]
+            args = split_top_level_args(call[call.find("(") + 1: -1])
+            for k, a in enumerate(args):
+                if "=" in a.split("(")[0] or k >= len(params):
+                    continue
+                if any(_uses_name(a, t) for t in tainted):
+                    hop.add(params[k])
+    reach = tainted | hop
+    for i, ln in enumerate(lines):
+        if i in prose:
+            continue
+        m = _EVAL_METHOD_CALL_RE.search(ln)
+        if not m:
+            continue
+        got = extract_call(lines, i, m.start() + 1, lang="python", max_lines=6)
+        arg = got[0] if got else ln[m.start():]
+        if UNTRUSTED_INPUT_RE.search(arg) or any(_uses_name(arg, t) for t in reach):
+            return i
+    return None
 
 
 # JS: the program's OWN command line / environment.
@@ -1202,6 +1691,57 @@ def _cli_origin(lines: list[str], idx: int, has_cli_import: bool) -> bool:
     return False
 
 
+# Decorators that make a function's PARAMETERS come from a remote party: a web route, a
+# chat-bot command, an agent / MCP tool, an event handler. (A click / typer command is
+# the program's own CLI, see `_cli_origin`; this rule never applies in such a file.)
+_REMOTE_HANDLER_DECORATOR_RE = re.compile(
+    r"^\s*@(?:[\w.]+\.)?(?:route|get|post|put|patch|delete|websocket|command|tool|call_tool|"
+    r"event|listen|listener|message_handler|on_message|handler|task|slash_command|"
+    r"hybrid_command|app_command)\b"
+    r"|^\s*@(?:tool|mcp_tool|function_tool)\b",
+)
+_PY_PARAM_RE = re.compile(r"(?:^|,|\()\s*\*{0,2}([A-Za-z_]\w*)\s*(?=[:=,)])")
+
+
+def _remote_handler_params(lines: list[str], idx: int, has_cli_import: bool) -> set[str]:
+    """Parameters of the function enclosing ``lines[idx]`` when it is a remote-entry
+    handler (see above), else empty. Precision PR 2: with the shell ladder, such a
+    parameter reaching a command is "untrusted input in reach" (high)."""
+    if has_cli_import or idx >= len(lines):
+        return set()
+    cur = len(lines[idx]) - len(lines[idx].lstrip())
+    for n in range(idx - 1, max(-1, idx - 400), -1):
+        st = lines[n].lstrip()
+        if not st or st.startswith(("#", ")", "]", "}")):
+            continue
+        ind = len(lines[n]) - len(st)
+        if ind >= cur:
+            continue
+        cur = ind
+        if not st.startswith(("def ", "async def ")):
+            if ind == 0:
+                return set()
+            continue
+        decorated = False
+        for k in range(n - 1, max(-1, n - 15), -1):
+            dst = lines[k].lstrip()
+            if not dst.startswith("@") and not dst.startswith(")"):
+                if dst and len(lines[k]) - len(dst) <= ind:
+                    break
+                continue
+            if _REMOTE_HANDLER_DECORATOR_RE.match(lines[k]):
+                decorated = True
+                break
+        if not decorated:
+            return set()
+        sig = " ".join(lines[n: min(len(lines), n + 10)])
+        open_i = sig.find("(")
+        close_i = sig.find(")", open_i)
+        params = {m.group(1) for m in _PY_PARAM_RE.finditer(sig[open_i: close_i + 1])}
+        return params - {"self", "cls", "ctx", "context", "interaction", "request", "req"}
+    return set()
+
+
 def _in_py_string_literal(line: str, pos: int) -> bool:
     """Is ``line[pos]`` inside a single-line ``'…'`` / ``"…"`` literal? (A matched
     ``shell=True`` inside an error message is text, not a keyword argument.)"""
@@ -1223,11 +1763,60 @@ def _in_py_string_literal(line: str, pos: int) -> bool:
     return q is not None
 
 
+_JS_METHOD_DEF_PREFIX_RE = re.compile(
+    r"^\s*(?:(?:async|static|public|private|protected|export|override)\s+)*\*?\s*$")
+_JS_METHOD_DEF_RE = re.compile(
+    r"[\w$]+\s*\([^()]*\)\s*(?::\s*[\w$<>\[\]|,. ]+)?\s*\{")
+
+
+def _js_call_is_text_or_def(line: str, pos: int, start_in: str | None = None) -> bool:
+    """Is the exec-family name at ``line[pos]`` NOT a call: inside a string literal or a
+    comment on this line, or the name of a definition (`function execSync(cmd) {`, a
+    class method `exec(cmd, opts) {`)? ``start_in`` seeds the state for a line that
+    begins inside a template literal opened earlier. Precision PR 2."""
+    in_str: str | None = start_in
+    escape = False
+    i = 0
+    while i < pos:
+        ch = line[i]
+        if in_str is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_str:
+                in_str = None
+            elif in_str == "`" and line.startswith("${", i):
+                return False  # code inside a template expression
+            i += 1
+            continue
+        if line.startswith("//", i):
+            return True
+        if line.startswith("/*", i):
+            end = line.find("*/", i + 2)
+            if end == -1 or end >= pos:
+                return True
+            i = end + 2
+            continue
+        if ch in "'\"`":
+            in_str = ch
+        i += 1
+    if in_str is not None:
+        return True
+    head = line[:pos]
+    if re.search(r"\bfunction\s*\*?\s*$", head):
+        return True
+    return bool(_JS_METHOD_DEF_PREFIX_RE.match(head) and _JS_METHOD_DEF_RE.match(line, pos))
+
+
 def _classify_exec_match(
     lines: list[str], idx: int, match: re.Match, file_lang: str | None,
     untrusted: list[int], has_cli_import: bool = False, js_cli=None,
+    func: str | None = None,
 ):
-    """Run the exec classifier for a matched subprocess/os.system/child_process call."""
+    """Run the exec classifier for a matched subprocess/os.system/child_process call.
+    ``func``: the function an aliased call stands for (``run`` bound to ``execSync``,
+    ``src/scanner/exec_alias.py``); by default the matched name."""
     from src.scanner.exec_classify import (
         classify_js_exec,
         classify_python_exec,
@@ -1242,15 +1831,24 @@ def _classify_exec_match(
     got = extract_call(lines, idx, start, lang=lang)
     call_src, consumed = (got if got else (lines[idx][start:], 1))
     flow = near and _untrusted_flows(lines, idx, call_src, untrusted)
+    payload = _decoded_flows(lines, idx, call_src) or _text_decode_flows(lines, idx, call_src)
+    if lang == "python" and not near:
+        # A remote handler's own parameter (web route, chat-bot command, agent tool)
+        # reaching the call is untrusted input in reach (precision PR 2).
+        params = _remote_handler_params(lines, idx, has_cli_import)
+        near = any(_uses_name(call_src, p) for p in params)
     if lang == "python":
-        func = next(g for g in match.groups() if g)
+        func = func or next(g for g in match.groups() if g)
         return classify_python_exec(
             call_src, func, untrusted_near=near, consumed=consumed,
             resolve_name=lambda nm: _resolve_py_assignment(lines, idx, nm),
             cli_origin=_cli_origin(lines, idx, has_cli_import), untrusted_flow=flow,
+            payload_flow=payload,
         )
-    return classify_js_exec(call_src, match.group(1), untrusted_near=near, consumed=consumed,
-                            untrusted_flow=flow, is_cli_expr=js_cli)
+    return classify_js_exec(call_src, func or match.group(1), untrusted_near=near,
+                            consumed=consumed,
+                            untrusted_flow=flow, is_cli_expr=js_cli, payload_flow=payload,
+                            resolve_name=lambda nm: _resolve_js_assignment(lines, idx, nm))
 
 
 def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted: list[int]):
@@ -1264,6 +1862,7 @@ def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted:
         _const_str,
         _parse_expr,
         extract_call,
+        inline_code_is_payload,
     )
 
     got = extract_call(lines, idx, match.start(), lang="python")
@@ -1274,23 +1873,71 @@ def _classify_eval_match(lines: list[str], idx: int, match: re.Match, untrusted:
         # ("Decoded payload fed to exec/eval"); don't report the same line twice.
         if _DECODED_EXEC_LINE_RE.search(lines[idx]):
             return None
-        return ExecVerdict("defect", "high", "exec/eval of a decoded payload", "", consumed)
+        return ExecVerdict("defect", "high", "exec/eval of a decoded payload", "", consumed,
+                           payload=True)
     node = _parse_expr(call_src)
     if isinstance(node, _ast.Call) and node.args:
         s = _const_str(node.args[0])
         if s is not None:
-            if INLINE_CODE_DANGER_RE.search(s):
+            # Precision PR 2: a constant whose only "danger" is that it execs/evals a
+            # NAME is a compatibility shim (six's `exec_`, future's `exec_`, py's
+            # `exec_=exec`): `exec("exec _code_ in _globs_, _locs_")` runs whatever the
+            # caller passes, exactly like `exec(code)`. Judge it as dynamic evaluation.
+            # A constant that decodes / fetches / imports / spawns stays high.
+            if INLINE_CODE_DANGER_RE.search(_SHIM_EXEC_WORD_RE.sub(" ", s)):
                 return ExecVerdict("defect", "high",
                                    "constant code string that execs/decodes/fetches", "",
-                                   consumed)
-            return ExecVerdict("capability", "info", "evaluates a constant code string",
-                               CAP_EVAL, consumed)
+                                   consumed, payload=inline_code_is_payload(s))
+            if not _SHIM_EXEC_WORD_RE.search(s):
+                return ExecVerdict("capability", "info", "evaluates a constant code string",
+                                   CAP_EVAL, consumed)
     if near:
-        return ExecVerdict("defect", "high", "dynamic code evaluation next to untrusted input",
-                           "", consumed)
+        # Flow, not proximity (precision PR 2): high only when the untrusted value
+        # reaches the evaluated expression; an unrelated fetch in the same file is a
+        # medium.
+        if _untrusted_flows(lines, idx, call_src, untrusted):
+            return ExecVerdict("defect", "high", "dynamic code evaluation of untrusted input",
+                               "", consumed, payload=True)
+        return ExecVerdict("defect", "medium", "dynamic code evaluation in a file that reads "
+                           "untrusted input (no flow to the call found)", "", consumed)
     return ExecVerdict("capability", "low",
                        "evaluates code built at runtime (no untrusted input in reach)",
                        CAP_EVAL, consumed)
+
+
+# The exec/eval/compile words a compatibility shim's constant code may contain.
+_SHIM_EXEC_WORD_RE = re.compile(r"\b(?:exec|eval|compile)\b")
+
+
+def _classify_vm_match(lines: list[str], idx: int, match: re.Match,
+                       untrusted: list[int]) -> tuple[str, str, str]:
+    """``(kind, severity, label)`` for a Node ``vm.runInContext`` /
+    ``runInNewContext`` / ``compileFunction`` call: the eval rule's ladder."""
+    from src.scanner.exec_classify import (
+        _js_literal,
+        extract_call,
+        split_top_level_args,
+    )
+
+    got = extract_call(lines, idx, match.start(), lang="js")
+    call_src = got[0] if got else lines[idx][match.start():]
+    open_i, close_i = call_src.find("("), call_src.rfind(")")
+    inner = call_src[open_i + 1: close_i] if 0 <= open_i < close_i else ""
+    args = split_top_level_args(inner)
+    first = args[0] if args else ""
+    if _js_literal(first) is not None:
+        if INLINE_CODE_DANGER_RE.search(_js_literal(first) or ""):
+            return "defect", "high", "runs a constant script that execs/decodes/fetches"
+        return "capability", "info", "runs a constant script in a VM context"
+    if _is_decode_line(first) or _decoded_flows(lines, idx, call_src):
+        return "defect", "high", "runs a decoded payload in a VM context"
+    if _near(untrusted, idx, _UNTRUSTED_WINDOW):
+        if _untrusted_flows(lines, idx, call_src, untrusted):
+            return "defect", "high", "runs untrusted input as code in a VM context"
+        return ("defect", "medium", "runs code in a VM context in a file that reads untrusted "
+                "input (no flow to the call found)")
+    return "capability", "low", "runs code built at runtime in a VM context (no untrusted " \
+        "input in reach)"
 
 
 def _rmtree_is_dangerous(lines: list[str], idx: int, match: re.Match) -> bool:
@@ -1541,7 +2188,7 @@ def _is_test_or_doc_file(file_path: str) -> bool:
     if any(p in ("tests", "test", "spec", "__tests__", "testing") for p in parts):
         return True
     name = Path(file_path).stem.lower()
-    if name.startswith("test_") or name.endswith("_test") or name.endswith("_spec"):
+    if name.startswith(("test_", "test-")) or name.endswith("_test") or name.endswith("_spec"):
         return True
     if name == "conftest":
         return True
@@ -1593,16 +2240,16 @@ def _finding_is_blocking(f: object) -> bool:
     # short-circuits above / via _DEP_MAL_PENALTY). Only FIRST-PARTY shipped code blocks.
     if getattr(f, "category", "") in _DEP_CATEGORIES:
         return False
-    path = getattr(f, "file_path", None)
-    if not path:
-        return True
+    # A payload-shaped defect blocks wherever it sits in the artifact (see Finding.payload).
     # Blocking uses a TIGHTER exemption than the finding-weight discount: a real
     # critical in a runtime-plausible dir an author could rename into (scripts/,
     # tooling/, sandbox/, playground/, site/, a `demo_server.py` at root) still
     # floors the score. Only genuinely-non-runtime code (tests/fixtures/docs/
     # examples/benchmarks, co-located test files) is exempt from the floor — that
     # noise is still weight-discounted elsewhere, it just can't hide a real critical.
-    return not _is_blocking_exempt_path(path)
+    # The location rule IS the public ``shipped`` tag (one definition, so the page and
+    # the answer agree).
+    return finding_is_shipped(f)
 
 
 # Dirs that are truly never the runtime surface an agent connects to. STRICTER than
@@ -1628,9 +2275,52 @@ def _is_blocking_exempt_path(path: str) -> bool:
     stem = Path(path).stem.lower()
     if ".test." in fname or ".spec." in fname:
         return True
-    if stem.startswith("test_") or stem.endswith(("_test", "_spec")) or stem == "conftest":
+    if stem.startswith(("test_", "test-")) or stem.endswith(("_test", "_spec")) \
+            or stem == "conftest":
         return True
     return False
+
+
+def _regrade_misnamed_tests(findings: list[Finding], texts: dict[str, str],
+                            allowlist: set[tuple[str, str]] | None,
+                            paths: list[str] | None = None) -> list[Finding]:
+    """Repository / local-tree scans: a file exempt for being a test (``test_*.py``,
+    ``*_test.py``, under ``tests/``) keeps the exemption only when it is test code
+    that nothing running imports or executes (``src.scanner.test_files``). Any other
+    such file is scanned again without the test downgrade and its defects are graded
+    as shipped code (``Finding.payload``: they block wherever the file sits).
+    Returns the new findings list."""
+    from src.scanner.test_files import not_really_tests
+
+    partial: dict[str, set[str]] = {}
+    bad = not_really_tests(texts, runs_for_consumer=lambda q: not (
+        _is_blocking_exempt_path(q) or _is_infra_file(q)), paths=paths, partial=partial)
+    if not bad:
+        return findings
+    out = [f for f in findings if f.file_path not in bad]
+    for path in sorted(bad):
+        fresh, _p, _s = _scan_content(texts[path], path, allowlist, not_test=True)
+        for f in fresh:
+            if f.kind == "defect":
+                f.payload = True
+        old = [f for f in findings if f.file_path == path]
+        out.extend(split_by_reach(fresh, old, texts[path], partial.get(path), path))
+    return out
+
+
+def split_by_reach(fresh: list[Finding], old: list[Finding], text: str,
+                   names: set[str] | None, path: str = "") -> list[Finding]:
+    """A test file that runtime code reaches only through some of its names: findings
+    in the definitions those names never reach keep the test grading (``old``), the
+    rest are graded as shipped (``fresh``). ``names`` None: the whole module."""
+    if names is None:
+        return fresh
+    from src.scanner.test_files import unreached_lines
+    gone = unreached_lines(text, names, path)
+    if not gone:
+        return fresh
+    return ([f for f in fresh if f.line_number not in gone]
+            + [f for f in old if f.line_number in gone])
 
 
 def _blocking_crit_count(result: object) -> int:
@@ -1663,6 +2353,7 @@ def _select_scan_files(
     scannable = [
         it for it in tree
         if not _should_skip_path(it["path"])
+        and it.get("size", 0) <= _MAX_FILE_SIZE
         and (_is_source_file(it["path"]) or _is_git_config_file(it["path"])
              or _is_git_hook_file(it["path"]))
         and not _excluded(it["path"])
@@ -1678,6 +2369,201 @@ def _select_scan_files(
             it["path"],
         ))
     return scannable[:_MAX_FILES_PER_REPO], total, sampled
+
+
+# Source files over ``_MAX_FILE_SIZE`` are not skipped silently: padding a file past a
+# scanner's size cap with filler, then putting the payload at the end, is a published
+# evasion (Pluto Security, "Malicious MCP servers, clean scans", 2026-09-15: 16.2 MiB of
+# weather text before the payload). The first and last ``_OVERSIZED_WINDOW`` bytes are
+# scanned and the file is disclosed as only partly read.
+_OVERSIZED_WINDOW = 256_000
+_MAX_OVERSIZED_FILES = 10
+# Closers of a multi-line string or comment. A tail window that begins inside the
+# filler docstring sees the closing quote as an OPENING one and would treat the code
+# after it as prose, so the text after the last closer is scanned on its own too.
+_TAIL_CLOSERS = ('"""', "'''", "*/")
+
+
+def _oversized_scan_files(
+    tree: list[dict], user_excludes: set[str] | None = None, *, limit: int | None = None,
+) -> list[dict]:
+    """Source files in ``tree`` over ``_MAX_FILE_SIZE`` that ``_select_scan_files``
+    leaves out, shipped paths first, at most ``limit`` (default ``_MAX_OVERSIZED_FILES``;
+    ``0`` = all, for counting the coverage gap)."""
+    excl = {e.lower() for e in (user_excludes or set())}
+    big = [
+        it for it in tree
+        if it.get("size", 0) > _MAX_FILE_SIZE
+        and not _should_skip_path(it["path"])
+        and _is_oversized_code_file(it["path"])
+        and not any(e in it["path"].lower() for e in excl)
+    ]
+    big.sort(key=lambda it: (
+        _is_nonshipped_path(it["path"]) or _is_test_or_doc_file(it["path"]), it["path"],
+    ))
+    if limit == 0:
+        return big
+    return big[:_MAX_OVERSIZED_FILES if limit is None else limit]
+
+
+def _is_oversized_code_file(path: str) -> bool:
+    """Code an interpreter runs (``_PAYLOAD_CODE_EXTS``). Oversized data files (a 1.2 MB
+    endpoints.json, a type table) can't hide a call, so they stay out of this pass."""
+    return Path(path).suffix.lower() in _PAYLOAD_CODE_EXTS and _is_source_file(path)
+
+
+# Text files in an agent-instruction directory (``skills/x/reference.md``) that an agent
+# may be handed to read; data and code there are counted by the other rules.
+_AGENT_TEXT_EXTS = (".md", ".mdc", ".markdown", ".txt")
+# Files whose NAME makes them agent instructions or tool definitions, wherever they sit.
+# Over the read cap they are not read at all, and they are exactly what the scanner
+# exists to read: the only oversized files that are a decision input (Review).
+AGENT_INSTRUCTION_FILE_NAMES = frozenset({
+    "skill.md", "agents.md", "claude.md", "mcp.json", ".mcp.json", "server.json",
+    "tools.json",
+})
+
+
+def is_oversized_agent_file(path: str) -> bool:
+    """A file NAMED as agent instructions or tool definitions (SKILL.md, AGENTS.md,
+    CLAUDE.md, mcp.json, server.json, tools.json) anywhere in the tree. Over the read
+    cap it is counted in ``oversized_agent_files``, which reads Review. A file a SKILL.md
+    links is handled by the skill scan (``skill_refs_unread``)."""
+    parts = [p for p in str(path).replace("\\", "/").lower().split("/") if p]
+    return bool(parts) and parts[-1] in AGENT_INSTRUCTION_FILE_NAMES
+
+
+def is_oversized_display_file(path: str) -> bool:
+    """A non-source file whose size gap is still worth disclosing (display only, in
+    ``oversized_files``): an agent-instruction text file by directory (an unreferenced
+    ``skills/x/notes.md``), a ``.mdc`` rule, any other agent-instruction name, and an
+    OpenAPI spec (a tool-definition surface). A README and files under ``.github/`` are
+    left out."""
+    from src.scanner.package_context import AGENT_INSTRUCTION_DIRS, AGENT_INSTRUCTION_NAMES
+    parts = [p for p in str(path).replace("\\", "/").lower().split("/") if p]
+    if not parts:
+        return False
+    name = parts[-1]
+    if name.startswith("readme"):
+        return False
+    if name in AGENT_INSTRUCTION_NAMES or name.endswith(".mdc") or name.startswith("openapi."):
+        return True
+    dirs = [p for p in parts[:-1] if p != ".github"]
+    return name.endswith(_AGENT_TEXT_EXTS) and any(p in AGENT_INSTRUCTION_DIRS for p in dirs)
+
+
+def _oversized_gap_counts(
+    tree: list[dict], user_excludes: set[str] | None = None,
+) -> tuple[int, int]:
+    """(oversized, of which agent-instruction files) for the coverage gaps: every blob
+    over the read cap the scan would have read (a source file of any extension, an
+    agent-instruction file, an OpenAPI spec), not only the code files whose head and
+    tail are read. Only the second count (by file name) is a decision input."""
+    excl = {e.lower() for e in (user_excludes or set())}
+    n = agent = 0
+    for it in tree:
+        path = str(it.get("path") or "")
+        if (not path or int(it.get("size", 0) or 0) <= _MAX_FILE_SIZE
+                or _should_skip_path(path) or any(e in path.lower() for e in excl)):
+            continue
+        is_agent = is_oversized_agent_file(path)
+        if is_agent or _is_source_file(path) or is_oversized_display_file(path):
+            n += 1
+            agent += int(is_agent)
+    return n, agent
+
+
+def _looks_padded(head: str, file_path: str) -> bool:
+    """Whether the head of an oversized file is filler: one long line repeated over a
+    third of the rows, or (in Python) almost all docstring / multi-line string."""
+    from collections import Counter
+    rows = [ln.strip() for ln in head.split("\n") if ln.strip()]
+    if len(rows) < 200:
+        return False
+    line, n = Counter(r for r in rows if len(r) >= 30).most_common(1)[0] if any(
+        len(r) >= 30 for r in rows) else ("", 0)
+    if line and n / len(rows) >= 0.3:
+        return True
+    if Path(file_path).suffix.lower() == ".py":
+        total = head.count("\n") + 1
+        return len(_python_prose_lines(head)) / total >= 0.9
+    return False
+
+
+def _scan_oversized_text(
+    head: str | None, tail: str | None, file_path: str, size: int,
+    allowlist: set[tuple[str, str]] | None = None, *, payloads_full_severity: bool = False,
+) -> list[Finding]:
+    """Findings for a source file too large to scan whole: the static engine over its
+    first and last ``_OVERSIZED_WINDOW`` bytes (``None`` = not readable), plus one
+    disclosure finding. A tail finding's line number is unknown and reported as 0."""
+    windows: list[tuple[str, bool]] = []
+    if head:
+        cut = head.rfind("\n")
+        windows.append((head[:cut + 1] if cut > 0 else head, True))
+    if tail:
+        cut = tail.find("\n")
+        body = tail[cut + 1:] if 0 <= cut < len(tail) - 1 else tail
+        windows.append((body, False))
+        last = max((body.rfind(t) + len(t) for t in _TAIL_CLOSERS if t in body), default=-1)
+        if 0 < last < len(body):
+            windows.append((body[last:], False))
+    out: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for text, is_head in windows:
+        try:
+            found, _pos, _sup = _scan_content(
+                text, file_path, allowlist, payloads_full_severity=payloads_full_severity)
+        except Exception:  # noqa: BLE001 — a window that fails to scan is just unread
+            continue
+        for f in found:
+            key = (f.name, f.snippet)
+            if key in seen:
+                continue
+            seen.add(key)
+            if not is_head:
+                f.line_number = 0
+            out.append(f)
+    padded = bool(head) and _looks_padded(head, file_path)
+    read = ("first and last 256 KB scanned" if head and tail
+            else "first 256 KB scanned" if head else "not read")
+    out.append(Finding(
+        category="obfuscation",
+        name=("Oversized source file padded with filler" if padded
+              else "Source file too large to scan in full"),
+        # Padded, or not read at all: medium. Head and tail read, no filler: low.
+        severity="medium" if padded or not (head or tail) else "low",
+        file_path=file_path,
+        line_number=0,
+        snippet=f"{size:,} bytes; {read}",
+        remediation=_why(
+            "a source file this large is only partly scanned; padding past a scanner's "
+            "size limit hides code", "obfuscation", "defect"),
+    ))
+    return out
+
+
+async def _fetch_file_window(
+    owner: str, repo: str, path: str, ref: str | None, *, tail: bool,
+) -> str | None:
+    """The first (``tail=False``) or last ``_OVERSIZED_WINDOW`` bytes of a repo file over
+    the unmetered raw host, by HTTP Range. None without a ref or on any failure (a
+    private repo 404s there); the caller then discloses the file as not read."""
+    if not ref:
+        return None
+    rng = f"bytes=-{_OVERSIZED_WINDOW}" if tail else f"bytes=0-{_OVERSIZED_WINDOW - 1}"
+    url = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"Range": rng})
+    except httpx.HTTPError:
+        return None
+    if resp.status_code not in (200, 206):
+        return None
+    data = resp.content
+    if resp.status_code == 200:  # Range ignored: keep the window we asked for
+        data = data[-_OVERSIZED_WINDOW:] if tail else data[:_OVERSIZED_WINDOW]
+    return data.decode("utf-8", errors="replace")
 
 
 # Developer/build tooling that is NEVER part of an installed package: `pip install`
@@ -1698,6 +2584,117 @@ def _is_build_tooling_file(file_path: str) -> bool:
         return True
     parts = [p.lower() for p in Path(file_path).parts[:-1]]
     return any(p in _BUILD_TOOLING_DIRS for p in parts)
+
+
+# Repo infrastructure a consumer never builds or runs: the project's own CI/release
+# machines (`infra/`, `ci/`, `*-runner/` bootstrap scripts, `scripts/release*`) and the
+# CI-config dirs. Limited to script/config files so an author can't park importable
+# source (.py/.js/.rs …) under `infra/` to dodge the floor.
+_CI_CONFIG_DIRS = frozenset({".github", ".gitlab", ".circleci", ".buildkite"})
+_INFRA_DIRS = frozenset({"infra", "ci", ".ci"})
+# (Not .devcontainer/: its postCreateCommand runs automatically when the repo is
+# opened in a dev container, an autorun on the clone-and-open path.)
+_DEV_TOP_DIRS = frozenset({"dev", "hack"})
+_SCRIPT_CONFIG_EXTS = frozenset({
+    ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd",
+    ".yml", ".yaml", ".tf", ".tfvars", ".hcl", ".toml", ".json", ".cfg", ".conf", ".ini",
+})
+
+
+_DOCS_BUILD_STEM_RE = re.compile(
+    r"^(?:(?:build|deploy|gen(?:erate)?|make|publish|serve)[-_]docs?|"
+    r"docs?[-_](?:build|deploy|gen(?:erate)?|publish|serve))$")
+
+
+def _is_script_or_config(file_path: str) -> bool:
+    return Path(file_path).suffix.lower() in _SCRIPT_CONFIG_EXTS
+
+
+def _is_dev_tooling_script(file_path: str) -> bool:
+    """A local-development helper script / config (vllm semantic-router's
+    ``tools/dev/local-up-router.sh``): under a top-level ``dev/`` or ``hack/``, or a
+    ``dev/`` directly under ``tools/`` or ``scripts/``. Script / config files only, so
+    importable source parked there keeps the floor. A repo / local / package scan
+    restores its findings when an install-reachable npm script or spawning code names
+    it (``npm_scripts.restore_externally_invoked``)."""
+    if not _is_script_or_config(file_path):
+        return False
+    parts = [p.lower() for p in Path(file_path).parts[:-1]]
+    return bool(parts) and (parts[0] in _DEV_TOP_DIRS or (
+        len(parts) > 1 and parts[0] in ("tools", "scripts", "script")
+        and parts[1] == "dev"))
+
+
+# Dataset files (round-2 DNC sample: an attack-prompt corpus under data/eval/): data
+# text under a dataset directory. Agent instruction files (SKILL.md, AGENTS.md,
+# anything under skills/ / prompts/ / .claude/ …, MCP / plugin manifests) are never
+# datasets, nor are package manifests or requirement lists.
+_DATASET_DIRS = frozenset({"data", "dataset", "datasets", "corpus", "corpora",
+                           "benchmark", "benchmarks", "eval", "evals"})
+_DATASET_EXTS = frozenset({".json", ".jsonl", ".ndjson", ".csv", ".tsv", ".txt"})
+_NOT_DATASET_NAMES = frozenset({
+    "package.json", "package-lock.json", "composer.json", "deno.json", "tsconfig.json",
+    "jsconfig.json", "bower.json", "app.json", "now.json", "vercel.json",
+})
+
+
+def _is_dataset_file(file_path: str) -> bool:
+    from src.scanner.package_context import is_agent_instruction_file
+    p = Path(file_path)
+    name = p.name.lower()
+    if p.suffix.lower() not in _DATASET_EXTS or name in _NOT_DATASET_NAMES \
+            or name.startswith(("requirements", "constraints")):
+        return False
+    if is_agent_instruction_file(file_path):
+        return False
+    return any(x.lower() in _DATASET_DIRS for x in p.parts[:-1])
+
+
+def _is_infra_script(file_path: str) -> bool:
+    """True for a CI/release-infrastructure script or config file (see above)."""
+    if not _is_script_or_config(file_path):
+        return False
+    parts = [p.lower() for p in Path(file_path).parts[:-1]]
+    if any(p in _CI_CONFIG_DIRS or p in _INFRA_DIRS or p.endswith(("-runner", "_runner"))
+           for p in parts):
+        return True
+    if _is_dev_tooling_script(file_path):
+        return True
+    # A docs-build script at the root or in scripts/ (pydantic's build-docs.sh installs
+    # rustup + uv to build the site): maintainer tooling, never in the package.
+    if parts in ([], ["scripts"], ["script"]) and _DOCS_BUILD_STEM_RE.match(
+            Path(file_path).stem.lower()):
+        return True
+    # scripts/release.sh, scripts/release-mac.sh, scripts/release/notarize.sh
+    for i, p in enumerate(parts):
+        if p in ("scripts", "script"):
+            below = parts[i + 1:] + [Path(file_path).name.lower()]
+            if any(b.startswith("release") for b in below):
+                return True
+    return False
+
+
+# A standalone installer a user runs ONCE to install the product (`curl …/install.sh |
+# sh`): download_cli.sh, install.sh, get-foo.sh, install-foo.ps1 at the repo root or in
+# scripts/. It is how the tool is delivered, not code the tool runs.
+_INSTALLER_STEM_RE = re.compile(
+    r"^(?:install(?:er)?|download[-_]?cli|get[-_][\w.-]+|install[-_][\w.-]+)$")
+
+
+def _is_installer_script(file_path: str) -> bool:
+    p = Path(file_path)
+    if p.suffix.lower() not in (".sh", ".bash", ".zsh", ".ps1"):
+        return False
+    parts = [x.lower() for x in p.parts[:-1]]
+    if parts not in ([], ["scripts"], ["script"]):
+        return False
+    return bool(_INSTALLER_STEM_RE.match(p.stem.lower()))
+
+
+def _is_unshipped_script(file_path: str) -> bool:
+    """Infra/CI/release scripts and one-time installer scripts: never the runtime surface,
+    so their findings are downgraded, weighted like tests, and never block."""
+    return _is_infra_script(file_path) or _is_installer_script(file_path)
 
 
 def _is_infra_file(file_path: str) -> bool:
@@ -1721,6 +2718,8 @@ def _is_infra_file(file_path: str) -> bool:
     # Build / developer tooling that never runs for a consumer (`pip install` does not
     # run the Makefile, tox, nox, or pre-commit): graded like CI config.
     if _is_build_tooling_file(file_path):
+        return True
+    if _is_unshipped_script(file_path):
         return True
     # Workflow YAMLs (e.g. under a workflows/ directory)
     if any(p == "workflows" for p in parts) and lname.endswith((".yml", ".yaml")):
@@ -1911,6 +2910,70 @@ _SECRET_PLACEHOLDER_CORES = (
     "notasecret", "insertkey", "insertyour", "todo", "fixme", "xxxx", "foobar",
 )
 
+
+# Fake-key words. In a TEST config / fixture file (``_is_test_fixture_file``) a secret
+# whose VALUE carries one of these is a fixture (dify's pytest.ini ``env =`` line:
+# ``sk-ant-api11-IamNotARealKeyJustForMockTestKawaii…``), not a credential. Matched on
+# the separator/case-normalized value like ``_SECRET_PLACEHOLDER_CORES``. Scoped to test
+# files only: ``test`` / ``mock`` / ``fake`` inside a value elsewhere is not evidence,
+# and a real-looking key in a test file (no marker) still fires.
+_FAKE_SECRET_MARKERS = (
+    "fake", "mock", "dummy", "test", "example", "notareal", "notreal", "xxxx",
+    "placeholder", "sample", "invalid",
+)
+_TEST_CONFIG_NAMES = frozenset({
+    "pytest.ini", "tox.ini", "setup.cfg", "conftest.py", "noxfile.py",
+    ".env.test", ".env.testing", ".env.ci", "phpunit.xml", "phpunit.xml.dist",
+})
+_TEST_CONFIG_PREFIXES = (
+    "jest.config.", "jest.setup.", "vitest.config.", "vitest.setup.", "karma.conf.",
+    "playwright.config.", "cypress.config.",
+)
+_TEST_FIXTURE_DIRS = frozenset({
+    "tests", "test", "__tests__", "spec", "testing", "e2e",
+    "fixtures", "fixture", "__fixtures__", "__mocks__", "mocks", "testdata", "test_data",
+})
+
+
+def _is_test_fixture_file(file_path: str) -> bool:
+    """A test runner's config (pytest.ini, tox.ini, setup.cfg, conftest.py, jest /
+    vitest config, .env.test), a file under a test / fixture dir, or a test-named file:
+    where a made-up key is a fixture."""
+    p = Path(file_path)
+    name = p.name.lower()
+    if name in _TEST_CONFIG_NAMES or name.startswith(_TEST_CONFIG_PREFIXES):
+        return True
+    if any(x.lower() in _TEST_FIXTURE_DIRS for x in p.parts[:-1]):
+        return True
+    stem = p.stem.lower()
+    return (".test." in name or ".spec." in name or stem.startswith("test_")
+            or stem.endswith(("_test", "_spec")))
+
+
+def _is_fake_fixture_secret(val_norm: str, file_path: str) -> bool:
+    """A secret VALUE marked fake (``_FAKE_SECRET_MARKERS``) in a test fixture file."""
+    return (any(tok in val_norm for tok in _FAKE_SECRET_MARKERS)
+            and _is_test_fixture_file(file_path))
+
+
+def _is_counting_placeholder(val: str) -> bool:
+    """A key body made only of counting runs (``1234567890abcdef1234567890…``, ghapi's
+    spec example) is a made-up value, never random key material. Every maximal run of
+    consecutive characters (9 wraps to 0) must be 4+ long, over 16+ characters, so a
+    random key that merely contains ``1234`` is still a key."""
+    body = re.split(r"[_-]", val)[-1]
+    if len(body) < 16:
+        return False
+    run = 1
+    for prev, ch in zip(body, body[1:]):
+        if ord(ch) == ord(prev) + 1 or (prev == "9" and ch == "0"):
+            run += 1
+            continue
+        if run < 4:
+            return False
+        run = 1
+    return run >= 4
+
 # OAuth2 token exchange looks exactly like exfiltration (a client_secret POSTed
 # outbound), but it's the REQUIRED auth flow. These hints — grant types, token/
 # authorize endpoints, well-known auth hosts — mark a POST as a legitimate OAuth
@@ -1969,6 +3032,237 @@ def _benign_zero_width(line: str, pos: int) -> bool:
     return ch == "\u200c" and pc == "Lo" and (closes or nc == "Lo")
 
 
+_MINIFIED_LINE_CHARS = 1000
+_INJECTION_TAG_ONLY_RE = re.compile(
+    r"<\s*/?\s*(?:system|important|instructions?|SYSTEM|IMPORTANT|INSTRUCTIONS?)\s*>")
+
+
+def _bidi_cannot_reorder_code(line: str, in_prose: bool, file_lang: str | None) -> bool:
+    """A bidi control on a line that carries no code a reviewer reads: an interior line
+    of a multi-line string / comment (no quote or comment delimiter on it), or a
+    minified bundle line."""
+    if len(line) > _MINIFIED_LINE_CHARS and file_lang in ("javascript", "typescript"):
+        return True
+    if not in_prose:
+        return False
+    return not any(d in line for d in ('"""', "'''", "`", "*/", "/*"))
+
+
+_EXAMPLE_INTRO_RE = re.compile(r"\b(?:example|e\.g\.|for instance)\b[^\"'`]{0,12}$",
+                               re.IGNORECASE)
+
+
+_SYSTEM_PROMPT_LABEL_RE = re.compile(r"system\s+prompt\s*:", re.IGNORECASE)
+# After the label: only escapes / whitespace, then a placeholder, then the string or the
+# template line ends (the label's whole value is the placeholder).
+_PLACEHOLDER_TAIL_RE = re.compile(
+    r"""^(?:\s|\\[nt])*(?:%[-#0 +]*\d*(?:\.\d+)?[sdrfi]|\{[^{}\n]{0,40}\}|\$\{[^{}\n]{0,40}\})"""
+    r"""[ \t]*(?:\\n|["'`])""")
+
+
+def _system_prompt_label_only(line: str, pattern: re.Pattern) -> bool:
+    """Every hit of the role-directive rule on this line is a "system prompt:" label
+    followed only by a format placeholder before the string closes."""
+    hits = list(pattern.finditer(line))
+    if not hits:
+        return False
+    for m in hits:
+        lm = _SYSTEM_PROMPT_LABEL_RE.search(m.group(0))
+        if lm is None:
+            return False
+        if not _PLACEHOLDER_TAIL_RE.match(line[m.end():]):
+            return False
+    return True
+
+
+# A value with a live provider prefix is a real credential even inside an "Example".
+_LIVE_KEY_PREFIX_RE = re.compile(
+    r"(?:sk[-_]|sk-ant-|sk_live_|rk_live_|pk_live_|ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|"
+    r"AKIA|ASIA|xox[abposr]-|AIza|glpat-|hf_|npm_|pypi-|SG\.|key-|shpat_|sq0)",
+)
+
+
+def _is_documented_example(line: str, pos: int) -> bool:
+    """The assignment at ``pos`` is prose inside a string literal, introduced right
+    before by "Example" / "e.g." (``"…Example api_key='…'"``)."""
+    before = line[:pos]
+    if not _EXAMPLE_INTRO_RE.search(before):
+        return False
+    # Inside a string: an odd number of unescaped double quotes before it.
+    return before.count('"') % 2 == 1 or before.count("'") % 2 == 1
+
+
+_PY_POST_CALL_RE = re.compile(r"(?:requests|httpx|axios)\.post\s*\(", re.IGNORECASE)
+_PY_FETCH_SECRET_RE = re.compile(
+    r"""https?://|os\.environ|getenv|password|passwd|token|secret""", re.IGNORECASE)
+
+
+# fetch()'s `credentials` option ('same-origin' | 'include' | 'omit') says whether the
+# browser sends cookies; it is not a credential being sent. Next.js inlines
+# `fetch(location.pathname+'?…',{credentials:'same-origin',headers:{…}})`.
+_FETCH_CREDENTIALS_OPTION_RE = re.compile(
+    r"""\bcredentials\s*:\s*(?:'|"|`|\\['"])(?:same-origin|include|omit)(?:'|"|`|\\['"])""",
+    re.IGNORECASE)
+
+
+def _only_fetch_credentials_option(line: str, pattern: re.Pattern[str]) -> bool:
+    """The exfil match rests only on fetch's `credentials` mode option: with every such
+    option removed the rule no longer matches. A real key/secret/token/password in the
+    same call still matches and is kept."""
+    if not _FETCH_CREDENTIALS_OPTION_RE.search(line):
+        return False
+    return not pattern.search(_FETCH_CREDENTIALS_OPTION_RE.sub("mode:''", line))
+
+
+# Keys whose value lists hosts / origins a server ACCEPTS (inbound), never a place data
+# is sent: Vite / webpack-dev-server allowedHosts, Django ALLOWED_HOSTS /
+# CSRF_TRUSTED_ORIGINS / CORS_*, Starlette TrustedHostMiddleware, cors({origin}).
+_HOST_ALLOWLIST_KEYS = frozenset({
+    "allowedhosts", "allowed_hosts", "trustedhosts", "trusted_hosts", "trustedorigins",
+    "trusted_origins", "csrf_trusted_origins", "cors_allowed_origins",
+    "cors_origin_whitelist", "cors_origins", "cors_allow_origins", "allowedorigins",
+    "allowed_origins", "allow_origins", "alloworigins", "origin", "origins",
+    "csrftrustedorigins", "allowedhostnames", "allowed_hostnames",
+})
+_ALLOWLIST_STR = r"""(?:"[^"\n]*"|'[^'\n]*'|`[^`\n$]*`)"""
+# `<key> [:=] [ [ ( { new Set([ ] "a", "b", "<host…` up to the matched host.
+_ALLOWLIST_PREFIX_RE = re.compile(
+    r"""(?P<key>[A-Za-z_][\w.]*|"[^"\n]+"|'[^'\n]+')\s*(?::\s*(?:list|set|tuple|"""
+    r"""string\[\]|str|List\[str\]|Set\[str\]|Array<string>)?\s*)?[:=]\s*"""
+    r"""(?:new\s+Set\s*\(\s*\[|[\[({])?\s*"""
+    r"""(?:""" + _ALLOWLIST_STR + r"""\s*,\s*)*["'`](?:https?://|wss?://)?[\w.\-*]*$""")
+_ALLOWLIST_ELEMS_ONLY_RE = re.compile(
+    r"""^\s*(?:""" + _ALLOWLIST_STR + r"""\s*,\s*)*["'`](?:https?://|wss?://)?[\w.\-*]*$""")
+_ALLOWLIST_CONT_LINE_RE = re.compile(
+    r"""^\s*(?:(?:""" + _ALLOWLIST_STR + r"""\s*,?\s*)*|//.*|#.*)$""")
+_ALLOWLIST_OPEN_LINE_RE = re.compile(
+    r"""(?P<key>[A-Za-z_][\w.]*|"[^"\n]+"|'[^'\n]+')\s*(?::\s*[\w\[\]<>, ]+)?\s*[:=]\s*"""
+    r"""(?:new\s+Set\s*\(\s*)?[\[(]\s*(?:""" + _ALLOWLIST_STR + r"""\s*,?\s*)*$""")
+# The host ends a plain literal element: `"x.ngrok.io"` then `,` / `]` / `)` / `}`.
+_ALLOWLIST_SUFFIX_RE = re.compile(r"""^[\w.\-:/]*["'`]\s*(?:[,\])}]|$)""")
+# A network call anywhere in the file (call-shaped; `os.environ.get(` is not one).
+_NET_SINK_CALL_RE = re.compile(
+    r"(?<![\w$])(?:fetch|axios|got|ky|request|superagent|needle|urlopen|"
+    r"XMLHttpRequest|sendBeacon|WebSocket|EventSource|createClient|Client|Session|"
+    r"(?:requests|httpx|aiohttp|urllib\w*|http|https|net|tls|dgram|axios|got|ky|"
+    r"undici|socket)\.\w+|"
+    r"[\w$\]\)]+\.(?:post|put|patch|send|request|fetch|connect|emit|write|open))\s*\(")
+# Keys that are a host allowlist only in a CORS context (`cors({ origin: [...] })`,
+# Django `CORS_*`); elsewhere `origin` can name a client's base URL.
+_CORS_ONLY_KEYS = frozenset({"origin", "origins"})
+
+
+def _allowlist_key_ok(key: str, lines: list[str], idx: int) -> bool:
+    k = key.strip("\"'").rsplit(".", 1)[-1].lower()
+    if k in _CORS_ONLY_KEYS:
+        # `cors({ origin: [...] })` / `@fastify/cors` options: the call opens on this
+        # line or just above (a comment that says "cors" does not count).
+        return any(re.search(r"\bcors\w*\s*\(|\bregister\s*\(\s*\w*cors", ln, re.I)
+                   and not _is_line_comment(ln) for ln in lines[max(0, idx - 3): idx + 1])
+    if k in _HOST_ALLOWLIST_KEYS:
+        return True
+    # Vite / webpack `hmr: { host: … }` is where the dev server's websocket listens.
+    return k == "host" and any(
+        re.search(r"\bhmr\b", ln) for ln in lines[max(0, idx - 3): idx + 1])
+
+
+def _host_allowlist_entry(lines: list[str], idx: int, pattern: re.Pattern[str]) -> set[str]:
+    """Every webhook/tunnel-host match on line ``idx`` is an element of a host / origin
+    ALLOWLIST (`allowedHosts: ["x.ngrok.io"]`): configuration of what a server accepts,
+    not a destination. Returns the allowlist key names, or an empty set when the key is
+    not an allowlist key (`url`, `endpoint`, `webhook`, `target`, `baseURL`), the file
+    has any network / exec / navigation sink, or the allowlist's name is read again
+    (`fetch(allowedHosts[0], …)`). The caller re-checks the rest of the tree
+    (npm_scripts.restore_externally_invoked)."""
+    line = lines[idx]
+    matches = list(pattern.finditer(line))
+    if not matches:
+        return set()
+    keys: set[str] = set()
+    for m in matches:
+        if not _ALLOWLIST_SUFFIX_RE.match(line[m.end():]):
+            return set()
+        prefix = line[:m.start()]
+        pm = _ALLOWLIST_PREFIX_RE.search(prefix)
+        if pm:
+            key = pm.group("key")
+        elif _ALLOWLIST_ELEMS_ONLY_RE.match(prefix):
+            # A multi-line list: walk up through element-only lines to the opener.
+            key = None
+            for j in range(idx - 1, max(-1, idx - 40), -1):
+                om = _ALLOWLIST_OPEN_LINE_RE.search(lines[j])
+                if om:
+                    key = om.group("key")
+                    break
+                if not _ALLOWLIST_CONT_LINE_RE.match(lines[j]):
+                    break
+            if key is None:
+                return set()
+        else:
+            return set()
+        if not _allowlist_key_ok(key, lines, idx):
+            return set()
+        keys.add(key.strip("\"'").rsplit(".", 1)[-1])
+    key_alt = "|".join(re.escape(k) for k in keys)
+    named_re = re.compile(r"(?<![\w$])(?:" + key_alt + r")(?![\w$])")
+    decl_re = re.compile(
+        r"\s*(?:(?:export|const|let|var|readonly|static|public|private)\s+)*"
+        r"(?:[\w$]+\.)*[\"']?(?:" + key_alt + r")[\"']?\s*(?::[^=\n]*?)?[:=]\s*"
+        r"(?:new\s+Set\s*\(\s*\[|[\[(])")
+    for n, ln in enumerate(lines):
+        # Any network / exec / navigation sink anywhere in the file (comments
+        # included: nothing is stripped, so nothing can hide behind a fake comment)
+        # disqualifies it. An allowlist file (a Vite config, Django settings) sends
+        # nothing, and a sink can reach the list without naming it
+        # (`Object.values(cfg)`, `cfg["allowed" + "Hosts"]`).
+        if _NET_SINK_CALL_RE.search(ln) or _OTHER_SINK_RE.search(ln):
+            return set()
+        if n == idx:
+            # `const allowedHosts = [...]; post(allowedHosts[0], env)` on one line
+            if len(named_re.findall(ln)) > 1:
+                return set()
+            continue
+        if _is_line_comment(ln):
+            continue
+        dm = decl_re.match(ln)
+        rest = ln[dm.end():] if dm else ln
+        if named_re.search(rest):
+            # The allowlist's name is read elsewhere (`fetch(allowedHosts[0])`, an
+            # alias `const u = allowedHosts[0]`): it may be a destination after all.
+            return set()
+    return keys
+
+
+# Sinks that are not a plain call: assigning a URL to an element / location, a
+# dynamic import, jQuery's ajax, process exec, Python's computed globals.
+_OTHER_SINK_RE = re.compile(
+    r"\.(?:src|href|action|location)\s*=|\blocation\s*=|\bimport\s*\(|\$\.\w+\s*\(|"
+    r"\bjQuery\b|\bexec\w*\s*\(|\bspawn\w*\s*\(|child_process|\bsubprocess\b|"
+    r"\bos\.(?:system|popen)|\bsystem\s*\(|\bglobals\s*\(|\bvars\s*\(|\bgetattr\s*\(|"
+    r"\beval\s*\(|\bFunction\s*\(|\bsetattr\s*\(|\bReflect\.|\bProxy\b|"
+    r"\bnavigator\.|\bWorker\s*\(|\bpostMessage\b|\bsocket\b|\bdgram\b",
+    re.IGNORECASE)
+
+
+def _is_line_comment(line: str) -> bool:
+    """A whole-line `//` comment, or a Python / shell `# ` comment (a JS private
+    member `#go()` is code)."""
+    t = line.lstrip()
+    return t.startswith("//") or re.match(r"#(?:\s|!|$)", t) is not None
+
+
+def _py_local_fetch_only(line: str, file_lang: str | None) -> bool:
+    """The exfil rule's ``fetch(`` branch is the JS global ``fetch``. Python has no
+    global ``fetch``: there it is a local function or parameter (litellm's
+    ``await fetch(include_key)`` reads a config object from a bucket), so a Python line
+    whose only hit is ``fetch(`` is not an HTTP POST. ``requests.post`` /
+    ``httpx.post`` still fire, and so does a line that carries a URL literal or reads a
+    secret (a local ``fetch = lambda u, d: urlopen(u, d)`` called with
+    ``password=os.environ[...]``)."""
+    return (file_lang == "python" and not _PY_POST_CALL_RE.search(line)
+            and not _PY_FETCH_SECRET_RE.search(line))
+
+
 def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
     """True when every hit of an invisible-Unicode rule on this line is a well-formed
     emoji tag sequence or a typographic joiner (precision PR 2: wcwidth's grapheme
@@ -1980,12 +3274,68 @@ def _benign_unicode_only(name: str, pattern: re.Pattern, line: str) -> bool:
     return False
 
 
+# A downgraded (test / doc / example / infra) file's critical/high defects drop to
+# medium, never block, and weigh a fraction: the repo scan grades a tool on what it
+# ships. Inside a PUBLISHED ARTIFACT a tests/ dir is installed next to the runtime code,
+# which can import it (`from evilpkg.tests import go`), so ``payloads_full_severity``
+# keeps the downgrade for capability-style findings (a test runner's subprocess, a
+# fixture's eval, a conftest's env read) but exempts the payload shapes below: they keep
+# their severity, carry ``Finding.payload`` and block like shipped code. (The artifact
+# scan then makes the rest informational: ``artifact_scan.scan_artifact_files``.)
+#
+# Only in executable source: a `curl … | sh` in a .yaml / .json / .html fixture is text.
+_PAYLOAD_CODE_EXTS = frozenset({
+    ".py", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+    ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".vbs",
+    ".rb", ".pl", ".pm", ".php", ".lua", ".go", ".rs", ".java",
+})
+# Remote code / script loads (the unpinned-resource and pip-install rules are not).
+_PAYLOAD_REMOTE_LOAD_NAMES = frozenset({
+    "Remote fetch piped into eval/exec (Python)",
+    "Remote response text fed to exec/eval (Python)",
+    "Remote fetch into Function/eval (JS)",
+    "Remote pickle/marshal load from response",
+    "curl/wget piped to shell",
+})
+_PAYLOAD_OBFUSCATION_NAMES = frozenset({
+    "Decoded payload fed to exec/eval", "Hex-encoded string execution",
+})
+# `getattr(__builtins__, 'ex' + 'ec')(code)`: the builtin looked up is CALLED. A bare
+# `getattr(__builtins__, '__dict__', __builtins__)` (numpy's tests) reads a namespace.
+_OBFUSCATED_BUILTIN_CALL_RE = re.compile(r"""getattr\s*\(\s*__builtins__\s*,[^\n]*?\)\s*\(""")
+# Whole-environment dumps and DNS tunnels are exfil whatever file they sit in; a POST
+# of `key`/`token` (an auth test) is exfil only next to a credential-file read.
+_PAYLOAD_EXFIL_NAMES = frozenset({"Environment variable exfil", "DNS exfiltration pattern"})
+_CREDENTIAL_FILE_RE = re.compile(
+    r"""\.ssh/|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.aws/credentials|/etc/shadow|\.netrc\b|"""
+    r"""\.npmrc\b|\.pypirc\b|\.docker/config\.json|\.kube/config|\.git-credentials""",
+)
+_CREDENTIAL_WINDOW = 5
+# Distinctive provider credentials. A PEM private key under tests/ is a test keypair
+# (every TLS / JWT / SSH library ships them) and stays downgraded.
+_PAYLOAD_SECRET_NAMES = frozenset({
+    "AWS Access Key", "AWS Secret Key", "OpenAI API Key", "OpenAI Project Key",
+    "Anthropic API Key", "GitHub Token", "Slack Token",
+})
+
+
 def _scan_content(
     content: str, file_path: str,
     allowlist: set[tuple[str, str]] | None = None,
-    *, metadata_text: bool = False,
+    *, metadata_text: bool = False, payloads_full_severity: bool = False,
+    not_test: bool = False, dev_tooling_runs: bool = False,
 ) -> tuple[list[Finding], list[str], int]:
     """Scan file content for security issues and positive signals.
+
+    ``not_test`` (repository scans): the file is named / placed like a test but is not
+    test code, or code that runs uses it (``_regrade_misnamed_tests``): no test
+    downgrade.
+
+    ``dev_tooling_runs``: a dev-tooling script (``_is_dev_tooling_script``) that an
+    install-reachable script or spawning code runs: no infra downgrade.
+
+    ``payloads_full_severity`` (artifact scans): in a downgraded file, payload-shaped
+    defects keep their severity and are marked ``Finding.payload`` (see above).
 
     Returns (findings, positive_signals, suppressed_count).
     """
@@ -1995,43 +3345,126 @@ def _scan_content(
     if allowlist is None:
         allowlist = set()
 
-    is_test_or_doc = _is_test_or_doc_file(file_path)
+    file_test_or_doc = _is_test_or_doc_file(file_path) and not not_test
     # CI/infra files (#3) are graded like tests/docs so a Dockerfile / workflow recipe
     # can't dominate the grade with a critical.
-    is_infra = _is_infra_file(file_path)
+    is_infra = _is_infra_file(file_path) and not (
+        dev_tooling_runs and _is_dev_tooling_script(file_path))
     # Findings in tests/docs/infra are downgraded (never suppressed).
-    is_downgraded = is_test_or_doc or is_infra
+    file_downgraded = file_test_or_doc or is_infra
+    is_test_or_doc, is_downgraded = file_test_or_doc, file_downgraded
+    # Test / doc / example dirs only: CI recipes, build tooling and maintainer scripts
+    # (infra) never run for a consumer, and an inline Rust test module only compiles
+    # for `cargo test`; both keep the plain downgrade.
+    payload_mode = (payloads_full_severity and file_test_or_doc
+                    and Path(file_path).suffix.lower() in _PAYLOAD_CODE_EXTS)
+
+    def _graded(kind: str, severity: str, payload: bool) -> tuple[str, bool]:
+        """The downgrade for a defect on this line: ``(severity, Finding.payload)``.
+        Reads ``is_downgraded`` at call time (inline Rust test lines rebind it)."""
+        if kind != "defect" or not is_downgraded or severity not in ("critical", "high"):
+            return severity, False
+        if payload_mode and payload:
+            return severity, True
+        return "medium", False
+
+    is_installer = _is_installer_script(file_path)
     # Per-file language for language-specific pattern dispatch (#2).
     file_lang = _EXT_TO_LANG.get(Path(file_path).suffix.lower())
     # Manifest / skill files ARE the tool's instruction surface — never downgrade
     # prompt-injection / hidden-unicode there even if they look doc-ish.
     is_metadata = Path(file_path).name.lower() in AGENT_METADATA_FILES
     lines = content.split("\n")
+    # Which lines each regex can match on (see src/scanner/prefilter.py).
+    lf = LineFilter(content)
+
+    def _found(rx: re.Pattern[str]) -> bool:
+        """``bool(rx.search(content))`` (``LineFilter.search`` returns the same match)."""
+        return lf.search(rx) is not None
+
     # Precision pass #6: lines inside a Python docstring / multi-line string are prose
     # for the CODE pattern groups (exec, deserialization, fs, remote-load, exfil,
     # obfuscation). Secrets, hidden unicode and prompt injection still scan them.
-    tpl_continuation: set[int] = set()
-    if file_lang == "python":
-        prose_lines = _python_prose_lines(content)
-    elif file_lang in ("javascript", "typescript"):
-        prose_lines, tpl_continuation = _js_string_state(content)
-    else:
-        prose_lines = set()
+    # ``(prose_lines, tpl_continuation)``, computed on first use: a file with no line a
+    # code rule can match never needs it.
+    string_state: list[set[int]] = []
+
+    def _string_state() -> list[set[int]]:
+        if not string_state:
+            if file_lang == "python":
+                string_state.extend((_python_prose_lines(content), set()))
+            elif file_lang in ("javascript", "typescript"):
+                string_state.extend(_js_string_state(content))
+            else:
+                string_state.extend((set(), set()))
+        return string_state
+
+    sink_memo: list[bool] = []
+    npx_hints: list = []  # printed_hint.Hints for this file, built on first use
+    shown_memo: dict = {}  # shown_text per-file facts (shell functions, HTML scripts)
+
+    def _pipe_shown(idx: int, line: str, pattern: re.Pattern[str]) -> bool:
+        """A shell script's help / error text or an HTML page's display text that
+        nothing in the file runs (``src.scanner.shown_text``)."""
+        from src.scanner import shown_text
+        suffix = Path(file_path).suffix.lower()
+        spans = [(m.start(), m.end()) for m in pattern.finditer(line)]
+        if suffix in shown_text.HTML_EXTS:
+            return shown_text.html_shown(content, lines, idx, spans, shown_memo)
+        if suffix not in shown_text.SHELL_EXTS and not (
+                suffix == "" and re.match(r"#!\S*(?:/|\s)(?:ba|z|k|da)?sh\b", content)):
+            return False
+        return shown_text.shell_shown(lines, idx, spans, shown_memo)
+    # package.json only: the parsed ``scripts`` table, memoized ([None] = unparseable).
+    pkg_scripts: list[npm_scripts.ScriptsInfo | None] = []
+
+    def _file_has_exec_sink() -> bool:
+        """``_FILE_EXEC_SINK_RE`` on the file's code lines (docstrings and whole-line
+        comments that only MENTION ``subprocess.Popen`` don't count). Memoized."""
+        if not sink_memo:
+            prose = _string_state()[0]
+            sink_memo.append(any(
+                _FILE_EXEC_SINK_RE.search(ln) for i, ln in enumerate(lines)
+                if i not in prose and not ln.lstrip().startswith(("#", "//", "*"))))
+        return sink_memo[0]
+
+    out_memo: list[bool] = []
+
+    def _npx_output_replaced() -> bool:
+        """This file replaces / aliases console, stdout or print (memoized)."""
+        if not out_memo:
+            from src.scanner.printed_hint import output_replaced
+            out_memo.append(output_replaced({file_path: content}))
+        return out_memo[0]
+
     # Untrusted-input lines (request body / fetched content) for the "dynamic argv or
     # eval NEXT TO untrusted input" rules.
-    untrusted = _untrusted_lines(lines)
+    untrusted = _untrusted_lines(lines, lf.lines(UNTRUSTED_INPUT_RE))
     js_cp_call_re = _js_cp_call_re(content) if file_lang != "python" else None
-    has_cli_import = file_lang == "python" and bool(_CLI_IMPORT_RE.search(content))
-    js_cli = (_js_cli_expr_checker(content, lines)
-              if file_lang in ("javascript", "typescript") else None)
+    has_cli_import = file_lang == "python" and _found(_CLI_IMPORT_RE)
+    # The two JS helpers below are read only when a JS exec call is classified, so
+    # they are computed on first use (each is a pure function of the file).
+    js_lazy: dict[str, object] = {}
+
+    def _js_cli() -> object:
+        if "cli" not in js_lazy:
+            js_lazy["cli"] = (_js_cli_expr_checker(content, lines)
+                              if file_lang in ("javascript", "typescript") else None)
+        return js_lazy["cli"]
+
     # Precision PR 2: a bare JS `exec(` / `spawn(` / `fork(` is child_process only when
     # the file references the module at all — otherwise it is a local function (a
     # wrapAnsi helper, a `$exec` RegExp binding, an `exec` callback parameter).
     js_has_child_process = file_lang != "python" and "child_process" in content
-    js_local_cp_names = (
-        {n for n in _JS_AMBIGUOUS_CP if _js_defines_locally(content, n)}
-        if file_lang != "python" and not js_has_child_process else set()
-    )
+
+    def _js_local_cp_names() -> object:
+        if "local" not in js_lazy:
+            js_lazy["local"] = (
+                {n for n in _JS_AMBIGUOUS_CP if _js_defines_locally(content, n)}
+                if file_lang != "python" and not js_has_child_process else set()
+            )
+        return js_lazy["local"]
+
     # A TypeScript declaration file is types only: no code runs from it.
     is_declaration = file_path.lower().endswith((".d.ts", ".d.mts", ".d.cts"))
     # Lines swallowed by a multi-line exec call already classified at its first line —
@@ -2039,13 +3472,200 @@ def _scan_content(
     consumed_until = -1
     suppressed_lines: set[int] = set()
 
-    for line_num, line in enumerate(lines, 1):
-        idx = line_num - 1
-        # Skip comments (basic heuristic)
+    # Inline Rust unit tests (`#[cfg(test)] mod tests { … }`) compile only for
+    # `cargo test`: lines inside them are graded like a file under tests/.
+    test_lines: set[int] = set()
+    if file_lang == "rust" and not file_test_or_doc:
+        from src.scanner.rust_tests import rust_test_lines
+        test_lines = rust_test_lines(content)
+
+    # Per-line rule lists: each group's rules, minus those whose regex cannot match the
+    # line (it lacks every literal the regex requires; see src/scanner/prefilter.py),
+    # and, in the groups whose loop drops a language-tagged rule right after its search
+    # matches, minus the rules for other languages. Each loop below skips a rule whose
+    # search finds nothing, so trying only these rules gives the same findings.
+    def _other_lang(rule: tuple) -> bool:
+        return not _lang_ok(rule[0], file_lang)
+
+    # Calls through a name the file binds to an exec function (`const { execSync: run }
+    # = require('child_process')`, `from subprocess import run as r`, `sh = os.system`):
+    # classified as the function they stand for (src/scanner/exec_alias.py).
+    alias_tab = (exec_alias.py_aliases(content) if file_lang == "python"
+                 else exec_alias.js_aliases(content) if file_lang in ("javascript",
+                                                                     "typescript")
+                 else exec_alias.Aliases(""))
+    js_alias_re = exec_alias.js_call_re(alias_tab) if alias_tab.lang == "js" else None
+    py_alias_res = ({"subprocess.run / Popen (Python)": exec_alias.py_call_re(
+                         alias_tab, "subprocess"),
+                     "os.system / os.popen (Python)": exec_alias.py_call_re(alias_tab, "os")}
+                    if alias_tab.lang == "python" and alias_tab else {})
+    # The same alias calls, for "is this npx string run?" (`_npx_string_runs`).
+    alias_run_res = tuple(r for r in (js_alias_re, *py_alias_res.values()) if r is not None)
+    # Extra regexes per rule: the rule also fires on these (line set = the union).
+    extra_exec: dict[str, list[re.Pattern[str]]] = {}
+    if js_cp_call_re is not None:
+        # "execSync / spawn (Node.js)" also fires on a call through a child_process
+        # alias; its line set is the union of both regexes' lines.
+        extra_exec.setdefault("execSync / spawn (Node.js)", []).append(js_cp_call_re)
+    if js_alias_re is not None:
+        extra_exec.setdefault("execSync / spawn (Node.js)", []).append(js_alias_re)
+    for rule_name, rx in py_alias_res.items():
+        if rx is not None:
+            extra_exec.setdefault(rule_name, []).append(rx)
+    exec_rules = [
+        (n, AnyOf(p, *extra_exec[n]), s) if n in extra_exec else (n, p, s)
+        for n, p, s in UNSAFE_EXEC_PATTERNS]
+    plans = [
+        lf.plan(SECRET_PATTERNS),
+        lf.plan(exec_rules, _other_lang),
+        lf.plan(INSECURE_DESERIALIZATION_PATTERNS, _other_lang),
+        lf.plan(FS_ACCESS_PATTERNS, _other_lang),
+        lf.plan(EXFILTRATION_PATTERNS),
+        lf.plan(DYNAMIC_REMOTE_LOAD_PATTERNS, _other_lang),
+        lf.plan(INVISIBLE_UNICODE_PATTERNS),
+        lf.plan(PROMPT_INJECTION_PATTERNS + (
+            METADATA_INJECTION_PATTERNS if (is_metadata or metadata_text) else [])),
+        lf.plan(OBFUSCATION_PATTERNS),
+    ]
+    (secret_plan, exec_plan, deser_plan, fs_plan, exfil_plan, remote_plan, unicode_plan,
+     injection_plan, obfuscation_plan) = ((p.table.get, p.default) for p in plans)
+    # Text an agent reads as prose (SKILL.md, AGENTS.md, a served tool description):
+    # `#` / `*` lines there are headings and bullets, not comments.
+    markdown_like = (is_metadata or metadata_text
+                     or Path(file_path).suffix.lower() in (".md", ".mdx", ".markdown"))
+
+    def _check_unicode(line: str, idx: int, stripped: str, *, in_comment: bool) -> None:
+        """Invisible / smuggled Unicode on one line (one finding per line)."""
+        for name, pattern, severity in unicode_plan[0](idx, unicode_plan[1]):
+            if in_comment and name.startswith("Zero-width"):
+                # A stray ZWSP pasted into a comment (`≥ 3.12.<ZWSP>`) changes no code
+                # and hides nothing; a RUN of zero-width characters is the hidden-text
+                # (steganography) shape, the same bar as shipped markdown.
+                if ZERO_WIDTH_RUN_RE.search(line) and not _is_allowlisted(
+                        file_path, ZERO_WIDTH_RUN_NAME, allowlist):
+                    findings.append(Finding(
+                        category="hidden_unicode", name=ZERO_WIDTH_RUN_NAME, severity="medium",
+                        file_path=file_path, line_number=idx + 1, snippet=stripped[:120]))
+                    break
+                continue
+            if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
+                if _is_allowlisted(file_path, name, allowlist):
+                    continue
+                effective_severity = severity
+                if name.startswith("Bidirectional") and _bidi_cannot_reorder_code(
+                        line, in_comment or idx in _string_state()[0], file_lang):
+                    # Trojan Source deceives a human reading CODE: the reordering is per
+                    # line. A line wholly inside a docstring / template / comment has no
+                    # code to reorder (bandit documents the attack in one); a minified
+                    # bundle line is not read by a reviewer (precision PR 2). A comment
+                    # line that opens or closes a block comment keeps its severity: the
+                    # "commenting-out" variant (`/*<RLO> } <LRI>if (admin)<PDI> */`).
+                    effective_severity = "low"
+                findings.append(Finding(
+                    category="hidden_unicode",
+                    name=name,
+                    severity=effective_severity,
+                    file_path=file_path,
+                    line_number=idx + 1,
+                    snippet=stripped[:120],
+                ))
+                break
+
+    declares_tools_memo: list[bool] = []
+
+    def _declares_tools() -> bool:
+        if not declares_tools_memo:
+            declares_tools_memo.append(_found(SSRF_TOOL_SURFACE_RE))
+        return declares_tools_memo[0]
+
+    def _check_injection(line: str, idx: int, stripped: str) -> None:
+        """Prompt injection / tool poisoning on one line (one finding per line)."""
+        # Check prompt injection / tool-description poisoning (metadata files also get the
+        # wider tool-poisoning shapes that would be noisy on code lines).
+        for name, pattern, severity in injection_plan[0](idx, injection_plan[1]):
+            if pattern.search(line):
+                if _is_allowlisted(file_path, name, allowlist):
+                    continue
+                # Downgrade in test/doc/infra files — EXCEPT manifest/skill metadata,
+                # which is the actual attack surface (a poisoned description is not a doc).
+                effective_severity = severity
+                if is_downgraded and not is_metadata and severity in ("critical", "high"):
+                    effective_severity = "medium"
+                # Precision PR 2: a bare `<instructions>` / `</system>` tag in a library's
+                # OWN prompt template (langchain's summarization prompt) structures text
+                # it sends to its own model call. It is a high only where an agent reads
+                # it as a tool definition: metadata files and files that declare tools.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and all(_INJECTION_TAG_ONLY_RE.fullmatch(mm.group(0))
+                                for mm in pattern.finditer(line))):
+                    if not _declares_tools():
+                        effective_severity = "medium"
+                # A "System prompt:" LABEL whose only content is a format placeholder
+                # (`"failed to prepend system prompt: %s"`, `f"System prompt:\n{sp}"`)
+                # carries no instruction itself: medium, never blocking.
+                if (name == "Injected system/role directive" and effective_severity == "high"
+                        and not (is_metadata or metadata_text)
+                        and _system_prompt_label_only(line, pattern)):
+                    effective_severity = "medium"
+                findings.append(Finding(
+                    category="prompt_injection",
+                    name=name,
+                    severity=effective_severity,
+                    file_path=file_path,
+                    line_number=idx + 1,
+                    snippet=stripped[:120],
+                ))
+                return
+
+    # A line no rule can match does nothing in the loop below unless it carries the
+    # suppression marker (counted even when nothing matches), so only these lines run.
+    if any(p.always_active for p in plans):
+        scan_idxs: list[int] | range = range(len(lines))
+    else:
+        scan_idxs = sorted(set().union(
+            *(p.table for p in plans), lf.lines_containing(_SUPPRESSION_COMMENT)))
+
+    for idx in scan_idxs:
+        line = lines[idx]
+        line_num = idx + 1
+        secret_rules = secret_plan[0](idx, secret_plan[1])
+        exec_rules_here = exec_plan[0](idx, exec_plan[1])
+        deser_rules = deser_plan[0](idx, deser_plan[1])
+        fs_rules = fs_plan[0](idx, fs_plan[1])
+        exfil_rules = exfil_plan[0](idx, exfil_plan[1])
+        remote_rules = remote_plan[0](idx, remote_plan[1])
+        obfuscation_rules = obfuscation_plan[0](idx, obfuscation_plan[1])
+        if test_lines:
+            in_test = idx in test_lines
+            is_test_or_doc = file_test_or_doc or in_test
+            is_downgraded = file_downgraded or in_test
+        # Comment lines (basic heuristic) skip every rule group but hidden Unicode: an
+        # invisible / bidi character in a comment is still Trojan Source and still
+        # smuggles text past a reviewer to whoever (or whatever agent) reads the file.
+        # Prompt-injection rules stay off in code comments (no agent reads a comment as
+        # an instruction to it; a security library documents the phrases there). In
+        # markdown-like agent text (SKILL.md / AGENTS.md / a tool description) `#` and
+        # `*` open headings and bullets, which ARE the text an agent reads: no skip.
+        # (Code rule groups stay off on those lines, as before.)
         stripped = line.strip()
         if stripped.startswith(("#", "//", "*", "/*")):
+            _check_unicode(line, idx, stripped, in_comment=not markdown_like)
+            if markdown_like:
+                _check_injection(line, idx, stripped)
             continue
-        is_prose = idx in prose_lines or is_declaration
+        # Only the code groups read is_prose, and a line none of their regexes matches
+        # gives no finding either way: those lines skip the groups (and the
+        # string-state pass is never needed for them).
+        code_rules = (exec_rules_here, deser_rules, fs_rules, exfil_rules, remote_rules,
+                      obfuscation_rules)
+        if any(code_rules) and not any(
+                rule[1].search(line) for group in code_rules for rule in group):
+            exec_rules_here = deser_rules = fs_rules = ()
+            exfil_rules = remote_rules = obfuscation_rules = ()
+            is_prose = False
+        else:
+            is_prose = any(code_rules) and (idx in _string_state()[0] or is_declaration)
         # NOTE: (#6) we deliberately do NOT skip an entire line just because it contains
         # the word "example"/"placeholder" — that let an attacker neutralize any rule with
         # `# example` and silently ignored real code like
@@ -2067,7 +3687,7 @@ def _scan_content(
             # else: fall through — the critical/high finding is created below.
 
         # Check secrets
-        for name, pattern, severity in SECRET_PATTERNS:
+        for name, pattern, severity in secret_rules:
             match = pattern.search(line)
             if match:
                 # Skip if the MATCHED VALUE is clearly a placeholder (not the whole line).
@@ -2076,7 +3696,9 @@ def _scan_content(
                 # Collapse separators/case so "CHANGE-ME-IN-PRODUCTION", "change_me",
                 # "your-api-key" all reduce to a comparable core before matching.
                 val_norm = re.sub(r"[^a-z0-9]", "", val.lower())
-                if any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES):
+                if (any(tok in val_norm for tok in _SECRET_PLACEHOLDER_CORES)
+                        or _is_counting_placeholder(val)
+                        or _is_fake_fixture_secret(val_norm, file_path)):
                     continue
                 # --- Option 2: Allowlist check ---
                 if _is_allowlisted(file_path, name, allowlist):
@@ -2088,15 +3710,33 @@ def _scan_content(
                 # so it stays skipped there to avoid noise. Placeholder + allowlist filters
                 # (above) already removed the obvious fakes.
                 sev = severity
+                secret_payload = False
                 if is_test_or_doc:
                     if name.startswith("Generic"):
                         continue
-                    sev = "medium" if severity in ("critical", "high") else "low"
+                    if payload_mode and name in _PAYLOAD_SECRET_NAMES:
+                        secret_payload = True
+                    else:
+                        sev = "medium" if severity in ("critical", "high") else "low"
                 # Precision pass #4: a generic key must LOOK like a credential (entropy,
                 # letters+digits, no path separator) — `TOKEN = "auth-request-type/at"`
                 # is a protocol constant, not a secret.
                 if name == "Generic API Key assignment" and not _generic_secret_plausible(val):
                     continue
+                # Precision PR 2: a key the NAME says is a shipped default / public /
+                # demo value (ethers' `defaultApiKey` for its community endpoints) is
+                # published on purpose: reported, medium, not a leaked credential.
+                if (name == "Generic API Key assignment" and sev == "high"
+                        and _SHARED_KEY_NAME_RE.search(
+                            _assigned_identifier(line, match.start()))):
+                    sev = "medium"
+                # A value introduced as an example inside help text ("…access logs.
+                # Example api_key='d5345c…'" in a FastAPI Query description) is
+                # documentation: reported, medium, never blocking.
+                if (name == "Generic API Key assignment" and sev == "high"
+                        and _is_documented_example(line, match.start())
+                        and not _LIVE_KEY_PREFIX_RE.match(val)):
+                    sev = "medium"
                 # Precision pass #3: a PEM HEADER with no key body is key-HANDLING code
                 # (marker tuples, startswith(), regexes) — reported as a capability.
                 if name == "Private Key block" and not _pem_has_body(lines, idx, match.end()):
@@ -2118,17 +3758,17 @@ def _scan_content(
                     file_path=file_path,
                     line_number=line_num,
                     snippet=_redact_secret(stripped[:120], match),
+                    payload=secret_payload,
                 ))
                 break  # one finding per line for secrets
 
         # Check unsafe exec (code group — skipped in docstrings; and a `def eval(` is a
         # definition, not the builtin).
-        if not is_prose and not _DEF_EVAL_EXEC_RE.search(stripped):
-            for name, pattern, severity in UNSAFE_EXEC_PATTERNS:
-                if not pattern.search(line) and not (
-                    name == "execSync / spawn (Node.js)"
-                    and js_cp_call_re is not None and js_cp_call_re.search(line)
-                ):
+        if exec_rules_here and not is_prose and not _DEF_EVAL_EXEC_RE.search(stripped):
+            for name, pattern, severity in exec_rules_here:
+                pattern = getattr(pattern, "first", pattern)
+                if not pattern.search(line) and not any(
+                        rx.search(line) for rx in extra_exec.get(name, ())):
                     continue
                 # Language dispatch (#2): skip a language-specific pattern on a
                 # non-matching file (e.g. Python exec() on a .mjs file).
@@ -2149,6 +3789,7 @@ def _scan_content(
                 capability = ""
                 label = ""
                 verdict = None
+                payload = False
                 if name == "child_process (Node.js)":
                     # Importing child_process is a capability; the calls are what count.
                     # One finding per line: when this line also CALLS through the module
@@ -2165,31 +3806,71 @@ def _scan_content(
                     sm = pattern.search(line)
                     if sm and _in_py_string_literal(line, sm.start()):
                         continue
+                    # `def runcmd(cmd, shell=True):` is a parameter default, not a call;
+                    # the call inside the function is classified on its own line.
+                    if re.match(r"\s*(?:async\s+)?def\s", line):
+                        continue
                     stmt = "\n".join(lines[max(0, idx - 6): idx + 1])
-                    if (_near(untrusted, idx, _UNTRUSTED_WINDOW)
-                            and _untrusted_flows(lines, idx, stmt, untrusted)):
+                    near = _near(untrusted, idx, _UNTRUSTED_WINDOW)
+                    if near and _untrusted_flows(lines, idx, stmt, untrusted):
                         verdict = ("defect", "critical",
                                    "shell=True on untrusted input", "")
+                        payload = True
+                    elif near or _decoded_flows(lines, idx, stmt):
+                        verdict = ("defect", "high", "shell=True runs a shell command next "
+                                   "to untrusted input or a decoded value", "")
+                        # A decoded value reaching the shell is the payload; untrusted
+                        # input merely nearby is not.
+                        payload = not near or _decoded_flows(lines, idx, stmt)
                     else:
-                        verdict = ("defect", "high", "shell=True runs a shell command", "")
+                        # Precision PR 2 ladder: a wrapper's shell=True with nothing
+                        # untrusted in reach is a medium.
+                        verdict = ("defect", "medium", "shell=True runs a shell command (no "
+                                   "untrusted input in reach)", "")
                 elif name in ("subprocess.run / Popen (Python)", "os.system / os.popen (Python)"):
                     m = _PY_EXEC_CALL_RE.search(line)
+                    alias_func = None
+                    arx = py_alias_res.get(name)
+                    if m is None and arx is not None:
+                        # A call through an alias (`r(cmd, shell=True)`, `o.system(x)`):
+                        # the first one on the line that is code, not string text.
+                        # (`def run(self):` defines a method; it calls nothing.)
+                        am = next((a for a in arx.finditer(line)
+                                   if not _in_py_string_literal(line, a.start())
+                                   and not re.search(r"\bdef\s+$", line[:a.start()])),
+                                  None)
+                        if am is None:
+                            continue
+                        m, alias_func = am, exec_alias.py_func_of(alias_tab, am)
                     if m:
                         v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
-                                                 has_cli_import)
+                                                 has_cli_import, func=alias_func)
                         verdict = (v.kind, v.severity, v.label, v.capability)
+                        payload = v.payload
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name == "execSync / spawn (Node.js)":
-                    m = _JS_EXEC_CALL_RE.search(line) or (
-                        js_cp_call_re.search(line) if js_cp_call_re is not None else None
-                    )
-                    if (m and m.group(1) in js_local_cp_names
+                    cands = list(_JS_EXEC_CALL_RE.finditer(line)) + (
+                        list(js_cp_call_re.finditer(line)) if js_cp_call_re is not None else []
+                    ) + (list(js_alias_re.finditer(line)) if js_alias_re is not None else [])
+                    tpl_in = "`" if idx in _string_state()[1] else None
+                    code_hits = [c for c in cands
+                                 if not _js_call_is_text_or_def(line, c.start(), tpl_in)]
+                    if cands and not code_hits:
+                        # Only inside a string / comment (`'Use the RegExp#exec() method'`,
+                        # `} // execSync()`) or a definition (`function execSync(cmd) {`).
+                        continue
+                    m = min(code_hits, key=lambda c: c.start()) if code_hits else None
+                    if (m and m.group(1) in _js_local_cp_names()
                             and m.group(0).startswith(m.group(1))):
                         continue  # a local exec()/spawn()/fork(), not child_process
                     if m:
+                        alias = (alias_tab.funcs.get(m.group(1))
+                                 if m.group(0).startswith(m.group(1)) else None)
                         v = _classify_exec_match(lines, idx, m, file_lang, untrusted,
-                                                 js_cli=js_cli)
+                                                 js_cli=_js_cli(),
+                                                 func=alias[1] if alias else None)
                         verdict = (v.kind, v.severity, v.label, v.capability)
+                        payload = v.payload
                         consumed_until = max(consumed_until, idx + v.consumed_lines - 1)
                 elif name in ("eval() call (Python)", "exec() call (Python)"):
                     m = _PY_EVAL_CALL_RE.search(line)
@@ -2198,12 +3879,11 @@ def _scan_content(
                         if v is None:
                             break  # reported by the obfuscation rule on this line
                         verdict = (v.kind, v.severity, v.label, v.capability)
+                        payload = v.payload
                 if verdict is not None:
                     kind, effective_severity, label, capability = verdict
                 # Downgrade severity in test/doc/infra files (defects only)
-                if (kind == "defect" and is_downgraded
-                        and effective_severity in ("critical", "high")):
-                    effective_severity = "medium"
+                effective_severity, payload = _graded(kind, effective_severity, payload)
                 findings.append(Finding(
                     category="unsafe_exec",
                     name=name,
@@ -2214,6 +3894,7 @@ def _scan_content(
                     remediation=_why(label, "unsafe_exec", kind),
                     kind=kind,
                     capability=capability,
+                    payload=payload,
                 ))
                 break
 
@@ -2222,7 +3903,7 @@ def _scan_content(
         # capability; next to untrusted input it stays the original high. yaml.load /
         # allow_pickle / torch.load are unchanged.
         if not is_prose:
-            for name, pattern, severity in INSECURE_DESERIALIZATION_PATTERNS:
+            for name, pattern, severity in deser_rules:
                 if not pattern.search(line):
                     continue
                 if not _lang_ok(name, file_lang):
@@ -2233,12 +3914,29 @@ def _scan_content(
                 kind = "defect"
                 capability = ""
                 label = ""
+                if name.startswith("numpy.load allow_pickle") and not _NP_LOAD_CTX_RE.search(
+                        "\n".join(lines[max(0, idx - 3): idx + 1])):
+                    # `def save(file, arr, allow_pickle=True)`: a parameter default or a
+                    # SAVE call writes a pickle; only a load call reads one (PR 2).
+                    continue
+                if name.startswith("yaml.load") and _ruamel_safe_receiver(content, line):
+                    # ruamel.yaml's `YAML()` loads round-trip (safe) unless typ='unsafe'.
+                    continue
                 if _PY_DESER_CALL_RE.search(line) and not _near(untrusted, idx, _UNTRUSTED_WINDOW):
                     kind, effective_severity, capability = "capability", "low", "data:deserialize"
                     label = "deserializes pickle/marshal data from a local source"
-                if (kind == "defect" and is_downgraded
-                        and effective_severity in ("critical", "high")):
+                elif _PY_DESER_CALL_RE.search(line) and not _untrusted_flows(
+                        lines, idx, line, untrusted):
+                    # Flow, not proximity (precision PR 2): scipy unpickles a file a
+                    # `.fetch()` 40 lines away downloaded (in another function). A
+                    # medium; high when the fetched value reaches the load.
                     effective_severity = "medium"
+                    label = ("deserializes pickle/marshal data in a file that reads untrusted "
+                             "input (no flow to the call found)")
+                # Untrusted input reaching a pickle/marshal load is the payload shape
+                # (the two branches above took every other pickle/marshal call).
+                effective_severity, payload = _graded(
+                    kind, effective_severity, bool(_PY_DESER_CALL_RE.search(line)))
                 findings.append(Finding(
                     category="insecure_deserialization",
                     name=name,
@@ -2249,12 +3947,13 @@ def _scan_content(
                     remediation=_why(label, "insecure_deserialization", kind),
                     kind=kind,
                     capability=capability,
+                    payload=payload,
                 ))
                 break
 
         # Check file system access
         if not is_prose:
-            for name, pattern, severity in FS_ACCESS_PATTERNS:
+            for name, pattern, severity in fs_rules:
                 if not pattern.search(line):
                     continue
                 # Language dispatch (#2)
@@ -2309,12 +4008,46 @@ def _scan_content(
                 break
 
         # Check data exfiltration
-        for name, pattern, severity in EXFILTRATION_PATTERNS:
+        for name, pattern, severity in exfil_rules:
             if is_prose:
                 break
             if pattern.search(line):
                 if _is_allowlisted(file_path, name, allowlist):
                     continue
+                if name == "HTTP POST with sensitive data" and _py_local_fetch_only(
+                        line, file_lang):
+                    continue
+                if (name == "HTTP POST with sensitive data"
+                        and _only_fetch_credentials_option(line, pattern)):
+                    continue
+                # A tunnel host in a host / origin ALLOWLIST (Vite `allowedHosts`,
+                # Django `ALLOWED_HOSTS`) is what a server accepts, not where data goes.
+                if name == "Outbound webhook/exfil URL":
+                    keys = _host_allowlist_entry(lines, idx, pattern)
+                    if keys:
+                        # Reported low; the caller restores it when another file of
+                        # the tree reads the allowlist (settings.ALLOWED_HOSTS[0]).
+                        f_low = Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120])
+                        npm_scripts.mark_allowlist(f_low, severity, keys)
+                        findings.append(f_low)
+                        continue
+                    # A host inside a regex / pattern string ARRAY that never reaches
+                    # a sink is a signature (a guard's list of what to look for,
+                    # 2026-10-26); low until the tree check finds another file that
+                    # reads the array or loads this file.
+                    from src.scanner.signature_lists import signature_array_entry
+                    arrays = signature_array_entry(lines, idx, pattern, file_path)
+                    if arrays:
+                        f_low = Finding(
+                            category="exfiltration", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120])
+                        npm_scripts.mark_signature(f_low, severity, arrays)
+                        findings.append(f_low)
+                        continue
                 # OAuth2 token exchange (client_secret/grant_type → token endpoint)
                 # is the required auth flow, not a leak. Relax ONLY the generic
                 # "POST with sensitive data" rule; the stronger critical exfil
@@ -2322,6 +4055,12 @@ def _scan_content(
                 if (name == "HTTP POST with sensitive data"
                         and _looks_like_oauth(lines, line_num)):
                     continue
+                # Exfil is not downgraded; in a downgraded artifact file the payload
+                # shapes are also graded as shipped code.
+                exfil_payload = payload_mode and is_downgraded and (
+                    name in _PAYLOAD_EXFIL_NAMES or any(
+                        _CREDENTIAL_FILE_RE.search(ln) for ln in lines[
+                            max(0, idx - _CREDENTIAL_WINDOW): idx + _CREDENTIAL_WINDOW + 1]))
                 findings.append(Finding(
                     category="exfiltration",
                     name=name,
@@ -2329,11 +4068,12 @@ def _scan_content(
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
+                    payload=exfil_payload,
                 ))
                 break
 
         # Check dynamic remote payload / rug-pull (external-URL-swap)
-        for name, pattern, severity in DYNAMIC_REMOTE_LOAD_PATTERNS:
+        for name, pattern, severity in remote_rules:
             if is_prose:
                 break
             dm = pattern.search(line)
@@ -2346,7 +4086,10 @@ def _scan_content(
                 # An `npx …` / branch-URL hint inside a string literal (an error
                 # message, a docstring line) is advice to a human, not a load.
                 if name.startswith("Unpinned") and _in_prose_string_at(
-                        line, dm.start(), "`" if idx in tpl_continuation else None):
+                        line, dm.start(), "`" if idx in _string_state()[1] else None) \
+                        and not _runs_call(line[:dm.start()], alias_run_res):
+                    # (`execSync('cd x && echo hi && npx foo')` reads like words but is
+                    # run: recall review of #24.)
                     continue
                 # A mutable branch URL is a rug-pull only when something LOADS it
                 # (fetch/urlopen/curl/pip/import within 2 lines); a `$id`, homepage
@@ -2355,59 +4098,195 @@ def _scan_content(
                 if (name.startswith("Unpinned remote resource")
                         and not _has_loader_context(lines, idx, dm.start())):
                     effective_severity = "low"
+                # Pipe-to-shell precision (src/scanner/pipe_shell.py): a placeholder,
+                # a regex or a prose prohibition is not a command; a plain official
+                # HTTPS installer is high; everything else keeps its critical.
+                pipe_class = None
+                if name == pipe_shell.PIPE_TO_SHELL:
+                    pipe_class = pipe_shell.classify_line(line, pattern, file_path)
+                    if pipe_class == pipe_shell.DROP:
+                        continue
+                    if pipe_class == pipe_shell.OFFICIAL:
+                        effective_severity = "high"
+                    if _pipe_shown(idx, line, pattern):
+                        # Shown, never run (round 2): help / error text of a shell
+                        # script, or a web page's display text. Reported, not dropped.
+                        from src.scanner.shown_text import WHY_SHOWN
+                        shown = Finding(
+                            category="dynamic_remote_load", name=name, severity="low",
+                            file_path=file_path, line_number=line_num,
+                            snippet=stripped[:120], remediation=WHY_SHOWN)
+                        # What it would have been (not a dataclass field): a tree pass
+                        # restores it when another file runs this script's output
+                        # (`package_context.restore_shown_scripts`).
+                        pre_sev, pre_payload = _graded(
+                            "defect", effective_severity,
+                            name in _PAYLOAD_REMOTE_LOAD_NAMES)
+                        shown.shown_pre = (  # type: ignore[attr-defined]
+                            pre_sev, pre_payload,
+                            pipe_shell.WHY_OFFICIAL
+                            if pipe_class == pipe_shell.OFFICIAL else "")
+                        findings.append(shown)
+                        break
                 # Downgrade in test/doc/infra files like other groups
-                if is_downgraded and effective_severity in ("critical", "high"):
-                    effective_severity = "medium"
-                findings.append(Finding(
+                effective_severity, remote_payload = _graded(
+                    "defect", effective_severity, name in _PAYLOAD_REMOTE_LOAD_NAMES)
+                # A pipe-to-shell STRING in a shipped test file (a security test's sample
+                # attack input, nltk) is data unless the file can run a command: then it
+                # is graded like any other downgraded finding (medium, non-blocking).
+                if (remote_payload and name == "curl/wget piped to shell"
+                        and Path(file_path).suffix.lower() not in _SHELL_PAYLOAD_EXTS
+                        and _in_string_literal_at(line, dm.start())
+                        and not _file_has_exec_sink()):
+                    effective_severity, remote_payload = "medium", False
+                npx_pre = None
+                if name.startswith("Unpinned npx") and _npx_not_a_load(
+                        file_path, line, dm.start(),
+                        "`" if idx in _string_state()[1] else None, lines, idx,
+                        alias_run_res):
+                    # Help text a CLI prints (`'  npx browserslist\n'`) or a maintainer
+                    # package.json script (`"release": "npx npmpub"`) never runs on a
+                    # consumer's machine (precision PR 2).
+                    from src.scanner import printed_hint
+                    if printed_hint.is_supported(file_path):
+                        # Printed help text: only while the output it is printed to is
+                        # the real one. The caller re-checks with every file in view.
+                        if not _npx_output_replaced():
+                            npx_pre = (effective_severity, remote_payload, None)
+                            effective_severity = "low"
+                    else:
+                        effective_severity = "low"
+                if name.startswith("Unpinned npx") and effective_severity == "medium":
+                    # npx policy (2026-10-19): an npx/uvx that is only documented or
+                    # printed is reported low; one that runs keeps medium.
+                    npx_low = None
+                    if _npx_doc_prose_file(file_path):
+                        npx_low = _NPX_DOC_WHY
+                    elif file_lang in ("javascript", "typescript", "python") \
+                            and not is_declaration:
+                        from src.scanner import printed_hint
+                        if not npx_hints:  # one tokenization per file
+                            npx_hints.append(printed_hint.Hints({file_path: content},
+                                                                package=False))
+                        if npx_hints[0].why_not(file_path, line_num, pattern) is None:
+                            npx_low = printed_hint.WHY
+                    if npx_low is not None:
+                        low = Finding(
+                            category="dynamic_remote_load",
+                            name=name,
+                            severity="low",
+                            file_path=file_path,
+                            line_number=line_num,
+                            snippet=stripped[:120],
+                            remediation=npx_low,
+                        )
+                        if npx_low != _NPX_DOC_WHY:
+                            # Re-checked with the whole package in view, like the
+                            # pipe-to-shell hint below (`calibrate_package_findings`).
+                            low.pre_hint = (effective_severity, remote_payload,
+                                            _REMEDIATION_HINTS["dynamic_remote_load"])
+                        findings.append(low)
+                        break
+                if name.startswith("vm.runInContext"):
+                    # Precision PR 2: classified like eval(). A constant script
+                    # (`vm.runInContext("this", ctx)`) or code with no untrusted input in
+                    # reach (jsdom running a page's own scripts, a test runner's module
+                    # evaluator) is a capability; untrusted input reaching it is high.
+                    vk, vsev, vlabel = _classify_vm_match(lines, idx, dm, untrusted)
+                    # A vm defect at high runs decoded or untrusted code; a constant
+                    # script is a payload only when it downloads / decodes AND runs.
+                    from src.scanner.exec_classify import inline_code_is_payload
+                    vsev, vm_payload = _graded(
+                        vk, vsev, not vlabel.startswith("runs a constant script")
+                        or inline_code_is_payload(line))
+                    findings.append(Finding(
+                        category="dynamic_remote_load",
+                        name=name,
+                        severity=vsev,
+                        payload=vm_payload,
+                        file_path=file_path,
+                        line_number=line_num,
+                        snippet=stripped[:120],
+                        remediation=_why(vlabel, "dynamic_remote_load", vk),
+                        kind=vk,
+                        capability="code:eval" if vk == "capability" else "",
+                    ))
+                    break
+                # A one-time installer piping a remote script to the shell is how the
+                # tool is delivered, reported as what it does, not as a defect.
+                if is_installer and name == "curl/wget piped to shell":
+                    from src.scanner.exec_classify import CAP_INSTALLER
+                    findings.append(Finding(
+                        category="dynamic_remote_load",
+                        name=name,
+                        severity="low",
+                        file_path=file_path,
+                        line_number=line_num,
+                        snippet=stripped[:120],
+                        kind="capability",
+                        capability=CAP_INSTALLER,
+                    ))
+                    break
+                if name == "curl/wget piped to shell" and file_lang in (
+                        "javascript", "typescript", "python") and not is_declaration:
+                    from src.scanner import printed_hint
+                    if printed_hint.hint_only({file_path: content}, file_path, line_num,
+                                              pattern, package=False):
+                        # A string the code prints / logs / puts in an error message
+                        # and never runs (pm2's "Install NVM: $ curl … | bash").
+                        hint = Finding(
+                            category="dynamic_remote_load",
+                            name=name,
+                            severity="low",
+                            file_path=file_path,
+                            line_number=line_num,
+                            snippet=stripped[:120],
+                            remediation=printed_hint.WHY,
+                        )
+                        # What it would have been: a package scan re-checks it with
+                        # every file in view and restores this when that fails
+                        # (`calibrate_package_findings`). Not a dataclass field, so it
+                        # never reaches serialized output. (severity, payload, remediation)
+                        hint.pre_hint = (effective_severity, remote_payload,
+                                         _REMEDIATION_HINTS["dynamic_remote_load"])
+                        findings.append(hint)
+                        break
+                finding = Finding(
                     category="dynamic_remote_load",
                     name=name,
                     severity=effective_severity,
                     file_path=file_path,
                     line_number=line_num,
                     snippet=stripped[:120],
-                ))
+                    payload=remote_payload,
+                    remediation=(pipe_shell.WHY_OFFICIAL
+                                 if pipe_class == pipe_shell.OFFICIAL else ""),
+                )
+                if npx_pre is not None:
+                    # What it would have been (not a dataclass field): repository,
+                    # local and package scans restore it when another file replaces
+                    # the output (`package_context.recheck_printed_hints`).
+                    finding.pre_hint = npx_pre  # type: ignore[attr-defined]
+                if (name == "curl/wget piped to shell"
+                        and Path(file_path).name.lower() == "package.json"):
+                    # A maintainer-only package.json script (`test:e2e:docker`) that no
+                    # install lifecycle script reaches never runs for a consumer. The
+                    # caller re-checks the tree for a file that runs it
+                    # (npm_scripts.restore_externally_invoked).
+                    owners = _maintainer_script_owners(content, pkg_scripts, idx, line,
+                                                       pattern)
+                    if owners:
+                        npm_scripts.mark_maintainer(finding, owners)
+                findings.append(finding)
                 break
 
         # Check invisible / smuggled Unicode (dangerous anywhere — no downgrade)
-        for name, pattern, severity in INVISIBLE_UNICODE_PATTERNS:
-            if pattern.search(line) and not _benign_unicode_only(name, pattern, line):
-                if _is_allowlisted(file_path, name, allowlist):
-                    continue
-                findings.append(Finding(
-                    category="hidden_unicode",
-                    name=name,
-                    severity=severity,
-                    file_path=file_path,
-                    line_number=line_num,
-                    snippet=stripped[:120],
-                ))
-                break
+        _check_unicode(line, idx, stripped, in_comment=False)
 
-        # Check prompt injection / tool-description poisoning (metadata files also get the
-        # wider tool-poisoning shapes that would be noisy on code lines).
-        injection_sets = PROMPT_INJECTION_PATTERNS + (
-            METADATA_INJECTION_PATTERNS if (is_metadata or metadata_text) else [])
-        for name, pattern, severity in injection_sets:
-            if pattern.search(line):
-                if _is_allowlisted(file_path, name, allowlist):
-                    continue
-                # Downgrade in test/doc/infra files — EXCEPT manifest/skill metadata,
-                # which is the actual attack surface (a poisoned description is not a doc).
-                effective_severity = severity
-                if is_downgraded and not is_metadata and severity in ("critical", "high"):
-                    effective_severity = "medium"
-                findings.append(Finding(
-                    category="prompt_injection",
-                    name=name,
-                    severity=effective_severity,
-                    file_path=file_path,
-                    line_number=line_num,
-                    snippet=stripped[:120],
-                ))
-                break
+        _check_injection(line, idx, stripped)
 
         # Check code obfuscation
-        for name, pattern, severity in OBFUSCATION_PATTERNS:
+        for name, pattern, severity in obfuscation_rules:
             if is_prose:
                 break
             if pattern.search(line):
@@ -2430,7 +4309,14 @@ def _scan_content(
                         break
                     lo = max(0, idx - _HEX_SINK_WINDOW)
                     hi = min(len(lines), idx + _HEX_SINK_WINDOW + 1)
-                    if not any(_HEX_SINK_RE.search(lines[n]) for n in range(lo, hi)):
+                    # Bounded by characters too (precision PR 2): on a minified bundle
+                    # line every sink in the file is "within 3 lines".
+                    hm = pattern.search(line)
+                    near_txt = (("\n".join(lines[lo:idx]))[-_HEX_SINK_CHARS:] + "\n"
+                                + line[max(0, hm.start() - _HEX_SINK_CHARS):
+                                       hm.end() + _HEX_SINK_CHARS] + "\n"
+                                + ("\n".join(lines[idx + 1:hi]))[:_HEX_SINK_CHARS])
+                    if not _HEX_SINK_RE.search(near_txt):
                         kind, effective_severity = "capability", "info"
                         capability = "binary:hex_literal"
                         emitted_name = "Long hex-escaped byte literal"
@@ -2443,8 +4329,41 @@ def _scan_content(
                     snippet=stripped[:120],
                     kind=kind,
                     capability=capability,
+                    # Not downgraded (repo parity); graded as shipped when payload-shaped.
+                    payload=(payload_mode and is_downgraded and kind == "defect"
+                             and (emitted_name in _PAYLOAD_OBFUSCATION_NAMES
+                                  or (emitted_name == "Obfuscated eval (Python)"
+                                      and _OBFUSCATED_BUILTIN_CALL_RE.search(line)
+                                      is not None))),
                 ))
                 break
+
+    # Tool descriptions written in source (a FastMCP `@mcp.tool` docstring, a TS
+    # `server.tool("x", "<description>", …)`): read with the metadata scan's tool-poisoning
+    # shapes, on the description text only (src/scanner/tool_descriptions.py).
+    if file_lang in ("python", "javascript", "typescript") and not is_metadata \
+            and not metadata_text and not is_declaration:
+        from src.scanner.tool_descriptions import tool_description_hits
+        for hit in tool_description_hits(content, file_lang):
+            if _is_allowlisted(file_path, hit.name, allowlist):
+                continue
+            sev = hit.severity
+            if (file_downgraded or hit.line_number - 1 in test_lines) \
+                    and sev in ("critical", "high"):
+                sev = "medium"
+            # The description reading replaces the line engine's on that line.
+            findings = [f for f in findings if not (
+                f.category == "prompt_injection" and f.line_number == hit.line_number)]
+            findings.append(Finding(
+                category="prompt_injection",
+                name=hit.name,
+                severity=sev,
+                file_path=file_path,
+                line_number=hit.line_number,
+                snippet=hit.snippet,
+                remediation=_why("text in an agent tool's description (read by the model "
+                                 "that calls the tool)", "prompt_injection", "defect"),
+            ))
 
     # A suppressed line that fell through (it matched a critical/high PATTERN) but
     # classified as a capability or a low/medium is what the suppression was for.
@@ -2456,12 +4375,25 @@ def _scan_content(
             or (f.kind == "defect" and f.severity in ("critical", "high"))
         ]
 
+    is_test_or_doc, is_downgraded = file_test_or_doc, file_downgraded
+    if test_lines:
+        for f in findings:
+            if f.line_number - 1 in test_lines:
+                f.test_code = True
+
     # Split fetch->exec across lines: a network read + an exec sink co-occurring in
     # one file is the classic rug-pull loader the per-line scan can't see. Fire only
     # when they're within ~40 lines of each other (keeps the composite finding tight).
     # Docstring lines (prose) don't count as either leg.
-    if not is_downgraded and NET_READ_RE.search(content) and EXEC_SINK_RE.search(content):
-        hit = _cooccur(lines, prose_lines, NET_READ_RE, EXEC_SINK_RE, 40)
+    # Precision PR 2: flow, not proximity: the exec sink must USE what was read (inline,
+    # or through a name assigned from the read). `ThreadedStream.fetch()` beside
+    # `exec(code, self.locals)` or `urlopen(target)` 30 lines above `eval(target, ns)`
+    # is co-occurrence, not a loader.
+    # The three flow rules below are payload shapes: in a downgraded artifact file
+    # (payload_mode) they run too, graded as shipped code.
+    flow_rules = not is_downgraded or payload_mode
+    if flow_rules and _found(NET_READ_RE) and _found(EXEC_SINK_RE):
+        hit = _cooccur_flow(lines, _string_state()[0], NET_READ_RE.search, EXEC_SINK_RE, 40)
         if hit is not None:
             findings.append(Finding(
                 category="dynamic_remote_load",
@@ -2470,15 +4402,37 @@ def _scan_content(
                 file_path=file_path,
                 line_number=hit + 1,
                 snippet="network read + exec sink co-occur — remote payload may be swappable",
+                payload=is_downgraded,
+            ))
+
+    # Untrusted input handed to a code-evaluating METHOD (precision PR 2): werkzeug's
+    # debugger reads `cmd = request.args.get("cmd")`, passes it to
+    # `self.execute_command(request, cmd, frame)`, which runs `frame.eval(command)`. A
+    # flow, followed one call deep inside the file, not proximity.
+    # (Only a line with an `.eval(` / `.exec(` method call can be the hit.)
+    if (file_lang == "python" and untrusted and flow_rules
+            and lf.may_match_a_line(_EVAL_METHOD_CALL_RE)):
+        f_eval = _untrusted_to_eval_method(lines, untrusted, _string_state()[0])
+        if f_eval is not None:
+            findings.append(Finding(
+                category="unsafe_exec",
+                name="Untrusted input passed to an eval/exec method (Python)",
+                severity="high",
+                file_path=file_path,
+                line_number=f_eval + 1,
+                snippet=lines[f_eval].strip()[:120],
+                remediation=_why("a request value reaches a method that evaluates code",
+                                 "unsafe_exec", "defect"),
+                payload=is_downgraded,
             ))
 
     # Split decode->exec across lines: `payload = base64.b64decode(...)` then
     # `exec(payload)` a few lines later is the obfuscated loader (OSV MAL- family); the
     # one-line form is the "Decoded payload fed to exec/eval" pattern above.
-    if (not is_downgraded and DECODE_SINK_RE.search(content) and EXEC_SINK_RE.search(content)
+    if (flow_rules and _found(DECODE_SINK_RE) and _found(EXEC_SINK_RE)
             and not any(f.name == "Decoded payload fed to exec/eval" for f in findings)):
-        hit = _cooccur(lines, prose_lines, DECODE_SINK_RE, _PY_EVAL_CALL_RE, 10,
-                       exclude_b=_DEF_EVAL_EXEC_RE)
+        hit = _cooccur_flow(lines, _string_state()[0], _is_decode_line, _PY_EVAL_CALL_RE, 10,
+                            exclude_b=_DEF_EVAL_EXEC_RE)
         if hit is not None:
             findings.append(Finding(
                 category="obfuscation",
@@ -2487,16 +4441,53 @@ def _scan_content(
                 file_path=file_path,
                 line_number=hit + 1,
                 snippet="base64/hex/zlib decode and exec/eval within 10 lines",
+                payload=is_downgraded,
             ))
+
+    # Evasion shapes from Pluto Security's clean-scan study (see src/scanner/evasion.py):
+    # a dangerous name assembled from string pieces at a lookup, and an XOR'd decoded
+    # payload run by exec/eval in another function. Both are payload-shaped.
+    if file_lang in ("python", "javascript", "typescript") and not is_declaration:
+        from src.scanner.evasion import assembled_name_hits, xor_decode_exec_hit
+        for i, joined, ctx, sev in assembled_name_hits(lines, file_lang, _string_state()[0]):
+            g_sev, g_payload = _graded("defect", sev, True)
+            findings.append(Finding(
+                category="obfuscation",
+                name=("Module name assembled from string pieces" if ctx == "module"
+                      else "Dangerous name assembled from string pieces"),
+                severity=g_sev,
+                file_path=file_path,
+                line_number=i + 1,
+                snippet=lines[i].strip()[:120],
+                remediation=_why(f"'{joined}' is built from pieces so the name never "
+                                 "appears in the source", "obfuscation", "defect"),
+                payload=g_payload,
+            ))
+        if file_lang == "python" and not any(
+                f.name.startswith("Decoded payload") for f in findings):
+            hit = xor_decode_exec_hit(lines, _string_state()[0])
+            if hit is not None:
+                g_sev, g_payload = _graded("defect", "high", True)
+                findings.append(Finding(
+                    category="obfuscation",
+                    name="XOR-decoded payload + exec/eval in same file (obfuscated loader)",
+                    severity=g_sev,
+                    file_path=file_path,
+                    line_number=hit + 1,
+                    snippet=lines[hit].strip()[:120],
+                    remediation=_why("bytes are decoded and XOR'd with a key in a file "
+                                     "that calls exec/eval", "obfuscation", "defect"),
+                    payload=g_payload,
+                ))
 
     # SSRF (structural): an MCP tool that builds an outbound request from a caller-supplied
     # URL with no destination validation (CVE-2026-14540 class). Whole-file, MEDIUM,
     # low-confidence — the sandbox SSRF probe is the high-confidence detector. Fire once per
     # file, only on an MCP-tool surface with a url-shaped input, a variable-built request,
     # and NO guard token anywhere in the file.
-    if (SSRF_TOOL_SURFACE_RE.search(content) and SSRF_URL_INPUT_RE.search(content)
-            and SSRF_DYNAMIC_FETCH_RE.search(content)
-            and not SSRF_GUARD_RE.search(content)):
+    if (_found(SSRF_TOOL_SURFACE_RE) and _found(SSRF_URL_INPUT_RE)
+            and _found(SSRF_DYNAMIC_FETCH_RE)
+            and not _found(SSRF_GUARD_RE)):
         m = SSRF_DYNAMIC_FETCH_RE.search(content)
         line_no = content[:m.start()].count("\n") + 1
         findings.append(Finding(
@@ -2526,7 +4517,31 @@ def _scan_content(
     findings.extend(_scan_git_hooks(content, file_path))
 
     # Toxic-flow / lethal-trifecta composition (#9) — whole-file capability co-occurrence
-    findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist))
+    findings.extend(_composite_findings(content, file_path, lines, is_downgraded, allowlist,
+                                        lf=lf))
+    findings.extend(_credential_exfil_findings(
+        content, file_path, lines, file_lang, allowlist,
+        payload=payload_mode and file_downgraded, lf=lf))
+    findings.extend(_env_dump_exfil_findings(
+        content, file_path, lines, file_lang, allowlist, findings,
+        payload=payload_mode and file_downgraded, lf=lf))
+    findings.extend(_browser_credential_findings(
+        content, file_path, lines, file_lang, allowlist, findings,
+        downgraded=file_downgraded, payload=payload_mode and file_downgraded,
+        prose_lines=(lambda: _string_state()[0]) if file_lang == "python" else None))
+
+    # A dataset of attack prompts (Tencent AI-Infra-Guard's data/eval/*.json): text the
+    # code reads, never runs. Prompt-injection and pipe-to-shell text there is capped
+    # at high until the tree check (npm_scripts.restore_externally_invoked) finds code
+    # that names the file and can execute something.
+    if _is_dataset_file(file_path):
+        for f in findings:
+            if (f.kind == "defect" and f.severity == "critical"
+                    and (f.category == "prompt_injection"
+                         or f.name == pipe_shell.PIPE_TO_SHELL)):
+                f.severity = "high"
+                f.remediation = npm_scripts.DATASET_WHY
+                f._dataset_restore = "critical"  # type: ignore[attr-defined]
 
     # Add remediation hints to all findings. A capability carries its description
     # (nothing to remediate — it's what the tool does), never the category hint.
@@ -2542,7 +4557,12 @@ def _scan_content(
 
     # Check positive signals per-line, skipping comments and examples
     # (same filtering as negative patterns to prevent comment-trick gaming)
-    for line in lines:
+    positive_plan = lf.plan(AUTH_POSITIVE_PATTERNS)
+    positive_idxs = (range(len(lines)) if positive_plan.always_active
+                     else sorted(positive_plan.table))
+    for pidx in positive_idxs:
+        line = lines[pidx]
+        rules = positive_plan.table.get(pidx, positive_plan.default)
         stripped_pos = line.strip()
         if not stripped_pos:
             continue
@@ -2550,7 +4570,7 @@ def _scan_content(
             continue
         if "example" in stripped_pos.lower() or "placeholder" in stripped_pos.lower():
             continue
-        for name, pattern in AUTH_POSITIVE_PATTERNS:
+        for name, pattern in rules:
             if pattern.search(stripped_pos):
                 positives.append(name)
 
@@ -2641,8 +4661,117 @@ def _scan_manifest_exec(content: str, file_path: str) -> list[Finding]:
 
 
 _NODE_EVAL_SEGMENT_RE = re.compile(
-    r"""\bnode\s+(?:-e|--eval)\s+(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE,
+    r"""\bnode\s+(?:-e|--eval|-p|--print|-pe|-ep)\s+(?:"([^"]*)"|'([^']*)')""",
+    re.IGNORECASE,
 )
+
+
+# An inert install guard (a package-manager or engine check, round-2 DNC sample:
+# metabase's "use Bun", casdoor's "use yarn"): a short body that only reads
+# process.env / process.version(s) / process.platform / process.arch, tests strings
+# with constant regexes or string methods, logs, throws an Error or exits. Checked token
+# by token against an allowlist, so anything else (require / import(), eval, Function,
+# fetch, Buffer, global / globalThis / this, bracket access other than a numeric
+# index, assignment, arrow functions, templates, comments, `$`, a backslash escape in a
+# string, an unlisted property such as .constructor / .mainModule / .binding) leaves
+# the snippet critical.
+_GUARD_MAX_LEN = 500
+_GUARD_TOKEN_RE = re.compile(
+    r"""(?P<ws>\s+)|(?P<str>'[^'\\\n$`]*'|"[^"\\\n$`]*")|(?P<num>\d+(?:\.\d+)?)|"""
+    r"""(?P<idx>\[\s*\d+\s*\])|(?P<id>[A-Za-z_]\w*)|"""
+    r"""(?P<op>===|!==|==|!=|<=|>=|&&|\|\||[-+<>!?:;,(){}.])""")
+# A regex literal: plain characters, character classes and escapes other than the
+# code-point ones (\x, \u, \c, octal digits).
+_GUARD_REGEX_RE = re.compile(
+    r"""/(?:[^/\\\n\[$`]|\\[^xuc0-9\n$`]|\[(?:[^\]\\\n$`]|\\[^xuc0-9\n$`])*\])+/[gimsuy]*""")
+_GUARD_BARE = frozenset({
+    "process", "console", "Error", "TypeError", "RangeError", "parseInt", "parseFloat",
+    "Number", "if", "else", "throw", "new", "typeof", "true", "false", "null", "undefined",
+})
+_GUARD_PROCESS = frozenset({"env", "version", "versions", "platform", "arch", "exit"})
+_GUARD_CONSOLE = frozenset({"log", "warn", "error", "info"})
+_GUARD_METHODS = frozenset({
+    "test", "indexOf", "includes", "startsWith", "endsWith", "match", "split", "slice",
+    "substring", "trim", "toLowerCase", "toUpperCase", "length",
+})
+_GUARD_ERRORS = frozenset({"Error", "TypeError", "RangeError"})
+# Environment variables a guard reads: npm's own (`npm_execpath`,
+# `npm_config_user_agent`), CI / NODE_ENV and skip switches. Never one that names a
+# credential (a guard could print it into a public CI log).
+_GUARD_ENV_RE = re.compile(
+    r"^(?:npm_\w+|CI|NODE_ENV|CONTINUOUS_INTEGRATION|HUSKY|\w*(?:SKIP|DISABLE)\w*)$")
+_GUARD_SECRET_ENV_RE = re.compile(r"token|auth|secret|passw|key|cred", re.IGNORECASE)
+# Never a property name, even as an environment variable (`process.env.constructor`).
+_GUARD_BAD_PROPS = frozenset({
+    "constructor", "prototype", "__proto__", "__defineGetter__", "__defineSetter__",
+    "__lookupGetter__", "__lookupSetter__", "valueOf", "toString", "hasOwnProperty",
+})
+
+
+def _is_inert_guard_snippet(code: str) -> bool:
+    """True for an inline ``node -e`` body built only from the guard vocabulary above."""
+    if not code.strip() or len(code) > _GUARD_MAX_LEN:
+        return False
+    toks: list[tuple[str, str]] = []
+    pos = 0
+    while pos < len(code):
+        prev = toks[-1] if toks else None
+        if code[pos] == "/" and (prev is None or (prev[0] == "op" and prev[1] not in ")}")):
+            m = _GUARD_REGEX_RE.match(code, pos)
+            if not m:
+                return False
+            toks.append(("re", m.group()))
+            pos = m.end()
+            continue
+        m = _GUARD_TOKEN_RE.match(code, pos)
+        if not m:
+            return False
+        pos = m.end()
+        if m.lastgroup != "ws":
+            toks.append((m.lastgroup, m.group()))
+    chain: list[str] = []
+    for i, (kind, val) in enumerate(toks):
+        prev = toks[i - 1] if i else None
+        after_dot = prev == ("op", ".")
+        if kind == "op" and val == ".":
+            # Member access only on a name chain or a value (a call, a literal, an index).
+            if prev is None or not (prev[0] in ("id", "str", "re", "num", "idx")
+                                    or prev == ("op", ")")):
+                return False
+            if prev[0] != "id":
+                chain = ["<value>"]
+            continue
+        if kind != "id":
+            if not after_dot and kind == "idx" and prev is not None and prev[0] == "op" \
+                    and prev[1] not in ")":
+                return False          # an array literal, not an index
+            continue
+        if not after_dot:
+            if val not in _GUARD_BARE:
+                return False
+            if val == "new" and (i + 1 >= len(toks) or toks[i + 1][1] not in _GUARD_ERRORS):
+                return False
+            chain = [val]
+            continue
+        if val in _GUARD_BAD_PROPS:
+            return False
+        chain.append(val)
+        base, depth = chain[0], len(chain)
+        if base == "process" and depth == 2:
+            # `process.env` only as `process.env.NAME` (never the whole environment).
+            ok = val in _GUARD_PROCESS and not (
+                val == "env" and toks[i + 1:i + 2] != [("op", ".")])
+        elif base == "process" and depth == 3 and chain[1] == "env":
+            ok = bool(_GUARD_ENV_RE.match(val)) and not _GUARD_SECRET_ENV_RE.search(val)
+        elif base == "process" and depth == 3 and chain[1] == "versions":
+            ok = True
+        elif base == "console":
+            ok = depth == 2 and val in _GUARD_CONSOLE
+        else:
+            ok = val in _GUARD_METHODS
+        if not ok:
+            return False
+    return True
 
 
 # The only inline snippets treated as inert: an exit code or a constant log line.
@@ -2652,13 +4781,45 @@ _INERT_NODE_SNIPPET_RE = re.compile(
 )
 
 
+# A snippet whose only effect is loading a local file of the package itself, e.g. core-js's
+# ``try{require('./postinstall')}catch(e){}``. That is no more dangerous than the hook
+# running ``node ./postinstall.js`` (already medium). The path must be a constant
+# relative literal of plain path characters; the catch body may be empty or a constant
+# log line. Anything else (another call, a concatenated path, a bare module name such as
+# ``require('http')``) does not match and stays critical.
+_CONST_LOG = r"""console\.(?:log|warn|error)\(\s*(?:'[^'$`\\]*'|\d+)?\s*\)"""
+_LOCAL_PATH = r"""\.{1,2}/[A-Za-z0-9_./-]*"""
+_LOCAL_REQUIRE = rf"""require\(\s*(?:'{_LOCAL_PATH}'|"{_LOCAL_PATH}")\s*\)"""
+_INERT_LOCAL_REQUIRE_RE = re.compile(
+    rf"""^\s*(?:{_LOCAL_REQUIRE}\s*;?|"""
+    rf"""try\s*\{{\s*{_LOCAL_REQUIRE}\s*;?\s*\}}\s*catch\s*(?:\(\s*\w+\s*\))?\s*"""
+    rf"""\{{\s*(?:{_CONST_LOG}\s*;?\s*)?\}})\s*;?\s*$""",
+)
+
+_REQUIRE_PATH_RE = re.compile(r"""require\(\s*(['"])(.*?)\1""")
+
+
+def _is_inert_local_require(code: str) -> bool:
+    m = _INERT_LOCAL_REQUIRE_RE.match(code)
+    if not m:
+        return False
+    path = _REQUIRE_PATH_RE.search(code).group(2)
+    normalized = posixpath.normpath(path)
+    # Must resolve inside the package root (the hook's cwd): no `..` escape.
+    return normalized != ".." and not normalized.startswith("../")
+
+
 def _strip_inert_node_eval(cmd: str) -> str:
     """Remove ``node -e "<snippet>"`` segments whose snippet is a known no-op
-    (``process.exit(0)`` as an ``||`` fallback, a constant ``console.log``) before the
-    danger check. Anything else (``require(…)``, fetch, eval, shell expansion) stays."""
+    (``process.exit(0)`` as an ``||`` fallback, a constant ``console.log``), only
+    requires a local file inside the package (optionally in an empty try/catch), or is
+    an inert package-manager / engine guard (``_is_inert_guard_snippet``) before the
+    danger check. Anything else (other ``require(…)``, fetch, eval, shell expansion)
+    stays."""
     def _inert(m: re.Match) -> str:
         code = m.group(1) if m.group(1) is not None else m.group(2)
-        if _INERT_NODE_SNIPPET_RE.match(code):
+        if (_INERT_NODE_SNIPPET_RE.match(code) or _is_inert_local_require(code)
+                or _is_inert_guard_snippet(code)):
             return "node <inert-inline>"
         return m.group(0)
     return _NODE_EVAL_SEGMENT_RE.sub(_inert, cmd)
@@ -2861,12 +5022,80 @@ def _compute_manifest_digest(tool_digests: dict[str, str]) -> str | None:
     return "sha256:" + hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
+_RESPONSE_SEND_RE = re.compile(
+    r"\b(?:res|resp|response|reply|ctx)\s*(?:\.\s*status\s*\([^)]*\))?\s*\.\s*send\s*\(")
+# `X.status(NNN).send(<literal>)`: an HTTP error/status reply with a fixed message
+# (notion-mcp-server's minified `_.status(400).send("Invalid or missing session ID")`).
+# Keyed on the ARGUMENT, not on proving X is a response: a string or number literal
+# carries no data, so even if X were a socket in disguise this line moves nothing.
+_LITERAL_STATUS_SEND_RE = re.compile(
+    r"""[\w$]+\s*\.\s*status\s*\(\s*[1-5]\d\d\s*\)\s*\.\s*send\s*\(\s*"""
+    r"""(?:"[^"\\\n]*(?:\\.[^"\\\n]*)*"|'[^'\\\n]*(?:\\.[^'\\\n]*)*'|`[^`$\\\n]*`|\d+)"""
+    # ...and the call ends the expression: its return value must not be used
+    r"""\s*\)(?!\s*(?:[.(\[`]|\?\.))""")
+
+
+_QUOTED_WEBHOOK_RE = re.compile(r"""(["'])webhooks?\1""", re.IGNORECASE)
+
+# A JS route registration whose path is a string starting with `/` (or `*`), and the
+# name of its handler's FIRST parameter (the request): `app.post('/mcp',async(q,r)=>`,
+# `.get("/x",auth,function(q,r){`, `.put('/y',q=>`. UNTRUSTED_INPUT_RE knows the request
+# only as `req`/`request`; a minifier renames it (`q`), which dropped the trifecta's
+# untrusted-input leg on one-line bundles.
+_ROUTE_HANDLER_RE = re.compile(
+    r"""\.\s*(?:get|post|put|patch|delete|all)\s*\(\s*"""
+    r"""(?:"[/*][^"\n]{0,200}"|'[/*][^'\n]{0,200}'|`[/*][^`\n]{0,200}`)\s*,\s*"""
+    r"""(?:[\w$.]{1,60}\s*,\s*){0,3}"""                 # middleware before the handler
+    r"""(?:async\s*)?(?:function\b\s*[\w$]*\s*)?"""
+    r"""(?:\(\s*([\w$]+)\s*[,)]|([\w$]+)\s*=>)""")
+_REQUEST_FIELD_RE = re.compile(r"\.\s*(?:body|query|params)\b")
+_ROUTE_HANDLER_WINDOW = 4000     # chars of handler text searched per registration
+_ROUTE_HANDLER_MAX = 200          # registrations examined per file (bounded cost)
+
+
+def _handler_request_input(content: str) -> list[int]:
+    """Lines (1-based) where a route handler reads its request's body / query / params
+    under any parameter name (`q.body` in a minified bundle). Scoped to the text right
+    after the registration, because minified one-letter names are reused all over a
+    bundle. Empty when the file registers no route."""
+    if not _REQUEST_FIELD_RE.search(content):
+        return []
+    offsets: set[int] = set()
+    for k, m in enumerate(_ROUTE_HANDLER_RE.finditer(content)):
+        if k >= _ROUTE_HANDLER_MAX:
+            break
+        name = m.group(1) or m.group(2)
+        if name in ("async", "function"):
+            continue
+        rx = re.compile(r"(?<![\w$.])" + re.escape(name) + r"\s*\.\s*(?:body|query|params)\b")
+        hit = rx.search(content, m.end(), m.end() + _ROUTE_HANDLER_WINDOW)
+        if hit:
+            offsets.add(hit.start())
+    lines, line, pos = [], 1, 0
+    for off in sorted(offsets):          # one forward pass: O(len(content)) in total
+        line += content.count("\n", pos, off)
+        pos = off
+        lines.append(line)
+    return sorted(set(lines))
+
+
+def _near_read(reads: list[int], sends: list[int], near) -> int | None:
+    """The first read line that has a send within the window (``near`` is the
+    composite's window test)."""
+    for r in reads:
+        if near([r], sends) is not None:
+            return r
+    return None
+
+
 def _composite_findings(
     content: str,
     file_path: str,
     lines: list[str],
     is_test_or_doc: bool,
     allowlist: object,
+    *,
+    lf: LineFilter | None = None,
 ) -> list[Finding]:
     """#9 — the lethal trifecta: private-data read + untrusted input + outbound send.
 
@@ -2876,17 +5105,32 @@ def _composite_findings(
     reads an env key and posts to one endpoint, with no untrusted-content ingestion,
     does NOT trigger. Emits at most one finding per file.
     """
+    # ``lf`` (the caller's LineFilter over ``content``) only skips searches that cannot
+    # match: a regex whose required literals are absent from the file / the line.
+    if lf is None:
+        lf = LineFilter(content)
+
+    def _found(rx: re.Pattern[str]) -> bool:
+        return lf.search(rx) is not None
+
     # Cheap pre-check on the whole blob before the per-line pass
     if not (
-        UNTRUSTED_INPUT_RE.search(content)
-        and OUTBOUND_SEND_RE.search(content)
-        and (SENSITIVE_READ_RE.search(content) or FILE_READ_RE.search(content))
+        _found(OUTBOUND_SEND_RE)
+        and (_found(SENSITIVE_READ_RE) or _found(FILE_READ_RE))
     ):
+        return []
+    # A route handler reading its renamed request (`q.body` in a minified bundle) is the
+    # same untrusted input as `req.body`. Checked whenever the file registers a route, so
+    # a bundle with one `(req, res) =>` handler and a minified `(q, r) =>` one gets both.
+    handler_lines = _handler_request_input(content)
+    if not (_found(UNTRUSTED_INPUT_RE) or handler_lines):
         return []
 
     def _hits(rx: re.Pattern[str]) -> list[int]:
         out = []
-        for i, ln in enumerate(lines):
+        cand = lf.lines(rx)
+        for i in range(len(lines)) if cand is None else sorted(cand):
+            ln = lines[i]
             stripped = ln.strip()
             if not stripped or stripped.startswith(("#", "//", "*", "/*")):
                 continue
@@ -2894,8 +5138,29 @@ def _composite_findings(
                 out.append(i + 1)
         return out
 
-    untrusted = _hits(UNTRUSTED_INPUT_RE)
-    outbound = _hits(OUTBOUND_SEND_RE)
+    # The bare word `webhook` counts as inbound input only as code (a `webhook` handler
+    # or object), not as a quoted string (`"webhook" in self.alerting`, a config value).
+    untrusted = [n for n in _hits(UNTRUSTED_INPUT_RE)
+                 if UNTRUSTED_INPUT_RE.search(_QUOTED_WEBHOOK_RE.sub(" ", lines[n - 1]))]
+    untrusted = sorted(set(untrusted) | set(handler_lines))
+    # An HTTP RESPONSE to the caller (`res.send(...)`, `reply.send(...)`) answers the
+    # request; it is not an outbound send to a third party (precision PR 2).
+    def _strip_literal(m: re.Match[str]) -> str:
+        # ...and starts a statement, so its value is not assigned, returned or passed on
+        i = m.start() - 1
+        while i >= 0 and m.string[i].isspace():
+            i -= 1
+        before = m.string[max(0, i - 7):i + 1]  # bounded: no O(n^2) on minified lines
+        if before and before[-1] not in ";{})" and not re.search(r"(?<![\w$])else$", before):
+            return m.group(0)
+        return " "
+
+    def _strip_responses(n: int) -> str:
+        return _RESPONSE_SEND_RE.sub(" ", _LITERAL_STATUS_SEND_RE.sub(_strip_literal,
+                                                                      lines[n - 1]))
+
+    outbound = [n for n in _hits(OUTBOUND_SEND_RE)
+                if OUTBOUND_SEND_RE.search(_strip_responses(n))]
     sensitive = _hits(SENSITIVE_READ_RE)
     file_read = _hits(FILE_READ_RE)
     if not (untrusted and outbound and (sensitive or file_read)):
@@ -2929,14 +5194,16 @@ def _composite_findings(
     if sensitive and _near(sensitive, outbound) is None:
         sensitive = []
 
+    # Report the read that sits next to the send (not the file's first read, which can
+    # be thousands of lines from the pair that fired).
     if sensitive:
         name = "Lethal trifecta: private-data read + untrusted input + outbound network"
         severity = "high"
-        line = sensitive[0]
+        line = _near_read(sensitive, outbound, _near) or sensitive[0]
     else:
         name = "Toxic flow: file read + untrusted input + outbound network"
         severity = "medium"
-        line = file_read[0]
+        line = _near_read(file_read, outbound, _near) or file_read[0]
 
     if _is_allowlisted(file_path, name, allowlist):
         return []
@@ -2951,6 +5218,162 @@ def _composite_findings(
         line_number=line,
         snippet="capability composition — each part benign alone, dangerous together",
     )]
+
+
+_CREDENTIAL_EXFIL_NAME = "Credential file read sent outbound"
+_CREDENTIAL_KIND_LABELS = {
+    "ssh": "an SSH private key", "aws": "AWS credentials", "gcloud": "gcloud credentials",
+    "kube": "a kubeconfig", "netrc": "a .netrc / git credential store",
+    "npmrc": "an .npmrc token", "pypirc": "a .pypirc password",
+    "docker": "Docker registry credentials", "browser": "browser cookies / saved logins",
+    "wallet": "a crypto wallet file", "env": "a .env file",
+}
+
+
+def _credential_exfil_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], *, payload: bool, lf: LineFilter | None = None,
+) -> list[Finding]:
+    """A credential file's contents reaching an outbound send (``credential_flow``).
+
+    Critical like the environment-dump rule, and never downgraded: in a test / doc
+    directory of a published artifact it is a payload (``payload``) and keeps its
+    severity."""
+    from src.scanner.credential_flow import credential_exfil_hits
+
+    if _is_allowlisted(file_path, _CREDENTIAL_EXFIL_NAME, allowlist):
+        return []
+    from src.scanner import npm_scripts
+    out = []
+    relaxed: list = []
+    vendor_uses: list = []
+    hits = credential_exfil_hits(content, file_lang, lf=lf, relaxed=relaxed,
+                                 vendor_uses=vendor_uses)
+    for line_no, kind, names in relaxed:
+        # Clean only because the key went bare into a library signing call: low
+        # until the tree pass checks that no other file of the package defines or
+        # reassigns the signer it resolved to (npm_scripts.restore_signing_relaxed).
+        f_low = Finding(
+            category="exfiltration", name=_CREDENTIAL_EXFIL_NAME, severity="low",
+            file_path=file_path, line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            payload=payload)
+        npm_scripts.mark_signing(f_low, "critical", set(names))
+        out.append(f_low)
+    for vendor in sorted({v for _ln, v in vendor_uses}):
+        out.append(Finding(
+            category="exfiltration", name=f"Uses your {vendor} API key", severity="low",
+            file_path=file_path, line_number=next(ln for ln, v in vendor_uses if v == vendor),
+            snippet="",
+            remediation=(
+                f"The code reads your {vendor} API key from a .env file and only sends it "
+                f"to {vendor}'s API to authenticate. Expected for a {vendor} integration; "
+                "make sure you're happy to share that key."),
+            kind="capability", capability="secret:vendor_api_key"))
+    for line_no, kind in hits:
+        what = _CREDENTIAL_KIND_LABELS.get(kind, "a credential file")
+        out.append(Finding(
+            category="exfiltration",
+            name=_CREDENTIAL_EXFIL_NAME,
+            severity="critical",
+            file_path=file_path,
+            line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            remediation=(
+                f"This code reads {what} from the user's machine and sends the contents "
+                "over the network. A tool has no reason to ship a local credential file "
+                "anywhere; remove the read or the send."
+            ),
+            payload=payload,
+        ))
+    return out
+
+
+_ENV_DUMP_EXFIL_NAME = "Whole environment sent outbound"
+
+
+def _env_dump_exfil_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], found: list[Finding], *, payload: bool,
+    lf: LineFilter | None = None,
+) -> list[Finding]:
+    """The whole environment (``JSON.stringify(process.env)``, ``{...process.env}``,
+    ``dict(os.environ)``, ``os.environ.copy()`` …) reaching an outbound send in the
+    same file (``credential_flow.env_dump_exfil_hits``). Critical and never
+    downgraded, like a credential file sent out. A line the per-line
+    "Environment variable exfil" rule already reported is not reported twice."""
+    from src.scanner.credential_flow import env_dump_exfil_hits
+
+    if _is_allowlisted(file_path, _ENV_DUMP_EXFIL_NAME, allowlist):
+        return []
+    seen = {f.line_number for f in found
+            if f.file_path == file_path and f.name == "Environment variable exfil"}
+    out = []
+    for line_no in env_dump_exfil_hits(content, file_lang, lf=lf):
+        if line_no in seen:
+            continue
+        out.append(Finding(
+            category="exfiltration",
+            name=_ENV_DUMP_EXFIL_NAME,
+            severity="critical",
+            file_path=file_path,
+            line_number=line_no,
+            snippet=lines[line_no - 1].strip()[:120] if line_no - 1 < len(lines) else "",
+            remediation=(
+                "This code serializes or copies the whole process environment (every "
+                "API key, token and password in it) and sends it over the network. A "
+                "tool has no reason to ship its environment anywhere; send only the "
+                "values the request needs."
+            ),
+            payload=payload,
+        ))
+    return out
+
+
+def _browser_credential_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]], found: list[Finding], *, downgraded: bool,
+    payload: bool, prose_lines=None,
+) -> list[Finding]:
+    """Browser credential handling (``browser_credentials``): a saved-password / cookie
+    database read, session data sent to a network endpoint, and the informational
+    capabilities (reads / saves session state, runs with the real browser profile).
+
+    A store read is dropped when ``credential_flow`` already reported the same file's
+    browser store being sent out (critical). In a test / doc / infra file a defect is
+    graded medium unless the file is a payload of a published artifact."""
+    from src.scanner.browser_credentials import STORE_READ_NAME, browser_credential_hits
+
+    hits = browser_credential_hits(content, file_lang, prose_lines=prose_lines)
+    if not hits:
+        return []
+    store_sent = any(f.name == _CREDENTIAL_EXFIL_NAME and f.file_path == file_path
+                     for f in found)
+    out = []
+    for h in hits:
+        if h.name == STORE_READ_NAME and store_sent:
+            continue
+        if _is_allowlisted(file_path, h.name, allowlist):
+            continue
+        severity, is_payload = h.severity, False
+        if h.kind == "defect" and downgraded and severity in ("critical", "high"):
+            if payload:
+                is_payload = True
+            else:
+                severity = "medium"
+        out.append(Finding(
+            category="exfiltration",
+            name=h.name,
+            severity=severity,
+            file_path=file_path,
+            line_number=h.line,
+            snippet=lines[h.line - 1].strip()[:120] if h.line - 1 < len(lines) else "",
+            remediation=h.detail,
+            kind=h.kind,
+            capability=h.capability,
+            payload=is_payload,
+        ))
+    return out
 
 
 _DEP_CATEGORIES = frozenset({"dependency", "install_hook"})
@@ -3012,9 +5435,12 @@ def _certified_status(result: ScanResult) -> dict:
             bool(prov.get("verified")) and bool(prov.get("source_matches_claim"))
         ),
         # 3. the published artifact matches its source (no injected/added files, no hook)
+        # A registry-only package scan has no repo to diff against (drift is empty), so
+        # its install hook is read from the artifact summary.
         "no_drift": not (
             drift.get("added_files") or drift.get("modified_files")
             or drift.get("has_install_hook")
+            or (getattr(result, "artifact_scan", None) or {}).get("has_install_hook")
         ),
         # 4. zero BLOCKING (shipped/known-malicious) critical or high, and no MAL dep.
         # Uses the blocking counts so Certified agrees with the headline number/grade —
@@ -3212,7 +5638,11 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # single critical must always bite, however large the repo. Not applied on the
     # graduated curve, where each medium has a fixed cost.
     if not graduated and result.files_scanned > 0 and total_findings > 0:
-        affected_files = len({f.file_path for f in code_findings})
+        # A low MCP icon finding (third-party host, oversized data: URI) is not a file
+        # with an issue and deducts nothing; it must not widen the ratio either.
+        affected_files = len({f.file_path for f in code_findings
+                              if not (f.severity == "low"
+                                      and str(f.file_path or "").endswith(":icons"))})
         ratio = affected_files / result.files_scanned
         # Scale factor: 0.4 at 1% affected, 1.0 at 25%+ affected
         scale = min(1.0, 0.4 + ratio * 2.4)
@@ -3269,7 +5699,7 @@ def _calculate_trust_score(result: ScanResult) -> int:
     # raises a score, and a findings-laden repo already sits below the cap so it's a no-op
     # there. Skipped/unscannable scans never reach here (their score is null).
     files = result.files_scanned or 0
-    if 0 < files < _EVIDENCE_MIN_FILES:
+    if 0 <= files < _EVIDENCE_MIN_FILES:
         cap = _EVIDENCE_VERY_THIN_CAP if files <= _EVIDENCE_VERY_THIN_FILES else _EVIDENCE_THIN_CAP
         if result.has_tests:
             cap += _EVIDENCE_TESTS_HEADROOM
@@ -3408,8 +5838,13 @@ async def _run_supply_chain(
     ref: str | None,
     sem,
     per_file_timeout: float,
+    gaps: dict | None = None,
 ) -> None:
     """Phase 0 coverage block + Phase 1 OSV supply-chain pass (fail-open).
+
+    ``gaps`` (the scan's coverage-gap dict) records what this pass could not check:
+    lockfiles it could not fetch, and an advisory lookup that failed — so a failed
+    lookup never reads the same as "no advisories". Disclosure only.
 
     Always attaches the Phase-0 ``coverage`` block (recompute discipline). When
     ``settings.scanner_use_osv`` is on it additionally fetches the repo's real
@@ -3453,6 +5888,8 @@ async def _run_supply_chain(
                 and it["path"].lower().endswith((".yml", ".yaml"))
             ][: settings.scanner_supply_chain_max_workflows]
 
+            unread: list[str] = []
+
             async def _fetch(path: str) -> tuple[str, str]:
                 try:
                     async with sem:
@@ -3460,12 +5897,20 @@ async def _run_supply_chain(
                             _fetch_file_content(owner, repo, path, token, ref=ref),
                             timeout=per_file_timeout,
                         )
+                    if content is None:
+                        unread.append(path)
                     return path, content or ""
                 except (asyncio.TimeoutError, Exception):
+                    unread.append(path)
                     return path, ""
 
             fetch_tasks = [_fetch(it["path"]) for it in (lock_items + wf_items)]
             fetched = await asyncio.gather(*fetch_tasks) if fetch_tasks else []
+            if gaps is not None:
+                # Unread lockfile paths (a set, so a file the regex pass also missed is
+                # counted once); the caller turns it into ``dependency_files_unread``.
+                gaps.setdefault("_dep_unread", set()).update(
+                    p for p in unread if Path(p).name.lower() in lock_names)
             lockfiles = {
                 p: c for p, c in fetched
                 if Path(p).name.lower() in lock_names and c
@@ -3527,6 +5972,8 @@ async def _run_supply_chain(
                 p == "Dependency pinning" for p in result.positive_signals
             ):
                 result.positive_signals.append("Dependency pinning")
+            if gaps is not None and not sc.ok and getattr(sc, "error", None):
+                gaps["advisory_lookup"] = "failed"
             db_snapshots = dict(sc.db_snapshots)
             sc_summary = {
                 "ok": sc.ok,
@@ -3543,6 +5990,8 @@ async def _run_supply_chain(
                 "db_snapshots": sc.db_snapshots,
             }
         except Exception:
+            if gaps is not None:
+                gaps["advisory_lookup"] = "failed"
             logger.warning(
                 "Supply-chain pass errored for %s/%s — keeping regex deps",
                 owner, repo, exc_info=True,
@@ -3600,41 +6049,117 @@ async def _release_tree_shas(
     return None
 
 
-async def _published_pkg_repo_slug(ecosystem: str, name: str) -> str | None:
-    """The ``owner/repo`` (lowercased) that a PUBLISHED npm/PyPI package declares as its
-    source, or None if it declares none. Lets the artifact scan skip a diff when a repo's
-    manifest name collides with an UNRELATED published package of the same name."""
-    urls: list[str] = []
+_GH_SLUG_RE = re.compile(r"github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git|/|#|\?|$)", re.IGNORECASE)
+_SHORTHAND_RE = re.compile(r"^(?:github:)?([\w.-]+/[\w.-]+?)(?:\.git)?$", re.IGNORECASE)
+
+
+def _github_slug(url: str, *, allow_shorthand: bool = False) -> str | None:
+    """The lowercased ``owner/repo`` a declared source URL points at, or None.
+
+    Handles ``git+https://github.com/o/r.git``, ``git@github.com:o/r.git``, monorepo
+    subpaths (``github.com/o/r/tree/main/packages/x``) and, for npm's ``repository``
+    field, the ``o/r`` / ``github:o/r`` shorthands."""
+    if not isinstance(url, str) or not url.strip():
+        return None
+    m = _GH_SLUG_RE.search(url)
+    if m:
+        return m.group(1).lower()
+    if allow_shorthand:
+        m = _SHORTHAND_RE.match(url.strip())
+        if m and ":" not in url.replace("github:", ""):
+            return m.group(1).lower()
+    return None
+
+
+async def _published_pkg_meta(ecosystem: str, name: str) -> tuple[list[str], dict | None]:
+    """The GitHub ``owner/repo`` slugs a PUBLISHED npm/PyPI/crates package declares as
+    its source (repository field first, then homepage/project URLs), plus the npm
+    latest-version manifest (None elsewhere). ``([], None)`` when the package doesn't
+    exist or the registry can't be reached."""
+    urls: list[tuple[str, bool]] = []  # (url, shorthand allowed)
+    manifest: dict | None = None
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as client:
             if ecosystem == "pypi":
                 resp = await client.get(f"https://pypi.org/pypi/{name}/json")
                 if resp.status_code != 200:
-                    return None
+                    return [], None
                 info = (resp.json() or {}).get("info", {}) or {}
-                urls = [v for v in (info.get("project_urls") or {}).values()
+                urls = [(v, False) for v in (info.get("project_urls") or {}).values()
                         if isinstance(v, str)]
                 if isinstance(info.get("home_page"), str):
-                    urls.append(info["home_page"])
+                    urls.append((info["home_page"], False))
             elif ecosystem == "npm":
-                resp = await client.get(f"https://registry.npmjs.org/{name}")
+                # The latest-version manifest: small (the full packument for a big
+                # package is many MB) and it carries repository, deps, keywords, bin.
+                resp = await client.get(f"https://registry.npmjs.org/{name}/latest")
                 if resp.status_code != 200:
-                    return None
+                    return [], None
                 data = resp.json() or {}
-                repo_field = data.get("repository")
-                if isinstance(repo_field, str):
-                    urls.append(repo_field)
-                elif isinstance(repo_field, dict) and isinstance(repo_field.get("url"), str):
-                    urls.append(repo_field["url"])
-                if isinstance(data.get("homepage"), str):
-                    urls.append(data["homepage"])
+                if isinstance(data, dict):
+                    manifest = data
+                    repo_field = data.get("repository")
+                    if isinstance(repo_field, str):
+                        urls.append((repo_field, True))
+                    elif isinstance(repo_field, dict) and isinstance(repo_field.get("url"), str):
+                        urls.append((repo_field["url"], True))
+                    if isinstance(data.get("homepage"), str):
+                        urls.append((data["homepage"], False))
+            elif ecosystem == "crates":
+                resp = await client.get(
+                    f"https://crates.io/api/v1/crates/{name}",
+                    headers={"User-Agent": "agentavow-scanner (https://agentavow.com)"},
+                )
+                if resp.status_code != 200:
+                    return [], None
+                crate = (resp.json() or {}).get("crate", {}) or {}
+                for k in ("repository", "homepage"):
+                    if isinstance(crate.get(k), str):
+                        urls.append((crate[k], False))
     except (httpx.HTTPError, ValueError, TypeError):
-        return None
-    for u in urls:
-        m = re.search(r"github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git|/|#|$)", u, re.IGNORECASE)
-        if m:
-            return m.group(1).lower()
-    return None
+        return [], None
+    slugs: list[str] = []
+    for u, shorthand in urls:
+        slug = _github_slug(u, allow_shorthand=shorthand)
+        if slug and slug not in slugs:
+            slugs.append(slug)
+    return slugs, manifest
+
+
+PACKAGE_UNCONFIRMED_NOTE = "no published package confirmed for this repo"
+
+
+async def _package_points_back(owner: str, repo: str, ecosystem: str, name: str) -> bool:
+    """True only when the published ``ecosystem``/``name`` package's own registry entry
+    names ``owner/repo`` as its source. The single gate for using a published package as
+    a repo's artifact (scan, sandbox, provenance, install). Fail-closed: no registry
+    answer, no repo declared, or a different repo declared all return False."""
+    if ecosystem not in ("npm", "pypi", "crates") or not name:
+        return False
+    slugs, _ = await _published_pkg_meta(ecosystem, name)
+    return f"{owner}/{repo}".lower() in slugs
+
+
+async def _verified_package_coordinate(
+    owner: str, repo: str, surface: str, name: str,
+) -> dict:
+    """``{"surface", "name", "is_mcp_server"}`` only when the published package's own
+    registry entry points back at ``owner/repo``; ``{}`` otherwise.
+
+    This gates the 1-click install on a repo page. A manifest name alone isn't proof:
+    vercel/next.js's private workspace root is named ``nextjs-project``, and an
+    unrelated npm package of that name exists. Fail-closed: no registry answer, no
+    install."""
+    if surface not in ("npm", "pypi", "crates") or not name:
+        return {}
+    slugs, manifest = await _published_pkg_meta(surface, name)
+    if f"{owner}/{repo}".lower() not in slugs:
+        return {}
+    return {
+        "surface": surface,
+        "name": name,
+        "is_mcp_server": _looks_like_mcp_server(surface, name, manifest),
+    }
 
 
 async def _maybe_scan_artifact(
@@ -3669,20 +6194,22 @@ async def _maybe_scan_artifact(
         return
     ecosystem, name, version = coord
 
-    # Name-collision guard: if the PUBLISHED package declares a source repo that is a
-    # DIFFERENT GitHub repo than the one we're scanning, this manifest name collides
-    # with an unrelated package (e.g. our `agentgraph` vs the unrelated PyPI `agentgraph`
-    # task-parallelism library). Diffing would attribute a stranger's files as bogus
-    # artifact_drift — skip the artifact scan entirely. Only skips on a POSITIVE mismatch
-    # (declared-and-different); a package declaring the same repo, or none, proceeds.
-    if ecosystem in ("pypi", "npm"):
-        declared = await _published_pkg_repo_slug(ecosystem, name)
-        if declared and declared != f"{owner}/{repo}".lower():
-            logger.info(
-                "artifact scan skipped: %s package %r declares repo %r, not %s/%s",
-                ecosystem, name, declared, owner, repo,
-            )
-            return
+    # Package-identity gate: scan the published package as this repo's artifact ONLY
+    # when its own registry entry points back at this repo. A manifest name alone isn't
+    # proof — vercel/next.js's root manifest is named `nextjs-project`, and a stranger's
+    # npm package of that name (declaring no repo) was being scanned and run in the
+    # sandbox as next.js. No repo declared, a different repo, or no registry answer all
+    # skip, and the result says so; the repo is graded from its source alone.
+    if not await _package_points_back(owner, repo, ecosystem, name):
+        logger.info(
+            "artifact scan skipped: %s package %r doesn't point back at %s/%s",
+            ecosystem, name, owner, repo,
+        )
+        result.artifact_scan = {
+            "ok": False, "skipped": "unconfirmed", "ecosystem": ecosystem,
+            "name": name, "note": PACKAGE_UNCONFIRMED_NOTE,
+        }
+        return
 
     try:
         from src.scanner.artifact_scan import scan_published_artifact
@@ -3726,6 +6253,9 @@ async def _maybe_scan_artifact(
         "unpacked_size": art.unpacked_size,
         "drift": art.drift,
     }
+    if getattr(art, "skipped", None):
+        # The bounded unpack left members out (too large / past the budget): disclose it.
+        result.artifact_scan["skipped"] = art.skipped
 
     # Upgrade the coverage block: scan_depth=artifact + the real artifact digest +
     # a pinned registry snapshot date (Phase 0 recompute discipline).
@@ -3807,55 +6337,18 @@ async def _accurate_artifact_coord(
 async def _resolve_repo_package(
     owner: str, repo: str, tree: list[dict], token: str | None, ref: str | None,
 ) -> dict:
-    """Resolve the published (surface, registry-name) a repo maps to by READING its
-    root manifest — the accurate published name. Returns ``{}`` when the repo
-    publishes no recognizable package.
+    """Resolve the published package a repo maps to: the name its root manifest
+    declares, kept only when that package's registry entry points back at this repo.
+    Returns ``{}`` when the repo publishes no package we can tie to it.
 
-    Best-effort + fail-open: any fetch/parse error falls back to the repo name (which
-    npm/PyPI normalization usually accepts) or ``{}``."""
-    root_names = {Path(it["path"]).name.lower(): it["path"]
-                  for it in tree if "/" not in it["path"]}
-
-    async def _read(path: str) -> str | None:
-        try:
-            return await _fetch_file_content(owner, repo, path, token, ref)
-        except Exception:  # noqa: BLE001 — fail-open
-            return None
-
-    if "package.json" in root_names:
-        txt = await _read(root_names["package.json"])
-        if txt:
-            try:
-                name = (json.loads(txt) or {}).get("name")
-                if name and isinstance(name, str):
-                    return {"surface": "npm", "name": name}
-            except (ValueError, TypeError):
-                pass
-        return {"surface": "npm", "name": repo}
-
-    for mf in ("pyproject.toml", "setup.py", "setup.cfg"):
-        if mf in root_names:
-            txt = await _read(root_names[mf])
-            if txt:
-                # [project] name = "x" / [tool.poetry] name = "x" / setup(name="x").
-                m = re.search(r'(?mi)^\s*name\s*=\s*["\']([A-Za-z0-9][A-Za-z0-9._-]*)["\']', txt)
-                if m:
-                    return {"surface": "pypi", "name": m.group(1)}
-            return {"surface": "pypi", "name": repo}
-
-    if "cargo.toml" in root_names:
-        txt = await _read(root_names["cargo.toml"])
-        if txt:
-            # The [package] name — take the first name= after a [package] header.
-            m = re.search(
-                r'(?is)\[package\].*?^\s*name\s*=\s*["\']([A-Za-z0-9][A-Za-z0-9._-]*)["\']',
-                txt, re.MULTILINE,
-            )
-            if m:
-                return {"surface": "crates", "name": m.group(1)}
-        return {"surface": "crates", "name": repo}
-
-    return {}
+    Never guesses: a missing/unparseable manifest, a ``"private": true`` workspace
+    root, or a registry entry that names another repo (or none) all return ``{}``.
+    Fail-open on errors (returns ``{}``)."""
+    coord = await _accurate_artifact_coord(owner, repo, tree, token, ref)
+    if not coord:
+        return {}
+    surface, name, _version = coord
+    return await _verified_package_coordinate(owner, repo, surface, name)
 
 
 async def _maybe_verify_provenance(
@@ -3902,7 +6395,9 @@ async def _maybe_verify_provenance(
         dl = art.get("download_url")
         if dl:
             filename = Path(str(dl).split("?", 1)[0]).name
-    elif artifact and artifact[2]:
+    elif artifact and artifact[2] and await _package_points_back(
+        owner, repo, artifact[0], artifact[1],
+    ):
         ecosystem, name, version = artifact
 
     surface = {"npm": "npm", "pypi": "pypi"}.get((ecosystem or "").lower())
@@ -3974,6 +6469,22 @@ def _apply_provenance_result(result: ScanResult, res, claimed_repo: str | None) 
             linked["commit"] = prov_commit
         linked["binding"] = "slsa-provenance"
         result.coverage["linked_repo"] = linked
+
+
+def _bind_pypi_declared_repo(res, manifest: dict | None) -> None:
+    """PEP 740: compare the verified Trusted Publisher repo (from the signed cert SAN)
+    with the repo the project declares on PyPI. A match sets ``source_matches_claim``
+    (what Certified needs). A mismatch or no declaration leaves it unset: never a
+    penalty, just not certifiable."""
+    from src.scanner.provenance import normalize_repo
+
+    declared = normalize_repo((manifest or {}).get("declared_repository"))
+    bound = (getattr(res, "binding", None) or {}).get("repo")
+    if not (getattr(res, "verified", False) and declared and bound):
+        return
+    if res.source_matches_claim is None and bound == declared:
+        res.claimed_repo = declared
+        res.source_matches_claim = True
 
 
 def _repo_from_manifest(manifest: dict | None) -> str | None:
@@ -4135,11 +6646,14 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
         result.error = fetched.error or "artifact fetch failed"
         return result
 
-    apply_artifact_scan(result, eco, fetched)
+    # Unpacked-tree scanning is CPU-bound (a big wheel is seconds of regex work): run it
+    # off the event loop so other requests keep being served. No DB/session work here.
+    await asyncio.to_thread(apply_artifact_scan, result, eco, fetched)
 
     # Provenance verification on the exact coordinate — this is what makes A+
-    # reachable for a package that publishes Sigstore/PEP-740 provenance.
-    if getattr(settings, "scanner_verify_provenance", False):
+    # reachable for a package that publishes Sigstore/PEP-740 provenance. (Images:
+    # cosign signatures, checked in ``apply_docker_image_extras`` below.)
+    if getattr(settings, "scanner_verify_provenance", False) and eco != "docker":
         try:
             from src.scanner.provenance import analyze_provenance
 
@@ -4155,6 +6669,8 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
                 artifact_digest=fetched.digest,
                 scan_depth=SCAN_DEPTH_ARTIFACT,
             )
+            if eco == "pypi":
+                _bind_pypi_declared_repo(res, fetched.packaged_manifest)
             _apply_provenance_result(result, res, claimed_repo)
         except Exception:
             logger.warning(
@@ -4164,19 +6680,76 @@ async def scan_package(surface: str, name: str, version: str | None = None) -> S
     # OSV for the package itself: MAL- incident history (context only, never scored) and
     # its own published advisories — one that affects the scanned version IS a finding.
     # Fetched BEFORE scoring so those findings count. Fail-open.
+    _osv_checked = False
     try:
         from src.scanner.incident_history import fetch_incident_history
         _ver = (result.artifact_scan or {}).get("version") or version
         result.incident_history = await fetch_incident_history(surface, name, _ver)
+        _osv_checked = (result.incident_history or {}).get("checked") is True
         result.findings = result.findings + _own_advisory_findings(
             name, _ver, (result.incident_history or {}).get("advisories") or [])
     except Exception:
         pass
+    # An ecosystem OSV covers whose lookup did not complete: "no advisories" was not
+    # checked, so say so beside the answer (disclosure only, never scored).
+    try:
+        from src.scanner.incident_history import _OSV_ECOSYSTEM
+        if (surface or "").lower() in _OSV_ECOSYSTEM and not _osv_checked:
+            result.coverage_gaps = {**(result.coverage_gaps or {}),
+                                    "advisory_lookup": "failed"}
+    except Exception:  # noqa: BLE001 — disclosure must never break a scan
+        pass
+
+    if eco == "docker":
+        # The image's installed packages → OSV (fixable CVEs, dependency-class), its
+        # cosign signature/attestation → provenance, and what the layer walk read.
+        from src.scanner.docker_image import apply_docker_image_extras
+        await apply_docker_image_extras(result, fetched)
 
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
     result.certified = _certified_status(result)
     return result
+
+
+def _fold_fetch_gaps(gaps: dict, eco: str, fetched) -> None:
+    """Coverage gaps a fetcher reports beside its files (disclosure only):
+
+    - Hugging Face (``packaged_manifest["hf"]["coverage"]``): text files past the
+      40-file cap or the byte budget (``package_skipped``), text over 512 KB
+      (``oversized_files``), per-file download failures (``fetch_failed``), a tree
+      listing that failed (``tree_unavailable``), and the custom ``.py`` code among
+      them (``custom_code_unread``).
+    - Docker (``image["layers"]["layers_skipped"]``): layers the walk did not read
+      (``image_layers_unread`` + the most common reason).
+    """
+    try:
+        if eco == "huggingface":
+            hf = ((getattr(fetched, "packaged_manifest", None) or {}).get("hf") or {})
+            cov = hf.get("coverage") if isinstance(hf.get("coverage"), dict) else {}
+            for src, key in (("over_cap", "package_skipped"),
+                             ("oversized", "oversized_files"),
+                             ("fetch_failed", "fetch_failed"),
+                             ("custom_code_unread", "custom_code_unread")):
+                n = int(cov.get(src) or 0)
+                if n > 0:
+                    gaps[key] = int(gaps.get(key) or 0) + n
+            if cov.get("tree_unavailable") is True:
+                gaps["tree_unavailable"] = True
+        elif eco == "docker":
+            image = getattr(fetched, "image", None)
+            layers = (image or {}).get("layers") if isinstance(image, dict) else None
+            skipped = (layers or {}).get("layers_skipped") if isinstance(layers, dict) else None
+            rows = [r for r in (skipped or []) if isinstance(r, dict)
+                    and int(r.get("count") or 0) > 0]
+            n = sum(int(r["count"]) for r in rows)
+            if n > 0:
+                gaps["image_layers_unread"] = n
+                top = max(rows, key=lambda r: int(r["count"]))
+                if isinstance(top.get("reason"), str) and top["reason"].strip():
+                    gaps["image_layers_reason"] = top["reason"].strip()[:60]
+    except Exception:  # noqa: BLE001 — disclosure must never break a scan
+        logger.warning("coverage gap fold failed for %s", eco, exc_info=True)
 
 
 def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
@@ -4193,11 +6766,17 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     )
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
 
-    findings, files_scanned, has_hook = scan_artifact_files(fetched)
+    oversized: list[str] = []
+    findings, files_scanned, has_hook = scan_artifact_files(fetched, oversized_out=oversized)
+    # npm / PyPI: text that matches an attack pattern in detection data, a prebuilt web
+    # bundle or a non-tool prompt template is not the package running it (no-op for
+    # other ecosystems).
+    from src.scanner.package_context import calibrate_package_findings
+    findings = calibrate_package_findings(findings, fetched)
     if eco == "huggingface":
         findings = findings + huggingface_weight_findings(fetched)
     elif eco == "docker":
-        # No layer scan: the OCI config carries the graded signal (root/env/base).
+        # The OCI config's own signal (root/env/base) on top of the layer walk's files.
         findings = findings + docker_config_findings(fetched)
     if getattr(fetched, "deprecation", None):
         result.deprecation = fetched.deprecation
@@ -4206,6 +6785,42 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
     result.findings = findings
     result.files_scanned = files_scanned
     result.total_scannable_files = files_scanned
+    # A big artifact is read bounded: binaries / media / test data past the budget are
+    # skipped so the code still gets scanned. When any skipped member is one the engine
+    # would have read, the grade covers only part of the package: say so through the
+    # same disclosure a capped repo scan uses (sampled + the larger total; it is signed
+    # into the attestation and keeps the Certified full-coverage check from passing).
+    skipped = getattr(fetched, "skipped", None)
+    if skipped is not None and getattr(skipped, "scannable", 0) > 0:
+        result.sampled = True
+        result.total_scannable_files = files_scanned + skipped.scannable
+    # Coverage gaps (disclosure only; `sampled` above is unchanged): source files over
+    # the 500 KB read cap, kept or dropped at unpack, and members the bounded unpack
+    # skipped. Stated beside the answer so a partial read never reads as clean.
+    gaps: dict = {}
+    n_over = len(oversized) + int(getattr(skipped, "oversized_scannable", 0) or 0)
+    if n_over:
+        gaps["oversized_files"] = n_over
+    if skipped is not None and int(getattr(skipped, "scannable", 0) or 0) > 0:
+        gaps["package_skipped"] = int(skipped.scannable)
+    if eco != "docker":
+        # Files named as agent instructions over the read cap (SKILL.md, AGENTS.md,
+        # CLAUDE.md, mcp.json) are not read at all: ``oversized_agent_files`` (Review).
+        # Other agent text and OpenAPI specs over the cap are disclosed only. A container
+        # image's files are the base OS's.
+        big = [p for p, af in (fetched.files or {}).items()
+               if getattr(af, "text", None) and len(af.text) > _MAX_FILE_SIZE
+               and not _should_skip_path(p)]
+        agent_over = [p for p in big if is_oversized_agent_file(p)]
+        if agent_over:
+            gaps["oversized_agent_files"] = len(agent_over)
+        # Not source files, so not in ``oversized`` yet (CLAUDE.md, skills/x/notes.md).
+        extra = len({p for p in big if is_oversized_agent_file(p)
+                     or is_oversized_display_file(p)} - set(oversized))
+        if extra:
+            gaps["oversized_files"] = int(gaps.get("oversized_files") or 0) + extra
+    _fold_fetch_gaps(gaps, eco, fetched)
+    result.coverage_gaps = gaps
     # Declared-scope manifest shipped INSIDE the artifact (same file the repo scan reads
     # at the repo root). Fail-open: absent/malformed = no declaration. The behavioral
     # tier judges observed egress against these declared hosts.
@@ -4227,6 +6842,9 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         Path(p).name.lower().startswith(("license", "licence", "copying"))
         for p in fetched.files
     )
+    _hf = (fetched.packaged_manifest or {}).get("hf") if eco == "huggingface" else None
+    if isinstance(_hf, dict) and _hf.get("license"):
+        result.has_license = True  # HF declares it in the model card, not a LICENSE file
     result.artifact_scan = {
         "ok": True, "ecosystem": fetched.ecosystem, "name": fetched.name,
         "version": fetched.version, "kind": fetched.kind, "digest": fetched.digest,
@@ -4237,6 +6855,20 @@ def apply_artifact_scan(result: ScanResult, eco: str, fetched) -> None:
         "is_mcp_server": _looks_like_mcp_server(eco, fetched.name, fetched.packaged_manifest),
         "published_at": getattr(fetched, "published_at", None),
     }
+    if skipped is not None and getattr(skipped, "count", 0) > 0:
+        result.artifact_scan["skipped"] = skipped.summary()
+    if isinstance(_hf, dict):
+        from src.scanner.hf_facts import model_card_facts
+        result.artifact_scan["model_card"] = model_card_facts(_hf)
+    _repo_url = (fetched.packaged_manifest or {}).get("repository") \
+        if eco == "crates" else None
+    if isinstance(_repo_url, str) and _repo_url:
+        result.artifact_scan["repository"] = _repo_url[:300]
+    if eco == "crates" and (fetched.packaged_manifest or {}).get("license"):
+        result.has_license = True  # crates.io records the SPDX license per version
+    if result.artifact_scan["is_mcp_server"]:
+        from src.scanner.mcp_tool_list import static_tool_list
+        result.tool_list = static_tool_list(fetched.files)
     result.coverage = build_coverage(
         surface=eco,
         artifact_digest=fetched.digest,
@@ -4268,6 +6900,16 @@ def _own_advisory_findings(name: str, version: str | None, advisories: list[dict
     return out
 
 
+# The scan error for an MCP server that refuses ``initialize`` until the caller signs
+# in (HTTP 401, or any error with a ``WWW-Authenticate: Bearer`` challenge; a bare 403
+# keeps the generic error, since a WAF block is not sign-in). Passed through as the
+# public API's error detail; carries no "not found" so routers answer it 422, not 404.
+MCP_SIGNIN_REQUIRED_ERROR = (
+    "This MCP server requires sign-in (OAuth), so its tool list isn't public and "
+    "can't be scanned. Scan its source repo or package instead."
+)
+
+
 async def scan_mcp(endpoint_url: str) -> ScanResult:
     """Grade a LIVE MCP server by its endpoint URL (roadmap §2.D). Handshakes the
     server, enumerates its advertised ``tools/list`` (+ resources/prompts), and
@@ -4279,12 +6921,20 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     anchored). Fail-open: a handshake failure returns a ScanResult with ``.error``.
     """
     from src.scanner.coverage import SCAN_DEPTH_ARTIFACT_LIVE, build_coverage
-    from src.scanner.mcp_scan import analyze_mcp, compute_tool_digests, fetch_mcp_tools
+    from src.scanner.mcp_scan import (
+        MCP_FAILURE_AUTH_REQUIRED,
+        analyze_mcp,
+        compute_tool_digests,
+        fetch_mcp_tools,
+    )
 
     result = ScanResult(repo=f"mcp:{endpoint_url}", stars=0, description="", framework="")
     result.is_mcp_server = True
     data = await fetch_mcp_tools(endpoint_url)
     if not data:
+        if getattr(data, "reason", None) == MCP_FAILURE_AUTH_REQUIRED:
+            result.error = MCP_SIGNIN_REQUIRED_ERROR
+            return result
         result.error = (
             "Could not handshake the MCP server — check it's a reachable "
             "Streamable-HTTP endpoint (stdio/SSE-only servers aren't supported yet)."
@@ -4296,13 +6946,39 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
         resources=data.get("resources"),
         prompts=data.get("prompts"),
         server_info=data.get("server_info"),
+        server_url=endpoint_url,
     )
     result.findings = mcp.findings
+    # A server that serves agents different tools than it served the scanner: grade the
+    # agent's view too (its poisoning is what reaches an agent) and report the switch.
+    from src.scanner.mcp_scan import client_view_findings, oversize_findings
+    result.findings.extend(oversize_findings(data.get("lists_too_large")))
+    _view = data.get("client_view")
+    if _view and _view.get("differs"):
+        result.findings.extend(client_view_findings(_view, data.get("tools")))
+        _seen = {(f.name, f.file_path) for f in result.findings}
+        for f in analyze_mcp(_view.get("tools"), server_info=data.get("server_info"),
+                             server_url=endpoint_url).findings:
+            if (f.name, f.file_path) not in _seen:
+                result.findings.append(f)
     # Pin the served tool definitions, one digest per tool name. A later scan whose
     # digest differs proves the server changed what it serves (the rug-pull), and a
     # gate can bind an authorization to the named tool that was graded.
     result.tool_digests = compute_tool_digests(data.get("tools"))
     result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
+    # The observation of that read binds to the same catalog digest (TRACE #443).
+    _obs = data.get("observation")
+    if isinstance(_obs, dict):
+        result.mcp_observation = {**_obs, "toolManifestDigest": result.tool_manifest_digest}
+    # Icons are not in the signed digests (they stay agentavow.mcp-tool-definition.v1).
+    # Their own fingerprint is an unsigned watch signal: a changed icon alerts a watcher
+    # without touching the attestation. None when tools/list was not read.
+    from src.scanner.mcp_icons import compute_icon_fingerprint
+    result.icon_fingerprint = (
+        None if data.get("tools_list_failed")
+        else compute_icon_fingerprint(data.get("tools"), data.get("server_info")))
+    from src.scanner.mcp_tool_list import build_tool_list
+    result.tool_list = build_tool_list(data.get("tools"))
     result.files_scanned = mcp.tool_count
     result.total_scannable_files = mcp.tool_count
     result.primary_language = "MCP"
@@ -4324,6 +7000,26 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     result.coverage = build_coverage(
         surface="mcp", scan_depth=SCAN_DEPTH_ARTIFACT_LIVE, live_observed=True,
     )
+    # Coverage gaps: a tools/list that failed, or a paged tool list read only in part
+    # (``pages_read`` pages), is not the whole tool set; an advertised resources/ or
+    # prompts/list that could not be read (or was too large) leaves agent-facing text
+    # unread. Each of these reads Review (verdict.decide; Kenne 2026-10-20).
+    _gaps: dict = {}
+    if data.get("tools_list_failed"):
+        _gaps["tool_list_unread"] = True
+    if data.get("tools_more_pages"):
+        _gaps["tool_list_paged"] = True
+        _pages = data.get("tools_pages_read")
+        if isinstance(_pages, int) and not isinstance(_pages, bool) and _pages > 0:
+            _gaps["pages_read"] = _pages
+    _lists = {"resources/list": "resource", "prompts/list": "prompt"}
+    for _m in data.get("lists_unread") or ():
+        if _m in _lists:
+            _gaps[f"{_lists[_m]}_list_unread"] = True
+    for _m in data.get("lists_too_large") or ():
+        if _m in _lists:
+            _gaps[f"{_lists[_m]}_list_too_large"] = True
+    result.coverage_gaps = _gaps
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
     result.certified = _certified_status(result)
@@ -4357,38 +7053,93 @@ def _extract_skill_refs(text: str, skill_dir: str, blobs: list[str]) -> list[str
     return refs
 
 
-async def scan_skill(owner: str, repo: str) -> ScanResult:
+async def scan_skill(owner: str, repo: str, skill: str | None = None) -> ScanResult:
     """Grade an OpenClaw / Agent SKILL living in a GitHub repo (roadmap §2.D). Finds
     the SKILL.md, fetches the manifest + bundled scripts + lifecycle-hook files, and
     STATICALLY grades the capability surface — the auto-exec `allowed-tools` grant,
     always-loaded-description injection, lifecycle-hook escalation, and env-exfil in
-    scripts. ``coverage.surface = openclaw``, scan_depth = artifact. Fail-open."""
+    scripts. ``coverage.surface = openclaw``, scan_depth = artifact. Fail-open.
+
+    A repo can hold MANY skills (e.g. anthropics/skills). ``skill`` names one of them
+    by its directory (``skills/pdf``) or folder name (``pdf``) and grades only that
+    skill. Without it, a single-skill repo is graded as before; a multi-skill repo
+    grades EVERY skill (capped, see ``src.scanner.skill_collection``) and the repo's
+    result is the WORST skill's, with every skill's answer listed alongside."""
     from src.github_auth import get_github_token
-    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
-    from src.scanner.skill_scan import analyze_skill
+    from src.scanner.skill_collection import (
+        build_collection_result,
+        grade_skills,
+        real_skill_mds,
+        resolve_skill_md,
+    )
 
     result = ScanResult(repo=f"skill:{owner}/{repo}", stars=0, description="", framework="")
     try:
         token = await get_github_token()
-        tree, _trunc, repo_ok, ref = await _fetch_repo_tree(owner, repo, token)
+        tree_meta: dict = {}
+        tree, trunc, repo_ok, ref = await _fetch_repo_tree(owner, repo, token, tree_meta)
         if not repo_ok:
             result.error = "Repository not found or unreadable"
             return result
         blobs = [it["path"] for it in tree if it.get("type") == "blob"]
+        # Blobs over the read cap never enter ``blobs``; a skill that links one (or keeps
+        # one in its directory) is disclosed as not read (coverage gaps).
+        big = [str(it.get("path")) for it in (tree_meta.get("oversized") or [])
+               if isinstance(it, dict) and it.get("path")]
+        tree_info = {"oversized": big, "truncated": bool(trunc)}
         skill_mds = [p for p in blobs if p.lower().endswith("skill.md")]
         if not skill_mds:
             result.error = "No SKILL.md found — this repo isn't a recognizable Agent Skill."
             return result
 
-        # A repo can hold MANY skills (a monorepo). Grade the PRIMARY one — the
-        # shallowest SKILL.md — and scope the scripts/hooks to its own directory,
-        # so a big skills-collection doesn't blur into one grade. Skip template/
-        # example/test skeletons so we grade a REAL skill (keep them only if that's
-        # all there is).
-        import re as _re
-        _skel = _re.compile(r"(?:^|/)(template|example|sample|demo|starter|_?tests?)s?/", _re.I)
-        _real = [p for p in skill_mds if not _skel.search(p)]
-        skill_md_path = min(_real or skill_mds, key=lambda p: (p.count("/"), p.lower()))
+        if skill:
+            md = resolve_skill_md(skill_mds, skill)
+            if md is None:
+                result.error = f"Skill not found in this repo: {skill}"
+                return result
+            one = await _grade_skill_at(owner, repo, token, ref, blobs, md, tree_info)
+            sub = md.rsplit("/", 1)[0] if "/" in md else ""
+            if not one.error and sub:
+                one.repo = f"skill:{owner}/{repo}/{sub}"
+            return one
+
+        real = real_skill_mds(skill_mds)
+        if len(real) <= 1:
+            # One skill (or only template skeletons): grade the primary, as before.
+            primary = min(real or skill_mds, key=lambda p: (p.count("/"), p.lower()))
+            return await _grade_skill_at(owner, repo, token, ref, blobs, primary, tree_info)
+
+        graded, total = await grade_skills(
+            real, lambda md: _grade_skill_at(owner, repo, token, ref, blobs, md, tree_info))
+        if not graded:
+            result.error = "Could not grade any of this repo's skills."
+            return result
+        return build_collection_result(f"skill:{owner}/{repo}", graded, total)
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        result.error = f"skill scan failed: {exc}"
+        logger.warning("scan_skill failed for %s/%s", owner, repo, exc_info=True)
+    return result
+
+
+# A skill's SKILL.md plus at most this many referenced / in-directory files are read.
+_SKILL_MAX_FILES = 39
+
+
+async def _grade_skill_at(
+    owner: str, repo: str, token: str | None, ref: str | None, blobs: list[str],
+    skill_md_path: str, tree_info: dict | None = None,
+) -> ScanResult:
+    """Grade ONE skill: the SKILL.md at ``skill_md_path`` plus the scripts, hooks and
+    referenced files in its own directory. Fail-open (``.error`` on failure).
+
+    ``tree_info`` (``{"oversized": [paths over the read cap], "truncated": bool}``)
+    feeds the coverage gaps: files the skill links or keeps that were too large, past
+    the file cap or not fetched, and a partial tree, are disclosed, never silent."""
+    from src.scanner.coverage import SCAN_DEPTH_ARTIFACT, build_coverage
+    from src.scanner.skill_scan import analyze_skill
+
+    result = ScanResult(repo=f"skill:{owner}/{repo}", stars=0, description="", framework="")
+    try:
         skill_dir = skill_md_path.rsplit("/", 1)[0] if "/" in skill_md_path else ""
         script_ext = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
         hook_names = ("hooks.json", "plugin.json", ".mcp.json")
@@ -4411,13 +7162,47 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
         # is always scanned.
         referenced = _extract_skill_refs(skill_md_text, skill_dir, blobs)
         in_dir = [p for p in blobs if p != skill_md_path and _in_skill(p)]
-        ordered = list(dict.fromkeys(referenced + in_dir))[:39]  # dedup, referenced first
+        wanted = list(dict.fromkeys(referenced + in_dir))  # dedup, referenced first
+        ordered = wanted[:_SKILL_MAX_FILES]
 
         files: dict[str, str] = {skill_md_path: skill_md_text}
+        failed: list[str] = []
         for p in ordered:
             txt = await _fetch_file_content(owner, repo, p, token, ref)
             if txt is not None:
                 files[p] = txt
+            else:
+                failed.append(p)
+
+        # Coverage gaps (disclosure only): what the skill links or keeps that was not
+        # read. A linked file is what the agent is told to read, so it is also counted
+        # on its own (``skill_refs_unread``).
+        info = tree_info or {}
+        big = [p for p in (info.get("oversized") or []) if isinstance(p, str)]
+        big_refs = _extract_skill_refs(skill_md_text, skill_dir, big)
+        # A file NAMED as agent instructions (AGENTS.md, mcp.json, ...) in the skill's
+        # tree is a decision input wherever it sits; an unreferenced .md is display only.
+        agent_big = [p for p in big if is_oversized_agent_file(p)
+                     and (not skill_dir or p.startswith(skill_dir + "/"))]
+        big_in_skill = list(dict.fromkeys(
+            big_refs + agent_big + [p for p in big if p != skill_md_path and _in_skill(p)]))
+        past_cap = wanted[_SKILL_MAX_FILES:]
+        unread = set(failed) | set(past_cap)
+        sgaps: dict = {}
+        if big_in_skill:
+            sgaps["oversized_files"] = len(big_in_skill)
+        if agent_big:
+            sgaps["oversized_agent_files"] = len(agent_big)
+        if failed:
+            sgaps["fetch_failed"] = len(failed)
+        if past_cap:
+            sgaps["over_file_cap"] = len(past_cap)
+            sgaps["file_cap"] = _SKILL_MAX_FILES + 1  # SKILL.md + 39 files
+        n_refs = len([p for p in referenced if p in unread]) + len(big_refs)
+        if n_refs:
+            sgaps["skill_refs_unread"] = n_refs
+        if info.get("truncated") is True:
+            sgaps["tree_truncated"] = True
 
         skill = analyze_skill(files, skill_md_path=skill_md_path)
 
@@ -4434,6 +7219,7 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
         result.tool_manifest_digest = skill.tree_digest
         result.artifact_scan = {
             "surface": "openclaw", "skill_name": skill.skill_name,
+            "skill_path": skill_dir,
             "allowed_tools": skill.allowed_tools, "auto_exec_risk": skill.auto_exec_risk,
             "has_lifecycle_hooks": skill.has_lifecycle_hooks, "script_count": skill.script_count,
             "blast_radius": skill.blast_radius,
@@ -4442,12 +7228,14 @@ async def scan_skill(owner: str, repo: str) -> ScanResult:
         if skill.script_count == 0 and not skill.has_lifecycle_hooks and result.critical_count == 0:
             result.positive_signals.append("No bundled scripts or lifecycle hooks")
         result.coverage = build_coverage(surface="openclaw", scan_depth=SCAN_DEPTH_ARTIFACT)
+        result.coverage_gaps = {k: sgaps[k] for k in sorted(sgaps)}
         result.trust_score = _calculate_trust_score(result)
         result.category_scores = _calculate_category_scores(result)
         result.certified = _certified_status(result)
     except Exception as exc:  # noqa: BLE001 — fail-open
         result.error = f"skill scan failed: {exc}"
-        logger.warning("scan_skill failed for %s/%s", owner, repo, exc_info=True)
+        logger.warning("skill grade failed for %s/%s %s", owner, repo, skill_md_path,
+                       exc_info=True)
     return result
 
 
@@ -4591,6 +7379,49 @@ def _tidy_desc(s: str) -> str:
     """Trim trailing separators/dangling punctuation left by stripped markdown links
     (e.g. a leftover ' —' where '[text](url) —' was cut)."""
     return re.sub(r"[\s–—\-·|:;,]+$", "", s or "").strip()
+
+
+REPO_SELECTION_RULE = (
+    f"default branch; source files up to {_MAX_FILE_SIZE // 1000} KB; "
+    f"first {_MAX_FILES_PER_REPO} shipped-first"
+)
+
+
+def files_read_digest(text_hashes: dict[str, str]) -> str | None:
+    """``sha256:`` over the sorted ``path NUL sha256(text)`` lines of every file read —
+    a digest of exactly what a "nothing found" claim covers (None when nothing read)."""
+    if not text_hashes:
+        return None
+    h = hashlib.sha256()
+    for path in sorted(text_hashes):
+        h.update(f"{path}\0{text_hashes[path]}\n".encode())
+    return "sha256:" + h.hexdigest()
+
+
+def _finish_repo_coverage(
+    result: ScanResult, gaps: dict, tree_sha: str | None, text_hashes: dict[str, str],
+) -> None:
+    """Fold the repo scan's coverage gaps + read scope into the result. Disclosure only:
+    nothing here touches the score, ``sampled`` or the Certified checks."""
+    dep_unread = gaps.pop("_dep_unread", None) or set()
+    if dep_unread:
+        gaps["dependency_files_unread"] = len(dep_unread)
+    art = result.artifact_scan if isinstance(result.artifact_scan, dict) else {}
+    skipped = art.get("skipped") if isinstance(art.get("skipped"), dict) else {}
+    if int(skipped.get("scannable") or 0) > 0:
+        gaps["package_skipped"] = int(skipped["scannable"])
+    if int(skipped.get("oversized_scannable") or 0) > 0:
+        gaps["oversized_files"] = (int(gaps.get("oversized_files") or 0)
+                                   + int(skipped["oversized_scannable"]))
+    result.coverage_gaps = {k: gaps[k] for k in sorted(gaps)}
+    if not isinstance(result.coverage, dict):
+        result.coverage = {}
+    result.coverage["selection"] = REPO_SELECTION_RULE
+    if tree_sha:
+        result.coverage["tree_sha"] = tree_sha
+    digest = files_read_digest(text_hashes)
+    if digest:
+        result.coverage["files_read_digest"] = digest
 
 
 async def scan_repo(
@@ -4794,6 +7625,25 @@ async def scan_repo(
         )
         result.sampled = result.sampled or _sel_sampled
 
+        # Coverage gaps (disclosure only — never a score / decision input; `sampled`
+        # and Certified are untouched). Oversized blobs are counted only when the scan
+        # would have read them (same selection rule as the files it did read).
+        gaps: dict = {}
+        # Every source or agent-instruction blob over the read cap (not only the code
+        # files whose head and tail are read): an AGENTS.md or mcp.json padded past it
+        # is skipped whole, and that is the file an agent reads.
+        n_oversized, n_agent_over = _oversized_gap_counts(
+            _repo_meta.get("oversized") or [], user_excludes)
+        if n_oversized:
+            gaps["oversized_files"] = n_oversized
+        if n_agent_over:
+            gaps["oversized_agent_files"] = n_agent_over
+        if result.total_scannable_files > len(scan_files):
+            gaps["over_file_cap"] = result.total_scannable_files - len(scan_files)
+            gaps["file_cap"] = _MAX_FILES_PER_REPO
+        if tree_truncated:
+            gaps["tree_truncated"] = True
+
         # Load allowlist once for the whole scan
         allowlist = _load_allowlist()
 
@@ -4813,6 +7663,8 @@ async def scan_repo(
         # Phase 2: repo file content hashes (path -> sha256 of text), used to detect
         # repo↔artifact MODIFIED-file drift. Only populated for files we fetched.
         repo_text_hashes: dict[str, str] = {}
+        # Every fetched text, for npm_scripts.restore_externally_invoked below.
+        repo_texts: dict[str, str] = {}
 
         async def _scan_one(item: dict) -> tuple:
             """Fetch and scan a file.
@@ -4821,7 +7673,11 @@ async def scan_repo(
             ``scanned`` is True only when the file was actually fetched AND scanned —
             a failed fetch or empty file returns False so it does NOT inflate
             ``files_scanned`` (#7). ``text_hash`` is ``(path, sha256(text))`` for
-            Phase-2 drift comparison, or None.
+            Phase-2 drift comparison, or None. A seventh element, ``failed``, is True
+            when the fetch errored, timed out or returned nothing (not an empty file):
+            the file was selected but never read, which the coverage gaps disclose.
+            ``failed`` is the string ``"scan"`` when the file was read but the static
+            engine raised on it (``scan_errors``, not a fetch failure).
             """
             path = item["path"]
             try:
@@ -4831,15 +7687,21 @@ async def scan_repo(
                         timeout=per_file_timeout,
                     )
                 if not content:
-                    return [], [], 0, None, None, False
-                f, p, s = _scan_content(content, path, allowlist)
+                    return [], [], 0, None, None, False, content is None
+                try:
+                    f, p, s = _scan_content(content, path, allowlist)
+                except Exception:  # noqa: BLE001 — read, but the engine raised on it
+                    logger.warning("scan_repo: static engine raised on %s/%s:%s",
+                                   owner, repo, path, exc_info=True)
+                    return [], [], 0, None, None, False, "scan"
+                repo_texts[path] = content
                 text_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 return (
                     f, p, s, (path, _canonical_tool_digest(content, path)),
-                    (path, text_hash), True,
+                    (path, text_hash), True, False,
                 )
             except (asyncio.TimeoutError, Exception):
-                return [], [], 0, None, None, False
+                return [], [], 0, None, None, False, True
 
         tasks = [asyncio.ensure_future(_scan_one(item)) for item in scan_files]
         # Bound the phase: collect whatever finished within the budget, cancel the rest
@@ -4853,17 +7715,24 @@ async def scan_repo(
                 for t in pending:
                     t.cancel()
                 result.sampled = True
+                gaps["time_limit_unread"] = len(pending)
                 logger.warning(
                     "scan_repo file phase hit the %.0fs budget for %s/%s — %d/%d files (sampled)",
                     scan_phase_budget, owner, repo, len(done), len(tasks),
                 )
             scan_results = [t.result() for t in tasks if t in done and not t.cancelled()]
 
-        for findings_list, positives_list, suppressed, digest, text_hash, scanned in scan_results:
+        fetch_failed = scan_errors = 0
+        for (findings_list, positives_list, suppressed, digest, text_hash, scanned,
+             failed) in scan_results:
             # Only count files that were actually scanned (#7) — signed filesScanned
             # must reflect real coverage, not attempted fetches.
             if scanned:
                 result.files_scanned += 1
+            if failed == "scan":
+                scan_errors += 1
+            elif failed:
+                fetch_failed += 1
             result.findings.extend(findings_list)
             result.positive_signals.extend(positives_list)
             result.suppressed_count += suppressed
@@ -4871,6 +7740,46 @@ async def scan_repo(
                 result.tool_digests[digest[0]] = digest[1]
             if text_hash and text_hash[1]:
                 repo_text_hashes[text_hash[0]] = text_hash[1]
+        if fetch_failed:
+            gaps["fetch_failed"] = fetch_failed
+        if scan_errors:
+            gaps["scan_errors"] = scan_errors
+        npm_scripts.restore_externally_invoked(result.findings, repo_texts)
+        # A test-named file that is not test code (or that running code uses) is graded
+        # as shipped code.
+        result.findings = _regrade_misnamed_tests(
+            result.findings, repo_texts, allowlist,
+            paths=[it["path"] for it in tree if isinstance(it, dict) and it.get("path")])
+        # A printed install hint lowered per file holds only with the whole repo in view.
+        from src.scanner.package_context import recheck_printed_hints
+        recheck_printed_hints(result.findings, repo_texts)
+
+        # Oversized source files: scan head + tail and disclose (see _scan_oversized_text).
+        oversized = _oversized_scan_files(getattr(tree, "oversized", []), user_excludes)
+        if oversized:
+            result.sampled = True  # the middle of each file is not read
+
+            async def _scan_big(item: dict) -> list:
+                async with sem:
+                    head, tail = await asyncio.gather(
+                        _fetch_file_window(owner, repo, item["path"], ref, tail=False),
+                        _fetch_file_window(owner, repo, item["path"], ref, tail=True),
+                    )
+                return await asyncio.to_thread(
+                    _scan_oversized_text, head, tail, item["path"],
+                    int(item.get("size", 0)), allowlist,
+                )
+
+            big_tasks = [asyncio.ensure_future(_scan_big(it)) for it in oversized]
+            done_big, pending_big = await asyncio.wait(big_tasks, timeout=20.0)
+            for t in pending_big:
+                t.cancel()
+            for item, t in zip(oversized, big_tasks):
+                if t in done_big and not t.cancelled() and t.exception() is None:
+                    result.findings.extend(t.result())
+                else:
+                    result.findings.extend(_scan_oversized_text(
+                        None, None, item["path"], int(item.get("size", 0))))
 
         result.tool_manifest_digest = _compute_manifest_digest(result.tool_digests)
 
@@ -4881,6 +7790,7 @@ async def scan_repo(
             if Path(item["path"]).name.lower() in dep_file_names
             and not _should_skip_path(item["path"])
         ]
+        dep_unread: set[str] = gaps.setdefault("_dep_unread", set())
         for dep_item in dep_files[:10]:  # cap at 10 dep files
             try:
                 async with sem:
@@ -4890,13 +7800,15 @@ async def scan_repo(
                         ),
                         timeout=per_file_timeout,
                     )
+                if dep_content is None:
+                    dep_unread.add(dep_item["path"])
                 if dep_content:
                     dep_findings = _scan_dependencies(
                         dep_content, dep_item["path"],
                     )
                     result.findings.extend(dep_findings)
             except (asyncio.TimeoutError, Exception):
-                pass
+                dep_unread.add(dep_item["path"])
 
         # --- Phase 1: real supply-chain (OSV / deps.dev / Scorecard) ----------
         # Parse the repo's real lockfiles → OSV → severity-weighted CVE/GHSA/MAL
@@ -4905,7 +7817,7 @@ async def scan_repo(
         # above stand and the scan proceeds. Every DB date is pinned into the
         # coverage block so the subscore is offline-recomputable (Phase 0).
         await _run_supply_chain(
-            result, owner, repo, tree, token, ref, sem, per_file_timeout,
+            result, owner, repo, tree, token, ref, sem, per_file_timeout, gaps,
         )
 
         # --- Phase 2: published-artifact fetch + scan + repo↔artifact drift ----
@@ -4935,9 +7847,9 @@ async def scan_repo(
         try:
             art = result.artifact_scan if isinstance(result.artifact_scan, dict) else {}
             if art.get("ok") and art.get("name") and art.get("ecosystem") in ("npm", "pypi"):
-                result.package_coordinate = {
-                    "surface": art["ecosystem"], "name": art["name"],
-                }
+                result.package_coordinate = await _verified_package_coordinate(
+                    owner, repo, art["ecosystem"], art["name"],
+                )
             else:
                 result.package_coordinate = await _resolve_repo_package(
                     owner, repo, tree, token, ref,
@@ -4966,6 +7878,12 @@ async def scan_repo(
         # negatives apply a small BOUNDED penalty (never a false-F). Capped at ~5
         # extra API calls, reusing the token.
         await _maybe_maintainer_signals(result, owner, repo, token)
+
+        # --- Coverage scope + gaps (disclosure only; never scored) -------------
+        # A "nothing found" answer covers only what was read: pin WHAT was read (the
+        # git tree listed, the selection rule, a digest of the exact file texts read)
+        # and record what was selected but not read, so silence never reads as clean.
+        _finish_repo_coverage(result, gaps, _repo_meta.get("tree_sha"), repo_text_hashes)
 
         # Dedupe before scoring: a repo scan grades BOTH the repo tree and the (same)
         # published artifact source, so an identical detection at the same site was

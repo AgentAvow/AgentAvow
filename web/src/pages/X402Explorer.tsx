@@ -103,8 +103,8 @@ export default function X402Explorer() {
           </a>
           . The batch view below is the most recent scan pass; the rescan tool
           lets operators refresh their own endpoint's live surface on demand.
-          This is a surface check — not an attestation. Letter grades are
-          derived server-side and published at the operator's profile.
+          This is a surface check, not an attestation. Trust scores are
+          computed server-side and published at the operator's profile.
         </p>
       </header>
 

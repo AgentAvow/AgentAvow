@@ -22,9 +22,11 @@ from src.scanner.patterns import (
     DANGEROUS_ARGV0_NET,
     DANGEROUS_ARGV0_SHELLS,
     DANGEROUS_ARGV_FLAGS,
+    DECODE_SINK_RE,
     INLINE_CODE_DANGER_RE,
     INTERPRETER_ARGV0,
     SHELL_DANGER_RE,
+    SHELL_PAYLOAD_DANGER_RE,
 )
 
 CAP_SPAWN = "process:spawn"
@@ -35,6 +37,7 @@ CAP_FS_READ = "filesystem:read"
 CAP_FS_WRITE = "filesystem:write"
 CAP_PEM = "secret:pem_handling"
 CAP_HEX = "binary:hex_literal"
+CAP_INSTALLER = "install:remote_script"
 
 # Human labels for the capability taxonomy (the `capabilities` summary on a result).
 CAPABILITY_LABELS: dict[str, str] = {
@@ -46,9 +49,17 @@ CAPABILITY_LABELS: dict[str, str] = {
     CAP_FS_WRITE: "Writes files at runtime-chosen paths",
     CAP_PEM: "Handles PEM private-key markers (no key body present)",
     CAP_HEX: "Embeds long hex-escaped byte literals",
+    CAP_INSTALLER: "Ships a one-time installer script that downloads and runs a remote script",
+    # Browser credential handling (src/scanner/browser_credentials.py)
+    "browser:session_read": "Reads cookies / storage state from the browser it drives",
+    "browser:session_persist": "Saves browser session state (cookies / storage) to disk",
+    "browser:real_profile": "Can run the browser with your real browser profile (your "
+                            "logged-in sessions)",
 }
 
 _URL_RE = re.compile(r"https?://", re.IGNORECASE)
+_OSASCRIPT_DANGER_RE = re.compile(
+    r"do\s+shell\s+script|https?://|curl|wget|password|keychain|System Events", re.I)
 _PY_SHELL_FUNCS = frozenset({"system", "popen"})
 
 
@@ -61,6 +72,10 @@ class ExecVerdict:
     label: str                # one-line reason, shown as the finding's remediation hint
     capability: str = ""      # taxonomy tag when kind == "capability"
     consumed_lines: int = 1   # how many source lines the call spanned (>=1)
+    # Payload-shaped: the call downloads / decodes / runs inline code, or untrusted
+    # input reaches it. Graded at full severity even where the file is downgraded
+    # (a test dir shipped inside a published artifact); see ``_scan_content``.
+    payload: bool = False
 
 
 def _flow(untrusted_near: bool, untrusted_flow: bool | None) -> bool:
@@ -73,12 +88,129 @@ def _flow(untrusted_near: bool, untrusted_flow: bool | None) -> bool:
     return untrusted_near and untrusted_flow
 
 
-def _defect(severity: str, label: str, consumed: int = 1) -> ExecVerdict:
-    return ExecVerdict("defect", severity, label, "", consumed)
+def _defect(severity: str, label: str, consumed: int = 1, *,
+            payload: bool = False) -> ExecVerdict:
+    # A critical needs untrusted input reaching the call: always payload-shaped.
+    return ExecVerdict("defect", severity, label, "", consumed,
+                       payload=payload or severity == "critical")
 
 
 def _cap(severity: str, label: str, tag: str, consumed: int = 1) -> ExecVerdict:
     return ExecVerdict("capability", severity, label, tag, consumed)
+
+
+# ---------------------------------------------------------------------------
+# Shell severity ladder (precision PR 2)
+# ---------------------------------------------------------------------------
+# A shell command is a risk when something an attacker controls can reach it, or when
+# its own text downloads / decodes / runs inline code. A shell library, a test runner,
+# a REPL's `!cmd`, an editor launcher or a file watcher running a command line is the
+# tool doing its job. The ladder, for the standard shell APIs (`os.system`,
+# `shell=True`, `exec`/`execSync`, `spawn(..., {shell: true})`):
+#
+#   untrusted input REACHES the command (flow)              critical
+#   a decoded / fetched value builds the command            high
+#   the visible command text carries payload tokens         high
+#   untrusted input in the same file, no flow found         high
+#   otherwise (literal, or built from local values)         medium
+#
+# A medium is still a defect: it is reported and costs score, it just does not make the
+# answer "Review before you connect" on its own.
+
+# A dynamic part that is itself a decode / fetch expression is a payload, not a value.
+# Character-code assembly (`"".join(chr(c) for c in [...])`, `bytes([...]).decode()`,
+# `String.fromCharCode(...)`) is a decode: it hides the command text from a reader.
+ASSEMBLY_DECODE_RE = re.compile(
+    r"(?<![\w.])(?:chr|unichr)\s*\(|\bbytes\s*\(\s*[\[(]|\bbytearray\s*\("
+    r"|\bfromCharCode\s*\(|\bfromCodePoint\s*\(",
+)
+_PAYLOAD_EXPR_RE = re.compile(
+    DECODE_SINK_RE.pattern + r"|\bfetch\s*\(|urlopen|urlretrieve|requests\.|httpx\.|axios"
+    r"|https?\.get\s*\(|" + ASSEMBLY_DECODE_RE.pattern,
+)
+# Text obfuscation that hides a command from a reader the way a decode does:
+# percent-decoding (`decodeURIComponent`, `urllib.parse.unquote`), `unescape`, a
+# reversed character string, and code evaluated to produce the command
+# (`execSync(eval('"cu"+"rl …"'))`). Adversarial recall review of the constant-command
+# calibration (ledger #24). Used only for what builds an exec call.
+TEXT_DECODE_RE = re.compile(
+    r"\bdecodeURI(?:Component)?\s*\(|(?<![\w.$])unescape\s*\("
+    r"|\bunquote(?:_plus|_to_bytes)?\s*\(|\bJSON\.parse\s*\(\s*['\"`]"
+    # a Buffer decoded with an encoding the decode regex does not name (`base64url`, a
+    # variable): `Buffer.from(blob, enc).toString()`
+    r"|\bBuffer\.from\s*\([^()]*,\s*(?:['\"](?:base64url|latin1|binary|ucs2|utf16le)['\"]"
+    r"|[A-Za-z_$][\w$]*)\s*\)"
+    r"|\.\s*split\s*\(\s*(?:''|\"\"|``)\s*\)\s*\.\s*reverse\s*\("
+    r"|(?<![\w.$])eval\s*\(|\bFunction\s*\(",
+)
+# `rm -rf ` / `rm -r -f ` immediately followed by a runtime value: the deleted path is
+# not visible, so it can be `$HOME` (adversarial review of #160).
+_RM_RECURSIVE_TAIL_RE = re.compile(
+    r"""\brm\s+(?:-[\w-]+\s+)*-\w*[rR]\w*(?:\s+-[\w-]+)*\s*['"]?$""")
+
+
+# Inline interpreter code (`python -c`, `node -e`, a constant `exec("...")`) is
+# payload-shaped when its text carries shell payload tokens, or when it both decodes /
+# fetches and runs something. INLINE_CODE_DANGER_RE (pickle, ctypes, a bare import,
+# `requests.`) keeps such code a high defect; it is not on its own a payload
+# (`python -OO -c "import pickle; pickle.loads(pickle.dumps(x))"` in a test suite).
+_CODE_RUN_RE = re.compile(
+    r"\b(?:exec|eval|compile)\s*\(|\bFunction\s*\(|os\.system|os\.popen|subprocess"
+    r"|child_process|\bexecSync\s*\(|\bspawn(?:Sync)?\s*\(",
+)
+
+
+def inline_code_is_payload(code: str) -> bool:
+    """Does constant inline code download / decode AND run something (or carry shell
+    payload tokens)? The payload notion for ``Finding.payload`` (see scan.py)."""
+    if SHELL_PAYLOAD_DANGER_RE.search(code):
+        return True
+    return bool(_PAYLOAD_EXPR_RE.search(code) and _CODE_RUN_RE.search(code))
+
+
+def _literal_shell_verdict(how: str, text: str, consumed: int) -> ExecVerdict:
+    """A shell command whose text is fully visible."""
+    if SHELL_PAYLOAD_DANGER_RE.search(text):
+        return _defect("high", f"{how} runs a literal shell command with download/decode/"
+                       "inline-code tokens", consumed, payload=True)
+    return _defect("medium", f"{how} runs a literal shell command (no download, decode or "
+                   "inline-code tokens)", consumed)
+
+
+def _dynamic_shell_verdict(
+    how: str, consts: list[str], dyn: list[str], *, untrusted_near: bool,
+    untrusted_flow: bool | None, payload_flow: bool, consumed: int,
+) -> ExecVerdict:
+    """A shell command built at runtime: ``consts`` are the visible text pieces, ``dyn``
+    the source of each runtime part (an opaque variable is one ``dyn`` entry)."""
+    if _flow(untrusted_near, untrusted_flow):
+        return _defect("critical", f"{how} runs a shell command built from untrusted input",
+                       consumed)
+    if payload_flow or any(_PAYLOAD_EXPR_RE.search(d) or TEXT_DECODE_RE.search(d)
+                           or LITERAL_TRANSFORM_RE.match(d) for d in dyn):
+        return _defect("high", f"{how} runs a shell command built from a decoded or fetched "
+                       "value", consumed, payload=True)
+    if SHELL_PAYLOAD_DANGER_RE.search(" ".join(consts)):
+        return _defect("high", f"{how} runs a shell command with download/decode/inline-code "
+                       "tokens", consumed, payload=True)
+    if dyn and any(_RM_RECURSIVE_TAIL_RE.search(c) for c in consts):
+        return _defect("high", f"{how} recursively deletes a path chosen at runtime", consumed)
+    if untrusted_near:
+        return _defect("high", f"{how} runs a shell command built at runtime next to untrusted "
+                       "input", consumed)
+    return _defect("medium", f"{how} runs a shell command built at runtime (no untrusted "
+                   "input reaches it)", consumed)
+
+
+# A string CONSTANT rewritten at runtime before it runs (`'cuXrl … | sXh'.replace(/X/g,
+# '')`, `[...'hs | lruc'].reverse().join('')`, `'CURL …'.toLowerCase()`): the text a
+# reader sees is not the command. Programs do not build an ordinary command this way
+# (adversarial recall review, ledger #24).
+LITERAL_TRANSFORM_RE = re.compile(
+    r"""^\s*(?:(['"`])(?:\\.|(?!\1).)*\1|\[\s*\.\.\.\s*(['"`])(?:\\.|(?!\2).)*\2\s*\]"""
+    r"""|Array\.from\s*\(\s*(['"`])(?:\\.|(?!\3).)*\3\s*\))\s*\.\s*(?:replace|replaceAll|split"""
+    r"""|reverse|toLowerCase|toUpperCase|normalize|slice|substring|substr|repeat|padStart"""
+    r"""|padEnd|translate|swapcase|lower|upper|casefold)\b""", re.S)
 
 
 # ---------------------------------------------------------------------------
@@ -153,8 +285,13 @@ def extract_call(
 # ---------------------------------------------------------------------------
 
 def _parse_expr(src: str) -> ast.AST | None:
+    import warnings
+
     try:
-        return ast.parse(src.strip(), mode="eval").body
+        with warnings.catch_warnings():
+            # Third-party source with an invalid escape (`"\|"`) parses fine but warns.
+            warnings.simplefilter("ignore", SyntaxWarning)
+            return ast.parse(src.strip(), mode="eval").body
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return None
 
@@ -280,9 +417,23 @@ def classify_argv(
     consts = [e for e in elements if e is not None]
 
     if base is not None and base in DANGEROUS_ARGV0_SHELLS:
+        if not dynamic:
+            # Precision PR 2: every argv element is a constant, so the shell runs text a
+            # reviewer can read in place (`["powershell.exe", "-command",
+            # "Get-Clipboard"]`, `spawnSync('cmd.exe', ['/s', '/c', 'chcp'])`). Payload
+            # tokens keep it high. A runtime string handed to an explicit shell binary
+            # (`spawn('sh', ['-c', cmd])`, the dropper shape) is unchanged below.
+            return _literal_shell_verdict(f"spawns a shell ({base}) that", " ".join(consts[1:]),
+                                          consumed)
         sev = "critical" if (dynamic and flow) else "high"
         return _defect(sev, f"spawns a shell ({base}) — a shell string is evaluated", consumed)
-    if base is not None and base in DANGEROUS_ARGV0_NET:
+    if base is not None and base in DANGEROUS_ARGV0_NET and base != "osascript":
+        # osascript is also an interpreter: `osascript -e "<constant>"` is judged by the
+        # inline-code rule below (Pillow's clipboard read), `do shell script` stays high.
+        return _defect("high", f"spawns a downloader/decoder binary ({base})", consumed)
+    if base == "osascript" and (
+            dynamic or any(_OSASCRIPT_DANGER_RE.search(c) for c in consts)
+            or not any(e in DANGEROUS_ARGV_FLAGS for e in elements[1:])):
         return _defect("high", f"spawns a downloader/decoder binary ({base})", consumed)
     if base is not None and (base in INTERPRETER_ARGV0 or argv0 == "python"):
         for i, el in enumerate(elements[1:], 1):
@@ -296,7 +447,7 @@ def classify_argv(
                 if INLINE_CODE_DANGER_RE.search(code):
                     return _defect(
                         "high", f"inline interpreter eval ({base} {el}) of code that execs/"
-                        "decodes/fetches", consumed,
+                        "decodes/fetches", consumed, payload=inline_code_is_payload(code),
                     )
                 return _cap(
                     "low", f"runs a constant inline {base} snippet ({el})", CAP_SPAWN, consumed,
@@ -436,11 +587,123 @@ def _const_values(node: ast.AST | None) -> list[str] | None:
     return None
 
 
+def _unparse(node: ast.AST) -> str:
+    try:
+        return ast.unparse(node)
+    except Exception:  # noqa: BLE001 — unreadable: an opaque dynamic part
+        return "?"
+
+
+def _py_command_parts(node: ast.AST, resolve_name=None, _depth: int = 0,
+                      ) -> tuple[list[str], list[str]]:
+    """``(visible text pieces, sources of runtime parts)`` of a Python command
+    expression: an f-string's literal text vs its ``{…}`` fields, a ``+`` / ``%``
+    concatenation, ``"…".format(…)``, an argv list, or a name bound to one of those
+    earlier in the function. Anything else is one opaque runtime part."""
+    if _depth > 20:
+        return [], [_unparse(node)]
+    s = _const_str(node)
+    if s is not None:
+        return [s], []
+    if isinstance(node, ast.JoinedStr):
+        consts: list[str] = []
+        dyn: list[str] = []
+        for v in node.values:
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                consts.append(v.value)
+            elif isinstance(v, ast.FormattedValue):
+                dyn.append(_unparse(v.value))
+        return consts, dyn
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod)):
+        lc, ld = _py_command_parts(node.left, resolve_name, _depth + 1)
+        if isinstance(node.op, ast.Mod):
+            return lc, ld + [_unparse(node.right)]
+        rc, rd = _py_command_parts(node.right, resolve_name, _depth + 1)
+        return lc + rc, ld + rd
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "join" and _const_str(node.func.value) is not None
+            and node.args and isinstance(node.args[0], (ast.List, ast.Tuple))):
+        # `" ".join(["curl", "-s", host, "|", "sh"])`: the assembled text is visible;
+        # read it as the string it builds so the payload check sees `curl … | sh`
+        # (adversarial review of #160: assembly must never be quieter than the string).
+        sep = _const_str(node.func.value) or ""
+        consts, dyn, run = [], [], []
+        for el in node.args[0].elts:
+            s = _const_str(el)
+            if s is not None:
+                run.append(s)
+                continue
+            if run:
+                consts.append(sep.join(run))
+                run = []
+            c, d = _py_command_parts(el, resolve_name, _depth + 1)
+            consts += c
+            dyn += d
+        if run:
+            consts.append(sep.join(run))
+        return consts, dyn
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+            and node.func.attr == "format":
+        rc, rd = _py_command_parts(node.func.value, resolve_name, _depth + 1)
+        return rc, rd + [_unparse(a) for a in node.args] + \
+            [_unparse(k.value) for k in node.keywords]
+    if isinstance(node, (ast.List, ast.Tuple)):
+        consts, dyn = [], []
+        for el in node.elts:
+            c, d = _py_command_parts(el, resolve_name, _depth + 1)
+            consts += c
+            dyn += d
+        return consts, dyn
+    if isinstance(node, ast.Name) and resolve_name is not None and _depth < 4:
+        resolved = resolve_name(node.id)
+        if resolved is not None:
+            return _py_command_parts(resolved, resolve_name, _depth + 1)
+    return [], [_unparse(node)]
+
+
+def _is_const_join(node: ast.AST) -> bool:
+    """`"<sep>".join([<only string constants>])`."""
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "join" and _const_str(node.func.value) is not None
+            and len(node.args) == 1 and isinstance(node.args[0], (ast.List, ast.Tuple))
+            and all(_const_str(e) is not None for e in node.args[0].elts))
+
+
+def _visible_shell_parts_py(nodes: list[ast.AST], resolve_name=None,
+                            ) -> tuple[list[str], list[str]] | None:
+    """For the argv AFTER an explicit shell binary: ``(consts, dyn)`` when every element
+    is a constant or a VISIBLE template (f-string / concat / ``.format``) — the command
+    text a reviewer can read with holes for values. ``None`` when any element is an
+    opaque value (a bare name or call): an unseen string handed to a shell."""
+    consts: list[str] = []
+    dyn: list[str] = []
+    for el in nodes:
+        s = _const_str(el)
+        if s is not None:
+            consts.append(s)
+            continue
+        if isinstance(el, ast.Name) and resolve_name is not None:
+            vals = _const_values(resolve_name(el.id))
+            if vals and len(vals) == 1:
+                consts.append(vals[0])
+                continue
+        if _is_const_join(el) or (_is_dynamic_string(el) and not (
+                isinstance(el, ast.Call) and isinstance(el.func, ast.Attribute)
+                and el.func.attr in ("join", "replace"))):
+            c, d = _py_command_parts(el, resolve_name)
+            consts += c
+            dyn += d
+            continue
+        return None
+    return consts, dyn
+
+
 def _shell_verdict(arg: ast.AST | None, *, untrusted_near: bool, consumed: int,
-                   how: str, untrusted_flow: bool | None = None) -> ExecVerdict:
-    """A shell IS being invoked (os.system / shell=True / string command). A literal is
-    high (a reviewer should see a shell); a dynamic string next to untrusted input is
-    the command-injection critical."""
+                   how: str, untrusted_flow: bool | None = None,
+                   payload_flow: bool = False, resolve_name=None) -> ExecVerdict:
+    """A shell IS being invoked (os.system / shell=True / string command): the severity
+    ladder above. Untrusted input reaching a runtime-built command is the
+    command-injection critical."""
     s = _const_str(arg) if arg is not None else None
     if s is not None and not s.strip() and how.startswith("os."):
         # `os.system("")` — the well-known no-op that enables ANSI escape handling in a
@@ -448,24 +711,41 @@ def _shell_verdict(arg: ast.AST | None, *, untrusted_near: bool, consumed: int,
         return _cap("info", f"{how}(\"\") no-op (enables ANSI escapes on Windows)",
                     CAP_SPAWN, consumed)
     if s is not None:
-        if SHELL_DANGER_RE.search(s):
-            return _defect("high", f"{how} runs a literal shell command with pipe/subshell/"
-                           "download tokens", consumed)
-        return _defect("high", f"{how} runs a literal shell command", consumed)
-    sev = "critical" if _flow(untrusted_near, untrusted_flow) else "high"
-    return _defect(sev, f"{how} runs a shell command built at runtime", consumed)
+        return _literal_shell_verdict(how, s, consumed)
+    if arg is None:
+        consts, dyn = [], ["?"]
+    else:
+        consts, dyn = _py_command_parts(arg, resolve_name)
+        listed = arg
+        if isinstance(listed, ast.Name) and resolve_name is not None:
+            listed = resolve_name(listed.id) or listed
+        elements = _argv_nodes(listed)
+        if elements is not None and any(
+                _SHELL_METACHAR_RE.search(c) for c in
+                (_const_str(e) for e in elements) if c is not None):
+            # An argv LIST whose element is `;` / `|` / `> /etc/passwd`: the shell joins
+            # the list and runs a SECOND command hidden in what reads as one argv.
+            sev = "critical" if _flow(untrusted_near, untrusted_flow) else "high"
+            return _defect(sev, f"{how} with an argv element carrying shell metacharacters "
+                           "(a second command)", consumed)
+    if not dyn and not _flow(untrusted_near, untrusted_flow):
+        return _literal_shell_verdict(how, " ".join(consts), consumed)
+    return _dynamic_shell_verdict(how, consts, dyn or ["?"], untrusted_near=untrusted_near,
+                                  untrusted_flow=untrusted_flow, payload_flow=payload_flow,
+                                  consumed=consumed)
 
 
 def classify_python_exec(
     call_src: str, func_name: str, *, untrusted_near: bool,
     resolve_name=None, consumed: int = 1, cli_origin: bool = False,
-    untrusted_flow: bool | None = None,
+    untrusted_flow: bool | None = None, payload_flow: bool = False,
 ) -> ExecVerdict:
     """Classify one ``subprocess.*`` / ``os.system`` / ``os.popen`` call.
 
     ``resolve_name(name) -> ast.AST | None`` lets the caller look up ``cmd = [...]``
-    assigned earlier in the file. Parse failures fall back to a conservative regex
-    read (never silently to "capability")."""
+    assigned earlier in the file. ``payload_flow``: the caller saw a decoded value
+    reach the call. Parse failures fall back to a conservative regex read (never
+    silently to "capability")."""
     node = _parse_expr(call_src)
     if not isinstance(node, ast.Call):
         return _regex_fallback(call_src, untrusted_near=untrusted_near, consumed=consumed,
@@ -479,7 +759,8 @@ def classify_python_exec(
     if func_name in _PY_SHELL_FUNCS:
         return _shell_verdict(first, untrusted_near=untrusted_near,
                               untrusted_flow=untrusted_flow, consumed=consumed,
-                              how=f"os.{func_name}")
+                              how=f"os.{func_name}", payload_flow=payload_flow,
+                              resolve_name=resolve_name)
 
     shell = kw.get("shell")
     if shell is not None:
@@ -495,7 +776,8 @@ def classify_python_exec(
                 return calibrated
             return _shell_verdict(first, untrusted_near=untrusted_near,
                                   untrusted_flow=untrusted_flow, consumed=consumed,
-                                  how="shell=True")
+                                  how="shell=True", payload_flow=payload_flow,
+                                  resolve_name=resolve_name)
 
     if first is None:
         # `Popen(*args, **kwargs)` — a pass-through wrapper: the command is whatever
@@ -512,6 +794,81 @@ def classify_python_exec(
                 first = resolved
     if seq is not None:
         elements, dynamic = seq
+        if dynamic and resolve_name is not None:
+            # `[ps_script_var, ...]` / `["powershell.exe", "-command", ps_script]`: a name
+            # bound to ONE constant earlier in the function reads as that constant.
+            arg_node = first
+            if isinstance(arg_node, ast.Name):
+                arg_node = resolve_name(arg_node.id) or arg_node
+            raw = _argv_nodes(arg_node)
+            if raw is not None and len(raw) == len(elements):
+                elements = list(elements)
+                for i, el in enumerate(raw):
+                    if elements[i] is None and isinstance(el, ast.Name):
+                        vals = _const_values(resolve_name(el.id))
+                        if vals and len(vals) == 1 and not isinstance(
+                                resolve_name(el.id), (ast.List, ast.Tuple)):
+                            elements[i] = vals[0]
+                dynamic = any(e is None for e in elements)
+        if dynamic and elements and elements[0] is not None \
+                and _basename(elements[0]) in DANGEROUS_ARGV0_SHELLS:
+            # `("sh", "-c", ". {0} && npm install -g npm@{1}".format(...))`: an explicit
+            # shell with a VISIBLE command template reads like any shell string (the
+            # ladder). An opaque string (`["sh", "-c", cmd]`) stays high below.
+            arg_node = first
+            if isinstance(arg_node, ast.Name) and resolve_name is not None:
+                arg_node = resolve_name(arg_node.id) or arg_node
+            raw = _argv_nodes(arg_node)
+            vis = _visible_shell_parts_py(raw[1:], resolve_name) if raw else None
+            if vis is not None:
+                return _dynamic_shell_verdict(
+                    f"spawns a shell ({_basename(elements[0])}) that", vis[0], vis[1] or ["?"],
+                    untrusted_near=untrusted_near, untrusted_flow=untrusted_flow,
+                    payload_flow=payload_flow, consumed=consumed)
+        if dynamic and elements and elements[0] is not None and (
+                _basename(elements[0]) in INTERPRETER_ARGV0 or elements[0] == "python"):
+            # `[sys.executable, "-c", "import %s; %s.%s()" % (mod, mod, fn)]` (alembic's
+            # console-script hook): inline code from a VISIBLE template is judged on its
+            # text and reach, like a shell string. Opaque code (`["node", "-e", code]`)
+            # stays high in classify_argv.
+            arg_node = first
+            if isinstance(arg_node, ast.Name) and resolve_name is not None:
+                arg_node = resolve_name(arg_node.id) or arg_node
+            raw = _argv_nodes(arg_node)
+            if raw and len(raw) == len(elements):
+                for i, el in enumerate(elements[1:-1], 1):
+                    if el not in DANGEROUS_ARGV_FLAGS:
+                        continue
+                    code = raw[i + 1]
+                    # Elements AFTER the code are the snippet's sys.argv, not code.
+                    others_dynamic = any(e is None for e in elements[:i + 1])
+                    if elements[i + 1] is None and not others_dynamic and _is_const_join(code):
+                        # `";".join(["import x", "x.main()"])`: constant code, assembled.
+                        text = " ".join(_py_command_parts(code, resolve_name)[0])
+                        base = _basename(elements[0])
+                        if INLINE_CODE_DANGER_RE.search(text) or \
+                                SHELL_PAYLOAD_DANGER_RE.search(text):
+                            return _defect("high", f"inline interpreter eval ({base} {el}) of "
+                                           "code that execs/decodes/fetches", consumed,
+                                           payload=inline_code_is_payload(text))
+                        return _cap("low", f"runs a constant inline {base} snippet ({el})",
+                                    CAP_SPAWN, consumed)
+                    if elements[i + 1] is None and not others_dynamic and _is_dynamic_string(
+                            code) and not (isinstance(code, ast.Call)
+                                           and isinstance(code.func, ast.Attribute)
+                                           and code.func.attr in ("join", "replace")):
+                        consts, dyn = _py_command_parts(code, resolve_name)
+                        base = _basename(elements[0])
+                        if INLINE_CODE_DANGER_RE.search(" ".join(consts)):
+                            return _defect("high", f"inline interpreter eval ({base} {el}) of "
+                                           "code that execs/decodes/fetches", consumed,
+                                           payload=inline_code_is_payload(" ".join(consts)))
+                        return _dynamic_shell_verdict(
+                            f"inline {base} {el} code built from a template", consts,
+                            dyn or ["?"], untrusted_near=untrusted_near,
+                            untrusted_flow=untrusted_flow, payload_flow=payload_flow,
+                            consumed=consumed)
+                    break
         return classify_argv(elements, dynamic, untrusted_near=untrusted_near,
                              consumed=consumed, untrusted_flow=untrusted_flow)
 
@@ -525,9 +882,13 @@ def classify_python_exec(
         return classify_argv([s], False, untrusted_near=untrusted_near, consumed=consumed,
                              untrusted_flow=untrusted_flow)
     if _is_dynamic_string(first):
-        sev = "critical" if _flow(untrusted_near, untrusted_flow) else "high"
-        return _defect(sev, "command built from a dynamic string (f-string/concat/format)",
-                       consumed)
+        # Precision PR 2: same ladder as a shell string (without shell=True there is
+        # not even a shell; on Windows the string is one command line).
+        consts, dyn = _py_command_parts(first, resolve_name)
+        return _dynamic_shell_verdict(
+            "a command string (f-string/concat/format)", consts,
+            dyn or ["?"], untrusted_near=untrusted_near, untrusted_flow=untrusted_flow,
+            payload_flow=payload_flow, consumed=consumed)
     # Name / Call (shlex.split(...)) / Attribute / Subscript / BinOp(list + list) / …
     return classify_argv([None], True, untrusted_near=untrusted_near, consumed=consumed,
                              untrusted_flow=untrusted_flow)
@@ -598,13 +959,54 @@ def split_top_level_args(inner: str) -> list[str]:
 
 
 def _js_literal(arg: str) -> str | None:
-    """The text of a plain string literal (no interpolation), else None."""
+    """The text of a plain string literal (no interpolation), else None.
+
+    ``'cu' + 'rl x|s' + 'h'`` starts and ends with a quote but is a concatenation, not
+    one literal: the opening quote must close only at the very end (adversarial recall
+    review, ledger #24; it read as the text ``cu' + 'rl x|s' + 'h``)."""
     a = arg.strip()
-    if len(a) >= 2 and a[0] == a[-1] and a[0] in "\"'":
-        return a[1:-1]
-    if len(a) >= 2 and a[0] == a[-1] == "`" and "${" not in a:
-        return a[1:-1]
-    return None
+    if len(a) < 2 or a[0] != a[-1] or a[0] not in "\"'`":
+        return None
+    q = a[0]
+    escape = False
+    for i in range(1, len(a) - 1):
+        ch = a[i]
+        if escape:
+            escape = False
+        elif ch == "\\":
+            escape = True
+        elif ch == q:
+            return None
+        elif q == "`" and a.startswith("${", i):
+            return None
+    if escape:
+        return None  # the final quote is escaped: unterminated
+    return _js_unescape(a[1:-1])
+
+
+_JS_ESCAPE_RE = re.compile(r"\\(?:x([0-9A-Fa-f]{2})|u\{([0-9A-Fa-f]{1,6})\}|u([0-9A-Fa-f]{4})|(.))",
+                           re.S)
+_JS_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "b": "\b", "f": "\f",
+                      "v": "\v"}
+
+
+def _js_unescape(text: str) -> str:
+    """The runtime text of a JS string literal's body: ``'\\x63url'`` is ``curl`` (a
+    payload spelled in escapes is still that payload; recall review, ledger #24)."""
+    if "\\" not in text:
+        return text
+
+    def sub(m: re.Match) -> str:
+        hx = m.group(1) or m.group(2) or m.group(3)
+        if hx:
+            try:
+                return chr(int(hx, 16))
+            except (ValueError, OverflowError):
+                return m.group(0)
+        ch = m.group(4)
+        return _JS_SIMPLE_ESCAPES.get(ch, ch)
+
+    return _JS_ESCAPE_RE.sub(sub, text)
 
 
 def _js_array_elements(arg: str) -> tuple[list[str | None], bool] | None:
@@ -624,31 +1026,84 @@ def _js_array_elements(arg: str) -> tuple[list[str | None], bool] | None:
 _JS_INTERP_RE = re.compile(r"\$\{((?:[^{}]|\{[^{}]*\})*)\}")
 
 
-def _js_command_parts(arg: str) -> tuple[list[str], list[str]] | None:
+_JS_IDENT_RE = re.compile(r"^[A-Za-z_$][\w$]*$")
+
+
+def _js_const_text(expr: str, resolve=None, _depth: int = 0) -> str | None:
+    """The constant text of ``expr``: a string literal, a ``+`` chain / template made
+    only of constants, or a bare name ``resolve`` binds to one (``const C = 'cu' + 'rl
+    …'``). ``None`` when any part is a runtime value."""
+    lit = _js_literal(expr)
+    if lit is not None:
+        return lit
+    if _depth >= 4:
+        return None
+    a = expr.strip()
+    if resolve is not None and _JS_IDENT_RE.match(a):
+        rhs = resolve(a)
+        return _js_const_text(rhs, resolve, _depth + 1) if rhs else None
+    if a.startswith("(") and a.endswith(")") and len(split_top_level_plus(a)) == 1:
+        return _js_const_text(a[1:-1], resolve, _depth + 1)
+    parts = _js_command_parts(a, resolve, _depth + 1)
+    if parts is None or parts[1]:
+        return None
+    return "".join(parts[0])
+
+
+def _js_command_parts(arg: str, resolve=None,
+                      _depth: int = 0) -> tuple[list[str], list[str]] | None:
     """Split a JS shell-command argument into (constant text pieces, dynamic
     expressions): a template literal's text vs its ``${...}`` parts, or a ``+``
-    concatenation of string literals and expressions. ``None`` if unreadable."""
+    concatenation of string literals and expressions. ``None`` if unreadable.
+
+    Constants that sit next to each other are ONE piece: ``'cu' + 'rl x|s' + 'h'``
+    reads as ``curl x|sh``, so splitting a payload token across literals does not
+    hide it. A name ``resolve`` binds to constant text counts as that text (adversarial
+    recall review, ledger #24)."""
     a = arg.strip()
     if len(a) >= 2 and a[0] == a[-1] == "`":
         body = a[1:-1]
-        dyn = [m.group(1).strip() for m in _JS_INTERP_RE.finditer(body)]
-        return [_JS_INTERP_RE.sub(" ", body)], dyn
+        dyn: list[str] = []
+        # One text piece per stretch between `${…}` holes, so a piece that ENDS where a
+        # runtime value begins (`rm -rf ${dir}`) stays visible as such.
+        pieces: list[str] = []
+        cur = ""
+        last = 0
+        for m in _JS_INTERP_RE.finditer(body):
+            cur += body[last:m.start()]
+            last = m.end()
+            hole = m.group(1).strip()
+            const = _js_const_text(hole, resolve, _depth + 1)
+            if const is not None:
+                cur += const
+                continue
+            pieces.append(cur)
+            cur = ""
+            dyn.append(hole)
+        pieces.append(cur + body[last:])
+        return pieces, dyn
     pieces = split_top_level_plus(a)
     if len(pieces) < 2:
         return None
     consts: list[str] = []
-    dyn: list[str] = []
+    dyn = []
+    glue = False  # the previous piece was constant text: the next constant joins it
     for p in pieces:
-        lit = _js_literal(p)
-        if lit is not None:
-            consts.append(lit)
+        const = _js_const_text(p, resolve, _depth + 1)
+        if const is not None:
+            if glue:
+                consts[-1] += const
+            else:
+                consts.append(const)
+            glue = True
             continue
-        sub = _js_command_parts(p) if p.startswith("`") else None
+        sub = _js_command_parts(p, resolve, _depth + 1) if p.startswith("`") else None
         if sub is not None:
             consts += sub[0]
             dyn += sub[1]
         else:
             dyn.append(p)
+        glue = False
     return consts, dyn
 
 
@@ -716,36 +1171,154 @@ def _js_cli_calibration(arg: str, is_cli_expr, consumed: int) -> ExecVerdict | N
                    "environment (no untrusted input reaches it)", consumed)
 
 
+_JS_NAME_JOIN_RE = re.compile(r"""^([A-Za-z_$][\w$]*)\s*\.\s*join\s*\(""")
+_JS_ARRAY_JOIN_RE = re.compile(r"""^\[(.*)\]\s*\.\s*join\s*\(\s*(['"`])(.*?)\2\s*\)$""", re.S)
+
+
+def _js_parts(arg: str, resolve=None) -> tuple[list[str], list[str]]:
+    """Visible text pieces and runtime parts of one JS argument (a literal, a template,
+    a ``+`` concatenation, an array literal; anything else is one opaque part).
+    ``resolve`` (name -> assigned expression) reads a name bound to constant text."""
+    lit = _js_literal(arg)
+    if lit is not None:
+        return [lit], []
+    a = arg.strip()
+    if resolve is not None:
+        const = _js_const_text(a, resolve)
+        if const is not None:
+            return [const], []
+        if _JS_IDENT_RE.match(a):
+            rhs = resolve(a)
+            if rhs and _JS_IDENT_RE.match(rhs.strip()) is None:
+                # `const c = decodeURIComponent(...)`: the bound expression is the part.
+                c, d = _js_parts(rhs, None)
+                return c, d or [a]
+    if resolve is not None:
+        nm = _JS_NAME_JOIN_RE.match(a)
+        if nm:
+            rhs = (resolve(nm.group(1)) or "").strip()
+            if rhs.startswith("[") and rhs.endswith("]"):
+                # `const p = ['curl', u, '|', 'sh']; execSync(p.join(' '))`
+                a = rhs + a[nm.end(1):]
+    jm = _JS_ARRAY_JOIN_RE.match(a)
+    if jm:
+        # `['curl', '-s', host, '|', 'sh'].join(' ')`: read the text it assembles.
+        sep = jm.group(3)
+        consts: list[str] = []
+        dyn: list[str] = []
+        run: list[str] = []
+        for el in split_top_level_args(jm.group(1)):
+            lit = _js_literal(el)
+            if lit is not None:
+                run.append(lit)
+                continue
+            if run:
+                consts.append(sep.join(run))
+                run = []
+            c, d = _js_parts(el, resolve)
+            consts += c
+            dyn += d
+        if run:
+            consts.append(sep.join(run))
+        return consts, dyn
+    if a.startswith("[") and a.endswith("]"):
+        consts: list[str] = []
+        dyn: list[str] = []
+        for el in split_top_level_args(a[1:-1]):
+            c, d = _js_parts(el, resolve)
+            consts += c
+            dyn += d
+        return consts, dyn
+    parts = _js_command_parts(a, resolve)
+    if parts is not None:
+        return parts
+    return [], [a]
+
+
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
 def classify_js_exec(
     call_src: str, func_name: str, *, untrusted_near: bool, consumed: int = 1,
-    untrusted_flow: bool | None = None, is_cli_expr=None,
+    untrusted_flow: bool | None = None, is_cli_expr=None, payload_flow: bool = False,
+    resolve_name=None,
 ) -> ExecVerdict:
     """Classify a child_process call: ``exec``/``execSync`` always go through a shell;
     ``spawn``/``execFile``/``fork`` take an argv (plus an options object whose
-    ``shell: true`` turns it back into a shell)."""
+    ``shell: true`` turns it back into a shell).
+
+    ``resolve_name`` (name -> the expression last assigned to it above the call) lets a
+    command held in a name be read (``const C = 'curl … | sh'; execSync(C)``). A name
+    can be shadowed or reassigned where a regex cannot see, so the resolved reading may
+    only RAISE the verdict, never lower it (adversarial recall review, ledger #24)."""
+    kw = dict(untrusted_near=untrusted_near, consumed=consumed,
+              untrusted_flow=untrusted_flow, is_cli_expr=is_cli_expr,
+              payload_flow=payload_flow)
+    base = _classify_js_exec(call_src, func_name, resolve=None, **kw)
+    if resolve_name is None:
+        return base
+    seen = _classify_js_exec(call_src, func_name, resolve=resolve_name, **kw)
+    rank = _SEVERITY_RANK
+    if seen.kind == "defect" and (
+            base.kind != "defect" or rank[seen.severity] > rank[base.severity]):
+        return seen
+    return base
+
+
+def _classify_js_exec(
+    call_src: str, func_name: str, *, untrusted_near: bool, consumed: int,
+    untrusted_flow: bool | None, is_cli_expr, payload_flow: bool, resolve,
+) -> ExecVerdict:
     open_i = call_src.find("(")
     close_i = call_src.rfind(")")
     inner = call_src[open_i + 1: close_i] if 0 <= open_i < close_i else ""
     args = split_top_level_args(inner)
 
-    if func_name in _JS_SHELL_FUNCS:
+    # `exec('git', ['status'])` / `exec(cmd, [...args, ...files])` is an argv-taking
+    # wrapper (tinyexec, execa, a project helper), never child_process.exec, whose second
+    # parameter is an options object or a callback. Read it as a spawn (precision PR 2).
+    # The first argument must look like a PROGRAM, not a command line: a literal with a
+    # space (`exec('curl x | sh', ['pad'])`) is a shell string whatever follows it
+    # (adversarial recall review, ledger #24).
+    argv_wrapper = (func_name in _JS_SHELL_FUNCS and len(args) > 1
+                    and args[1].strip().startswith("["))
+    if argv_wrapper:
+        head = _js_literal(args[0])
+        if head is None and resolve is not None:
+            head = _js_const_text(args[0], resolve)
+        if head is not None and re.search(r"\s", head.strip()):
+            argv_wrapper = False
+
+    if func_name in _JS_SHELL_FUNCS and not argv_wrapper:
         lit = _js_literal(args[0]) if args else None
         if lit is not None:
-            if SHELL_DANGER_RE.search(lit):
-                return _defect("high", f"{func_name} runs a literal shell command with "
-                               "pipe/subshell/download tokens", consumed)
-            return _defect("high", f"{func_name} runs a literal shell command", consumed)
+            return _literal_shell_verdict(func_name, lit, consumed)
         flow = _flow(untrusted_near, untrusted_flow)
         if not flow and args:
             cal = _js_cli_calibration(args[0], is_cli_expr, consumed)
             if cal is not None:
                 return cal
-        sev = "critical" if flow else "high"
-        return _defect(sev, f"{func_name} runs a shell command built at runtime", consumed)
+        consts, dyn = _js_parts(args[0], resolve) if args else ([], ["?"])
+        return _dynamic_shell_verdict(func_name, consts, dyn or ["?"],
+                                      untrusted_near=untrusted_near,
+                                      untrusted_flow=untrusted_flow,
+                                      payload_flow=payload_flow, consumed=consumed)
 
     if re.search(r"\bshell\s*:\s*(?:true|['\"][^'\"]+['\"])", inner):
-        sev = "critical" if _flow(untrusted_near, untrusted_flow) else "high"
-        return _defect(sev, f"{func_name} with shell: true", consumed)
+        consts, dyn = [], []
+        for a in args:
+            if a.strip().startswith("{"):
+                continue  # the options object
+            c, d = _js_parts(a, resolve)
+            consts += c
+            dyn += d
+        how = f"{func_name} with shell: true"
+        if not dyn and not _flow(untrusted_near, untrusted_flow):
+            return _literal_shell_verdict(how, " ".join(consts), consumed)
+        return _dynamic_shell_verdict(how, consts, dyn or ["?"],
+                                      untrusted_near=untrusted_near,
+                                      untrusted_flow=untrusted_flow,
+                                      payload_flow=payload_flow, consumed=consumed)
 
     if func_name == "fork":
         lit = _js_literal(args[0]) if args else None
@@ -761,14 +1334,68 @@ def classify_js_exec(
                              consumed=consumed, untrusted_flow=untrusted_flow)
 
     argv0 = _js_literal(args[0]) if args else None
+    if argv0 is None and args and resolve is not None:
+        # Resolve-only (it can only RAISE the verdict, see classify_js_exec): the running
+        # Node binary is `node`, so `-e`/`-p` code is inline code; a name bound to a
+        # constant program is that program (`const s = 'bash'; execFileSync(s, …)`).
+        a0 = args[0].strip()
+        if re.fullmatch(r"process\s*\.\s*execPath|process\s*\.\s*argv\s*\[\s*0\s*\]", a0):
+            argv0 = "node"
+        else:
+            argv0 = _js_const_text(a0, resolve)
     elements = [argv0]
     dynamic = argv0 is None
     if len(args) > 1:
         arr = _js_array_elements(args[1])
+        if arr is not None and resolve is not None and arr[1]:
+            # Read each element that is a name / concatenation of constants in this file
+            # (rollup: `spawnSync(process.execPath, ['-p', script])` with `script` a
+            # constant probe). Anything still unreadable keeps the argv dynamic.
+            a1 = args[1].strip()
+            vals = [_js_const_text(el, resolve) for el in split_top_level_args(a1[1:-1])]
+            arr = (vals, any(v is None for v in vals))
+            if (not arr[1] and argv0 is not None and _basename(argv0) == "node"
+                    and len(vals) >= 2 and vals[0] in ("-e", "-p", "--eval", "--print")):
+                # Inline code assembled from constants in this file: what decides is
+                # whether that code is a payload (downloads / decodes AND runs, or shell
+                # payload tokens), not that it calls `require` (rollup's report probe).
+                if inline_code_is_payload(vals[1]):
+                    return _defect("high", f"{func_name} runs inline node code assembled "
+                                   "from constants that downloads / decodes and runs",
+                                   consumed, payload=True)
+                return _cap("low", "runs a constant inline node snippet assembled in this "
+                            "file", "process:spawn", consumed)
         if arr is not None:
             elements += arr[0]
             dynamic = dynamic or arr[1]
         elif not args[1].strip().startswith("{"):
             dynamic = True
+    if dynamic and argv0 is not None and _basename(argv0) in DANGEROUS_ARGV0_SHELLS \
+            and len(args) > 1 and args[1].strip().startswith("["):
+        # `spawnSync('cmd.exe', ['/s', '/c', `chcp ${codepage}`])`: an explicit shell with
+        # a VISIBLE command template reads like any shell string (the ladder). An opaque
+        # string (`spawn('sh', ['-c', cmd])`, the dropper shape) stays high below.
+        consts: list[str] = []
+        dyn: list[str] = []
+        visible = True
+        a1 = args[1].strip()
+        for el in split_top_level_args(a1[1:-1]):
+            lit = _js_literal(el)
+            if lit is not None:
+                consts.append(lit)
+                continue
+            e = el.strip()
+            parts = _js_command_parts(e, resolve) if (e.startswith("`") or "+" in e) \
+                else None
+            if parts is None:
+                visible = False
+                break
+            consts += parts[0]
+            dyn += parts[1]
+        if visible:
+            return _dynamic_shell_verdict(
+                f"{func_name} of a shell ({_basename(argv0)}) that", consts, dyn or ["?"],
+                untrusted_near=untrusted_near, untrusted_flow=untrusted_flow,
+                payload_flow=payload_flow, consumed=consumed)
     return classify_argv(elements, dynamic, untrusted_near=untrusted_near, consumed=consumed,
                          untrusted_flow=untrusted_flow)

@@ -8,6 +8,7 @@
 // the JWK is pinned in the file (kid-matched to the JWS header).
 import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { instantNanoseconds } from './time.mjs';
 
 const file = process.argv[2] ?? new URL('./tool-manifest-digest-v1-vectors.json', import.meta.url);
 const set = JSON.parse(readFileSync(file, 'utf8'));
@@ -56,8 +57,9 @@ function axes(vec) {
   const signed = payload.scan?.toolDigests?.[toolKey(vec.gate.tool_name)];
   const tool_binds = typeof signed === 'string';
   const tool_digest_binds = tool_binds ? signed === vec.gate.observed_tool_digest : 'not_evaluated';
-  const t = Date.parse(vec.gate.evaluation_time);
-  const fresh = t >= Date.parse(payload.issuedAt) && t < Date.parse(payload.expiresAt);
+  // Compare exact instants through nanoseconds; unsupported timestamps refuse.
+  const t = instantNanoseconds(vec.gate.evaluation_time);
+  const fresh = t >= instantNanoseconds(payload.issuedAt) && t < instantNanoseconds(payload.expiresAt);
   const rely = signature_valid && canonical_bytes && subject_binds && tool_binds
     && tool_digest_binds === true && fresh;
   return { signature_valid, canonical_bytes, subject_binds, tool_binds, tool_digest_binds, fresh, rely };
@@ -111,6 +113,12 @@ check('a grade for one server cannot be re-attached to another', byName['wrong-s
 check('a signed verdict does not verify forever', byName['past-expiry'].fresh, 'false');
 check('canonical form is not authenticity: tampered payload is canonical yet unsigned',
   byName['tampered-payload'].canonical_bytes && !byName['tampered-payload'].signature_valid, 'true');
+// boundary-fresh is part of the pinned set; other vector files run through this verifier
+// (nanosecond-window-vectors.json) carry their own boundary cases instead.
+if (byName['boundary-fresh']) check('a gate time inside the window by a sub-millisecond remainder is fresh and relies',
+  byName['boundary-fresh'].fresh && byName['boundary-fresh'].rely, 'true');
+else if (file === undefined || String(file).endsWith('tool-manifest-digest-v1-vectors.json'))
+  check('the pinned set carries boundary-fresh', 'missing', 'present');
 check('every negative fails exactly one axis',
   ['unknown-tool', 'tool-drift', 'wrong-subject', 'past-expiry', 'tampered-payload']
     .every(n => Object.entries(byName[n]).filter(([k, v]) => k !== 'rely' && v === false).length === 1), 'true');

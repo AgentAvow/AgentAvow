@@ -1,4 +1,4 @@
-# Gate on the score
+# Gate on the answer
 
 A score you don't act on is trivia. AgentAvow is built so a **machine** can read the answer and decide — block a risky tool, throttle an unproven one, or wave a Certified one through — in CI and at your agent's runtime. Every path below reads the same signed result you can recompute offline.
 
@@ -12,7 +12,7 @@ Every result leads with one of three answers, in `decision`, with the reason in 
 | `review` | Review before you connect | require approval, or allow with limits |
 | `do_not_connect` | Do not connect | deny |
 
-**Do not connect** means a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a high finding (code or sandbox), a published advisory on this version, a deprecated package, or a score under 51. A clean scan of very little code reads **Safe to connect**, and its reason says so. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer (`certified.eligible`), never instead of it.
+**Do not connect** means a critical finding, a planted credential leaving the sandbox, a critical sandbox finding, or a known-malicious package or dependency. **Review before you connect** means a high finding (code or sandbox), a published advisory on this version, a deprecated package, or a score under 51. A clean scan of very little code reads **Safe to connect**, and its reason says so. Adoption is never an input. `decision_final: false` means the sandbox is still running and the answer may still move to Review. The full rule is in [How scoring works](./how-grading-works.md#the-answer-three-phrases). Certified rides beside the answer, never instead of it: read `certified_mark`, which is true only beside Safe to connect (a final sandbox result, a score of 81 or more, enough code inspected). `certified.eligible` alone can sit beside Review, so don't gate on it.
 
 ## What the score tells a machine to do
 
@@ -67,11 +67,11 @@ if (r.decision === 'review') await confirmWithUser(`Review before you connect: $
 
 For a package or a live MCP server, call the scan endpoints under **Gate anything** below; the response shape is the same.
 
-Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway`) enforces a policy server-side when you'd rather not embed the logic.
+Framework bridges ship in `sdk/bridges/` (LangChain, CrewAI, AutoGen, Pydantic AI) so the pre-flight check drops into an existing agent, and the **trust gateway** (`/api/v1/gateway/check`) enforces a policy server-side when you'd rather not embed the logic: it denies a Do not connect tool whatever its tier, takes the same `fail_on` (`do_not_connect` by default, or `review`), and keeps `min_tier` as an extra floor.
 
 ### LangChain
 
-A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before a tool runs it fetches the server's signed grade, allows the call when the score clears the floor (81, Trusted) with no critical/high finding, and checks the definition the agent was served against the per-tool digest in the attestation — so a tool that was redefined after it was graded is stopped, not run. A block comes back to the model as a tool message that says why, leading with the tool's answer and its reason ("Do not connect (one critical finding: …) · 40/100, tier minimal"); nothing raises. The result also carries `decision`.
+A one-line middleware gates **every tool call** in a LangChain 1.x agent. Before a tool runs it fetches the server's signed result, allows the call when the answer is Safe to connect (and the score clears the floor, 51 by default, with no critical/high finding), and checks the definition the agent was served against the per-tool digest in the attestation — so a tool that was redefined after it was graded is stopped, not run. A block comes back to the model as a tool message that says why, leading with the tool's answer and its reason ("Do not connect (one critical finding: …) · 40/100, tier minimal"); nothing raises. The result also carries `decision`.
 
 ```python
 from langchain.agents import create_agent
@@ -79,13 +79,14 @@ from src.bridges.langchain.middleware import AgentAvowGate   # from the AgentAvo
 
 gate = AgentAvowGate(
     servers={"deepwiki": "https://mcp.deepwiki.com/mcp"},    # or tool_to_server={tool: server}
-    min_score=81,                                             # Trusted floor
+    fail_on="review",                                         # default: stop Review and Do not connect;
+                                                              # "do_not_connect" lets Review through
     on_fail="block",                                          # or "confirm" | "warn" | "raise"
 )
 agent = create_agent(model, tools=mcp_tools, middleware=[gate])
 ```
 
-The mapping is yours to give — a LangChain tool doesn't carry its server's URL — by tool name (`tool_to_server`), by server name (`servers`, matched to `MCPAdapter`'s server name or a `<server>_` tool-name prefix), or a `resolve_server` callable. Tools that map to no server (your own functions) are not gated. `on_fail="confirm"` pauses the graph with a LangGraph interrupt until you resume with `"approve"`; `fail_closed=False` lets a call through, with a warning, when AgentAvow itself can't answer.
+The mapping is yours to give — a LangChain tool doesn't carry its server's URL — by tool name (`tool_to_server`), by server name (`servers`, matched to `MCPAdapter`'s server name or a `<server>_` tool-name prefix), or a `resolve_server` callable. Tools that map to no server (your own functions) are not gated. `min_score=81` holds the stricter Trusted floor. `on_fail="confirm"` pauses the graph with a LangGraph interrupt until you resume with `"approve"`; `fail_closed=False` lets a call through, with a warning, when AgentAvow itself can't answer.
 
 ### Google ADK
 
@@ -99,7 +100,7 @@ from src.bridges.google_adk import AgentAvowToolGate            # from the Agent
 agent = LlmAgent(
     name="assistant", model="gemini-2.5-flash",
     tools=[McpToolset(connection_params=StreamableHTTPConnectionParams(url=SERVER_URL))],
-    before_tool_callback=AgentAvowToolGate(min_score=81, on_fail="block"),
+    before_tool_callback=AgentAvowToolGate(fail_on="review", on_fail="block"),
 )
 ```
 
@@ -107,7 +108,7 @@ A stdio server has no URL — give it a coordinate with `tool_to_server={"tool":
 
 ### Vercel AI SDK
 
-`wrapTools` from `agentavow-trust/vercel-ai` runs the same gate as the Flue adapter below: one policy object, the three answers, the attestation verified against AgentAvow's public JWKS by default, and a tool whose definition changed since it was graded blocked by default. It wraps each tool's `execute`, because the SDK's `onToolExecutionStart` callback can watch a call but can't stop it. A tool that is not allowed returns `{ error, agentavow }` as its output: `error` leads with the answer ("Do not connect — 'send_email' was not run. …", with "· Certified" beside the answer when the tool carries the mark) and `agentavow` is the decision. `onReview: 'confirm'` sets `needsApproval`, so `generateText`, `streamText` and `ToolLoopAgent` pause for the user on a Review before you connect answer through the SDK's own approval flow. Do not connect is never put to the user.
+`wrapTools` from `agentavow-trust/vercel-ai` runs the same gate as the Flue adapter below: one policy object, the three answers, the attestation verified against AgentAvow's public JWKS by default, and a tool whose definition changed since it was scanned blocked by default. It wraps each tool's `execute`, because the SDK's `onToolExecutionStart` callback can watch a call but can't stop it. A tool that is not allowed returns `{ error, agentavow }` as its output: `error` leads with the answer ("Do not connect — 'send_email' was not run. …", with "· Certified" beside the answer when the tool carries the mark) and `agentavow` is the decision. `onReview: 'confirm'` sets `needsApproval`, so `generateText`, `streamText` and `ToolLoopAgent` pause for the user on a Review before you connect answer through the SDK's own approval flow. Do not connect is never put to the user.
 
 ```ts
 import { createMCPClient } from '@ai-sdk/mcp'
@@ -121,7 +122,7 @@ const tools = wrapTools(mcp.toolsFromDefinitions(listing), {
   servedTools: listing,   // the exact definitions, for the drift check
   allowFloor: 51,         // trust score that is safe without review (81 is strict)
   onReview: 'confirm',    // or 'block' | 'warn'
-  onDrift: 'block',       // a tool whose definition changed since it was graded
+  onDrift: 'block',       // a tool whose definition changed since it was scanned
 })
 const { text } = await generateText({ model, tools, prompt })
 ```
@@ -140,7 +141,7 @@ import { createFlueGate } from 'agentavow-trust/flue'
 export const gate = createFlueGate({
   allowFloor: 51,        // trust score that is safe without review (81 is strict)
   onReview: 'block',     // or 'warn' | 'confirm'
-  onDrift: 'block',      // a tool whose definition changed since it was graded
+  onDrift: 'block',      // a tool whose definition changed since it was scanned
   onApiError: 'block',   // fail closed when AgentAvow cannot answer
 })
 instrument(gate.instrumentation())
@@ -165,6 +166,105 @@ export function Assistant() {
 
 The gate verifies the EdDSA attestation against AgentAvow's public JWKS and decides on the signed fields; it needs only `fetch` and WebCrypto, so it runs on Flue's Node and Cloudflare Workers targets. `onReview: 'confirm'` takes a `confirm` hook of yours, since Flue has no built-in approval pause. The same core, `agentavow-trust/gate`, works without Flue: `createGate(policy).check(target)` and `checkToolCall({ server, toolName, servedDefinition })`.
 
+### Claude Agent SDK
+
+For an agent built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), `agentavow-trust/claude-agent-sdk` (TypeScript) and `src/bridges/claude_agent_sdk` (Python) put the check at two points: before the session starts, and before every MCP tool call.
+
+```ts
+import { query } from '@anthropic-ai/claude-agent-sdk'
+import { createClaudeAgentGate } from 'agentavow-trust/claude-agent-sdk'
+
+const gate = createClaudeAgentGate({ onReview: 'confirm' })   // or 'block' | 'warn'
+const { servers, disallowedTools, refused } = await gate.mcpServers({
+  deepwiki: { type: 'http', url: 'https://mcp.deepwiki.com/mcp' },
+})
+for await (const m of query({ prompt, options: { mcpServers: servers, disallowedTools, hooks: gate.hooks() } })) {
+  // …
+}
+```
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions, query
+from src.bridges.claude_agent_sdk import AgentAvowClaudeGate     # from the AgentAvow repo; not on PyPI yet
+
+gate = AgentAvowClaudeGate(fail_on="review", on_fail="block")    # or on_fail="confirm" | "warn" | "raise"
+servers = await gate.check_mcp_servers({"deepwiki": {"type": "http", "url": "https://mcp.deepwiki.com/mcp"}})
+options = ClaudeAgentOptions(mcp_servers=servers, hooks=gate.hooks())
+```
+
+`mcpServers` (`check_mcp_servers` in Python) reads each server's signed result and leaves out the ones whose answer fails your policy, so the session never connects to them. For an https server the TypeScript gate also reads the server's own `tools/list` and lists any tool whose definition changed since it was graded in `disallowedTools`. `hooks()` adds a `PreToolUse` hook for every `mcp__<server>__<tool>` call: it re-checks the call (the cached result plus the definition check) and, when the call is not allowed, returns `permissionDecision: "deny"` with the reason, which the model gets as the tool result. A `PreToolUse` deny holds in every permission mode, including `bypassPermissions`, which is why the gate uses a hook rather than `canUseTool` (auto-approved tools never reach `canUseTool`; `gate.canUseTool` is there if your code already routes approvals through it). Review before you connect with `onReview: 'confirm'` returns `permissionDecision: "ask"`, the SDK's own approval flow. A stdio server has no URL: give it a coordinate (`coordinates: { fs: 'npm:@scope/server' }`, `servers={...}` in Python) and it's graded as a package. Tools that aren't `mcp__…` (Bash, Edit, your own SDK tools) are not gated.
+
+### OpenAI Agents SDK
+
+For an agent built on the [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/), `agentavow-trust/openai-agents` (TypeScript) and `src/bridges/openai_agents` (Python) wrap an MCP server object, so the same server you pass to `Agent({ mcpServers })` carries the check.
+
+```ts
+import { Agent, run, MCPServerStreamableHttp } from '@openai/agents'
+import { createOpenAIAgentsGate } from 'agentavow-trust/openai-agents'
+
+const gate = createOpenAIAgentsGate({ onReview: 'block' })
+const { servers, refused } = await gate.connectAll([
+  new MCPServerStreamableHttp({ name: 'deepwiki', url: 'https://mcp.deepwiki.com/mcp' }),
+])
+const agent = new Agent({ name: 'Assistant', instructions: '…', mcpServers: servers })
+```
+
+```python
+from agents import Agent, Runner
+from agents.mcp import MCPServerStreamableHttp
+from src.bridges.openai_agents import AgentAvowMCPGate          # from the AgentAvow repo; not on PyPI yet
+
+gate = AgentAvowMCPGate(fail_on="review")
+async with gate.wrap(MCPServerStreamableHttp(name="deepwiki",
+                                             params={"url": "https://mcp.deepwiki.com/mcp"})) as server:
+    result = await Runner.run(Agent(name="Assistant", mcp_servers=[server]), prompt)
+```
+
+`gate.wrap(server)` wraps three methods on that server. `connect()` reads the server's signed result first and refuses the connection (a `GateError`, `ToolGateBlockedError` in Python) when the answer fails your policy; `connectAll` / `connect_all` connects the servers that pass and returns the rest as `refused`, so the agent starts without them. `listTools()` checks each served definition against the per-tool digest in the attestation and drops a tool that changed since it was graded, so the model never sees it. `callTool()` re-checks each call; a call that is not allowed never reaches the server, and the model gets the reason (TypeScript throws, which the SDK's `errorFunction` turns into model-visible text; Python returns an MCP error result). A stdio server needs a coordinate (`gate.wrap(server, 'npm:@scope/server')`, `servers={...}` in Python). `onReview: 'confirm'` needs a `confirm` hook of yours, since MCP server tools have no SDK approval pause.
+
+### Open Policy Agent
+
+If your gateway, sidecar or service mesh already asks [OPA](https://www.openpolicyagent.org/) for decisions, the AgentAvow policy (`integrations/opa/` in the repository) answers "may this agent connect to this server, or call this tool?" from the server's signed result. It refuses Do not connect (or Review too, with `fail_on: "review"`), and when you pass the served definition's digest it refuses a tool that changed since the scan or that the scan never saw.
+
+```bash
+opa run --server integrations/opa/policy
+curl -s localhost:8181/v1/data/agentavow/authz/result \
+  -d '{"input": {"server": "https://mcp.deepwiki.com/mcp", "tool": "read_wiki_structure", "tool_digest": "sha256:…"}}'
+```
+
+`server` takes an MCP endpoint URL, `npm:`/`pypi:`/`crates:`/`docker:`/`huggingface:` package, or `owner/repo`. OPA caches each answer for an hour (`cache_seconds`); `fail_closed` (default on) refuses when AgentAvow can't answer. The repository includes an Envoy `ext_authz` example that puts the check in front of MCP traffic and reads the tool name from each JSON-RPC `tools/call`.
+
+### LiteLLM proxy
+
+For agents that reach MCP servers through [LiteLLM](https://docs.litellm.ai/)'s MCP gateway, the AgentAvow guardrail (`integrations/litellm/` and `src/bridges/litellm`) runs on every MCP tool call (`mode: pre_mcp_call`) and refuses one whose server reads Do not connect, or whose tool definition changed since the scan:
+
+```yaml
+guardrails:
+  - guardrail_name: agentavow
+    litellm_params:
+      guardrail: agentavow_guardrail.AgentAvowGuardrail
+      mode: pre_mcp_call
+      default_on: true
+      fail_on: do_not_connect          # or: review
+      servers:                         # stdio servers: grade them as their package
+        local_files: "npm:@modelcontextprotocol/server-filesystem"
+```
+
+https servers are graded by the URL in your `mcp_servers` config. A refused call returns to the caller as an MCP tool error with the reason, so the model sees why and the run continues. `on_fail: warn` logs instead of refusing. Tested with `litellm[proxy]` 1.105.
+
+### Where each integration stands
+
+| Integration | Status |
+|---|---|
+| Claude Code plugin (session-start check, install check, per-call gate) | Shipped; listed in the Claude plugin directory |
+| MCP connector (`https://agentavow.com/mcp`) | Shipped; works in any MCP client |
+| ChatGPT app | In OpenAI review |
+| npm `agentavow-trust`: core gate, Vercel AI SDK, Flue, Claude Agent SDK, OpenAI Agents SDK | Shipped (0.4.1) |
+| LangChain, Google ADK, Claude Agent SDK and OpenAI Agents SDK gates (Python) | In this repository (`src/bridges/`); not on PyPI yet |
+| GitHub Action, local CLI, GitLab CI component, Bitbucket Pipe, Azure Pipelines template | Shipped |
+| Open Policy Agent policy (with an Envoy `ext_authz` example) | In this repository (`integrations/opa/`) |
+| LiteLLM proxy guardrail (MCP gateway) | In this repository (`integrations/litellm/`, `src/bridges/litellm`); not on PyPI yet |
+
 ## Gate anything (the API)
 
 Every surface is one auth-free GET, returning the score, tier, findings, the signed `coverage{}` block, and the JWS attestation:
@@ -182,6 +282,8 @@ Read `decision` / `decision_reason` to decide (`trust_score` / `trust_tier` unde
 ## Catch the rug-pull after you've shipped
 
 A one-time gate misses the tool that was clean when you adopted it and turned malicious in v2. **Watch** a tool and AgentAvow re-scans it on a schedule and sends an **HMAC-signed webhook** when its score drops by more than 5 points **or its signed tool definition changes** (`tool_manifest_digest` drift — the silent redefinition you'd otherwise miss). Wire the webhook to Slack or your CI to pull a now-unsafe tool automatically.
+
+To see it end to end, run the [rug-pull demo](https://github.com/AgentAvow/AgentAvow/tree/main/demos/rugpull): an MCP server that was clean on approval day redefines its `send_email` tool, the ungated agent leaks the message, and the gated agent refuses the call before anything is sent.
 
 Definition-change alerts cover GitHub repos, OpenClaw skills and live MCP servers, where the scan pins the tool definitions. For a live MCP server the digest is per tool name, taken from the `tools/list` the server actually serves. npm and PyPI package watches alert on score only.
 
@@ -206,6 +308,7 @@ The body is JSON with a `type` that says what happened:
 
 - `agentavow.alert.grade_change` — `{type, owner, repo, old_score, new_score, reason, decision, decision_final, decision_reason, certified}`, where `reason` is `score dropped` or `signed definition changed` and `decision` is the tool's answer now.
 - `agentavow.alert.behavioral_change` — a later [sandbox run](./behavioral-sandbox.md) added findings, leaked a canary or reached a new undeclared host. Carries the run's current state rather than a diff: `findings[]` (`rule`, `severity`, `name`), `unexpected_egress[]`, `canary_exfil[]`, `tools_exercised[]`, `plan`, `score`, the `package` the sandbox exercised, and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
+- `agentavow.alert.icon_change` — a watched MCP server now serves different `icons` on its tools or in its `serverInfo`. Icons are not part of the signed tool definition, so this is separate from `signed definition changed` and the grade and attestation are not what moved. Carries `{type, event, owner, repo, surface, score, reason, old_icon_fingerprint, new_icon_fingerprint, icon_findings[]}` (`severity`, `name`, `where` for the icon findings of the new scan) and the tool's answer now (`decision`, `decision_final`, `decision_reason`, `certified`).
 - `agentavow.alert.test` — what `POST …/test` sends, shaped like a grade change with a `message`.
 
 Verify before you act on an alert:
@@ -226,6 +329,6 @@ Reject a delivery whose timestamp is more than a few minutes old. Rotating the s
 
 1. **CI:** the GitHub Action blocks a merge on **Do not connect** (or on Review, if you choose).
 2. **Runtime:** your gate refuses a tool that reads **Do not connect**, asks a person on **Review before you connect**, and throttles the ones it admits by tier.
-3. **Ongoing:** a watch alerts you — and can auto-revoke — when a tool you already trust regresses or redefines itself.
+3. **Ongoing:** a watch alerts you (wire the signed webhook to pull the tool) when a tool you already trust regresses or redefines itself.
 
 Same answer, on the same signed score, enforced at every layer, recomputable by anyone.

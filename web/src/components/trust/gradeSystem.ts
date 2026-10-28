@@ -163,7 +163,7 @@ export interface DecisionPhrase {
 export const DECISIONS: readonly DecisionPhrase[] = [
   { value: 'safe', phrase: 'Safe to connect', label: 'Safe', color: '#22C55E', colorText: '#15803D' },
   { value: 'review', phrase: 'Review before you connect', label: 'Review', color: '#F59E0B', colorText: '#B45309' },
-  { value: 'do_not_connect', phrase: 'Do not connect', label: 'Blocked', color: '#EF4444', colorText: '#B91C1C' },
+  { value: 'do_not_connect', phrase: 'Do not connect', label: "Don't connect", color: '#EF4444', colorText: '#B91C1C' },
 ]
 
 export const REVIEW_PHRASE = 'Review before you connect'
@@ -178,9 +178,36 @@ export interface Decision {
 export const REVIEW_SCORE_FLOOR = 51
 export const THIN_COVERAGE_FILES = 8
 export const PENDING_SUFFIX = '; sandbox still running'
+/** Pending because every sandbox slot is busy (`behavioral.state === 'queued'`). */
+export const QUEUED_SUFFIX = '; waiting for a sandbox slot'
 export const THIN_REASON = 'nothing found; little code to inspect'
+/** Thin coverage at zero files: the package was read and held no code to scan. */
+export const THIN_REASON_NO_CODE = 'nothing found; no code to inspect'
+// An unread MCP tool list reads Review (Kenne, 10-20); twin of TOOL_LIST_UNREAD_REASON.
+export const TOOL_LIST_UNREAD_REASON = "the server's tool list could not be read"
+// A tool list read only in part reads Review too; twin of TOOL_LIST_PAGED_REASON.
+export const TOOL_LIST_PAGED_REASON = "only part of the server's tool list could be read"
+// An advertised resources/ or prompts/list that could not be read (or was too large)
+// reads Review; twins of the verdict.py constants of the same names.
+export const RESOURCE_LIST_UNREAD_REASON = "the server's resource list could not be read"
+export const PROMPT_LIST_UNREAD_REASON = "the server's prompt list could not be read"
+export const RESOURCE_PROMPT_LISTS_UNREAD_REASON = "the server's resource and prompt lists could not be read"
+// The other things we exist to read (partial-coverage audit, 10-20); twins of the
+// *_UNREAD_REASON constants in src/scanner/verdict.py.
+export const CODE_UNREAD_REASON = 'the scan could not read the code'
+export const AGENT_FILE_UNREAD_REASON = 'an agent instruction file was too large to read'
+export const SKILL_REF_UNREAD_REASON = "a file the skill's instructions use could not be read"
+export const CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
+
+// A hardcoded credential shipped in a tool (category `secret`) exposes the vendor whose
+// key leaked, not the person installing it: on its own it caps at Review, never Do not
+// connect (Kenne, 2026-10-19). Twin of SECRET_* in src/scanner/verdict.py.
+export const SECRET_CATEGORY = 'secret'
+const secretReason = (n: number, where: string): string => (n === 1
+  ? `a hardcoded credential${where} (it exposes the vendor's key, not yours)`
+  : `${n} hardcoded credentials${where} (they expose the vendor's keys, not yours)`)
 
 const BEHAVIORAL_LABELS: Record<string, string> = {
   behavioral_undeclared_egress: 'undeclared network call',
@@ -194,6 +221,33 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const asObj = (v: unknown): Obj => (isObj(v) ? v : {})
 const asList = (v: unknown): Obj[] => (Array.isArray(v) ? v.filter(isObj) : [])
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v)
+
+// A loose sort key for release strings ("1.10.0" > "1.9.2"), as verdict.py _version_key.
+function versionKey(v: string): [number, string][] {
+  return v.replace(/^v+/, '').split('.').map((p) => {
+    const num = p.replace(/\D/g, '')
+    return [num ? parseInt(num, 10) : 0, p] as [number, string]
+  })
+}
+
+function compareKeys(a: [number, string][], b: [number, string][]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i][0] !== b[i][0]) return a[i][0] - b[i][0]
+    if (a[i][1] !== b[i][1]) return a[i][1] < b[i][1] ? -1 : 1
+  }
+  return a.length - b.length
+}
+
+// The release that fixes ALL the listed advisories = the highest fixed_in (first wins a tie).
+function highestFix(advisories: Obj[]): string | null {
+  let best: string | null = null
+  for (const a of advisories) {
+    if (!a.fixed_in) continue
+    const f = String(a.fixed_in)
+    if (best === null || compareKeys(versionKey(f), versionKey(best)) > 0) best = f
+  }
+  return best
+}
 
 function toInt(v: unknown): number {
   if (typeof v === 'boolean') return v ? 1 : 0
@@ -236,9 +290,151 @@ function isBlockingItem(i: Obj): boolean {
   return i.shipped !== false
 }
 
-function countPhrase(n: number, severity: string, label: string | null): string {
-  if (n === 1) return `one ${severity} finding` + (label ? `: ${label}` : '')
-  return `${n} ${severity} findings` + (label ? `, including ${label}` : '')
+// Where the leading finding sits (wording only). Twin of `finding_where` in
+// src/scanner/verdict.py: path rules only, byte-identical output.
+const AGENT_FILE_NAMES = new Set([
+  'skill.md', 'agents.md', 'agent.md', 'claude.md', 'gemini.md', 'copilot-instructions.md',
+  '.cursorrules', '.windsurfrules', '.clinerules', 'llms.txt', 'llms-full.txt',
+  'mcp.json', '.mcp.json', 'server.json', 'ai-plugin.json', 'manifest.json',
+  'plugin.json', 'marketplace.json', 'tools.json', 'smithery.yaml', 'smithery.yml',
+  'agents.yaml', 'agents.yml', 'tasks.yaml', 'tasks.yml',
+])
+const AGENT_DIRS = new Set([
+  'skills', 'skill', '.claude', '.claude-plugin', '.cursor', '.windsurf', '.agents',
+  '.codex', '.gemini', 'agents', 'prompts', 'instructions', 'commands',
+])
+const TEXT_EXTS = ['.md', '.mdc', '.txt', '.yaml', '.yml', '.json', '.toml']
+const DATA_EXTS = ['.yaml', '.yml', '.json', '.jsonl', '.toml', '.xml', '.txt', '.csv', '.tsv']
+const EXECUTED_DATA_NAMES = new Set([
+  'package.json', 'pyproject.toml', 'setup.cfg', 'docker-compose.yml',
+  'docker-compose.yaml', 'compose.yml', 'compose.yaml', 'action.yml', 'action.yaml',
+  '.gitlab-ci.yml', '.travis.yml', 'azure-pipelines.yml', '.pre-commit-config.yaml',
+])
+const CI_DIRS = new Set(['.github', '.gitlab', '.circleci', '.buildkite', 'workflows'])
+
+export function findingWhere(i: Obj): string {
+  if (i.category === 'install_hook') return ' in its install script'
+  if (i.category === 'dependency') return ' in a dependency'
+  const path = String(i.file_path ?? '').replace(/\\/g, '/').toLowerCase()
+  if (['tool:', 'prompt:', 'resource:', 'server:'].some((p) => path.startsWith(p))) {
+    return ' in its tool definitions'
+  }
+  const parts = path.split('/').filter((p) => p)
+  const name = parts.length ? parts[parts.length - 1] : ''
+  // A deciding finding in package.json sits in its scripts: a maintainer-only script
+  // is low and never decides, so what is left runs from an install lifecycle script.
+  if (name === 'package.json') return ' in its install script'
+  if (AGENT_FILE_NAMES.has(name) || name.endsWith('.mdc') || (
+    TEXT_EXTS.some((e) => name.endsWith(e))
+    && (name.startsWith('readme') || parts.slice(0, -1).some((p) => AGENT_DIRS.has(p))))) {
+    return ' in instructions it gives agents'
+  }
+  if (DATA_EXTS.some((e) => name.endsWith(e)) && !EXECUTED_DATA_NAMES.has(name)
+    && !parts.slice(0, -1).some((p) => CI_DIRS.has(p))) {
+    return ' in a data file it ships'
+  }
+  return ' in its code'
+}
+
+function countPhrase(n: number, severity: string, label: string | null, where = ''): string {
+  if (n === 1) return `one ${severity} finding${where}` + (label ? `: ${label}` : '')
+  return `${n} ${severity} findings${where}` + (label ? `, including ${label}` : '')
+}
+
+// A vulnerable-dependency finding: counted in the totals, never a decision input (a
+// known-malicious one is).
+const isDependencyAdvisory = (i: Obj) =>
+  i.category === 'dependency' && i.kind !== 'capability' && !isMaliciousItem(i)
+
+/** [critical, high] dependency advisories as the totals count them: the larger of the
+ * listed items and the scored supply-chain counts (the item list is capped). */
+function dependencyCounts(data: Obj, items: Obj[]): [number, number] {
+  const sevOf = (i: Obj) => String(i.severity ?? '').toLowerCase()
+  let crit = items.filter((i) => isDependencyAdvisory(i) && sevOf(i) === 'critical').length
+  let high = items.filter((i) => isDependencyAdvisory(i) && sevOf(i) === 'high').length
+  const sc = asObj(data.supply_chain)
+  if (sc.scored === true && isObj(sc.counts)) {
+    crit = Math.max(crit, toInt(sc.counts.critical))
+    high = Math.max(high, toInt(sc.counts.high))
+  }
+  return [crit, high]
+}
+
+function dependencyPhrase(crit: number, high: number): string {
+  const parts: string[] = []
+  if (crit > 0) parts.push(`${crit} critical`)
+  if (high > 0) parts.push(`${high} high`)
+  return parts.join(' and ')
+}
+
+// What the scan could not check (wording only). Twin of `coverage_gap_notes` /
+// `coverage_gap_suffix` in src/scanner/verdict.py: byte-identical output. A Safe reason
+// ends with these; nothing here changes the decision or the score.
+export const COVERAGE_GAP_REASON_MAX = 2
+const DEFAULT_FILE_CAP = 200
+const fmtInt = (n: number) => n.toLocaleString('en-US')
+const filesPhrase = (n: number, noun = 'file') => `${fmtInt(n)} ${noun}${n === 1 ? '' : 's'}`
+const was = (n: number) => (n === 1 ? 'was' : 'were')
+
+/** Plain-English notes for what the scan could not check (`coverage_gaps`). */
+export function coverageGapNotes(input: unknown): string[] {
+  const g = asObj(asObj(input).coverage_gaps)
+  const notes: string[] = []
+  // What an agent is handed to read comes first: the cheap ways to hide an instruction.
+  let n = toInt(g.oversized_agent_files)
+  if (n > 0) notes.push(`${filesPhrase(n, 'agent instruction file')} over 500 KB ${was(n)} not read`)
+  n = toInt(g.skill_refs_unread)
+  if (n > 0) notes.push(`${filesPhrase(n)} the skill's instructions link to ${was(n)} not read`)
+  n = toInt(g.custom_code_unread)
+  if (n > 0) notes.push(`${filesPhrase(n, 'custom code file')} in the model ${was(n)} not read`)
+  n = toInt(g.oversized_files)
+  if (n > 0) notes.push(`${filesPhrase(n)} over 500 KB ${was(n)} not fully read`)
+  n = toInt(g.fetch_failed)
+  if (n > 0) notes.push(`${filesPhrase(n)} could not be fetched`)
+  n = toInt(g.scan_errors)
+  if (n > 0) notes.push(`${filesPhrase(n)} could not be scanned`)
+  n = toInt(g.time_limit_unread)
+  if (n > 0) notes.push(`${filesPhrase(n)} ${was(n)} not read before the time limit`)
+  n = toInt(g.over_file_cap)
+  if (n > 0) {
+    const cap = toInt(g.file_cap) || DEFAULT_FILE_CAP
+    notes.push(`${filesPhrase(n)} past the ${fmtInt(cap)}-file limit ${was(n)} not read`)
+  }
+  if (g.tree_truncated === true) notes.push('GitHub returned only part of the file tree')
+  if (g.tree_unavailable === true) notes.push('the file list could not be read')
+  n = toInt(g.package_skipped)
+  if (n > 0) notes.push(`${filesPhrase(n)} in the package ${was(n)} skipped for size`)
+  n = toInt(g.dependency_files_unread)
+  if (n > 0) notes.push(`${filesPhrase(n, 'dependency file')} could not be read`)
+  if (g.advisory_lookup === 'failed') notes.push('the vulnerability database lookup failed')
+  if (g.tool_list_unread === true) notes.push("the server's tool list could not be read")
+  if (g.tool_list_paged === true) {
+    n = toInt(g.pages_read)
+    if (n > 1) notes.push(`only the first ${fmtInt(n)} pages of the server's tool list were read`)
+    else if (n === 1) notes.push("only the first page of the server's tool list was read")
+    else notes.push("only part of the server's tool list was read")
+  }
+  for (const kind of ['resource', 'prompt']) {
+    if (g[`${kind}_list_too_large`] === true) notes.push(`the server's ${kind} list was too large to read`)
+    else if (g[`${kind}_list_unread`] === true) notes.push(`the server's ${kind} list could not be read`)
+  }
+  n = toInt(g.image_layers_unread)
+  if (n > 0) {
+    const why = typeof g.image_layers_reason === 'string' && g.image_layers_reason ? ` (${g.image_layers_reason})` : ''
+    notes.push(`${filesPhrase(n, 'image layer')} ${was(n)} not read${why}`)
+  }
+  n = toInt(g.skills_ungraded)
+  if (n > 0) notes.push(`${filesPhrase(n, 'skill')} in the repo ${was(n)} not graded`)
+  return notes
+}
+
+/** `; <note>; <note>; and N more coverage gaps` for a Safe reason ('' when none). */
+export function coverageGapSuffix(input: unknown): string {
+  const notes = coverageGapNotes(input)
+  if (!notes.length) return ''
+  const head = notes.slice(0, COVERAGE_GAP_REASON_MAX)
+  const rest = notes.length - head.length
+  return '; ' + head.join('; ') + (rest > 0 ? `; and ${filesPhrase(rest, 'more coverage gap')}` : '')
 }
 
 /** The three-phrase decision for a scan result (API response JSON). Byte-identical twin
@@ -249,16 +445,27 @@ export function decide(input: unknown): Decision {
   const findings = asObj(data.findings)
   const items = asList(findings.items)
   const meta = asObj(data.metadata)
-  const files = isInt(meta.files_scanned) ? meta.files_scanned : 0
+  // An explicit 0 (read, no code) is thin coverage; a missing files_scanned is unknown.
+  const filesKnown = isInt(meta.files_scanned)
+  const files: number = filesKnown ? (meta.files_scanned as number) : 0
 
   const b = isObj(data.behavioral) ? data.behavioral : null
   const pending = !!(b && b.pending)
   const bLive = !!(b && b.ran && !b.pending && !(b.plan === 'live-probe' || b.advisory === true))
   const bFindings = bLive && b ? asList(b.findings) : []
 
+  const suffix = !pending ? '' : (b && b.state === 'queued' ? QUEUED_SUFFIX : PENDING_SUFFIX)
   const done = (decision: DecisionValue, reason: string): Decision =>
-    ({ decision, final: !pending, reason: reason + (pending ? PENDING_SUFFIX : '') })
+    ({ decision, final: !pending, reason: reason + suffix })
   const sev = (i: Obj) => String(i.severity ?? '').toLowerCase()
+
+  // Dependency advisories never decide, but the totals count them: a reason that counts
+  // findings names them too. Wording only; nothing here changes the decision.
+  const [depC, depH] = dependencyCounts(data, items)
+  const deps = dependencyPhrase(depC, depH)
+  const inCode = deps ? ' in its code' : ''
+  const inSandbox = deps ? ' in the sandbox' : ''
+  const plusDeps = deps ? `; plus ${deps} in dependencies` : ''
 
   // do_not_connect
   const canaryList = b ? b.canary_exfil : undefined
@@ -267,7 +474,7 @@ export function decide(input: unknown): Decision {
   if (canary) return done('do_not_connect', 'a planted credential left the sandbox')
   const inc = asObj(data.incident_history)
   if (inc.current_version_affected === true) {
-    return done('do_not_connect', 'this version is listed as malicious (OpenSSF MAL advisory)')
+    return done('do_not_connect', 'this version is a known-malicious package (malware advisory)')
   }
   const mal = items.find(isMaliciousItem)
   const scMal = asObj(data.supply_chain).malicious
@@ -277,40 +484,50 @@ export function decide(input: unknown): Decision {
   }
 
   const isAdvisory = (i: Obj) => i.category === 'known_vulnerability' && i.kind !== 'capability'
+  const isSecret = (i: Obj) => i.category === SECRET_CATEGORY && i.kind !== 'capability'
+    && !isMaliciousItem(i)
+  // Blocking critical hardcoded credentials: reviewed below, never Do not connect.
+  const secrets = items.filter((i) => sev(i) === 'critical' && isBlockingItem(i) && isSecret(i))
   const defect = (severity: string): [number, Obj | undefined] => {
-    let hits = items.filter((i) => sev(i) === severity && isBlockingItem(i) && !isAdvisory(i))
+    const crit = severity === 'critical'
+    let hits = items.filter((i) => sev(i) === severity && isBlockingItem(i) && !isAdvisory(i)
+      && !(crit && isSecret(i)))
     const headline = findings[severity]
     let n: number
     if (isInt(headline)) {
       const adv = items.filter((i) => sev(i) === severity && isAdvisory(i)).length
-      n = Math.max(headline - adv, 0)
+      n = Math.max(headline - adv - (crit ? secrets.length : 0), 0)
     } else {
       n = hits.length
     }
     if (n && !hits.length) {
       hits = items.filter((i) => sev(i) === severity && i.kind !== 'capability'
-        && i.installed !== false && !isAdvisory(i))
+        && i.installed !== false && !isAdvisory(i) && !(crit && isSecret(i)))
     }
     return [n, hits[0]]
   }
 
+  // The leading finding's place; without an item, ' in its code' only when the
+  // dependency clause needs the contrast.
+  const where = (item: Obj | undefined) => (item ? findingWhere(item) : inCode)
   const [nCrit, crit] = defect('critical')
-  if (nCrit) return done('do_not_connect', countPhrase(nCrit, 'critical', crit ? findingLabel(crit.name) : null))
+  if (nCrit) return done('do_not_connect', countPhrase(nCrit, 'critical', crit ? findingLabel(crit.name) : null, where(crit)) + plusDeps)
   const bCrit = bFindings.filter((f) => sev(f) === 'critical')
   if (bCrit.length) {
     const f = bCrit[0]
     const label = BEHAVIORAL_LABELS[String(f.rule ?? '')] || findingLabel(f.name)
-    return done('do_not_connect', `the sandbox caught a critical behavior: ${label}`)
+    return done('do_not_connect', `the sandbox caught a critical behavior: ${label}` + plusDeps)
   }
 
   // review
+  if (secrets.length) return done('review', secretReason(secrets.length, findingWhere(secrets[0])) + plusDeps)
   const [nHigh, high] = defect('high')
-  if (nHigh) return done('review', countPhrase(nHigh, 'high', high ? findingLabel(high.name) : null))
+  if (nHigh) return done('review', countPhrase(nHigh, 'high', high ? findingLabel(high.name) : null, where(high)) + plusDeps)
   const bHigh = bFindings.filter((f) => sev(f) === 'high')
   if (bHigh.length) {
     const f = bHigh[0]
     const label = BEHAVIORAL_LABELS[String(f.rule ?? '')] || findingLabel(f.name)
-    return done('review', countPhrase(bHigh.length, 'high', label))
+    return done('review', countPhrase(bHigh.length, 'high', label, inSandbox) + plusDeps)
   }
 
   const rawAdv = Array.isArray(data.advisories) && data.advisories.length ? data.advisories : inc.advisories
@@ -319,19 +536,47 @@ export function decide(input: unknown): Decision {
   const advItem = items.find(isAdvisory)
   if (advisories.length || advItem) {
     const aid = String((advisories.length ? advisories[0].id : '') || '')
-    return done('review', 'a published advisory affects this version' + (aid ? ` (${aid})` : ''))
+    const fix = highestFix(advisories)
+    return done('review', 'a published advisory affects this version' + (aid ? ` (${aid})` : '') + (fix ? `; fixed in ${fix}` : ''))
   }
   const dep = data.deprecation
   if (typeof dep === 'string' && dep.trim()) return done('review', 'the maintainer has deprecated this package')
   if (score < REVIEW_SCORE_FLOOR) return done('review', `trust score ${score}/100 is under ${REVIEW_SCORE_FLOOR}`)
+  const gap = asObj(data.coverage_gaps)
+  if (gap.tool_list_unread === true) return done('review', TOOL_LIST_UNREAD_REASON)
+  if (gap.tool_list_paged === true) return done('review', TOOL_LIST_PAGED_REASON)
+  const resGap = gap.resource_list_unread === true || gap.resource_list_too_large === true
+  const prGap = gap.prompt_list_unread === true || gap.prompt_list_too_large === true
+  if (resGap || prGap) {
+    return done('review', resGap && prGap ? RESOURCE_PROMPT_LISTS_UNREAD_REASON
+      : resGap ? RESOURCE_LIST_UNREAD_REASON : PROMPT_LIST_UNREAD_REASON)
+  }
+  if (isObj(gap)) {
+    if (filesKnown && files === 0 && (gap.tree_truncated === true || gap.tree_unavailable === true
+      || toInt(gap.fetch_failed) > 0 || toInt(gap.time_limit_unread) > 0)) {
+      return done('review', CODE_UNREAD_REASON)
+    }
+    if (toInt(gap.oversized_agent_files) > 0) return done('review', AGENT_FILE_UNREAD_REASON)
+    if (toInt(gap.skill_refs_unread) > 0) return done('review', SKILL_REF_UNREAD_REASON)
+    if (toInt(gap.custom_code_unread) > 0) return done('review', CUSTOM_CODE_UNREAD_REASON)
+  }
 
   const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
     && i.kind !== 'capability' && i.installed !== false)
 
-  // safe — thin coverage (0 < files < 8, nothing found) reads Safe and says so in the
-  // reason (decided 2026-10-08, #19); the 74 / 82 score cap still shows it.
-  if (files > 0 && files < THIN_COVERAGE_FILES && !found) {
-    return done('safe', isRemoteMcp(data) ? THIN_REASON_REMOTE_MCP : THIN_REASON)
+  // safe — thin coverage (0 <= files < 8, nothing found) reads Safe and says so in the
+  // reason (decided 2026-10-08, #19); the 74 / 82 score cap still shows it. Zero files
+  // (a metapackage whose code ships in a dependency) says there was no code at all.
+  // A Safe reason ends with what the scan could not check (wording only).
+  const gaps = coverageGapSuffix(data)
+  const safe = (reason: string): Decision => done('safe', reason + gaps)
+  if (deps) {
+    const noun = depC + depH === 1 ? 'advisory' : 'advisories'
+    return safe(`no critical or high findings in its code (dependencies: ${deps} ${noun})`)
+  }
+  if (filesKnown && files >= 0 && files < THIN_COVERAGE_FILES && !found) {
+    if (isRemoteMcp(data)) return safe(THIN_REASON_REMOTE_MCP)
+    return safe(files > 0 ? THIN_REASON : THIN_REASON_NO_CODE)
   }
   let reason: string
   if (files > 0) {
@@ -341,7 +586,7 @@ export function decide(input: unknown): Decision {
   } else {
     reason = found ? 'no critical or high findings' : 'nothing found'
   }
-  return done('safe', reason)
+  return safe(reason)
 }
 
 const DECISION_BY_VALUE = (v: unknown): DecisionPhrase | undefined => DECISIONS.find((d) => d.value === v)
@@ -368,9 +613,77 @@ export function verdictPhrase(scanOrDecision: unknown): string {
   return decisionPhrase(decisionOf(scanOrDecision).decision).phrase
 }
 
-/** Whether a scan carries the Certified mark (the full conjunctive gate). */
+// ── The Certified mark (display rule) ─────────────────────────────────────────────
+// `certified.eligible` is the signed six-check provenance gate and never changes here.
+// The MARK sits only beside Safe to connect, once the sandbox result is final, at a
+// score of 81 or above, and never on thin coverage. Byte-identical twin of
+// `certified_mark_status()` in src/scanner/verdict.py (tests/test_decision.py).
+export const CERTIFIED_MARK_MIN_SCORE = 81
+export type CertifiedMarkWhyNot = '' | 'not_safe' | 'sandbox_pending' | 'score_below_81' | 'thin_coverage' | 'coverage_gaps'
+
+// The disclosure finding the scanner emits when an oversized file's head is filler.
+const PADDED_FINDING = 'Oversized source file padded with filler'
+const surfaceIs = (data: Obj, surface: string) =>
+  asObj(data.coverage).surface === surface || asObj(data.surface_detail).surface === surface
+
+/** Whether `coverage_gaps` holds a gap that is cheap for an attacker to cause (twin of
+ * `cheap_coverage_gap` in src/scanner/verdict.py). A plain big bundle is not one. */
+export function cheapCoverageGap(input: unknown): boolean {
+  const data = asObj(input)
+  if (!isObj(data.coverage_gaps)) return false
+  const g = data.coverage_gaps
+  if (toInt(g.fetch_failed) > 0) return true
+  if (g.tool_list_unread === true || g.tool_list_paged === true) return true
+  if (toInt(g.oversized_agent_files) > 0 || toInt(g.skill_refs_unread) > 0) return true
+  if (toInt(g.skills_ungraded) > 0) return true
+  if (surfaceIs(data, 'openclaw') && (toInt(g.oversized_files) > 0 || toInt(g.over_file_cap) > 0
+    || g.tree_truncated === true)) return true
+  if (toInt(g.oversized_files) > 0) {
+    const items = asObj(data.findings).items
+    if (Array.isArray(items) && items.some((i) => isObj(i) && i.name === PADDED_FINDING)) return true
+  }
+  return false
+}
+
+/** [mark, whyNot]. `whyNot` is '' when the mark shows or the tool is not eligible at
+ * all; otherwise the one condition that suppressed an earned eligibility. */
+export function certifiedMarkStatus(input: unknown, decision?: Decision): [boolean, CertifiedMarkWhyNot] {
+  const data = asObj(input)
+  if (asObj(data.certified).eligible !== true) return [false, '']
+  const d = decision ?? decide(data)
+  if (d.decision !== 'safe') return [false, 'not_safe']
+  if (!d.final) return [false, 'sandbox_pending']
+  if (toInt(data.trust_score) < CERTIFIED_MARK_MIN_SCORE) return [false, 'score_below_81']
+  const files = asObj(data.metadata).files_scanned
+  if ((isInt(files) ? files : 0) < THIN_COVERAGE_FILES) return [false, 'thin_coverage']
+  if (cheapCoverageGap(data)) return [false, 'coverage_gaps']
+  return [true, '']
+}
+
+/** Whether a result shows the Certified MARK: the API's `certified_mark` when the result
+ * carries it, else the display rule over the API's decision. Never the raw
+ * `certified.eligible` provenance gate, which can sit beside Review. */
 export function isCertified(scan: unknown): boolean {
-  return asObj(asObj(scan).certified).eligible === true
+  const o = asObj(scan)
+  if (typeof o.certified_mark === 'boolean') return o.certified_mark
+  return certifiedMarkStatus(o, decisionOf(o))[0]
+}
+
+/** Why an earned Certified eligibility shows no mark, in plain words ('' when the mark
+ * shows or the tool is not eligible). */
+export function certifiedMarkNote(scan: unknown): string {
+  const o = asObj(scan)
+  const why = (typeof o.certified_mark_reason === 'string' && typeof o.certified_mark === 'boolean')
+    ? (o.certified_mark ? '' : o.certified_mark_reason)
+    : certifiedMarkStatus(o, decisionOf(o))[1]
+  const tail: Record<string, string> = {
+    not_safe: 'the mark shows when the answer is Safe to connect.',
+    sandbox_pending: 'the mark shows after the sandbox finishes.',
+    score_below_81: 'the mark shows at a trust score of 81 or above.',
+    thin_coverage: 'the mark needs more code to inspect (8 or more files).',
+    coverage_gaps: 'the mark needs the files an agent reads to have been read in full.',
+  }
+  return tail[why] ? `Certified checks pass; ${tail[why]}` : ''
 }
 
 /** "Safe to connect · Certified" — the phrase with the Certified mark when earned. */

@@ -1,0 +1,22 @@
+{
+  "check-ids": "definition-digest/<key>, definition-count, key-encoding/NN (index into the file's key_encoding), case/<vector>/<axis>, plus the implementation's own checks (native: unsigned-map-equals-signed, key-encoding-count, property/*; probity: payload-digest)",
+  "checker": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+  "controls": [
+    "control-key-encoding-01",
+    "control-definition-ask_wiki_question",
+    "control-case-tool-drift"
+  ],
+  "driver-files": {
+    "docs/standards/tool-manifest-digest-vectors-v1/time.mjs": "065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+    "docs/standards/tool-manifest-digest-vectors-v1/verify.mjs": "007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98",
+    "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py": "5ff729a8a94a8c346e39641a95b508158cbc29d186934d0cfabd83c8f81ef2d8"
+  },
+  "implementation": "verify.mjs (AgentAvow native verifier)",
+  "inputs": {
+    "vectors": {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    }
+  },
+  "pass-rule": "a check passes when the implementation's output equals the value the vector file states for it; otherwise it fails"
+}

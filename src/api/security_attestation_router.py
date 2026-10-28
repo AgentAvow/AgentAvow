@@ -18,7 +18,7 @@ from src.attestation.composed_slot import (
 )
 from src.database import get_db
 from src.models import Entity, FrameworkSecurityScan, TrustScore
-from src.signing import KID, canonicalize, create_jws
+from src.signing import KID, canonicalize, create_jws, rfc3339_ms
 
 logger = logging.getLogger(__name__)
 
@@ -134,9 +134,9 @@ def _build_payload(
             "entity_id": str(entity.id),
             "display_name": entity.display_name,
         },
-        "scannedAt": scan.scanned_at.isoformat() if scan.scanned_at else now.isoformat(),
-        "issuedAt": now.isoformat(),
-        "expiresAt": (now + timedelta(hours=24)).isoformat(),
+        "scannedAt": rfc3339_ms(scan.scanned_at or now),
+        "issuedAt": rfc3339_ms(now),
+        "expiresAt": rfc3339_ms(now + timedelta(hours=24)),
         "scan": {
             "result": scan.scan_result,
             "framework": scan.framework,
@@ -168,6 +168,9 @@ def _build_payload(
                 if isinstance(vulns, dict) else 0
             ),
             "sampled": vulns.get("sampled", False) if isinstance(vulns, dict) else False,
+            # What the scan selected but could not read; omitted when nothing was.
+            **({"coverageGaps": vulns["coverage_gaps"]}
+               if isinstance(vulns, dict) and vulns.get("coverage_gaps") else {}),
             "primaryLanguage": vulns.get("primary_language", "") if isinstance(vulns, dict) else "",
         },
         "trust": {

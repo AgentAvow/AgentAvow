@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Grade the fixture MCP server with AgentAvow's own scanner and sign the result
+"""Scan the fixture MCP server with AgentAvow's own scanner and sign the result
 with a throwaway DEMO key, so the demo runs offline.
 
 What is real here: the handshake, the tool-definition analysis, the trust score,
@@ -18,8 +18,8 @@ localhost: the SSRF guard that refuses non-https and private addresses (it
 protects the hosted scanner from user-supplied URLs) is bypassed for the fetch,
 and the result is written to files instead of a cache.
 
-    python grade.py --endpoint http://127.0.0.1:8787/mcp --out .state
-    python grade.py --endpoint http://127.0.0.1:8787/mcp --report-only   # no signing
+    python scan.py --endpoint http://127.0.0.1:8787/mcp --out .state
+    python scan.py --endpoint http://127.0.0.1:8787/mcp --report-only   # no signing
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ os.environ.setdefault("DEBUG", "true")  # settings refuse the default JWT secret
 DEMO_KID = "demo-not-agentavow"
 DEMO_ISSUER = {
     "id": "did:web:demo.invalid",
-    "name": "Offline demo grader (NOT AgentAvow)",
+    "name": "Offline demo scanner (NOT AgentAvow)",
     "url": "https://demo.invalid",
 }
 
@@ -64,7 +64,7 @@ async def _fetch_local(url: str) -> dict | None:
                 "server_info": s.server_info}
 
 
-async def grade(endpoint: str, out: Path | None) -> dict:
+async def scan_endpoint(endpoint: str, out: Path | None) -> dict:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
@@ -108,7 +108,7 @@ async def grade(endpoint: str, out: Path | None) -> dict:
                      "Issuer did:web:demo.invalid, kid demo-not-agentavow.")
     if out is not None:
         out.mkdir(parents=True, exist_ok=True)
-        (out / "grade.json").write_text(json.dumps(resp, indent=2) + "\n")
+        (out / "result.json").write_text(json.dumps(resp, indent=2) + "\n")
         (out / "jwks.json").write_text(json.dumps(jwks, indent=2) + "\n")
     return {"response": resp, "payload": payload, "served": served}
 
@@ -121,7 +121,7 @@ def main() -> None:
                     help="analyze and print; sign nothing, write nothing")
     ap.add_argument("--json", action="store_true", help="print the summary as JSON")
     a = ap.parse_args()
-    r = asyncio.run(grade(a.endpoint, None if a.report_only else Path(a.out)))
+    r = asyncio.run(scan_endpoint(a.endpoint, None if a.report_only else Path(a.out)))
     resp = r["response"]
     findings = [f"{f.get('severity')}: {f.get('name')}"
                 for f in (resp.get("findings") or {}).get("items", [])]
@@ -133,6 +133,7 @@ def main() -> None:
         "decision_reason": resp["decision_reason"],
         "findings": findings,
         "tool_digests": r["payload"]["scan"]["toolDigests"],
+        "certified_mark": bool(resp.get("certified_mark")),
         "signed": not a.report_only,
     }
     if a.json:
@@ -140,15 +141,23 @@ def main() -> None:
         return
     phrase = {"safe": "Safe to connect", "review": "Review before you connect",
               "do_not_connect": "Do not connect"}[summary["decision"]]
-    print(f"  trust score {summary['trust_score']}/100 ({summary['trust_tier']}): {phrase}")
-    print(f"  reason: {summary['decision_reason'] or '(none)'}")
+    adoption = resp.get("adoption") or {}
+    count = adoption.get("count")
+    adopt = (f"{count} {adoption.get('unit') or ''}".strip() if count
+             else "no signal yet (localhost)")
+    mark = " · Certified" if resp.get("certified_mark") else ""
+    print(f"  {phrase}{mark}: {summary['decision_reason'] or '(no reason given)'}")
+    print(f"  trust score {summary['trust_score']}/100 (tier {summary['trust_tier']})"
+          f" · adoption: {adopt}")
+    if not resp.get("certified_mark"):
+        print("  certified mark: no (a live server ships no published package to check provenance on)")
     for f in findings or ["no findings"]:
         print(f"  finding: {f}")
     for k, v in summary["tool_digests"].items():
         print(f"  {k}  {v}")
     if summary["signed"]:
-        print(f"  signed with the throwaway demo key (kid {DEMO_KID}, issuer "
-              f"{DEMO_ISSUER['id']}); wrote grade.json and jwks.json")
+        print(f"  signed with the throwaway demo key (kid {DEMO_KID}, issuer {DEMO_ISSUER['id']})")
+        print("  wrote result.json and jwks.json")
 
 
 if __name__ == "__main__":

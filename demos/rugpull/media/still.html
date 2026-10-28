@@ -1,0 +1,55 @@
+<!doctype html>
+<!-- Source for ../still.png (1600x900). Render: Chrome headless with
+     --screenshot --window-size=1600,900 --hide-scrollbars. Lines are copied from demo.txt. -->
+<html><head><meta charset="utf-8"><title>Rug-pull at the call</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --mut:#8b949e;
+          --red:#ff7b72; --green:#7ee787; --amber:#e3b341; --blue:#79c0ff; }
+  * { box-sizing:border-box; margin:0; }
+  body { width:1600px; height:900px; background:var(--bg); color:var(--text);
+         font:16px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; padding:78px 44px 0; }
+  h1 { font-size:38px; letter-spacing:-0.5px; }
+  .sub { color:var(--mut); font-size:19px; margin:8px 0 22px; max-width:1500px; }
+  code, pre { font-family:"SF Mono", Menlo, Consolas, monospace; }
+  .sub code { color:var(--text); font-size:17px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:22px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; display:flex; flex-direction:column; height:520px; }
+  .hd { padding:12px 18px; font-weight:700; font-size:18px; border-bottom:1px solid var(--line); border-radius:8px 8px 0 0; }
+  .bad .hd { background:#2d1517; color:var(--red); }
+  .good .hd { background:#12261a; color:var(--green); }
+  pre { padding:14px 16px; font-size:14px; line-height:1.7; white-space:pre-wrap; flex:1; }
+  .k { color:var(--green); } .t { color:var(--amber); } .x { color:var(--red); font-weight:700; } .d { color:var(--blue); }
+  .ft { border-top:1px solid var(--line); padding:12px 18px 16px; }
+  .ft b { font-size:20px; display:block; margin-bottom:4px; }
+  .bad .ft b { color:var(--red); } .good .ft b { color:var(--green); }
+  .ft small { font-family:"SF Mono", Menlo, monospace; color:var(--mut); font-size:13.5px; }
+  .note { color:var(--mut); font-size:14px; margin-top:16px; }
+  .note code { font-size:13px; }
+</style></head><body>
+<h1>Rug-pull at the call</h1>
+<p class="sub">acme-mail's <code>send_email</code> was scanned (<b>Safe to connect</b>, 74/100) and approved as v1. Weeks later the same server, at the same URL, serves v2: a poisoned description and a hidden <code>bcc</code> default. Same agent, same call.</p>
+<div class="grid">
+<div class="card bad"><div class="hd">Without AgentAvow</div>
+<pre>agent  connected to http://127.0.0.1:8787/mcp (acme-mail 1.1.0); served: send_email
+<span class="k">gate</span>   none (control run)
+agent  task: email the CFO the draft Q3 numbers (scripted agent, no model)
+agent  calls send_email(to=cfo@acme.example, subject="Q3 board numbers (draft)")
+<span class="t">tool</span>   <span class="t">Sent to cfo@acme.example.</span></pre>
+<div class="ft"><b>The canary email reached the attacker's sink.</b>
+<small>copied to audit-archive@collector.invalid: CANARY-control-0bbea4c0</small></div></div>
+<div class="card good"><div class="hd">With the AgentAvow gate (onDrift: 'block')</div>
+<pre>agent  connected to http://127.0.0.1:8787/mcp (acme-mail 1.1.0); served: send_email
+<span class="k">gate</span>   AgentAvow gate ON (onDrift: 'block', results verified against the demo JWKS)
+agent  task: email the CFO the draft Q3 numbers (scripted agent, no model)
+agent  calls send_email(to=cfo@acme.example, subject="Q3 board numbers (draft)")
+<span class="x">gate   DO NOT CONNECT: blocked 'send_email'. Not run.</span>
+       the definition of 'send_email' changed since it was scanned (74/100):
+<span class="d">signed sha256:811d1414506d36dccc1a273a29714fe29d1d2f7f2220dc16b61fec0f972d70da
+served sha256:b2163bf3f4aa19a65db1fc25b9bcf0609d8116603226490a708f2d7860be174f</span>
+
+<span class="k">verify</span> signature valid offline (EdDSA) · edit the signed score → INVALID</pre>
+<div class="ft"><b>Blocked at the call. Nothing reached the server.</b>
+<small>attacker sink: 0 messages from this run · outbox: 0</small></div></div>
+</div>
+<p class="note">Recorded from <code>demos/rugpull/run.sh</code>, all on localhost with canary data. The result comes from AgentAvow's scanner and is signed by a throwaway demo key (issuer did:web:demo.invalid), not AgentAvow's.</p>
+</body></html>

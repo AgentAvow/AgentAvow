@@ -122,6 +122,8 @@ async def run_security_scan(
         "files_scanned": result.files_scanned,
         "total_scannable_files": result.total_scannable_files,
         "sampled": result.sampled,
+        # What the scan selected but could not read (disclosure only; never scored).
+        "coverage_gaps": getattr(result, "coverage_gaps", {}) or {},
         "primary_language": result.primary_language,
         "critical_count": result.critical_count,
         "high_count": result.high_count,
@@ -138,16 +140,11 @@ async def run_security_scan(
         # Phase 3: provenance / signing verification summary (empty unless the
         # scanner_verify_provenance flag is on and a package coordinate resolved).
         "provenance": getattr(result, "provenance", {}) or {},
-        "findings": [
-            {
-                "category": f.category,
-                "name": f.name,
-                "severity": f.severity,
-                "file_path": f.file_path,
-                "line_number": f.line_number,
-            }
-            for f in result.findings[:100]  # Cap at 100 for DB storage
-        ],
+        # Blocking (shipped / known-malicious) counts, the headline the report's
+        # decide() reads; critical_count / high_count above stay the raw totals.
+        "shipped_critical_count": result.shipped_critical_count,
+        "shipped_high_count": result.shipped_high_count,
+        "findings": _stored_finding_items(result.findings),
     }
 
     scan_record = FrameworkSecurityScan(
@@ -166,6 +163,125 @@ async def run_security_scan(
     )
 
     return scan_record
+
+
+_STORED_FINDINGS_CAP = 100
+_SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+
+def _stored_finding_items(findings: list) -> list[dict]:
+    """The stored findings list: the same tags and order the public report uses
+    (deciding findings first, then shipped, then severity), capped at 100. The tags
+    (``shipped`` / ``kind`` / ``installed``) let ``decide()`` read a stored row the way
+    it reads the report, and the order keeps the deciding findings inside the cap."""
+    from src.scanner.scan import finding_is_shipped
+    from src.scanner.verdict import finding_decides
+
+    items = [
+        {
+            "category": f.category,
+            "name": f.name,
+            "severity": f.severity,
+            "file_path": f.file_path,
+            "line_number": f.line_number,
+            "shipped": finding_is_shipped(f),
+            "kind": getattr(f, "kind", "defect") or "defect",
+            "installed": bool(getattr(f, "installed", True)),
+        }
+        for f in findings
+    ]
+    items.sort(key=lambda i: (not finding_decides(i), not i["shipped"],
+                              _SEV_RANK.get(i["severity"], 5)))
+    return items[:_STORED_FINDINGS_CAP]
+
+
+def stored_scan_decision_input(
+    vulnerabilities: object, fallback_score: int | None = None,
+) -> dict:
+    """The ``decide()`` input for a stored ``FrameworkSecurityScan.vulnerabilities``.
+
+    Every surface that answers from a stored scan (the entity badge, the embed badge,
+    the bot security-scan report) calls this, so they all reach the same answer.
+
+    Shapes:
+    - dict (``run_security_scan``): the scan's own 0-100 ``trust_score``, the stored
+      findings as ``items``, and the blocking headline counts when the row has them.
+      Rows written before the items carried a ``shipped`` tag get it inferred from the
+      file path with the scanner's own rule.
+    - list (framework bridge imports, ``bridges/registry_base``): ``{pattern, severity,
+      location, match}`` items; the bridge stores no score, so ``fallback_score``.
+    - None / empty / anything else: no findings, ``fallback_score``.
+    """
+    fallback = int(fallback_score or 0)
+    if isinstance(vulnerabilities, list):
+        items = [
+            {
+                "category": str(v.get("category") or "bridge"),
+                "name": str(v.get("pattern") or v.get("name") or ""),
+                "severity": str(v.get("severity") or "").lower(),
+                "file_path": str(v.get("location") or v.get("file_path") or ""),
+            }
+            for v in vulnerabilities if isinstance(v, dict)
+        ]
+        return {"trust_score": fallback, "findings": {"items": items}}
+    if not isinstance(vulnerabilities, dict):
+        return {"trust_score": fallback, "findings": {"items": []}}
+
+    from types import SimpleNamespace
+
+    from src.scanner.scan import _finding_is_discounted, finding_is_shipped
+
+    items = []
+    for raw in vulnerabilities.get("findings") or []:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        by_path = SimpleNamespace(
+            file_path=str(item.get("file_path") or ""), payload=False, test_code=False,
+            installed=item.get("installed") is not False)
+        if "shipped" not in item:
+            item["shipped"] = finding_is_shipped(by_path)
+        elif (item["shipped"] is False and _finding_is_discounted(by_path)
+              and finding_is_shipped(by_path)):
+            # A row written before the tag and the blocking rule agreed: the old tag
+            # said not-shipped for a path that blocks (scripts/, tooling/, demo_*).
+            # The path alone made it False (an inline test module's False came from
+            # ``test_code``, on a path the old rule called shipped), so re-tag it with
+            # today's rule and the badge reads the row the way the report does.
+            item["shipped"] = True
+        items.append(item)
+
+    findings: dict = {"items": items}
+    for key, stored in (("critical", "shipped_critical_count"),
+                        ("high", "shipped_high_count")):
+        n = vulnerabilities.get(stored)
+        if isinstance(n, int) and not isinstance(n, bool):
+            findings[key] = n
+
+    score = vulnerabilities.get("trust_score")
+    data: dict = {
+        "trust_score": score if isinstance(score, (int, float)) and
+        not isinstance(score, bool) else fallback,
+        "findings": findings,
+    }
+    files = vulnerabilities.get("files_scanned")
+    if isinstance(files, int) and not isinstance(files, bool):
+        data["metadata"] = {"files_scanned": files}
+    for key in ("supply_chain", "coverage", "coverage_gaps", "provenance"):
+        if isinstance(vulnerabilities.get(key), dict):
+            data[key] = vulnerabilities[key]
+    return data
+
+
+def decide_stored_scan(scan: object, fallback_score: int | None = None):
+    """``decide()`` over a stored ``FrameworkSecurityScan`` (see
+    :func:`stored_scan_decision_input`). ``None`` for an errored scan."""
+    from src.scanner.verdict import decide
+
+    if getattr(scan, "scan_result", None) == "error":
+        return None
+    return decide(stored_scan_decision_input(
+        getattr(scan, "vulnerabilities", None), fallback_score))
 
 
 async def get_latest_scan(
@@ -292,53 +408,51 @@ async def rescan_all_agents(
 async def refresh_public_scan_cache(limit: int | None = None) -> int:
     """Pre-refresh Redis cache for popular public scan repos.
 
-    Queries cached scan results that are about to expire (> 50 min old
-    from the 1-hour TTL) and re-scans them so the cache stays warm.
-    Called by the scheduler alongside the agent rescan loop.
+    Finds cached public scan results about to expire (< 10 min left of the 1-hour
+    TTL) and re-scans them so the cache stays warm. Called by the scheduler alongside
+    the agent rescan loop.
+
+    Each key is routed to its own surface (``coords_from_cache_key``): a package key
+    like ``npm/react-dom`` is re-scanned as the npm package, not looked up as a GitHub
+    repo (which 404'd and wasted a GitHub call per package key). The re-scan goes
+    through the catalog row path, which writes the fresh result back to the cache;
+    the old ``scan_repo`` call discarded its result, so nothing was ever refreshed.
 
     ``limit`` defaults from ``config.settings.public_cache_refresh_limit``.
     """
-    if limit is None:
-        from src.config import settings
+    from src.config import settings
 
+    if limit is None:
         limit = settings.public_cache_refresh_limit
     try:
+        from src.database import async_session
+        from src.jobs.scheduler import _rescan_catalog_row
         from src.redis_client import get_redis
-        from src.scanner.scan import scan_repo
+        from src.scanner.behavioral.trigger import coords_from_cache_key
 
         r = await get_redis()
         refreshed = 0
+        spacing = getattr(settings, "catalog_rescan_spacing_seconds", 1.5)
 
-        # Find cached public scan keys
         keys: list[bytes] = []
         async for key in r.scan_iter(match="ag:cache:public_scan:*"):
             keys.append(key)
 
-        if not keys:
-            return 0
-
-        # Check TTL — refresh any with < 10 min remaining
         for key in keys[:limit]:
             ttl = await r.ttl(key)
-            if 0 < ttl < 600:  # less than 10 min remaining
-                # Extract repo name from key: ag:cache:public_scan:owner/repo
-                key_str = key.decode() if isinstance(key, bytes) else key
-                repo = key_str.replace("ag:cache:public_scan:", "")
-                if "/" in repo:
-                    from src.github_auth import get_github_token
-                    token = await get_github_token()
-                    try:
-                        await scan_repo(
-                            full_name=repo,
-                            stars=0,
-                            description="",
-                            framework="",
-                            token=token,
-                        )
-                        refreshed += 1
-                        logger.debug("Pre-refreshed public scan cache: %s", repo)
-                    except Exception:
-                        logger.debug("Failed to refresh cache for %s", repo)
+            if not 0 < ttl < 600:  # refresh only what has < 10 min left
+                continue
+            key_str = key.decode() if isinstance(key, bytes) else key
+            coords = coords_from_cache_key(key_str.replace("ag:cache:public_scan:", "", 1))
+            if coords is None:
+                continue
+            surface, owner, repo = coords
+            async with async_session() as db:
+                if await _rescan_catalog_row(surface, owner, repo, db):
+                    refreshed += 1
+                    logger.debug("Pre-refreshed public scan cache: %s %s/%s",
+                                 surface, owner, repo)
+            await asyncio.sleep(spacing)
 
         return refreshed
     except Exception:

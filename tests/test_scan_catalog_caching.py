@@ -566,3 +566,24 @@ async def test_cache_control_through_full_app(fetch, clock, monkeypatch):
     assert authed.headers["cache-control"] == "public, max-age=60"
     assert other.headers["cache-control"] == "private, no-cache"
     assert other_authed.headers["cache-control"] == "private, no-cache"
+
+
+async def test_github_surface_tab_and_certified_split(fetch, clock, monkeypatch):
+    """GitHub repos have their own tab, so every Certified row sits in a surface tab and
+    the per-surface Certified counts add up to the Certified total."""
+    monkeypatch.setattr(m, "_CATALOG_CACHE", m._build_catalog(_fixture_rows()))
+    fetch["result"] = [
+        CatalogRow(surface="npm", name="semver", full_name="npm/semver",
+                   trust_score=92, grade="A+", critical=0, high=0),
+        CatalogRow(surface="github", name="o/r", full_name="o/r",
+                   trust_score=90, grade="A+", critical=0, high=0),
+        CatalogRow(surface="github", name="o/plain", full_name="o/plain",
+                   trust_score=90, grade="A", critical=0, high=0),
+    ]
+    kw = dict(q=None, severity=None, category=None, decision=None,
+              sort="name", limit=200, offset=0, db=None)
+    allc = await m.scan_catalog(surface=None, grade="certified", **kw)
+    gh = await m.scan_catalog(surface="github", grade="certified", **kw)
+    npm = await m.scan_catalog(surface="npm", grade="certified", **kw)
+    assert [r.name for r in gh.rows] == ["o/r"]
+    assert gh.total + npm.total == allc.total == 2

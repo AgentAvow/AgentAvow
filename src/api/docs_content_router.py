@@ -29,7 +29,7 @@ router = APIRouter(prefix="/docpages", tags=["docs"])
 # slug -> human title, in the same order as Docs.tsx's DOCS array.
 DOCS: list[tuple[str, str]] = [
     ("how-grading-works", "How scoring works"),
-    ("gate-on-the-grade", "Gate on the score"),
+    ("gate-on-the-grade", "Gate on the answer"),
     ("check-guide", "Reading your scan score"),
     ("behavioral-sandbox", "Behavioral sandbox"),
     ("run-locally", "Run locally & in CI"),
@@ -70,6 +70,10 @@ def _load(slug: str) -> str | None:
 
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+_ITALIC_RE = re.compile(
+    r"(?<![*\w])\*(?![\s*])([^*\n]+?)(?<!\s)\*(?![*\w])"
+    r"|(?<![\w])_(?![\s_])([^_\n]+?)(?<!\s)_(?!\w)"
+)
 # ./some-slug.md or ./some-slug.md#anchor  → /docs/some-slug or /docs/some-slug#anchor
 _INTRA_RE = re.compile(r"^\./([\w-]+)\.md(#[\w-]+)?$")
 _META_DESCRIPTION_MAX = 155
@@ -101,11 +105,22 @@ def _meta_description(text: str, limit: int = _META_DESCRIPTION_MAX) -> str:
     return f"{cut}…"
 
 
+def _italics_html(text: str) -> str:
+    """Escape ``text`` and render the *...* / _..._ italics in it."""
+    out, last = [], 0
+    for m in _ITALIC_RE.finditer(text):
+        out.append(html.escape(text[last:m.start()]))
+        out.append(f"<em>{html.escape(m.group(1) or m.group(2))}</em>")
+        last = m.end()
+    out.append(html.escape(text[last:]))
+    return "".join(out)
+
+
 def _inline(text: str) -> str:
     """Render inline markdown for a single already-line-joined string.
 
     Order matters: pull out inline code spans first (their contents must NOT be
-    treated as markdown), then escape, then apply bold and links. Code-span and
+    treated as markdown), then escape, then apply links, bold and italic. Code-span and
     link/bold outputs are stitched back with placeholders so escaping never
     double-encodes generated tags.
     """
@@ -129,13 +144,19 @@ def _inline(text: str) -> str:
 
     text = _LINK_RE.sub(_link, text)
 
-    # 3. bold **...**
+    # 3. bold **...** (italics inside bold still render: **does _not_ do**)
     def _bold(m: re.Match[str]) -> str:
-        return _stash(f"<strong>{html.escape(m.group(1))}</strong>")
+        return _stash(f"<strong>{_italics_html(m.group(1))}</strong>")
 
     text = _BOLD_RE.sub(_bold, text)
 
-    # 4. escape whatever plain text remains, then restore stashed fragments
+    # 4. italic *...* / _..._ (not inside words, so snake_case and 2*3*4 stay literal)
+    def _em(m: re.Match[str]) -> str:
+        return _stash(f"<em>{html.escape(m.group(1) or m.group(2))}</em>")
+
+    text = _ITALIC_RE.sub(_em, text)
+
+    # 5. escape whatever plain text remains, then restore stashed fragments
     text = html.escape(text)
 
     def _restore(m: re.Match[str]) -> str:
@@ -349,6 +370,10 @@ _STYLE = """
   .index a { display:block; padding:16px 0; color:var(--fg); text-decoration:none; font-weight:600; }
   .index a:hover { color:var(--accent); }
   .index .blurb { display:block; color:var(--muted); font-weight:400; font-size:14px; margin-top:2px; }
+  .top { display:flex; gap:10px; align-items:center; max-width:760px; margin:0 auto; padding:18px 24px 0; font-size:14px; color:var(--muted); }
+  .top a { color:var(--fg); text-decoration:none; font-weight:600; }
+  .top .check { margin-left:auto; color:var(--accent); }
+  em { font-style:italic; }
   .home { display:inline-block; margin-top:36px; color:var(--muted); font-size:14px; }
 """
 
@@ -359,12 +384,13 @@ def _page(title: str, description: str, canonical: str, body: str) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(title)} · AgentAvow Docs</title>
+<title>{html.escape(title)}</title>
 <meta name="description" content="{html.escape(description, quote=True)}">
 <link rel="canonical" href="{html.escape(canonical, quote=True)}">
 <style>{_STYLE}</style>
 </head>
 <body>
+  <header class="top"><a href="https://agentavow.com/">AgentAvow</a><span>·</span><a href="/docs">Docs</a><a class="check" href="https://agentavow.com/check">Check a tool</a></header>
   <main class="wrap">
 {body}
     <a class="home" href="https://agentavow.com/">← Back to AgentAvow</a>
@@ -404,7 +430,7 @@ async def docs_hub() -> HTMLResponse:
         f'<ul class="index">{"".join(items)}</ul>'
     )
     return HTMLResponse(_page(
-        "Documentation",
+        "Docs · AgentAvow",
         "AgentAvow documentation — how scoring works, gating on the score, verifying "
         "attestations, trust badges, and running locally.",
         "https://agentavow.com/docs",
@@ -427,13 +453,17 @@ async def docs_page(slug: str) -> HTMLResponse:
         hub.status_code = 404
         return hub
     title = _TITLES[slug]
+    # The page already prints the title as its <h1>; drop the doc's own leading "# ..."
+    # so there is exactly one h1.
+    md = re.sub(r"\A\s*#\s+[^\n]*\n?", "", md, count=1)
     body = (
         f"<h1>{html.escape(title)}</h1>\n"
         '<p class="sub">AgentAvow Docs · agentavow.com</p>\n'
         f"{_render_body(md)}"
     )
     return HTMLResponse(_page(
-        title,
+        # Same title as the SPA's SEOHead ("<Doc> · Docs" + " · AgentAvow").
+        f"{title} · Docs · AgentAvow",
         _meta_description(_first_paragraph(md)) or f"AgentAvow documentation — {title}.",
         f"https://agentavow.com/docs/{slug}",
         body,

@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { rp } from '../basePath'
 import { unsupportedRepoHost, unsupportedRepoHostMessage } from '../lib/unsupportedHost'
+import { NoticeText } from '../components/NoticeText'
 import { motion, useReducedMotion } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCatalog, fetchFlaggedStat, rowIdentity } from '../catalog'
 import { publicApi } from '../../lib/scanApi'
-import { getTrustTier } from '../../components/trust/gradeSystem'
-import { TrustBar, AdoptionNeedle, CertifiedMark, TrustMini, AdoptionMini, DecisionLine } from '../components/TrustMark'
+import { decisionOf, getTrustTier } from '../../components/trust/gradeSystem'
+import { TrustBar, AdoptionNeedle, CertifiedMark, TrustOrCertifiedMini, AdoptionMini, DecisionLine } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
 import { trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
@@ -32,6 +33,9 @@ const EXAMPLES = [
   'anthropics/anthropic-sdk-python', // ~88 · A
   'vercel/next.js',                  // ~90 · A
 ]
+
+const CHATGPT_LISTING = 'https://chatgpt.com/plugins/plugin_asdk_app_6ac830ccc2d48191ac27974dec7d8344'
+const CLAUDE_LISTING = 'https://claude.ai/directory/connectors/agentavow'
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <span className="font-mono text-[12px] tracking-[0.16em] uppercase text-primary-light font-semibold">{children}</span>
@@ -142,7 +146,12 @@ export default function RebrandHome() {
     const row = teaser[0]
     if (!row) return null
     const { display, repoPath } = rowIdentity(row)
-    return { row, display, repoPath, t: getTrustTier(row.trust_score as number) }
+    // The Certified mark as the report shows it: the row's certified_mark when the
+    // catalog carries it, else the stored A+.
+    const mark = (row as { certified_mark?: boolean | null }).certified_mark
+    const certified = decisionOf({ ...row, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision === 'safe'
+      && (typeof mark === 'boolean' ? mark : row.grade === 'A+')
+    return { row, display, repoPath, certified, t: getTrustTier(row.trust_score as number) }
   })()
   // Real adoption for the example card (stars/checks/watchers) — no "coming soon".
   const { data: exAdopt } = useQuery({
@@ -196,7 +205,7 @@ export default function RebrandHome() {
               Check
             </button>
           </form>
-          {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-amber-300">{notice}</p>}
+          {notice && <p role="alert" className="mt-3 mx-auto max-w-[600px] text-[13px] text-amber-300"><NoticeText text={notice} /></p>}
 
           <div className="mt-4 flex flex-wrap gap-2 justify-center items-center">
             <span className="font-mono text-[11.5px] text-text-muted/70">try one:</span>
@@ -238,7 +247,7 @@ export default function RebrandHome() {
               [s?.total_scans ?? 0, 'tools scanned'],
               [s?.by_surface?.mcp ?? 0, 'MCP servers'],
               [s?.by_surface?.x402 ?? 0, 'x402 endpoints'],
-              [s?.repo_scans_scanned ?? s?.repo_scans_total ?? 0, 'repos graded'],
+              [s?.repo_scans_scanned ?? s?.repo_scans_total ?? 0, 'repos scanned'],
               [12, 'detection categories'],
             ].map(([n, l]) => (
               <div key={l as string}>
@@ -253,6 +262,46 @@ export default function RebrandHome() {
             </div>
           </div>
           <SandboxTotalsStrip className="mt-3 px-2" linkLabel="Behavioral sandbox →" />
+        </Reveal>
+      </section>
+
+      {/* ②b WORKS WHERE YOUR AGENT DOES — the assistant listings + how the check runs in each */}
+      <section id="assistants" className="max-w-[1080px] mx-auto px-6 py-14 border-t border-border/60">
+        <Reveal>
+          <div className="text-center max-w-[60ch] mx-auto">
+            <Eyebrow>Works where your agent does</Eyebrow>
+            <h2 className="mt-2.5 text-2xl md:text-3xl font-bold">Check a tool before your agent connects it, from the assistant you already use.</h2>
+            <p className="mt-3 text-text-muted">AgentAvow is in the ChatGPT and Claude directories. Ask about a repo, a package or an MCP server and get the answer before anything is installed.</p>
+          </div>
+          <div className="flex gap-2.5 flex-wrap justify-center mt-6">
+            <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent('guest_cta_click', '/rebrand', 'add_chatgpt')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to ChatGPT ↗</a>
+            <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent('guest_cta_click', '/rebrand', 'add_claude')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to Claude ↗</a>
+            <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claude Code plugin →</Link>
+            <Link to={rp('/rebrand/for-developers')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Cursor · VS Code · any MCP client →</Link>
+          </div>
+          <div className="grid md:grid-cols-3 rounded-2xl overflow-hidden border border-border/60 mt-8 glass">
+            {[
+              ['01', 'You ask', '"Add the Notion MCP server", "Is this package safe to install?", or "Check this repo before I use it."'],
+              ['02', 'AgentAvow checks it first', 'Its code, dependencies and published advisories, the tool definitions a server serves, and where it applies a sandbox run that watches what it actually does.'],
+              ['03', 'You get the answer', 'Safe to connect, Review before you connect, or Do not connect, with the reason, a signed trust score and an adoption score. Then you decide.'],
+            ].map(([n, h, p], i) => (
+              <div key={n} className={`p-6 ${i < 2 ? 'md:border-r border-border/60' : ''}`}>
+                <div className="font-mono text-[12px] text-primary-light tracking-wide">{n}</div>
+                <h3 className="mt-2.5 text-[17px] font-semibold">{h}</h3>
+                <p className="mt-2 text-text-muted text-[14px]">{p}</p>
+              </div>
+            ))}
+          </div>
+          <div className="grid md:grid-cols-2 gap-4 mt-4">
+            <div className="glass rounded-2xl p-6">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">ChatGPT and Claude chat</div>
+              <p className="mt-2 text-text-muted text-[14px]">The check runs when you ask, and the bundled skill steps in when you're about to add a tool. You see the answer and a trust card before you run any install command.</p>
+            </div>
+            <div className="glass rounded-2xl p-6">
+              <div className="font-mono text-[11.5px] uppercase tracking-wide text-accent">Claude Code</div>
+              <p className="mt-2 text-text-muted text-[14px]">The plugin checks automatically: each new MCP server when a session starts, and the answer on file before each tool call. A server that reads Do not connect is stopped; a tool whose definition changed asks you first.</p>
+            </div>
+          </div>
         </Reveal>
       </section>
 
@@ -282,11 +331,11 @@ export default function RebrandHome() {
                 <div className="absolute inset-0 pointer-events-none" style={{ background: `radial-gradient(340px 130px at 25% -10%, ${example.t.color}1c, transparent 70%), radial-gradient(340px 130px at 78% -10%, rgba(45,212,191,0.12), transparent 70%)` }} />
                 <div className="relative grid grid-cols-2">
                   <div className="p-5 text-center flex flex-col items-center">
-                    <div className="min-h-[126px] flex items-center justify-center"><TrustBar score={example.row.trust_score as number} /></div>
+                    <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center">{example.certified ? <CertifiedMark score={example.row.trust_score as number} /> : <TrustBar score={example.row.trust_score as number} />}</div>
                     <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: example.t.color }}>Attestation Trust</div>
                   </div>
                   <div className="p-5 text-center flex flex-col items-center border-l border-border/50">
-                    <div className="min-h-[126px] flex items-center justify-center"><AdoptionNeedle count={exCount} unit={exUnit} /></div>
+                    <div className="min-h-[100px] sm:min-h-[126px] flex items-center justify-center"><AdoptionNeedle count={exCount} unit={exUnit} /></div>
                     <div className="mt-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] gradient-text">Adoption</div>
                   </div>
                 </div>
@@ -294,7 +343,7 @@ export default function RebrandHome() {
               <div className="p-5 flex flex-wrap gap-5 text-[13px] text-text-muted">
                 <span><b className="text-danger tabular-nums">{example.row.critical ?? 0}</b> critical</span>
                 <span><b className="text-warning tabular-nums">{example.row.high ?? 0}</b> high</span>
-                <span><b className="text-text tabular-nums">{example.row.findings_count ?? 0}</b> total findings</span>
+                <span><b className="text-text tabular-nums">{example.row.findings_count ?? 0}</b> {(example.row.findings_count ?? 0) === 1 ? 'finding' : 'findings'} (any severity)</span>
               </div>
               <div className="flex items-center gap-2.5 p-4 border-t border-dashed border-border flex-wrap">
                 <span className="flex items-center gap-2 font-mono text-[12px] text-success">
@@ -307,7 +356,7 @@ export default function RebrandHome() {
                 {example.repoPath && <Link to={rp(`/rebrand/check/${example.repoPath}`)} className="ml-auto text-[13px] font-semibold text-primary-light hover:text-primary">See the full report →</Link>}
               </div>
               <div className="px-5 py-3.5 border-t border-border/60 text-[12.5px] text-text-muted leading-relaxed">
-                A signed record means a tool can't show you one grade and be another. Don't take our word for it — <Link to={rp('/rebrand/how-it-works#verify')} className="text-primary-light hover:text-primary font-semibold">verify the signature yourself, or tamper with it and watch it fail →</Link>
+                A signed record means a tool can't show you one score and be another. Don't take our word for it — <Link to={rp('/rebrand/how-it-works#verify')} className="text-primary-light hover:text-primary font-semibold">verify the signature yourself, or tamper with it and watch it fail →</Link>
               </div>
             </div>
           ) : (
@@ -322,7 +371,7 @@ export default function RebrandHome() {
               <div className="min-w-0 flex-1 text-center sm:text-left">
                 <div className="font-mono text-[11px] uppercase tracking-[0.16em] gradient-text font-semibold">The top tier</div>
                 <h3 className="mt-1.5 text-xl font-bold">Certified — the earned pinnacle.</h3>
-                <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[44ch] mx-auto sm:mx-0">Score 96+ <em>and</em> verified provenance, no manifest drift, full category coverage — revocable the moment any of it slips. Not a sticker you buy; a bar you clear.</p>
+                <p className="mt-1.5 text-text-muted text-[13.5px] max-w-[44ch] mx-auto sm:mx-0">Verified provenance, no drift, nothing sampled — <em>and</em> a Safe to connect answer at a trust score of 81 or above. Revocable the moment any of it slips. Not a sticker you buy; a bar you clear.</p>
                 <p className="mt-2 text-[12.5px] text-text-muted/90 max-w-[44ch] mx-auto sm:mx-0"><span className="text-text">sigstore</span>, <span className="text-text">react</span>, <span className="text-text">axios</span> and more clear it today — not theoretical.</p>
                 <Link to={rp('/rebrand/certified')} className="inline-block mt-2.5 text-[13px] font-semibold text-primary-light hover:text-primary">See the gate + who's Certified →</Link>
               </div>
@@ -380,13 +429,13 @@ export default function RebrandHome() {
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Check before it connects</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Add AgentAvow's MCP to your agent (Claude Code, Cursor, or your own runtime). It pulls a tool's signed grade before your agent connects, so an unsafe tool is stopped in the loop, not found after the fact.</p>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Add AgentAvow to your agent (ChatGPT, Claude, Claude Code, Cursor, or your own runtime). It pulls a tool's signed answer and score before your agent connects, so an unsafe tool is stopped in the loop, not found after the fact.</p>
               <Link to={rp("/rebrand/how-it-works") + "#mcp-check"} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Set it up →</Link>
             </div>
             <div className="glass rounded-2xl p-7 flex flex-col">
               <div className="font-mono text-[11.5px] uppercase tracking-wide text-primary-light">For anyone</div>
               <h3 className="mt-2 text-xl font-semibold">Get change alerts</h3>
-              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a score drops or a signed definition changes — the rug-pull you'd otherwise miss.</p>
+              <p className="mt-2 text-text-muted text-[14.5px] flex-1">Watch the tools you depend on. We re-scan them and alert you the moment a score drops or a signed definition changes — the rug-pull you'd otherwise miss. <a href="https://github.com/AgentAvow/AgentAvow/tree/main/demos/rugpull" target="_blank" rel="noopener noreferrer" className="text-primary-light hover:underline">See the rug-pull demo ↗</a></p>
               <Link to={rp("/rebrand/login")} className="mt-5 self-start font-semibold px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Get change alerts →</Link>
             </div>
             <div className="glass rounded-2xl p-7 flex flex-col">
@@ -423,7 +472,7 @@ export default function RebrandHome() {
             <span className="font-mono text-[10.5px] uppercase tracking-wide px-2 py-1 rounded bg-primary/15 text-primary-light shrink-0">New</span>
             <div className="min-w-0 flex-1">
               <div className="text-[15px] font-semibold">Running an agent? Give it a built-in safety check.</div>
-              <div className="text-[13.5px] text-text-muted mt-0.5">Add AgentAvow's MCP server to Claude Code or Cursor, and your agent asks "is this safe?" before it connects anything.</div>
+              <div className="text-[13.5px] text-text-muted mt-0.5">Add AgentAvow to ChatGPT, Claude, Claude Code or Cursor, and your agent asks "is this safe?" before it connects anything.</div>
             </div>
             <span className="text-[14px] font-semibold text-primary-light group-hover:translate-x-1 transition-transform shrink-0">Add it →</span>
           </Link>
@@ -454,7 +503,7 @@ export default function RebrandHome() {
               <div className="absolute -right-8 -top-8 w-28 h-28 rounded-full bg-primary/15 blur-2xl" />
               <div className="font-mono text-[11px] uppercase tracking-wide text-primary-light">Axis 03 · Tool-safety</div>
               <h3 className="mt-2 text-lg font-semibold gradient-text">Is what it connects to safe?</h3>
-              <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses — graded and <strong>signed so you can verify it</strong>. This is AgentAvow.</p>
+              <p className="mt-2 text-text-muted text-[14px]">The unguarded surface — the tools, MCP servers, and skills an agent uses — scanned and <strong>signed so you can verify it</strong>. This is AgentAvow.</p>
             </div>
           </div>
           <p className="mt-5 text-[14px] text-text-muted">Our evidence format and conformance vectors are public and built in the open with the agent-trust standards community. <Link to={rp("/rebrand/how-it-works")} className="text-primary-light hover:text-primary font-semibold">See how it works & who we build with →</Link></p>
@@ -478,8 +527,8 @@ export default function RebrandHome() {
                       <div className="flex items-center justify-between gap-2.5">
                         <span className="font-mono text-[13.5px] break-all">{display}</span>
                         <div className="flex items-center gap-3 shrink-0">
-                          <TrustMini score={row.trust_score as number} />
-                          {(row as { adoption_count?: number }).adoption_count ? <AdoptionMini count={(row as { adoption_count?: number }).adoption_count} /> : null}
+                          <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />
+                          {(row as { adoption_count?: number }).adoption_count ? <AdoptionMini count={(row as { adoption_count?: number }).adoption_count} unit={(row as { adoption_unit?: string | null }).adoption_unit} /> : null}
                         </div>
                       </div>
                       <DecisionLine row={row} className="mt-2" />
@@ -505,17 +554,12 @@ export default function RebrandHome() {
           </div>
           <div className="grid md:grid-cols-2 gap-6 items-center mt-6">
             <div className="min-w-0">
-              {/* real badge styles: Trust, and Trust + Adoption */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-                  <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow Trust</span>
-                  <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
-                </span>
-                <span className="inline-flex font-mono text-[12px] rounded overflow-hidden shadow-md">
-                  <span className="bg-[#38445f] text-white px-2.5 py-1.5">AgentAvow</span>
-                  <span className="px-2.5 py-1.5 font-bold text-white bg-[#22C55E]">94/100</span>
-                  <span className="px-2.5 py-1.5 font-bold text-[#7fe9d9] bg-[#233047]">★ 490M</span>
-                </span>
+              {/* the live badges (compact README badge + website card) for our own repo */}
+              <div className="flex flex-col items-start gap-3">
+                <img src="/api/v1/public/scan/AgentAvow/AgentAvow/badge" alt="AgentAvow compact badge for AgentAvow/AgentAvow"
+                  height={20} className="h-5 w-auto" loading="lazy" />
+                <img src="/api/v1/public/scan/AgentAvow/AgentAvow/badge?style=card" alt="AgentAvow website card for AgentAvow/AgentAvow"
+                  width={320} className="w-full max-w-[320px] h-auto" loading="lazy" />
               </div>
               <div className="mt-4 font-mono text-[12.5px] bg-surface border border-border rounded-xl px-4 py-3.5 text-text-muted overflow-x-auto whitespace-pre-wrap break-all">
                 [![AgentAvow Trust](https://agentavow.com/api/v1/public/scan/you/your-repo/badge)](https://agentavow.com/check/you/your-repo)

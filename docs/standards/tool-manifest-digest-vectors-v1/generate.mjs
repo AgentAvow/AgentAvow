@@ -80,6 +80,15 @@ const expectAll = (o) => ({ signature_valid: true, canonical_bytes: true, subjec
 const gate = (o) => ({ subject_id: subject, tool_name: toolName, observed_tool_digest: toolDigestSigned,
   evaluation_time: plusH(issuedAt, 1), ...o });
 
+// boundary-fresh is only meaningful while the signed expiresAt carries a sub-millisecond
+// remainder: its gate time is that instant truncated to milliseconds, so it sits inside
+// [issuedAt, expiresAt) by that remainder alone. A re-pin that lands on a whole millisecond
+// would make the case vacuous rather than wrong, so refuse to build it.
+const expiryFrac = ((payload.expiresAt.match(/\.(\d+)/)?.[1] ?? '') + '000000').slice(0, 6);
+if (Number(expiryFrac.slice(3)) === 0) {
+  throw new Error(`boundary-fresh needs a sub-millisecond remainder on expiresAt; got ${payload.expiresAt}`);
+}
+
 const vectors = [
   { name: 'tool-match', note: 'The positive case. The gate authorizes one named tool on the same server, computes the digest of the definition it was served, and that digest equals the one the scan signed for that tool, inside the validity window. Every axis passes.',
     gate: gate({}), jws: 'reference', expect: expectAll({}) },
@@ -97,9 +106,11 @@ const vectors = [
     jws: 'reference', expect: expectAll({ fresh: false, rely: false }) },
   { name: 'tampered-payload', note: 'Payload edited after signing (trustScore raised to 99), re-canonicalized, original signature kept. Canonical bytes still check; the signature does not. Canonical form is not authenticity. Do not rely.',
     gate: gate({}), jws: tamperedJws, expect: expectAll({ signature_valid: false, rely: false }) },
+  { name: 'boundary-fresh', note: 'A gate time inside the validity window by less than a millisecond. It is the signed expiresAt truncated to millisecond precision and written with Z, which is the shape a millisecond clock produces. Every axis passes, and rely is true. A consumer that compares the timestamps as strings, or parses them with something that truncates to milliseconds (JavaScript Date, jose), reads this as expired and fails exactly one axis. The six cases above cannot distinguish that consumer from a correct one, because every other gate time sits an hour or more from a boundary.',
+    gate: gate({ evaluation_time: expiresAt.toISOString() }), jws: 'reference', expect: expectAll({}) },
 ];
 
-// Key-encoding vectors. The pinned server's tool names are plain ASCII, so the six
+// Key-encoding vectors. The pinned server's tool names are plain ASCII, so the seven
 // cases never exercise the percent-encoding rule. These pairs do; they are derived
 // here with the same toolKey() and carry no signature.
 const keyVectors = [
@@ -128,7 +139,7 @@ const keyVectors = [
 const out = {
   suite: 'tool-manifest-digest-v1',
   spec: 'aeoess/agent-governance-vocabulary#177 / #179 E1 — tool-safety evidence consumed by a pre-execution gate, bound to one named tool by its definition digest',
-  status: 'proposed — extends tool-manifest-digest-v0 (whole-server binding) with a per-tool binding; a consumer-input shape (gate) and six expected outcomes for the boundary to refine, not a finalized schema',
+  status: 'proposed — extends tool-manifest-digest-v0 (whole-server binding) with a per-tool binding; a consumer-input shape (gate) and seven expected outcomes for the boundary to refine, not a finalized schema',
   claim_ceiling: 'rely=true establishes exactly this: at evaluation_time, the named issuer had signed a static-analysis grade for this server, the grade covered a tool of this name, the definition the gate was served for that tool is the one the scan graded, and the signature, subject and validity window all check. It establishes nothing about runtime behavior, nothing about what the tool does when invoked, nothing about other tools on the server, and nothing about definitions the scan did not observe. Whether a gate proceeds on rely=true is a separately versioned admission policy.',
   derivation: {
     attestation: 'compact JWS (RFC 7515), alg EdDSA (Ed25519), payload = RFC 8785 JCS canonical bytes of the verdict; signature over ASCII(BASE64URL(header) || "." || BASE64URL(payload)).',

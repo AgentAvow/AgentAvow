@@ -185,14 +185,14 @@ EXPECTED_PHRASES = {
 def test_phrase_table_is_the_three_locked_phrases():
     assert {d.value: d.phrase for d in DECISIONS} == EXPECTED_PHRASES
     assert {d.value: d.label for d in DECISIONS} == {
-        "safe": "Safe", "review": "Review", "do_not_connect": "Blocked"}
+        "safe": "Safe", "review": "Review", "do_not_connect": "Don't connect"}
     assert REVIEW_PHRASE == EXPECTED_PHRASES["review"]
     assert not any(hasattr(t, "verdict") for t in TIERS)  # tiers no longer carry a phrase
 
 
 def test_ts_phrase_table_agrees():
     ts = (ROOT / "web/src/components/trust/gradeSystem.ts").read_text()
-    rows = dict(re.findall(r"\{ value: '([a-z_]+)', phrase: '([^']+)', label: '", ts))
+    rows = dict(re.findall(r"\{ value: '([a-z_]+)', phrase: '([^']+)', label: ['\"]", ts))
     assert rows == EXPECTED_PHRASES
     m = re.search(r"export const REVIEW_PHRASE = '([^']+)'", ts)
     assert m and m.group(1) == REVIEW_PHRASE
@@ -235,7 +235,8 @@ def test_og_surfaces_lead_with_the_decision():
     high = {"trust_score": 85, "metadata": {"files_scanned": 40},
             "findings": {"high": 1, "items": [{"severity": "high", "name": "Eval of input"}]}}
     assert og_router._og_verdict(85, high) == (
-        f"{REVIEW_PHRASE}: one high finding: eval of input · signed, verifiable offline.")
+        f"{REVIEW_PHRASE}: one high finding in its code: eval of input · signed, "
+        "verifiable offline.")
     cert = {"trust_score": 98, "metadata": {"files_scanned": 40},
             "certified": {"eligible": True}}
     assert og_router._og_verdict(98, cert).startswith("Safe to connect · Certified: ")

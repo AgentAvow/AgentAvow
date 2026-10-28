@@ -1,0 +1,10 @@
+{
+  "repository": "rufat325/heldfast",
+  "commit": "ca5a872264b486907ed5479247e5150c5122d33d",
+  "module": "src/heldfast/profiles.py",
+  "functions": ["agentavow_v1_digest", "agentavow_v1_key"],
+  "python": "3.9",
+  "license": "Apache-2.0",
+  "claim": "reproduces the published per-tool digests and the key encoding for the pinned fixture (3 of 3 digests, 13 of 13 key pairs); makes no claim about AgentAvow's grades",
+  "claim_source": "https://github.com/rufat325/heldfast/blob/main/docs/TRANSPARENCY.md#comparing-with-another-record"
+}

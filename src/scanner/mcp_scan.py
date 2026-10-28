@@ -13,7 +13,9 @@ Detectors (all deterministic from the JSON alone):
     descriptions + resource/prompt text (reuses prompt_injection + hidden_unicode);
   * input-schema risk — freeform/dangerous params, ``additionalProperties: true``;
   * dangerous-capability taxonomy per tool + lethal-trifecta across the tool SET;
-  * annotation truthfulness — ``readOnlyHint`` that lies about a write/exec tool.
+  * annotation truthfulness — ``readOnlyHint`` that lies about a write/exec tool;
+  * icons — active or outside content, insecure / private / third-party hosts
+    (``src.scanner.mcp_icons``; never fetched, never part of a digest).
 """
 from __future__ import annotations
 
@@ -25,28 +27,277 @@ from typing import Any
 
 import rfc8785
 
-# Capability keyword taxonomy — classify a tool from its name + description.
+# Capability taxonomy — classify a tool from its name + description.
+#
+# exec / fs_write / db_write drive the annotation-lie finding and the "mutate" leg of
+# the lethal trifecta, so they need a capability PHRASE (a verb plus the thing it acts
+# on), not a bare word: "run a search", "dry run", "list commands", "create a summary",
+# "update the view" and "drop-in" are not code execution or writes. A match preceded
+# in the same clause by a negation ("never executes code", "does not write files",
+# "read-only: no writes") does not count (see ``_affirmed``).
+_GAP = r"(?:\s+[\w'./-]+){0,%d}?\s+"  # up to N intervening words between verb and object
+
+_EXEC_OBJ = (
+    r"(?:commands?|shell|scripts?|programs?|process(?:es)?|binar(?:y|ies)|executables?"
+    r"|python|javascript|js|bash|powershell|snippets?"
+    r"|code(?!\s+(?:analysis|review|search|scan|quality|coverage|style|navigation|"
+    r"intelligence|completion|graph|map|owners?|examples?|documentation|docs)))"
+)
+_FS_OBJ = r"(?:files?|director(?:y|ies)|folders?|paths?|disk|filesystem|file\s+system)"
+_DB_OBJ = (
+    r"(?:rows?|records?|tables?|databases?|db|collections?|entries|entry|documents? in"
+    r"|keys? in)"
+)
+
 _CAP_PATTERNS: dict[str, re.Pattern] = {
     "exec": re.compile(
-        r"\b(exec|execute|run|shell|command|spawn|subprocess|eval|bash|sh)\b", re.I),
+        r"(?<!-)\b(?:exec(?:ute|utes|uted|uting)?|run|runs|running|eval(?:uate|uates|uating)?"
+        r"|invoke|invokes|launch(?:es)?|spawn(?:s|ed|ing)?)" + (_GAP % 3) + _EXEC_OBJ + r"\b(?!-)"
+        r"|\b(?:shell|terminal|system|os|cli)\s+commands?\b"
+        r"|\b(?:shell|command|code|process)\s+execution\b"
+        r"|\b(?:arbitrary|remote)\s+(?:code|commands?|scripts?)\b"
+        r"|\b(?:subprocess(?:es)?|child[\s_]process(?:es)?|bash|powershell|zsh)\b"
+        r"|\bsh\s+-c\b"
+        r"|\b(?:in|via|through|from|into|on)\s+(?:a|the)?\s*shell\b(?!-)",
+        re.I),
     "fs_write": re.compile(
-        r"\b(write|create|delete|remove|unlink|rename|move|mkdir|chmod|save|edit|patch)\b", re.I),
+        r"\b(?:write|writes|writing|overwrite|overwrites|append|appends|create|creates"
+        r"|creating|delete|deletes|deleting|remove|removes|removing|move|moves|moving"
+        r"|rename|renames|renaming|save|saves|saving|edit|edits|editing|modify|modifies"
+        r"|copy|copies)" + (_GAP % 4) + _FS_OBJ + r"\b"
+        r"|\b(?:mkdir|rmdir|chmod|chown|unlink|rm\s+-rf?)\b"
+        r"|\bfiles?\s+(?:writes?|deletion|removal)\b",
+        re.I),
     "fs_read": re.compile(
-        r"\b(read|open|cat|list|glob|stat|load|fetch file|get file)\b", re.I),
+        r"\b(?:read|reads|reading|open|opens|list|lists|listing|load|loads|get|gets|view"
+        r"|cat|search|searches|find|finds|stat|glob|browse)" + (_GAP % 5) + _FS_OBJ + r"\b"
+        r"|\bglob\b|\bfile\s+(?:contents?|tree|listing|search)\b",
+        re.I),
     "net": re.compile(
-        r"\b(http|https|url|fetch|request|curl|download"
-        r"|upload|webhook|post|api call|send)\b", re.I),
+        r"\b(?:https?|urls?|fetch|fetches|curl|wget|downloads?(?!\s+per\b)|upload|uploads"
+        r"|webhooks?|api\s+calls?|web\s+(?:pages?|requests?|search)"
+        r"|(?:http|web|api|network|post|get)\s+requests?|requests?\s+to"
+        r"|post\s+(?:to|data)|send\s+(?:an?\s+)?(?:emails?|messages?|requests?|data))\b",
+        re.I),
     "secrets": re.compile(
-        r"\b(secret|token|password|credential|api[_ ]?key|env"
-        r"|environment|\.env|ssh|aws|private key)\b", re.I),
+        r"\b(?:secrets?|passwords?|credentials?|api[_ ]?keys?|private\s+keys?|ssh\s+keys?"
+        r"|(?:access|auth|api|bearer|oauth|session|refresh|github|gh|npm|personal)"
+        r"[\s_-]tokens?|env(?:ironment)?\s+var(?:iable)?s?|\.env|env\s+files?"
+        r"|process\.env|os\.environ|aws\s+(?:credentials|keys?|secrets?))\b",
+        re.I),
     "db_write": re.compile(
-        r"\b(insert|update|delete from|drop|truncate|mutation|write to|db write|sql)\b", re.I),
+        r"\b(?:insert|inserts|inserting|update|updates|updating|upsert|upserts|delete"
+        r"|deletes|deleting|truncate|truncates|modify|modifies|write"
+        r"|writes|writing|alter|alters)" + (_GAP % 3) + _DB_OBJ + r"\b"
+        r"|\b(?:drop|truncate|alter)\s+(?:table|database|index|collection)\b"
+        r"|\bdelete\s+from\b|\binsert\s+into\b"
+        r"|\bgraphql\s+mutations?\b"
+        r"|\b(?:run|runs|execute|executes|perform|performs|send|sends)\s+(?:an?\s+|the\s+)?"
+        r"mutations?\b"
+        r"|\b(?:execute|executes|run|runs)\s+(?:arbitrary|raw|any)\s+sql\b",
+        re.I),
 }
+
+# A capability match preceded in the same clause (within ~4 words) by one of these
+# is a denial, not a claim: "never executes code", "does not write files".
+_NEGATION = re.compile(
+    r"^(?:not|never|no|none|nor|without|cannot|can't|cant|doesn't|doesnt|don't|dont"
+    r"|won't|wont|isn't|isnt|read-only|readonly|non-destructive)$", re.I)
+_CLAUSE_BREAK = re.compile(r"[.;:!?\n(),]|\bbut\b|\bwhile\b|\bthen\b", re.I)
+
+
+def _affirmed(pat: re.Pattern, text: str) -> bool:
+    """True when ``pat`` matches somewhere in ``text`` that is not negated."""
+    for m in pat.finditer(text):
+        head = _CLAUSE_BREAK.split(text[: m.start()])[-1]
+        words = re.findall(r"[\w'-]+", head)[-4:]
+        if not any(_NEGATION.match(w) for w in words):
+            return True
+    return False
+
+
+def _normalize_tool_name(name: str) -> str:
+    """``execute_command`` / ``runShellCommand`` → words, so a name reads as prose."""
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
+    return re.sub(r"[_\-.:/]+", " ", s)
+
 # Param names that are dangerous when freeform (no enum / constrained format).
+# `body` is not on the list (precision PR 2, ledger #20): a message / email / issue
+# body is free text by design (`send_email(to, subject, body)`); nothing executes or
+# resolves it. The rule was aimed at raw HTTP request bodies, which no tool name says.
 _DANGEROUS_PARAM = re.compile(
     r"^(cmd|command|exec|script|code|eval|shell|path|file|filepath|filename|dir|"
-    r"directory|url|uri|endpoint|query|sql|expression|template|payload|body)$", re.I
+    r"directory|url|uri|endpoint|query|sql|expression|template|payload)$", re.I
 )
+# The subset of those that, as a freeform string, is declared evidence of execution.
+_EXEC_PARAM = re.compile(r"^(cmd|command|commands|script|shell|shell_command)$", re.I)
+# Ambiguous names (``code`` is as often an OTP, invite or country code): evidence only
+# when the param's own description says it is source to run.
+_EXEC_PARAM_AMBIGUOUS = re.compile(r"^(code|exec|eval|source|expression)$", re.I)
+_EXEC_PARAM_DESC = re.compile(
+    r"\b(?:python|javascript|typescript|bash|shell|sql|source\s+code|code\s+to\s+(?:run|exec"
+    r"|evaluate)|script|snippet|to\s+(?:run|execute|evaluate)|executed|evaluated)\b", re.I)
+# A tool whose name, or the first word of its description, is a destructive verb
+# ("delete_record", "Removes the entry ...") mutates state whatever object it names.
+_DESTRUCTIVE_NAME_VERBS = frozenset({
+    "delete", "remove", "drop", "purge", "destroy", "erase", "truncate", "overwrite",
+    "write", "insert", "upsert", "wipe",
+})
+_DESTRUCTIVE_LEAD = re.compile(
+    r"^\W*(?:delete|remove|drop|purge|destroy|erase|truncate|overwrite|wipe)s?\b", re.I)
+# A description that explicitly says the "command" is not executed on a real host
+# (e.g. a docs server's shell-like query over a virtual, in-memory filesystem). The
+# schema and the prose then disagree, so the read-only contradiction is medium.
+_EXEC_DENIAL = re.compile(
+    r"\b(?:not|never|isn't|is\s+not)\s+(?:a\s+)?(?:real\s+)?shell\b"
+    r"|\bnothing\s+(?:is\s+)?(?:runs?|executed|executes)\b"
+    r"|\bno\s+process\s+(?:control|execution|spawning)\b"
+    r"|\b(?:virtual(?:ized)?|in-memory|simulated|sandboxed)\s+(?:in-memory\s+)?"
+    r"(?:filesystem|file\s+system|shell)\b",
+    re.I)
+
+
+# Exfiltration through a parameter (the "sidenote" tool-poisoning shape): a tool or
+# param description that tells the agent to put a secret or a credential file's
+# contents into an argument. With `body` off the freeform-param list (#20) this is
+# what catches a `body` that really carries data out (adversarial recall review).
+_EXFIL_SOURCE_FILE = re.compile(
+    r"~/\.(?:ssh|aws|cursor|kube|docker|gnupg|npmrc|netrc|pypirc|git-credentials)\b"
+    r"|\$HOME/\.(?:ssh|aws|cursor|kube|docker|gnupg|npmrc|netrc|pypirc)\b"
+    r"|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|\.ssh/|\.aws/credentials|\bmcp\.json\b"
+    r"|claude_desktop_config|/etc/(?:passwd|shadow)"
+    r"|(?<![\w.])\.env\b(?!\.(?:example|sample|template|dist|defaults?)\b)|\bprivate[\s_-]keys?\b"
+    r"|~/\.config/(?:gh|gcloud|op|hub)\b|\bhosts\.yml\b|\.(?:bash|zsh|python)_history\b"
+    r"|\bshell\s+history\b|\bkeychain\b|\.git-credentials\b|\bcookies?\.(?:sqlite|db)\b"
+    # an environment variable that holds a secret, by name
+    # (case-sensitive: `$skiptoken` is an OData paging value, not a secret)
+    r"|(?:\$\{?|process\.env\.|os\.environ\[['\"]?)(?-i:[A-Z][A-Z0-9_]*"
+    r"(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIALS?))\b",
+    re.I)
+_SECRET_WORDS = (r"api[\s_-]?keys?|access[\s_-]?keys?|tokens|secrets|credentials|passwords"
+                 r"|private[\s_-]keys?|ssh[\s_-]keys?")
+# Bulk secrets only when they are the AGENT's / user's own ("all of your API keys");
+# "any API keys the endpoint needs" is an HTTP tool's ordinary header param.
+_EXFIL_SOURCE_BULK = re.compile(
+    r"\b(?:all|every|each|any)\s+(?:of\s+)?(?:your|the\s+user'?s|the\s+local|the\s+current"
+    r"|this\s+machine'?s|the\s+machine'?s|the\s+agent'?s)\s+(?:environment\s+variables?"
+    r"|env(?:ironment)?\s+vars?|" + _SECRET_WORDS + r")\b",
+    re.I)
+# Environment variables in bulk, when the sentence says they hold secrets.
+_EXFIL_SOURCE_ENV = re.compile(
+    r"\b(?:all|every|each)\s+(?:of\s+the\s+)?(?:environment\s+variables?"
+    r"|env(?:ironment)?\s+vars?)\b|\bprocess\.env\b|\bos\.environ\b", re.I)
+_SECRET_WORD_RE = re.compile(r"\b(?:" + _SECRET_WORDS + r"|api[\s_-]?key|token|secret)\b", re.I)
+# Put-into verbs only: reading a secret is what a vault tool does; putting one into an
+# argument is the exfiltration.
+_EXFIL_VERB = re.compile(
+    r"\b(?:include|append|attach|paste|pass|send|copy|put|insert|add|embed|provide|dump"
+    r"|forward|upload|place|supply|fill|enter)\b", re.I)
+# A file's CONTENTS, not its name: "include the contents of ~/.ssh/id_rsa" vs a watch
+# list that "can include .env" (MCP-side precision check of #177).
+_EXFIL_CONTENT = re.compile(
+    r"\b(?:contents?|text|data|full|entire|whole|value)\b"
+    r"|\b(?:attach|paste|embed|dump)\b", re.I)
+_EXFIL_SINK = re.compile(r"\b(?:param(?:eter)?s?|arguments?|args?|fields?|inputs?)\b", re.I)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.;!?])\s+|\n+")
+# A param that exists to carry a credential (the tool's own auth / key-import / env /
+# header input). Putting a secret THERE is the tool authenticating, not exfiltration:
+# "Pass your API key in the `api_key` parameter", "Provide the value of $GITHUB_TOKEN as
+# the token parameter", "Insert the PEM text into the key field" (MCP-side precision
+# check of #177).
+_CRED_PARAM = re.compile(
+    r"^(?:\w*?[_-])?(?:api[_-]?keys?|apikeys?|keys?|tokens?|access[_-]?tokens?|auth"
+    r"|authorization|bearer|password|passwd|passphrase|secrets?|credentials?|creds"
+    r"|private[_-]?keys?|pem|certs?|certificates?|ssh[_-]?keys?|env|envs|environment"
+    r"|env[_-]?vars?|environment[_-]?variables|headers?)$", re.I)
+_SINK_BEFORE_WORD = re.compile(
+    r"[`'\"]?([A-Za-z_][\w-]*)[`'\"]?\s+(?:param(?:eter)?|argument|arg|field|input)s?\b", re.I)
+_SINK_QUOTED = re.compile(
+    r"\b(?:as|into|in|to|via)\s+(?:the\s+)?[`'\"]([A-Za-z_][\w-]*)[`'\"]", re.I)
+# "… in the configuration file, not as parameters": the sentence rules the param out.
+_SINK_DENIED = re.compile(
+    r"\bnot\s+(?:as|in|via|through|into)\s+(?:an?\s+|the\s+)?"
+    r"(?:param(?:eter)?s?|arguments?|fields?|inputs?)\b", re.I)
+_SINK_STOPWORDS = frozenset({"the", "a", "an", "this", "that", "its", "each", "any", "your",
+                             "same", "following", "given", "other", "one"})
+
+
+def _cred_name(name: str) -> bool:
+    return bool(_CRED_PARAM.match(re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)))
+
+
+def _named_sinks(sent: str, param_names: list[str]) -> set[str]:
+    """The params a sentence says to put something into."""
+    out = {m.group(1) for m in _SINK_BEFORE_WORD.finditer(sent)
+           if m.group(1).lower() not in _SINK_STOPWORDS}
+    out |= {m.group(1) for m in _SINK_QUOTED.finditer(sent)}
+    # A param named after a sink preposition ("… in body", "… to the note"), not one
+    # that only names where to read from ("the file at the given path").
+    out |= {p for p in param_names
+            if p and re.search(r"\b(?:into|in|as|to|via|inside|within)\s+(?:the\s+)?"
+                               r"[`'\"]?" + re.escape(p) + r"(?![\w-])", sent, re.I)}
+    return out
+# "Do not forget to include …" / "never fail to append …" are instructions, not denials.
+_DOUBLE_NEGATIVE = re.compile(
+    r"\b(?:do\s+not|don'?t|never|must\s+not|cannot)\s+(?:forget|fail|neglect|omit|skip)"
+    r"(?:\s+to)?\b", re.I)
+
+
+def _exfil_instruction(text: str, param_names: list[str], in_param: bool,
+                       own: str = "") -> bool:
+    """Does ``text`` tell the agent to put a secret / a credential file's contents into
+    an argument? ``in_param``: the text is param ``own``'s description (that param is
+    the sink unless the sentence names another); otherwise a sentence must also name a
+    param or say "parameter". A sink that is a credential param (``api_key``, ``token``,
+    ``env``, ``headers``) is the tool's own auth input, not exfiltration."""
+    text = _DOUBLE_NEGATIVE.sub(" ", text or "")
+    sents = [x for x in _SENTENCE_SPLIT.split(text) if x.strip()]
+    # Each sentence, and each pair of neighbouring sentences ("Read ~/.ssh/id_rsa. Paste
+    # its contents into body."): the instruction may span a sentence break.
+    windows = sents + [f"{a} {b}" for a, b in zip(sents, sents[1:])]
+    for sent in windows:
+        file_src = _EXFIL_SOURCE_FILE.search(sent)
+        bulk_src = _EXFIL_SOURCE_BULK.search(sent) or (
+            _EXFIL_SOURCE_ENV.search(sent) and _SECRET_WORD_RE.search(sent))
+        if not (file_src or bulk_src):
+            continue
+        if not _affirmed(_EXFIL_VERB, sent):
+            continue
+        if file_src and not bulk_src and not _EXFIL_CONTENT.search(sent):
+            continue  # "path to the key, e.g. ~/.ssh/id_rsa": a path, not its contents
+        if _SINK_DENIED.search(sent):
+            continue
+        sinks = _named_sinks(sent, param_names)
+        if not sinks and in_param and own:
+            sinks = {own}
+        if sinks and all(_cred_name(x) for x in sinks):
+            continue  # the secret goes to the tool's own credential input
+        if in_param or sinks or _EXFIL_SINK.search(sent):
+            return True
+    return False
+
+
+def _schema_descriptions(schema: Any, prefix: str = "", _depth: int = 0) -> list:
+    """(dotted param path, description) for every property in an input schema,
+    nested objects and array items included."""
+    out: list = []
+    if not isinstance(schema, dict) or _depth > 4:
+        return out
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        for k, spec in props.items():
+            path = f"{prefix}{k}"
+            if isinstance(spec, dict):
+                for key in ("description", "title"):
+                    if spec.get(key):
+                        out.append((path, str(spec.get(key))))
+                out += _schema_descriptions(spec, f"{path}.", _depth + 1)
+    items = schema.get("items")
+    if isinstance(items, dict):
+        if items.get("description"):
+            out.append((prefix.rstrip(".") or "items", str(items["description"])))
+        out += _schema_descriptions(items, prefix, _depth + 1)
+    return out
 
 
 @dataclass
@@ -108,8 +359,41 @@ def compute_blast_radius(capabilities: dict, lethal_trifecta: bool) -> dict:
 
 
 def _classify_tool(name: str, desc: str) -> set[str]:
-    blob = f"{name} {desc}"
-    return {cap for cap, pat in _CAP_PATTERNS.items() if pat.search(blob)}
+    """Capabilities a tool's name + description affirm (prose evidence only)."""
+    blob = f"{_normalize_tool_name(name)}. {desc}"
+    return {cap for cap, pat in _CAP_PATTERNS.items() if _affirmed(pat, blob)}
+
+
+def _schema_exec_params(schema: Any) -> list[str]:
+    """Freeform string params named like a command / script / code: declared evidence
+    that the tool executes what it is given, independent of how the prose reads."""
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict):
+        return []
+    out = []
+    for pname, pspec in props.items():
+        if (
+            isinstance(pspec, dict) and pspec.get("type") == "string"
+            and not pspec.get("enum") and "const" not in pspec
+            and not pspec.get("format") and not pspec.get("pattern")
+            and (
+                _EXEC_PARAM.match(str(pname))
+                or (
+                    _EXEC_PARAM_AMBIGUOUS.match(str(pname))
+                    and _EXEC_PARAM_DESC.search(str(pspec.get("description") or ""))
+                )
+            )
+        ):
+            out.append(str(pname))
+    return out
+
+
+def _declares_destruction(name: str, desc: str) -> bool:
+    """The tool's name or its description's first word is a destructive verb."""
+    words = _normalize_tool_name(name).lower().split()
+    return bool(
+        (words and words[0] in _DESTRUCTIVE_NAME_VERBS) or _DESTRUCTIVE_LEAD.search(desc)
+    )
 
 
 def _finding(category: str, name: str, severity: str, where: str, remediation: str = ""):
@@ -146,8 +430,12 @@ def analyze_mcp(
     resources: list[dict] | None = None,
     prompts: list[dict] | None = None,
     server_info: dict | None = None,
+    server_url: str | None = None,
 ) -> McpScanResult:
-    """Score an MCP server's advertised surface. Pure + deterministic."""
+    """Score an MCP server's advertised surface. Pure + deterministic.
+
+    ``server_url`` is the endpoint that was scanned; the icon checks use its host as
+    the server's own site (``src.scanner.mcp_icons``). Nothing is fetched."""
     tools = tools or []
     resources = resources or []
     prompts = prompts or []
@@ -157,6 +445,7 @@ def analyze_mcp(
     )
     caps_union: set[str] = set()
     cap_counts: dict[str, int] = {}
+    mutates_any = False  # a destructive-verb tool name / lead, outside the cap taxonomy
 
     for t in tools:
         if not isinstance(t, dict):
@@ -170,6 +459,27 @@ def analyze_mcp(
 
         # 2. input-schema risk
         schema = t.get("inputSchema") or t.get("input_schema") or {}
+        pdescs = _schema_descriptions(schema)
+        pnames = sorted({p.rsplit(".", 1)[-1] for p, _d in pdescs})
+        exfil_where = None
+        ttitle = str(t.get("title", "") or "")
+        if _exfil_instruction(f"{ttitle}\n{tdesc}", pnames, in_param=False):
+            exfil_where = where
+        else:
+            for ppath, pdesc in pdescs:
+                if _exfil_instruction(pdesc, pnames, in_param=True,
+                                      own=ppath.rsplit(".", 1)[-1]):
+                    exfil_where = f"{where}:param:{ppath}"
+                    break
+        if exfil_where:
+            result.findings.append(_finding(
+                "prompt_injection",
+                f"Tool '{tname}' tells the agent to send secrets or credential files "
+                "through a parameter (tool poisoning)",
+                "high", exfil_where,
+                "A tool description must never ask the agent to put credential files,"
+                " keys or secrets into an argument; that is data exfiltration.",
+            ))
         if isinstance(schema, dict):
             if schema.get("additionalProperties") is True:
                 result.findings.append(_finding(
@@ -199,24 +509,49 @@ def analyze_mcp(
                             " freeform is an injection/RCE vector.",
                         ))
 
-        # 3. capability taxonomy
-        caps = _classify_tool(tname, tdesc)
+        # 3. capability taxonomy — prose phrases, plus declared schema evidence
+        prose_caps = _classify_tool(tname, tdesc)
+        exec_params = _schema_exec_params(schema)
+        # A "command" the description says never runs on a real host (a docs server's
+        # shell-like query over a virtual filesystem) is not counted as execution.
+        exec_denied = bool(exec_params) and bool(_EXEC_DENIAL.search(tdesc))
+        caps = prose_caps | ({"exec"} if exec_params and not exec_denied else set())
         caps_union |= caps
+        destructive = _declares_destruction(tname, tdesc)
+        mutates_any = mutates_any or destructive
         for c in caps:
             cap_counts[c] = cap_counts.get(c, 0) + 1
 
-        # 4. annotation truthfulness — readOnlyHint that lies
+        # 4. annotation truthfulness — readOnlyHint that lies. Declared schema evidence
+        # (a freeform command/script/code param) is high; a contradiction read only
+        # from description prose is medium, since prose is a weaker signal than a
+        # schema. The behavioral sandbox's observed write (annotation_readonly_violated)
+        # stays high on its own path.
         ann = t.get("annotations") or {}
         if isinstance(ann, dict) and ann.get("readOnlyHint") is True:
             writes = caps & {"fs_write", "exec", "db_write"}
-            if writes:
+            if exec_params:
+                denied = exec_denied
                 result.findings.append(_finding(
                     "annotation_lie",
-                    f"Tool '{tname}' claims readOnlyHint but looks like it "
-                    f"{', '.join(sorted(writes))}",
-                    "high", where,
-                    "A read-only annotation contradicting the tool's caps"
-                    " is a strong bad-actor signal.",
+                    f"Tool '{tname}' claims readOnlyHint but takes a freeform "
+                    f"'{exec_params[0]}' to execute"
+                    + (" (its description says nothing runs on a real host)" if denied else ""),
+                    "medium" if denied else "high", f"{where}:param:{exec_params[0]}",
+                    "A read-only annotation on a tool that accepts a command/script/code"
+                    " string contradicts its declared schema; fix the annotation or the"
+                    " input.",
+                ))
+            elif writes or destructive:
+                said = [_CAP_LABEL[c] for c in sorted(writes)] or ["delete or overwrite data"]
+                result.findings.append(_finding(
+                    "annotation_lie",
+                    f"Tool '{tname}' claims readOnlyHint but its name or description says"
+                    f" it can {', '.join(said)}",
+                    "medium", where,
+                    "Either the read-only annotation or the description is wrong; a"
+                    " read-only claim that contradicts what the tool says it does misleads"
+                    " clients that auto-approve read-only tools.",
                 ))
 
     # resource + prompt text also gets the injection scan (always-loaded content)
@@ -229,11 +564,18 @@ def analyze_mcp(
             result.findings.extend(_scan_text_for_injection(
                 str(p.get("description", "") or ""), f"prompt:{p.get('name', '?')}"))
 
+    # icons (MCP 2025-11-25): active content, outside content, non-https / private /
+    # third-party hosts, non-image or oversized data: URIs. Not part of any digest.
+    from src.scanner.mcp_icons import icon_findings
+    result.findings.extend(icon_findings(
+        tools, resources=resources, prompts=prompts, server_info=server_info,
+        server_url=server_url))
+
     # lethal trifecta across the whole tool SET: private-data access + external
     # comms + (implicit) untrusted input → the classic exfiltration chain.
     private = bool(caps_union & {"secrets", "fs_read"})
     external = bool(caps_union & {"net"})
-    mutate = bool(caps_union & {"fs_write", "exec", "db_write"})
+    mutate = bool(caps_union & {"fs_write", "exec", "db_write"}) or mutates_any
     if private and external and (mutate or "exec" in caps_union):
         result.lethal_trifecta = True
         result.findings.append(_finding(
@@ -409,6 +751,131 @@ def _rpc(method: str, params: dict | None = None, rid: int | None = 1) -> dict:
     return body
 
 
+# How the scanner names itself in ``initialize``. A server can read this and serve a
+# clean tool list to scanners only (Pluto Security, "Malicious MCP servers, clean scans",
+# 2026-09-15), so ``fetch_mcp_tools`` also lists the tools under the name a mainstream
+# agent client sends and compares the two (``client_view``).
+SCANNER_CLIENT_INFO = {"name": "AgentAvow", "version": "1.0"}
+AGENT_CLIENT_INFO = {"name": "claude-ai", "version": "0.1.0"}
+
+
+async def _client_view(client, url: str, scanner_digests: dict[str, str]) -> dict | None:
+    """Whether the server serves different tool definitions to an agent client than to
+    the scanner. Lists ``tools/list`` once as ``AGENT_CLIENT_INFO`` and once more as the
+    scanner; a difference counts only when the two scanner lists agree with each other
+    (so a server whose list changes on every call is not read as fingerprinting).
+    Returns ``{"client", "differs", "tools"}`` or None when a view could not be read."""
+    agent = McpSession(client, url, AGENT_CLIENT_INFO)
+    if await agent.initialize() >= 400 or agent.init_status == 0:
+        return None
+    agent_tools = await agent.list("tools/list", "tools")
+    again = McpSession(client, url, SCANNER_CLIENT_INFO)
+    if await again.initialize() >= 400 or again.init_status == 0:
+        return None
+    rescan = compute_tool_digests(await again.list("tools/list", "tools"))
+    if rescan != scanner_digests:
+        return {"client": AGENT_CLIENT_INFO["name"], "differs": False, "tools": [],
+                "unstable": True}
+    differs = compute_tool_digests(agent_tools) != scanner_digests
+    return {"client": AGENT_CLIENT_INFO["name"], "differs": differs,
+            "tools": agent_tools if differs else []}
+
+
+def oversize_findings(lists_too_large) -> list:
+    """Findings for lists the server sent past MCP_MAX_RESPONSE_BYTES (agentgraph-72's
+    #208 gate). A refused tools/list is HIGH: its definitions could not be inspected, yet
+    an agent client still receives and acts on them, so padding the list must never read
+    Safe. An oversized resources/ or prompts/list is MEDIUM (not tool definitions)."""
+    out = []
+    mb = MCP_MAX_RESPONSE_BYTES // (1024 * 1024)
+    for method in sorted(set(lists_too_large or ())):
+        is_tools = method == "tools/list"
+        out.append(_finding(
+            "obfuscation",
+            f"{'Tool' if is_tools else method.split('/')[0].capitalize()} list too large "
+            f"to read (over {mb} MB)",
+            "high" if is_tools else "medium",
+            f"server:{method}",
+            "The server's answer was larger than the scanner reads, so these definitions "
+            "were not inspected, while an agent that connects still receives all of them. "
+            "Review the definitions yourself before connecting; a real server's list is "
+            "a few hundred KB.",
+        ))
+    return out
+
+
+def client_view_findings(view: dict | None, scanner_tools: list | None) -> list:
+    """The finding for a server that serves agents different tools than the scanner."""
+    if not view or not view.get("differs"):
+        return []
+    seen = compute_tool_digests(scanner_tools)
+    agent = compute_tool_digests(view.get("tools"))
+    changed = sorted(k for k in set(seen) | set(agent) if seen.get(k) != agent.get(k))
+    names = ", ".join(k.removeprefix("tool:") for k in changed[:5]) or "the tool list"
+    return [_finding(
+        "prompt_injection",
+        "Server shows a scanner different tool definitions than an agent client",
+        "critical",
+        f"tools/list as '{view.get('client')}': {names}",
+        "The server changes what it serves by the connecting client's name — a "
+        "scanner-evasion pattern. Do not connect; the definitions an agent receives were "
+        "not the ones reviewed.",
+    )]
+
+
+# Most a remote MCP server may send in one response to the scanner. A tools/list for a
+# large real server is a few hundred KB; anything past this is refused (the read stops,
+# the call is recorded as failed) so a hostile server cannot stream an unbounded body
+# into the scanner's memory.
+MCP_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
+class ResponseTooLargeError(Exception):
+    """A remote MCP response exceeded ``MCP_MAX_RESPONSE_BYTES``."""
+
+
+class _CappedResponse:
+    """The parts of an httpx response the session reads, from a capped streamed body."""
+
+    def __init__(self, status_code: int, headers, body: bytes, encoding: str | None,
+                 tls: dict | None = None) -> None:
+        self.status_code = status_code
+        self.headers = headers
+        self.body = body
+        self.text = body.decode(encoding or "utf-8", "replace")
+        # TLS facts of the connection this response arrived on (mcp_observation).
+        self.tls = tls
+
+
+async def _post_capped(client, url: str, *, limit: int | None = None, **kw):
+    """POST and read at most ``limit`` bytes of the body; raises ResponseTooLargeError past
+    it. A client without ``stream`` (test fakes) falls back to a plain ``post``."""
+    if limit is None:
+        limit = MCP_MAX_RESPONSE_BYTES
+    if not hasattr(client, "stream"):
+        return await client.post(url, **kw)
+    async with client.stream("POST", url, **kw) as resp:
+        declared = resp.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > limit:
+            raise ResponseTooLargeError(declared)
+        from src.scanner.mcp_observation import tls_facts
+        tls = tls_facts((getattr(resp, "extensions", None) or {}).get("network_stream"))
+        buf = bytearray()
+        async for chunk in resp.aiter_bytes():
+            buf += chunk
+            if len(buf) > limit:
+                raise ResponseTooLargeError(len(buf))
+        return _CappedResponse(resp.status_code, resp.headers, bytes(buf), resp.encoding, tls)
+
+
+class _ListPageError(Exception):
+    """A ``*/list`` page came back as an HTTP error or without a JSON-RPC result."""
+
+
+# Pages of one list method read per session before the read is called partial.
+_MCP_MAX_PAGES = 20
+
+
 class McpSession:
     """One Streamable-HTTP MCP session over a (rebind-safe) httpx client: ``initialize``
     + ``notifications/initialized``, then ``tools/list`` / ``tools/call`` on the same
@@ -416,13 +883,20 @@ class McpSession:
     credentials, nothing else. Every method is fail-open (returns a status / None /
     an error record) and never raises past the transport."""
 
-    def __init__(self, client, url: str) -> None:
+    def __init__(self, client, url: str, client_info: dict | None = None) -> None:
         self._client = client
         self._url = url
+        self._client_info = dict(client_info or SCANNER_CLIENT_INFO)
         self._headers = dict(_MCP_HEADERS)
         self.server_info: dict = {}
+        # What ``initialize`` advertised (``result.capabilities``): a resources/ or
+        # prompts/list that fails counts as unread only when the server said it has one.
+        self.capabilities: dict = {}
         self.session_id: str | None = None
         self.init_status: int | None = None
+        # The ``WWW-Authenticate`` header of a refused ``initialize`` (None otherwise):
+        # how ``fetch_mcp_tools`` tells "needs sign-in" from "unreachable".
+        self.init_www_authenticate: str | None = None
         self._rid = 1
 
     def _next_id(self) -> int:
@@ -431,14 +905,15 @@ class McpSession:
 
     async def initialize(self) -> int:
         """Run the handshake; returns the HTTP status of ``initialize`` (0 on a transport
-        error). ``server_info`` and ``session_id`` are set on success."""
+        error). ``server_info``, ``capabilities`` and ``session_id`` are set on
+        success."""
         try:
-            init = await self._client.post(self._url, headers=self._headers, json=_rpc(
+            init = await _post_capped(self._client, self._url, headers=self._headers, json=_rpc(
                 "initialize",
                 {
                     "protocolVersion": _MCP_PROTOCOL_VERSION,
                     "capabilities": {},
-                    "clientInfo": {"name": "AgentAvow", "version": "1.0"},
+                    "clientInfo": self._client_info,
                 },
             ))
         except Exception:
@@ -446,32 +921,91 @@ class McpSession:
             return 0
         self.init_status = init.status_code
         if init.status_code >= 400:
+            self.init_www_authenticate = init.headers.get("www-authenticate")
             return init.status_code
         session = init.headers.get("mcp-session-id") or init.headers.get("Mcp-Session-Id")
         init_doc = _parse_jsonrpc_body(init.text)
-        self.server_info = ((init_doc or {}).get("result") or {}).get("serverInfo") or {}
+        init_result = (init_doc or {}).get("result") if isinstance(init_doc, dict) else None
+        init_result = init_result if isinstance(init_result, dict) else {}
+        self.server_info = init_result.get("serverInfo") or {}
+        caps = init_result.get("capabilities")
+        self.capabilities = caps if isinstance(caps, dict) else {}
         if session:
             self.session_id = session
             self._headers["mcp-session-id"] = session
         # notifications/initialized (no id — a notification)
         try:
-            await self._client.post(
-                self._url, headers=self._headers,
+            await _post_capped(
+                self._client, self._url, headers=self._headers,
                 json=_rpc("notifications/initialized", {}, rid=None))
         except Exception:
             pass
         return init.status_code
 
     async def list(self, method: str, key: str) -> list:
-        try:
-            resp = await self._client.post(
-                self._url, headers=self._headers, json=_rpc(method, {}, rid=2))
-            if resp.status_code >= 400:
-                return []
-            doc = _parse_jsonrpc_body(resp.text)
-            return ((doc or {}).get("result") or {}).get(key) or []
-        except Exception:
-            return []
+        """Every page of ``method``'s ``key`` list, following ``nextCursor`` ([] when
+        the first page fails). Records the methods that failed outright (``list_failed``:
+        HTTP error, transport error, no JSON-RPC result), the ones read only in part
+        (``list_more_pages``: a later page failed, a cursor repeated, or the
+        ``_MCP_MAX_PAGES`` cap was reached), and per method the pages read
+        (``pages[method]``: request id, cursor hashes, item count, response hash, TLS
+        facts), so the whole paged list binds to one observation and a partial read is
+        disclosed rather than graded as the whole tool set."""
+        from src.scanner.mcp_observation import sha256_hex
+        failed = self.__dict__.setdefault("list_failed", set())
+        more = self.__dict__.setdefault("list_more_pages", set())
+        too_large = self.__dict__.setdefault("list_too_large", set())
+        pages = self.__dict__.setdefault("pages", {}).setdefault(method, [])
+        items: list = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        for _ in range(_MCP_MAX_PAGES):
+            rid = self._next_id()
+            try:
+                resp = await _post_capped(
+                    self._client, self._url, headers=self._headers,
+                    json=_rpc(method, {"cursor": cursor} if cursor else {}, rid=rid))
+                if resp.status_code >= 400:
+                    raise _ListPageError
+                doc = _parse_jsonrpc_body(resp.text)
+                result = (doc or {}).get("result") if isinstance(doc, dict) else None
+                if not isinstance(result, dict):
+                    raise _ListPageError
+            except ResponseTooLargeError:
+                too_large.add(method)
+                (failed if not pages else more).add(method)
+                return items
+            except Exception:
+                (failed if not pages else more).add(method)
+                return items
+            page_items = result.get(key) or []
+            if not isinstance(page_items, list):
+                page_items = []
+            items.extend(page_items)
+            nxt = result.get("nextCursor")
+            nxt = nxt if isinstance(nxt, str) and nxt else None
+            body = getattr(resp, "body", None)
+            if body is None:
+                body = (getattr(resp, "text", "") or "").encode("utf-8")
+            if getattr(self, "retain_raw", False):  # packet generation only, never stored
+                self.__dict__.setdefault("raw_pages", {}).setdefault(method, []).append(body)
+            pages.append({
+                "requestId": rid,
+                "cursorSha256": sha256_hex(cursor) if cursor else None,
+                "nextCursorSha256": sha256_hex(nxt) if nxt else None,
+                "itemCount": len(page_items),
+                "responseSha256": sha256_hex(body),
+                "tls": getattr(resp, "tls", None),
+            })
+            if nxt is None:
+                return items
+            if nxt in seen:  # a cursor loop: stop, disclose the partial read
+                more.add(method)
+                return items
+            seen.add(nxt)
+            cursor = nxt
+        more.add(method)  # page cap reached
+        return items
 
     async def call_tool(self, name: str, arguments: dict, *, timeout: float) -> dict:
         """One ``tools/call``. Returns ``{ok, is_error, result, error, status}`` — ``ok``
@@ -483,8 +1017,8 @@ class McpSession:
                      "status": None}
         try:
             resp = await asyncio.wait_for(
-                self._client.post(
-                    self._url, headers=self._headers, timeout=timeout,
+                _post_capped(
+                    self._client, self._url, headers=self._headers, timeout=timeout,
                     json=_rpc("tools/call", {"name": name, "arguments": arguments},
                               rid=self._next_id()),
                 ),
@@ -540,11 +1074,50 @@ def mcp_result_text(result: dict | None, limit: int = 65536) -> str:
     return "\n".join(parts)[:limit]
 
 
-async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
+MCP_FAILURE_AUTH_REQUIRED = "auth_required"
+
+_BEARER_CHALLENGE = re.compile(r"(?:^|[\s,])bearer(?:\s|,|$)", re.IGNORECASE)
+
+
+class McpFetchFailure:
+    """Why ``fetch_mcp_tools`` got no tool list, when the reason is worth telling the
+    user. Falsy, so every ``if not data`` caller treats it exactly like ``None``.
+
+    Only facts already in the refused response are kept: the ``resource_metadata`` URL
+    a server names in its challenge is never fetched (following a server-supplied URL
+    would be new SSRF surface)."""
+
+    __slots__ = ("reason", "status")
+
+    def __init__(self, reason: str, status: int | None = None) -> None:
+        self.reason = reason
+        self.status = status
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return f"McpFetchFailure(reason={self.reason!r}, status={self.status!r})"
+
+
+def _auth_required(status: int | None, www_authenticate: str | None) -> bool:
+    """A refused ``initialize`` that asks for credentials: HTTP 401, or any error status
+    carrying a Bearer challenge (``WWW-Authenticate: Bearer ...``, the MCP authorization
+    spec's OAuth signal). A bare 403 is not enough: a WAF or bot block answers 403 too,
+    and calling that "sign-in" would mislead."""
+    if status == 401:
+        return True
+    return bool(status and status >= 400 and isinstance(www_authenticate, str)
+                and _BEARER_CHALLENGE.search(www_authenticate))
+
+
+async def fetch_mcp_tools(endpoint_url: str) -> dict | McpFetchFailure | None:
     """Handshake a Streamable-HTTP MCP server and return
     ``{"tools": [...], "resources": [...], "prompts": [...], "server_info": {...}}``.
-    Fail-open: any SSRF-guard/transport/protocol error returns None so the caller
-    can surface a clean error instead of a wrong grade. Never raises.
+    Fail-open: any SSRF-guard/transport/protocol error returns a falsy value so the
+    caller can surface a clean error instead of a wrong grade. Never raises. The falsy
+    value is ``None``, or an ``McpFetchFailure`` when the server refused ``initialize``
+    for want of sign-in (``reason == MCP_FAILURE_AUTH_REQUIRED``).
     """
 
     from src.ssrf import validate_url_https
@@ -559,19 +1132,61 @@ async def fetch_mcp_tools(endpoint_url: str) -> dict | None:
         # connect-time DNS lookup are otherwise two separate resolutions — a rebinding
         # host can pass the check then connect to an internal IP. The pinned transport
         # connects to the exact validated IP. (This endpoint is USER-supplied.)
+        from src.scanner.mcp_observation import build_observation, now_ms
         from src.ssrf import ssrf_safe_async_client
         async with ssrf_safe_async_client(timeout=_MCP_TIMEOUT, follow_redirects=False) as client:
             session = McpSession(client, url)
             if await session.initialize() >= 400 or session.init_status == 0:
+                if _auth_required(session.init_status, session.init_www_authenticate):
+                    return McpFetchFailure(MCP_FAILURE_AUTH_REQUIRED, session.init_status)
                 return None
+            started = now_ms()
             tools = await session.list("tools/list", "tools")
+            finished = now_ms()
             resources = await session.list("resources/list", "resources")
             prompts = await session.list("prompts/list", "prompts")
-            if not tools and not resources and not prompts:
+            too_large = set(getattr(session, "list_too_large", set()))
+            if not tools and not resources and not prompts and not too_large:
                 return None
-            return {
+            view = None
+            if tools:
+                try:
+                    view = await _client_view(client, url, compute_tool_digests(tools))
+                except Exception:  # noqa: BLE001 — the comparison never breaks a scan
+                    view = None
+            out = {
                 "tools": tools, "resources": resources, "prompts": prompts,
-                "server_info": session.server_info,
+                "server_info": session.server_info, "client_view": view,
             }
+            # Coverage disclosure: tools/list failed (graded on resources/prompts
+            # only), or the server paged its tool list and only part of it was read (a
+            # later page failed or was too large, a cursor repeated, or the page cap was
+            # reached); ``tools_pages_read`` says how many pages were read.
+            failed = getattr(session, "list_failed", set())
+            partial = getattr(session, "list_more_pages", set())
+            tool_pages = (getattr(session, "pages", {}) or {}).get("tools/list") or []
+            if "tools/list" in failed:
+                out["tools_list_failed"] = True
+            if "tools/list" in partial:
+                out["tools_more_pages"] = True
+                out["tools_pages_read"] = len(tool_pages)
+            if too_large:
+                out["lists_too_large"] = sorted(too_large)
+            # A resources/ or prompts/list that failed (or was read only in part) is
+            # unread only when initialize advertised that capability: most servers have
+            # no prompts, and their "method not found" is not a gap.
+            caps = session.capabilities if isinstance(session.capabilities, dict) else {}
+            unread = sorted(m for m, cap in (("resources/list", "resources"),
+                                             ("prompts/list", "prompts"))
+                            if m in (failed | partial) and m not in too_large
+                            and caps.get(cap) is not None)
+            if unread:
+                out["lists_unread"] = unread
+            if tool_pages:
+                out["observation"] = build_observation(
+                    url, tool_pages, started=started, finished=finished,
+                    complete=not ({"tools/list"} & (getattr(session, "list_more_pages", set())
+                                                    | getattr(session, "list_failed", set()))))
+            return out
     except Exception:
         return None

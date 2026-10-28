@@ -209,7 +209,7 @@ test('drift: the agent was handed a changed definition; blocked by default, outp
   assert.equal(out.agentavow.outcome, 'drift');
   assert.equal(out.agentavow.signedDigest, mod.toolDigest(TOOL));
   assert.equal(out.agentavow.servedDigest, mod.toolDigest(DRIFTED));
-  assert.match(out.error, /^Do not connect — 'ask_wiki_question' was not run\. AgentAvow: the definition of 'ask_wiki_question' on https:\/\/mcp\.example\.com\/mcp changed since it was graded/);
+  assert.match(out.error, /^Do not connect — 'ask_wiki_question' was not run\. AgentAvow: the definition of 'ask_wiki_question' on https:\/\/mcp\.example\.com\/mcp changed since it was scanned/);
   // the 0.2.x output keys are all still there
   for (const k of ['outcome', 'server', 'score', 'tier', 'reportUrl', 'servedDigest', 'signedDigest']) assert.ok(k in out.agentavow, k);
   // the raw grade and attestation payload stay out of the model's context
@@ -291,12 +291,13 @@ test('do_not_connect: a critical finding blocks whatever the floor; review: unde
 });
 
 test('Certified passes through next to the phrase and never changes the decision', { skip }, async () => {
-  const cert = { certified: { eligible: true } };
+  const cert = { certified: { eligible: true }, certified_mark: true };
   const blocked = fakeNet({ grade: await signed(scanJson({ score: 40, extra: cert })) });
   const out = await run(mod.wrapTools(makeTools(), opts(blocked)));
-  assert.equal(out.agentavow.certified, true);
+  // the mark only ever sits beside Safe to connect
+  assert.equal(out.agentavow.certified, false);
   assert.equal(out.agentavow.decision, 'review');
-  assert.match(out.error, /^Review before you connect · Certified — /);
+  assert.match(out.error, /^Review before you connect — /);
   const ok = fakeNet({ grade: await signed(scanJson({ extra: cert })) });
   const d = await mod.createVercelGate(opts(ok)).decide('ask_wiki_question', makeTools().ask_wiki_question);
   assert.equal(d.certified, true);

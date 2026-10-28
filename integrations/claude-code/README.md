@@ -47,11 +47,12 @@ the per-call gate (below); leave it out for session-start verdicts only.
    ```
    You should see a JSON object with a one-line `systemMessage` summary and an
    `additionalContext` block that lists each new MCP server
-   with its AgentAvow score and verdict. Run it again — already-scanned servers are
+   with its answer (Safe to connect / Review before you connect / Do not connect), the
+   reason and its AgentAvow score. Run it again — already-scanned servers are
    cached (`~/.cache/agentavow/scanned.json`), so the second run is silent.
 2. End to end: add a new MCP server (`claude mcp add --transport http foo <url>`),
    then start a **new** session. The hook scans `foo` and you'll see a line like:
-   `⚠️ MCP 'foo' (<url>): AgentAvow 66/100 — needs review, 1 blocking finding(s).`
+   `⚠️ MCP 'foo' (<url>): Review before you connect — one high finding: … · AgentAvow 66/100`
 
 **Guarantees:** warn-only (never blocks a session), fail-open (a scan error or an
 unrecognized config just stays silent), and it only scans each endpoint once. A
@@ -65,9 +66,11 @@ your machine.
 
 ## The per-call gate (`agentavow_pretool_gate.py`)
 
-Runs before each MCP tool call and acts on the grade the session-start hook stored.
-It never calls AgentAvow. **Deny** when the server's grade is in the `blocked` tier
-(0 to 10 out of 100), with the score and report link as the reason. **Ask** when a
+Runs before each MCP tool call and acts on the result the session-start hook stored.
+It never calls AgentAvow. **Deny** when the server's answer is "Do not connect" (a
+critical finding, a planted credential leaving the sandbox, a known-malicious package)
+or its score is in the `blocked` tier (0 to 10 out of 100); the reason leads with the
+answer and gives the score and report link. **Ask** when a
 remote server now serves a definition for this tool that differs from the one that
 was graded, or a tool the grade never saw: the gate re-fetches `tools/list` from the
 server itself (at most once per server per 15 minutes) and recomputes the per-tool

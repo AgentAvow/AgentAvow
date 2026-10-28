@@ -1,0 +1,26 @@
+# LiteLLM proxy with its MCP gateway, and AgentAvow deciding every MCP tool call.
+# Run: AGENTAVOW_REPO=/path/to/AgentAvow litellm --config config.yaml
+model_list:
+  - model_name: claude
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+mcp_servers:
+  deepwiki:                       # https: AgentAvow grades this URL
+    url: "https://mcp.deepwiki.com/mcp"
+  local_files:                    # stdio: give AgentAvow its package below
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/srv/shared"]
+
+guardrails:
+  - guardrail_name: agentavow
+    litellm_params:
+      guardrail: agentavow_guardrail.AgentAvowGuardrail
+      mode: pre_mcp_call
+      default_on: true
+      fail_on: do_not_connect     # or: review
+      fail_closed: true           # refuse when AgentAvow can't answer
+      check_drift: true           # refuse a tool whose definition changed since the scan
+      servers:
+        local_files: "npm:@modelcontextprotocol/server-filesystem"

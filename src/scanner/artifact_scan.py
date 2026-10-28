@@ -21,6 +21,7 @@ fetch/unpack error returns ``ok=False`` and the caller keeps the repo-only grade
 from __future__ import annotations
 
 import ast
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -60,6 +61,9 @@ class ArtifactScanResult:
     files_scanned: int = 0
     unpacked_size: int = 0
     file_count: int = 0
+    # Members the bounded unpack left out ({count, bytes, scannable, reasons, examples});
+    # empty when the artifact was read whole.
+    skipped: dict = field(default_factory=dict)
     drift: dict = field(default_factory=dict)
     registry_snapshot: str | None = None
     error: str | None = None
@@ -185,7 +189,142 @@ def _is_fixed_argv_spawn(node: ast.Call, fname: str) -> bool:
     elements, dynamic = seq
     if elements and elements[0] is None:
         return False
+    if elements and _TEMP_DIR_RE.search(elements[0]):
+        return False  # a binary dropped in a temp dir is not the package's own helper
     return classify_argv(elements, dynamic, untrusted_near=False).kind == "capability"
+
+
+_TEMP_DIR_RE = re.compile(r"^(?:/tmp/|/var/tmp/|/dev/shm/|/private/tmp/)")
+
+
+# Precision PR 2: a build step that runs a TOOLCHAIN binary named by the environment or
+# the build config: `[os.environ.get("PKG_CONFIG", "pkg-config"), "--cflags", "libffi"]`
+# (cffi), `[self.pg_config_exe, "--libdir"]` (psycopg2), `check_output(str(proj))`
+# (pyproj), `[configure] + flags` (pynacl). It runs at install time, so it stays an
+# install hook, but without a shell or inline code it is a medium, the same as a
+# fixed-argv spawn. Inline code, a URL or a decode/fetch in any part keeps it high.
+_BUILD_PART_DANGER_RE = re.compile(
+    r"b64decode|a85decode|unhexlify|fromhex|decompress|urlopen|urlretrieve|requests\.|"
+    r"httpx\.|https?://|\bexec\b|\beval\b|__import__|marshal|pickle"
+    # A binary in (or defaulting to) a temp dir is a dropped file, not a toolchain
+    # (adversarial recall review of #24: `os.environ.get('PG_CONFIG', '/tmp/pg_config')`).
+    r"|/tmp/|/var/tmp/|/dev/shm/|\btempfile\b|gettempdir|mkdtemp|mkstemp"
+    r"|['\"](?:TMPDIR|TEMP|TMP)['\"]")
+
+# Modules whose import alone makes a later call a network fetch, under any alias
+# (`from urllib.request import urlopen as f`, `__import__('requests')`).
+_NET_MODULES = frozenset({
+    "requests", "httpx", "urllib3", "aiohttp", "pycurl", "wget", "socket", "ftplib",
+    "http.client", "urllib.request", "urllib2", "six.moves.urllib.request", "paramiko",
+    "smtplib", "telnetlib",
+})
+# A spawned VCS / package fetch: `git clone`, `pip download`, `svn checkout`.
+_SETUP_VCS_FETCH_RE = re.compile(
+    r"""['"](?:git|hg)['"]\s*,\s*(?:['"]-\w+['"]\s*,\s*)*['"](?:clone|fetch|pull)['"]"""
+    r"""|['"]pip[\d.]*['"]\s*,\s*['"]download['"]|['"]svn['"]\s*,\s*['"](?:checkout|co|export)['"]"""
+    r"""|\b(?:git|hg)\s+(?:clone|fetch|pull)\b|\bpip[\d.]*\s+download\b""")
+
+
+def _target_src(node: ast.AST) -> str:
+    try:
+        return ast.unparse(node)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+# An install-time decode: a blob inside setup.py turned into bytes (a dropped binary).
+_SETUP_DECODE_CALLS = frozenset({
+    "b64decode", "a85decode", "b32decode", "b16decode", "b85decode", "unhexlify",
+    "fromhex", "decompress", "extractall", "extract", "unpack_archive",
+})
+
+# An unguarded network fetch anywhere in setup.py. A toolchain binary is only a build
+# step when nothing at install time downloads; `requests.get(U)` → write `./pgc` → run
+# it is the download-and-run shape whatever the binary is called (recall review, #24).
+_SETUP_NET_FETCH_RE = re.compile(
+    r"^(?:requests|httpx|urllib3|aiohttp|pycurl|wget|socket|http\.client|urllib\.request"
+    r"|urllib2|six\.moves\.urllib\.request)\.|"
+    r"^(?:urlopen|urlretrieve|HTTPSConnection|HTTPConnection|create_connection"
+    r"|PoolManager|build_opener)$|\.(?:urlopen|urlretrieve|HTTPSConnection|HTTPConnection"
+    r"|create_connection|PoolManager|build_opener)$")
+
+
+def _is_build_binary_spawn(node: ast.Call, fname: str, assigns: dict,
+                           values: dict | None = None) -> bool:
+    from src.scanner.exec_classify import (
+        _argv_nodes,
+        _basename,
+        _const_str,
+    )
+    from src.scanner.patterns import (
+        DANGEROUS_ARGV0_NET,
+        DANGEROUS_ARGV0_SHELLS,
+        DANGEROUS_ARGV_FLAGS,
+        INTERPRETER_ARGV0,
+        SHELL_PAYLOAD_DANGER_RE,
+    )
+
+    if fname in _AST_NET_CALLS:
+        return False
+    recv = node.func.value if isinstance(node.func, ast.Attribute) else None
+    if isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name) \
+            and recv.func.id == "__import__":
+        return False  # `__import__('os').system(...)`: the evasive form, never a build step
+    shell = fname in ("system", "popen") or any(
+        kw.arg == "shell" and not (isinstance(kw.value, ast.Constant) and kw.value.value is False)
+        for kw in node.keywords)
+    if shell:
+        # A LITERAL shell command a reviewer reads in place (`os.popen('brew --prefix
+        # libffi')`): the shell ladder's medium, unless it carries payload tokens.
+        cmd = node.args[0] if node.args else None
+        s = _const_str(cmd) if cmd is not None else None
+        return s is not None and not SHELL_PAYLOAD_DANGER_RE.search(s)
+    first = node.args[0] if node.args else next(
+        (kw.value for kw in node.keywords if kw.arg == "args"), None)
+    if isinstance(first, ast.Name):
+        if first.id not in assigns:
+            return False  # an opaque command we cannot read: not provably a build step
+        first = assigns[first.id]
+    if first is None:
+        return False
+    parts = _argv_nodes(first)
+    if parts is None:
+        # One program path, no shell: `check_output(str(proj))` / `run(exe_path)`. A
+        # string BUILT from pieces (f-string / concat / format) may be a shell-ish
+        # command line: not this class.
+        if isinstance(first, (ast.JoinedStr, ast.BinOp)) or (
+                isinstance(first, ast.Call) and isinstance(first.func, ast.Attribute)
+                and first.func.attr in ("format", "join")):
+            return False
+        parts = [first]
+    for i, el in enumerate(parts):
+        try:
+            src = ast.unparse(el)
+            if isinstance(el, ast.Name) and values and el.id in values:
+                # `pg = os.environ.get('PG_CONFIG', '/tmp/pg_config')`: read what the
+                # name was bound to, not just the name.
+                src += " " + ast.unparse(values[el.id])
+        except Exception:  # noqa: BLE001 — unreadable part: not provably a build step
+            return False
+        if _BUILD_PART_DANGER_RE.search(src):
+            return False
+        s = _const_str(el)
+        if s is None:
+            continue
+        if s in DANGEROUS_ARGV_FLAGS:
+            return False
+        if i == 0:
+            base = _basename(s)
+            if base in DANGEROUS_ARGV0_SHELLS or base in DANGEROUS_ARGV0_NET \
+                    or base in INTERPRETER_ARGV0:
+                return False
+    return True
+
+
+# setuptools commands that never run on `pip install` (a maintainer builds the sdist /
+# uploads / runs the tests): code inside a command class derived from one of these is
+# not an install hook.
+_NON_INSTALL_COMMAND_RE = re.compile(r"^(?:sdist|upload|register|clean|test|check)", re.I)
 
 
 # Receivers whose `.run()` / `.system()` / `.call()` is not a process or network call:
@@ -230,6 +369,83 @@ class _InstallExecVisitor(ast.NodeVisitor):
         self.has_dynamic_unguarded = False
         self.cmdclass = False
         self._guard_depth = 0
+        # `cmd = [pip, "install", path]` … `check_output(cmd)`: last simple assignment of
+        # a name to a list/tuple, so the call's argv can be read (precision PR 2).
+        self._assigns: dict[str, ast.AST] = {}
+        # Every simple `name = <expr>`, so a build binary held in a name is read too.
+        self._values: dict[str, ast.AST] = {}
+        # An unguarded network fetch (requests / httpx / urllib / socket) anywhere.
+        self.net_fetch_unguarded = False
+        self._net_aliases: set[str] = set()
+        # An unguarded decode / archive extraction, or an environment variable the file
+        # itself points at a shell, an interpreter or a temp / relative path.
+        self.dropped_binary_unguarded = False
+        # Unguarded execs that passed only as a fixed-argv spawn or a toolchain step.
+        self.build_step_unguarded = False
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for a in node.names:
+            if a.name in _NET_MODULES or a.name.split(".")[0] in _NET_MODULES:
+                self._net_aliases.add((a.asname or a.name).split(".")[0])
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        mod = node.module or ""
+        if mod in _NET_MODULES or mod.split(".")[0] in _NET_MODULES:
+            for a in node.names:
+                self._net_aliases.add(a.asname or a.name)
+        self.generic_visit(node)
+
+    def _env_write(self, target: ast.AST, value: ast.AST) -> None:
+        """`os.environ['PG_CONFIG'] = 'sh'` / `'./pgc'` / `'/tmp/x'` in setup.py itself."""
+        from src.scanner.exec_classify import _basename
+        from src.scanner.patterns import (
+            DANGEROUS_ARGV0_NET,
+            DANGEROUS_ARGV0_SHELLS,
+            INTERPRETER_ARGV0,
+        )
+        try:
+            tgt = ast.unparse(target)
+        except Exception:  # noqa: BLE001
+            return
+        if not re.match(r"^(?:os\.)?environ\b", tgt) or self._guard_depth:
+            return
+        v = value.value if isinstance(value, ast.Constant) else None
+        if not isinstance(v, str):
+            try:
+                src = ast.unparse(value)
+            except Exception:  # noqa: BLE001
+                return
+            if _BUILD_PART_DANGER_RE.search(src):
+                self.dropped_binary_unguarded = True
+            return
+        base = _basename(v)
+        if (base in DANGEROUS_ARGV0_SHELLS or base in DANGEROUS_ARGV0_NET
+                or base in INTERPRETER_ARGV0 or v.startswith(("./", "../"))
+                or _BUILD_PART_DANGER_RE.search(v)):
+            self.dropped_binary_unguarded = True
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for t in node.targets:
+            if isinstance(t, ast.Subscript):
+                self._env_write(t.value, node.value)
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            self._values[node.targets[0].id] = node.value
+            if isinstance(node.value, (ast.List, ast.Tuple, ast.BinOp)):
+                self._assigns[node.targets[0].id] = node.value
+        self.generic_visit(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        # `class sdist(sdist_orig): def run(self): os.system("git rev-parse …")` runs
+        # when the maintainer builds an sdist, never on `pip install` (precision PR 2).
+        bases = [b.id if isinstance(b, ast.Name) else b.attr if isinstance(b, ast.Attribute)
+                 else "" for b in node.bases]
+        if any(_NON_INSTALL_COMMAND_RE.match(b) for b in bases):
+            self._guard_depth += 1
+            self.generic_visit(node)
+            self._guard_depth -= 1
+            return
+        self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> None:
         if _is_cli_publish_guard(node.test):
@@ -246,6 +462,28 @@ class _InstallExecVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         fname = _call_name(node)
+        if self._guard_depth == 0:
+            try:
+                target = ast.unparse(node.func)
+            except Exception:  # noqa: BLE001
+                target = ""
+            head = target.split(".")[0].split("(")[0]
+            if _SETUP_NET_FETCH_RE.search(target) or head in self._net_aliases:
+                self.net_fetch_unguarded = True
+            if fname in ("__import__", "import_module") and node.args \
+                    and isinstance(node.args[0], ast.Constant) \
+                    and str(node.args[0].value).split(".")[0] in _NET_MODULES:
+                self.net_fetch_unguarded = True
+            if fname in _AST_EXEC_CALLS and _SETUP_VCS_FETCH_RE.search(_target_src(node)):
+                self.net_fetch_unguarded = True  # `git clone git@host:…` fetches code
+            if fname in _SETUP_DECODE_CALLS:
+                self.dropped_binary_unguarded = True
+            if fname in ("setdefault", "putenv", "update") and node.args \
+                    and re.search(r"environ|putenv", target):
+                if fname == "putenv" and len(node.args) > 1:
+                    self._env_write(ast.Name(id="environ"), node.args[1])
+                elif fname == "setdefault" and len(node.args) > 1:
+                    self._env_write(ast.Name(id="environ"), node.args[1])
         if fname in _AST_EXEC_CALLS and not _is_non_exec_receiver(node):
             if self._guard_depth > 0:
                 self.guarded.append((fname, getattr(node, "lineno", 1)))
@@ -253,7 +491,11 @@ class _InstallExecVisitor(ast.NodeVisitor):
                 self.unguarded.append((fname, getattr(node, "lineno", 1)))
                 if fname in _AST_NET_CALLS:
                     self.has_net_unguarded = True
-                if not _is_fixed_argv_spawn(node, fname):
+                if _is_fixed_argv_spawn(node, fname):
+                    self.build_step_unguarded = True
+                elif _is_build_binary_spawn(node, fname, self._assigns, self._values):
+                    self.build_step_unguarded = True
+                else:
                     self.has_dynamic_unguarded = True
         if fname == "setup":
             for kw in node.keywords:
@@ -296,7 +538,9 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
         # script) still runs at install time, but it is auditable in place: medium.
         if visitor.has_net_unguarded:
             severity = "critical"
-        elif visitor.has_dynamic_unguarded:
+        elif visitor.has_dynamic_unguarded or (
+                (visitor.net_fetch_unguarded or visitor.dropped_binary_unguarded)
+                and visitor.build_step_unguarded):
             severity = "high"
         else:
             severity = "medium"
@@ -309,7 +553,7 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
             line_number=line,
             snippet=(
                 f"install-time exec via {name}(...) in setup.py"
-                + (" (fixed argv, no shell)" if severity == "medium" else "")
+                + (" (argv, no shell)" if severity == "medium" else "")
             ),
             remediation=_REMEDIATION_HINTS.get("install_hook", "Audit install-time code"),
         ))
@@ -330,26 +574,37 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
 # Scan the unpacked tree with the existing 12-category engine
 # ---------------------------------------------------------------------------
 
-def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
+def scan_artifact_files(
+    fetched: ArtifactFetchResult, oversized_out: list | None = None,
+) -> tuple[list, int, bool]:
     """Run the 12-category engine + install-hook detectors over the unpacked tree.
 
-    Returns ``(findings, files_scanned, has_install_hook)``. Reuses the repo
+    Returns ``(findings, files_scanned, has_install_hook)``. Pass ``oversized_out`` to
+    collect the paths of source files the engine did not read because their text is
+    over the 500 KB read cap (disclosed as a coverage gap; never scored). Reuses the repo
     scanner's ``_scan_content`` / ``_scan_dependencies`` verbatim, so every current
     detector gains artifact-truth for free.
     """
     from src.scanner.artifact_fetch import is_installed_path
+    from src.scanner.patterns import SKIP_DIRS
     from src.scanner.scan import (
         _MAX_FILE_SIZE,
+        _OVERSIZED_WINDOW,
+        Finding,
+        _is_allowlisted,
         _is_build_tooling_file,
         _is_git_config_file,
         _is_git_hook_file,
+        _is_oversized_code_file,
         _is_source_file,
         _is_test_or_doc_file,
         _load_allowlist,
         _scan_content,
         _scan_dependencies,
+        _scan_oversized_text,
         _should_skip_path,
     )
+    from src.scanner.tool_descriptions import is_shipped_markdown, markdown_unicode_hits
 
     findings: list = []
     files_scanned = 0
@@ -361,8 +616,29 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
     # code that runs (the repo-scanner skip for those dirs is for build OUTPUT in a git
     # tree). Scan them here instead of grading 1 of 700 files.
     is_npm_tarball = (fetched.ecosystem or "").lower() == "npm"
+    # A container image's package manifests describe what was installed when the image
+    # was BUILT; nothing installs (no lifecycle script runs) when you run it. Its
+    # packages are checked against OSV instead (``src.scanner.docker_image``).
+    is_image = (fetched.ecosystem or "").lower() == "docker"
+
+    # A wheel's top-level directories are the importable packages themselves: a package
+    # named like a repo build/output dir (`coverage`, `build`, `env`, `target`) must not
+    # have its whole tree skipped. Nested dirs keep the usual rules.
+    is_wheel = (getattr(fetched, "kind", "") or "") == "wheel"
+
+    # A minified file the package itself runs (its package.json entrypoint, or required
+    # by its code) is read like any other code; other `.min.` files stay skipped.
+    from src.scanner.package_context import executed_minified_paths
+    run_min = executed_minified_paths(fetched) if not is_image else set()
 
     def _skip(path: str) -> bool:
+        if path in run_min:
+            p = Path(path)
+            path = str(p.with_name(p.name.replace(".min.", ".", 1)))
+        if is_wheel and "/" in path:
+            head, rest = path.split("/", 1)
+            if head in SKIP_DIRS and not head.startswith("."):
+                return _should_skip_path(rest)
         if not is_npm_tarball:
             return _should_skip_path(path)
         parts = [p for p in Path(path).parts if p not in ("dist", "build")]
@@ -378,12 +654,24 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
             return False
         return is_installed_path(path, installed_paths)
 
+    # A file exempt for being a test (by name or tests/ dir) that the package loads,
+    # imports or runs, a conftest.py shipped in the package, or a tests/ package that is
+    # an import name: graded as shipped code (``src.scanner.test_files``).
+    from src.scanner.scan import _is_blocking_exempt_path, _is_infra_file
+    from src.scanner.test_files import not_really_tests
+    partial: dict[str, set[str]] = {}
+    not_tests = set() if is_image else not_really_tests(
+        {p: af.text for p, af in fetched.files.items() if af.text},
+        runs_for_consumer=lambda q: _installed(q) and not (
+            _is_blocking_exempt_path(q) or _is_infra_file(q)),
+        wheel=is_wheel, paths=set(fetched.files), partial=partial)
+
     for path, af in fetched.files.items():
         # Dependency manifests (package.json / setup.py / requirements.txt ...) →
         # dependency + install-hook detectors (npm lifecycle hooks live here).
         name_lower = Path(path).name.lower()
-        if name_lower in {"package.json", "setup.py", "setup.cfg", "pyproject.toml",
-                          "requirements.txt", "pipfile"}:
+        if not is_image and name_lower in {"package.json", "setup.py", "setup.cfg",
+                                           "pyproject.toml", "requirements.txt", "pipfile"}:
             if af.text:
                 dep_findings = _scan_dependencies(af.text, path)
                 findings.extend(dep_findings)
@@ -397,7 +685,7 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
         # dedicated detector understands install-time vs maintainer-only reachability.
         # Only the ROOT setup.py runs at `pip install`; a nested one (a test fixture
         # package, a vendored C-runtime build script) is ordinary source below.
-        if name_lower == "setup.py" and path == "setup.py":
+        if name_lower == "setup.py" and path == "setup.py" and not is_image:
             if af.text:
                 ast_findings = detect_pypi_install_exec(af.text, path)
                 if ast_findings:
@@ -406,31 +694,120 @@ def scan_artifact_files(fetched: ArtifactFetchResult) -> tuple[list, int, bool]:
                         has_install_hook = True
             continue
 
-        # The 12-category static engine over every scannable source file. Test /
-        # doc / example code shipped in an sdist is skipped — it isn't the runtime
-        # or install surface an agent executes, and penalizing it would grade a
-        # package on its test suite (the repo scanner downgrades these; for
-        # artifact-truth we skip them, since install hooks + drift are detected
-        # separately above).
+        # README / markdown the package ships is the text a registry page, a tool picker
+        # and a coding agent read: hidden Unicode there (tag characters, bidi controls,
+        # zero-width runs) smuggles instructions past the human reviewing it. Agent
+        # metadata files (SKILL.md, AGENTS.md) already go through the full engine below.
+        # (A container image's /usr/share/doc is the base OS's, not the tool's text.)
+        if (not is_image and af.text and is_shipped_markdown(path)
+                and not _is_source_file(path) and not _skip(path)):
+            for hit in markdown_unicode_hits(af.text[:_MAX_FILE_SIZE]):
+                if _is_allowlisted(path, hit.name, allowlist):
+                    continue
+                findings.append(Finding(
+                    category="hidden_unicode", name=hit.name, severity=hit.severity,
+                    file_path=path, line_number=hit.line_number, snippet=hit.snippet,
+                ))
+            continue
+
+        # The 12-category static engine over every scannable source file, test / doc /
+        # example code included: a tests/ dir in a published artifact is installed next
+        # to the runtime code, which can import it (`from evilpkg.tests import go`).
+        # Those files are read for payloads only: payload-shaped findings (download+exec,
+        # pipe-to-shell, decoded exec, credential exfil, untrusted input reaching a sink,
+        # a provider secret) keep their severity and block (``payloads_full_severity``);
+        # everything else there is informational (below).
         # A shipped .git/config or .git/hooks/* in a tarball is a GitSpawn autorun vector
         # (a published artifact should never carry a .git/ dir) — scan it like the repo tree.
+        # A source file over the engine's size cap is scanned at its head and tail and
+        # disclosed (padding past the cap is a published evasion; _scan_oversized_text).
+        oversized = (bool(af.text) and len(af.text) > _MAX_FILE_SIZE
+                     and _is_oversized_code_file(path))
         if (
-            af.text
-            and len(af.text) <= _MAX_FILE_SIZE
+            oversized_out is not None
+            and af.text
+            and len(af.text) > _MAX_FILE_SIZE
             and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
             and not _skip(path)
-            and not _is_test_or_doc_file(path)
         ):
-            f, _positives, _suppressed = _scan_content(af.text, path, allowlist)
+            oversized_out.append(path)
+        if (
+            af.text
+            and (len(af.text) <= _MAX_FILE_SIZE or oversized)
+            and (_is_source_file(path) or _is_git_config_file(path) or _is_git_hook_file(path))
+            and not _skip(path)
+        ):
+            if oversized:
+                f = _scan_oversized_text(
+                    af.text[:_OVERSIZED_WINDOW], af.text[-_OVERSIZED_WINDOW:], path,
+                    len(af.text.encode("utf-8", errors="replace")), allowlist,
+                    payloads_full_severity=True)
+            else:
+                f, _positives, _suppressed = _scan_content(
+                    af.text, path, allowlist, payloads_full_severity=True,
+                    not_test=path in not_tests)
+            if path in not_tests:
+                # Shipped code wherever it sits: its defects block (``payload``),
+                # unless the file is not installed (below).
+                for item in f:
+                    if item.kind == "defect":
+                        item.payload = True
+                if path in partial and not oversized:
+                    # Runtime code takes only some names from it: the definitions they
+                    # never reach keep the test grading (informational unless payload).
+                    from src.scanner.scan import split_by_reach
+                    old, _p2, _s2 = _scan_content(af.text, path, allowlist,
+                                                  payloads_full_severity=True)
+                    old = [item for item in old if item.kind != "capability"]
+                    for item in old:
+                        if (item.kind == "defect" and not item.payload
+                                and item.severity != "info"):
+                            item.severity = "info"
+                    f = split_by_reach(f, old, af.text, partial[path], path)
             if not _installed(path):
                 # Not on a consumer's disk: keep the finding visible, never let it
                 # score or block (severity capped at info).
                 for item in f:
                     item.installed = False
+                    item.payload = False  # graded by `installed`, never as shipped
                     if item.kind == "defect" and item.severity != "info":
                         item.severity = "info"
+            if _is_test_or_doc_file(path) and path not in not_tests:
+                # Test / doc / example code is read for payloads only. Anything else
+                # there is informational, like an uninstalled file's findings: a
+                # defect drops to info (no score, no review, no block), and the test
+                # suite's capabilities (pytest via subprocess, fixtures' eval) are not
+                # the tool's. Thin coverage measures runtime code, so these files are
+                # not counted in files_scanned.
+                f = [item for item in f if item.kind != "capability"]
+                for item in f:
+                    if item.kind == "defect" and not item.payload and item.severity != "info":
+                        item.severity = "info"
+                findings.extend(f)
+                continue
             findings.extend(f)
-            files_scanned += 1
+            if not oversized:  # a partly read file does not count as scanned
+                files_scanned += 1
+
+    # Source members too large to unpack at all (``MAX_MEMBER_BYTES``) were never read:
+    # disclose each one the skip report names, like a partly read file.
+    skipped = getattr(fetched, "skipped", None)
+    for ex in (getattr(skipped, "examples", None) or []):
+        path = str(ex.get("path") or "")
+        if (ex.get("reason") == "too large" and path and _is_oversized_code_file(path)
+                and not _skip(path) and path not in fetched.files):
+            for item in _scan_oversized_text(None, None, path, int(ex.get("size") or 0)):
+                if not _installed(path) or _is_test_or_doc_file(path):
+                    item.installed = _installed(path)
+                    item.severity = "info"
+                findings.append(item)
+
+    # A pipe-to-shell in a maintainer-only package.json script was downgraded by the
+    # line engine; restore it when another file here can run that script.
+    from src.scanner.npm_scripts import restore_externally_invoked
+    restore_externally_invoked(
+        findings, {p: af.text for p, af in fetched.files.items() if af.text},
+        registry_artifact=is_npm_tarball)
 
     return findings, files_scanned, has_install_hook
 
@@ -616,6 +993,9 @@ def _is_drift_ignorable(path: str) -> bool:
     return any(marker in low for marker in _DRIFT_IGNORE_DIR_MARKERS)
 
 
+_WHEEL_REPO_PREFIXES = ("src/", "lib/", "python/")
+
+
 def compute_drift(
     fetched: ArtifactFetchResult,
     repo_paths: set[str] | None,
@@ -648,12 +1028,27 @@ def compute_drift(
 
     added: list[str] = []
     modified: list[str] = []
+    # A wheel lays the package out at its root; a src-layout repo keeps it under src/
+    # (or lib/, python/). Look a wheel path up under those too, so a wheel lines up with
+    # its repo the way the sdist did.
+    is_wheel = (getattr(fetched, "kind", "") or "") == "wheel"
+
+    def _repo_key(path: str, known) -> str | None:
+        if path in known:
+            return path
+        if is_wheel:
+            for prefix in _WHEEL_REPO_PREFIXES:
+                if prefix + path in known:
+                    return prefix + path
+        return None
+
     if release_blob_shas is not None:
         # Accurate basis: compare the artifact against its own release tag by git blob SHA.
         for path, af in fetched.files.items():
             if _is_drift_ignorable(path):
                 continue
-            tag_sha = release_blob_shas.get(path)
+            key = _repo_key(path, release_blob_shas)
+            tag_sha = release_blob_shas.get(key) if key else None
             if tag_sha is None:
                 added.append(path)
             elif af.git_blob_sha and af.git_blob_sha != tag_sha:
@@ -664,10 +1059,11 @@ def compute_drift(
         for path, af in fetched.files.items():
             if _is_drift_ignorable(path):
                 continue
-            if path not in repo_paths and path not in repo_text_hashes:
+            key = _repo_key(path, repo_paths) or _repo_key(path, repo_text_hashes)
+            if key is None:
                 added.append(path)
             else:
-                repo_hash = repo_text_hashes.get(path)
+                repo_hash = repo_text_hashes.get(key)
                 if repo_hash and af.text_sha256 and repo_hash != af.text_sha256:
                     modified.append(path)
         have_repo_view = bool(repo_paths or repo_text_hashes)
@@ -822,7 +1218,8 @@ async def scan_published_artifact(
             result.error = fetched.error or "artifact fetch failed"
             return result
 
-        findings, files_scanned, has_hook = scan_artifact_files(fetched)
+        # CPU-bound: off the event loop (see scan_package).
+        findings, files_scanned, has_hook = await asyncio.to_thread(scan_artifact_files, fetched)
         # Prefer comparing the artifact against the RELEASE TAG it was built from
         # (accurate); the resolver returns {path: git-blob-sha} for that tag, or None
         # when no matching tag exists — then compute_drift falls back to the branch view.
@@ -848,6 +1245,7 @@ async def scan_published_artifact(
         result.files_scanned = files_scanned
         result.unpacked_size = fetched.unpacked_size
         result.file_count = fetched.file_count
+        result.skipped = fetched.skipped.summary() if fetched.skipped else {}
         result.drift = drift
         result.registry_snapshot = _registry_snapshot()
         return result

@@ -128,21 +128,27 @@ def slots(monkeypatch):
     log: list[str] = []
     state = {"refuse": 0}
 
-    async def acquire():
+    async def acquire(priority="normal", *, lock_key=""):
         log.append("acquire")
         if state["refuse"] > 0:
             state["refuse"] -= 1
-            return False
-        return True
+            return None
+        return "lease-1"
 
-    async def release():
+    async def release(handle=None):
         log.append("release")
+        state["released_lease"] = handle
 
     from src.config import settings
 
     monkeypatch.setattr("src.api.public_scan_router._acquire_behavioral_slot", acquire)
     monkeypatch.setattr("src.api.public_scan_router._release_behavioral_slot", release)
     monkeypatch.setattr(settings, "behavioral_eval_slot_wait_sec", 0.05, raising=False)
+
+    async def no_drain():
+        return 0
+
+    monkeypatch.setattr("src.api.public_scan_router._drain_behavioral_queue", no_drain)
     return SimpleNamespace(log=log, state=state)
 
 
@@ -374,6 +380,40 @@ def test_diff_fixture_regression_and_persisting_failure():
     d = be.compute_diff(_rep(failed=["benign"], exercised_names=["a"]),
                         _rep(exercised_names=["a"]))
     assert d["fixture_fixed"] == ["benign"] and d["regression"] is False
+
+
+def _kg(name, rules, *, expect=(), ran=True, error=None):
+    return {"kind": "known_good", "surface": "pypi", "name": name, "launch_ok": True,
+            "ran": ran, "error": error, "rules": list(rules), "expect_rules": list(expect)}
+
+
+def test_diff_lost_expected_finding_is_a_regression():
+    # 2026-10-08: a full scratch disk truncated captures; fixtures still passed, but
+    # mcp-server-fetch silently lost its expected ssrf_internal_fetch.
+    prev = _rep(exercised_names=["a"])
+    prev["rows"].append(_kg("mcp-server-fetch", ["ssrf_internal_fetch"],
+                            expect=["ssrf_internal_fetch"]))
+    cur = _rep(exercised_names=["a"])
+    cur["rows"].append(_kg("mcp-server-fetch", [], expect=["ssrf_internal_fetch"]))
+    d = be.compute_diff(prev, cur)
+    assert d["lost_expected_findings"] == [
+        {"surface": "pypi", "name": "mcp-server-fetch", "rules": ["ssrf_internal_fetch"]}]
+    assert d["regression"] is True
+    title, body = be.summarize_regression({"diff": d})
+    assert "stopped catching known findings" in body and "mcp-server-fetch" in body
+
+
+def test_diff_lost_expected_ignores_runs_that_did_not_happen_and_never_caught():
+    prev = _rep()
+    prev["rows"] += [_kg("p", ["r"], expect=["r"]), _kg("q", [], expect=["r"])]
+    cur = _rep()
+    # p did not run this time (an outage is a different alert); q never produced it
+    cur["rows"] += [_kg("p", [], expect=["r"], ran=False, error="runner_unavailable"),
+                    _kg("q", [], expect=["r"])]
+    d = be.compute_diff(prev, cur)
+    assert d["lost_expected_findings"] == [] and d["regression"] is False
+    # first-ever run never alerts
+    assert be.compute_diff(None, cur)["lost_expected_findings"] == []
 
 
 def test_diff_exercised_drop_threshold():

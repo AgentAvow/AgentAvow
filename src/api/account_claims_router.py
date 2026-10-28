@@ -68,7 +68,7 @@ def _valid_repo(owner: str, repo: str) -> bool:
     return bool(owner) and bool(repo) and all(c.lower() in _VALID for c in owner + repo)
 
 
-_SURFACES = ("github", "npm", "pypi", "mcp", "openclaw")
+_SURFACES = ("github", "npm", "pypi", "crates", "mcp", "openclaw")
 
 
 def _claim_coord(surface: str, owner: str, repo: str) -> tuple[str, str, str] | None:
@@ -81,7 +81,7 @@ def _claim_coord(surface: str, owner: str, repo: str) -> tuple[str, str, str] | 
     if s in ("github", "openclaw"):
         o, r = owner.strip("/"), repo.strip("/")
         return (o, r, f"{o}/{r}") if _valid_repo(o, r) else None
-    if s in ("npm", "pypi"):
+    if s in ("npm", "pypi", "crates"):
         # package name incl. npm scoped @scope/name
         if not repo or not re.fullmatch(r"@?[\w.-]+(?:/[\w.-]+)?", repo):
             return None
@@ -116,6 +116,10 @@ def _norm_github_repo(url: str | None) -> str | None:
     return f"{owner}/{repo}".lower()
 
 
+# crates.io's crawl policy asks for a descriptive User-Agent with contact info.
+_CRATES_UA = {"User-Agent": "AgentAvow-Claims (ownership check; kenne@agentavow.com)"}
+
+
 async def _declared_repo(surface: str, name: str) -> str | None:
     """The GitHub repo a package DECLARES as its source (npm package.json
     `repository`; PyPI project_urls / home_page). Self-asserted, so only trusted
@@ -137,6 +141,14 @@ async def _declared_repo(surface: str, name: str) -> str | None:
                     rr = ver.get("repository")
                     url = rr.get("url") if isinstance(rr, dict) else rr
                 return _norm_github_repo(url)
+            if surface == "crates":
+                r = await client.get(f"https://crates.io/api/v1/crates/{name}",
+                                     headers=_CRATES_UA)
+                if r.status_code != 200:
+                    return None
+                crate = (r.json() or {}).get("crate") or {}
+                return (_norm_github_repo(crate.get("repository"))
+                        or _norm_github_repo(crate.get("homepage")))
             if surface == "pypi":
                 r = await client.get(f"https://pypi.org/pypi/{name}/json")
                 if r.status_code != 200:
@@ -252,6 +264,16 @@ async def _keyword_challenge_ok(surface: str, name: str, code: str) -> bool:
                 if isinstance(ver.get("keywords"), list):
                     kws.update(str(k).lower() for k in ver["keywords"])
                 return token in kws
+            if surface == "crates":
+                r = await client.get(f"https://crates.io/api/v1/crates/{name}",
+                                     headers=_CRATES_UA)
+                if r.status_code != 200:
+                    return False
+                doc = r.json() or {}
+                kws = {str(k).lower() for k in ((doc.get("crate") or {}).get("keywords") or [])}
+                kws |= {str(k.get("keyword") or k.get("id") or "").lower()
+                        for k in (doc.get("keywords") or []) if isinstance(k, dict)}
+                return token in kws
             if surface == "pypi":
                 r = await client.get(f"https://pypi.org/pypi/{name}/json")
                 if r.status_code != 200:
@@ -332,7 +354,7 @@ def _serialize(c: RepoClaim, meta: dict | None = None) -> dict:
     # Per-surface proof instruction the UI renders (what the owner must do to verify).
     if surface in ("github", "openclaw"):
         proof = {"kind": "topic", "topic": verify_token}
-    elif surface in ("npm", "pypi"):
+    elif surface in ("npm", "pypi", "crates"):
         proof = {"kind": "keyword", "keyword": verify_token, "registry": surface}
     elif surface == "mcp":
         proof = {"kind": "mcp-challenge", "header": "X-AgentAvow-Verify", "value": verify_token}
@@ -490,7 +512,7 @@ async def create_claim(
         verified = bool(token) and await _repo_accessible_with_token(owner, repo, token)
         proof_method = "token" if verified else None
     # --- npm / PyPI: try to auto-grant by linking to a repo you own. ---
-    elif surface in ("npm", "pypi"):
+    elif surface in ("npm", "pypi", "crates"):
         verified, proof_method = await _package_grant(db, entity.id, surface, repo)
     # --- MCP: always starts pending — the endpoint must return the challenge. ---
     else:  # mcp
@@ -567,7 +589,7 @@ async def verify_claim(
         return {"verified": True, **_serialize(claim)}
 
     # --- npm / PyPI: re-check the repo-link auto-grant, then the keyword challenge.
-    if surface in ("npm", "pypi"):
+    if surface in ("npm", "pypi", "crates"):
         granted, pm = await _package_grant(db, entity.id, surface, claim.repo)
         if granted:
             return await _mark_verified(pm)
@@ -638,7 +660,7 @@ async def _scan_surface_for_publish(surface: str, owner: str, repo: str):
     from src.api.public_scan_router import _scan_result_to_dict
     from src.scanner.scan import scan_mcp, scan_package, scan_skill
 
-    if surface in ("npm", "pypi"):
+    if surface in ("npm", "pypi", "crates"):
         result = await scan_package(surface, repo)
     elif surface == "mcp":
         result = await scan_mcp(repo)

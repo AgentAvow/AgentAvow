@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { rp } from '../basePath'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { fetchCatalog, rowIdentity, type CatalogRow, type CatalogSandbox, type CatalogSummary } from '../catalog'
-import { TrustMini, AdoptionMini } from '../components/TrustMark'
+import { TrustOrCertifiedMini, AdoptionMini } from '../components/TrustMark'
 import { DECISIONS, decide, decisionPhrase } from '../../components/trust/gradeSystem'
 
 import { Reveal, RevealStagger, CountUp } from '../components/motion'
@@ -22,11 +22,12 @@ const SURFACES = [
   { key: 'openclaw', label: 'OpenClaw skills' },
   { key: 'npm', label: 'npm packages' },
   { key: 'pypi', label: 'Python packages' },
+  { key: 'github', label: 'GitHub repos' },
   { key: 'crates', label: 'Rust crates' },
   { key: 'huggingface', label: 'Hugging Face models' },
   { key: 'docker', label: 'Container images' },
   { key: 'x402', label: 'x402 endpoints' },
-  { key: 'community', label: 'Community' },
+  { key: 'community', label: 'All on-demand scans' },
 ]
 
 const SORTS = [
@@ -74,6 +75,7 @@ function whyLines(row: CatalogRow): string[] {
     const parts = [sb.findings ? `${sb.findings} behavioral finding${sb.findings > 1 ? 's' : ''}` : 'no behavioral findings']
     if (sb.unexpected_egress) parts.push(`${sb.unexpected_egress} unexpected egress host${sb.unexpected_egress > 1 ? 's' : ''}`)
     if (sb.exercised === false) parts.push('server did not start')
+    if (sb.timed_out) parts.push('ran partly (hit its time limit)')
     out.push(`Sandbox run (not part of the signed score): ${parts.join(', ')}`)
   }
   return out
@@ -84,6 +86,7 @@ function whyLines(row: CatalogRow): string[] {
 function sandboxMark(sb: CatalogSandbox | null | undefined): string | null {
   if (!sb?.ran) return null
   if (sb.findings) return `sandbox: ${sb.findings} finding${sb.findings > 1 ? 's' : ''}`
+  if (sb.timed_out) return 'sandbox: partial'
   return 'sandbox ✓'
 }
 
@@ -97,10 +100,10 @@ function statusChip(row: CatalogRow): { label: string; cls: string; title?: stri
       : { label: `${row.http_status ?? '—'}`, cls: 'text-text-muted bg-surface-hover' }
   }
   if (row.trust_score != null) {
-    // Lead with the three-phrase short label (Safe / Review / Blocked); Certified rides beside.
+    // Lead with the three-phrase short label (Safe / Review / Don't connect); Certified rides beside.
     const d = decisionPhrase(row.decision ?? decide({ trust_score: row.trust_score, findings: { critical: row.critical ?? 0, high: row.high ?? 0 } }).decision)
     const cls = d.value === 'safe' ? 'text-success bg-success/15' : d.value === 'review' ? 'text-warning bg-warning/15' : 'text-danger bg-danger/15'
-    return { label: d.label + (row.grade === 'A+' ? ' · ✦ Certified' : ''), cls, title: row.decision_reason ? `${d.phrase} — ${row.decision_reason}` : d.phrase }
+    return { label: d.label + (row.certified_mark && d.value === 'safe' ? ' · ✦ Certified' : ''), cls, title: row.decision_reason ? `${d.phrase} — ${row.decision_reason}` : d.phrase }
   }
   return { label: 'unscored', cls: 'text-text-muted bg-surface-hover' }
 }
@@ -154,7 +157,10 @@ function ToolCard({ row }: { row: CatalogRow }) {
   const fnd = findingsLine(row)
   const sbx = sandboxMark(row.sandbox)
   return (
-    <div className="glass card-hover rounded-xl p-[18px]">
+    // The whole card opens the report: the "See report" link is stretched over the
+    // card with an ::after overlay (a real <a>, so cmd/middle-click and keyboard
+    // work). The "Why this score" toggle sits above the overlay (relative z-10).
+    <div className={`glass card-hover rounded-xl p-[18px]${href ? ' relative cursor-pointer has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-primary/60' : ''}`}>
       <div className="flex items-center justify-between gap-2.5">
         <span className="min-w-0 flex items-center gap-2">
           {surfaceBadge && <span className="font-mono text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/12 text-primary-light shrink-0">{surfaceBadge}</span>}
@@ -162,8 +168,8 @@ function ToolCard({ row }: { row: CatalogRow }) {
         </span>
         {row.trust_score != null ? (
           <div className="flex flex-col items-end gap-1.5 shrink-0">
-            <TrustMini score={row.trust_score} />
-            {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} />}
+            <TrustOrCertifiedMini row={row as unknown as Record<string, unknown> & { trust_score: number }} />
+            {row.adoption_count != null && row.adoption_count > 0 && <AdoptionMini count={row.adoption_count} unit={row.adoption_unit} />}
           </div>
         ) : (
           <span className="font-mono text-[11px] px-2 py-0.5 rounded-lg shrink-0 text-text-muted bg-surface-hover">unscored</span>
@@ -189,7 +195,12 @@ function ToolCard({ row }: { row: CatalogRow }) {
           </span>
         )}
       </div>
-      <button onClick={() => setOpen(!open)} className="mt-3 text-[12.5px] text-primary-light hover:text-primary">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open) }}
+        className="relative z-10 mt-3 text-[12.5px] text-primary-light hover:text-primary"
+      >
         {open ? 'Hide' : 'Why this score'} {open ? '▴' : '▾'}
       </button>
       {open && (
@@ -199,7 +210,7 @@ function ToolCard({ row }: { row: CatalogRow }) {
       )}
       {href && (
         <div className="mt-3">
-          <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary">
+          <Link to={href} className="text-[12.5px] font-semibold text-primary-light hover:text-primary focus-visible:outline-none after:absolute after:inset-0 after:rounded-xl after:content-['']">
             {row.trust_score != null ? 'See report & install →' : 'View →'}
           </Link>
         </div>
@@ -226,9 +237,13 @@ function SummaryStrip({ s }: { s: CatalogSummary }) {
   const npmPypiCrit = (bc.npm ?? 0) + (bc.pypi ?? 0)
   const npmPypiHigh = (bh.npm ?? 0) + (bh.pypi ?? 0)
   const x402Total = s.x402_endpoints_total ?? bs.x402 ?? 0
+  // Count the surfaces that actually have rows ("community" is a bucket of on-demand
+  // scans across surfaces, not a surface), so the hint can't go stale as surfaces
+  // are added (it said "5" long after crates, Docker and Hugging Face joined).
+  const surfaceCount = Object.entries(bs).filter(([k, n]) => k !== 'community' && (n ?? 0) > 0).length
   return (
     <Reveal className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-6">
-      <StatCard label="Total scans" value={s.total_scans} hint="across 5 surfaces" />
+      <StatCard label="Total scans" value={s.total_scans} hint={`across ${surfaceCount} ${surfaceCount === 1 ? 'surface' : 'surfaces'}`} />
       <StatCard label="x402 endpoints" value={x402Total} hint={s.x402_compliant != null ? `${s.x402_compliant} compliant` : 'payment-gated APIs'} />
       <StatCard label="MCP servers" value={bs.mcp ?? 0} hint={`${bc.mcp ?? 0} critical · ${bh.mcp ?? 0} high`} />
       <StatCard label="OpenClaw skills" value={bs.openclaw ?? 0} hint={`${bc.openclaw ?? 0} critical · ${bh.openclaw ?? 0} high`} />
@@ -444,7 +459,7 @@ export default function RebrandBrowse() {
             {Array.from({ length: 9 }).map((_, i) => <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[128px]" />)}
           </div>
         ) : (
-          <RevealStagger key={`${surface}-${page}`} className="grid grid-cols-1 md:grid-cols-3 gap-3.5" stagger={0.035}>
+          <RevealStagger key={[surface, sort, severity, grade, decision, category, q, page].join('|')} className="grid grid-cols-1 md:grid-cols-3 gap-3.5" stagger={0.035}>
             {rows.map((row) => <ToolCard key={row.full_name || row.name} row={row} />)}
           </RevealStagger>
         )}

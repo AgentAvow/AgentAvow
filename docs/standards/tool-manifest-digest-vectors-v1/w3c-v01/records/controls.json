@@ -1,0 +1,274 @@
+[
+  {
+    "derived_from": {
+      "change": "/key_encoding/1/key: \"tool:a%3Db\" -> \"tool:a=b\"",
+      "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    },
+    "expected": {
+      "rule": "key-encoding/01",
+      "state": "fail"
+    },
+    "fixture_id": "control-key-encoding-01/native-verify-mjs",
+    "input": {
+      "ref": "controls/control-key-encoding-01.json",
+      "sha256": "ab3365fb6cb7e42f35457aa8b1b7d3f154a17ef0b61f99c460857cd1f52d53ac"
+    },
+    "observed": {
+      "flipped": [
+        "key-encoding/01"
+      ],
+      "state": "fail",
+      "unchanged_count": 75
+    },
+    "provenance": {
+      "author": "AgentAvow",
+      "license": "Apache-2.0",
+      "source": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py"
+    },
+    "target_check": {
+      "check_id": "key-encoding/01",
+      "checker_revision": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+      "config_digest": "1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
+    },
+    "why_must_fail": "the expected key for the name a=b is written with = left literal, and the key rule percent-encodes = as %3D, so a correct encoder disagrees with it"
+  },
+  {
+    "derived_from": {
+      "change": "/observed_tools/0/description: \"Ask any question about a GitHub repository's codebase and get an AI-powered answer\\ngrounded in its DeepWiki.\" -> \"Ask any question about a GitHub repository's codebase and get an AI-powered answer\\ngrounded in its DeepWiki. This sentence was added after the grade.\"",
+      "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    },
+    "expected": {
+      "rule": "definition-digest/tool:ask_wiki_question",
+      "state": "fail"
+    },
+    "fixture_id": "control-definition-ask_wiki_question/native-verify-mjs",
+    "input": {
+      "ref": "controls/control-definition-ask_wiki_question.json",
+      "sha256": "2edc74755734ad6960b4474463deaaa0ca570e08dcf59e7e9f2bdb56f90c8447"
+    },
+    "observed": {
+      "flipped": [
+        "definition-digest/tool:ask_wiki_question"
+      ],
+      "state": "fail",
+      "unchanged_count": 75
+    },
+    "provenance": {
+      "author": "AgentAvow",
+      "license": "Apache-2.0",
+      "source": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py"
+    },
+    "target_check": {
+      "check_id": "definition-digest/tool:ask_wiki_question",
+      "checker_revision": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+      "config_digest": "1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
+    },
+    "why_must_fail": "the served definition of ask_wiki_question has a sentence appended to its description, so its digest no longer equals the signed one"
+  },
+  {
+    "derived_from": {
+      "change": "/vectors/2/expect/tool_digest_binds: false -> true",
+      "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    },
+    "expected": {
+      "rule": "case/tool-drift/tool_digest_binds",
+      "state": "fail"
+    },
+    "fixture_id": "control-case-tool-drift/native-verify-mjs",
+    "input": {
+      "ref": "controls/control-case-tool-drift.json",
+      "sha256": "f25b6a5e56a19f03b31b3bcac6f369b22bd2ecfbb692673315181fd41bcfdb5c"
+    },
+    "observed": {
+      "flipped": [
+        "case/tool-drift/tool_digest_binds"
+      ],
+      "state": "fail",
+      "unchanged_count": 75
+    },
+    "provenance": {
+      "author": "AgentAvow",
+      "license": "Apache-2.0",
+      "source": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py"
+    },
+    "target_check": {
+      "check_id": "case/tool-drift/tool_digest_binds",
+      "checker_revision": "AgentAvow/AgentAvow docs/standards/tool-manifest-digest-vectors-v1/verify.mjs@sha256:007abe818cf9ab9e8c268472d873ff9fbbb398f19b90112ca91ef553a075db98, time.mjs@sha256:065c21f12c6770c674376db7dbba19648ea6c9dbe26488b581a9ee5ab5568d39",
+      "config_digest": "1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
+    },
+    "why_must_fail": "the tool-drift case expects tool_digest_binds true, but the definition the gate names differs from the signed one, so a correct reader computes false"
+  },
+  {
+    "derived_from": {
+      "change": "/key_encoding/1/key: \"tool:a%3Db\" -> \"tool:a=b\"",
+      "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    },
+    "expected": {
+      "rule": "key-encoding/01",
+      "state": "fail"
+    },
+    "fixture_id": "control-key-encoding-01/probity-map-reader",
+    "input": {
+      "ref": "controls/control-key-encoding-01.json",
+      "sha256": "ab3365fb6cb7e42f35457aa8b1b7d3f154a17ef0b61f99c460857cd1f52d53ac"
+    },
+    "observed": {
+      "flipped": [
+        "key-encoding/01"
+      ],
+      "state": "fail",
+      "unchanged_count": 66
+    },
+    "provenance": {
+      "author": "AgentAvow",
+      "license": "Apache-2.0",
+      "source": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py"
+    },
+    "target_check": {
+      "check_id": "key-encoding/01",
+      "checker_revision": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+      "config_digest": "48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
+    },
+    "why_must_fail": "the expected key for the name a=b is written with = left literal, and the key rule percent-encodes = as %3D, so a correct encoder disagrees with it"
+  },
+  {
+    "derived_from": {
+      "change": "/observed_tools/0/description: \"Ask any question about a GitHub repository's codebase and get an AI-powered answer\\ngrounded in its DeepWiki.\" -> \"Ask any question about a GitHub repository's codebase and get an AI-powered answer\\ngrounded in its DeepWiki. This sentence was added after the grade.\"",
+      "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    },
+    "expected": {
+      "rule": "definition-digest/tool:ask_wiki_question",
+      "state": "fail"
+    },
+    "fixture_id": "control-definition-ask_wiki_question/probity-map-reader",
+    "input": {
+      "ref": "controls/control-definition-ask_wiki_question.json",
+      "sha256": "2edc74755734ad6960b4474463deaaa0ca570e08dcf59e7e9f2bdb56f90c8447"
+    },
+    "observed": {
+      "flipped": [
+        "definition-digest/tool:ask_wiki_question"
+      ],
+      "state": "fail",
+      "unchanged_count": 66
+    },
+    "provenance": {
+      "author": "AgentAvow",
+      "license": "Apache-2.0",
+      "source": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py"
+    },
+    "target_check": {
+      "check_id": "definition-digest/tool:ask_wiki_question",
+      "checker_revision": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+      "config_digest": "48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
+    },
+    "why_must_fail": "the served definition of ask_wiki_question has a sentence appended to its description, so its digest no longer equals the signed one"
+  },
+  {
+    "derived_from": {
+      "change": "/vectors/2/expect/tool_digest_binds: false -> true",
+      "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    },
+    "expected": {
+      "rule": "case/tool-drift/tool_digest_binds",
+      "state": "fail"
+    },
+    "fixture_id": "control-case-tool-drift/probity-map-reader",
+    "input": {
+      "ref": "controls/control-case-tool-drift.json",
+      "sha256": "f25b6a5e56a19f03b31b3bcac6f369b22bd2ecfbb692673315181fd41bcfdb5c"
+    },
+    "observed": {
+      "flipped": [
+        "case/tool-drift/tool_digest_binds"
+      ],
+      "state": "fail",
+      "unchanged_count": 66
+    },
+    "provenance": {
+      "author": "AgentAvow",
+      "license": "Apache-2.0",
+      "source": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py"
+    },
+    "target_check": {
+      "check_id": "case/tool-drift/tool_digest_binds",
+      "checker_revision": "probityai/agent-evidence-vectors@d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1/map_reader.py",
+      "config_digest": "48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
+    },
+    "why_must_fail": "the tool-drift case expects tool_digest_binds true, but the definition the gate names differs from the signed one, so a correct reader computes false"
+  },
+  {
+    "derived_from": {
+      "change": "/key_encoding/1/key: \"tool:a%3Db\" -> \"tool:a=b\"",
+      "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    },
+    "expected": {
+      "rule": "key-encoding/01",
+      "state": "fail"
+    },
+    "fixture_id": "control-key-encoding-01/heldfast-profiles",
+    "input": {
+      "ref": "controls/control-key-encoding-01.json",
+      "sha256": "ab3365fb6cb7e42f35457aa8b1b7d3f154a17ef0b61f99c460857cd1f52d53ac"
+    },
+    "observed": {
+      "flipped": [
+        "key-encoding/01"
+      ],
+      "state": "fail",
+      "unchanged_count": 15
+    },
+    "provenance": {
+      "author": "AgentAvow",
+      "license": "Apache-2.0",
+      "source": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py"
+    },
+    "target_check": {
+      "check_id": "key-encoding/01",
+      "checker_revision": "rufat325/heldfast@ca5a872264b486907ed5479247e5150c5122d33d/src/heldfast/profiles.py",
+      "config_digest": "bf7e2345181367b267830ec025416bf9cf884a8f9388af7e3a1fdc697659ab7a"
+    },
+    "why_must_fail": "the expected key for the name a=b is written with = left literal, and the key rule percent-encodes = as %3D, so a correct encoder disagrees with it"
+  },
+  {
+    "derived_from": {
+      "change": "/observed_tools/0/description: \"Ask any question about a GitHub repository's codebase and get an AI-powered answer\\ngrounded in its DeepWiki.\" -> \"Ask any question about a GitHub repository's codebase and get an AI-powered answer\\ngrounded in its DeepWiki. This sentence was added after the grade.\"",
+      "ref": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+      "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+    },
+    "expected": {
+      "rule": "definition-digest/tool:ask_wiki_question",
+      "state": "fail"
+    },
+    "fixture_id": "control-definition-ask_wiki_question/heldfast-profiles",
+    "input": {
+      "ref": "controls/control-definition-ask_wiki_question.json",
+      "sha256": "2edc74755734ad6960b4474463deaaa0ca570e08dcf59e7e9f2bdb56f90c8447"
+    },
+    "observed": {
+      "flipped": [
+        "definition-digest/tool:ask_wiki_question"
+      ],
+      "state": "fail",
+      "unchanged_count": 15
+    },
+    "provenance": {
+      "author": "AgentAvow",
+      "license": "Apache-2.0",
+      "source": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py"
+    },
+    "target_check": {
+      "check_id": "definition-digest/tool:ask_wiki_question",
+      "checker_revision": "rufat325/heldfast@ca5a872264b486907ed5479247e5150c5122d33d/src/heldfast/profiles.py",
+      "config_digest": "bf7e2345181367b267830ec025416bf9cf884a8f9388af7e3a1fdc697659ab7a"
+    },
+    "why_must_fail": "the served definition of ask_wiki_question has a sentence appended to its description, so its digest no longer equals the signed one"
+  }
+]
