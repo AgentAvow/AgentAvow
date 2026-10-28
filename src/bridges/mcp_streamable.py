@@ -65,7 +65,11 @@ _DECISION_ICONS = {"safe": "✅", "review": "⚠️", "do_not_connect": "⛔"}
 # without MCP Apps fall back to the text/structuredContent we already return.
 # Versioned so a host that caches the UI resource is forced to re-fetch when we ship a
 # new card (bump the suffix on each card change during the render-debug phase).
-_CARD_URI = "ui://agentavow/trust-card-v13.html"
+_CARD_URI = "ui://agentavow/trust-card-v14.html"
+# The card the ChatGPT app was approved with (2026-10-23). Keep serving it unchanged: a
+# host that cached the old template URI must still render (published-app rule, runbook).
+_CARD_URI_V13 = "ui://agentavow/trust-card-v13.html"
+_CARD_VERSION_BY_URI = {_CARD_URI: 14, _CARD_URI_V13: 13}
 _CARD_MIME = "text/html;profile=mcp-app"
 # Shared MCP-Apps standard (Claude + ChatGPT both use it): ui.resourceUri + the
 # ui/notifications/tool-result postMessage (which TRUST_CARD_HTML already reads) +
@@ -1634,7 +1638,16 @@ _SCAN_OUTPUT_SCHEMA: dict = {
                     "description": "Binary form of the decision, kept for older clients."},
         "verdict_reason": {"type": "string",
                            "description": "Machine reason for the binary verdict, e.g. clean, "
-                                          "blocking_findings, thin_coverage."},
+                                          "clean_partial (clean, but not everything was "
+                                          "read), blocking_findings, thin_coverage."},
+        "not_checked": {"type": "array", "items": {"type": "string"},
+                        "description": "Plain-English notes for what the scan could not "
+                                       "read or check (empty when it read everything). "
+                                       "Say these alongside the answer."},
+        "coverage_gaps": {"type": "object",
+                          "description": "Machine form of not_checked: gap kinds (e.g. "
+                                         "tool_list_paged, oversized_files) with a flag or "
+                                         "count. Empty when nothing was skipped."},
         "critical": {"type": "integer", "minimum": 0,
                      "description": "Critical findings, static and sandbox."},
         "high": {"type": "integer", "minimum": 0,
@@ -1990,23 +2003,27 @@ async def _on_list_tools(
 
 
 async def _list_resources() -> list[types.Resource]:
-    _r = types.Resource(
-        uri=_CARD_URI,
-        name="AgentAvow trust card",
-        description="Interactive trust card rendered from a scan result.",
-        mimeType=_CARD_MIME,
-    )
+    out = []
+    for uri, name in ((_CARD_URI, "AgentAvow trust card"),
+                      (_CARD_URI_V13, "AgentAvow trust card (previous version)")):
+        _r = types.Resource(
+            uri=uri,
+            name=name,
+            description="Interactive trust card rendered from a scan result.",
+            mimeType=_CARD_MIME,
+        )
     # ChatGPT's app review reads the widget domain + CSP off the TEMPLATE resource
     # (not just the tool). The card is fully self-contained (inline HTML/CSS/SVG, no
     # external fetches), so both allow-lists are empty — but they must be *declared*.
     # Set via .meta after construction (the constructor drops an unknown meta= kwarg).
     # ChatGPT-namespaced widget domain/CSP only — no `ui` object here (Claude reads
     # the resource content, and an unexpected ui.* on the resource can break its render).
-    _r.meta = {
-        "openai/widgetDomain": "https://agentavow.com",
-        "openai/widgetCSP": _WIDGET_CSP,
-    }
-    return [_r]
+        _r.meta = {
+            "openai/widgetDomain": "https://agentavow.com",
+            "openai/widgetCSP": _WIDGET_CSP,
+        }
+        out.append(_r)
+    return out
 
 
 # OpenAI reads the widget's domain, CSP and description off the resource CONTENTS.
@@ -2032,9 +2049,11 @@ async def _on_list_resources(
 
 
 async def _read_resource(uri: object) -> list[ReadResourceContents]:
-    if str(uri).rstrip("/") == _CARD_URI.rstrip("/"):
-        return [ReadResourceContents(content=trust_card_html(HEADLINE_FOLLOWS_DECISION),
-                                     mime_type=_CARD_MIME, meta=_CARD_CONTENTS_META)]
+    version = _CARD_VERSION_BY_URI.get(str(uri).rstrip("/"))
+    if version is not None:
+        return [ReadResourceContents(
+            content=trust_card_html(HEADLINE_FOLLOWS_DECISION, card_version=version),
+            mime_type=_CARD_MIME, meta=_CARD_CONTENTS_META)]
     return []
 
 

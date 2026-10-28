@@ -18,11 +18,11 @@ def test_tools_list_digest_is_unchanged():
     doc = [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in tools]
     digest = hashlib.sha256(
         json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
-    assert digest == "935a3240011a3d45"
+    assert digest == "a9bc46b5c9f51e1f"  # card v14 + not_checked/coverage_gaps schema (2026-10-28)
 
 
 def test_same_resource_uri_and_byte_identical_meta():
-    assert m._CARD_URI == "ui://agentavow/trust-card-v13.html"
+    assert m._CARD_URI == "ui://agentavow/trust-card-v14.html"
     assert m._CARD_CONTENTS_META == {
         "openai/widgetDomain": "https://agentavow.com",
         "openai/widgetCSP": {"connect_domains": [], "resource_domains": [],

@@ -149,10 +149,15 @@ async def test_modern_tools_call_keeps_the_surface_attribution():
 
 async def test_modern_resources_and_prompts_are_200():
     import json
-    read = await _modern("resources/read", uri=m._CARD_URI)
+    # The approved v13 card is still served byte-for-byte at its URI (published-app rule)...
+    read = await _modern("resources/read", uri=m._CARD_URI_V13)
     assert read.status_code == 200
     legacy = json.loads((WIRE / "resources_read.json").read_bytes())["result"]["contents"]
     assert read.json()["result"]["contents"] == legacy
+    # ...and the current card (the one the tools point at) is served too.
+    cur = await _modern("resources/read", uri=m._CARD_URI)
+    assert cur.status_code == 200
+    assert cur.json()["result"]["contents"][0]["uri"] == m._CARD_URI
 
     assert (await _modern("resources/list")).status_code == 200
     prompts = await _modern("prompts/list")
