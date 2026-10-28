@@ -536,21 +536,21 @@
   },
   "npm/@upstash/context7-mcp": {
    "version": "4.2.0",
-   "score": 88,
+   "score": 80,
    "label": "safe",
-   "reason": "nothing found in 25 files",
+   "reason": "no critical or high findings in 25 files",
    "files_scanned": 25,
    "severity": {
     "critical": 0,
     "high": 0,
-    "medium": 0,
-    "low": 2,
+    "medium": 2,
+    "low": 0,
     "info": 0
    },
    "capabilities": 0,
    "not_installed": 0,
    "rules": {
-    "low: Unpinned npx/uvx package (no @version pin)": 2
+    "medium: Unpinned npx/uvx package (no @version pin)": 2
    }
   },
   "npm/@wonderwhy-er/desktop-commander": {
