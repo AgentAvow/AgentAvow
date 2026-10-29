@@ -44,16 +44,22 @@ to the key that signed a scan.
 
 ### The signed catalog
 
-[`/.well-known/ai-catalog.json`](https://agentavow.com/.well-known/ai-catalog.json) lists the connector's
-own tools and is signed under the `did:web` Publisher Profile, which mandates ES256, so it uses the P-256
-key rather than the Ed25519 key that signs scans. Each entry's `trustManifest.signature` is a detached
-compact JWS (RFC 7515 Appendix F, `header..signature`) with `alg` `ES256` and `kid`
-`did:web:agentavow.com#catalog-es256-v1`; the payload is the RFC 8785 canonical form of the manifest with
-`signature` removed. To check it offline, resolve the key from the DID document above (or from the JWKS by
-`kid`), rebuild the payload, and verify the P-256 signature over `<header>.<payload>`. The repo ships the
-check as a script: `python3 scripts/ai_catalog_wellknown.py verify --resolve` runs the profile's Level 3
-checks (no `none` or key-carrying headers, `kid` under the publisher's DID, key found in the DID document
-with no private material, signature verifies) and exits non-zero on any failure.
+[`/.well-known/ai-catalog.json`](https://agentavow.com/.well-known/ai-catalog.json) follows the AI Catalog
+specification's independent Trust Manifests. It lists the connector itself, with AgentAvow's own manifest
+(a publisher endorsement, since the signer matches the `urn:air:agentavow.com` identifier), and one
+third-party MCP server, GitHub's, with an AgentAvow assessor manifest that points to the signed scan
+verdict for the repository its server card names. That entry uses an AgentAvow identifier, not a
+`urn:air` one, because AgentAvow is not its publisher. Each manifest carries a `signature` object
+(`signer`, `profile` `did-web-v1`, `issuedAt`, `expiresAt`, `jws`); the catalog root carries one too.
+The `jws` is a detached compact JWS (RFC 7515 Appendix F, `header..signature`) with `alg` `ES256`, `kid`
+`did:web:agentavow.com#catalog-es256-v1`, and `typ` `ai-catalog-trust-manifest+jws` (or `ai-catalog+jws`
+for the root). The payload is the RFC 8785 canonical form of the whole manifest (or catalog) with only
+`signature.jws` removed, so the signer, profile and timestamps are signed too. The ES256 rule comes from the
+`did:web` Signer Profile, which is why the catalog uses the P-256 key rather than the Ed25519 key that
+signs scans. The repo ships the check as a script: `python3 scripts/ai_catalog_wellknown.py verify
+--resolve` applies the profile (exact profile name, `kid` under the signer, key authorized by
+`assertionMethod`, no key-carrying headers), checks that each subject matches its entry and that the
+artifact bytes match `entry.digest`, verifies every signature, and exits non-zero on any failure.
 
 ## Verify in Python
 
