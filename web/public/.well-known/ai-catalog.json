@@ -15,7 +15,7 @@
         "name": "agentavow.com/agentavow-trust",
         "version": "0.16.0",
         "title": "AgentAvow Trust",
-        "description": "Signed, offline-verifiable safety grades for repos, packages, and MCP servers. Read-only.",
+        "description": "Is this tool safe for your agent to connect? Safe to connect, Review before you connect, or Do not connect, with a signed, offline-verifiable trust score and an adoption score for repos, packages, and MCP servers. Read-only.",
         "websiteUrl": "https://agentavow.com",
         "repository": {
           "source": "github",
@@ -35,7 +35,7 @@
             {
               "name": "scan_repo",
               "title": "Scan a GitHub repo",
-              "description": "Scan a public GitHub repository with AgentAvow and return whether it is safe for an agent to connect to: a 0-100 trust score, a plain safe / needs-review verdict, the findings behind it (with where and how to fix), and a signed, offline-verifiable attestation. Read-only, no account. Calls the AgentAvow public API at agentavow.com.",
+              "description": "Scan a public GitHub repository with AgentAvow and return whether it is safe for an agent to connect to: one of three answers with its reason (Safe to connect, Review before you connect, or Do not connect), a 0-100 trust score, an adoption score from real usage (stars), the findings behind it (with where and how to fix), and a signed, offline-verifiable attestation. Read-only, no account. Calls the AgentAvow public API at agentavow.com.",
               "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -58,6 +58,259 @@
                   "repo"
                 ]
               },
+              "outputSchema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "description": "What was scanned, as given."
+                  },
+                  "scanned_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "When the scan ran (ISO 8601, UTC)."
+                  },
+                  "target_type": {
+                    "type": "string",
+                    "description": "github, npm, pypi, crates, docker, hf, or mcp."
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "safe",
+                      "review",
+                      "do_not_connect"
+                    ],
+                    "description": "The answer to lead with: safe = Safe to connect, review = Review before you connect, do_not_connect = Do not connect."
+                  },
+                  "decision_final": {
+                    "type": "boolean",
+                    "description": "False while the behavioral sandbox is still running; the decision can still change."
+                  },
+                  "decision_reason": {
+                    "type": "string",
+                    "description": "One sentence naming what decided it."
+                  },
+                  "trust_score": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Trust score, 0-100. Evidence under the decision."
+                  },
+                  "tier": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Trust tier for the score (detail, not the headline)."
+                  },
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "safe",
+                      "needs_review"
+                    ],
+                    "description": "Binary form of the decision, kept for older clients."
+                  },
+                  "verdict_reason": {
+                    "type": "string",
+                    "description": "Machine reason for the binary verdict, e.g. clean, clean_partial (clean, but not everything was read), blocking_findings, thin_coverage."
+                  },
+                  "not_checked": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Plain-English notes for what the scan could not read or check (empty when it read everything). Say these alongside the answer."
+                  },
+                  "coverage_gaps": {
+                    "type": "object",
+                    "description": "Machine form of not_checked: gap kinds (e.g. tool_list_paged, oversized_files) with a flag or count. Empty when nothing was skipped."
+                  },
+                  "critical": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Critical findings, static and sandbox."
+                  },
+                  "high": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "High findings, static and sandbox."
+                  },
+                  "findings_total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "All findings, every severity."
+                  },
+                  "static_findings_total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Findings from static analysis only."
+                  },
+                  "package_version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Package version scanned."
+                  },
+                  "published_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "When that version was published."
+                  },
+                  "deprecated": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The maintainer's deprecation notice, or null."
+                  },
+                  "advisories_affecting_version": {
+                    "type": "array",
+                    "description": "Published advisories that affect this version.",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "sandbox": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "What the behavioral sandbox observed; null if it does not apply."
+                  },
+                  "certified": {
+                    "type": "boolean",
+                    "description": "Matches the signed attestation's certified.eligible."
+                  },
+                  "certified_mark": {
+                    "type": "boolean",
+                    "description": "Certified and safe: show the Certified mark."
+                  },
+                  "top_findings": {
+                    "type": "array",
+                    "description": "Up to five most important findings.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "severity": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "critical, high, medium, or low."
+                        },
+                        "what": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "What was found."
+                        },
+                        "where": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "File and line, if file-based."
+                        },
+                        "remediation": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "How to fix it."
+                        },
+                        "count": {
+                          "type": "integer",
+                          "description": "How many times it occurs."
+                        }
+                      }
+                    }
+                  },
+                  "incident": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Known past compromise (context only, never scored)."
+                  },
+                  "subscores": {
+                    "type": "object",
+                    "description": "Per-category 0-100 scores behind the trust score.",
+                    "additionalProperties": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "install": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Install command, only when nothing blocks it."
+                  },
+                  "adoption": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "The adoption score: real usage (downloads per week, stars or installs). Never changes the decision.",
+                    "properties": {
+                      "count": {
+                        "type": "integer"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "score_0_100": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "signed": {
+                    "type": "boolean",
+                    "description": "True when a signed (Ed25519/JWS) attestation backs this."
+                  },
+                  "cached": {
+                    "type": "boolean",
+                    "description": "Served from the ~1h cache."
+                  },
+                  "rescan_pending": {
+                    "type": "boolean",
+                    "description": "A fresh scan was started; this is the previous result."
+                  },
+                  "report_url": {
+                    "type": "string",
+                    "description": "Full report page."
+                  },
+                  "report_json_url": {
+                    "type": "string",
+                    "description": "The full verdict as JSON."
+                  },
+                  "verify_url": {
+                    "type": "string",
+                    "description": "How to verify offline."
+                  }
+                },
+                "required": [
+                  "target",
+                  "target_type",
+                  "decision",
+                  "decision_final",
+                  "decision_reason",
+                  "trust_score",
+                  "verdict",
+                  "report_url"
+                ]
+              },
               "annotations": {
                 "title": "Scan a GitHub repo",
                 "readOnlyHint": true,
@@ -69,7 +322,7 @@
             {
               "name": "scan_package",
               "title": "Scan a package",
-              "description": "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with AgentAvow. Returns a 0-100 trust score, a safe / needs-review verdict, findings with remediation, and a signed attestation. Also reports repo-vs-artifact drift (files shipped that aren't in the source). Read-only; calls agentavow.com.",
+              "description": "Scan a published package (npm, PyPI, crates, Docker, or Hugging Face) with AgentAvow. Returns one of three answers with its reason (Safe to connect, Review before you connect, or Do not connect), a 0-100 trust score, an adoption score from real usage (downloads per week), findings with remediation, and a signed attestation. Also reports published advisories that affect the scanned version, the maintainer's deprecation notice, repo-vs-artifact drift (files shipped that aren't in the source), and AgentAvow's behavioral sandbox results when available. Scans the latest version unless `version` (or a pin in the name) names one. Read-only; calls agentavow.com.",
               "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -90,6 +343,11 @@
                     "description": "Package name, e.g. 'chalk' (or 'org/model' for hf).",
                     "maxLength": 214
                   },
+                  "version": {
+                    "type": "string",
+                    "description": "Exact version to scan, e.g. '5.3.0'. Optional: the latest version by default. A pin in the name ('chalk@5.3.0', 'requests==2.32.5') works too.",
+                    "maxLength": 64
+                  },
                   "force": {
                     "type": "boolean",
                     "description": "Re-scan now instead of returning the cached verdict (results cache ~1h). Use after a new version ships."
@@ -97,6 +355,259 @@
                 },
                 "required": [
                   "name"
+                ]
+              },
+              "outputSchema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "description": "What was scanned, as given."
+                  },
+                  "scanned_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "When the scan ran (ISO 8601, UTC)."
+                  },
+                  "target_type": {
+                    "type": "string",
+                    "description": "github, npm, pypi, crates, docker, hf, or mcp."
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "safe",
+                      "review",
+                      "do_not_connect"
+                    ],
+                    "description": "The answer to lead with: safe = Safe to connect, review = Review before you connect, do_not_connect = Do not connect."
+                  },
+                  "decision_final": {
+                    "type": "boolean",
+                    "description": "False while the behavioral sandbox is still running; the decision can still change."
+                  },
+                  "decision_reason": {
+                    "type": "string",
+                    "description": "One sentence naming what decided it."
+                  },
+                  "trust_score": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Trust score, 0-100. Evidence under the decision."
+                  },
+                  "tier": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Trust tier for the score (detail, not the headline)."
+                  },
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "safe",
+                      "needs_review"
+                    ],
+                    "description": "Binary form of the decision, kept for older clients."
+                  },
+                  "verdict_reason": {
+                    "type": "string",
+                    "description": "Machine reason for the binary verdict, e.g. clean, clean_partial (clean, but not everything was read), blocking_findings, thin_coverage."
+                  },
+                  "not_checked": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Plain-English notes for what the scan could not read or check (empty when it read everything). Say these alongside the answer."
+                  },
+                  "coverage_gaps": {
+                    "type": "object",
+                    "description": "Machine form of not_checked: gap kinds (e.g. tool_list_paged, oversized_files) with a flag or count. Empty when nothing was skipped."
+                  },
+                  "critical": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Critical findings, static and sandbox."
+                  },
+                  "high": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "High findings, static and sandbox."
+                  },
+                  "findings_total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "All findings, every severity."
+                  },
+                  "static_findings_total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Findings from static analysis only."
+                  },
+                  "package_version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Package version scanned."
+                  },
+                  "published_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "When that version was published."
+                  },
+                  "deprecated": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The maintainer's deprecation notice, or null."
+                  },
+                  "advisories_affecting_version": {
+                    "type": "array",
+                    "description": "Published advisories that affect this version.",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "sandbox": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "What the behavioral sandbox observed; null if it does not apply."
+                  },
+                  "certified": {
+                    "type": "boolean",
+                    "description": "Matches the signed attestation's certified.eligible."
+                  },
+                  "certified_mark": {
+                    "type": "boolean",
+                    "description": "Certified and safe: show the Certified mark."
+                  },
+                  "top_findings": {
+                    "type": "array",
+                    "description": "Up to five most important findings.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "severity": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "critical, high, medium, or low."
+                        },
+                        "what": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "What was found."
+                        },
+                        "where": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "File and line, if file-based."
+                        },
+                        "remediation": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "How to fix it."
+                        },
+                        "count": {
+                          "type": "integer",
+                          "description": "How many times it occurs."
+                        }
+                      }
+                    }
+                  },
+                  "incident": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Known past compromise (context only, never scored)."
+                  },
+                  "subscores": {
+                    "type": "object",
+                    "description": "Per-category 0-100 scores behind the trust score.",
+                    "additionalProperties": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "install": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Install command, only when nothing blocks it."
+                  },
+                  "adoption": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "The adoption score: real usage (downloads per week, stars or installs). Never changes the decision.",
+                    "properties": {
+                      "count": {
+                        "type": "integer"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "score_0_100": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "signed": {
+                    "type": "boolean",
+                    "description": "True when a signed (Ed25519/JWS) attestation backs this."
+                  },
+                  "cached": {
+                    "type": "boolean",
+                    "description": "Served from the ~1h cache."
+                  },
+                  "rescan_pending": {
+                    "type": "boolean",
+                    "description": "A fresh scan was started; this is the previous result."
+                  },
+                  "report_url": {
+                    "type": "string",
+                    "description": "Full report page."
+                  },
+                  "report_json_url": {
+                    "type": "string",
+                    "description": "The full verdict as JSON."
+                  },
+                  "verify_url": {
+                    "type": "string",
+                    "description": "How to verify offline."
+                  }
+                },
+                "required": [
+                  "target",
+                  "target_type",
+                  "decision",
+                  "decision_final",
+                  "decision_reason",
+                  "trust_score",
+                  "verdict",
+                  "report_url"
                 ]
               },
               "annotations": {
@@ -110,7 +621,7 @@
             {
               "name": "scan_mcp_server",
               "title": "Scan an MCP server",
-              "description": "Scan a live MCP server's tool definitions for tool-poisoning, prompt-injection, invisible-unicode, and manifest-execution risks before your agent connects to it. Returns a 0-100 trust score, a safe / needs-review verdict, findings, and a signed attestation. Read-only; calls the agentavow.com public API.",
+              "description": "Scan a live MCP server's tool definitions for tool-poisoning, prompt-injection, invisible-unicode, and manifest-execution risks before your agent connects to it. Returns one of three answers with its reason (Safe to connect, Review before you connect, or Do not connect), a 0-100 trust score, findings, and a signed attestation. Read-only; calls the agentavow.com public API.",
               "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -126,6 +637,259 @@
                 },
                 "required": [
                   "endpoint_url"
+                ]
+              },
+              "outputSchema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "description": "What was scanned, as given."
+                  },
+                  "scanned_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "When the scan ran (ISO 8601, UTC)."
+                  },
+                  "target_type": {
+                    "type": "string",
+                    "description": "github, npm, pypi, crates, docker, hf, or mcp."
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "safe",
+                      "review",
+                      "do_not_connect"
+                    ],
+                    "description": "The answer to lead with: safe = Safe to connect, review = Review before you connect, do_not_connect = Do not connect."
+                  },
+                  "decision_final": {
+                    "type": "boolean",
+                    "description": "False while the behavioral sandbox is still running; the decision can still change."
+                  },
+                  "decision_reason": {
+                    "type": "string",
+                    "description": "One sentence naming what decided it."
+                  },
+                  "trust_score": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Trust score, 0-100. Evidence under the decision."
+                  },
+                  "tier": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Trust tier for the score (detail, not the headline)."
+                  },
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "safe",
+                      "needs_review"
+                    ],
+                    "description": "Binary form of the decision, kept for older clients."
+                  },
+                  "verdict_reason": {
+                    "type": "string",
+                    "description": "Machine reason for the binary verdict, e.g. clean, clean_partial (clean, but not everything was read), blocking_findings, thin_coverage."
+                  },
+                  "not_checked": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Plain-English notes for what the scan could not read or check (empty when it read everything). Say these alongside the answer."
+                  },
+                  "coverage_gaps": {
+                    "type": "object",
+                    "description": "Machine form of not_checked: gap kinds (e.g. tool_list_paged, oversized_files) with a flag or count. Empty when nothing was skipped."
+                  },
+                  "critical": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Critical findings, static and sandbox."
+                  },
+                  "high": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "High findings, static and sandbox."
+                  },
+                  "findings_total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "All findings, every severity."
+                  },
+                  "static_findings_total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Findings from static analysis only."
+                  },
+                  "package_version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Package version scanned."
+                  },
+                  "published_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "When that version was published."
+                  },
+                  "deprecated": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The maintainer's deprecation notice, or null."
+                  },
+                  "advisories_affecting_version": {
+                    "type": "array",
+                    "description": "Published advisories that affect this version.",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "sandbox": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "What the behavioral sandbox observed; null if it does not apply."
+                  },
+                  "certified": {
+                    "type": "boolean",
+                    "description": "Matches the signed attestation's certified.eligible."
+                  },
+                  "certified_mark": {
+                    "type": "boolean",
+                    "description": "Certified and safe: show the Certified mark."
+                  },
+                  "top_findings": {
+                    "type": "array",
+                    "description": "Up to five most important findings.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "severity": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "critical, high, medium, or low."
+                        },
+                        "what": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "What was found."
+                        },
+                        "where": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "File and line, if file-based."
+                        },
+                        "remediation": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "How to fix it."
+                        },
+                        "count": {
+                          "type": "integer",
+                          "description": "How many times it occurs."
+                        }
+                      }
+                    }
+                  },
+                  "incident": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Known past compromise (context only, never scored)."
+                  },
+                  "subscores": {
+                    "type": "object",
+                    "description": "Per-category 0-100 scores behind the trust score.",
+                    "additionalProperties": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "install": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Install command, only when nothing blocks it."
+                  },
+                  "adoption": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "The adoption score: real usage (downloads per week, stars or installs). Never changes the decision.",
+                    "properties": {
+                      "count": {
+                        "type": "integer"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "score_0_100": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "signed": {
+                    "type": "boolean",
+                    "description": "True when a signed (Ed25519/JWS) attestation backs this."
+                  },
+                  "cached": {
+                    "type": "boolean",
+                    "description": "Served from the ~1h cache."
+                  },
+                  "rescan_pending": {
+                    "type": "boolean",
+                    "description": "A fresh scan was started; this is the previous result."
+                  },
+                  "report_url": {
+                    "type": "string",
+                    "description": "Full report page."
+                  },
+                  "report_json_url": {
+                    "type": "string",
+                    "description": "The full verdict as JSON."
+                  },
+                  "verify_url": {
+                    "type": "string",
+                    "description": "How to verify offline."
+                  }
+                },
+                "required": [
+                  "target",
+                  "target_type",
+                  "decision",
+                  "decision_final",
+                  "decision_reason",
+                  "trust_score",
+                  "verdict",
+                  "report_url"
                 ]
               },
               "annotations": {
@@ -272,6 +1036,7 @@
           "agentavow.com/tool-count": 8
         }
       },
+      "digest": "sha256:945bc20042b3b0c71e6878fa19919cf428eafa2e7f9a095fcbc3d2a2b6d39458",
       "tags": [
         "security",
         "trust",
@@ -279,81 +1044,140 @@
         "mcp",
         "scanner"
       ],
-      "updatedAt": "2026-10-02T00:17:09Z",
+      "updatedAt": "2026-10-29T01:16:48Z",
       "publisher": {
         "identifier": "did:web:agentavow.com",
         "displayName": "AgentAvow",
         "identityType": "did"
       },
-      "trustManifest": {
-        "identity": "did:web:agentavow.com",
-        "identityType": "did",
-        "trustSchema": {
-          "identifier": "https://agentavow.com/docs/safety-model",
-          "version": "1",
-          "governanceUri": "https://agentavow.com/docs/verify-attestations",
-          "verificationMethods": [
-            "did:web"
-          ]
-        },
-        "provenance": [
-          {
-            "relation": "publishedFrom",
-            "sourceId": "https://github.com/agentgraph-co/agentgraph"
+      "extensions": {
+        "https://ai-catalog.org/extensions/policy-urls": {
+          "privacyPolicyUrl": "https://agentavow.com/legal/privacy",
+          "termsOfServiceUrl": "https://agentavow.com/legal/terms"
+        }
+      },
+      "trustManifests": [
+        {
+          "contributor": "did:web:agentavow.com",
+          "subject": {
+            "identifier": "urn:air:agentavow.com:mcp:agentavow-trust",
+            "type": "application/mcp-server-card+json",
+            "digest": "sha256:945bc20042b3b0c71e6878fa19919cf428eafa2e7f9a095fcbc3d2a2b6d39458"
+          },
+          "trustSchema": {
+            "identifier": "https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/agentavow-safety-model-v1.md",
+            "version": "1",
+            "governanceUri": "https://agentavow.com/docs/verify-attestations",
+            "verificationMethods": [
+              "did:web"
+            ]
+          },
+          "provenance": [
+            {
+              "relation": "publishedFrom",
+              "sourceId": "https://github.com/agentgraph-co/agentgraph"
+            }
+          ],
+          "extensions": {
+            "com.agentavow.toolManifest": {
+              "profile": "agentavow.mcp-tool-definition.v1",
+              "endpoint": "https://agentavow.com/mcp",
+              "observedAt": "2026-10-29T01:16:48Z",
+              "toolDigests": {
+                "tool:scan_repo": "sha256:c25b1055587dbdd06db3b8e6324221e6c2a41f3e2812c8e363313cfd6c16f52b",
+                "tool:scan_package": "sha256:6c56a3261c9d408e9f0e27e100f93f26a2320c9228f9f07037ef1892c1a87982",
+                "tool:scan_mcp_server": "sha256:c99a625daac790f5fa5187b078b88575437989c90f642e1178a6817b99558bb1",
+                "tool:verify_trust": "sha256:01b9f5a4783910587b2e81981867ca9d66d6ab1a6b738487e7a9192a785a591f",
+                "tool:check_interaction_safety": "sha256:66a90f5514d192ade2ea534ecd0c4a631bc4107afcd2e910d4588bc6e3372a36",
+                "tool:lookup_identity": "sha256:6a58057fde6231daa5bb774a230dd2f18ee468980cfe2537dd211931a6560445",
+                "tool:get_trust_badge": "sha256:2db0bd6919d6ea37befb321904633616225814451cdec9da1d7ec41a3686386c",
+                "tool:about_agentavow": "sha256:522c096139aa859d4d5032b8f24848248e040d60b5b93a45865e8a6ae862d4ed"
+              },
+              "toolManifestDigest": "sha256:a8144326c4ade816dd3117e818078e181aea20d6a16df5f9525a77e7ec443a2c",
+              "vectors": "https://github.com/agentgraph-co/agentgraph/tree/main/docs/standards/tool-manifest-digest-vectors-v1"
+            }
           }
-        ],
-        "privacyPolicyUrl": "https://agentavow.com/legal/privacy",
-        "termsOfServiceUrl": "https://agentavow.com/legal/terms",
-        "extensions": {
-          "com.agentavow.toolManifest": {
-            "profile": "agentavow.mcp-tool-definition.v1",
-            "endpoint": "https://agentavow.com/mcp",
-            "observedAt": "2026-10-02T00:17:09Z",
-            "toolDigests": {
-              "tool:scan_repo": "sha256:85646a96b2767545c7d4701834f9172b23e1fdc7a00de074ffa814e925f21f7b",
-              "tool:scan_package": "sha256:222e45db5d17bb40f3bf3c2bb2e33a9b897b9f356330d5c3b724c0750ab6b5fb",
-              "tool:scan_mcp_server": "sha256:6190aa4316601e2bc8058968bdff5db78389f8a288612236bfbdbd183f539e93",
-              "tool:verify_trust": "sha256:01b9f5a4783910587b2e81981867ca9d66d6ab1a6b738487e7a9192a785a591f",
-              "tool:check_interaction_safety": "sha256:66a90f5514d192ade2ea534ecd0c4a631bc4107afcd2e910d4588bc6e3372a36",
-              "tool:lookup_identity": "sha256:6a58057fde6231daa5bb774a230dd2f18ee468980cfe2537dd211931a6560445",
-              "tool:get_trust_badge": "sha256:2db0bd6919d6ea37befb321904633616225814451cdec9da1d7ec41a3686386c",
-              "tool:about_agentavow": "sha256:522c096139aa859d4d5032b8f24848248e040d60b5b93a45865e8a6ae862d4ed"
+        }
+      ]
+    },
+    {
+      "identifier": "https://agentavow.com/ids/mcp/io.github.github/github-mcp-server",
+      "type": "application/mcp-server-card+json",
+      "url": "https://api.githubcopilot.com/mcp/server-card",
+      "digest": "sha256:2082331fd2c4b5fa3ba11be9f74371ed16d2883a9ff5668d9828c483c57d9c10",
+      "tags": [
+        "mcp",
+        "assessed",
+        "third-party"
+      ],
+      "updatedAt": "2026-10-29T01:16:48Z",
+      "extensions": {
+        "com.agentavow.sourceCoordinates": {
+          "serverCardName": "io.github.github/github-mcp-server",
+          "serverCardUrl": "https://api.githubcopilot.com/mcp/server-card",
+          "repository": "https://github.com/github/github-mcp-server",
+          "etag": "\"2082331fd2c4b5fa3ba11be9f74371ed16d2883a9ff5668d9828c483c57d9c10\""
+        }
+      },
+      "trustManifests": [
+        {
+          "contributor": "did:web:agentavow.com",
+          "subject": {
+            "identifier": "https://agentavow.com/ids/mcp/io.github.github/github-mcp-server",
+            "type": "application/mcp-server-card+json",
+            "digest": "sha256:2082331fd2c4b5fa3ba11be9f74371ed16d2883a9ff5668d9828c483c57d9c10"
+          },
+          "trustSchema": {
+            "identifier": "https://github.com/AgentAvow/AgentAvow/blob/main/docs/standards/agentavow-safety-model-v1.md",
+            "version": "1",
+            "governanceUri": "https://agentavow.com/docs/verify-attestations",
+            "verificationMethods": [
+              "did:web"
+            ]
+          },
+          "attestations": [
+            {
+              "type": "com.agentavow.scan-verdict",
+              "uri": "https://agentavow.com/api/v1/public/scan/github/github-mcp-server/verdict.json",
+              "description": "AgentAvow's current signed scan verdict for github/github-mcp-server (JSON with an EdDSA compact JWS; verify against https://agentgraph.co/.well-known/jwks.json). Full report: https://agentavow.com/check/github/github-mcp-server. The scan covers the source repository the card names (https://github.com/github/github-mcp-server, tree f38526264abb14961b32cea386e38ec6d3cf674f), not the remote deployment the card describes."
             },
-            "toolManifestDigest": "sha256:88ef392dd926c6687ef38caba90221a921ddc5948d29e850addb3cdbe515bbf7",
-            "vectors": "https://github.com/agentgraph-co/agentgraph/tree/main/docs/standards/tool-manifest-digest-vectors-v1"
+            {
+              "type": "com.agentavow.scan-attestation",
+              "uri": "data:application/jose,eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTMwVDAxOjE2OjQ5LjE0MloiLCJpc3N1ZWRBdCI6IjIwMjYtMTAtMjlUMDE6MTY6NDkuMTQyWiIsImlzc3VlciI6eyJpZCI6ImRpZDp3ZWI6YWdlbnRncmFwaC5jbyIsIm5hbWUiOiJBZ2VudEF2b3ciLCJ1cmwiOiJodHRwczovL2FnZW50Z3JhcGguY28ifSwicmVjb21tZW5kZWRMaW1pdHMiOnsibWF4X3Rva2Vuc19wZXJfY2FsbCI6ODE5MiwicmVxdWVzdHNfcGVyX21pbnV0ZSI6NjAsInJlcXVpcmVfdXNlcl9jb25maXJtYXRpb24iOmZhbHNlfSwic2NhbiI6eyJjYXRlZ29yeVNjb3JlcyI6eyJjb2RlX3NhZmV0eSI6ODQsImRhdGFfaGFuZGxpbmciOjEwMCwiZGVwZW5kZW5jeV9oZWFsdGgiOjEwMCwiZmlsZXN5c3RlbV9hY2Nlc3MiOjEwMCwic2VjcmV0X2h5Z2llbmUiOjEwMH0sImNvdmVyYWdlIjp7ImFydGlmYWN0X2RpZ2VzdCI6InJlcG86aHR0cHM6Ly9naXRodWIuY29tL2dpdGh1Yi9naXRodWItbWNwLXNlcnZlckBtYWluIiwiZGJfc25hcHNob3RzIjp7Im9zdiI6IjIwMjYtMTAtMjMifSwiZXZpZGVuY2VfYW5jaG9ycyI6WyJldmlkZW5jZS1hbmNob3Itc3RhdGljLWFuYWx5c2lzLXYwIl0sImZpbGVzX3JlYWRfZGlnZXN0Ijoic2hhMjU2OjBlOGU2ODY3OGY5ZmYxMzRhOGQwMzFiZmQ2YTQwNjBlNjBkOTRmYjU3MTkzNmE5NWJmYzBiYTcxY2VjODc0ODciLCJsaW5rZWRfcmVwbyI6eyJiaW5kaW5nIjoiZGVjbGFyZWQiLCJjb21taXQiOiJtYWluIiwidXJsIjoiaHR0cHM6Ly9naXRodWIuY29tL2dpdGh1Yi9naXRodWItbWNwLXNlcnZlciJ9LCJsaXZlX29ic2VydmVkIjpmYWxzZSwicG9pbnRfaW5fdGltZSI6IjIwMjYtMTAtMjNUMDQ6NDI6MTIuNjUxODQzWiIsInByb3ZlbmFuY2VfYmluZGluZyI6Im4vYSIsInNjYW5fZGVwdGgiOiJyZXBvLW9ubHkiLCJzZWxlY3Rpb24iOiJkZWZhdWx0IGJyYW5jaDsgc291cmNlIGZpbGVzIHVwIHRvIDUwMCBLQjsgZmlyc3QgMjAwIHNoaXBwZWQtZmlyc3QiLCJzdXJmYWNlIjoiZ2l0aHViIiwidHJlZV9zaGEiOiJmMzg1MjYyNjRhYmIxNDk2MWIzMmNlYTM4NmUzOGVjNmQzY2Y2NzRmIn0sImNvdmVyYWdlR2FwcyI6eyJmaWxlX2NhcCI6MjAwLCJvdmVyX2ZpbGVfY2FwIjoxNDh9LCJmaWxlc1NjYW5uZWQiOjIwMCwiZmlsZXNUb3RhbCI6MzQ4LCJmaW5kaW5ncyI6eyJjYXRlZ29yaWVzIjp7InVuc2FmZV9leGVjIjo0fSwiY3JpdGljYWwiOjAsImNyaXRpY2FsX2FsbCI6MCwiaGlnaCI6MCwiaGlnaF9hbGwiOjAsIml0ZW1zIjpbeyJjYXBhYmlsaXR5IjoiIiwiY2F0ZWdvcnkiOiJ1bnNhZmVfZXhlYyIsImZpbGVfcGF0aCI6ImNtZC9tY3BjdXJsL21haW4uZ28iLCJpbnN0YWxsZWQiOnRydWUsImtpbmQiOiJkZWZlY3QiLCJsaW5lX251bWJlciI6Mzg4LCJuYW1lIjoib3MvZXhlYyAoR28pIiwicmVtZWRpYXRpb24iOiJWYWxpZGF0ZSBhbmQgc2FuaXRpemUgaW5wdXQgYmVmb3JlIGV4ZWN1dGlvbiIsInNldmVyaXR5IjoibWVkaXVtIiwic2hpcHBlZCI6dHJ1ZX0seyJjYXBhYmlsaXR5IjoiIiwiY2F0ZWdvcnkiOiJ1bnNhZmVfZXhlYyIsImZpbGVfcGF0aCI6ImludGVybmFsL29hdXRoL2Vudi5nbyIsImluc3RhbGxlZCI6dHJ1ZSwia2luZCI6ImRlZmVjdCIsImxpbmVfbnVtYmVyIjozMCwibmFtZSI6Im9zL2V4ZWMgKEdvKSIsInJlbWVkaWF0aW9uIjoiVmFsaWRhdGUgYW5kIHNhbml0aXplIGlucHV0IGJlZm9yZSBleGVjdXRpb24iLCJzZXZlcml0eSI6Im1lZGl1bSIsInNoaXBwZWQiOnRydWV9LHsiY2FwYWJpbGl0eSI6IiIsImNhdGVnb3J5IjoidW5zYWZlX2V4ZWMiLCJmaWxlX3BhdGgiOiJpbnRlcm5hbC9vYXV0aC9lbnYuZ28iLCJpbnN0YWxsZWQiOnRydWUsImtpbmQiOiJkZWZlY3QiLCJsaW5lX251bWJlciI6MzIsIm5hbWUiOiJvcy9leGVjIChHbykiLCJyZW1lZGlhdGlvbiI6IlZhbGlkYXRlIGFuZCBzYW5pdGl6ZSBpbnB1dCBiZWZvcmUgZXhlY3V0aW9uIiwic2V2ZXJpdHkiOiJtZWRpdW0iLCJzaGlwcGVkIjp0cnVlfSx7ImNhcGFiaWxpdHkiOiIiLCJjYXRlZ29yeSI6InVuc2FmZV9leGVjIiwiZmlsZV9wYXRoIjoiaW50ZXJuYWwvb2F1dGgvZW52LmdvIiwiaW5zdGFsbGVkIjp0cnVlLCJraW5kIjoiZGVmZWN0IiwibGluZV9udW1iZXIiOjM0LCJuYW1lIjoib3MvZXhlYyAoR28pIiwicmVtZWRpYXRpb24iOiJWYWxpZGF0ZSBhbmQgc2FuaXRpemUgaW5wdXQgYmVmb3JlIGV4ZWN1dGlvbiIsInNldmVyaXR5IjoibWVkaXVtIiwic2hpcHBlZCI6dHJ1ZX1dLCJtZWRpdW0iOjQsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjo0fSwicG9zaXRpdmVTaWduYWxzIjpbIlR5cGUgc2FmZXR5IiwiQXV0aGVudGljYXRpb24gY2hlY2siLCJDT1JTIGNvbmZpZ3VyYXRpb24iLCJMb2dnaW5nIC8gYXVkaXQgdHJhaWwiLCJJbnB1dCB2YWxpZGF0aW9uIiwiUHJvdGVjdGVkIGRlZmF1bHQgYnJhbmNoIiwiQWN0aXZlbHkgbWFpbnRhaW5lZCIsIkhlYWx0aHkgY29udHJpYnV0b3IgZGl2ZXJzaXR5IiwiRXJyb3IgaGFuZGxpbmciLCJSYXRlIGxpbWl0aW5nIiwiQXV0aG9yaXphdGlvbiBjaGVjayIsIkNvbnRlbnQtU2VjdXJpdHktUG9saWN5IiwiQ3J5cHRvZ3JhcGhpYyB2ZXJpZmljYXRpb24iLCJEZXBlbmRlbmN5IHBpbm5pbmciXSwicHJpbWFyeUxhbmd1YWdlIjoiR28iLCJyZXN1bHQiOiJjbGVhbiIsInNhbXBsZWQiOnRydWUsInN1cHBseUNoYWluIjp7ImFkdmlzb3J5IjpmYWxzZSwiY291bnRzIjp7fSwiZGJfc25hcHNob3RzIjp7Im9zdiI6IjIwMjYtMTAtMjMifSwiZGVwc190b3RhbCI6MTQ1LCJlY29zeXN0ZW1zIjpbIm5wbSJdLCJnaXRodWJfZGVwdGgiOnsiaGFzaF9waW5uZWRfYWN0aW9ucyI6eyJwaW5uZWQiOjQxLCJyYXRpbyI6MSwidG90YWwiOjQxfX0sImxvY2tmaWxlc19zY2FubmVkIjoxLCJtYWxpY2lvdXMiOltdLCJvayI6dHJ1ZSwic2NvcmVjYXJkIjpudWxsLCJzY29yZWQiOmZhbHNlLCJ1bmlxdWVfdnVsbnMiOjB9LCJ0b29sRGlnZXN0cyI6eyJhZ2VudC1wbHVnaW4vbWNwLmpzb24iOiJzaGEyNTY6YmMzZDUwNTMxNjc1NzlkMmU0YTVkMmVjMzk2MzFlOTE2YTM2YjllNGZmNjFiMTg3YzRkMzA2YTZjODc2YWEzYSIsInNlcnZlci5qc29uIjoic2hhMjU2OmVjYmM2M2M1YzdjMDVjNmJlMjM2MDAzNWZlNTU3ZGI5OWNjZTNlYTAxMWRjZWMzYmVjZWJlYWY5NmQ3ZDJlYTMifSwidG9vbE1hbmlmZXN0RGlnZXN0Ijoic2hhMjU2OjM4MDI3YmIzZTk1MTc0ZTUyNzUzZTkwYzA1NTE4OTdjMGM4Mjc5ZTQ0NTEwNTViZDU0ZDQyOTdiMTRlYWFmMmEiLCJ0cnVzdFNjb3JlIjo5MSwidHJ1c3RUaWVyIjoidHJ1c3RlZCJ9LCJzY2FubmVkQXQiOiIyMDI2LTEwLTIzVDA0OjQyOjEzLjk4MloiLCJzdWJqZWN0Ijp7ImlkIjoiZ2l0aHViOmdpdGh1Yi9naXRodWItbWNwLXNlcnZlciIsInJlcG8iOiJnaXRodWIvZ2l0aHViLW1jcC1zZXJ2ZXIifSwidHlwZSI6IlNlY3VyaXR5UG9zdHVyZUF0dGVzdGF0aW9uIn0.liuWQNP2-dTm0BsZNovSXjc2PnrCc6X4o8PruZH0i9nJfZoxDpB3pLQaydXOUv03Ik3zapE7WYUsyIQYzoogDA",
+              "digest": "sha256:6314a723af75ef5d8793dafdeaa57bb809ae307d53615701a97030426a13f855",
+              "size": 4849,
+              "description": "AgentAvow scan verdict for github/github-mcp-server: Safe to connect, trust score 91/100. Compact JWS (EdDSA, kid agentgraph-security-v1); verify against https://agentgraph.co/.well-known/jwks.json. Issued 2026-10-29T01:16:49.142Z, expires 2026-10-30T01:16:49.142Z. Live re-check: https://agentavow.com/api/v1/public/scan/github/github-mcp-server/verdict.json"
+            }
+          ],
+          "extensions": {
+            "com.agentavow.assessment": {
+              "role": "independent-assessor",
+              "assessedAt": "2026-10-29T01:16:48Z",
+              "artifactUrl": "https://api.githubcopilot.com/mcp/server-card",
+              "repository": "https://github.com/github/github-mcp-server",
+              "scanDepth": "repo-only",
+              "treeSha": "f38526264abb14961b32cea386e38ec6d3cf674f",
+              "liveObserved": false,
+              "decision": "safe",
+              "score": 91,
+              "scope": "The scan covers the source repository the card names (https://github.com/github/github-mcp-server, tree f38526264abb14961b32cea386e38ec6d3cf674f), not the remote deployment the card describes."
+            }
           }
-        },
-        "subject": {
-          "identifier": "urn:air:agentavow.com:mcp:agentavow-trust",
-          "type": "application/mcp-server-card+json",
-          "digest": "sha256:6f90b0c077df797b563d189c38b9a981f5d2dcf4f9f64c17e3a256700e433ee7"
-        },
-        "issuedAt": "2026-10-02T00:17:09Z",
-        "expiresAt": "2026-11-01T00:17:09Z",
-        "signature": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImRpZDp3ZWI6YWdlbnRhdm93LmNvbSNjYXRhbG9nLWVzMjU2LXYxIn0..ln06HZvnYea5KkBthB2Zd0ZWY93n9ZZepApg25RnS6ewPGk8koydj4QNqHuSdTYJombmnj-ptHy4wINzAp4D7g",
-        "attestations": [
-          {
-            "type": "com.agentavow.scan-attestation",
-            "uri": "data:application/jose,eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50Z3JhcGgtc2VjdXJpdHktdjEifQ.eyJAY29udGV4dCI6Imh0dHBzOi8vc2NoZW1hLmFnZW50Z3JhcGguY28vYXR0ZXN0YXRpb24vc2VjdXJpdHkvdjEiLCJleHBpcmVzQXQiOiIyMDI2LTEwLTAzVDAwOjE3OjA5LjM4ODYxOSswMDowMCIsImlzc3VlZEF0IjoiMjAyNi0xMC0wMlQwMDoxNzowOS4zODg2MTkrMDA6MDAiLCJpc3N1ZXIiOnsiaWQiOiJkaWQ6d2ViOmFnZW50Z3JhcGguY28iLCJuYW1lIjoiQWdlbnRBdm93IiwidXJsIjoiaHR0cHM6Ly9hZ2VudGdyYXBoLmNvIn0sInJlY29tbWVuZGVkTGltaXRzIjp7Im1heF90b2tlbnNfcGVyX2NhbGwiOjgxOTIsInJlcXVlc3RzX3Blcl9taW51dGUiOjYwLCJyZXF1aXJlX3VzZXJfY29uZmlybWF0aW9uIjpmYWxzZX0sInNjYW4iOnsiY2F0ZWdvcnlTY29yZXMiOnsiY29kZV9zYWZldHkiOjEwMCwiZGF0YV9oYW5kbGluZyI6MTAwLCJkZXBlbmRlbmN5X2hlYWx0aCI6MTAwLCJmaWxlc3lzdGVtX2FjY2VzcyI6MTAwLCJzZWNyZXRfaHlnaWVuZSI6MTAwfSwiY292ZXJhZ2UiOnsiZGJfc25hcHNob3RzIjp7fSwibGl2ZV9vYnNlcnZlZCI6dHJ1ZSwicG9pbnRfaW5fdGltZSI6IjIwMjYtMTAtMDJUMDA6MTY6NDMuODMxNjcwWiIsInByb3ZlbmFuY2VfYmluZGluZyI6Im4vYSIsInNjYW5fZGVwdGgiOiJhcnRpZmFjdCtsaXZlIiwic3VyZmFjZSI6Im1jcCJ9LCJmaWxlc1NjYW5uZWQiOjgsImZpbGVzVG90YWwiOjgsImZpbmRpbmdzIjp7ImNhdGVnb3JpZXMiOnt9LCJjcml0aWNhbCI6MCwiY3JpdGljYWxfYWxsIjowLCJoaWdoIjowLCJoaWdoX2FsbCI6MCwiaXRlbXMiOltdLCJtZWRpdW0iOjAsInN1cHByZXNzZWRfbGluZXMiOjAsInRvdGFsIjowfSwicG9zaXRpdmVTaWduYWxzIjpbIjggdG9vbHMgZW51bWVyYXRlZCDCtyBubyBsZXRoYWwgdHJpZmVjdGEiXSwicHJpbWFyeUxhbmd1YWdlIjoiTUNQIiwicmVzdWx0IjoiY2xlYW4iLCJzYW1wbGVkIjpmYWxzZSwidG9vbERpZ2VzdHMiOnsidG9vbDphYm91dF9hZ2VudGF2b3ciOiJzaGEyNTY6NTIyYzA5NjEzOWFhODU5ZDRkNTAzMmI4ZjI0ODQ4MjQ4ZTA0MGQ2MGI1YjkzYTQ1ODY1ZThhNmFlODYyZDRlZCIsInRvb2w6Y2hlY2tfaW50ZXJhY3Rpb25fc2FmZXR5Ijoic2hhMjU2OjY2YTkwZjU1MTRkMTkyYWRlMmVhNTM0ZWNkMGM0YTYzMWJjNDEwN2FmY2QyZTkxMGQ0NTg4YmM2ZTMzNzJhMzYiLCJ0b29sOmdldF90cnVzdF9iYWRnZSI6InNoYTI1NjoyZGIwYmQ2OTE5ZDZlYTM3YmVmYjMyMTkwNDYzMzYxNjIyNTgxNDQ1MWNkZWM5ZGExZDdlYzQxYTM2ODYzODZjIiwidG9vbDpsb29rdXBfaWRlbnRpdHkiOiJzaGEyNTY6NmE1ODA1N2ZkZTYyMzFkYWE1YmI3NzRhMjMwZGQyZjE4ZWU0Njg5ODBjZmUyNTM3ZGQyMTE5MzFhNjU2MDQ0NSIsInRvb2w6c2Nhbl9tY3Bfc2VydmVyIjoic2hhMjU2OjYxOTBhYTQzMTY2MDFlMmJjODA1ODk2OGJkZmY1ZGI3ODM4OWY4YTI4ODYxMjIzNmJmYmRiZDE4M2Y1MzllOTMiLCJ0b29sOnNjYW5fcGFja2FnZSI6InNoYTI1NjoyMjJlNDVkYjVkMTdiYjQwZjNiZjNjMmJiMmUzM2E5Yjg5N2I5ZjM1NjMzMGQ1YzNiNzI0YzA3NTBhYjZiNWZiIiwidG9vbDpzY2FuX3JlcG8iOiJzaGEyNTY6ODU2NDZhOTZiMjc2NzU0NWM3ZDQ3MDE4MzRmOTE3MmIyM2UxZmRjN2EwMGRlMDc0ZmZhODE0ZTkyNWYyMWY3YiIsInRvb2w6dmVyaWZ5X3RydXN0Ijoic2hhMjU2OjAxYjlmNWE0NzgzOTEwNTg3YjJlODE5ODE4NjdjYTlkNjZkNmFiMWE2YjczODQ4N2U3YTkxOTJhNzg1YTU5MWYifSwidG9vbE1hbmlmZXN0RGlnZXN0Ijoic2hhMjU2Ojg4ZWYzOTJkZDkyNmM2Njg3ZWYzOGNhYmE5MDIyMWE5MjFkZGM1OTQ4ZDI5ZTg1MGFkZGIzY2RiZTUxNWJiZjciLCJ0cnVzdFNjb3JlIjo4NywidHJ1c3RUaWVyIjoidHJ1c3RlZCJ9LCJzY2FubmVkQXQiOiIyMDI2LTEwLTAyVDAwOjE2OjQzLjgzMTkxMyswMDowMCIsInN1YmplY3QiOnsiaWQiOiJtY3A6aHR0cHM6Ly9hZ2VudGF2b3cuY29tL21jcCIsInJlcG8iOiJtY3A6aHR0cHM6Ly9hZ2VudGF2b3cuY29tL21jcCJ9LCJ0eXBlIjoiU2VjdXJpdHlQb3N0dXJlQXR0ZXN0YXRpb24ifQ.o60G407GhGFlaOOZ4Ci1sk2u7fIE-fUxlT-cnw5Moxxm2GTkCCzwa621G_rHR6dS1IXrcbB8Ix-G8pJ8UV_HAQ",
-            "digest": "sha256:1165c4d96fe162169d526127e3b355dd8cc9cda3426e5c1b04fee53ac9406c90",
-            "size": 2872,
-            "description": "AgentAvow scan verdict for mcp:https://agentavow.com/mcp: grade A, score 87/100, tier trusted. Compact JWS (EdDSA, kid agentgraph-security-v1); verify against https://agentgraph.co/.well-known/jwks.json. Issued 2026-10-02T00:17:09.388619+00:00, expires 2026-10-03T00:17:09.388619+00:00. Live re-check: https://agentavow.com/api/v1/public/scan/mcp?endpoint=https://agentavow.com/mcp"
-          }
-        ]
-      }
+        }
+      ]
     }
   ],
   "extensions": {
     "com.agentavow.catalogBuild": {
-      "status": "signed",
+      "status": "draft-unsigned",
       "generator": "scripts/ai_catalog_wellknown.py",
-      "specTarget": "Agent-Card/ai-catalog main @ 2026-10-01 (post #108/#109/#110)",
-      "signatureAlg": "ES256 (P-256) per the did:web Publisher Profile",
+      "specTarget": "Agent-Card/ai-catalog main @ 9aac2c1b (ADR-0028 + ADR-0029, merged 2026-10-28)",
+      "signatureProfile": "did-web-v1",
+      "signatureAlg": "ES256 (P-256)",
       "signerDid": "did:web:agentavow.com",
       "signerKid": "did:web:agentavow.com#catalog-es256-v1",
       "didDocument": "https://agentavow.com/.well-known/did.json",
-      "jwks": "https://agentgraph.co/.well-known/jwks.json",
-      "signedAt": "2026-10-02T00:17:12Z"
+      "jwks": "https://agentgraph.co/.well-known/jwks.json"
     }
   }
 }
