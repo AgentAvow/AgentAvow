@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -627,10 +628,65 @@ async def test_probe_and_alert_end_to_end(redis, mail, token, monkeypatch):
     async def probe():
         return await real("https://agentavow.com/mcp", client=client)
     monkeypatch.setattr(h, "run_probe", probe)
+    monkeypatch.setattr(settings, "mcp_health_cert_hosts", "")  # no real TLS dial
     out = await h.probe_and_alert()
     assert out["alerted"] == ["modern_discover"]
     assert "client version 2026-07-28" in mail["sent"][0]["html"]
     await client.aclose()
+
+
+# ── TLS certificate expiry ────────────────────────────────────────────────────────
+DAY = 86400.0
+T0 = 1_800_000_000.0
+
+
+def test_cert_with_time_left_passes():
+    c = h.evaluate_cert("agentavow.com", T0 + 60 * DAY, None, now=T0, warn_days=14)
+    assert c.ok is True and c.key == "tls_cert_agentavow_com"
+    assert c.facts["days_left"] == 60
+
+
+def test_cert_inside_the_warning_window_fails_with_days_left():
+    c = h.evaluate_cert("agentavow.com", T0 + 13.5 * DAY, None, now=T0, warn_days=14)
+    assert c.ok is False and c.problem == "expires in 13 days"
+    assert not c.transient
+    assert "certbot renew --cert-name agentavow.com" in c.next_step
+
+
+def test_expired_cert_fails_and_other_verify_errors_are_untrusted():
+    c = h.evaluate_cert("agentavow.com", None, "certificate has expired", now=T0)
+    assert c.ok is False and c.problem == "certificate expired"
+    c = h.evaluate_cert("agentavow.com", None, "Hostname mismatch", now=T0)
+    assert c.ok is False and c.problem == "certificate not trusted"
+
+
+def test_unreachable_host_is_not_judged():
+    c = h.evaluate_cert("agentavow.com", None, "connect: ConnectionRefusedError: x", now=T0)
+    assert c.ok is None
+
+
+async def test_cert_check_runs_each_configured_host(monkeypatch):
+    seen = []
+
+    def fake_fetch(host, timeout):
+        seen.append(host)
+        return (time.time() + 90 * DAY, None) if host == "a.example" else (None, "expired")
+    monkeypatch.setattr(h, "_fetch_cert", fake_fetch)
+    monkeypatch.setattr(settings, "mcp_health_cert_hosts", "a.example, b.example")
+    checks = _by_key(await h.run_cert_check())
+    assert seen == ["a.example", "b.example"]
+    assert checks["tls_cert_a_example"].ok is True
+    assert checks["tls_cert_b_example"].problem == "certificate expired"
+
+
+async def test_cert_alert_email_names_host_and_expiry(redis, mail):
+    c = h.evaluate_cert("agentgraph.co", T0 + 5 * DAY, None, now=T0, warn_days=14)
+    out = await h.alert([c], NOW)
+    assert out["alerted"] == ["tls_cert_agentgraph_co"]
+    msg = mail["sent"][0]
+    assert msg["subject"] == ("AgentAvow MCP: TLS certificate agentgraph.co failing "
+                              "(expires in 5 days)")
+    assert "5 days left" in msg["html"]
 
 
 # ── scheduling ────────────────────────────────────────────────────────────────────

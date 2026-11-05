@@ -20,6 +20,10 @@ admin's HMAC alert webhook, like the sandbox watchdog):
 ``run_reject_check``  every 15 min: the reject share of real client POSTs over the last
                    30 min (src/bridges/mcp_response_counter), and any "Unsupported
                    protocol version" rejects with the version clients asked for.
+``run_cert_check``  with each probe: the TLS certificate of each host in
+                   ``mcp_health_cert_hosts`` must verify and have more than
+                   ``mcp_health_cert_warn_days`` left. On 2026-11-04 the agentavow.com
+                   certificate expired with no renewal job on the host (~2 h outage).
 
 Alerting: a check that fails emails once per distinct problem per 6 h; timeouts,
 connection errors and 5xx must fail twice in a row first (a blip is not an outage).
@@ -82,6 +86,12 @@ _NEXT_UPV = (
 _NEXT_REJECTS = (
     f"Read <code>{_DC} logs --tail 300 backend</code> for the failing status and run "
     f"<code>{_DC} exec -T backend python -m src.jobs.mcp_health probe</code>.")
+_NEXT_CERT = (
+    "On the host: <code>sudo certbot certificates</code>, then <code>sudo certbot renew "
+    "--cert-name HOST --standalone --pre-hook \"docker stop agentgraph-nginx-1\" "
+    "--post-hook \"docker start agentgraph-nginx-1\"</code>. Renewal should be automatic "
+    "(<code>/etc/cron.d/certbot-renew</code>, log <code>/var/log/certbot-renew.log</code>); "
+    "if this alert fired, read that log for why it did not renew.")
 
 
 @dataclass
@@ -384,6 +394,72 @@ async def run_reject_check(now: float | None = None) -> list[Check]:
 
 
 # --------------------------------------------------------------------------- #
+# TLS certificate expiry
+# --------------------------------------------------------------------------- #
+def evaluate_cert(host: str, not_after: float | None, error: str | None,
+                  *, now: float | None = None, warn_days: int | None = None) -> Check:
+    """One host's certificate check (pure). ``not_after`` is epoch seconds from a verified
+    handshake; ``error`` is the verify failure, or "connect: ..." when unreachable."""
+    warn = int(warn_days if warn_days is not None else _cfg("mcp_health_cert_warn_days", 14))
+    key = f"tls_cert_{_slug(host)}"
+    label = f"TLS certificate {host}"
+    step = _NEXT_CERT.replace("HOST", html.escape(host))
+    if error and error.startswith("connect:"):
+        # Unreachable is the probe's job to report; the certificate is not judged.
+        return Check(key, label, None, detail=error, next_step=step)
+    if error:
+        expired = "expired" in error.lower()
+        return Check(key, label, False,
+                     "certificate expired" if expired else "certificate not trusted",
+                     f"Clients refuse https://{host}: {error}", next_step=step,
+                     facts={"host": host})
+    if not_after is None:
+        return Check(key, label, None, next_step=step)
+    days = int((not_after - (now if now is not None else time.time())) // 86400)
+    expires = datetime.fromtimestamp(not_after, timezone.utc).strftime("%Y-%m-%d %H:%M")
+    facts = {"host": host, "days_left": days, "expires": expires}
+    if days <= warn:
+        return Check(key, label, False, f"expires in {max(days, 0)} days",
+                     f"The https://{host} certificate expires {expires} UTC. "
+                     "Automatic renewal should have replaced it 30 days before.",
+                     next_step=step, facts=facts)
+    return Check(key, label, True, next_step=step, facts=facts)
+
+
+def _fetch_cert(host: str, timeout: float) -> tuple[float | None, str | None]:
+    """Verified TLS handshake to ``host``:443 -> (notAfter epoch, error)."""
+    import socket
+    import ssl
+
+    ctx = ssl.create_default_context()
+    try:
+        with socket.create_connection((host, 443), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as tls:
+                cert = tls.getpeercert() or {}
+    except ssl.SSLCertVerificationError as e:
+        return None, str(e.verify_message or e)
+    except (OSError, ssl.SSLError) as e:
+        return None, f"connect: {type(e).__name__}: {e}"
+    na = cert.get("notAfter")
+    return (ssl.cert_time_to_seconds(na) if na else None), None
+
+
+async def run_cert_check(now: float | None = None) -> list[Check]:
+    import asyncio
+
+    hosts = [h.strip() for h in str(_cfg("mcp_health_cert_hosts", "")).split(",") if h.strip()]
+    timeout = float(_cfg("mcp_health_probe_timeout_seconds", 20.0))
+    out: list[Check] = []
+    for host in hosts:
+        try:
+            not_after, error = await asyncio.to_thread(_fetch_cert, host, timeout)
+            out.append(evaluate_cert(host, not_after, error, now=now))
+        except Exception:
+            logger.debug("tls cert check failed for %s", host, exc_info=True)
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # alert state machine: dedupe + recovery
 # --------------------------------------------------------------------------- #
 def _slug(problem: str) -> str:
@@ -465,6 +541,8 @@ def _facts_html(c: Check) -> str:
                     f"{', '.join(f.get('supported') or []) or 'unknown'}")
     if "tools" in f:
         rows.append(f"{f['tools']} tools")
+    if "days_left" in f:
+        rows.append(f"{f['host']}: expires {f['expires']} UTC ({f['days_left']} days left)")
     if "total" in f:
         rows.append(f"{f['total']} client POSTs, {f.get('errors', 0)} rejects, "
                     f"{f.get('upv', 0)} unsupported-version in {f.get('window_minutes')} min")
@@ -566,7 +644,7 @@ async def alert(checks: list[Check], now: datetime | None = None) -> dict:
 
 
 async def probe_and_alert() -> dict:
-    checks = await run_probe()
+    checks = await run_probe() + await run_cert_check()
     bad = [c.key for c in checks if c.ok is False]
     if bad:
         logger.info("MCP health probe: failing %s", bad)
@@ -627,7 +705,7 @@ def _main(argv: list[str]) -> int:  # pragma: no cover - manual operator entry p
 
     async def go() -> int:
         if cmd == "probe":
-            for c in await run_probe():
+            for c in await run_probe() + await run_cert_check():
                 state = "PASS" if c.ok else ("SKIP" if c.ok is None else "FAIL")
                 print(f"{state:4} {c.label}: {c.problem or 'ok'} {c.detail}".rstrip())
             return 0

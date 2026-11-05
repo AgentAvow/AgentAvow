@@ -438,6 +438,11 @@ class Settings(BaseSettings):
     mcp_health_alert_dedupe_hours: int = 6
     # Recipient; empty = admin_email.
     mcp_health_alert_email: str = ""
+    # TLS certificate expiry check, run with each probe. On 2026-11-04 the agentavow.com
+    # certificate expired (no renewal job on the host) and the site was down ~2 h.
+    # agentgraph.co serves the JWKS, so verification breaks if it lapses.
+    mcp_health_cert_hosts: str = "agentavow.com,agentgraph.co"
+    mcp_health_cert_warn_days: int = 14
 
     # Marketing bot system
     marketing_enabled: bool = False
