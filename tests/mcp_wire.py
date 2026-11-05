@@ -49,6 +49,7 @@ async def post(
     protocol_version: str | None = "2025-11-25",
     headers: dict | None = None,
     request_id: int = 1,
+    path: str = "/mcp",
 ) -> httpx.Response:
     body: dict = {"jsonrpc": "2.0", "id": request_id, "method": method}
     if params is not None:
@@ -69,7 +70,7 @@ async def post(
         try:
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=m.mcp_asgi_app),
                                          base_url="http://testserver") as c:
-                return await c.post("/mcp", headers=h, content=json.dumps(body))
+                return await c.post(path, headers=h, content=json.dumps(body))
         finally:
             m.session_manager = saved
 

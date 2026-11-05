@@ -443,6 +443,32 @@ async def test_asgi_front_counts_client_rejects_but_not_probes(
     assert w["surfaces"]["claude"] == {"total": 1, "errors": 0}
 
 
+def test_is_endpoint_path_matches_only_the_endpoint():
+    assert counter.is_endpoint_path("/mcp")
+    assert counter.is_endpoint_path("/mcp/")
+    assert counter.is_endpoint_path("/mcp", "/mcp")      # as mounted in src/main.py
+    assert counter.is_endpoint_path("/mcp/", "/mcp")
+    assert counter.is_endpoint_path("/", "")             # mount point already stripped
+    assert not counter.is_endpoint_path("/mcp/sse", "/mcp")
+    assert not counter.is_endpoint_path("/mcp/sse")
+    assert not counter.is_endpoint_path("/mcp/sse/.well-known/agent.json", "/mcp")
+
+
+async def test_asgi_front_does_not_count_crawler_paths(monkeypatch, redis, offline):
+    monkeypatch.setattr(settings, "mcp_health_enabled", True)
+    bad_accept = {"accept": "text/html"}
+    resp = await wire.post("tools/list", None, path="/mcp/sse", headers=bad_accept)
+    assert resp.status_code == 406
+    await _drain()
+    assert (await counter.read_window(5))["total"] == 0
+    # the same bad request to /mcp itself is still a client reject
+    resp = await wire.post("tools/list", None, headers=bad_accept)
+    assert resp.status_code == 406
+    await _drain()
+    w = await counter.read_window(5)
+    assert w["total"] == 1 and w["statuses"] == {"406": 1}
+
+
 async def test_asgi_front_counts_nothing_when_disabled(monkeypatch, redis, offline):
     monkeypatch.setattr(settings, "mcp_health_enabled", False)
     await wire.post("tools/list", None)

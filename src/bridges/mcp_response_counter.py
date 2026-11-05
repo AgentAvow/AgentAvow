@@ -11,7 +11,9 @@ admin when the reject share crosses its threshold.
 Hot-path rules: :func:`record_response` is synchronous and only schedules a task; the
 task's Redis writes swallow every exception (logged at debug). Nothing here can change
 or delay a response. Health-probe requests (see ``src/jobs/mcp_health.is_probe_request``)
-are never counted, so the probe cannot mask or fake a reject rate.
+are never counted, so the probe cannot mask or fake a reject rate. Neither are POSTs to
+paths under /mcp (see :func:`is_endpoint_path`): crawlers guess at those, and on
+2026-11-04 and 11-05 their 406s tripped the alert while every real client was fine.
 
 Keys (TTL 26 h):
   ``ag:mcp:resp:{slot}``      hash — ``total``, ``c:{2xx|3xx|4xx|5xx}``, ``s:{status}``,
@@ -87,6 +89,15 @@ def is_probe_marker(value: str | bytes | None) -> bool:
         return False
     given = value.decode("latin-1", "replace") if isinstance(value, bytes) else value
     return hmac.compare_digest(given, expected)
+
+
+def is_endpoint_path(path: str | None, root_path: str | None = "") -> bool:
+    """This request is for /mcp itself, not a path under it like /mcp/sse. A mounted
+    app sees the full path in ``path`` and the mount point in ``root_path``."""
+    path, root = path or "", root_path or ""
+    if root and path.startswith(root):
+        path = path[len(root):]
+    return path.strip("/") in ("", "mcp")
 
 
 def slot_for(ts: float) -> int:
