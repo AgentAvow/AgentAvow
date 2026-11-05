@@ -106,6 +106,8 @@ class Check:
     transient: bool = False
     next_step: str = _NEXT_PROBE
     facts: dict = field(default_factory=dict)
+    # What makes this the same problem for dedupe, when ``problem`` carries a live number.
+    dedupe_on: str = ""
 
 
 def _cfg(name: str, default):
@@ -360,7 +362,7 @@ def evaluate_rejects(window: dict, *, minutes: int | None = None) -> list[Check]
                          f"{upv} in {minutes} min, clients sent {vs}",
                          f"{upv} request(s) in the last {minutes} min were rejected with "
                          f"'Unsupported protocol version'. Versions clients asked for: {vs}.",
-                         next_step=_NEXT_UPV, facts=facts))
+                         next_step=_NEXT_UPV, facts=facts, dedupe_on=vs))
     else:
         out.append(Check("rejects_unsupported_version", label, True, facts=facts))
 
@@ -377,7 +379,8 @@ def evaluate_rejects(window: dict, *, minutes: int | None = None) -> list[Check]
                              f"{errors} of {total} client POSTs to /mcp in the last "
                              f"{minutes} min got a 4xx/5xx ({share:.0%}; alert at "
                              f"{ratio_at:.0%}). Statuses: {top}.",
-                             next_step=_NEXT_REJECTS, facts=facts))
+                             next_step=_NEXT_REJECTS, facts=facts,
+                             dedupe_on="over threshold"))
         else:
             out.append(Check("rejects_error_rate", label, True, facts=facts))
     return out
@@ -422,7 +425,7 @@ def evaluate_cert(host: str, not_after: float | None, error: str | None,
         return Check(key, label, False, f"expires in {max(days, 0)} days",
                      f"The https://{host} certificate expires {expires} UTC. "
                      "Automatic renewal should have replaced it 30 days before.",
-                     next_step=step, facts=facts)
+                     next_step=step, facts=facts, dedupe_on="expiring")
     return Check(key, label, True, next_step=step, facts=facts)
 
 
@@ -514,8 +517,9 @@ async def process(checks: list[Check], now: datetime | None = None
             dkey = f"{DEDUPE_PREFIX}{c.key}"
             prev = await r.get(dkey)
             prev = prev.decode() if isinstance(prev, bytes) else prev
-            if prev != _slug(c.problem):
-                await r.set(dkey, _slug(c.problem), ex=dedupe_ttl)
+            slug = _slug(c.dedupe_on or c.problem)
+            if prev != slug:
+                await r.set(dkey, slug, ex=dedupe_ttl)
                 state["alerted"] = True
                 to_alert.append((c, state))
         await r.set(skey, json.dumps(state), ex=STATE_TTL)
