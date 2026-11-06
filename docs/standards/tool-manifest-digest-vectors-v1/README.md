@@ -210,6 +210,10 @@ What runs, in order (`compat/run-probity.sh`):
    signing key comes from Probity's `selection.json`, so a rotated issuer key fails here
    until the consumer updates its selection; `--key-from-fixture` isolates that case.
 
+Update 2026-11: after agent-evidence-vectors PR #236, Probity's own driver accepts the
+current vector file (appendix row R4-driver, agent-evidence-vectors 82b8bb67, producer
+b7c5cd2f). The records here were produced through the glue.
+
 Locally:
 
     python3.13 -m pip install -r <probity-checkout>/interop/a2a-s3-retain-2026-10-01/requirements.txt

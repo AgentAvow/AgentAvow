@@ -69,6 +69,10 @@ reimplements any encoding, hashing or verification. Probity's own driver,
 one Probity locked at producer commit `36426cf` (the `boundary-fresh` case was
 added after), so the glue runs the same sequence on the current file.
 
+Update 2026-11: after agent-evidence-vectors PR #236, Probity's own driver accepts the
+current vector file (appendix row R4-driver, agent-evidence-vectors 82b8bb67, producer
+b7c5cd2f). The records here were produced through the glue.
+
 ## Controls (section 5.4)
 
 Each control is the vector file with one stated change, written to
