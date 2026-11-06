@@ -2607,7 +2607,8 @@ async def mcp_asgi_app(scope, receive, send) -> None:
         return
     # Count what this POST was answered with (src/bridges/mcp_response_counter) for the
     # passive reject-rate alert. Observes the response only; never alters or delays it.
-    count = (not probe and scope.get("method") == "POST" and _counter.counting_enabled())
+    count = (not probe and scope.get("method") == "POST" and _counter.counting_enabled()
+             and _counter.is_endpoint_path(scope.get("path"), scope.get("root_path")))
     seen: dict = {"status": 0, "body": bytearray()}
 
     async def _observe(message) -> None:

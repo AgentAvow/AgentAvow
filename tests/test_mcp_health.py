@@ -443,6 +443,32 @@ async def test_asgi_front_counts_client_rejects_but_not_probes(
     assert w["surfaces"]["claude"] == {"total": 1, "errors": 0}
 
 
+def test_is_endpoint_path_matches_only_the_endpoint():
+    assert counter.is_endpoint_path("/mcp")
+    assert counter.is_endpoint_path("/mcp/")
+    assert counter.is_endpoint_path("/mcp", "/mcp")      # as mounted in src/main.py
+    assert counter.is_endpoint_path("/mcp/", "/mcp")
+    assert counter.is_endpoint_path("/", "")             # mount point already stripped
+    assert not counter.is_endpoint_path("/mcp/sse", "/mcp")
+    assert not counter.is_endpoint_path("/mcp/sse")
+    assert not counter.is_endpoint_path("/mcp/sse/.well-known/agent.json", "/mcp")
+
+
+async def test_asgi_front_does_not_count_crawler_paths(monkeypatch, redis, offline):
+    monkeypatch.setattr(settings, "mcp_health_enabled", True)
+    bad_accept = {"accept": "text/html"}
+    resp = await wire.post("tools/list", None, path="/mcp/sse", headers=bad_accept)
+    assert resp.status_code == 406
+    await _drain()
+    assert (await counter.read_window(5))["total"] == 0
+    # the same bad request to /mcp itself is still a client reject
+    resp = await wire.post("tools/list", None, headers=bad_accept)
+    assert resp.status_code == 406
+    await _drain()
+    w = await counter.read_window(5)
+    assert w["total"] == 1 and w["statuses"] == {"406": 1}
+
+
 async def test_asgi_front_counts_nothing_when_disabled(monkeypatch, redis, offline):
     monkeypatch.setattr(settings, "mcp_health_enabled", False)
     await wire.post("tools/list", None)
@@ -525,6 +551,22 @@ async def test_failure_emails_once_then_dedupes(redis, mail):
         await h.alert([_fail()], NOW)
     assert len(mail["sent"]) == 1  # still the same problem inside the window
     assert redis.ttl[f"{h.DEDUPE_PREFIX}modern_discover"] == 6 * 3600
+
+
+async def test_a_moving_reject_rate_is_one_problem(redis, mail):
+    # 2026-11-05: 11%, then 30%, then 19% sent three emails in 32 minutes
+    for total, rejects in ((215, 24), (252, 75), (220, 42)):
+        window = _window(total, {"200": total - rejects, "406": rejects})
+        await h.alert(h.evaluate_rejects(window, minutes=30), NOW)
+        await h.alert(h.evaluate_rejects(window, minutes=30), NOW)
+    assert len(mail["sent"]) == 1
+
+
+async def test_a_new_rejected_version_emails_again(redis, mail):
+    for n, version in ((3, "2099-01-01"), (5, "2099-01-01"), (5, "2100-01-01")):
+        window = _window(5, {"400": n}, upv=n, versions=[version])
+        await h.alert(h.evaluate_rejects(window, minutes=30), NOW)
+    assert len(mail["sent"]) == 2
 
 
 async def test_a_different_problem_emails_again(redis, mail):
