@@ -14,11 +14,14 @@ or delay a response. Health-probe requests (see ``src/jobs/mcp_health.is_probe_r
 are never counted, so the probe cannot mask or fake a reject rate. Neither are POSTs to
 paths under /mcp (see :func:`is_endpoint_path`): crawlers guess at those, and on
 2026-11-04 and 11-05 their 406s tripped the alert while every real client was fine.
+A 406 from an unnamed client on /mcp itself is counted but kept apart as ``u406``, because
+a single bot guessing at ``/mcp/`` tripped the alert the same way on 2026-11-06.
 
 Keys (TTL 26 h):
   ``ag:mcp:resp:{slot}``      hash — ``total``, ``c:{2xx|3xx|4xx|5xx}``, ``s:{status}``,
                               ``upv`` (unsupported-version rejects), ``t:{surface}``,
-                              ``e:{surface}`` (4xx/5xx per surface)
+                              ``e:{surface}`` (4xx/5xx per surface), ``u406`` (406s
+                              from the ``other`` surface)
   ``ag:mcp:resp:upv:{slot}``  set — the protocol versions those rejects asked for
 where ``slot = unix_time // 300``.
 """
@@ -158,6 +161,8 @@ async def _write(status: int, rejected: str | None, surface: str, now: float) ->
         pipe.hincrby(key, f"t:{surface}", 1)
         if status >= 400:
             pipe.hincrby(key, f"e:{surface}", 1)
+        if status == 406 and surface == "other":
+            pipe.hincrby(key, "u406", 1)
         if rejected is not None:
             pipe.hincrby(key, "upv", 1)
         pipe.expire(key, KEY_TTL)
@@ -177,14 +182,14 @@ def _s(v: object) -> str:
 
 async def read_window(minutes: int, now: float | None = None) -> dict:
     """Sum the counters over the last ``minutes`` (whole 5-minute slots, current slot
-    included). Returns ``{total, classes, statuses, upv, surfaces, versions}``."""
+    included). Returns ``{total, classes, statuses, upv, u406, surfaces, versions}``."""
     from src.redis_client import get_redis
 
     r = get_redis()
     now = time.time() if now is None else now
     last = slot_for(now)
     n = max(1, -(-int(minutes * 60) // SLOT_SECONDS))
-    out: dict = {"total": 0, "classes": {}, "statuses": {}, "upv": 0,
+    out: dict = {"total": 0, "classes": {}, "statuses": {}, "upv": 0, "u406": 0,
                  "surfaces": {}, "versions": []}
     versions: set[str] = set()
     for slot in range(last - n + 1, last + 1):
@@ -195,6 +200,8 @@ async def read_window(minutes: int, now: float | None = None) -> dict:
                 out["total"] += cnt
             elif k == "upv":
                 out["upv"] += cnt
+            elif k == "u406":
+                out["u406"] += cnt
             elif k.startswith("c:"):
                 out["classes"][k[2:]] = out["classes"].get(k[2:], 0) + cnt
             elif k.startswith("s:"):

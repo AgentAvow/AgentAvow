@@ -349,7 +349,11 @@ def evaluate_rejects(window: dict, *, minutes: int | None = None) -> list[Check]
     versions = list(window.get("versions") or [])
     # 404 is JSON-RPC "method not found": clients probe optional methods and get it
     # as a normal answer, so it is shown but does not count as a reject.
+    # A 406 from an unnamed client is a bot that never sent the right Accept header (one
+    # such bot tripped this on 2026-11-06), so it is shown too but not counted. Named
+    # clients still count: a 406 from Claude or ChatGPT would be a real break.
     errors = sum(n for s, n in statuses.items() if s[:1] in ("4", "5") and s != "404")
+    errors = max(0, errors - int(window.get("u406") or 0))
     facts = {"window_minutes": minutes, "total": total, "errors": errors,
              "statuses": statuses, "upv": upv, "versions": versions,
              "surfaces": window.get("surfaces") or {}}

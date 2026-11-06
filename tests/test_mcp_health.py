@@ -498,6 +498,36 @@ def test_error_rate_below_threshold_passes():
     assert checks["rejects_error_rate"].ok is True
 
 
+def test_unnamed_406_is_shown_but_not_a_reject():
+    window = {**_window(266, {"200": 224, "202": 13, "404": 2, "406": 27}), "u406": 27}
+    checks = _by_key(h.evaluate_rejects(window, minutes=30))
+    assert checks["rejects_error_rate"].ok is True
+    assert checks["rejects_error_rate"].facts["errors"] == 0
+    assert checks["rejects_error_rate"].facts["statuses"]["406"] == 27
+
+
+def test_named_client_406_still_counts_as_a_reject():
+    checks = _by_key(h.evaluate_rejects(_window(100, {"200": 90, "406": 10}), minutes=30))
+    assert checks["rejects_error_rate"].ok is False
+
+
+def test_other_errors_still_count_beside_unnamed_406s():
+    window = {**_window(100, {"200": 70, "406": 20, "500": 10}), "u406": 20}
+    checks = _by_key(h.evaluate_rejects(window, minutes=30))
+    assert checks["rejects_error_rate"].ok is False
+    assert checks["rejects_error_rate"].facts["errors"] == 10
+
+
+async def test_counter_keeps_only_unnamed_406s_apart(redis):
+    t = 1_800_000_000.0
+    counter.record_response(406, b"", header_version=None, surface="other", now=t)
+    counter.record_response(406, b"", header_version=None, surface="bogus", now=t)
+    counter.record_response(406, b"", header_version=None, surface="claude", now=t)
+    await _drain()
+    w = await counter.read_window(5, now=t)
+    assert w["u406"] == 2 and w["statuses"] == {"406": 3}
+
+
 def test_404_method_not_found_does_not_count_as_a_reject():
     checks = _by_key(h.evaluate_rejects(_window(40, {"200": 20, "404": 20}), minutes=30))
     assert checks["rejects_error_rate"].ok is True
