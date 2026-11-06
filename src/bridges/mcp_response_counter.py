@@ -13,9 +13,9 @@ task's Redis writes swallow every exception (logged at debug). Nothing here can 
 or delay a response. Health-probe requests (see ``src/jobs/mcp_health.is_probe_request``)
 are never counted, so the probe cannot mask or fake a reject rate. Neither are POSTs to
 paths under /mcp (see :func:`is_endpoint_path`): crawlers guess at those, and on
-2026-11-04 and 11-05 their 406s tripped the alert while every real client was fine. A 406 from an unnamed
-client on /mcp itself is counted but kept apart as ``u406``, because a single bot guessing
-at ``/mcp/`` tripped the alert the same way on 2026-11-06.
+2026-11-04 and 11-05 their 406s tripped the alert while every real client was fine.
+A 406 from an unnamed client on /mcp itself is counted but kept apart as ``u406``, because
+a single bot guessing at ``/mcp/`` tripped the alert the same way on 2026-11-06.
 
 Keys (TTL 26 h):
   ``ag:mcp:resp:{slot}``      hash — ``total``, ``c:{2xx|3xx|4xx|5xx}``, ``s:{status}``,
