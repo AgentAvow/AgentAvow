@@ -231,9 +231,14 @@ function PageSkeleton() {
 /** Subtle breathing color orbs in the gutters — the "rails pop" from the mock. */
 function Orbs() {
   const reduce = useReducedMotion()
+  // Touch devices get still, unblurred glows: redrawing a 90px blur every frame made
+  // blocks of the background blink on Android (DuckDuckGo, 2026-10-31 recording).
+  const desktop = typeof window !== 'undefined'
+    && window.matchMedia('(hover: hover) and (pointer: fine)').matches
   const orb = (cls: string, delay: number) => (
-    <motion.div className={`absolute rounded-full blur-[90px] ${cls}`}
-      animate={reduce ? {} : { scale: [1, 1.08, 1], opacity: [0.4, 0.55, 0.4] }}
+    <motion.div className={`absolute rounded-full ${desktop ? 'blur-[90px]' : ''} ${cls}`}
+      style={desktop ? undefined : { opacity: 0.4 }}
+      animate={reduce || !desktop ? {} : { scale: [1, 1.08, 1], opacity: [0.4, 0.55, 0.4] }}
       transition={{ duration: 9, ease: 'easeInOut', repeat: Infinity, delay }} />
   )
   return (
