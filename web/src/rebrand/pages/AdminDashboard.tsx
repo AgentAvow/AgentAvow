@@ -1,9 +1,9 @@
 /**
  * AgentAvow admin dashboard — Kenne's day-to-day ops tool, rebrand-styled.
  *
- * Two tabs: Metrics (product/adoption + traffic funnel, with today/7d/30d + trends)
- * and Marketing (health, weekly campaign planner, interactive draft queue, reply-guy,
- * cost, recent posts). Consumes the SAME existing admin endpoints as the legacy admin,
+ * Tabs: Metrics (product/adoption + traffic funnel, with today/7d/30d + trends),
+ * Marketing (health, weekly campaign planner, interactive draft queue, reply-guy,
+ * cost, recent posts), Posts (review and track hand-posted drafts) and Radar. Consumes the SAME existing admin endpoints as the legacy admin,
  * which is left fully intact (footer Community → /feed → /admin, and a link here).
  */
 import type { ReactNode } from 'react'
@@ -17,6 +17,7 @@ import { DECISIONS, TRUST_TIERS } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
 import StartHerePanel from './AdminStartHere'
+import PostStudioTab from './AdminPostStudio'
 
 // ── shared types (loose — endpoints already validated server-side) ──────────
 type Win = 'today' | '7d' | '30d'
@@ -1329,8 +1330,8 @@ export default function AdminDashboard() {
   // Tab lives in the URL so browser back/forward restores it.
   const [sp, setSp] = useSearchParams()
   const _t = sp.get('tab')
-  const tab: 'metrics' | 'marketing' | 'radar' = _t === 'marketing' ? 'marketing' : _t === 'radar' ? 'radar' : 'metrics'
-  const setTab = (t: 'metrics' | 'marketing' | 'radar') => setSp(t === 'metrics' ? {} : { tab: t })
+  const tab: 'metrics' | 'marketing' | 'posts' | 'radar' = _t === 'marketing' ? 'marketing' : _t === 'posts' ? 'posts' : _t === 'radar' ? 'radar' : 'metrics'
+  const setTab = (t: 'metrics' | 'marketing' | 'posts' | 'radar') => setSp(t === 'metrics' ? {} : { tab: t })
 
   if (isLoading) return <div className="max-w-[1080px] mx-auto px-6 py-24 text-center text-text-muted">Loading…</div>
   if (!user?.is_admin) return (
@@ -1351,12 +1352,12 @@ export default function AdminDashboard() {
           <a href="/admin" className="text-[12.5px] text-text-muted hover:text-text font-semibold">Legacy admin ↗</a>
         </div>
         <div className="mt-6 flex gap-1 border-b border-border/60">
-          {(['metrics', 'marketing', 'radar'] as const).map((t) => (
+          {(['metrics', 'marketing', 'posts', 'radar'] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 text-[14px] font-semibold capitalize border-b-2 -mb-px transition-colors ${tab === t ? 'border-primary text-text' : 'border-transparent text-text-muted hover:text-text'}`}>{t === 'radar' ? 'Dev radar' : t}</button>
           ))}
         </div>
       </Reveal>
-      {tab === 'metrics' ? <MetricsTab /> : tab === 'marketing' ? <MarketingTab /> : <RadarTab />}
+      {tab === 'metrics' ? <MetricsTab /> : tab === 'marketing' ? <MarketingTab /> : tab === 'posts' ? <PostStudioTab /> : <RadarTab />}
     </div>
   )
 }

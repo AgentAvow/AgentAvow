@@ -71,6 +71,7 @@ from src.api.notification_router import router as notification_router
 from src.api.og_router import router as og_router
 from src.api.onboarding_router import router as onboarding_router
 from src.api.org_router import router as org_router
+from src.api.post_studio_router import router as post_studio_router
 from src.api.preflight_router import router as preflight_router
 from src.api.profile_router import router as profile_router
 from src.api.public_scan_router import router as public_scan_router
@@ -847,6 +848,7 @@ app.include_router(aip_v2_router, prefix=settings.api_v1_prefix)
 app.include_router(aip_v2_ecosystem_router, prefix=settings.api_v1_prefix)
 app.include_router(campaign_router, prefix=settings.api_v1_prefix)
 app.include_router(marketing_router, prefix=settings.api_v1_prefix)
+app.include_router(post_studio_router, prefix=settings.api_v1_prefix)
 app.include_router(recruitment_router, prefix=settings.api_v1_prefix)
 app.include_router(reply_guy_router, prefix=settings.api_v1_prefix)
 app.include_router(token_router, prefix=settings.api_v1_prefix)
