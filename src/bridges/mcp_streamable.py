@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import time
 from urllib.parse import quote
 
 import httpx
@@ -33,6 +34,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 from starlette.requests import ClientDisconnect
 
+from src.bridges import mcp_connector_sources as _sources
 from src.bridges import mcp_response_counter as _counter
 from src.bridges.mcp_app_view import trust_card_html
 from src.scanner.verdict import DECISION_VALUES as _DECISION_VALUES
@@ -362,6 +364,134 @@ def _name_not_resolved(name: str, candidates: list[dict]) -> str:
                      "it; in Claude Code: `claude mcp get <name>`), or its npm / PyPI package "
                      "name for scan_package.")
     return "\n".join(lines)
+
+
+def _known_connector_without_endpoint(name: str, kc: _sources.KnownConnector) -> str:
+    """A common sign-in connector named without a URL, where no endpoint or vendor
+    source can be named with certainty: say so and give the next step, never a guess."""
+    return (
+        f"Not scanned: '{name}' looks like the {kc.vendor} connector. It is an account "
+        "connector, and AgentAvow has no public endpoint for it, or server source code "
+        f"published by {kc.company}, that it can match to that name with certainty, so it "
+        "cannot grade it from the name alone.\n"
+        "Next step: give me its https endpoint URL (in claude.ai: Settings → Connectors "
+        "shows it; in Claude Code: `claude mcp get <name>`). If you run a local server for "
+        "it instead, pass its npm / PyPI package to scan_package or its source repo "
+        "('owner/name') to scan_repo. Not scanned is neither safe nor unsafe."
+    )
+
+
+# --- sign-in (OAuth) MCP servers, answered from the vendor's published source --------
+# Whole-call budget for the live handshake plus the source scan: under _get's 110 s and
+# nginx's 120 s /mcp read timeout, so a slow fresh source scan comes back as a "still
+# scanning" next step instead of a cut connection.
+_SIGNIN_SOURCE_BUDGET_S = 95.0
+_SIGNIN_SOURCE_MIN_S = 15.0
+
+
+def _is_signin_detail(detail: str) -> bool:
+    """True when the scan API's 422 detail is the scanner's sign-in-required error."""
+    from src.scanner.scan import MCP_SIGNIN_REQUIRED_ERROR
+
+    return bool(detail) and detail.strip() == MCP_SIGNIN_REQUIRED_ERROR
+
+
+def _host_of(url: str) -> str:
+    return url.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0] or "the server"
+
+
+def _source_label(src: _sources.OfficialSource, host: str) -> str:
+    """The first line of a sign-in server's answer: what was graded, and what was not."""
+    head = (f"Based on {src.vendor}'s published source code ({src.repo}), not the live "
+            "server, which requires sign-in.")
+    if src.relation == "separate":
+        return (head + f" {src.vendor} describes that repository as a separate, "
+                f"self-hosted MCP server, so the hosted server at {host} can offer "
+                "different tools. Its live tool definitions were not read.")
+    return (head + f" {src.vendor} publishes that repository as the code of its hosted "
+            f"server at {host}. Its live tool definitions were not read.")
+
+
+def _source_not_checked_note(src: _sources.OfficialSource, host: str) -> str:
+    what = (f"{src.vendor}'s published source ({src.repo}), a separate self-hosted version"
+            if src.relation == "separate" else f"{src.vendor}'s published source ({src.repo})")
+    return (f"The live server at {host} requires sign-in (OAuth), so its tool definitions "
+            f"were not read. This answer grades {what}.")
+
+
+def _source_pending_help(src: _sources.OfficialSource, host: str) -> str:
+    return (
+        f"Not scanned yet: {host} requires sign-in (OAuth), so its tool list isn't public. "
+        f"AgentAvow is grading {src.vendor}'s published source code ({src.repo}) instead, "
+        "and that scan is still running.\n"
+        f"Next step: ask again in a minute, or call scan_repo with '{src.repo}'. "
+        "Not scanned is neither safe nor unsafe."
+    )
+
+
+def _source_failed_help(src: _sources.OfficialSource, host: str) -> str:
+    return (
+        f"Not scanned: {host} requires sign-in (OAuth), so its tool list isn't public, and "
+        f"AgentAvow could not grade {src.vendor}'s published source code ({src.repo}) "
+        "right now.\n"
+        f"Next step: try scan_repo with '{src.repo}' shortly. "
+        "Not scanned is neither safe nor unsafe."
+    )
+
+
+def _signin_no_source_help(vendor: str, host: str) -> str:
+    return (
+        f"Not scanned: {host} requires sign-in (OAuth), so its tool list isn't public and "
+        f"can't be scanned. {vendor} does not publish the source code of this hosted "
+        "server (AgentAvow checked for an official repository or package), so there is no "
+        "published code to grade either.\n"
+        "Next step: if you run a local server for it instead, pass its npm / PyPI package "
+        "to scan_package or its source repo ('owner/name') to scan_repo. "
+        "Not scanned is neither safe nor unsafe."
+    )
+
+
+async def _answer_from_source(
+    src: _sources.OfficialSource, url: str, started: float, force: bool
+) -> list[types.TextContent] | tuple[list[types.TextContent], dict]:
+    """A sign-in MCP server answered from the vendor's own published source: the normal
+    repo scan (cached ~1h; a fresh one inside the remaining budget), labeled in the text
+    and in structuredContent (target, not_checked, coverage_gaps) as a source answer, not
+    a read of the live tool list."""
+    host = _host_of(url)
+    owner, repo = src.repo.split("/", 1)
+    path = f"/public/scan/{owner}/{repo}"
+    budget = max(_SIGNIN_SOURCE_MIN_S, _SIGNIN_SOURCE_BUDGET_S - (time.monotonic() - started))
+    try:
+        data = await asyncio.wait_for(_get(path), timeout=budget)
+    except (TimeoutError, httpx.TimeoutException):
+        await _bump_s("signin:source_pending")
+        return _text(_source_pending_help(src, host))
+    except httpx.HTTPStatusError as e:
+        await _bump_s("signin:source_pending" if e.response.status_code == 503
+                      else "result:error")
+        if e.response.status_code == 503:
+            return _text(_source_pending_help(src, host))
+        return _text(_source_failed_help(src, host))
+    rescan = force and _schedule_rescan(path, None)
+    await _bump_s("signin:source_answer")
+    await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
+    adoption = await _adoption("github", owner, repo)
+    rp = f"/check/{owner}/{repo}"
+    api = f"/api/v1/public/scan/{owner}/{repo}"
+    block = _scan_block(data, "connect", rp, src.repo, adoption)
+    card = _card_text(_source_label(src, host) + "\n\n" + block)
+    struct = _scan_struct(data, src.repo, "github", rp, api, adoption)
+    struct["not_checked"] = [_source_not_checked_note(src, host)] + list(
+        struct.get("not_checked") or [])
+    struct["coverage_gaps"] = {**(struct.get("coverage_gaps") or {}),
+                               "live_tool_definitions_unread": True,
+                               "answered_from_published_source": True}
+    if struct.get("verdict_reason") == "clean":
+        struct["verdict_reason"] = "clean_partial"
+    if rescan:
+        card, struct = _with_rescan_note(card, struct)
+    return card, struct
 
 
 async def _bump(metric: str) -> None:
@@ -2445,16 +2575,41 @@ async def _run_tool(
                 card, struct = _with_rescan_note(card, struct)
             return card, struct
         if name == "scan_mcp_server":
+            started = time.monotonic()
             url = str(arguments.get("endpoint_url") or "").strip()
             if not url.lower().startswith(("http://", "https://")):
-                # A connector / server NAME (claude.ai never shows a connector's URL):
-                # resolve it against the catalog of scanned MCP servers.
-                resolved, candidates = await _resolve_mcp_name(url)
-                if not resolved:
-                    return _text(_name_not_resolved(url, candidates))
-                url = resolved
+                # A connector / server NAME (claude.ai never shows a connector's URL).
+                # A common vendor connector resolves through the reviewed map first (the
+                # catalog holds many third-party servers named after the same vendor);
+                # anything else against the catalog of scanned MCP servers.
+                known = _sources.known_connector(url)
+                if known is not None and known.endpoint is None:
+                    return _text(_known_connector_without_endpoint(url, known))
+                if known is not None:
+                    url = known.endpoint
+                else:
+                    resolved, candidates = await _resolve_mcp_name(url)
+                    if not resolved:
+                        return _text(_name_not_resolved(url, candidates))
+                    url = resolved
             params = {"endpoint": url}
-            data = await _get("/public/scan/mcp", params=params)
+            try:
+                data = await _get("/public/scan/mcp", params=params)
+            except httpx.HTTPStatusError as e:
+                # A sign-in (OAuth) server hides its tool list. Answer from the vendor's
+                # own published source where the reviewed map has one; say plainly when
+                # the vendor publishes none. Every other failure: the handlers below.
+                if e.response.status_code != 422 or not _is_signin_detail(
+                        _api_error_detail(e)):
+                    raise
+                src = _sources.official_source_for(url)
+                if src is not None:
+                    return await _answer_from_source(src, url, started, force)
+                vendor = _sources.no_public_source_vendor(url)
+                if vendor is None:
+                    raise
+                await _bump_s("result:error")
+                return _text(_signin_no_source_help(vendor, _host_of(url)))
             rescan = force and _schedule_rescan("/public/scan/mcp", params)
             await _bump_s("verdict:safe" if _safe_verdict(data) else "verdict:needs_review")
             # A bare MCP endpoint has no registry/stars adoption signal — omit it rather
