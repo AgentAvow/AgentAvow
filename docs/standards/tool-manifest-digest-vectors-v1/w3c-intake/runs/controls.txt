@@ -1,0 +1,29 @@
+Controls. Each row: what changed, then the intake reader's grounds (C1 with the root), and for the anchor rows the anchor check (C2).
+
+- record: criterion 3, selector expression matches nothing ('nothing*'): refused under W3C-I-007, W3C-I-011
+- record: criterion 3, exactly one member required, '*' matches 76: refused under W3C-I-012
+- record: criterion 3, selector.matched changed to 0 (Roel's second case, 0129): refused under W3C-I-010
+- record: criterion 1, one member pin changed to 64 zeroes (Roel's first case, 0129): refused under W3C-I-002, W3C-I-003
+- record: criterion 4, aggregate total changed to 77: refused under W3C-I-014
+- record: criterion 4, exit code carried as 1: refused under W3C-I-014, W3C-I-019
+- record: criterion 4, aggregate-agreement.agrees changed to false (a field the intake reader does not read): admitted
+- record: criterion 5, one carried verdict changed from ok to FAIL: refused under W3C-I-014, W3C-I-016, W3C-I-019
+- record: criterion 6, an unconsumed artifact declared consumed: refused under W3C-I-047
+- record: criterion 8, specification-readers removed: refused under W3C-I-031
+- record: criterion 10, one replay digest changed, state left stable: refused under W3C-I-036
+- record: criterion 12, one limit removed from does-not-claim: refused under W3C-I-045
+
+- population: criterion 2 (i), the boundary-fresh case removed from the vector file, checker re-run (exit 1, 69 check lines), pins moved, manifest ids as declared: refused under W3C-I-005, W3C-I-007
+- population: criterion 2 (ii), the tool-match case duplicated in the vector file, checker re-run (exit 0, 83 check lines), pins moved, manifest ids as declared: refused under W3C-I-006
+- population: criterion 2 (iii), an eighth case added inside the vector file, checker re-run (exit 0, 83 check lines), pins moved, manifest ids as declared: refused under W3C-I-007
+
+- tree: criterion 1, the vector file's bytes moved, pins left (a key changed): refused under W3C-I-003
+- tree: criterion 2, a file named like the vector file added beside it (extra-tool-manifest-digest-v1-vectors.json): refused under W3C-I-008
+- tree: criterion 2, the same file added inside the declared location's directory under another name (copy.json): admitted
+- tree: criterion 5, the native stdout file edited (one ok token changed): admitted
+- tree: criterion 5, the re-encoded native cases edited (one finding added): refused under W3C-I-019
+- tree: criterion 7, DIGESTS.txt removed: refused under W3C-I-023; C2 against af5648c29360: exit 0
+- tree: criterion 7, the DIGESTS.txt line's digest changed: refused under W3C-I-024; C2 against af5648c29360: exit 0
+- tree: criterion 7, consistent rewrite: one key byte in the vector file, then every pin moved (record, manifest, corpus digest, DIGESTS.txt line); the record still names the anchor commit: admitted; C2 against af5648c29360: exit 1
+- tree: criterion 8, the helper (intake.py) edited: refused under W3C-I-028
+- tree: criterion 8, the checker source (time.mjs) edited: refused under W3C-I-025

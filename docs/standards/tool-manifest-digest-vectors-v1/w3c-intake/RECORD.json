@@ -1,0 +1,3788 @@
+{
+  "aggregate": {
+    "counts": {
+      "ok": 76
+    },
+    "line": "all checks passed",
+    "total": 76
+  },
+  "aggregate-agreement": {
+    "agrees": true,
+    "exit-code": 0,
+    "printed-failures": 0,
+    "printed-line": "all checks passed",
+    "printed-total": null,
+    "recount": {
+      "failures": 0,
+      "passes": 76,
+      "total": 76
+    },
+    "rule": "the printed line states a failure count (all checks passed means 0) and no total; it is compared with the FAIL lines recounted from the per-check lines, and the exit code with whether any FAIL line exists. A disagreement is a refusal and nothing is written"
+  },
+  "anchor": {
+    "git-commit": "af5648c29360673a39d962b759c1430eb7116daa",
+    "kind": "digest-list-line",
+    "manifest": "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+    "reference": {
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+      "uri": "https://github.com/AgentAvow/AgentAvow/blob/af5648c29360673a39d962b759c1430eb7116daa/docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt"
+    },
+    "routine": "corpus_digest in docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/intake.py",
+    "routine-file": "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/intake.py",
+    "serialization": "corpus-routine",
+    "sha256": "83aef3b5c8a5ef20435d9210e31a1b19bb0a96b68717d7bc7234793ef0d83469",
+    "verdicts": {
+      "availability-failure": "inconclusive",
+      "integrity-failure": "fail"
+    },
+    "verification": {
+      "availability-failure": "the commit does not resolve in a clone of https://github.com/AgentAvow/AgentAvow (git cat-file exits non-zero)",
+      "commands": [
+        "git cat-file -e af5648c29360673a39d962b759c1430eb7116daa^{commit}",
+        "git show af5648c29360673a39d962b759c1430eb7116daa:docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt | grep -Fx -- '83aef3b5c8a5ef20435d9210e31a1b19bb0a96b68717d7bc7234793ef0d83469  docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json'"
+      ],
+      "integrity-failure": "the commit resolves and its DIGESTS.txt carries no line binding this digest to this manifest",
+      "same-as": "python3 intake.py anchor-check",
+      "what-binds": "a git commit identifier (SHA-1 object id), which binds content, not a signer; no signature is offered. Who published the commit rests on the repository and on the list message that names it"
+    }
+  },
+  "artifacts": [
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "595c7226105e2760cfffb4a13708c4a3b0ac61f65e350d16ce1db69a4a1f8b9f",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/LICENSE",
+      "serialization": "bytes",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "b3af3617f8ce29641fa1466bc826d439c63c4c8e778351ca7228245f1c95f0ef",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/README.md",
+      "serialization": "bytes",
+      "sha256": "0b2b53c7f7ea3227268c1f728907ab27cb6eba118fdfabf881bbe67ebd39be71"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/heldfast-profiles.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "39987db98136d6ae35e46be24eaaed4a22935877a752bb53acb5df4469ba98cb",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast-pin.json",
+      "serialization": "bytes",
+      "sha256": "cd98f5b63132bfff170682e6f979296633f778ba032d5f40a1249f4915618002"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "changed",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "changed",
+            "swapped": {
+              "exit-code": 1,
+              "report-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr": "non-empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/heldfast-profiles.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "73c229aa4c633cbf811862b3502e5d56d81a5590c7a29ea33db79e1ca43ecb46",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast_compat.py",
+      "serialization": "bytes",
+      "sha256": "f2949c2f90bed75e5b4c308799421140939e1861311679993aff0c953f1ff3af"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/probity-map-reader.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "5580e48976fc8f3898a218dc24e02c09d23fc8832e23aae8ef7540cf8810d278",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/probity-pin.json",
+      "serialization": "bytes",
+      "sha256": "a8b2f126764c92758e91522fc159c3b063979d5e7df0414573fbb86c6e17d0e9"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "changed",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "changed",
+            "swapped": {
+              "exit-code": 1,
+              "report-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stderr": "non-empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/probity-map-reader.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "dc7033f2eb4fb15518c85539154d4764c2139ef82bc9f261292ab481a8871332",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/probity_compat.py",
+      "serialization": "bytes",
+      "sha256": "a50569bb2cd28d4f847f5d42083b3fb3ff2aa9be32f6ec6ec4f0e9a4e80b5b50"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "c9076ba177a2a2df6002b37dc5d96f9f01b13885718687762a7de313da5d1e65",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/run-probity.sh",
+      "serialization": "bytes",
+      "sha256": "2506a3a3d7655a1af1330e549b93e647f76a1d99d95664cf4f248ac3ab92d364"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "6c52129e6350c3b1b4ba22c57cf38b06b954607b66fe426ff056dd322cdac1cf",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/generate.mjs",
+      "serialization": "bytes",
+      "sha256": "5fd6d1dbcd8138446a229cc46ed4366d275bbd09da91e919a3cfc0cd0b9f1105"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/time-contract.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "05f9a969faf83c0758b54e07b9a67c76054409bd269235345eeb8c1c09c76065",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/nanosecond-window-vectors.json",
+      "serialization": "bytes",
+      "sha256": "5c17415e2db93b987f1ce5d244a542f22cf7a373fe952a63d8d0f416d0604d20"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "7595c61b28ddfa1baa37317698d34ee52f3ab6162bc53d9b749de1a18a7229aa",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/source.json",
+      "serialization": "bytes",
+      "sha256": "b140d2bbd0b382e87ea5ada36f174380b878b25bfb17888c8cd9160c088482f9"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "5da71f23a6a547961f0dec6f9b4ee464e5fbfdad5e7c118ce0611df0d80697f7",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/test-time.mjs",
+      "serialization": "bytes",
+      "sha256": "7d15e5a4cedc85023466b7786f8139287bc73882ce74e12501ae8ea404ab2716"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "6f12bc0005e11ca7cba2ba4c0019b5023eb96f4f502468967473bd4269af9ff8",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/time-contract.md",
+      "serialization": "bytes",
+      "sha256": "2ab2ce3f4c961c5c5fce1b3473897864c9f524406f5ec424e2328480370ba9f2"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "87a61b6fbaaab42ffdaf42a1334a3e6554652f49c8467d9e2e31b47a7ea45ebf",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+      "serialization": "bytes",
+      "sha256": "39016e5f568a7404f431ab12a2680c9c30178d1bd5c97171e4ff76cf46deffcf"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/heldfast-profiles.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/native-verify-mjs.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/probity-map-reader.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/native-verify-mjs.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "ea9df0a4d21d680ce40837529d734bf697a229efc8f215344394ede1e88abc5e",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/emit.py",
+      "serialization": "bytes",
+      "sha256": "5ff729a8a94a8c346e39641a95b508158cbc29d186934d0cfabd83c8f81ef2d8"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "3def0f36c3cd5732cd233becb969641629aad124479d64469929cfc0ded2002a",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+      "serialization": "bytes",
+      "sha256": "0d47327bbaf5b172b8c3e30151df18920bd05ff0b9af21c08ec1153fa010eb3c"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "ed6dd8d2226b17b3f9b56d2d19f2a3b5042dbb104a224ee93711c4c5be46ab9f",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/heldfast-profiles.json",
+      "serialization": "bytes",
+      "sha256": "bf7e2345181367b267830ec025416bf9cf884a8f9388af7e3a1fdc697659ab7a"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/native-verify-mjs.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "78be2dadfb798cdb73b6976f74f7aaa70cb28994cf1d92bbb49057009609a2d3",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/native-verify-mjs.json",
+      "serialization": "bytes",
+      "sha256": "1703fcc2f6ae5afecc201fada39203a699d82be412a192f7701573d7d66d1f99"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "0c0bca6519c1f78f780ec2e422a8c42fe283a478e6fde3a89d06cc15ef3fd041",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/probity-map-reader.json",
+      "serialization": "bytes",
+      "sha256": "48fdab38195ce29632e2669767ad4ce0645de7c1b999c785f7a4efcd6b605415"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "8496c9cc23edf94758f80105170451e22377ef889acd074119429d2c466ce0f7",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+      "serialization": "bytes",
+      "sha256": "0add3b4d7e5a53238f36bfdbb257d6bd88674cea128d9bfd69f8c5bc2ffe4a67"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/native-verify-mjs.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "88b48a7bad6026d3a5dbf42976ec7e29559462a721e5ce0fcf632d1ddd5cea77",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-case-tool-drift.json",
+      "serialization": "bytes",
+      "sha256": "f25b6a5e56a19f03b31b3bcac6f369b22bd2ecfbb692673315181fd41bcfdb5c"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/native-verify-mjs.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "dda10a12bd88c19644a45c9cf89c8fc1bd7e5e177573197e9845af96cf4a8932",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-definition-ask_wiki_question.json",
+      "serialization": "bytes",
+      "sha256": "2edc74755734ad6960b4474463deaaa0ca570e08dcf59e7e9f2bdb56f90c8447"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/native-verify-mjs.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "b3565338cc669db60d14c676cd8e01731ad19014579bf96ff4525d202ae84623",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-key-encoding-01.json",
+      "serialization": "bytes",
+      "sha256": "ab3365fb6cb7e42f35457aa8b1b7d3f154a17ef0b61f99c460857cd1f52d53ac"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "509493d50bb48074a79cde10ba0a48cdb778bbac9c7098d227e59e55df95086d",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/not-emitted.json",
+      "serialization": "bytes",
+      "sha256": "e148b9fe95f767860f7041c2e7954f0a7ad646c950a6ed782c84529f0172a7a8"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "8fd5deb7e9ceefde565fdc1478deb8c1eda128336f1bad5296b2c34186925cd4",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json",
+      "serialization": "bytes",
+      "sha256": "31ecebedfbfbe64338dcac81b4e645b87338cbe4e4241d630143041591a40eaf"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "7ec5416a3f26d6901fe5ea4b4b6d51570e6b4c4535a01b937ec0c905e674f699",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/native-verify-mjs.json",
+      "serialization": "bytes",
+      "sha256": "7032e5cc7dbdf6dd0e29dbf7d8f606d0fcc45c83aefb99bf205ff626feca577b"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "cfaf4d79c8fcee670bddf09223da55ce78342552d3f1a2325fc4473c401b94f4",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json",
+      "serialization": "bytes",
+      "sha256": "ddc1e64e25c49825380163263e1d622b7e87db51e09843c1d550e64a80dad611"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "8bb382453fbcd00d600e5530e5658975a68b24ad57d07d159b4b973998ea6df5",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/run.json",
+      "serialization": "bytes",
+      "sha256": "663f36605ac4a11b65251522daead7c3088bce73a8793f60562535716d933734"
+    },
+    {
+      "consumed": "unconsumed",
+      "evidence": {
+        "baseline": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "corpus-digest": "recomputed",
+        "other-readers": {
+          "heldfast-profiles": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+              "stderr": "empty"
+            }
+          },
+          "probity-map-reader": {
+            "answers": "no observed effect",
+            "baseline": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            },
+            "complete-result": "no observed effect",
+            "swapped": {
+              "exit-code": 0,
+              "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+              "stderr": "empty"
+            }
+          }
+        },
+        "pins-moved": [
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+          "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json"
+        ],
+        "reading": "no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+        "refused-by": [
+          "W3C-I-002"
+        ],
+        "swapped": {
+          "exit-code": 0,
+          "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+          "stderr": "empty"
+        },
+        "swapped-in": "971eaab486717f9faec9eee0fba1c73beddbf282e004427db45ea9e86fd881fa",
+        "test": "swap-and-re-pin"
+      },
+      "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/validate.py",
+      "serialization": "bytes",
+      "sha256": "de1c1b3d6f1446653238d248740a8a7bf4563ff97cb0a6a4efc277d80d8498a3"
+    }
+  ],
+  "boundary": {
+    "complete": true,
+    "member-locations": [
+      {
+        "dir": "",
+        "recursive": false,
+        "suffix": "tool-manifest-digest-v1-vectors.json"
+      }
+    ],
+    "note": "the package's members all live in the one vector file; a member added inside it is returned by the checker as a check outside the manifest (W3C-I-007), and a file added beside it is outside the claim",
+    "root": "docs/standards/tool-manifest-digest-vectors-v1"
+  },
+  "byte-identity": {
+    "note": "one pin per member, each over the one vector file",
+    "pins": 76,
+    "serialization": "bytes"
+  },
+  "canonicalization": {
+    "encoding": "jcs-sha256",
+    "instance": "the attestation payload under test is RFC 8785 bytes; the record offers no digest over a JSON value"
+  },
+  "checker": {
+    "commands": [
+      "cd docs/standards/tool-manifest-digest-vectors-v1 && node verify.mjs"
+    ],
+    "dependencies": [],
+    "dependencies-note": "verify.mjs imports node:crypto, node:fs and ./time.mjs only",
+    "helper-runtime": {
+      "name": "cpython",
+      "version": "3.14.3"
+    },
+    "helpers": [
+      {
+        "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/intake.py",
+        "role": "re-encodes the checker's stdout into native-cases, and writes this record; not acquired over the network",
+        "serialization": "bytes",
+        "sha256": "44796d34adb516d55c54652fd123d6ff30091525dfb7e4405e3617c477e9a276",
+        "uri": "https://github.com/AgentAvow/AgentAvow/blob/af5648c29360673a39d962b759c1430eb7116daa/docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/intake.py"
+      }
+    ],
+    "name": "verify.mjs (AgentAvow native verifier)",
+    "relationship": "same-implementation",
+    "revision": {
+      "kind": "source-listing",
+      "paths": [
+        "docs/standards/tool-manifest-digest-vectors-v1/verify.mjs",
+        "docs/standards/tool-manifest-digest-vectors-v1/time.mjs"
+      ],
+      "serialization": "sha256-listing-v1",
+      "sha256": "2bdd53f120383943ddda4d1b0246111516f05e7f930d7799c49759d2057e9bb5"
+    },
+    "runtime": {
+      "name": "node",
+      "version": "22.22.0"
+    },
+    "shared-verification-code": [
+      "docs/standards/tool-manifest-digest-vectors-v1/verify.mjs",
+      "docs/standards/tool-manifest-digest-vectors-v1/time.mjs"
+    ]
+  },
+  "checks": [
+    {
+      "check": "definition-digest/tool:ask_wiki_question",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "definition-digest/tool:read_wiki_contents",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "definition-digest/tool:read_wiki_structure",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "definition-count",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "unsigned-map-equals-signed",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding-count",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/00",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/01",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/02",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/03",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/04",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/05",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/06",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/07",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/08",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/09",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/10",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/11",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "key-encoding/12",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-match/signature_valid",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-match/canonical_bytes",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-match/subject_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-match/tool_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-match/tool_digest_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-match/fresh",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-match/rely",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/unknown-tool/signature_valid",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/unknown-tool/canonical_bytes",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/unknown-tool/subject_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/unknown-tool/tool_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/unknown-tool/tool_digest_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/unknown-tool/fresh",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/unknown-tool/rely",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-drift/signature_valid",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-drift/canonical_bytes",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-drift/subject_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-drift/tool_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-drift/tool_digest_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-drift/fresh",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tool-drift/rely",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/wrong-subject/signature_valid",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/wrong-subject/canonical_bytes",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/wrong-subject/subject_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/wrong-subject/tool_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/wrong-subject/tool_digest_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/wrong-subject/fresh",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/wrong-subject/rely",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/past-expiry/signature_valid",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/past-expiry/canonical_bytes",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/past-expiry/subject_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/past-expiry/tool_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/past-expiry/tool_digest_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/past-expiry/fresh",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/past-expiry/rely",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tampered-payload/signature_valid",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tampered-payload/canonical_bytes",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tampered-payload/subject_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tampered-payload/tool_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tampered-payload/tool_digest_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tampered-payload/fresh",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/tampered-payload/rely",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/boundary-fresh/signature_valid",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/boundary-fresh/canonical_bytes",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/boundary-fresh/subject_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/boundary-fresh/tool_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/boundary-fresh/tool_digest_binds",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/boundary-fresh/fresh",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "case/boundary-fresh/rely",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "property/positive-case-relies",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "property/unknown-tool-does-not-bind",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "property/changed-definition-does-not-bind",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "property/wrong-subject-does-not-bind",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "property/expiry-applies",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "property/canonical-is-not-authentic",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "property/boundary-fresh-relies",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    },
+    {
+      "check": "property/negatives-fail-one-axis",
+      "native": {
+        "reasons": [],
+        "verdict": "ok"
+      },
+      "state": "pass"
+    }
+  ],
+  "corpus-digest": {
+    "serialization": "sha256-listing-v1",
+    "sha256": "e16c8fae3e489fa81824c303ab9a6c7ed80159b767e1f75d613e7c8770fe0202"
+  },
+  "criteria": "intake criteria v2.1 as consolidated for the editor in October 2026; record shape of agent_evidence_vectors.w3cintake at 7e501506c35ddfe5da64bb5885d668f505f7d6d3",
+  "exit-code": 0,
+  "exit-rule": "zero-iff-every-check-passes",
+  "exposure": "visible",
+  "exposure-note": "the expected answers are in the vector file and were visible to every implementer and every runner",
+  "faults": [
+    {
+      "command": "cd docs/standards/tool-manifest-digest-vectors-v1 && node verify.mjs w3c-v01/records/controls/control-case-tool-drift.json",
+      "id": "control-case-tool-drift",
+      "injected": "/vectors/2/expect/tool_digest_binds: false -> true",
+      "input": {
+        "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-case-tool-drift.json",
+        "sha256": "f25b6a5e56a19f03b31b3bcac6f369b22bd2ecfbb692673315181fd41bcfdb5c"
+      },
+      "result": {
+        "detected": true,
+        "exit-code": 1,
+        "failed-checks": [
+          "case/tool-drift/tool_digest_binds"
+        ],
+        "state": "fail",
+        "stdout-sha256": "b3b8f827810b624c1eaae5559935ea06b6127cf3a7707772435be587f12eeca7"
+      },
+      "target-check": "case/tool-drift/tool_digest_binds"
+    },
+    {
+      "command": "cd docs/standards/tool-manifest-digest-vectors-v1 && node verify.mjs w3c-v01/records/controls/control-definition-ask_wiki_question.json",
+      "id": "control-definition-ask_wiki_question",
+      "injected": "/observed_tools/0/description: \"Ask any question about a GitHub repository's codebase and get an AI-powered answer\\ngrounded in its DeepWiki.\" -> \"Ask any question about a GitHub repository's codebase and get an AI-powered answer\\ngrounded in its DeepWiki. This sentence was added after the grade.\"",
+      "input": {
+        "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-definition-ask_wiki_question.json",
+        "sha256": "2edc74755734ad6960b4474463deaaa0ca570e08dcf59e7e9f2bdb56f90c8447"
+      },
+      "result": {
+        "detected": true,
+        "exit-code": 1,
+        "failed-checks": [
+          "definition-digest/tool:ask_wiki_question"
+        ],
+        "state": "fail",
+        "stdout-sha256": "a18e812ffc2baabb3d42d20e64d7191db4f096a5a076ef8de4cf84334b3234a8"
+      },
+      "target-check": "definition-digest/tool:ask_wiki_question"
+    },
+    {
+      "command": "cd docs/standards/tool-manifest-digest-vectors-v1 && node verify.mjs w3c-v01/records/controls/control-key-encoding-01.json",
+      "id": "control-key-encoding-01",
+      "injected": "/key_encoding/1/key: \"tool:a%3Db\" -> \"tool:a=b\"",
+      "input": {
+        "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls/control-key-encoding-01.json",
+        "sha256": "ab3365fb6cb7e42f35457aa8b1b7d3f154a17ef0b61f99c460857cd1f52d53ac"
+      },
+      "result": {
+        "detected": true,
+        "exit-code": 1,
+        "failed-checks": [
+          "key-encoding/01"
+        ],
+        "state": "fail",
+        "stdout-sha256": "1ca49326ae341ce2ed0143f7888f383a36d3b51f95431793497780df6b40ba16"
+      },
+      "target-check": "key-encoding/01"
+    }
+  ],
+  "format": "public-agent-conformance/intake-record/v2",
+  "manifest": {
+    "closed": true,
+    "ids": [
+      "definition-digest/tool:ask_wiki_question",
+      "definition-digest/tool:read_wiki_contents",
+      "definition-digest/tool:read_wiki_structure",
+      "definition-count",
+      "unsigned-map-equals-signed",
+      "key-encoding-count",
+      "key-encoding/00",
+      "key-encoding/01",
+      "key-encoding/02",
+      "key-encoding/03",
+      "key-encoding/04",
+      "key-encoding/05",
+      "key-encoding/06",
+      "key-encoding/07",
+      "key-encoding/08",
+      "key-encoding/09",
+      "key-encoding/10",
+      "key-encoding/11",
+      "key-encoding/12",
+      "case/tool-match/signature_valid",
+      "case/tool-match/canonical_bytes",
+      "case/tool-match/subject_binds",
+      "case/tool-match/tool_binds",
+      "case/tool-match/tool_digest_binds",
+      "case/tool-match/fresh",
+      "case/tool-match/rely",
+      "case/unknown-tool/signature_valid",
+      "case/unknown-tool/canonical_bytes",
+      "case/unknown-tool/subject_binds",
+      "case/unknown-tool/tool_binds",
+      "case/unknown-tool/tool_digest_binds",
+      "case/unknown-tool/fresh",
+      "case/unknown-tool/rely",
+      "case/tool-drift/signature_valid",
+      "case/tool-drift/canonical_bytes",
+      "case/tool-drift/subject_binds",
+      "case/tool-drift/tool_binds",
+      "case/tool-drift/tool_digest_binds",
+      "case/tool-drift/fresh",
+      "case/tool-drift/rely",
+      "case/wrong-subject/signature_valid",
+      "case/wrong-subject/canonical_bytes",
+      "case/wrong-subject/subject_binds",
+      "case/wrong-subject/tool_binds",
+      "case/wrong-subject/tool_digest_binds",
+      "case/wrong-subject/fresh",
+      "case/wrong-subject/rely",
+      "case/past-expiry/signature_valid",
+      "case/past-expiry/canonical_bytes",
+      "case/past-expiry/subject_binds",
+      "case/past-expiry/tool_binds",
+      "case/past-expiry/tool_digest_binds",
+      "case/past-expiry/fresh",
+      "case/past-expiry/rely",
+      "case/tampered-payload/signature_valid",
+      "case/tampered-payload/canonical_bytes",
+      "case/tampered-payload/subject_binds",
+      "case/tampered-payload/tool_binds",
+      "case/tampered-payload/tool_digest_binds",
+      "case/tampered-payload/fresh",
+      "case/tampered-payload/rely",
+      "case/boundary-fresh/signature_valid",
+      "case/boundary-fresh/canonical_bytes",
+      "case/boundary-fresh/subject_binds",
+      "case/boundary-fresh/tool_binds",
+      "case/boundary-fresh/tool_digest_binds",
+      "case/boundary-fresh/fresh",
+      "case/boundary-fresh/rely",
+      "property/positive-case-relies",
+      "property/unknown-tool-does-not-bind",
+      "property/changed-definition-does-not-bind",
+      "property/wrong-subject-does-not-bind",
+      "property/expiry-applies",
+      "property/canonical-is-not-authentic",
+      "property/boundary-fresh-relies",
+      "property/negatives-fail-one-axis"
+    ],
+    "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+    "sha256": "2d427355fc84b073caa9696ddaa15190ba41c39a6c5d5ff33f995a6d5aa93ba3"
+  },
+  "member-consumption": {
+    "evidence": {
+      "baseline": {
+        "exit-code": 0,
+        "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161",
+        "stderr": "empty"
+      },
+      "corpus-digest": "recomputed",
+      "other-readers": {
+        "heldfast-profiles": {
+          "answers": "changed",
+          "baseline": {
+            "exit-code": 0,
+            "report-sha256": "50b9a0126fbb30fd3a5c2306ae21898814c1fd93198c151bd0af7c8badb58ac7",
+            "stderr": "empty"
+          },
+          "complete-result": "changed",
+          "swapped": {
+            "exit-code": 1,
+            "report-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr": "non-empty"
+          }
+        },
+        "probity-map-reader": {
+          "answers": "changed",
+          "baseline": {
+            "exit-code": 0,
+            "report-sha256": "bde4609a6b8eed67ae06499427dffc8eb023d2188eca83f801ea924f26551194",
+            "stderr": "empty"
+          },
+          "complete-result": "changed",
+          "swapped": {
+            "exit-code": 1,
+            "report-sha256": "b2b773569346f1858cb407ca73898fdb6e0f5791c9cea8fb5e9861291b29bc65",
+            "stderr": "non-empty"
+          }
+        }
+      },
+      "pins-moved": [
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/DIGESTS.txt",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/MANIFEST.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/README.md",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/SHA256SUMS",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/heldfast-profiles.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/native-verify-mjs.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/configs/probity-map-reader.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/controls.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/heldfast-profiles.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/native-verify-mjs.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/w3c-v01/records/reports/probity-map-reader.json"
+      ],
+      "reading": "changed: the swap changes the complete native result of this checker",
+      "swapped": {
+        "exit-code": 1,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr": "non-empty"
+      },
+      "swapped-in": "f066835b564875fe5b449c400fd075ad3ee3b41b2ccddfaa68663de87ee8a78d",
+      "test": "swap-and-re-pin"
+    },
+    "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+    "state": "consumed"
+  },
+  "member-field-mutations": {
+    "reading": "'no observed effect': no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127). 'changed': that reader's result differs from its baseline. For the outside readers, complete-result includes the glue's echo of the input file's own sha256, so any byte change to the vector file changes it; answers leaves that echo out",
+    "rows": [
+      {
+        "field": "/issuer/jwk/x",
+        "heldfast-profiles": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "id": "issuer-key",
+        "native": "changed",
+        "probity-map-reader": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "what": "the verification key: replaced by the RFC 8032 test 1 public key (no private key of ours is involved)"
+      },
+      {
+        "field": "/issuer/id",
+        "heldfast-profiles": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "id": "issuer-id",
+        "native": "no observed effect",
+        "probity-map-reader": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "what": "the issuer identifier the file names"
+      },
+      {
+        "field": "/issuer/jwks_url",
+        "heldfast-profiles": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "id": "jwks-url",
+        "native": "no observed effect",
+        "probity-map-reader": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "what": "where the key is published"
+      },
+      {
+        "field": "/attestation/toolDigests/tool:ask_wiki_question",
+        "heldfast-profiles": {
+          "answers": "changed",
+          "complete-result": "changed"
+        },
+        "id": "unsigned-map-entry",
+        "native": "changed",
+        "probity-map-reader": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "what": "the unsigned convenience copy of one signed digest"
+      },
+      {
+        "field": "/attestation/payload_sha256",
+        "heldfast-profiles": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "id": "payload-sha256",
+        "native": "no observed effect",
+        "probity-map-reader": {
+          "answers": "changed",
+          "complete-result": "changed"
+        },
+        "what": "the file's stated digest of the signed payload"
+      },
+      {
+        "field": "/claim_ceiling",
+        "heldfast-profiles": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "id": "claim-ceiling",
+        "native": "no observed effect",
+        "probity-map-reader": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "what": "prose: the claim ceiling"
+      },
+      {
+        "field": "/vectors/0/note",
+        "heldfast-profiles": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "id": "case-note",
+        "native": "no observed effect",
+        "probity-map-reader": {
+          "answers": "no observed effect",
+          "complete-result": "changed"
+        },
+        "what": "prose: a case's note"
+      },
+      {
+        "field": "interop/agentavow-signed-map-v1/selection.json /jwk/x",
+        "heldfast-profiles": "not read",
+        "id": "probity-selected-key",
+        "native": "not read",
+        "probity-map-reader": {
+          "answers": "changed",
+          "complete-result": "changed"
+        },
+        "what": "the key Probity's reader verifies under, in its own checkout, replaced by the RFC 8032 test 1 public key"
+      }
+    ]
+  },
+  "members": [
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "definition-digest/tool:ask_wiki_question"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "definition-digest/tool:read_wiki_contents"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "definition-digest/tool:read_wiki_structure"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "definition-count"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "unsigned-map-equals-signed"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding-count"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/00"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/01"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/02"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/03"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/04"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/05"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/06"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/07"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/08"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/09"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/10"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/11"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "key-encoding/12"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-match/signature_valid"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-match/canonical_bytes"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-match/subject_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-match/tool_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-match/tool_digest_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-match/fresh"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-match/rely"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/unknown-tool/signature_valid"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/unknown-tool/canonical_bytes"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/unknown-tool/subject_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/unknown-tool/tool_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/unknown-tool/tool_digest_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/unknown-tool/fresh"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/unknown-tool/rely"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-drift/signature_valid"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-drift/canonical_bytes"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-drift/subject_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-drift/tool_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-drift/tool_digest_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-drift/fresh"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tool-drift/rely"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/wrong-subject/signature_valid"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/wrong-subject/canonical_bytes"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/wrong-subject/subject_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/wrong-subject/tool_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/wrong-subject/tool_digest_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/wrong-subject/fresh"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/wrong-subject/rely"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/past-expiry/signature_valid"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/past-expiry/canonical_bytes"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/past-expiry/subject_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/past-expiry/tool_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/past-expiry/tool_digest_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/past-expiry/fresh"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/past-expiry/rely"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tampered-payload/signature_valid"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tampered-payload/canonical_bytes"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tampered-payload/subject_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tampered-payload/tool_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tampered-payload/tool_digest_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tampered-payload/fresh"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/tampered-payload/rely"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/boundary-fresh/signature_valid"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/boundary-fresh/canonical_bytes"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/boundary-fresh/subject_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/boundary-fresh/tool_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/boundary-fresh/tool_digest_binds"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/boundary-fresh/fresh"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "case/boundary-fresh/rely"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "property/positive-case-relies"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "property/unknown-tool-does-not-bind"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "property/changed-definition-does-not-bind"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "property/wrong-subject-does-not-bind"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "property/expiry-applies"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "property/canonical-is-not-authentic"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "property/boundary-fresh-relies"
+    },
+    {
+      "files": [
+        {
+          "path": "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+          "sha256": "48cf831840fc81db4e242ce5d2230a99fd41c890e5aa8b00dd6edef24098e9d3"
+        }
+      ],
+      "id": "property/negatives-fail-one-axis"
+    }
+  ],
+  "native": {
+    "cases": "native-cases",
+    "format": "corpus-result-json-v1",
+    "process-status": {
+      "exit-code": 0
+    },
+    "re-encoding": "verify.mjs prints text; native-cases is its stdout re-encoded one printed line per member and checked to render back to the stdout bytes exactly. The intake reader checks the carried lines against native-cases; the stdout against native-cases is checked by intake.py check",
+    "summary": null
+  },
+  "non-author-runs": [
+    {
+      "answers-visible": true,
+      "command": "python emit.py --runner <name> --runner-wrote none --out records (in w3c-v01)",
+      "covers-these-bytes": true,
+      "date": "2026-10-14",
+      "environment": "Linux x86_64, Python 3.13.7, cryptography 50.0.2, rfc8785 0.1.4, Node v22.22.2",
+      "files-compared": [
+        "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/verify.mjs",
+        "docs/standards/tool-manifest-digest-vectors-v1/time.mjs",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/probity_compat.py",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast_compat.py",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/probity-pin.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast-pin.json"
+      ],
+      "label": "a reproduction in O8's sense: our implementation, another operator",
+      "list-message": "https://lists.w3.org/Archives/Public/public-agent-conformance/2026Oct/0101.html",
+      "operator": "Nicolas Rocchia (wrote none of the vectors, the readers or the glue)",
+      "output": "v0.1 reports, eleven of thirteen files byte-identical to the committed ones; run.json and SHA256SUMS differ by design. Not this record's native output: the run predates it",
+      "producer-commit": "fbbbd4ac71bcdf5353957629d5a9320c49af204d",
+      "reader": "verify.mjs",
+      "relationship": "same-implementation",
+      "result": "76/76",
+      "shared-verification-code": [
+        "docs/standards/tool-manifest-digest-vectors-v1/verify.mjs",
+        "docs/standards/tool-manifest-digest-vectors-v1/time.mjs"
+      ]
+    },
+    {
+      "answers-visible": true,
+      "command": "python emit.py --runner <name> --runner-wrote none --out records (in w3c-v01)",
+      "covers-these-bytes": true,
+      "date": "2026-10-14",
+      "environment": "Linux x86_64, Python 3.13.7, cryptography 50.0.2, rfc8785 0.1.4, Node v22.22.2",
+      "files-compared": [
+        "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/verify.mjs",
+        "docs/standards/tool-manifest-digest-vectors-v1/time.mjs",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/probity_compat.py",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast_compat.py",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/probity-pin.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast-pin.json"
+      ],
+      "label": "a reader written from the specification, run by someone who wrote neither it nor the vectors, through AgentAvow's glue",
+      "list-message": "https://lists.w3.org/Archives/Public/public-agent-conformance/2026Oct/0101.html",
+      "operator": "Nicolas Rocchia (wrote none of the vectors, the readers or the glue)",
+      "output": "v0.1 reports, eleven of thirteen files byte-identical to the committed ones; run.json and SHA256SUMS differ by design. Not this record's native output: the run predates it",
+      "producer-commit": "fbbbd4ac71bcdf5353957629d5a9320c49af204d",
+      "reader": "Probity map_reader at d759fb4db68a7fefcc91c2d3ad2a585471d6a53a",
+      "relationship": "written-from-specification",
+      "result": "67/67",
+      "shared-verification-code": []
+    },
+    {
+      "answers-visible": true,
+      "command": "python emit.py --runner <name> --runner-wrote none --out records (in w3c-v01)",
+      "covers-these-bytes": true,
+      "date": "2026-10-14",
+      "environment": "Linux x86_64, Python 3.13.7, cryptography 50.0.2, rfc8785 0.1.4, Node v22.22.2",
+      "files-compared": [
+        "docs/standards/tool-manifest-digest-vectors-v1/tool-manifest-digest-v1-vectors.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/verify.mjs",
+        "docs/standards/tool-manifest-digest-vectors-v1/time.mjs",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/probity_compat.py",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast_compat.py",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/probity-pin.json",
+        "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast-pin.json"
+      ],
+      "label": "a reader written from the specification, run by someone who wrote neither it nor the vectors, through AgentAvow's glue",
+      "list-message": "https://lists.w3.org/Archives/Public/public-agent-conformance/2026Oct/0101.html",
+      "operator": "Nicolas Rocchia (wrote none of the vectors, the readers or the glue)",
+      "output": "v0.1 reports, eleven of thirteen files byte-identical to the committed ones; run.json and SHA256SUMS differ by design. Not this record's native output: the run predates it",
+      "producer-commit": "fbbbd4ac71bcdf5353957629d5a9320c49af204d",
+      "reader": "heldfast profiles.py at ca5a872264b486907ed5479247e5150c5122d33d",
+      "relationship": "written-from-specification",
+      "result": "16/16",
+      "shared-verification-code": []
+    }
+  ],
+  "observations": [
+    {
+      "carry": "referenced",
+      "id": "native-stdout",
+      "reference": {
+        "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/native/verify-mjs.stdout",
+        "serialization": "bytes",
+        "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161"
+      }
+    },
+    {
+      "carry": "referenced",
+      "id": "native-cases",
+      "reference": {
+        "path": "docs/standards/tool-manifest-digest-vectors-v1/w3c-intake/native/verify-mjs.cases.json",
+        "serialization": "bytes",
+        "sha256": "f9e668454b95dd98c4d04b886a497e74722d805a033584ff6a5ec9d8872bdd28"
+      }
+    },
+    {
+      "carried": "",
+      "carry": "carried",
+      "id": "stderr"
+    },
+    {
+      "carried": "0",
+      "carry": "carried",
+      "id": "exit-code"
+    }
+  ],
+  "pin-serialization": "bytes",
+  "refusal-verdicts": [
+    "FAIL"
+  ],
+  "refusals": [],
+  "relaxed-controls": [],
+  "relaxed-controls-note": "no check of this suite has been run relaxed; there is no relaxed result to pair with a baseline",
+  "replay-stability": {
+    "cause": null,
+    "ordering": "emission-order",
+    "runs": [
+      {
+        "process": "run-1",
+        "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161"
+      },
+      {
+        "process": "run-2",
+        "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161"
+      },
+      {
+        "process": "run-3 (TZ=Pacific/Kiritimati, LANG=C, LC_ALL=C)",
+        "sha256": "d5c6adefe5dc5aed1de52e8f53412bdae4ec9ce4ac75329ceaaa964029dd9161"
+      }
+    ],
+    "scope": "three processes on one machine and one Node version; not measured across runtimes at the stdout level",
+    "seed": null,
+    "seed-note": "verify.mjs iterates arrays and sorted keys; no hash seed reaches its output. The re-encoding writes members in printed order",
+    "state": "stable"
+  },
+  "scope": {
+    "does-not-claim": [
+      "whole-attack-surface",
+      "implementation-ranking",
+      "threats-outside-corpus",
+      "action-occurred-or-authority"
+    ],
+    "establishes": [
+      "verify.mjs, at the source listing named here and run as `node verify.mjs` under the Node version named here, returns the 76 declared checks over the pinned vector file, each equal to the value the file states for it",
+      "the two readers written from the specification, at their pinned commits and through AgentAvow's glue, agree with the vector file on every check each makes, on the same bytes (see specification-readers)",
+      "each of the three injected faults fails exactly its target check (faults)"
+    ],
+    "leaves-open": [
+      "anything about AgentAvow's safety grades, trust scores or answers; the vectors pin one attestation for one server and test byte agreement only",
+      "runtime behaviour of the pinned server or of any tool",
+      "who published the anchor: it is a git commit, which binds content and names no signer",
+      "whether any reader reaches these results without the expected answers visible: they were visible to all",
+      "replay across Node versions or platforms at the stdout level",
+      "for an artifact recorded unconsumed: no observed effect for this mutation, under this checker and context; an unchanged result does not alone establish non-consumption (2026Oct/0127)",
+      "the readers written from the specification have been run against these bytes only through AgentAvow's glue, by the vector author and by one operator who wrote none of it"
+    ]
+  },
+  "selector": {
+    "expression": "*",
+    "language": "id-glob",
+    "matched": 76,
+    "require": "at-least-one",
+    "selected": [
+      "definition-digest/tool:ask_wiki_question",
+      "definition-digest/tool:read_wiki_contents",
+      "definition-digest/tool:read_wiki_structure",
+      "definition-count",
+      "unsigned-map-equals-signed",
+      "key-encoding-count",
+      "key-encoding/00",
+      "key-encoding/01",
+      "key-encoding/02",
+      "key-encoding/03",
+      "key-encoding/04",
+      "key-encoding/05",
+      "key-encoding/06",
+      "key-encoding/07",
+      "key-encoding/08",
+      "key-encoding/09",
+      "key-encoding/10",
+      "key-encoding/11",
+      "key-encoding/12",
+      "case/tool-match/signature_valid",
+      "case/tool-match/canonical_bytes",
+      "case/tool-match/subject_binds",
+      "case/tool-match/tool_binds",
+      "case/tool-match/tool_digest_binds",
+      "case/tool-match/fresh",
+      "case/tool-match/rely",
+      "case/unknown-tool/signature_valid",
+      "case/unknown-tool/canonical_bytes",
+      "case/unknown-tool/subject_binds",
+      "case/unknown-tool/tool_binds",
+      "case/unknown-tool/tool_digest_binds",
+      "case/unknown-tool/fresh",
+      "case/unknown-tool/rely",
+      "case/tool-drift/signature_valid",
+      "case/tool-drift/canonical_bytes",
+      "case/tool-drift/subject_binds",
+      "case/tool-drift/tool_binds",
+      "case/tool-drift/tool_digest_binds",
+      "case/tool-drift/fresh",
+      "case/tool-drift/rely",
+      "case/wrong-subject/signature_valid",
+      "case/wrong-subject/canonical_bytes",
+      "case/wrong-subject/subject_binds",
+      "case/wrong-subject/tool_binds",
+      "case/wrong-subject/tool_digest_binds",
+      "case/wrong-subject/fresh",
+      "case/wrong-subject/rely",
+      "case/past-expiry/signature_valid",
+      "case/past-expiry/canonical_bytes",
+      "case/past-expiry/subject_binds",
+      "case/past-expiry/tool_binds",
+      "case/past-expiry/tool_digest_binds",
+      "case/past-expiry/fresh",
+      "case/past-expiry/rely",
+      "case/tampered-payload/signature_valid",
+      "case/tampered-payload/canonical_bytes",
+      "case/tampered-payload/subject_binds",
+      "case/tampered-payload/tool_binds",
+      "case/tampered-payload/tool_digest_binds",
+      "case/tampered-payload/fresh",
+      "case/tampered-payload/rely",
+      "case/boundary-fresh/signature_valid",
+      "case/boundary-fresh/canonical_bytes",
+      "case/boundary-fresh/subject_binds",
+      "case/boundary-fresh/tool_binds",
+      "case/boundary-fresh/tool_digest_binds",
+      "case/boundary-fresh/fresh",
+      "case/boundary-fresh/rely",
+      "property/positive-case-relies",
+      "property/unknown-tool-does-not-bind",
+      "property/changed-definition-does-not-bind",
+      "property/wrong-subject-does-not-bind",
+      "property/expiry-applies",
+      "property/canonical-is-not-authentic",
+      "property/boundary-fresh-relies",
+      "property/negatives-fail-one-axis"
+    ]
+  },
+  "specification-readers": [
+    {
+      "author": "Sankalp Gilda, Probity",
+      "author-run": "the reader's author ran it on the vector file at producer commit 36426cf, whose bytes differ from the pinned file (the boundary-fresh case was added after); Probity's own driver refuses the current file for that reason",
+      "basis": "its README at the pinned commit: it reads the producer's version-1 profile, and the native verifier is never imported or executed",
+      "glue": {
+        "note": "AgentAvow's glue: calls the reader's functions and writes their answers; no encoding, hashing or verification of its own",
+        "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/probity_compat.py",
+        "serialization": "bytes",
+        "sha256": "a50569bb2cd28d4f847f5d42083b3fb3ff2aa9be32f6ec6ec4f0e9a4e80b5b50"
+      },
+      "key-source": {
+        "note": "the reader verifies under this key, not the key in the vector file",
+        "path": "interop/agentavow-signed-map-v1/selection.json",
+        "serialization": "bytes",
+        "sha256": "494e4d50dd785c771eeffe6f3e7fdc924720d21d206bdf01544ce5864430f06c"
+      },
+      "reader": "https://github.com/probityai/agent-evidence-vectors/tree/d759fb4db68a7fefcc91c2d3ad2a585471d6a53a/interop/agentavow-signed-map-v1 (map_reader.py)",
+      "reader-files": {
+        "paths": [
+          "interop/agentavow-live-mcp/definition_pin.py",
+          "interop/agentavow-signed-map-v1/map_reader.py",
+          "interop/agentavow-signed-map-v1/selection.json",
+          "interop/agentavow-signed-map-v1/source-lock.json",
+          "packaging/run_vectors.py"
+        ],
+        "serialization": "sha256-listing-v1",
+        "sha256": "1d99910887d4753351e2def6ce997e467a082e9df52752e0c4b039a99c05778c"
+      },
+      "relationship": "written-from-specification",
+      "revision": {
+        "kind": "git-commit",
+        "value": "d759fb4db68a7fefcc91c2d3ad2a585471d6a53a"
+      },
+      "this-run": {
+        "agree": 67,
+        "checks": 67,
+        "glue-exit-code": 0,
+        "operator": "the vector author (AgentAvow), with the answers visible"
+      }
+    },
+    {
+      "author": "rufat325, heldfast",
+      "basis": "heldfast's statement on stacklok/toolhive#6734 and its TRANSPARENCY.md: its own implementation of the published rules, with none of our files copied",
+      "claims": "the three served-definition digests and the thirteen key pairs only",
+      "glue": {
+        "note": "AgentAvow's glue: calls agentavow_v1_digest and agentavow_v1_key",
+        "path": "docs/standards/tool-manifest-digest-vectors-v1/compat/heldfast_compat.py",
+        "serialization": "bytes",
+        "sha256": "f2949c2f90bed75e5b4c308799421140939e1861311679993aff0c953f1ff3af"
+      },
+      "reader": "https://github.com/rufat325/heldfast/blob/ca5a872264b486907ed5479247e5150c5122d33d/src/heldfast/profiles.py",
+      "reader-files": {
+        "paths": [
+          "src/heldfast"
+        ],
+        "serialization": "sha256-listing-v1",
+        "sha256": "5f668d494bd36800f54ed11ca7df0f3ee4ed04844602365e5922031b608c2e4e"
+      },
+      "relationship": "written-from-specification",
+      "revision": {
+        "kind": "git-commit",
+        "value": "ca5a872264b486907ed5479247e5150c5122d33d"
+      },
+      "this-run": {
+        "agree": 16,
+        "checks": 16,
+        "glue-exit-code": 0,
+        "operator": "the vector author (AgentAvow), with the answers visible"
+      }
+    }
+  ],
+  "state": "pass",
+  "suite": "tool-manifest-digest-v1"
+}
