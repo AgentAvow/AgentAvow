@@ -10,7 +10,7 @@ import { publicApi } from '../../lib/scanApi'
 import { decisionOf, getTrustTier } from '../../components/trust/gradeSystem'
 import { TrustBar, AdoptionNeedle, CertifiedMark, TrustOrCertifiedMini, AdoptionMini, DecisionLine } from '../components/TrustMark'
 import { Reveal, CountUp } from '../components/motion'
-import { trackEvent } from '../../lib/analytics'
+import { currentPath, trackCheckSubmit, trackCta, trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { SandboxTotalsStrip } from '../components/SandboxStats'
 import SEOHead from '../../components/SEOHead'
@@ -87,7 +87,10 @@ export default function RebrandHome() {
   const hint = useRotatingPlaceholder(CHECK_HINTS)
   const runCheck = (input: string) => {
     const v = input.trim()
-    if (v) trackEvent('guest_cta_click', '/rebrand', 'check_a_tool')
+    if (v) {
+      trackEvent('guest_cta_click', currentPath(), 'check_a_tool')
+      trackCheckSubmit()
+    }
     setNotice(null)
     // A repo host we know but can't read yet: say so instead of scanning the same-named GitHub repo.
     const host = unsupportedRepoHost(v)
@@ -274,8 +277,8 @@ export default function RebrandHome() {
             <p className="mt-3 text-text-muted">AgentAvow is in the ChatGPT and Claude directories. Ask about a repo, a package or an MCP server and get the answer before anything is installed.</p>
           </div>
           <div className="flex gap-2.5 flex-wrap justify-center mt-6">
-            <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent('guest_cta_click', '/rebrand', 'add_chatgpt')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to ChatGPT ↗</a>
-            <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => trackEvent('guest_cta_click', '/rebrand', 'add_claude')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to Claude ↗</a>
+            <a href={CHATGPT_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => { trackEvent('guest_cta_click', currentPath(), 'add_chatgpt'); trackCta('add_chatgpt') }} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to ChatGPT ↗</a>
+            <a href={CLAUDE_LISTING} target="_blank" rel="noopener noreferrer" onClick={() => { trackEvent('guest_cta_click', currentPath(), 'add_claude'); trackCta('add_claude') }} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl text-white bg-gradient-to-r from-primary to-primary-dark shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-shadow">Add to Claude ↗</a>
             <Link to={rp('/rebrand/docs/auto-scan-claude-code')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Claude Code plugin →</Link>
             <Link to={rp('/rebrand/for-developers')} className="inline-flex items-center font-semibold text-[14px] px-5 py-2.5 rounded-xl border border-border text-text hover:border-primary-light hover:text-primary-light transition-colors">Cursor · VS Code · any MCP client →</Link>
           </div>

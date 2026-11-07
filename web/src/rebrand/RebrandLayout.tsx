@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AtmosphericBackground } from '../components/AtmosphericBackground'
 import { useAuth } from '../hooks/useAuth'
 import api from '../lib/api'
-import { trackEvent } from '../lib/analytics'
+import { currentPath, trackEvent, trackLandingView } from '../lib/analytics'
 import { NotifRow, isRelevant, type Notif } from './components/NotificationBits'
 
 /**
@@ -257,7 +257,8 @@ export default function RebrandLayout() {
   // has real session data — the live cutover tree never emitted this before, so
   // the funnel was starved. Feeds /analytics/conversion (session-keyed).
   useEffect(() => {
-    trackEvent('guest_page_view', pathname)
+    trackLandingView()
+    trackEvent('guest_page_view', currentPath())
   }, [pathname])
 
   // Rebrand-only favicon swap — restored on unmount so the live site (which shares

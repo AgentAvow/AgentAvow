@@ -3,6 +3,37 @@ import { useQuery } from '@tanstack/react-query'
 import api from '../../lib/api'
 import { InlineSkeleton } from '../../components/Skeleton'
 
+interface CampaignRow {
+  source: string | null
+  medium: string | null
+  campaign: string | null
+  content: string | null
+  term: string | null
+  sessions: number
+  lp_view: number
+  check_submit: number
+  result_view: number
+  copy_plugin_cmd: number
+  open_plugin_dir: number
+  add_claude: number
+  add_chatgpt: number
+  badge_copied: number
+  contact_submit: number
+}
+
+const CAMPAIGN_STEPS: [keyof CampaignRow, string][] = [
+  ['sessions', 'Sessions'],
+  ['lp_view', 'Landed'],
+  ['check_submit', 'Checks'],
+  ['result_view', 'Results'],
+  ['copy_plugin_cmd', 'Plugin Cmd'],
+  ['open_plugin_dir', 'Plugin Dir'],
+  ['add_claude', 'Add Claude'],
+  ['add_chatgpt', 'Add ChatGPT'],
+  ['badge_copied', 'Badge'],
+  ['contact_submit', 'Contact'],
+]
+
 export default function AttributionTab() {
   const [attributionDays, setAttributionDays] = useState(30)
 
@@ -15,6 +46,15 @@ export default function AttributionTab() {
     queryKey: ['admin-attribution', attributionDays],
     queryFn: async () => {
       const { data } = await api.get('/analytics/attribution', { params: { days: attributionDays } })
+      return data
+    },
+    staleTime: 2 * 60_000,
+  })
+
+  const { data: campaignData } = useQuery<{ period_days: number; campaigns: CampaignRow[] }>({
+    queryKey: ['admin-attribution-campaigns', attributionDays],
+    queryFn: async () => {
+      const { data } = await api.get('/analytics/attribution/campaigns', { params: { days: attributionDays } })
       return data
     },
     staleTime: 2 * 60_000,
@@ -57,6 +97,49 @@ export default function AttributionTab() {
               <div className="text-xs text-text-muted uppercase tracking-wider mb-1">Unattributed Events</div>
               <div className="text-lg font-bold">{attributionData.total_unattributed.toLocaleString()}</div>
             </div>
+          </div>
+
+          {/* Per-campaign funnel, by each session's first touch */}
+          <div className="bg-surface border border-border rounded-lg p-4">
+            <h3 className="text-xs text-text-muted uppercase tracking-wider mb-1">By Campaign</h3>
+            <p className="text-xs text-text-muted mb-3">
+              Sessions active in this window that reached each step, by the first campaign tags
+              seen for the session, so return visits count. Plugin directory installs, /plugin
+              installs and ChatGPT store adds cannot be tied to a campaign: these columns count
+              clicks and copies, not installs.
+            </p>
+            {campaignData?.campaigns.length ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-2 pr-4 text-text-muted font-medium">Campaign</th>
+                      <th className="text-left py-2 pr-4 text-text-muted font-medium">Source / Medium</th>
+                      <th className="text-left py-2 pr-4 text-text-muted font-medium">Content</th>
+                      <th className="text-left py-2 pr-4 text-text-muted font-medium">Term</th>
+                      {CAMPAIGN_STEPS.map(([key, label]) => (
+                        <th key={key} className="text-right py-2 pr-4 text-text-muted font-medium whitespace-nowrap">{label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {campaignData.campaigns.map((row) => (
+                      <tr key={[row.campaign, row.source, row.medium, row.content, row.term].join('|')} className="border-b border-border/50">
+                        <td className="py-2 pr-4 font-medium">{row.campaign || '-'}</td>
+                        <td className="py-2 pr-4 text-text-muted">{row.source || '-'} / {row.medium || '-'}</td>
+                        <td className="py-2 pr-4 text-text-muted">{row.content || '-'}</td>
+                        <td className="py-2 pr-4 text-text-muted">{row.term || '-'}</td>
+                        {CAMPAIGN_STEPS.map(([key]) => (
+                          <td key={key} className="py-2 pr-4 text-right font-mono">{(row[key] as number).toLocaleString()}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-xs text-text-muted">No campaign sessions yet.</p>
+            )}
           </div>
 
           {/* Per-source breakdown */}

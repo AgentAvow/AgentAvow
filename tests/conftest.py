@@ -23,6 +23,7 @@ _TABLES = [
     "delegations", "agent_capability_registry", "organization_memberships",
     "organizations", "audit_records", "verification_badges",
     "framework_security_scans", "moderation_appeals", "analytics_events",
+    "analytics_first_touch",
     "submolt_memberships", "direct_messages", "conversations",
     "entity_blocks", "reviews", "trust_attestations",
     "capability_endorsements", "post_edits", "bookmarks",
@@ -744,6 +745,19 @@ async def _clean_db_once():
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_community_scans_full_name "
             "ON community_scans (full_name)"
+        ))
+        # Ensure analytics_first_touch table exists (migration t26)
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS analytics_first_touch ("
+            "  session_id VARCHAR(64) PRIMARY KEY,"
+            "  utm_source VARCHAR(200),"
+            "  utm_medium VARCHAR(200),"
+            "  utm_campaign VARCHAR(200),"
+            "  utm_content VARCHAR(200),"
+            "  utm_term VARCHAR(200),"
+            "  landing_page VARCHAR(200) NOT NULL,"
+            "  created_at TIMESTAMPTZ NOT NULL DEFAULT now()"
+            ")"
         ))
         await conn.execute(
             text("TRUNCATE " + ", ".join(_TABLES) + " CASCADE")
