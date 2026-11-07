@@ -387,6 +387,8 @@ export function coverageGapNotes(input: unknown): string[] {
   if (n > 0) notes.push(`${filesPhrase(n)} the skill's instructions link to ${was(n)} not read`)
   n = toInt(g.custom_code_unread)
   if (n > 0) notes.push(`${filesPhrase(n, 'custom code file')} in the model ${was(n)} not read`)
+  n = toInt(g.bytecode_unread)
+  if (n > 0) notes.push(`${filesPhrase(n, 'Python bytecode file')} ${was(n)} not read`)
   n = toInt(g.oversized_files)
   if (n > 0) notes.push(`${filesPhrase(n)} over 500 KB ${was(n)} not fully read`)
   n = toInt(g.fetch_failed)
@@ -639,6 +641,7 @@ export function cheapCoverageGap(input: unknown): boolean {
   if (g.sandbox_not_observed === 'other_version') return true
   if (g.tool_list_unread === true || g.tool_list_paged === true) return true
   if (toInt(g.oversized_agent_files) > 0 || toInt(g.skill_refs_unread) > 0) return true
+  if (toInt(g.bytecode_unread) > 0) return true
   if (toInt(g.skills_ungraded) > 0) return true
   if (surfaceIs(data, 'openclaw') && (toInt(g.oversized_files) > 0 || toInt(g.over_file_cap) > 0
     || g.tree_truncated === true)) return true

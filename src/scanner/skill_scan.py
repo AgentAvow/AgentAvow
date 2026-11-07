@@ -130,6 +130,9 @@ class SkillScanResult:
         self.tree_digest: str | None = None
         self.script_count: int = 0
         self.blast_radius: dict = {}        # {level, capabilities, why} — see below
+        # What this pass selected but could not cover (``bytecode_unread``); merged
+        # into the scan's coverage_gaps by the caller.
+        self.coverage_gaps: dict = {}
 
 
 # Map an OpenClaw / Claude skill `allowed-tools` grant to the shared capability
@@ -227,9 +230,11 @@ def _tool_list(raw) -> list[str]:
     return out
 
 
-def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> SkillScanResult:
+def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md",
+                  tree_paths: list[str] | None = None) -> SkillScanResult:
     """Grade a skill's files. ``files`` maps path -> text for SKILL.md + scripts +
-    hook manifests. Pure + deterministic."""
+    hook manifests. ``tree_paths``: every path in the repo tree (files that are not
+    fetched included), for the bytecode check. Pure + deterministic."""
     result = SkillScanResult()
 
     # full-tree digest (rug-pull anchor) — sha256 over path-sorted content.
@@ -308,6 +313,13 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
             "skill_capability", "No SKILL.md found — not a recognizable Agent Skill",
             "info", "skill",
         ))
+
+    # 2c. Python bytecode in the skill's tree (the PyCache trap): never read, high.
+    from src.scanner.bytecode import skill_bytecode
+    _skill_dir = skill_md_path.rsplit("/", 1)[0] if "/" in skill_md_path else ""
+    _bc_findings, _bc_gaps = skill_bytecode(list(tree_paths or files), _skill_dir)
+    result.findings.extend(_bc_findings)
+    result.coverage_gaps.update(_bc_gaps)
 
     # 3. lifecycle-hook / plugin escalation
     for path, text in files.items():

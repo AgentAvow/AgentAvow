@@ -557,7 +557,8 @@ def test_notes_never_change_the_decision():
             "advisory_lookup": "failed", "tool_list_unread": True, "tool_list_paged": True,
             "oversized_agent_files": 1, "skill_refs_unread": 2, "custom_code_unread": 1,
             "scan_errors": 1, "tree_unavailable": True, "image_layers_unread": 2,
-            "image_layers_reason": "unsupported compression", "skills_ungraded": 4}
+            "image_layers_reason": "unsupported compression", "skills_ungraded": 4,
+            "bytecode_unread": 3}
     review_keys = {"tool_list_unread", "tool_list_paged", "oversized_agent_files",
                    "skill_refs_unread", "custom_code_unread"}
     disclosure_only = {k: v for k, v in gaps.items() if k not in review_keys}
@@ -567,19 +568,21 @@ def test_notes_never_change_the_decision():
         assert (a.decision, a.final) == (b.decision, b.final)
         c = decide({**base, "trust_score": score, "coverage_gaps": gaps})
         assert c.decision == "review"
-    assert len(coverage_gap_notes({"coverage_gaps": gaps})) == 16
-    assert coverage_gap_suffix({"coverage_gaps": gaps}).endswith("; and 14 more coverage gaps")
+    assert len(coverage_gap_notes({"coverage_gaps": gaps})) == 17
+    assert coverage_gap_suffix({"coverage_gaps": gaps}).endswith("; and 15 more coverage gaps")
 
 
 def test_new_gap_notes_read_plainly():
     notes = coverage_gap_notes({"coverage_gaps": {
         "oversized_agent_files": 1, "skill_refs_unread": 2, "custom_code_unread": 1,
         "scan_errors": 3, "tree_unavailable": True, "image_layers_unread": 2,
-        "image_layers_reason": "unsupported compression", "skills_ungraded": 1}})
+        "image_layers_reason": "unsupported compression", "skills_ungraded": 1,
+        "bytecode_unread": 1}})
     assert notes == [
         "1 agent instruction file over 500 KB was not read",
         "2 files the skill's instructions link to were not read",
         "1 custom code file in the model was not read",
+        "1 Python bytecode file was not read",
         "3 files could not be scanned",
         "the file list could not be read",
         "2 image layers were not read (unsupported compression)",
@@ -609,6 +612,7 @@ def test_ts_coverage_gap_notes_twin():
         {"image_layers_unread": 3, "image_layers_reason": ""},
         {"image_layers_unread": 1, "image_layers_reason": 5, "tree_unavailable": "yes"},
         {"oversized_files": 2, "oversized_agent_files": 2, "fetch_failed": 1},
+        {"bytecode_unread": 1}, {"bytecode_unread": "12", "oversized_files": 1},
     )] + [{"coverage_gaps": ["x"]}, {}]
     script = (
         "const m = await import(process.argv[1]);"
