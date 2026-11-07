@@ -425,6 +425,9 @@ export function coverageGapNotes(input: unknown): string[] {
   }
   n = toInt(g.skills_ungraded)
   if (n > 0) notes.push(`${filesPhrase(n, 'skill')} in the repo ${was(n)} not graded`)
+  const why = g.sandbox_not_observed
+  if (why === 'other_version') notes.push('the sandbox has not run this version')
+  else if (typeof why === 'string' && why) notes.push(`the sandbox could not start the tool (${why}), so its behavior was not observed`)
   return notes
 }
 
@@ -633,6 +636,7 @@ export function cheapCoverageGap(input: unknown): boolean {
   if (!isObj(data.coverage_gaps)) return false
   const g = data.coverage_gaps
   if (toInt(g.fetch_failed) > 0) return true
+  if (g.sandbox_not_observed === 'other_version') return true
   if (g.tool_list_unread === true || g.tool_list_paged === true) return true
   if (toInt(g.oversized_agent_files) > 0 || toInt(g.skill_refs_unread) > 0) return true
   if (toInt(g.skills_ungraded) > 0) return true
