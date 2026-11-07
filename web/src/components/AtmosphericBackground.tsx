@@ -29,7 +29,7 @@ function useReducedMotion() {
 // Pauses animations when the browser tab is hidden to save CPU/GPU.
 
 function useTabVisible() {
-  const [visible, setVisible] = useState(!document.hidden)
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || !document.hidden)
   useEffect(() => {
     const handler = () => setVisible(!document.hidden)
     document.addEventListener('visibilitychange', handler)

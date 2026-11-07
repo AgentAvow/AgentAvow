@@ -32,16 +32,20 @@ function cutoverHtmlPlugin(cutover: boolean) {
   }
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, isSsrBuild }) => {
   const backendPort = mode === 'staging' ? 8001 : 8000
   const env = loadEnv(mode, process.cwd(), '')
   const cutover = env.VITE_CUTOVER === 'true'
 
   return {
     plugins: [react(), tailwindcss(), cutoverHtmlPlugin(cutover)],
+    // The prerender bundle (web/scripts/prerender.mjs) carries its dependencies, so
+    // Node never has to resolve their ESM/CJS entry points at build time.
+    ssr: { noExternal: true },
     build: {
+      copyPublicDir: !isSsrBuild,
       rollupOptions: {
-        output: {
+        output: isSsrBuild ? {} : {
           manualChunks: {
             vendor: ['react', 'react-dom', 'react-router-dom'],
             query: ['@tanstack/react-query'],

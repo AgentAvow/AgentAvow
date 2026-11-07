@@ -311,6 +311,8 @@ export default function RebrandBrowse() {
     ...Object.entries(data?.summary?.by_category ?? {}).map(([c, n]) => ({ key: c, label: `${c} (${n})` }))]
 
   const rows = data?.rows ?? []
+  // The prerender keeps the page's totals but not its tool rows (see prerender-entry.tsx).
+  const rowsLoading = isLoading || import.meta.env.SSR
   const summary = data?.summary
   const total = summary?.total_scans
   const matching = data?.total
@@ -454,7 +456,7 @@ export default function RebrandBrowse() {
         )}
         {isError ? (
           <div className="glass rounded-xl p-8 text-center text-text-muted text-[14px]">Couldn't load the catalog right now. Try again in a moment.</div>
-        ) : isLoading && rows.length === 0 ? (
+        ) : rowsLoading && rows.length === 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
             {Array.from({ length: 9 }).map((_, i) => <div key={i} className="glass rounded-xl p-[18px] animate-pulse h-[128px]" />)}
           </div>
@@ -463,7 +465,7 @@ export default function RebrandBrowse() {
             {rows.map((row) => <ToolCard key={row.full_name || row.name} row={row} />)}
           </RevealStagger>
         )}
-        {!isLoading && !isError && rows.length === 0 && (
+        {!rowsLoading && !isError && rows.length === 0 && (
           <div className="mt-2 text-center text-text-muted text-[14px]">No matches on this surface. Try another category or search.</div>
         )}
 
