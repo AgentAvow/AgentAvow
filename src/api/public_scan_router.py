@@ -661,11 +661,27 @@ def _other_version_block() -> dict:
             "reason": BEHAVIORAL_OTHER_VERSION_REASON}
 
 
+def _is_exec_plan(plan: object) -> bool:
+    """A sandbox plan that exists to START the tool: an MCP server plan (``npm-mcp``,
+    ``pypi-mcp``, ``npm-git-mcp``, ``pypi-git-mcp``) or a skill's hooks and scripts
+    (``skill``). The plain install/import plans (``npm``, ``pypi``, ``*-git``) launch
+    nothing, so "did it start" does not apply to them (``not_applicable``)."""
+    p = str(plan or "").strip().lower()
+    return p.endswith("-mcp") or p == "skill"
+
+
 def _sandbox_gap(block: dict | None) -> str | None:
     """Why the sandbox observed nothing, for ``coverage_gaps.sandbox_not_observed``:
     ``other_version``, ``unavailable`` (the run did not happen), or the plain-words
-    start reason of a server that never started. None when a run is still coming, there
-    was nothing to run, or the tool was observed. Advisory live probes are never a gap."""
+    start reason of a tool that never started. None when a run is still coming, there
+    was nothing to run, or the tool was observed. Advisory live probes are never a gap.
+
+    "Never started" is any start reason on a launch that failed, and, on an exec plan
+    (``_is_exec_plan``), also a run that stopped before the launch was even attempted
+    (an install that failed, the wall clock, the resource cap, no transcript at all):
+    the plan was meant to start the tool and did not. An install-only plan
+    (``not_applicable``) is never a gap. Every value but ``unavailable`` withholds the
+    Certified mark (``verdict.cheap_coverage_gap``); none moves the score or decision."""
     if not isinstance(block, dict) or block.get("pending") or is_advisory_block(block):
         return None
     if block.get("other_version"):
@@ -674,9 +690,14 @@ def _sandbox_gap(block: dict | None) -> str | None:
         return "unavailable" if block.get("state") == "unavailable" or block.get("error") \
             else None
     gs = block.get("grade_summary") if isinstance(block.get("grade_summary"), dict) else {}
+    reason = str(gs.get("start_reason") or "").strip().lower()
     if not gs.get("server_failed_to_start"):
-        return None
-    return str(gs.get("start_reason") or "unknown").replace("_", " ")
+        ex = block.get("exercise") if isinstance(block.get("exercise"), dict) else {}
+        launched = gs.get("launch_ok") is True or ex.get("launch_ok") is True
+        if (launched or reason in ("started", "not_applicable")
+                or not _is_exec_plan(block.get("plan") or gs.get("plan"))):
+            return None
+    return (reason or "unknown").replace("_", " ")
 
 
 def _apply_behavioral_score(data: dict, block: dict | None) -> dict:
@@ -693,6 +714,13 @@ def _apply_behavioral_score(data: dict, block: dict | None) -> dict:
     out["behavioral_score_effect"] = {k: eff[k] for k in
                                       ("applied", "static_score", "score", "delta", "reason")}
     if not eff["applied"]:
+        if gap and out.get("grade") == "A+":
+            # The legacy letter follows the mark: A+ was set on the static scan, and a
+            # gap that withholds the mark takes it back to the plain letter for the score.
+            crit = int(((data.get("findings") or {}).get("critical")) or 0)
+            out["grade"] = _display_grade(
+                int(data.get("trust_score") or 0),
+                _certified_mark({**out, "behavioral": block}), crit)
         return out
     score = eff["score"]
     tier = _compute_tier(score)

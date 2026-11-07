@@ -98,6 +98,7 @@ def _report_url(surface: str, target: str) -> str:
 
 def _build_preflight(
     target: str, surface: str, data: dict, auth: dict | None, cached: bool,
+    mark: bool | None = None,
 ) -> PreflightResponse:
     report = evaluate_gates(data, surface=surface, auth=auth)
     subject_full = f"mcp:{target}" if surface == "mcp" else target
@@ -115,8 +116,9 @@ def _build_preflight(
         trust_score=int(data.get("trust_score") or 0),
         trust_tier=str(data.get("trust_tier") or ""),
         grade=str(data.get("grade") or ""),
-        # The Certified MARK (display rule), not the raw provenance gate.
-        certified=certified_mark(data, dec),
+        # The Certified MARK (display rule), not the raw provenance gate. ``mark`` is the
+        # result page's own mark (sandbox state folded in) when the caller knows it.
+        certified=certified_mark(data, dec) and (mark is None or mark),
         gates=[Gate(**g) for g in report["gates"]],
         summary=report["summary"],
         signed={
@@ -201,7 +203,8 @@ async def preflight_repo(
     if not force:
         cached = await _cache_get(key)
         if cached:
-            return _build_preflight(full, "repo", cached["data"], None, cached=True)
+            return _build_preflight(full, "repo", cached["data"], None, cached=True,
+                                    mark=await _repo_page_mark(cached["data"], owner, repo))
 
     if request is not None:
         from src.api.rate_limit import enforce_fresh_scan_limit
@@ -221,7 +224,19 @@ async def preflight_repo(
 
     data = _scan_result_to_dict(result)
     await _cache_set(key, {"data": data})
-    return _build_preflight(full, "repo", data, None, cached=False)
+    return _build_preflight(full, "repo", data, None, cached=False,
+                            mark=await _repo_page_mark(data, owner, repo))
+
+
+async def _repo_page_mark(data: dict, owner: str, repo: str) -> bool:
+    """The Certified mark the repo's result page shows: its cached sandbox run folded
+    in, so a run still pending, or one that never started the tool, shows no mark.
+    Cache-only (never starts a run); False on any error (fail closed)."""
+    try:
+        from src.api.public_scan_router import _mark_for_cached
+        return bool(await _mark_for_cached(data, (owner, repo)))
+    except Exception:  # noqa: BLE001 — an unknown sandbox state never earns the mark
+        return False
 
 
 def _registry_meta(subject_id: str, subject_full: str, data: dict) -> dict:

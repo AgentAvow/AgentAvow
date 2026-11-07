@@ -636,7 +636,8 @@ export function cheapCoverageGap(input: unknown): boolean {
   if (!isObj(data.coverage_gaps)) return false
   const g = data.coverage_gaps
   if (toInt(g.fetch_failed) > 0) return true
-  if (g.sandbox_not_observed === 'other_version') return true
+  const why = g.sandbox_not_observed
+  if (typeof why === 'string' && why && why !== 'unavailable') return true
   if (g.tool_list_unread === true || g.tool_list_paged === true) return true
   if (toInt(g.oversized_agent_files) > 0 || toInt(g.skill_refs_unread) > 0) return true
   if (toInt(g.skills_ungraded) > 0) return true
@@ -686,6 +687,12 @@ export function certifiedMarkNote(scan: unknown): string {
     score_below_81: 'the mark shows at a trust score of 81 or above.',
     thin_coverage: 'the mark needs more code to inspect (8 or more files).',
     coverage_gaps: 'the mark needs the files an agent reads to have been read in full.',
+  }
+  // The same reason code covers a sandbox run that never started the tool (or a pinned
+  // version it has not run): say that, not "files read in full".
+  const sandboxGap = asObj(o.coverage_gaps).sandbox_not_observed
+  if (why === 'coverage_gaps' && typeof sandboxGap === 'string' && sandboxGap && sandboxGap !== 'unavailable') {
+    return 'Certified checks pass; the mark needs a finished sandbox run that started the tool.'
   }
   return tail[why] ? `Certified checks pass; ${tail[why]}` : ''
 }
