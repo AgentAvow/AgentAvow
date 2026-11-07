@@ -118,6 +118,8 @@ _TOOL_CONFIG_RE = re.compile(
 # also decides whether a known vendor key leaves for a non-vendor host.
 _EXFIL_RE = re.compile(_EXFIL_PATH_RE.pattern + "|" + _SECRET_ENV_RE.pattern)
 _SCRIPT_EXT = (".sh", ".bash", ".zsh", ".py", ".js", ".ts", ".rb", ".pl", ".ps1")
+# Prose an agent reads when it loads the skill (SKILL.md, references, notes).
+_PROSE_EXT = (".md", ".markdown", ".mdx", ".txt")
 
 
 class SkillScanResult:
@@ -130,6 +132,9 @@ class SkillScanResult:
         self.tree_digest: str | None = None
         self.script_count: int = 0
         self.blast_radius: dict = {}        # {level, capabilities, why} — see below
+        # What this pass selected but could not cover (``encoded_text_unread``); merged
+        # into the scan's coverage_gaps by the caller.
+        self.coverage_gaps: dict = {}
 
 
 # Map an OpenClaw / Claude skill `allowed-tools` grant to the shared capability
@@ -308,6 +313,16 @@ def analyze_skill(files: dict[str, str], skill_md_path: str = "SKILL.md") -> Ski
             "skill_capability", "No SKILL.md found — not a recognizable Agent Skill",
             "info", "skill",
         ))
+
+    # 2b. encoded instructions in the skill's prose (SKILL.md, every other markdown /
+    # text file it ships): decoded and read with the injection matcher.
+    from src.scanner.encoded_instructions import Budget as _EncBudget
+    from src.scanner.encoded_instructions import scan_text as _scan_encoded
+    enc_budget = _EncBudget()
+    for path in sorted(files):
+        if files[path] and path.lower().endswith(_PROSE_EXT):
+            result.findings.extend(_scan_encoded(files[path], path, enc_budget))
+    result.coverage_gaps.update(enc_budget.gaps())
 
     # 3. lifecycle-hook / plugin escalation
     for path, text in files.items():

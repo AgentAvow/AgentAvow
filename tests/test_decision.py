@@ -472,6 +472,12 @@ CASES = [
     ("v7_hf_custom_code_unread", _scan(85, 20, coverage_gaps={
         "package_skipped": 3, "custom_code_unread": 1}),
      "review", True, "the model's custom code could not be read"),
+    ("v_encoded_text_unread", _scan(88, 12, coverage={"surface": "openclaw"}, coverage_gaps={
+        "encoded_text_unread": 1}),
+     "review", True, "encoded text the agent reads could not all be decoded"),
+    ("v_encoded_text_unread_mcp", _scan(86, 9, coverage={"surface": "mcp"}, coverage_gaps={
+        "encoded_text_unread": 2}),
+     "review", True, "encoded text the agent reads could not all be decoded"),
     ("v_order_no_code_first", _scan(80, 0, coverage_gaps={
         "fetch_failed": 1, "oversized_agent_files": 1, "skill_refs_unread": 1}),
      "review", True, "the scan could not read the code"),
