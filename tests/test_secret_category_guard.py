@@ -14,7 +14,8 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 _EMIT_RE = re.compile(r"""category\s*=\s*["']secret["']|_capability\(\s*["']secret["']""")
 KNOWN = {
     "scanner/scan.py": 2,           # SECRET_PATTERNS hits + the PEM marker (info capability)
-    "scanner/artifact_scan.py": 1,  # docker image ENV / label (high)
+    # docker image ENV / label (high); a private key in a shipped file (the publisher's)
+    "scanner/artifact_scan.py": 2,
     "scanner/skill_scan.py": 1,     # "Uses your … API key" (capability, excluded from the cap)
     "scanner/behavioral/graders.py": 1,     # canary echoed in a tool result (medium)
     "scanner/behavioral/live_probe.py": 1,  # secret-like tool result (medium)
