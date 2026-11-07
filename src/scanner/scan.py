@@ -4525,6 +4525,7 @@ def _scan_content(
     findings.extend(_env_dump_exfil_findings(
         content, file_path, lines, file_lang, allowlist, findings,
         payload=payload_mode and file_downgraded, lf=lf))
+    findings.extend(_signing_key_send_findings(content, file_path, lines, file_lang, allowlist))
     findings.extend(_browser_credential_findings(
         content, file_path, lines, file_lang, allowlist, findings,
         downgraded=file_downgraded, payload=payload_mode and file_downgraded,
@@ -5287,6 +5288,45 @@ def _credential_exfil_findings(
             payload=payload,
         ))
     return out
+
+
+_SIGNING_KEY_SEND_NAME = "Wallet private key sent over the network"
+
+
+def _signing_key_send_findings(
+    content: str, file_path: str, lines: list[str], file_lang: str | None,
+    allowlist: set[tuple[str, str]],
+) -> list[Finding]:
+    """The raw value of a wallet signing key reaching a network call
+    (``signing_key_flow``): critical to a hardcoded public host, high to an endpoint
+    only the user configures. Never category ``secret``: it reads the user's key, so the
+    Review cap for a vendor's hardcoded key must not apply."""
+    if file_lang not in ("python", "javascript", "typescript"):
+        return []
+    if _is_allowlisted(file_path, _SIGNING_KEY_SEND_NAME, allowlist):
+        return []
+    from src.scanner.signing_key_flow import signing_key_sends
+
+    sends = signing_key_sends(content, file_path)
+    if not sends:
+        return []
+    worst = next((s for s in sends if s.severity == "critical"), sends[0])
+    head = worst.line[:24]
+    line_no = next((i for i, ln in enumerate(lines, 1) if head and head in ln), 1)
+    where = ", ".join(worst.hosts[:3]) or "an endpoint you configure"
+    return [Finding(
+        category="exfiltration",
+        name=_SIGNING_KEY_SEND_NAME,
+        severity=worst.severity,
+        file_path=file_path,
+        line_number=line_no,
+        snippet=f"{worst.env_name} reaches a network call ({where})",
+        remediation=(
+            f"This code sends the raw value of {worst.env_name} to {where}. A signing key "
+            "stays on this machine: sign locally and send the signature. Whoever receives "
+            "the key controls the wallet."
+        ),
+    )]
 
 
 _ENV_DUMP_EXFIL_NAME = "Whole environment sent outbound"

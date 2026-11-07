@@ -574,6 +574,62 @@ def detect_pypi_install_exec(source: str, file_path: str) -> list:
 # Scan the unpacked tree with the existing 12-category engine
 # ---------------------------------------------------------------------------
 
+# A file named as a private key whose whole content is 32 bytes of hex. The name is
+# needed: a bare 64-hex file is as likely a checksum.
+_KEY_FILE_NAME_RE = re.compile(
+    r"(?:^|[._-])(?:priv(?:ate)?[._-]?key|secret[._-]?key|wallet[._-]?key)(?:[._-]|$)|^privkey",
+    re.IGNORECASE)
+_HEX_KEY_RE = re.compile(r"\s*(?:0x)?[0-9a-fA-F]{64}\s*")
+
+
+def _shipped_key_file_findings(fetched: ArtifactFetchResult, skip, allowlist) -> list:
+    """A private key sitting in a shipped file the source engine never reads. Goes by
+    CONTENT for a PEM block, so renaming ``key.pem`` to ``notes.txt`` changes nothing;
+    the extension is the publisher's to choose. Category ``secret``: this is the
+    publisher's key, not the user's, so alone it reads Review. Test and doc files
+    are reported at info (TLS fixtures, README samples). The value is never reported."""
+    from src.scanner.patterns import SECRET_PATTERNS
+    from src.scanner.scan import (
+        Finding,
+        _is_allowlisted,
+        _is_source_file,
+        _is_test_or_doc_file,
+        _pem_has_body,
+    )
+    from src.scanner.tool_descriptions import is_shipped_markdown
+
+    name = "Private Key block"
+    pem_re = next(rx for n, rx, _sev in SECRET_PATTERNS if n == name)
+    out: list = []
+    for path, af in fetched.files.items():
+        if not af.text or _is_source_file(path) or skip(path):
+            continue
+        if _is_allowlisted(path, name, allowlist):
+            continue
+        lines = af.text.splitlines()
+        hit = None
+        for idx, line in enumerate(lines):
+            m = pem_re.search(line)
+            if m and _pem_has_body(lines, idx, m.end()):
+                hit = idx + 1
+                break
+        if hit is None and _HEX_KEY_RE.fullmatch(af.text) \
+                and _KEY_FILE_NAME_RE.search(Path(path).name):
+            hit = 1
+        if hit is not None:
+            out.append(Finding(
+                category="secret", name=name,
+                severity=("info" if _is_test_or_doc_file(path) or is_shipped_markdown(path)
+                          else "critical"),
+                file_path=path, line_number=hit,
+                snippet=f"private key material in {Path(path).name} (value not shown)",
+                remediation=(
+                    "This package ships a private key. Treat the key as compromised: rotate "
+                    "it and stop publishing the file."),
+            ))
+    return out
+
+
 def scan_artifact_files(
     fetched: ArtifactFetchResult, oversized_out: list | None = None,
 ) -> tuple[list, int, bool]:
@@ -801,6 +857,11 @@ def scan_artifact_files(
                     item.installed = _installed(path)
                     item.severity = "info"
                 findings.append(item)
+
+    # Private keys in files the engine does not read (key.pem, privkey.hex). A container
+    # image's files are the base OS's (ssl-cert's snakeoil key), not the tool's.
+    if not is_image:
+        findings.extend(_shipped_key_file_findings(fetched, _skip, allowlist))
 
     # A pipe-to-shell in a maintainer-only package.json script was downgraded by the
     # line engine; restore it when another file here can run that script.

@@ -11,6 +11,8 @@ production package path (npm_result_from_tarball -> apply_artifact_scan -> trust
   (2026-10-26)
 * ``cases_browser_profile`` - a skill script driving the real browser profile
   (2026-10-28; runs the skill path, ``analyze_skill``, not an npm tarball)
+* ``cases_signing_key`` - a raw wallet key sent out, a private key in a shipped file
+  (2026-11-06)
 
 Every case's label is pinned in ``expected.json``. A scanner change that moves one fails
 here; regenerate with ``python -I tests/adversarial/expected_labels.py --write`` in the
@@ -30,7 +32,7 @@ import pytest
 HERE = Path(__file__).resolve().parent
 EXPECTED = json.loads((HERE / "expected.json").read_text())
 SETS = ("cases_npm_scripts", "cases_printed_hint", "cases_trifecta", "cases_exfil_precision",
-        "cases_browser_profile")
+        "cases_browser_profile", "cases_signing_key")
 
 # Attacks that still read safe today, with the label they should read.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
@@ -41,6 +43,10 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     # string elements reads as prose to the line engine, so its webhook hosts are never
     # flagged, even when the list is handed to an imported sender.
     ("cases_exfil_precision", "py_signature_list_to_imported_sender"): "do_not_connect",
+    # The signing-key rule's source is the env var's name; a bland name is unseen.
+    ("cases_signing_key", "gap_bland_env_name"): "do_not_connect",
+    # 64 hex under a bland file name can't be told from a checksum.
+    ("cases_signing_key", "gap_hex_key_bland_name"): "review",
 }
 
 _mods: dict[str, object] = {}

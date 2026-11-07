@@ -4314,7 +4314,7 @@
     "high": 0,
     "medium": 1,
     "low": 0,
-    "info": 0
+    "info": 7
    },
    "capabilities": 15,
    "not_installed": 0,
@@ -4333,7 +4333,7 @@
     "high": 0,
     "medium": 0,
     "low": 0,
-    "info": 13
+    "info": 20
    },
    "capabilities": 10,
    "not_installed": 0,
@@ -6583,7 +6583,7 @@
     "high": 0,
     "medium": 0,
     "low": 0,
-    "info": 2
+    "info": 3
    },
    "capabilities": 4,
    "not_installed": 0,
