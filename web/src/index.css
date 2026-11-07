@@ -40,10 +40,24 @@ body {
   overflow-x: hidden;
 }
 
-#root {
+#root,
+#prerender {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* A prerendered page stays on screen while the app loads into #root behind it
+   (rebrand/lib/snapshot.ts). Removing #prerender is what reveals the app. */
+#prerender ~ #root {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 
 /* Smooth scrolling */

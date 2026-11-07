@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { rp } from './basePath'
@@ -9,6 +9,7 @@ import { useAuth } from '../hooks/useAuth'
 import api from '../lib/api'
 import { trackEvent } from '../lib/analytics'
 import { NotifRow, isRelevant, type Notif } from './components/NotificationBits'
+import { dropSnapshot, inSnapshot } from './lib/snapshot'
 
 /**
  * Signed-in account controls: a notifications bell (unread count from the real
@@ -228,6 +229,12 @@ function PageSkeleton() {
   )
 }
 
+/** Shares the page's Suspense boundary, so this commits only when the page itself does. */
+function SnapshotHandoff() {
+  useLayoutEffect(dropSnapshot, [])
+  return null
+}
+
 /** Subtle breathing color orbs in the gutters — the "rails pop" from the mock. */
 function Orbs() {
   const reduce = useReducedMotion()
@@ -314,12 +321,13 @@ export default function RebrandLayout() {
               Keyed on pathname; no exit anim (plays nice with lazy/Suspense). */}
           <motion.div
             key={pathname}
-            initial={{ opacity: 0, y: 8 }}
+            initial={inSnapshot() ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.32, ease: 'easeOut' }}
           >
             <Suspense fallback={<PageSkeleton />}>
               <Outlet />
+              <SnapshotHandoff />
             </Suspense>
           </motion.div>
         </AtmosphericBackground>

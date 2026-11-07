@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { hydrate, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { HelmetProvider } from 'react-helmet-async'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import { REBRAND_BASE } from './rebrand/basePath'
+import { inSnapshot, snapshotQueryState } from './rebrand/lib/snapshot'
 
 // At cutover (VITE_CUTOVER=true) the rebrand becomes the root site and the old
 // pages it replaces step aside. Off (default) → everything is exactly as today.
@@ -147,6 +148,7 @@ const queryClient = new QueryClient({
     },
   },
 })
+hydrate(queryClient, snapshotQueryState())
 
 function PageLoader() {
   return (
@@ -181,7 +183,12 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
 function ScrollToTop() {
   const { pathname } = useLocation()
-  useEffect(() => { window.scrollTo(0, 0) }, [pathname])
+  // Someone already reading a prerendered page keeps their place when the app takes over.
+  const landed = useRef(inSnapshot())
+  useEffect(() => {
+    if (landed.current) landed.current = false
+    else window.scrollTo(0, 0)
+  }, [pathname])
   return null
 }
 

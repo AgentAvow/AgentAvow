@@ -14,6 +14,7 @@ import { trackEvent } from '../../lib/analytics'
 import { useRotatingPlaceholder } from '../lib/hooks'
 import { SandboxTotalsStrip } from '../components/SandboxStats'
 import SEOHead from '../../components/SEOHead'
+import { inSnapshot } from '../lib/snapshot'
 
 const CHECK_HINTS = ['github.com/owner/repo', 'npm:chalk', 'pypi:requests', 'crates:serde', 'hf:openai-community/gpt2', 'mcp:https://…', 'a repo, package, model, or MCP server']
 
@@ -47,7 +48,7 @@ function HeroSeal() {
   return (
     <motion.svg
       viewBox="0 0 96 96" className="w-[72px] h-[72px] mx-auto mb-6" aria-hidden="true"
-      initial={reduce ? false : { opacity: 0, scale: 0.85 }}
+      initial={reduce || inSnapshot() ? false : { opacity: 0, scale: 0.85 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.6, ease: 'easeOut' }}
     >
@@ -72,7 +73,7 @@ function HeroSeal() {
       <motion.path
         d="M34 49l9 9 19-20" fill="none" stroke="url(#seal-check)" strokeWidth="5"
         strokeLinecap="round" strokeLinejoin="round" pathLength={1}
-        initial={reduce ? false : { pathLength: 0 }}
+        initial={reduce || inSnapshot() ? false : { pathLength: 0 }}
         animate={{ pathLength: 1 }}
         transition={{ duration: 0.7, ease: 'easeOut', delay: 0.35 }}
       />
@@ -174,7 +175,7 @@ export default function RebrandHome() {
       <section className="text-center pt-16 pb-8 px-6">
         <motion.div
           className="max-w-[1080px] mx-auto"
-          initial={{ opacity: 0, y: 14 }}
+          initial={inSnapshot() ? false : { opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, ease: 'easeOut' }}
         >

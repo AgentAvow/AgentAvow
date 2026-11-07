@@ -137,7 +137,9 @@ function Row({ row, rank }: { row: CatalogRow; rank: number }) {
     : <div>{inner}</div>
 }
 
-function Board({ title, note, rows, isLoading, href }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean; href?: string }) {
+function Board({ title, note, rows, isLoading: fetching, href }: { title: string; note: string; rows?: CatalogRow[]; isLoading: boolean; certified?: boolean; href?: string }) {
+  // The prerender keeps the page's totals but not its tool rows (see prerender-entry.tsx).
+  const isLoading = fetching || import.meta.env.SSR
   return (
     // min-w-0: grid items default to min-width:auto and won't shrink below their
     // content — a long tool name in a row was forcing the card past the viewport
