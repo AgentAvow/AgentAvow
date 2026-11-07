@@ -11,6 +11,7 @@ Disallow: /tools
 Disallow: /avatar
 Disallow: /legacy-home
 Disallow: /api/
+Allow: /api/v1/public/scan-catalog
 Disallow: /verify-email
 Disallow: /reset-password
 Disallow: /forgot-password
