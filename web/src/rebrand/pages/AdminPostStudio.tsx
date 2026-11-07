@@ -59,7 +59,9 @@ function PostCard({ p, onDone }: { p: Studio; onDone: () => void }) {
     onSuccess: onDone,
   })
   const limit = LIMITS[p.platform]
-  const over = limit != null && text.length > limit
+  // X counts every link as 23 characters, however long the tracking link is.
+  const length = p.platform === 'x' ? text.replace(/https?:\/\/\S+/g, 'x'.repeat(23)).length : text.length
+  const over = limit != null && length > limit
   const link = composer(p)
   const copy = async () => {
     await navigator.clipboard.writeText(p.content)
@@ -83,7 +85,7 @@ function PostCard({ p, onDone }: { p: Studio; onDone: () => void }) {
       {p.status === 'studio_review' ? (
         <>
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={Math.min(16, Math.max(5, text.split('\n').length + 2))} className={field} />
-          <div className={`mt-1 text-[11.5px] font-mono ${over ? 'text-danger' : 'text-text-muted/70'}`}>{text.length}{limit ? ` / ${limit}` : ''} characters</div>
+          <div className={`mt-1 text-[11.5px] font-mono ${over ? 'text-danger' : 'text-text-muted/70'}`}>{length}{limit ? ` / ${limit}` : ''} characters</div>
         </>
       ) : <p className="text-[13.5px] text-text whitespace-pre-wrap">{p.content}</p>}
 
