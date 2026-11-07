@@ -198,6 +198,7 @@ export const CODE_UNREAD_REASON = 'the scan could not read the code'
 export const AGENT_FILE_UNREAD_REASON = 'an agent instruction file was too large to read'
 export const SKILL_REF_UNREAD_REASON = "a file the skill's instructions use could not be read"
 export const CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
+export const ENCODED_TEXT_UNREAD_REASON = 'encoded text the agent reads could not all be decoded'
 // A live MCP server scan reads the served tool definitions only (files = tools).
 export const THIN_REASON_REMOTE_MCP = 'tool definitions clean; server code not inspected'
 
@@ -387,6 +388,8 @@ export function coverageGapNotes(input: unknown): string[] {
   if (n > 0) notes.push(`${filesPhrase(n)} the skill's instructions link to ${was(n)} not read`)
   n = toInt(g.custom_code_unread)
   if (n > 0) notes.push(`${filesPhrase(n, 'custom code file')} in the model ${was(n)} not read`)
+  n = toInt(g.encoded_text_unread)
+  if (n > 0) notes.push(`${filesPhrase(n, 'agent-facing text')} ${was(n)} not fully decoded`)
   n = toInt(g.oversized_files)
   if (n > 0) notes.push(`${filesPhrase(n)} over 500 KB ${was(n)} not fully read`)
   n = toInt(g.fetch_failed)
@@ -562,6 +565,7 @@ export function decide(input: unknown): Decision {
     if (toInt(gap.oversized_agent_files) > 0) return done('review', AGENT_FILE_UNREAD_REASON)
     if (toInt(gap.skill_refs_unread) > 0) return done('review', SKILL_REF_UNREAD_REASON)
     if (toInt(gap.custom_code_unread) > 0) return done('review', CUSTOM_CODE_UNREAD_REASON)
+    if (toInt(gap.encoded_text_unread) > 0) return done('review', ENCODED_TEXT_UNREAD_REASON)
   }
 
   const found = items.some((i) => ['critical', 'high', 'medium'].includes(sev(i))
@@ -639,6 +643,7 @@ export function cheapCoverageGap(input: unknown): boolean {
   if (g.sandbox_not_observed === 'other_version') return true
   if (g.tool_list_unread === true || g.tool_list_paged === true) return true
   if (toInt(g.oversized_agent_files) > 0 || toInt(g.skill_refs_unread) > 0) return true
+  if (toInt(g.encoded_text_unread) > 0) return true
   if (toInt(g.skills_ungraded) > 0) return true
   if (surfaceIs(data, 'openclaw') && (toInt(g.oversized_files) > 0 || toInt(g.over_file_cap) > 0
     || g.tree_truncated === true)) return true
