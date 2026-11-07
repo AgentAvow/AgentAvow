@@ -201,6 +201,9 @@ SKILL_REF_UNREAD_REASON = "a file the skill's instructions use could not be read
 # A Hugging Face model's custom .py (too large, past the file cap, or not fetched):
 # custom code runs on load with trust_remote_code.
 CUSTOM_CODE_UNREAD_REASON = "the model's custom code could not be read"
+# Encoded text in an agent-facing file or description past the scan's decode budget
+# (src/scanner/encoded_instructions.py): padding past the cap is the cheap evasion.
+ENCODED_TEXT_UNREAD_REASON = "encoded text the agent reads could not all be decoded"
 
 # A hardcoded credential shipped in a tool (category ``secret``, e.g. an AWS key in
 # yt-dlp's extractors) exposes the vendor whose key leaked, not the person installing
@@ -476,6 +479,9 @@ def coverage_gap_notes(data: dict) -> list[str]:
     n = _int(g.get("custom_code_unread"))
     if n > 0:
         notes.append(f"{_files_phrase(n, 'custom code file')} in the model {_was(n)} not read")
+    n = _int(g.get("encoded_text_unread"))
+    if n > 0:
+        notes.append(f"{_files_phrase(n, 'agent-facing text')} {_was(n)} not fully decoded")
     n = _int(g.get("oversized_files"))
     if n > 0:
         notes.append(f"{_files_phrase(n)} over 500 KB {_was(n)} not fully read")
@@ -719,6 +725,8 @@ def decide(data: dict) -> Decision:
         return done(DECISION_REVIEW, SKILL_REF_UNREAD_REASON)
     if _int(gap.get("custom_code_unread")) > 0:
         return done(DECISION_REVIEW, CUSTOM_CODE_UNREAD_REASON)
+    if _int(gap.get("encoded_text_unread")) > 0:
+        return done(DECISION_REVIEW, ENCODED_TEXT_UNREAD_REASON)
 
     found = any(sev(i) in ("critical", "high", "medium") and i.get("kind") != "capability"
                 and i.get("installed") is not False for i in items)
@@ -794,6 +802,8 @@ def cheap_coverage_gap(data: dict) -> bool:
     if g.get("tool_list_unread") is True or g.get("tool_list_paged") is True:
         return True
     if _int(g.get("oversized_agent_files")) > 0 or _int(g.get("skill_refs_unread")) > 0:
+        return True
+    if _int(g.get("encoded_text_unread")) > 0:
         return True
     if _int(g.get("skills_ungraded")) > 0:
         return True

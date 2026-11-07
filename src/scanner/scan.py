@@ -6994,11 +6994,14 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     from src.scanner.mcp_scan import client_view_findings, oversize_findings
     result.findings.extend(oversize_findings(data.get("lists_too_large")))
     _view = data.get("client_view")
+    _view_gaps: dict = {}
     if _view and _view.get("differs"):
         result.findings.extend(client_view_findings(_view, data.get("tools")))
         _seen = {(f.name, f.file_path) for f in result.findings}
-        for f in analyze_mcp(_view.get("tools"), server_info=data.get("server_info"),
-                             server_url=endpoint_url).findings:
+        _vmcp = analyze_mcp(_view.get("tools"), server_info=data.get("server_info"),
+                            server_url=endpoint_url)
+        _view_gaps = _vmcp.coverage_gaps
+        for f in _vmcp.findings:
             if (f.name, f.file_path) not in _seen:
                 result.findings.append(f)
     # Pin the served tool definitions, one digest per tool name. A later scan whose
@@ -7059,6 +7062,10 @@ async def scan_mcp(endpoint_url: str) -> ScanResult:
     for _m in data.get("lists_too_large") or ():
         if _m in _lists:
             _gaps[f"{_lists[_m]}_list_too_large"] = True
+    # Encoded agent-facing text the decode budget did not cover (both views).
+    for _g in (mcp.coverage_gaps, _view_gaps):
+        for _k, _v in (_g or {}).items():
+            _gaps[_k] = int(_gaps.get(_k) or 0) + int(_v)
     result.coverage_gaps = _gaps
     result.trust_score = _calculate_trust_score(result)
     result.category_scores = _calculate_category_scores(result)
@@ -7245,6 +7252,7 @@ async def _grade_skill_at(
             sgaps["tree_truncated"] = True
 
         skill = analyze_skill(files, skill_md_path=skill_md_path)
+        sgaps.update(skill.coverage_gaps)
 
         # Env vars the skill's scripts read: the behavioral sandbox fills each
         # secret-named one with a canary when it runs the hooks and scripts.
