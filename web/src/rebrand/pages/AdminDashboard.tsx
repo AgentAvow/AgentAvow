@@ -16,6 +16,7 @@ import api from '../../lib/api'
 import { DECISIONS, TRUST_TIERS } from '../../components/trust/gradeSystem'
 import { rp } from '../basePath'
 import { Reveal } from '../components/motion'
+import StartHerePanel from './AdminStartHere'
 import PostStudioTab from './AdminPostStudio'
 
 // ── shared types (loose — endpoints already validated server-side) ──────────
@@ -563,6 +564,7 @@ function MetricsTab() {
 
   return (
     <>
+      <StartHerePanel />
       <Section title="Product & adoption" note="Everything the product surfaces — the full set, not a slice." right={<WindowToggle win={win} setWin={setWin} />}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           <Stat label="Repos scanned" value={fmt(h.repos_scanned)} sub={`${fmt(h.new_repos)} new`} series={s.repos_scanned} />
