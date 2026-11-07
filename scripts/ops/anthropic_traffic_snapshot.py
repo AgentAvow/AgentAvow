@@ -37,6 +37,7 @@ REPO = os.path.join(HOME, "agentgraph")
 DATA = os.path.join(REPO, "data")
 CSV_PATH = os.path.join(DATA, "anthropic-traffic.csv")
 SEEN_PATH = os.path.join(DATA, "anthropic-traffic-seen.json")
+CHECKED_PATH = os.path.join(DATA, "anthropic-traffic-checked.json")
 SALT_PATH = os.path.join(DATA, ".anthropic-traffic-salt")
 OWNER_PATH = os.path.join(DATA, "owner-ips.txt")
 NGINX_CONTAINER = "agentgraph-nginx-1"
@@ -62,6 +63,12 @@ COLUMNS = [
     # session hit under mcp 1.x; a session-start proxy only through 2026-10-19) or
     # "session_start" (the server's own counter, PR #221). Series break at 2026-10-20.
     "cc_sessions_source", "cc_session_starters",
+    # Rolling 7-day counts, owner excluded. The session-start hook caches a grade for up to
+    # 7 days, so a machine can be protected without sending a check on a given day. The
+    # 7-day window matches that cache. checked_machines_7d is complete from 2026-11-14.
+    "cc_machines_7d", "checked_machines_7d",
+    # Retention: machines first seen 1 or 7 days ago, and how many came back on this day.
+    "d1_cohort", "d1_returned", "d7_cohort", "d7_returned",
 ]
 
 
@@ -167,6 +174,35 @@ def _owner_ips() -> set[str]:
         return set()
 
 
+def _reach_fields(seen: dict[str, list[str]], checked_last: dict[str, str],
+                  today: set[str], day: str, owner: set[str]) -> dict:
+    """Rolling 7-day machine counts and D1/D7 retention from salted hashes."""
+    date = datetime.strptime(day, "%Y-%m-%d")
+
+    def ago(n: int) -> str:
+        return (date - timedelta(days=n)).strftime("%Y-%m-%d")
+
+    start = ago(6)
+    fields = {
+        "cc_machines_7d": sum(1 for h, v in seen.items() if v[1] >= start and h not in owner),
+        "checked_machines_7d": sum(
+            1 for h, v in checked_last.items() if v >= start and h not in owner),
+    }
+    for n in (1, 7):
+        cohort = {h for h, v in seen.items() if v[0] == ago(n) and h not in owner}
+        fields[f"d{n}_cohort"] = len(cohort)
+        fields[f"d{n}_returned"] = len(cohort & today)
+    return fields
+
+
+def _load_checked() -> dict:
+    try:
+        with open(CHECKED_PATH) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
 def _load_seen() -> dict:
     try:
         with open(SEEN_PATH) as fh:
@@ -252,9 +288,21 @@ def snapshot(day: str, since_hours: int) -> dict:
         seen[h] = [first, last]
         if first == day:
             new += 1
+    def machine(ip: str) -> str:
+        return hashlib.sha256(f"{salt}|{ip}".encode()).hexdigest()[:24]
+
+    week_ago = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+    checked_last = {h: d for h, d in _load_checked().items() if d >= week_ago}
+    for ip in hook_ips | pre_ips:
+        h = machine(ip)
+        checked_last[h] = max(checked_last.get(h, day), day)
+    reach = _reach_fields(seen, checked_last, {machine(ip) for ip in cc_ips}, day,
+                          {machine(ip) for ip in owner})
     os.makedirs(DATA, exist_ok=True)
     with open(SEEN_PATH, "w") as fh:
         json.dump(seen, fh)
+    with open(CHECKED_PATH, "w") as fh:
+        json.dump(checked_last, fh)
 
     row = {
         "day": day,
@@ -273,6 +321,7 @@ def snapshot(day: str, since_hours: int) -> dict:
         "checked_machines_excl_owner": len((hook_ips | pre_ips) - owner),
         "preinstall_reqs": n["preinstall_reqs"],
         "log_complete": int(bool(hours_seen) and min(hours_seen) == 0 and max(hours_seen) == 23),
+        **reach,
     }
     # Redis names the surface "claude-code"; the CSV column is calls_claude_code.
     rc = _redis_counts(day)

@@ -1026,9 +1026,17 @@ _TRAFFIC_INT_COLUMNS = (
     "owner_cc_reqs", "owner_cc_sessions", "owner_hook_reqs", "owner_scans_200",
     "cc_machines_excl_owner", "hook_machines_excl_owner", "log_complete",
     "checked_machines", "checked_machines_excl_owner", "preinstall_reqs",
-    "cc_session_starters",
+    "cc_session_starters", "cc_machines_7d", "checked_machines_7d",
+    "d1_cohort", "d1_returned", "d7_cohort", "d7_returned",
 )
 _TRAFFIC_NOTES = [
+    "checked_machines_7d and cc_machines_7d are rolling 7-day counts of distinct machines, "
+    "owner excluded. Use these for the share of machines protected: the session-start "
+    "hook caches a grade for up to 7 days, so the one-day count can miss protected "
+    "machines. checked_machines_7d is complete from 2026-11-14.",
+    "d1/d7_cohort = machines first seen 1 or 7 days before this day; d1/d7_returned = how "
+    "many of them connected on this day. Machines are IP addresses, so an address change "
+    "reads as a new machine and lowers retention.",
     "checked_machines = distinct machines where the plugin checked something on its own "
     "that day (session-start hook or install-time hook), excluding the owner's test "
     "machines in the _excl_owner variant. This is the headline usage number: the plugin "
@@ -1124,7 +1132,8 @@ async def traffic_metrics(
                     "callers_claude_code", "calls_claude", "callers_claude", "calls_chatgpt",
                     "cc_machines_excl_owner", "hook_machines_excl_owner",
                     "checked_machines", "checked_machines_excl_owner", "preinstall_machines",
-                    "preinstall_reqs")
+                    "preinstall_reqs", "cc_machines_7d", "checked_machines_7d",
+                    "d7_cohort", "d7_returned")
     }
     latest = rows[-1] if rows else None
     return {

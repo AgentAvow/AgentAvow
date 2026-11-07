@@ -144,3 +144,22 @@ def test_snapshot_rewrites_old_rows_under_the_new_header(tmp_path):
     col = snap.COLUMNS.index("cc_sessions_source")
     assert rows["2026-10-22"].split(",")[col] == "session_start"
     assert rows["2026-10-19"].split(",")[col] == ""
+
+
+def test_reach_fields_count_seven_days_and_retention():
+    snapshot = _snapshot_module()
+    seen = {
+        "regular": ["2026-10-20", "2026-11-10"],
+        "new_d7": ["2026-11-03", "2026-11-10"],
+        "lost_d7": ["2026-11-03", "2026-11-03"],
+        "new_d1": ["2026-11-09", "2026-11-09"],
+        "owner": ["2026-11-03", "2026-11-10"],
+    }
+    checked = {"regular": "2026-11-04", "old": "2026-11-03", "owner": "2026-11-10"}
+    today = {"regular", "new_d7", "owner"}
+    fields = snapshot._reach_fields(seen, checked, today, "2026-11-10", {"owner"})
+    # 11-04 is inside the window and 11-03 is not.
+    assert fields["cc_machines_7d"] == 3
+    assert fields["checked_machines_7d"] == 1
+    assert (fields["d7_cohort"], fields["d7_returned"]) == (2, 1)
+    assert (fields["d1_cohort"], fields["d1_returned"]) == (1, 0)
